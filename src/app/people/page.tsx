@@ -21,9 +21,11 @@ interface Category {
 
 
 const UserIcon = () => (
-  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-  </svg>
+  <img
+            src="https://directory.weill.cornell.edu/api/v1/person/profile/ccole.png"
+            alt="Curtis L Cole"
+            className="w-40 h-20 sm:w-30 sm:h-22 rounded object-cover border-2 border-gray-200 flex-shrink-0 mx-auto sm:mx-0"
+          />
 );
 
 const ChevronRightIcon = () => (
@@ -74,46 +76,6 @@ const facultyData: Faculty[] = [
     category: "Faculty Member",
     avatar: null
   },
-//   {
-//     id: 6,
-//     name: "Chen, David",
-//      cwid:"cwid-sia2006",
-//     title: "Assistant Professor of Neurology",
-//     category: "Courtesy Faculty",
-//     avatar: null
-//   },
-//   {
-//     id: 7,
-//      cwid:"cwid-sia2006",
-//     name: "Davis, Emily",
-//     title: "Professor Emeritus of Psychiatry",
-//     category: "Faculty Member Emeritus",
-//     avatar: null
-//   },
-//   {
-//     id: 8,
-//      cwid:"cwid-sia2006",
-//     name: "Garcia, Roberto",
-//     title: "Clinical Fellow in Cardiology",
-//     category: "Fellow",
-//     avatar: null
-//   },
-//   {
-//     id: 9,
-//      cwid:"cwid-sia2006",
-//     name: "Johnson, Lisa",
-//     title: "Full-Time Faculty in Emergency Medicine",
-//     category: "Full-Time WCMC Faculty",
-//     avatar: null
-//   },
-//   {
-//     id: 10,
-//      cwid:"cwid-sia2006",
-//     name: "Kim, Jennifer",
-//     title: "Instructor in Family Medicine",
-//     category: "Instructor",
-//     avatar: null
-//   }
 ];
 
 // const categories: Category[] = [
