@@ -1,7 +1,7 @@
 /**
- * Synthetic seed data for the Phase 1 prototype.
+ * Synthetic scholar fixtures + identity-layer edge cases.
  *
- * Covers identity-layer edge cases:
+ * Covers:
  *   - Standard ASCII names
  *   - Diacritics (NFKD-decomposable)
  *   - Non-decomposable Latin extensions (Søren)
@@ -13,8 +13,6 @@
  *   - CWID aliases (Q2' replacement_cwid)
  *
  * NO real WCM data. All names, CWIDs, and content are fictional.
- *
- * Usage: `npm run seed`
  */
 import { prisma } from "@/lib/db";
 import { deriveSlug } from "@/lib/slug";
@@ -31,13 +29,13 @@ type SeedScholar = {
   slugOverride?: string;
   // For soft-delete testing.
   deletedAt?: Date;
-  // ISO8601 to control ordering for collision-resolution determinism.
+  // Controls ordering for collision-resolution determinism.
   createdAt: Date;
   appointmentTitle: string;
   appointmentOrg: string;
 };
 
-const scholars: SeedScholar[] = [
+export const scholars: SeedScholar[] = [
   {
     cwid: "jas2001",
     preferredName: "Jane Smith",
@@ -46,7 +44,7 @@ const scholars: SeedScholar[] = [
     primaryDepartment: "Department of Medicine",
     email: "jas2001@med.cornell.edu",
     overview:
-      "Dr. Smith's research focuses on the molecular mechanisms of cardiac fibrosis and the development of targeted therapeutics for heart failure.",
+      "Dr. Smith's research focuses on the molecular mechanisms of cardiac fibrosis and the development of targeted therapeutics for heart failure. Her lab combines mouse models, human-derived organoids, and single-cell sequencing to map the transition from reversible to irreversible cardiac remodeling.",
     createdAt: new Date("2018-01-15"),
     appointmentTitle: "Professor of Medicine",
     appointmentOrg: "Department of Medicine",
@@ -71,7 +69,8 @@ const scholars: SeedScholar[] = [
     primaryTitle: "Assistant Professor of Pediatrics",
     primaryDepartment: "Department of Pediatrics",
     email: "mga2003@med.cornell.edu",
-    overview: "Dr. García-López studies pediatric infectious disease epidemiology in immigrant populations.",
+    overview:
+      "Dr. García-López studies pediatric infectious disease epidemiology in immigrant populations.",
     createdAt: new Date("2021-03-10"),
     appointmentTitle: "Assistant Professor of Pediatrics",
     appointmentOrg: "Department of Pediatrics",
@@ -84,7 +83,7 @@ const scholars: SeedScholar[] = [
     primaryDepartment: "Department of Neurology",
     email: "mao2004@med.cornell.edu",
     overview:
-      "Dr. O'Brien's lab investigates the neuroinflammatory basis of multiple sclerosis using single-cell sequencing approaches.",
+      "Dr. O'Brien's lab investigates the neuroinflammatory basis of multiple sclerosis using single-cell sequencing approaches. The lab has a particular interest in the role of microglial subpopulations in lesion progression and remyelination.",
     createdAt: new Date("2015-09-01"),
     appointmentTitle: "Professor of Neurology",
     appointmentOrg: "Department of Neurology",
@@ -96,7 +95,8 @@ const scholars: SeedScholar[] = [
     primaryTitle: "Associate Professor of Psychiatry",
     primaryDepartment: "Department of Psychiatry",
     email: "ski2005@med.cornell.edu",
-    overview: "Dr. Kierkegaard studies existential dimensions of clinical depression and trauma recovery.",
+    overview:
+      "Dr. Kierkegaard studies existential dimensions of clinical depression and trauma recovery.",
     createdAt: new Date("2017-06-15"),
     appointmentTitle: "Associate Professor of Psychiatry",
     appointmentOrg: "Department of Psychiatry",
@@ -110,7 +110,8 @@ const scholars: SeedScholar[] = [
     primaryTitle: "Professor of Oncology",
     primaryDepartment: "Department of Medicine",
     email: "lim2006@med.cornell.edu",
-    overview: "Dr. Li directs the precision oncology program with a focus on hepatocellular carcinoma.",
+    overview:
+      "Dr. Li directs the precision oncology program with a focus on hepatocellular carcinoma. His lab integrates whole-genome sequencing, organoid drug screens, and single-cell ATAC-seq to identify clinically-actionable targets.",
     createdAt: new Date("2014-01-15"),
     appointmentTitle: "Professor of Oncology",
     appointmentOrg: "Department of Medicine",
@@ -139,7 +140,7 @@ const scholars: SeedScholar[] = [
     primaryDepartment: "Department of Genetics",
     email: "sjo2008@med.cornell.edu",
     overview:
-      "Dr. Johnson's lab develops CRISPR-based screening tools for rare-variant interpretation in clinical genetics.",
+      "Dr. Johnson's lab develops CRISPR-based screening tools for rare-variant interpretation in clinical genetics. Her group is particularly interested in non-coding variation in pediatric cardiomyopathies.",
     createdAt: new Date("2016-04-15"),
     appointmentTitle: "Associate Professor of Genetics",
     appointmentOrg: "Department of Genetics",
@@ -166,7 +167,8 @@ const scholars: SeedScholar[] = [
     primaryTitle: "Associate Professor of Pediatric Hematology",
     primaryDepartment: "Department of Pediatrics",
     email: "dpa2010@med.cornell.edu",
-    overview: "Dr. Patel investigates the pathophysiology of pediatric sickle cell disease.",
+    overview:
+      "Dr. Patel investigates the pathophysiology of pediatric sickle cell disease. Her translational program connects basic studies of erythrocyte mechanics to clinical trials of disease-modifying therapeutics.",
     createdAt: new Date("2018-11-01"),
     appointmentTitle: "Associate Professor of Pediatric Hematology",
     appointmentOrg: "Department of Pediatrics",
@@ -191,24 +193,24 @@ const scholars: SeedScholar[] = [
     primaryTitle: "Assistant Professor of Dermatology",
     primaryDepartment: "Department of Dermatology",
     email: "agr2012@med.cornell.edu",
-    overview: "Dr. Grant's research interests include autoimmune skin diseases and dermatologic imaging.",
+    overview:
+      "Dr. Grant's research interests include autoimmune skin diseases and dermatologic imaging.",
     createdAt: new Date("2022-09-01"),
     appointmentTitle: "Assistant Professor of Dermatology",
     appointmentOrg: "Department of Dermatology",
   },
 ];
 
-async function seed() {
-  console.log("Seeding synthetic scholars...");
-
-  // Reset (idempotent re-runs).
-  await prisma.cwidAlias.deleteMany();
-  await prisma.slugHistory.deleteMany();
-  await prisma.appointment.deleteMany();
-  await prisma.scholar.deleteMany();
-
+export async function seedScholars() {
   for (const s of scholars) {
     const slug = s.slugOverride ?? deriveSlug(s.preferredName);
+    // For scholars who have been around a while, give them a couple of past
+    // appointments alongside the current one so the "Show past" expander demos.
+    const yearsSinceJoin =
+      (Date.now() - s.createdAt.getTime()) / (1000 * 60 * 60 * 24 * 365);
+    const showcase = ["jas2001", "mao2004", "lim2006", "sjo2008", "dpa2010"].includes(s.cwid);
+    const wantsPastAppointments = showcase && yearsSinceJoin > 5;
+
     await prisma.scholar.create({
       data: {
         cwid: s.cwid,
@@ -232,6 +234,19 @@ async function seed() {
               isInterim: false,
               externalId: `ED-${s.cwid}-1`,
             },
+            ...(wantsPastAppointments
+              ? [
+                  {
+                    title: priorTitle(s.appointmentTitle),
+                    organization: s.appointmentOrg,
+                    startDate: addYears(s.createdAt, -5),
+                    endDate: addYears(s.createdAt, -1),
+                    isPrimary: false,
+                    isInterim: false,
+                    externalId: `ED-${s.cwid}-2`,
+                  },
+                ]
+              : []),
           ],
         },
       },
@@ -256,18 +271,17 @@ async function seed() {
       createdAt: new Date("2019-02-15"),
     },
   });
-
-  const count = await prisma.scholar.count();
-  const slugCount = await prisma.slugHistory.count();
-  const aliasCount = await prisma.cwidAlias.count();
-  console.log(`Seeded ${count} scholars, ${slugCount} slug-history rows, ${aliasCount} CWID aliases.`);
 }
 
-seed()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+function priorTitle(current: string): string {
+  if (current.startsWith("Professor")) return current.replace("Professor", "Associate Professor");
+  if (current.startsWith("Associate Professor"))
+    return current.replace("Associate Professor", "Assistant Professor");
+  return `Visiting ${current}`;
+}
+
+function addYears(d: Date, years: number): Date {
+  const out = new Date(d);
+  out.setFullYear(out.getFullYear() + years);
+  return out;
+}

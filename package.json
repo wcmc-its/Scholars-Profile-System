@@ -18,7 +18,7 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
-    "seed": "tsx --env-file=.env seed/synthetic-scholars.ts"
+    "seed": "tsx --env-file=.env seed/index.ts"
   },
   "dependencies": {
     "@prisma/adapter-mariadb": "^7.8.0",
