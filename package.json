@@ -18,9 +18,11 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
-    "seed": "tsx --env-file=.env seed/index.ts"
+    "seed": "tsx --env-file=.env seed/index.ts",
+    "search:index": "tsx --env-file=.env etl/search-index/index.ts"
   },
   "dependencies": {
+    "@opensearch-project/opensearch": "^3.6.0",
     "@prisma/adapter-mariadb": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "class-variance-authority": "^0.7.1",
