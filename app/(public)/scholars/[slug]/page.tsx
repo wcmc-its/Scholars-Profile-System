@@ -22,8 +22,17 @@ export const revalidate = 86400;
 export const dynamicParams = true;
 
 export async function generateStaticParams() {
-  const slugs = await getActiveScholarSlugs();
-  return slugs.map((slug) => ({ slug }));
+  // Pre-render all active scholars at build when the DB is reachable. In
+  // build environments without a DB (CI on a fresh checkout), gracefully
+  // skip prerendering — `dynamicParams: true` means pages still render at
+  // request time. This keeps `next build` green in CI.
+  try {
+    const slugs = await getActiveScholarSlugs();
+    return slugs.map((slug) => ({ slug }));
+  } catch (err) {
+    console.warn("[generateStaticParams] Skipping prerender (no DB):", err);
+    return [];
+  }
 }
 
 export async function generateMetadata({
