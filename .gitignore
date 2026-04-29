@@ -55,3 +55,5 @@ Thumbs.db
 
 # typescript
 *.tsbuildinfo
+
+/lib/generated/prisma
