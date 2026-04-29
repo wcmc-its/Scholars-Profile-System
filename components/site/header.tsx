@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { SearchAutocomplete } from "@/components/search/autocomplete";
 
 /**
  * Persistent site header with branding and the always-visible search box.
- * Search functionality wires up in Phase 3; for now the input is non-interactive.
+ * Search input wires through SearchAutocomplete (Phase 3): autocomplete fires
+ * on 2 characters, Enter routes to /search, click-through routes to the
+ * scholar profile.
  */
 export function SiteHeader() {
   return (
@@ -16,10 +18,7 @@ export function SiteHeader() {
           <span className="text-base">Scholars</span>
         </Link>
         <div className="flex-1" />
-        <div className="text-muted-foreground flex w-full max-w-sm items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-          <Search className="h-4 w-4" />
-          <span className="text-muted-foreground italic">Search scholars (Phase 3)</span>
-        </div>
+        <SearchAutocomplete />
       </div>
     </header>
   );
