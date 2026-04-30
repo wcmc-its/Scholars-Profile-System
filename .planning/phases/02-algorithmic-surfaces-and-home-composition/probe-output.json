@@ -1,0 +1,1364 @@
+{
+  "table": "reciterai-chatbot",
+  "region": "us-east-1",
+  "capturedAt": "2026-04-30T20:52:23.125Z",
+  "totalScanned": 101501,
+  "prefixes": {
+    "DEEPDIVE#": 1,
+    "FACULTY#": 1563,
+    "IMPACT#": 7097,
+    "TAXONOMY#": 1,
+    "TOOL#": 14721,
+    "TOOL_INDEX#": 15,
+    "TOPIC#": 78103
+  },
+  "samples": {
+    "DEEPDIVE#": [
+      {
+        "content": "Deep dive analysis pending generation.",
+        "reviewed_by": "",
+        "subtopics": [
+          "cognitive_decline",
+          "neurodegeneration",
+          "longevity",
+          "geriatric_medicine",
+          "age_related_disease"
+        ],
+        "taxonomy_version": "taxonomy_v2",
+        "review_status": "pending",
+        "SK": "META",
+        "generated_at": "2026-04-10T03:18:48.425862+00:00",
+        "PK": "DEEPDIVE#aging_geroscience",
+        "domain": "aging_geroscience"
+      }
+    ],
+    "FACULTY#": [
+      {
+        "department": "Population Health Sciences",
+        "top_topics": [
+          {
+            "topic_id": "breast_cancer",
+            "max_score": 0.95
+          },
+          {
+            "topic_id": "genetics_genomics_precision_medicine",
+            "max_score": 0.92
+          },
+          {
+            "topic_id": "epidemiology_population_health",
+            "max_score": 0.75
+          },
+          {
+            "topic_id": "translational_clinical_science",
+            "max_score": 0.6
+          },
+          {
+            "topic_id": "biostatistics_quantitative_sciences",
+            "max_score": 0.6
+          },
+          {
+            "topic_id": "health_equity_social_determinants",
+            "max_score": 0.55
+          },
+          {
+            "topic_id": "womens_health_reproductive_medicine",
+            "max_score": 0.55
+          },
+          {
+            "topic_id": "implementation_science",
+            "max_score": 0.55
+          },
+          {
+            "topic_id": "health_services_policy",
+            "max_score": 0.45
+          },
+          {
+            "topic_id": "pathology_laboratory_medicine",
+            "max_score": 0.4
+          }
+        ],
+        "last_author_count": 2,
+        "taxonomy_version": "taxonomy_v2",
+        "article_count": 27,
+        "name": "<redacted-faculty-name>",
+        "SK": "PROFILE",
+        "faculty_uid": "cwid_redacted_14",
+        "first_author_count": 5,
+        "h_index": 14,
+        "scored_pub_count": 3,
+        "PK": "FACULTY#cwid_redacted_14",
+        "subtopic_scores": {
+          "biostatistics_quantitative_sciences": {
+            "biostatistics_clinical_trial_design": 0.1701,
+            "biostatistics_prediction_risk_models": 0.4681
+          },
+          "breast_cancer": {
+            "breast_screening_risk_prediction": 1.3814
+          },
+          "cancer_biology_general": {
+            "cancer_breast_cancer_risk_epidemiology": 0.1098
+          },
+          "epidemiology_population_health": {
+            "epidemiology_cancer_screening_survivorship": 0.7434
+          },
+          "genetics_genomics_precision_medicine": {
+            "genetics_gwas_polygenic_risk": 0.8963,
+            "genetics_breast_cancer_genomics": 0.4248
+          },
+          "health_equity_social_determinants": {
+            "health_cancer_disparities_screening": 0.3542
+          },
+          "health_services_policy": {
+            "health_cancer_screening_disparities_survivorship": 0.1701
+          },
+          "pathology_laboratory_medicine": {
+            "pathology_breast_pathology_biomarkers": 0.1324
+          },
+          "primary_care_general_medicine": {
+            "primary_cancer_screening_survivorship": 0.0964
+          },
+          "translational_clinical_science": {
+            "translational_precision_oncology_genomics": 0.1809,
+            "translational_clinical_trial_design_methodology": 0.2544
+          },
+          "womens_health_reproductive_medicine": {
+            "womens_breast_cancer_risk_screening": 0.5121
+          }
+        }
+      },
+      {
+        "department": "Urology",
+        "top_topics": [
+          {
+            "topic_id": "urology_mens_health",
+            "max_score": 0.92
+          },
+          {
+            "topic_id": "transplantation_medicine",
+            "max_score": 0.88
+          },
+          {
+            "topic_id": "surgery_perioperative_medicine",
+            "max_score": 0.82
+          },
+          {
+            "topic_id": "prostate_urologic_cancer",
+            "max_score": 0.82
+          },
+          {
+            "topic_id": "nephrology_renal_disease",
+            "max_score": 0.65
+          },
+          {
+            "topic_id": "biomedical_engineering",
+            "max_score": 0.6
+          },
+          {
+            "topic_id": "biostatistics_quantitative_sciences",
+            "max_score": 0.3
+          }
+        ],
+        "last_author_count": 3,
+        "taxonomy_version": "taxonomy_v2",
+        "article_count": 64,
+        "name": "<redacted-faculty-name>",
+        "SK": "PROFILE",
+        "faculty_uid": "cwid_redacted_08",
+        "first_author_count": 13,
+        "h_index": 27,
+        "scored_pub_count": 2,
+        "PK": "FACULTY#cwid_redacted_08",
+        "subtopic_scores": {
+          "biomedical_engineering": {
+            "biomedical_robotic_surgical_systems": 0.1153
+          },
+          "biostatistics_quantitative_sciences": {
+            "biostatistics_prediction_risk_models": 0.058
+          },
+          "nephrology_renal_disease": {
+            "nephrology_kidney_transplant_outcomes": 0.129
+          },
+          "surgery_perioperative_medicine": {
+            "surgery_urologic_prostate": 0.3142
+          },
+          "transplantation_medicine": {
+            "transplantation_kidney_donor_recipient": 0.1972
+          },
+          "urology_mens_health": {
+            "urology_penile_erectile_prosthetic": 0.2786
+          }
+        }
+      },
+      {
+        "department": "General Internal Medicine (Medicine)",
+        "top_topics": [
+          {
+            "topic_id": "health_equity_social_determinants",
+            "max_score": 0.95
+          },
+          {
+            "topic_id": "environmental_planetary_health",
+            "max_score": 0.95
+          },
+          {
+            "topic_id": "health_services_policy",
+            "max_score": 0.93
+          },
+          {
+            "topic_id": "biomedical_informatics",
+            "max_score": 0.92
+          },
+          {
+            "topic_id": "epidemiology_population_health",
+            "max_score": 0.9
+          },
+          {
+            "topic_id": "sleep_medicine_circadian_biology",
+            "max_score": 0.9
+          },
+          {
+            "topic_id": "palliative_end_of_life_care",
+            "max_score": 0.9
+          },
+          {
+            "topic_id": "cardiovascular_disease",
+            "max_score": 0.85
+          },
+          {
+            "topic_id": "infectious_disease_immunology",
+            "max_score": 0.85
+          },
+          {
+            "topic_id": "global_public_health",
+            "max_score": 0.82
+          }
+        ],
+        "last_author_count": 8,
+        "taxonomy_version": "taxonomy_v2",
+        "article_count": 35,
+        "name": "<redacted-faculty-name>",
+        "SK": "PROFILE",
+        "faculty_uid": "cwid_redacted_01",
+        "first_author_count": 16,
+        "h_index": 8,
+        "scored_pub_count": 20,
+        "PK": "FACULTY#cwid_redacted_01",
+        "subtopic_scores": {
+          "aging_geroscience": {
+            "aging_nursing_home_ltc": 0.5449,
+            "aging_late_life_depression_mental_health": 0.1188,
+            "aging_covid19_outcomes_aging": 0.2145,
+            "aging_social_determinants_health_disparities": 0.3555
+          },
+          "biomedical_informatics": {
+            "biomedical_ml_ehr_prediction": 0.2428,
+            "biomedical_federated_learning_data_privacy": 0.482
+          },
+          "biostatistics_quantitative_sciences": {
+            "biostatistics_health_disparities_social_determinants": 0.8071,
+            "biostatistics_real_world_evidence_healthcare_utilization": 0.1715,
+            "biostatistics_machine_learning_ai_health": 0.1771,
+            "biostatistics_causal_inference_comparative_effectiveness": 0.434,
+            "biostatistics_epidemiology_infectious_disease": 0.3203,
+            "biostatistics_prediction_risk_models": 0.8306
+          },
+          "cardiovascular_disease": {
+            "cardiovascular_social_determinants_disparities": 1.4925
+          },
+          "emergency_critical_care_medicine": {
+            "emergency_global_emergency_care_lmic": 0.1313,
+            "emergency_covid19_hospitalized_outcomes": 0.1485,
+            "emergency_icu_data_informatics_ai": 0.2346
+          },
+          "environmental_planetary_health": {
+            "environmental_hurricane_disaster_health": 1.8831,
+            "environmental_heat_illness_climate": 0.6076
+          },
+          "epidemiology_population_health": {
+            "epidemiology_healthcare_utilization_fragmentation": 0.1024,
+            "epidemiology_machine_learning_ehr_methods": 0.1987,
+            "epidemiology_chronic_disease_risk_factors": 0.9722,
+            "epidemiology_global_lmic_population_health": 0.1915,
+            "epidemiology_racial_ethnic_health_disparities_outcomes": 1.2703,
+            "epidemiology_elder_mistreatment_aging": 0.496,
+            "epidemiology_covid19_outcomes_surveillance": 0.9751,
+            "epidemiology_social_determinants_disparities": 0.6307
+          },
+          "global_public_health": {
+            "global_covid19_epidemiology_outcomes": 0.7406,
+            "global_health_disparities_sdoh": 0.0859,
+            "global_heat_climate_health": 0.9261,
+            "global_emergency_trauma_lmic": 0.2027
+          },
+          "health_economics": {
+            "health_healthcare_spending_utilization": 0.1007,
+            "health_racial_socioeconomic_disparities": 0.3299,
+            "health_value_based_payment_mips": 0.2211
+          },
+          "health_equity_social_determinants": {
+            "health_global_lmic_disparities": 0.0697,
+            "health_sdoh_cardiovascular_stroke": 0.3279,
+            "health_racial_ethnic_disparities_outcomes": 1.8817,
+            "health_sdoh_data_measurement": 0.2372,
+            "health_neighborhood_built_environment": 0.575,
+            "health_covid_racial_socioeconomic_disparities": 0.8528
+          },
+          "health_services_policy": {
+            "health_racial_ethnic_disparities_access": 1.0966,
+            "health_healthcare_financing_payment_policy": 0.2829,
+            "health_covid19_pandemic_health_systems": 0.4555,
+            "health_nursing_home_long_term_care": 0.7441,
+            "health_mental_health_behavioral_policy": 0.2565,
+            "health_hospital_utilization_quality_improvement": 0.3222,
+            "health_social_determinants_health_outcomes": 0.4789
+          },
+          "infectious_disease_immunology": {
+            "infectious_covid19_clinical_outcomes": 0.4709,
+            "infectious_sars_cov2_variants_epidemiology": 0.3696
+          },
+          "mental_health_psychiatry": {
+            "mental_anxiety_ptsd_trauma": 0.0652,
+            "mental_depression_treatment_mechanisms": 0.2293
+          },
+          "nephrology_renal_disease": {
+            "nephrology_aki_critical_care": 0.1771
+          },
+          "palliative_end_of_life_care": {
+            "palliative_hospice_utilization_quality": 0.5336,
+            "palliative_geriatric_serious_illness": 0.0768
+          },
+          "pediatrics_neonatology": {
+            "pediatrics_covid_infectious_disease": 0.058
+          },
+          "primary_care_general_medicine": {
+            "primary_cardiovascular_risk_prediction": 0.1271,
+            "primary_depression_mental_health_primary_care": 0.1078
+          },
+          "pulmonary_critical_care": {
+            "pulmonary_covid19_clinical_outcomes": 0.1485
+          },
+          "rehabilitation_disability_medicine": {
+            "rehabilitation_fall_prevention_older_adults": 0.0953
+          },
+          "sleep_medicine_circadian_biology": {
+            "sleep_auditory_environmental_interventions": 0.3756
+          },
+          "surgery_perioperative_medicine": {
+            "surgery_perioperative_anesthesia": 0.058
+          },
+          "translational_clinical_science": {
+            "translational_wearables_digital_health": 0.0807,
+            "translational_machine_learning_ehr": 0.1004,
+            "translational_research_workforce_ctsa": 0.0526
+          }
+        }
+      },
+      {
+        "department": "Emergency Medicine",
+        "top_topics": [
+          {
+            "topic_id": "digital_health_telemedicine",
+            "max_score": 0.95
+          },
+          {
+            "topic_id": "emergency_critical_care_medicine",
+            "max_score": 0.88
+          },
+          {
+            "topic_id": "health_services_policy",
+            "max_score": 0.82
+          },
+          {
+            "topic_id": "implementation_science",
+            "max_score": 0.75
+          },
+          {
+            "topic_id": "pulmonary_critical_care",
+            "max_score": 0.75
+          },
+          {
+            "topic_id": "infectious_disease_immunology",
+            "max_score": 0.55
+          },
+          {
+            "topic_id": "primary_care_general_medicine",
+            "max_score": 0.45
+          },
+          {
+            "topic_id": "epidemiology_population_health",
+            "max_score": 0.4
+          },
+          {
+            "topic_id": "health_equity_social_determinants",
+            "max_score": 0.35
+          },
+          {
+            "topic_id": "biomedical_informatics",
+            "max_score": 0.3
+          }
+        ],
+        "last_author_count": 0,
+        "taxonomy_version": "taxonomy_v2",
+        "article_count": 7,
+        "name": "<redacted-faculty-name>",
+        "SK": "PROFILE",
+        "faculty_uid": "cwid_redacted_03",
+        "first_author_count": 0,
+        "h_index": 6,
+        "scored_pub_count": 4,
+        "PK": "FACULTY#cwid_redacted_03",
+        "subtopic_scores": {
+          "biomedical_informatics": {
+            "biomedical_telehealth_digital_patient_engagement": 0.0692
+          },
+          "digital_health_telemedicine": {
+            "digital_telehealth_covid_expansion": 0.4841,
+            "digital_mhealth_apps_interventions": 0.3222
+          },
+          "emergency_critical_care_medicine": {
+            "emergency_covid19_respiratory_mechanical_ventilation": 0.3301,
+            "emergency_ed_operations_telemedicine": 1.071
+          },
+          "epidemiology_population_health": {
+            "epidemiology_healthcare_utilization_fragmentation": 0.1412
+          },
+          "health_equity_social_determinants": {
+            "health_medicaid_insurance_access": 0.1172
+          },
+          "health_services_policy": {
+            "health_telehealth_digital_health": 0.1971,
+            "health_hospital_utilization_quality_improvement": 0.1617,
+            "health_care_coordination_fragmentation": 0.3858
+          },
+          "infectious_disease_immunology": {
+            "infectious_covid19_clinical_outcomes": 0.2991
+          },
+          "primary_care_general_medicine": {
+            "primary_care_transitions_discharge_planning": 0.1666
+          },
+          "pulmonary_critical_care": {
+            "pulmonary_covid19_respiratory_pathophysiology": 0.2771
+          }
+        }
+      },
+      {
+        "department": "Hematology and Medical Oncology (Medicine)",
+        "top_topics": [
+          {
+            "topic_id": "hematology",
+            "max_score": 0.85
+          },
+          {
+            "topic_id": "immunology_inflammation",
+            "max_score": 0.75
+          },
+          {
+            "topic_id": "drug_discovery_pharmacology",
+            "max_score": 0.75
+          },
+          {
+            "topic_id": "translational_clinical_science",
+            "max_score": 0.6
+          },
+          {
+            "topic_id": "cancer_biology_general",
+            "max_score": 0.5
+          },
+          {
+            "topic_id": "cell_molecular_biology",
+            "max_score": 0.3
+          }
+        ],
+        "last_author_count": 0,
+        "taxonomy_version": "taxonomy_v2",
+        "article_count": 13,
+        "name": "<redacted-faculty-name>",
+        "SK": "PROFILE",
+        "faculty_uid": "cwid_redacted_06",
+        "first_author_count": 4,
+        "h_index": 8,
+        "scored_pub_count": 2,
+        "PK": "FACULTY#cwid_redacted_06",
+        "subtopic_scores": {
+          "cancer_biology_general": {
+            "cancer_lymphoma_leukemia_biology": 0.1191
+          },
+          "cell_molecular_biology": {
+            "cell_tumor_microenvironment_immunity": 0.0334
+          },
+          "drug_discovery_pharmacology": {
+            "drug_antibody_biologics_vaccine_development": 0.1206,
+            "drug_hematologic_malignancy_treatment": 0.1663
+          },
+          "hematology": {
+            "hematology_lymphoma_biology_therapy": 0.3619
+          },
+          "immunology_inflammation": {
+            "immunology_lymphoma_hematologic_immune": 0.1206
+          },
+          "translational_clinical_science": {
+            "translational_precision_oncology_genomics": 0.05,
+            "translational_oncology_clinical_trials": 0.134
+          }
+        }
+      }
+    ],
+    "IMPACT#": [
+      {
+        "model": "gpt-5.1",
+        "SK": "SCORE",
+        "pmid": "40909477",
+        "impact_score": 38,
+        "PK": "IMPACT#pmid_40909477",
+        "justification": "Early hit discovery; novel TREM2 modulator but preclinical, unvalidated, uncited."
+      },
+      {
+        "model": "gpt-5.1",
+        "SK": "SCORE",
+        "pmid": "39346858",
+        "impact_score": 36,
+        "PK": "IMPACT#pmid_39346858",
+        "justification": "Incremental in-vitro model characterization with proteomics; limited demonstrated influence"
+      },
+      {
+        "model": "gpt-5.1",
+        "SK": "SCORE",
+        "pmid": "32907668",
+        "impact_score": 58,
+        "PK": "IMPACT#pmid_32907668",
+        "justification": "High-impact COVID surge-planning review, widely cited and practice-informing."
+      },
+      {
+        "model": "gpt-5.1",
+        "SK": "SCORE",
+        "pmid": "37883178",
+        "impact_score": 60,
+        "PK": "IMPACT#pmid_37883178",
+        "justification": "Novel ER\u03b1 activation mechanism with strong mechanistic rigor, emerging citations."
+      },
+      {
+        "model": "gpt-5.1",
+        "SK": "SCORE",
+        "pmid": "35790295",
+        "impact_score": 34,
+        "PK": "IMPACT#pmid_35790295",
+        "justification": "In vitro mechanistic study; modest novelty, limited downstream influence."
+      }
+    ],
+    "TAXONOMY#": [
+      {
+        "SK": "META",
+        "created_at": "2026-04-10T03:18:55.701403+00:00",
+        "PK": "TAXONOMY#taxonomy_v2",
+        "topics": [
+          {
+            "description": "Clinical and translational research on heart and vascular conditions including heart failure, coronary artery disease, arrhythmias, valvular disease, cardiomyopathy, and vascular surgery. Encompasses cardiac imaging, interventional cardiology, cardiac surgery outcomes, and basic cardiovascular biology. Includes both structural heart disease and cardiovascular risk factor management.",
+            "id": "cardiovascular_disease",
+            "label": "Cardiovascular Disease"
+          },
+          {
+            "description": "Basic and clinical neuroscience spanning fundamental neural mechanisms, neurophysiology, neuroanatomy, and clinical neurology including stroke, epilepsy, brain injury, and movement disorders. Covers molecular and cellular neurobiology, neuroimaging, neuromodulation, and neural circuit function. Distinct from neurodegenerative disease (progressive conditions like Alzheimer's/Parkinson's) and psychiatry (mental health disorders).",
+            "id": "neuroscience_neurology",
+            "label": "Neuroscience & Neurology"
+          },
+          {
+            "description": "Pathogen-focused research on bacterial, viral, fungal, and parasitic infections alongside host defense mechanisms, vaccine development, and antimicrobial resistance. Encompasses HIV, COVID-19, tuberculosis, hepatitis, and emerging infections. Distinct from Immunology & Inflammation (fundamental immune regulation) in its focus on pathogen biology and infection-specific immune responses.",
+            "id": "infectious_disease_immunology",
+            "label": "Infectious Disease & Host Defense"
+          },
+          {
+            "description": "Clinical and translational research on psychiatric conditions including depression, anxiety, schizophrenia, bipolar disorder, PTSD, and behavioral health across the lifespan. Covers neurobiological mechanisms, pharmacological and psychotherapeutic interventions, and mental health services delivery. Substance use disorders are primarily covered under Substance Use & Addiction Medicine.",
+            "id": "mental_health_psychiatry",
+            "label": "Mental Health & Psychiatry"
+          },
+          {
+            "description": "Foundational research into cellular mechanisms, molecular signaling pathways, gene regulation, and biochemical processes underlying physiology and disease. Encompasses cell cycle regulation, protein function, organelle biology, RNA biology, epigenetic regulation, and intracellular signaling across disease contexts.",
+            "id": "cell_molecular_biology",
+            "label": "Cell & Molecular Biology"
+          },
+          {
+            "description": "Research on gastrointestinal, hepatobiliary, and pancreatic diseases including inflammatory bowel disease, cirrhosis, hepatitis, colorectal conditions, pancreatic cancer, and pancreatitis. Covers endoscopic interventions, gut microbiome biology, liver fibrosis mechanisms, and both medical and surgical management of GI, hepatobiliary, and pancreatic conditions.",
+            "id": "gastroenterology_hepatology",
+            "label": "Gastroenterology, Hepatology & Pancreatic Disease"
+          },
+          {
+            "description": "Research examining racial, ethnic, socioeconomic, geographic, and structural disparities in health outcomes, healthcare access, and treatment. Addresses systemic factors driving health inequities including insurance status, neighborhood disadvantage, discrimination, and policy-level determinants. Includes structural equity within healthcare institutions, representation in the biomedical workforce, and diversity pipeline research.",
+            "id": "health_equity_social_determinants",
+            "label": "Health Equity & Social Determinants of Health"
+          },
+          {
+            "description": "Research on diabetes, obesity, thyroid disease, adrenal disorders, and related metabolic conditions including insulin resistance, lipid metabolism, and hormonal regulation. Spans molecular mechanisms of metabolic dysfunction through clinical management of endocrine disorders and their systemic complications.",
+            "id": "metabolic_endocrine_disease",
+            "label": "Metabolic & Endocrine Disease"
+          },
+          {
+            "description": "Research focused on progressive neurological conditions including Alzheimer's disease, Parkinson's disease, ALS, Huntington's disease, and related tauopathies and proteinopathies. Covers molecular mechanisms of neurodegeneration, biomarker discovery, neuroprotective strategies, and clinical disease management.",
+            "id": "neurodegenerative_disease",
+            "label": "Neurodegenerative Disease"
+          },
+          {
+            "description": "Research on gynecology, reproductive endocrinology, fertility, menopause, and sex-specific health conditions across the female lifespan. Encompasses gynecologic oncology, assisted reproductive technologies, contraception, and biological sex differences in disease. Distinct from Maternal & Child Health (population-level perinatal epidemiology and public health).",
+            "id": "womens_health_reproductive_medicine",
+            "label": "Women's Health & Reproductive Medicine"
+          },
+          {
+            "description": "Research on biological mechanisms of aging and their clinical consequences including frailty, cognitive decline, age-related disease, and geriatric syndromes. Bridges molecular biology of cellular senescence and aging pathways with clinical geriatric care, elder mistreatment, and long-term care delivery.",
+            "id": "aging_geroscience",
+            "label": "Aging & Geroscience"
+          },
+          {
+            "description": "Research on chronic and acute lung diseases including COPD, interstitial lung disease, asthma, pulmonary fibrosis, and respiratory infections. Covers airway biology, mechanical ventilation, and ICU management of respiratory failure. Distinct from Emergency & Critical Care Medicine (ED workflows, trauma, triage, resuscitation) in its focus on pulmonary biology and respiratory-focused critical care.",
+            "id": "pulmonary_critical_care",
+            "label": "Pulmonary & Critical Care Medicine"
+          },
+          {
+            "description": "Clinical and translational research focused on health conditions, development, and care delivery in neonatal, infant, and pediatric populations. Encompasses preterm infant management, pediatric disease across organ systems, neurodevelopmental conditions, and age-specific clinical challenges from birth through adolescence.",
+            "id": "pediatrics_neonatology",
+            "label": "Pediatrics & Neonatology"
+          },
+          {
+            "description": "Research on surgical techniques, outcomes, and perioperative management across specialties including general, thoracic, vascular, and minimally invasive surgery. Covers operative technique evaluation, perioperative risk stratification, postoperative complications, and quality improvement in surgical care.",
+            "id": "surgery_perioperative_medicine",
+            "label": "Surgery & Perioperative Medicine"
+          },
+          {
+            "description": "Research on acute kidney injury, chronic kidney disease progression, renal physiology, and kidney transplantation. Encompasses biomarker discovery, renal replacement therapy, electrolyte homeostasis, and both molecular mechanisms and clinical management of kidney disease.",
+            "id": "nephrology_renal_disease",
+            "label": "Nephrology & Renal Disease"
+          },
+          {
+            "description": "Fundamental research on immune cell biology, inflammatory signaling, and immune regulation including innate and adaptive immunity, cytokine pathways, immune checkpoint biology, and inflammatory mechanisms. Focuses on host immune regulation and non-organ-specific inflammatory conditions. Distinct from infectious disease (pathogen-focused) and autoimmune/rheumatologic disease (clinical autoimmune syndromes).",
+            "id": "immunology_inflammation",
+            "label": "Immunology & Inflammation"
+          },
+          {
+            "description": "Clinical and translational research on solid organ and hematopoietic stem cell transplantation including donor-recipient matching, rejection mechanisms, immunosuppression, post-transplant complications, and long-term outcomes. Covers kidney, liver, heart, lung, and bone marrow transplantation.",
+            "id": "transplantation_medicine",
+            "label": "Transplantation Medicine"
+          },
+          {
+            "description": "Research on blood cell disorders, coagulation, hematopoiesis, transfusion medicine, and hematologic malignancies. Covers both benign hematology (hemostasis, thrombosis, anemias, sickle cell disease) and blood cancers (leukemia, lymphoma, myeloma). Blood cancers are shared with Oncology; hematology emphasizes the hematologic biology and bone marrow context.",
+            "id": "hematology",
+            "label": "Hematology"
+          },
+          {
+            "description": "Research on bone, joint, cartilage, spine, and connective tissue conditions including osteoarthritis, fractures, spinal disorders, and orthopedic surgical outcomes. Spans basic bone and cartilage biology, biomechanics, sports medicine, and clinical surgical management. Inflammatory arthritides primarily sit under Autoimmune & Rheumatologic Disease.",
+            "id": "musculoskeletal_orthopedic_medicine",
+            "label": "Musculoskeletal & Orthopedic Medicine"
+          },
+          {
+            "description": "Clinical and translational research on systemic autoimmune syndromes and rheumatologic conditions including lupus, rheumatoid arthritis, vasculitis, scleroderma, and inflammatory arthritis. Covers disease biomarkers, immunosuppressive therapies, and clinical management. Distinct from Immunology & Inflammation (fundamental immune mechanisms) in its focus on clinical autoimmune disease and rheumatology practice.",
+            "id": "autoimmune_rheumatologic_disease",
+            "label": "Autoimmune & Rheumatologic Disease"
+          },
+          {
+            "description": "Population-level and systems-focused research on healthcare delivery, utilization, cost, quality, and policy interventions. Encompasses healthcare financing, insurance models, care coordination, value-based care, and the organization of health systems at institutional and national levels.",
+            "id": "health_services_policy",
+            "label": "Health Services Research & Health Policy"
+          },
+          {
+            "description": "Population-level research addressing disease burden, epidemiology, health disparities, and health systems across diverse geographic and demographic contexts including low- and middle-income countries. Covers public health surveillance, community-based interventions, and international health policy.",
+            "id": "global_public_health",
+            "label": "Global & Public Health"
+          },
+          {
+            "description": "Research on training, curriculum development, competency assessment, and professional development across medical specialties and healthcare professions. Addresses residency/fellowship education, simulation-based training, faculty development, workforce well-being, burnout, and diversity/equity initiatives within academic medicine and the healthcare workforce.",
+            "id": "medical_education_workforce",
+            "label": "Medical Education & Healthcare Workforce"
+          },
+          {
+            "description": "Research on symptom management, goals-of-care communication, hospice utilization, and quality of life for seriously ill patients and their caregivers. Encompasses advance care planning, end-of-life decision-making, spiritual care, and the psychosocial dimensions of serious illness.",
+            "id": "palliative_end_of_life_care",
+            "label": "Palliative & End-of-Life Care"
+          },
+          {
+            "description": "Research on opioid, alcohol, and other substance use disorders including epidemiology, treatment strategies, harm reduction, and policy. Covers medication-assisted treatment, naloxone distribution, opioid prescribing practices, and the neurobiological and social determinants of addiction.",
+            "id": "substance_use_addiction_medicine",
+            "label": "Substance Use & Addiction Medicine"
+          },
+          {
+            "description": "Clinical and translational research on inflammatory, neoplastic, and infectious skin conditions including psoriasis, atopic dermatitis, melanoma, and rare dermatologic disorders. Encompasses skin biology, immunological mechanisms of skin disease, and therapeutic interventions across diverse skin types.",
+            "id": "dermatology_skin_disease",
+            "label": "Dermatology & Skin Disease"
+          },
+          {
+            "description": "Clinical and translational research on eye diseases including age-related macular degeneration, glaucoma, diabetic retinopathy, and retinal disorders. Covers ocular biology, gene therapy for retinal disease, diagnostic imaging, and surgical interventions for ophthalmic conditions.",
+            "id": "ophthalmology_vision_science",
+            "label": "Ophthalmology & Vision Science"
+          },
+          {
+            "description": "Clinical and translational research on urological conditions including prostate cancer, bladder cancer, benign prostatic hyperplasia, kidney stones, and male reproductive health. Encompasses urological surgery, imaging-guided diagnosis, and both oncologic and functional urological outcomes.",
+            "id": "urology_mens_health",
+            "label": "Urology & Men's Health"
+          },
+          {
+            "description": "Research on disorders of the ear, nose, throat, larynx, and head and neck structures including head and neck cancers, voice disorders, swallowing dysfunction, hearing loss, and sinonasal conditions. Covers both functional and oncologic conditions of the upper aerodigestive tract.",
+            "id": "otolaryngology_head_neck",
+            "label": "Otolaryngology & Head and Neck Medicine"
+          },
+          {
+            "description": "Population-level research examining disease prevalence, incidence, risk factors, and health behaviors using observational and surveillance methods. Encompasses chronic disease epidemiology, social determinants modeling, community health interventions, and public health surveillance across diverse populations.",
+            "id": "epidemiology_population_health",
+            "label": "Epidemiology & Population Health"
+          },
+          {
+            "description": "Research leveraging genetic and genomic data to understand disease mechanisms, population variation, and individualized clinical management. Includes GWAS, hereditary cancer genetics, pharmacogenomics, epigenomics, and the application of genomic information to precision diagnostics and therapeutics.",
+            "id": "genetics_genomics_precision_medicine",
+            "label": "Genetics, Genomics & Precision Medicine"
+          },
+          {
+            "description": "Research on cellular reprogramming, tissue regeneration, and stem cell biology including iPSC generation, organoid models, hematopoietic stem cell biology, and tissue engineering. Covers both methodological advances in cell-based approaches and fundamental biology of tissue repair and regeneration.",
+            "id": "stem_cell_regenerative_medicine",
+            "label": "Stem Cell & Regenerative Medicine"
+          },
+          {
+            "description": "Structural and functional studies of proteins, macromolecular complexes, membranes, and metabolic pathways using biophysical and biochemical approaches. Includes cryo-EM, spectroscopy, enzyme kinetics, lipid biology, and molecular dynamics relevant to understanding biological function at atomic and molecular resolution.",
+            "id": "biochemistry_biophysics",
+            "label": "Biochemistry & Biophysics"
+          },
+          {
+            "description": "Research on organogenesis, cell differentiation, lineage specification, and developmental genetics using model organisms and stem cell systems. Encompasses embryonic development, congenital conditions, developmental signaling pathways, and the molecular regulation of tissue patterning and morphogenesis.",
+            "id": "developmental_biology",
+            "label": "Developmental Biology"
+          },
+          {
+            "description": "Research on microbial communities and their interactions with host biology in health and disease contexts including gut, oral, skin, and respiratory microbiomes. Covers microbiome composition, host-microbe interactions, metabolomics, and therapeutic manipulation of microbial communities.",
+            "id": "microbiome_research",
+            "label": "Microbiome Research"
+          },
+          {
+            "description": "Translational research on therapeutic delivery of genetic material and cellular constructs for disease treatment including AAV-mediated gene delivery, CAR-T cell therapy, and pharmacological chaperone approaches. Covers vector design, safety characterization, and preclinical and clinical development of gene and cell-based therapeutics.",
+            "id": "gene_cell_therapy",
+            "label": "Gene & Cell Therapy"
+          },
+          {
+            "description": "Research on identifying, developing, and characterizing novel therapeutic agents including small molecules, biologics, and drug delivery platforms. Encompasses target identification, high-throughput screening, structure-activity relationships, pharmacokinetics, and translational pharmacology bridging basic science to clinical application.",
+            "id": "drug_discovery_pharmacology",
+            "label": "Drug Discovery & Pharmacology"
+          },
+          {
+            "description": "Research on perioperative care, pain mechanisms, analgesic strategies, and anesthetic pharmacology. Covers chronic pain conditions, opioid stewardship, regional anesthesia, neuropathic pain biology, and the intersection of pain management with surgical and critical care contexts.",
+            "id": "pain_management_anesthesiology",
+            "label": "Pain Management & Anesthesiology"
+          },
+          {
+            "description": "Research applying computational methods, natural language processing, machine learning, and data infrastructure to clinical and biomedical problems as a distinct departmental and institutional identity. Includes electronic health records, clinical decision support, computable phenotyping, and knowledge representation for biomedical discovery.",
+            "id": "biomedical_informatics",
+            "label": "Biomedical Informatics"
+          },
+          {
+            "description": "Engineering-driven research applied to medical problems representing a distinct departmental identity at academic medical centers. Includes medical device development, biomaterials, tissue engineering scaffolds, wearable sensors, robotic surgical systems, and the application of engineering principles to clinical and biological challenges.",
+            "id": "biomedical_engineering",
+            "label": "Biomedical Engineering"
+          },
+          {
+            "description": "Research on diagnostic and interventional imaging technologies, radiation physics, and their clinical applications including MRI, CT, PET, ultrasound, nuclear medicine, interventional radiology, and radiation dosimetry. Encompasses imaging physics, AI-assisted image analysis, imaging biomarkers, treatment planning, and medical physics as a clinical and academic discipline.",
+            "id": "radiology_medical_imaging",
+            "label": "Radiology, Medical Imaging & Medical Physics"
+          },
+          {
+            "description": "Research infrastructure and methodology supporting the translation of basic discoveries to clinical application including clinical trial science, biomarker validation, patient-oriented research, and CTSA-supported translational research programs. Addresses the organizational and methodological foundations of bench-to-bedside research.",
+            "id": "translational_clinical_science",
+            "label": "Translational & Clinical Science"
+          },
+          {
+            "description": "Research evaluating the economic dimensions of healthcare including cost-effectiveness analysis, healthcare financing, payment model innovation, pharmaceutical pricing, and the economic burden of disease. Addresses how economic incentives, market structures, and resource allocation shape healthcare delivery and patient outcomes.",
+            "id": "health_economics",
+            "label": "Health Economics"
+          },
+          {
+            "description": "Research on methods and strategies for systematically integrating evidence-based interventions into clinical practice and health systems. Covers dissemination and implementation frameworks, quality improvement science, guideline adherence, and the study of barriers and facilitators to adopting effective health interventions.",
+            "id": "implementation_science",
+            "label": "Implementation Science"
+          },
+          {
+            "description": "Research evaluating technology-enabled care delivery models including telemedicine, mobile health applications, remote patient monitoring, and digital therapeutics. Examines clinical outcomes, patient satisfaction, access equity, and implementation of virtual and remote healthcare platforms.",
+            "id": "digital_health_telemedicine",
+            "label": "Digital Health & Telemedicine"
+          },
+          {
+            "description": "Research leveraging single-cell genomics, transcriptomics, proteomics, and spatial multi-omics to characterize cellular heterogeneity, tissue architecture, and cell-state dynamics in health and disease. Represents an emerging methodological and scientific domain with broad applications across organ systems and disease areas.",
+            "id": "single_cell_spatial_biology",
+            "label": "Single-Cell & Spatial Biology"
+          },
+          {
+            "description": "Research integrating multi-omics data, computational modeling, and network analysis to understand complex biological systems and emergent properties of cellular and organismal function. Encompasses pathway analysis, gene regulatory networks, protein interaction networks, and quantitative modeling of biological processes.",
+            "id": "systems_biology",
+            "label": "Systems Biology"
+          },
+          {
+            "description": "Research on functional recovery, disability management, and rehabilitation outcomes following illness, injury, or congenital conditions. Covers physical and cognitive rehabilitation, assistive technology, disability policy, and quality of life in populations with functional impairments.",
+            "id": "rehabilitation_disability_medicine",
+            "label": "Rehabilitation & Disability Medicine"
+          },
+          {
+            "description": "Research on care delivery, patient-provider communication, preventive medicine, and chronic disease management in primary and ambulatory care settings. Encompasses care coordination, patient education, caregiver support, and the organization of generalist medical practice.",
+            "id": "primary_care_general_medicine",
+            "label": "Primary Care & General Internal Medicine"
+          },
+          {
+            "description": "Research on acute illness management in emergency departments and intensive care including trauma, sepsis, resuscitation science, triage systems, and ED operations. Covers acute organ failure management, emergency protocols, and outcomes in high-acuity settings. Distinct from Pulmonary & Critical Care (respiratory-focused) in its emphasis on emergency medicine workflows and multi-system critical illness.",
+            "id": "emergency_critical_care_medicine",
+            "label": "Emergency & Critical Care Medicine"
+          },
+          {
+            "description": "Research on dietary patterns, nutrient metabolism, nutritional biochemistry, and their effects on disease risk and cellular function. Encompasses metabolomics, dietary interventions, nutritional epidemiology, and the molecular mechanisms linking nutrition to metabolic health and disease.",
+            "id": "nutrition_metabolism",
+            "label": "Nutrition & Metabolism"
+          },
+          {
+            "description": "Population-level research on perinatal epidemiology, birth outcomes, child development, and community-based maternal-child interventions. Covers prenatal care access, infant mortality, childhood nutrition, and social determinants of maternal and child well-being. Distinct from Women's Health (clinical gynecology/reproductive medicine) and Pediatrics (clinical pediatric specialty research).",
+            "id": "maternal_child_health",
+            "label": "Maternal & Child Health"
+          },
+          {
+            "description": "Studies addressing the organizational, methodological, and human dimensions of academic research including biobanking, research data systems, peer review, scientific publishing, postdoctoral training, and the sustainability of the biomedical research enterprise. Supports institutional research capacity and workforce development.",
+            "id": "research_infrastructure_workforce",
+            "label": "Research Infrastructure & Scientific Workforce"
+          },
+          {
+            "description": "Research in anatomic and clinical pathology, histopathology, cytopathology, clinical chemistry, and laboratory diagnostics. Covers tissue-based disease characterization, molecular pathology, digital pathology, and the development and validation of laboratory assays for clinical diagnosis and disease monitoring.",
+            "id": "pathology_laboratory_medicine",
+            "label": "Pathology & Laboratory Medicine"
+          },
+          {
+            "description": "Research on statistical methodology, study design, causal inference, and quantitative methods applied to biomedical and clinical research. Covers clinical trial design, Bayesian methods, survival analysis, comparative effectiveness research, real-world evidence generation, and the methodological foundations of evidence-based medicine.",
+            "id": "biostatistics_quantitative_sciences",
+            "label": "Biostatistics & Quantitative Health Sciences"
+          },
+          {
+            "description": "Research on sleep disorders, circadian rhythm regulation, and the physiological and molecular mechanisms of sleep-wake cycles. Covers obstructive sleep apnea, insomnia, narcolepsy, circadian clock biology, and the impact of sleep disruption on metabolic, cardiovascular, cognitive, and psychiatric health.",
+            "id": "sleep_medicine_circadian_biology",
+            "label": "Sleep Medicine & Circadian Biology"
+          },
+          {
+            "description": "Research on oral diseases, dental medicine, craniofacial development, and conditions of the oral cavity, jaw, and facial structures. Covers periodontal disease, oral cancer, temporomandibular disorders, craniofacial genetics, and the intersection of oral health with systemic disease.",
+            "id": "oral_craniofacial_health",
+            "label": "Oral & Craniofacial Health"
+          },
+          {
+            "description": "Research on breast cancer biology, screening, diagnosis, and treatment including hormone receptor biology, HER2-targeted therapy, triple-negative breast cancer, surgical and radiation approaches, survivorship, and disparities in breast cancer outcomes.",
+            "id": "breast_cancer",
+            "label": "Breast Cancer"
+          },
+          {
+            "description": "Research on non-small cell and small cell lung cancer including molecular drivers (EGFR, ALK, KRAS), screening and early detection, surgical and systemic treatment strategies, and outcomes in lung malignancies.",
+            "id": "lung_cancer",
+            "label": "Lung Cancer"
+          },
+          {
+            "description": "Research on prostate cancer, bladder cancer, kidney cancer, and testicular cancer including active surveillance, surgical management, radiation therapy, and biomarker-driven treatment decisions in genitourinary oncology.",
+            "id": "prostate_urologic_cancer",
+            "label": "Prostate & Urologic Cancer"
+          },
+          {
+            "description": "Research on cancers of the gastrointestinal tract including colorectal, pancreatic, esophageal, gastric, and hepatocellular carcinoma. Covers molecular subtypes, surgical and endoscopic management, and systemic therapy approaches.",
+            "id": "gi_cancer",
+            "label": "Gastrointestinal Cancer"
+          },
+          {
+            "description": "Research on primary brain tumors including glioma, glioblastoma, meningioma, and CNS lymphoma. Covers tumor biology, surgical and radiation treatment, blood-brain barrier challenges, and outcomes in central nervous system malignancies.",
+            "id": "neuro_oncology",
+            "label": "Neuro-Oncology"
+          },
+          {
+            "description": "Research on ovarian, cervical, uterine, and vulvar cancers including molecular mechanisms, surgical management, systemic therapy, and screening strategies for gynecologic malignancies.",
+            "id": "gynecologic_oncology",
+            "label": "Gynecologic Oncology"
+          },
+          {
+            "description": "Research on melanoma, non-melanoma skin cancers, and cutaneous lymphoma including molecular biology, immunotherapy response, surgical management, and early detection strategies.",
+            "id": "melanoma_skin_cancer",
+            "label": "Melanoma & Skin Cancer"
+          },
+          {
+            "description": "Cross-cutting cancer research spanning tumor biology, metastasis, tumor microenvironment, angiogenesis, cancer metabolism, and molecular mechanisms of malignancy not specific to a single cancer type. Includes cancer modeling, drug resistance mechanisms, and foundational oncologic science.",
+            "id": "cancer_biology_general",
+            "label": "Cancer Biology (General)"
+          },
+          {
+            "description": "Research examining ethical frameworks in medicine, patient autonomy, clinical decision-making, AI ethics in healthcare, and the philosophical foundations of biomedical ethics. Includes clinician burnout, moral distress, resilience, narrative medicine, and the role of humanities in medical education and professional identity.",
+            "id": "bioethics_medical_humanities",
+            "label": "Bioethics, Medical Humanities & Clinician Wellbeing"
+          },
+          {
+            "description": "Research on how environmental exposures, climate change, occupational hazards, and ecological disruption affect human health. Covers air pollution, chemical exposures, the exposome, heat-related illness, and the intersection of environmental determinants with population health outcomes.",
+            "id": "environmental_planetary_health",
+            "label": "Environmental & Planetary Health"
+          }
+        ],
+        "topic_count": 67,
+        "taxonomy_version": "taxonomy_v2"
+      }
+    ],
+    "TOOL#": [
+      {
+        "tool_category": "animal_model",
+        "context": "Alzheimer\u2019s disease mouse model for in-vivo EM studies",
+        "score": 0.9,
+        "SK": "SCORE#0900#ACTIVITY#pmid_39644493#cwid_redacted_05",
+        "faculty_uid": "cwid_redacted_05",
+        "pmid": "39644493",
+        "PK": "TOOL#5xFAD transgenic mouse"
+      },
+      {
+        "tool_category": "animal_model",
+        "context": "Alzheimer\u2019s disease mouse model for in-vivo EM studies",
+        "score": 0.9,
+        "SK": "SCORE#0900#ACTIVITY#pmid_39644493#cwid_redacted_12",
+        "faculty_uid": "cwid_redacted_12",
+        "pmid": "39644493",
+        "PK": "TOOL#5xFAD transgenic mouse"
+      },
+      {
+        "tool_category": "instrument",
+        "context": "Instrument generating droplets for single-cell assays",
+        "score": 0.7,
+        "SK": "SCORE#0700#ACTIVITY#pmid_33081820#cwid_redacted_04",
+        "faculty_uid": "cwid_redacted_04",
+        "pmid": "33081820",
+        "PK": "TOOL#Droplet-based single-cell microfluidic platform"
+      },
+      {
+        "tool_category": "animal_model",
+        "context": "Frog oocytes used to study progesterone-induced meiosis",
+        "score": 0.8,
+        "SK": "SCORE#0800#ACTIVITY#pmid_39873665#cwid_redacted_02",
+        "faculty_uid": "cwid_redacted_02",
+        "pmid": "39873665",
+        "PK": "TOOL#Xenopus laevis oocyte model"
+      },
+      {
+        "tool_category": "animal_model",
+        "context": "Frog oocytes used to study progesterone-induced meiosis",
+        "score": 0.8,
+        "SK": "SCORE#0800#ACTIVITY#pmid_39873665#cwid_redacted_10",
+        "faculty_uid": "cwid_redacted_10",
+        "pmid": "39873665",
+        "PK": "TOOL#Xenopus laevis oocyte model"
+      }
+    ],
+    "TOOL_INDEX#": [
+      {
+        "tools": [
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Digital audio recorder"
+            ],
+            "canonical_name": "Digital Audio Recorder",
+            "pub_count": 5
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Ultracentrifuge"
+            ],
+            "canonical_name": "Ultracentrifuge",
+            "pub_count": 4
+          }
+        ],
+        "SK": "META",
+        "functional_category": "other",
+        "PK": "TOOL_INDEX#other",
+        "tool_count": 2
+      },
+      {
+        "tools": [
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Cardiopulmonary bypass (CPB) machine",
+              "Cardiopulmonary bypass machine"
+            ],
+            "canonical_name": "Cardiopulmonary Bypass (CPB) Machine",
+            "pub_count": 13
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "da Vinci Surgical System"
+            ],
+            "canonical_name": "da Vinci Surgical System",
+            "pub_count": 9
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Pressure-specified sensory device (PSSD)"
+            ],
+            "canonical_name": "Pressure-Specified Sensory Device (PSSD)",
+            "pub_count": 6
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Automated sphygmomanometer",
+              "Automated blood pressure monitor"
+            ],
+            "canonical_name": "Automated Blood Pressure Monitor",
+            "pub_count": 6
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Electrocardiogram (ECG) device",
+              "Electrocardiogram (ECG) machine"
+            ],
+            "canonical_name": "Electrocardiogram (ECG) Device",
+            "pub_count": 6
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Extracorporeal membrane oxygenation (ECMO) circuit",
+              "Extracorporeal membrane oxygenation (ECMO) system"
+            ],
+            "canonical_name": "ECMO System",
+            "pub_count": 6
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Endolumenal Functional Lumen Imaging Probe (EndoFLIP)"
+            ],
+            "canonical_name": "EndoFLIP System",
+            "pub_count": 5
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Spirometer"
+            ],
+            "canonical_name": "Spirometer",
+            "pub_count": 5
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Mechanical ventilator"
+            ],
+            "canonical_name": "Mechanical Ventilator",
+            "pub_count": 5
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Pulse oximeter"
+            ],
+            "canonical_name": "Pulse Oximeter",
+            "pub_count": 4
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Patient Health Questionnaire-9 (PHQ-9)"
+            ],
+            "canonical_name": "Patient Health Questionnaire-9 (PHQ-9)",
+            "pub_count": 4
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Colonoscope"
+            ],
+            "canonical_name": "Colonoscope",
+            "pub_count": 3
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Deep brain stimulation (DBS) system"
+            ],
+            "canonical_name": "Deep Brain Stimulation (DBS) System",
+            "pub_count": 3
+          },
+          {
+            "original_category": "instrument_consumable",
+            "original_names": [
+              "Nasopharyngeal swab"
+            ],
+            "canonical_name": "Nasopharyngeal Swab",
+            "pub_count": 3
+          },
+          {
+            "original_category": "instrument_consumable",
+            "original_names": [
+              "Balloon angioplasty catheter"
+            ],
+            "canonical_name": "Balloon Angioplasty Catheter",
+            "pub_count": 3
+          }
+        ],
+        "SK": "META",
+        "functional_category": "clinical_tools",
+        "PK": "TOOL_INDEX#clinical_tools",
+        "tool_count": 15
+      },
+      {
+        "tools": [
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Cryogenic electron microscope (cryo-EM)",
+              "Cryogenic electron microscopy (cryo-EM) instrument",
+              "Cryogenic electron microscopy (cryo-EM)"
+            ],
+            "canonical_name": "Cryo-EM",
+            "pub_count": 29
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Microscale thermophoresis (MST) instrument"
+            ],
+            "canonical_name": "Microscale Thermophoresis (MST) Instrument",
+            "pub_count": 10
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Surface plasmon resonance (SPR) instrument",
+              "Surface plasmon resonance (SPR) biosensor"
+            ],
+            "canonical_name": "Surface Plasmon Resonance (SPR) Instrument",
+            "pub_count": 10
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Nuclear magnetic resonance (NMR) spectrometer"
+            ],
+            "canonical_name": "NMR Spectrometer",
+            "pub_count": 9
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Dynamic light scattering (DLS) instrument"
+            ],
+            "canonical_name": "Dynamic Light Scattering (DLS) Instrument",
+            "pub_count": 4
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "X-ray crystallography diffractometer"
+            ],
+            "canonical_name": "X-ray Crystallography Diffractometer",
+            "pub_count": 4
+          }
+        ],
+        "SK": "META",
+        "functional_category": "structural_biology",
+        "PK": "TOOL_INDEX#structural_biology",
+        "tool_count": 6
+      },
+      {
+        "tools": [
+          {
+            "original_category": "software_open_source",
+            "original_names": [
+              "Research Electronic Data Capture (REDCap)"
+            ],
+            "canonical_name": "REDCap",
+            "pub_count": 5
+          },
+          {
+            "original_category": "software_open_source",
+            "original_names": [
+              "R statistical computing environment"
+            ],
+            "canonical_name": "R Statistical Computing Environment",
+            "pub_count": 4
+          }
+        ],
+        "SK": "META",
+        "functional_category": "software",
+        "PK": "TOOL_INDEX#software",
+        "tool_count": 2
+      },
+      {
+        "tools": [
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Fluorescence in situ hybridization (FISH)"
+            ],
+            "canonical_name": "Fluorescence In Situ Hybridization (FISH)",
+            "pub_count": 3
+          },
+          {
+            "original_category": "instrument",
+            "original_names": [
+              "Seahorse XF extracellular flux analyzer"
+            ],
+            "canonical_name": "Seahorse XF Extracellular Flux Analyzer",
+            "pub_count": 3
+          },
+          {
+            "original_category": "reagent",
+            "original_names": [
+              "Hematoxylin and eosin (H&E) stain"
+            ],
+            "canonical_name": "Hematoxylin and Eosin (H&E) Stain",
+            "pub_count": 3
+          },
+          {
+            "original_category": "assay_kit",
+            "original_names": [
+              "Interleukin-6 (IL-6) ELISA kit"
+            ],
+            "canonical_name": "IL-6 ELISA Kit",
+            "pub_count": 3
+          },
+          {
+            "original_category": "assay_kit",
+            "original_names": [
+              "C-reactive protein (CRP) ELISA kit"
+            ],
+            "canonical_name": "CRP ELISA Kit",
+            "pub_count": 3
+          }
+        ],
+        "SK": "META",
+        "functional_category": "assays",
+        "PK": "TOOL_INDEX#assays",
+        "tool_count": 5
+      }
+    ],
+    "TOPIC#": [
+      {
+        "topic_scores_version": "taxonomy_v2",
+        "score": 0.3,
+        "impact_score": 38,
+        "author_position": "last",
+        "primary_subtopic_id": "palliative_caregiver_burden_support",
+        "rationale": "Caregiver burden addressed but not end-of-life/palliative context",
+        "journal": "Rehabilitation nursing : the official journal of the Association of Rehabilitation Nurses",
+        "synopsis": "Mobile-friendly website for stroke caregivers shows promise in reducing burden.",
+        "subtopic_ids": [
+          "palliative_caregiver_burden_support",
+          "palliative_digital_health_symptom_monitoring"
+        ],
+        "year": 2020,
+        "SK": "SCORE#0300#ACTIVITY#pmid_30418319#cwid_redacted_13",
+        "faculty_uid": "cwid_redacted_13",
+        "impact_justification": "Small, early-stage usability study; modest uptake, average field influence",
+        "pmid": "30418319",
+        "PK": "TOPIC#palliative_end_of_life_care",
+        "subtopic_confidences": {
+          "palliative_caregiver_burden_support": 0.75,
+          "palliative_digital_health_symptom_monitoring": 0.55
+        },
+        "title": "Design and Usability Testing of the Stroke Caregiver Support System: A Mobile-Friendly Website to Reduce Stroke Caregiver Burden."
+      },
+      {
+        "topic_scores_version": "taxonomy_v2",
+        "score": 0.3,
+        "impact_score": 62,
+        "author_position": "first",
+        "primary_subtopic_id": "palliative_crisis_standards_resource_allocation",
+        "rationale": "Treatment prioritization touches end-of-life but not primary focus",
+        "journal": "Journal of neuro-oncology",
+        "synopsis": "Framework helps prioritize neuro-oncologic cases during COVID-19 resource strain.",
+        "subtopic_ids": [
+          "palliative_crisis_standards_resource_allocation",
+          "palliative_telehealth_covid_delivery"
+        ],
+        "year": 2020,
+        "SK": "SCORE#0300#ACTIVITY#pmid_32274630#cwid_redacted_11",
+        "faculty_uid": "cwid_redacted_11",
+        "impact_justification": "Widely cited specialty COVID triage guidance, strong but time-limited influence",
+        "pmid": "32274630",
+        "PK": "TOPIC#palliative_end_of_life_care",
+        "subtopic_confidences": {
+          "palliative_crisis_standards_resource_allocation": 0.85,
+          "palliative_telehealth_covid_delivery": 0.6
+        },
+        "title": "Inpatient and outpatient case prioritization for patients with neuro-oncologic disease amid the COVID-19 pandemic: general guidance for neuro-oncology practitioners from the AANS/CNS Tumor Section and Society for Neuro-Oncology."
+      },
+      {
+        "topic_scores_version": "taxonomy_v2",
+        "score": 0.3,
+        "impact_score": 18,
+        "author_position": "last",
+        "primary_subtopic_id": "palliative_ethics_consultation_clinical",
+        "rationale": "Chaplaincy and spiritual care mentioned but not end-of-life focus",
+        "journal": "Journal of religion and health",
+        "synopsis": "Parallel struggles in medicine and chaplaincy expose power dynamics affecting care.",
+        "subtopic_ids": [
+          "palliative_ethics_consultation_clinical",
+          "palliative_spiritual_integrative_care",
+          "palliative_goals_of_care_communication"
+        ],
+        "year": 2020,
+        "SK": "SCORE#0300#ACTIVITY#pmid_32318959#cwid_redacted_09",
+        "faculty_uid": "cwid_redacted_09",
+        "impact_justification": "Conceptual ethics essay, niche readership, no citations or observable uptake.",
+        "pmid": "32318959",
+        "PK": "TOPIC#palliative_end_of_life_care",
+        "subtopic_confidences": {
+          "palliative_ethics_consultation_clinical": 0.72,
+          "palliative_goals_of_care_communication": 0.58,
+          "palliative_spiritual_integrative_care": 0.65
+        },
+        "title": "Paternalism, Evangelism, and Power."
+      },
+      {
+        "topic_scores_version": "taxonomy_v2",
+        "score": 0.3,
+        "impact_score": 24,
+        "author_position": "first",
+        "primary_subtopic_id": "palliative_crisis_standards_resource_allocation",
+        "rationale": "End-of-life resource allocation touched on, not central",
+        "journal": "The Hastings Center report",
+        "synopsis": "Thucydides' Plague of Athens offers insights on pandemic ethics and ventilator allocation.",
+        "subtopic_ids": [
+          "palliative_crisis_standards_resource_allocation",
+          "palliative_icu_critical_care_eol"
+        ],
+        "year": 2020,
+        "SK": "SCORE#0300#ACTIVITY#pmid_32596885#cwid_redacted_09",
+        "faculty_uid": "cwid_redacted_09",
+        "impact_justification": "Thoughtful pandemic ethics essay; limited novelty, low citation influence",
+        "pmid": "32596885",
+        "PK": "TOPIC#palliative_end_of_life_care",
+        "subtopic_confidences": {
+          "palliative_crisis_standards_resource_allocation": 0.85,
+          "palliative_icu_critical_care_eol": 0.65
+        },
+        "title": "Pandemics, Protocols, and the Plague of Athens: Insights from Thucydides."
+      },
+      {
+        "topic_scores_version": "taxonomy_v2",
+        "score": 0.3,
+        "impact_score": 55,
+        "author_position": "last",
+        "primary_subtopic_id": "palliative_prolonged_grief_disorder",
+        "rationale": "PGD relates to bereavement/grief but focus is neurobiology, not palliative care",
+        "journal": "Psychiatry research. Neuroimaging",
+        "synopsis": "Systematic review links Prolonged Grief Disorder to altered reward system activity.",
+        "subtopic_ids": [
+          "palliative_prolonged_grief_disorder"
+        ],
+        "year": 2020,
+        "SK": "SCORE#0300#ACTIVITY#pmid_32629197#cwid_redacted_07",
+        "faculty_uid": "cwid_redacted_07",
+        "impact_justification": "Influential systematic review clarifying PGD neurobiology; high citation impact",
+        "pmid": "32629197",
+        "PK": "TOPIC#palliative_end_of_life_care",
+        "subtopic_confidences": {
+          "palliative_prolonged_grief_disorder": 0.95
+        },
+        "title": "The neurobiological reward system in Prolonged Grief Disorder (PGD): A systematic review."
+      }
+    ]
+  },
+  "_redactions": {
+    "note": "CWID-shaped strings (cwid_<id>) replaced with deterministic cwid_redacted_NN tokens; faculty 'name' string fields replaced with <redacted-faculty-name>. Schema shape preserved for D-02 decision.",
+    "cwids_redacted_count": 14,
+    "name_field_redacted": true,
+    "redacted_at": "2026-04-30"
+  }
+}
