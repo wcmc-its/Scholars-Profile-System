@@ -5,6 +5,8 @@ status: draft
 shadcn_initialized: true
 preset: new-york / neutral / radix / lucide
 created: 2026-04-30
+revised: 2026-04-30
+revision_reason: Typography BLOCK (8 sizes / 4 weights → 4 sizes / 2 weights); Visuals FLAG (no focal point declared); Spacing FLAG (12px exception unnamed)
 ---
 
 # Phase 2 — UI Design Contract
@@ -29,46 +31,55 @@ Source: `components.json`, `npx shadcn info`, CLAUDE.md constraints (typography 
 
 ## Spacing Scale
 
-Declared values (multiples of 4):
+Declared values (multiples of 4 unless noted):
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| xs | 4px | Icon gaps, pill internal padding, inline gutter |
-| sm | 8px | Chip gap, avatar-to-text gap, badge padding |
-| md | 16px | Card internal padding (horizontal), form element spacing |
-| lg | 24px | Section sub-heading margin, card gap in grid |
-| xl | 32px | Section padding (top/bottom), carousel gap |
-| 2xl | 48px | Major section breaks (between home sections) |
-| 3xl | 64px | Page-level top/bottom padding |
+| Token | CSS var | Value | Usage |
+|-------|---------|-------|-------|
+| xs | `--space-1` | 4px | Icon gaps, pill internal padding, inline gutter |
+| sm | `--space-2` | 8px | Chip gap, avatar-to-text gap, badge padding |
+| xs-plus | `--space-3` | 12px | Carousel peek width (signals scroll affordance); browse grid row gap (keeps 67-item grid compact). Named exception — do not reach for ad-hoc values. `--space-3` already defined in `default.css`. |
+| md | `--space-4` | 16px | Card internal padding (horizontal), form element spacing, carousel snap gap |
+| lg | `--space-6` | 24px | Section sub-heading margin, card gap in grid |
+| xl | `--space-8` | 32px | Section padding (top/bottom) |
+| 2xl | `--space-12` | 48px | Major section breaks (between home sections) |
+| 3xl | `--space-16` | 64px | Page-level top/bottom padding |
 
 Exceptions:
 - Touch targets for chip rows: minimum 44px tall (accessibility; chip height is 28px, row has 8px vertical padding each side = 44px tap target)
-- Carousel scroll-snap: gap between subtopic cards = 16px (md); peek of next card = 12px (to signal scroll affordance)
-- Browse grid column gap: 16px (md); row gap: 12px (sm-plus) to keep 67-item grid compact
+- 12px (`--space-3` / `--space-xs-plus`) is the only sub-16px gap value permitted in layout contexts; used only for carousel peek and browse-grid row gap as listed above
 
-Source: design sketch `default.css` spacing scale (--space-* tokens), cross-referenced with 8-point grid
+Source: `default.css` `--space-*` tokens (confirmed: `--space-3: 12px` already declared); 8-point grid with named 12px exception
 
 ---
 
 ## Typography
 
-| Role | Font | Size | Weight | Line Height | Usage |
-|------|------|------|--------|-------------|-------|
-| Body | Inter | 15px | 400 | 1.55 | Paragraph text, card descriptions, method copy |
-| Label / UI | Inter | 13px | 400 | 1.35 | Badge text, chip labels, metadata lines, captions |
-| Heading (section) | Inter | 18px | 600 | 1.2 | Section headings ("Recent contributions", "Selected research", "Browse all research areas") |
-| Display (hero H1) | Charter / Tiempos / Georgia | 44px (desktop), 32px (mobile) | 700 | 1.2 | Home hero H1 "Scholars at Weill Cornell Medicine" |
+Consolidated scale: **4 sizes, 2 weights.** Every surface entry below uses only values from this table.
 
-Additional type rules:
-- Paper titles on cards: 15px / weight 600 / line-height 1.35 (Inter semibold — not serif; titles are data not brand)
-- Scholar name on cards/chips: 14px / weight 600 (Inter semibold)
-- Methodology inline footnote ("Selected by ReCiterAI · methodology"): 12px / weight 400 / color muted-foreground / italic
-- Topic name on subtopic carousel cards: 15px / weight 600
-- Parent breadcrumb on subtopic cards: 12px / weight 400 / color muted-foreground
-- Browse grid topic names: 14px / weight 500
-- Browse grid scholar counts: 13px / weight 400 / color muted-foreground
+| Role | CSS token | Font | Size | Weight | Line Height | Usage |
+|------|-----------|------|------|--------|-------------|-------|
+| Label / metadata | `--text-sm` | Inter | 13px | 400 regular | 1.35 | Badge text, chip labels, metadata lines, captions, muted footnotes, methodology footnotes, parent breadcrumbs, scholar counts, journal · year lines |
+| Body / card content | `--text-base` | Inter | 15px | 400 regular | 1.55 | Paragraph text, card descriptions, methodology prose, paper titles (weight 600 semibold variant of this size) |
+| Section heading | `--text-lg` | Inter | 18px | 600 semibold | 1.2 | All section headings: "Recent contributions", "Selected research", "Browse all research areas", "Top scholars in this area", "Recent highlights", "How algorithmic surfaces work" section anchors |
+| Display / hero H1 | `--text-4xl` (desktop) | Charter / Tiempos / Georgia | 44px desktop · 32px mobile | 600 semibold | 1.2 | Home hero H1 "Scholars at Weill Cornell Medicine"; `/about/methodology` page H1 "How algorithmic surfaces work". Single role; responsive size is not a separate scale entry. |
 
-Source: design sketch theme `default.css` (--text-* and --weight-* tokens), CLAUDE.md typography constraint (locked), sketch 003 Variant D card anatomy
+Semibold variants within the body size:
+- Paper titles on cards: 15px / weight 600 / line-height 1.35 — differentiated from body copy by weight alone, not a new size
+- Scholar name on cards/chips: 15px / weight 600 — rounded up from prior 14px; weight 600 provides sufficient differentiation against 15px / 400 body
+- Subtopic name on carousel cards: 15px / weight 600
+- Browse grid topic names: 15px / weight 600 — rounded up from prior 14px / 500; weight 600 replaces medium weight
+
+Dropped sizes and replacements (checker audit trail):
+- 12px footnote/breadcrumb → 13px muted (`--text-sm` / `var(--muted-foreground)`) — italic where applicable
+- 14px scholar-name / browse-topic → 15px weight 600 (size rounds up; weight differentiates)
+- 20px methodology section headings → 18px (`--text-lg`) — same section-heading token used everywhere
+- 32px methodology page H1 (mobile) → 32px is the mobile-responsive value of the 44px display role, not a separate entry; the display role is one scale entry with a responsive breakpoint
+- Weight 500 (medium) → weight 600 semibold for browse grid topic names and chip name labels
+- Weight 700 (bold) → weight 600 semibold for hero H1; Charter/Tiempos serif at 44px reads as display weight at 600
+
+CSS tokens confirmed in `default.css`: `--text-sm: 13px`, `--text-base: 15px`, `--text-lg: 18px`, `--text-4xl: 44px`, `--weight-normal: 400`, `--weight-semibold: 600`. Tokens `--weight-medium: 500` and `--weight-bold: 700` exist in `default.css` but are NOT used in Phase 2 components.
+
+Source: design sketch `default.css` token inventory (confirmed); CLAUDE.md typography constraint (locked); checker revision 2026-04-30
 
 ---
 
@@ -98,6 +109,14 @@ Source: CLAUDE.md design tokens (locked by design spec v1.7.1); sketch theme `de
 
 ---
 
+## Primary Visual Anchor
+
+Primary visual anchor: hero H1 "Scholars at Weill Cornell Medicine" at Charter 44px / weight 600 — draws the eye before any section content. No competing display-size elements on the home page. Stats strip (13px muted) and subtitle (15px body) are subordinate to the H1.
+
+Source: Dimension 2 FLAG resolution; sketch 003 Variant D hero layout
+
+---
+
 ## Surface-by-Surface Interaction Contract
 
 ### Home — Recent contributions (RANKING-01)
@@ -107,49 +126,50 @@ Source: CLAUDE.md design tokens (locked by design spec v1.7.1); sketch theme `de
 - Sparse-state floor: ≥3 of 6 cards must qualify (scholar-attributed, first-or-senior, eligibility-carved, no citations); hide section entirely if below floor; emit structured log line
 - Card anatomy:
   - HeadshotAvatar size="md" (48×48px) + fallback initials
-  - Scholar name (14px / semibold) linking to `/scholars/{slug}`
+  - Scholar name (15px / weight 600) linking to `/scholars/{slug}`
   - Primary title (13px / muted) — single line, truncate
-  - Paper title (15px / semibold) linking to DOI/PubMed — 2-line clamp
+  - Paper title (15px / weight 600) linking to DOI/PubMed — 2-line clamp
   - Journal · year · authorship role on one line (13px / muted) — authorship role as text label: "first author" or "senior author"
   - No citation count displayed (locked by design spec v1.7.1)
-- Section heading: "Recent contributions" (18px / semibold)
-- Methodology footnote below section heading (not per-card): "Faculty contributions ranked by ReCiterAI · [How this works]" — footnote 12px / italic / muted; "How this works" is Slate accent link → `/about/methodology#recent-contributions`
+- Section heading: "Recent contributions" (18px / weight 600)
+- Methodology footnote below section heading (not per-card): "Faculty contributions ranked by ReCiterAI · [How this works]" — footnote 13px / italic / muted; "How this works" is Slate accent link → `/about/methodology#recent-contributions`
 - Rule visible in plain English per design spec v1.7.1 §423: "First- and senior-author papers by WCM researchers, ranked by research impact and recency"
 
 ### Home — Selected research carousel (HOME-02)
 
-- Layout: horizontal scroll-snap, 8 subtopic cards; visible width = card × N + peek of (N+1)th card (peek ≈12px)
+- Layout: horizontal scroll-snap, 8 subtopic cards; visible width = card × N + peek of (N+1)th card (peek = 12px / `--space-3`)
 - No arrow buttons required (scroll-snap only per Claude's discretion; sketch 003 Variant D shows scroll-snap pattern)
 - Desktop (≥1024px): show 3.15 cards (peek)
 - Tablet (768–1023px): show 2.15 cards (peek)
 - Mobile (<768px): show 1.15 cards (peek)
 - Card anatomy:
-  - Parent topic breadcrumb (12px / muted / weight 400)
+  - Parent topic breadcrumb (13px / muted / weight 400)
   - Subtopic name (15px / weight 600)
   - Scholar count + pub count (13px / muted) — "42 scholars · 318 publications"
-  - 2 ReCiterAI-selected publications: paper title (14px / semibold, 1-line clamp) + first WCM author chip (small)
-  - Italic footnote: "Selected by ReCiterAI · [methodology]" (12px / italic / muted); "methodology" is Slate accent link → `/about/methodology#selected-research`
+  - 2 ReCiterAI-selected publications: paper title (15px / weight 600, 1-line clamp) + first WCM author chip (small)
+  - Italic footnote: "Selected by ReCiterAI · [methodology]" (13px / italic / muted); "methodology" is Slate accent link → `/about/methodology#selected-research`
 - Sparse-state floor: ≥4 of 8 cards; hide section if below floor; emit log
-- Section heading: "Selected research" (18px / semibold)
+- Section heading: "Selected research" (18px / weight 600)
 - Plain-English rule (in section subheading, not per-card): "Eight subtopics with the strongest recent activity at WCM, one per parent area, refreshed weekly"
 
 ### Home — Browse all research areas (HOME-03)
 
 - Layout: 4-column grid, 67 parent topic names + scholar counts; no floor (all 67 render or none — fewer than 67 is a data-layer bug)
 - Mobile collapse: 4-col → 2-col (≤768px) → 1-col (≤480px)
-- Each item: topic name as link (14px / weight 500) → `/topics/{slug}` + scholar count badge (13px / muted) — "47 scholars"
-- Section heading: "Browse all research areas" (18px / semibold)
+- Row gap: 12px (`--space-3` / `--space-xs-plus`) to keep 67-item grid compact
+- Each item: topic name as link (15px / weight 600) → `/topics/{slug}` + scholar count badge (13px / muted) — "47 scholars"
+- Section heading: "Browse all research areas" (18px / weight 600)
 - No methodology link (enumerative surface, not algorithmic)
 
 ### /topics/{slug} — Top scholars chip row (RANKING-03)
 
 - Layout: horizontal row of 7 chips, wraps on mobile; max 1 row on desktop (horizontal scroll if overflow)
 - Chip anatomy:
-  - HeadshotAvatar size="sm" (24×24px) + name (13px / weight 500) + primary title (12px / muted) — title in parentheses or secondary line
+  - HeadshotAvatar size="sm" (24×24px) + name (13px / weight 600) + primary title (13px / muted / weight 400) — title on secondary line
   - Chip border: `var(--border)`; active/hover state: Slate (`#2c4f6e`) outline 1.5px
   - Click → `/scholars/{slug}`
-- Section heading: "Top scholars in this area" (18px / semibold)
-- Methodology footnote: "Ranked by ReCiterAI publication impact · [How this works]" (12px / italic / muted); "How this works" → `/about/methodology#top-scholars`
+- Section heading: "Top scholars in this area" (18px / weight 600)
+- Methodology footnote: "Ranked by ReCiterAI publication impact · [How this works]" (13px / italic / muted); "How this works" → `/about/methodology#top-scholars`
 - Plain-English rule: "Seven WCM researchers with the strongest recent publication record in this area"
 - Sparse-state floor: ≥3 of 7 chips; hide section if below floor; emit log
 
@@ -157,11 +177,11 @@ Source: CLAUDE.md design tokens (locked by design spec v1.7.1); sketch theme `de
 
 - Layout: vertical list of 3 paper cards, full width of main column
 - Card anatomy:
-  - Paper title (15px / semibold) — 2-line clamp, links to DOI/PubMed
+  - Paper title (15px / weight 600) — 2-line clamp, links to DOI/PubMed
   - Author chips row: first 3 WCM authors + ellipsis if more (same chip pattern as profile page)
   - Journal · year (13px / muted)
   - No citation count displayed (locked by design spec v1.7.1)
-- Section heading: "Recent highlights" (18px / semibold)
+- Section heading: "Recent highlights" (18px / weight 600)
 - Caveat line per design spec v1.7.1 §538: "Three publications surfaced by ReCiterAI · [how this works]" (13px / italic / muted); "how this works" → `/about/methodology#recent-highlights`
 - Sparse-state floor: hide section if <1 qualifying paper; emit log
 
@@ -169,16 +189,16 @@ Source: CLAUDE.md design tokens (locked by design spec v1.7.1); sketch theme `de
 
 - Page layout: full-width prose, max-width 720px centered, no sidebar
 - Anchor sections (IDs): `#recent-contributions`, `#selected-research`, `#top-scholars`, `#recent-highlights`
-- Section headings: Inter 20px / semibold
+- Section headings: Inter 18px / weight 600 / line-height 1.2 — same `--text-lg` token as all section headings
 - Body copy: Inter 15px / weight 400 / line-height 1.55
 - Formula display: monospace code blocks (background `var(--secondary)`) for the formula string and recency-curve tables
 - No interactive components; read-only prose + tables
-- Page H1: Charter/Tiempos serif 32px / weight 700: "How algorithmic surfaces work"
+- Page H1: Charter/Tiempos serif 44px desktop / 32px mobile / weight 600 — "How algorithmic surfaces work" (same display role token as home hero H1)
 - Calibration note at bottom: plain-English acknowledgment that weights are reviewed six months post-launch
 
 ### /about (stub) (D-05)
 
-- Minimal: single centered paragraph, Charter/Tiempos H1 "About Scholars at WCM"
+- Minimal: single centered paragraph, Charter/Tiempos H1 "About Scholars at WCM" (44px display role)
 - Body: "Methodology and algorithmic details are documented on the [methodology page]." with Slate link to `/about/methodology`
 - No navigation, no footer sections — Phase 4 replaces this page
 
@@ -266,11 +286,12 @@ Source: `npx shadcn info` — installed components list; no third-party registri
 | Surface | Desktop (≥1024px) | Tablet (768–1023px) | Mobile (<768px) |
 |---------|-------------------|---------------------|-----------------|
 | Recent contributions grid | 3×2 (6 cards) | 2×3 (6 cards) | 1×6 (6 cards stacked) |
-| Selected research carousel | Show 3.15 cards (peek) | Show 2.15 cards (peek) | Show 1.15 cards (peek) |
-| Browse grid | 4 columns | 2 columns | 1 column |
+| Selected research carousel | Show 3.15 cards (peek = 12px) | Show 2.15 cards (peek = 12px) | Show 1.15 cards (peek = 12px) |
+| Browse grid | 4 columns, row gap 12px | 2 columns, row gap 12px | 1 column, row gap 16px |
 | Top scholars chip row | Horizontal single row, overflow scroll | Horizontal single row, overflow scroll | Wraps to 2 rows |
 | Recent highlights | Full main column width | Full main column width | Full width |
 | /about/methodology | 720px max-width centered | 100% minus 48px padding | 100% minus 32px padding |
+| Hero H1 display size | 44px (Charter / weight 600) | 44px | 32px (same Charter / weight 600) |
 
 Source: CLAUDE.md RESPONSIVE-01 (mobile-responsive single-column collapse, locked); CONTEXT.md Claude's discretion items for collapse patterns; sketch 003 Variant D
 
@@ -279,10 +300,10 @@ Source: CLAUDE.md RESPONSIVE-01 (mobile-responsive single-column collapse, locke
 ## Checker Sign-Off
 
 - [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
+- [ ] Dimension 2 Visuals: pending (focal point declaration added — re-check)
 - [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
+- [ ] Dimension 4 Typography: pending (consolidated to 4 sizes / 2 weights — re-check)
+- [ ] Dimension 5 Spacing: pending (12px named as `--space-xs-plus` / `--space-3` — re-check)
 - [ ] Dimension 6 Registry Safety: PASS
 
 **Approval:** pending
