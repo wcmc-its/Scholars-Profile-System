@@ -21,8 +21,38 @@
  * Usage: `npm run etl:ed`
  */
 import { prisma } from "@/lib/db";
+import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
-import { fetchActiveFaculty, openLdap } from "@/lib/sources/ldap";
+import {
+  type EdFacultyEntry,
+  fetchActiveFaculty,
+  fetchDoctoralStudents,
+  openLdap,
+} from "@/lib/sources/ldap";
+
+/**
+ * Derive the role-category bucket for the algorithmic-surface eligibility carve.
+ * Source: design-spec-v1.7.1.md:352-356.
+ *
+ * Order matters — the doctoral-student check fires first because PHD students
+ * pulled from ou=students may also have a personTypeCode populated. Full-time
+ * faculty requires BOTH the personTypeCode and FTE=100; anything else with a
+ * faculty class falls through to "affiliated_faculty".
+ */
+function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
+  if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
+  if (f.personTypeCode === "Full-Time WCMC Faculty" && f.fte === 100) return "full_time_faculty";
+  if (f.personTypeCode === "Postdoc") return "postdoc";
+  if (f.personTypeCode === "Fellow") return "fellow";
+  if (f.personTypeCode === "Non-Faculty Academic") return "non_faculty_academic";
+  if (f.personTypeCode === "Non-Academic") return "non_academic";
+  if (f.personTypeCode === "Instructor") return "instructor";
+  if (f.personTypeCode === "Lecturer") return "lecturer";
+  if (f.personTypeCode === "Emeritus") return "emeritus";
+  // Catch-all: any faculty class not meeting Full-Time + FTE=100 (including
+  // Full-Time WCMC Faculty with FTE<100 or unknown personTypeCode values).
+  return "affiliated_faculty";
+}
 
 async function main() {
   const start = new Date();
@@ -36,11 +66,21 @@ async function main() {
 
     console.log("Fetching active academic faculty (this can take a moment)...");
     const facultyEntries = await fetchActiveFaculty(client);
-    await client.unbind();
     console.log(`ED returned ${facultyEntries.length} active academic entries.`);
 
+    // Phase 2: doctoral students live under ou=students, not ou=people, so the
+    // active-faculty filter excludes them. Pull them as a second branch and
+    // merge before the upsert. Eligibility-carve consumers depend on this.
+    console.log("Fetching doctoral (PHD) students from ou=students...");
+    const studentEntries = await fetchDoctoralStudents(client);
+    console.log(`ED returned ${studentEntries.length} doctoral students.`);
+
+    await client.unbind();
+
+    const allEntries = [...facultyEntries, ...studentEntries];
+
     // Sort by CWID for deterministic collision ordering.
-    facultyEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
+    allEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
 
     // Existing scholars and slugs from the DB.
     const existing = await prisma.scholar.findMany({
@@ -54,9 +94,10 @@ async function main() {
     let reactivated = 0;
     const incomingCwids = new Set<string>();
 
-    for (const f of facultyEntries) {
+    for (const f of allEntries) {
       incomingCwids.add(f.cwid);
       const existingScholar = existingByCwid.get(f.cwid);
+      const roleCategory = deriveRoleCategory(f);
 
       if (existingScholar) {
         // Update in place; reactivate if soft-deleted.
@@ -69,6 +110,7 @@ async function main() {
             primaryTitle: f.primaryTitle,
             primaryDepartment: f.primaryDepartment,
             email: f.email,
+            roleCategory,
             // Slug is NOT regenerated on update if the name is unchanged. If it
             // changed, derive a new one and write the old to slug_history.
             ...(await maybeUpdatedSlug(existingScholar.slug, f.preferredName, f.cwid, existingSlugs)),
@@ -92,6 +134,7 @@ async function main() {
             primaryDepartment: f.primaryDepartment,
             email: f.email,
             slug,
+            roleCategory,
             // ED ETL doesn't have appointment date detail in the basic search;
             // a richer query will add appointments in a follow-up. Insert a
             // placeholder primary appointment so the profile renders.
@@ -132,7 +175,7 @@ async function main() {
       data: {
         status: "success",
         completedAt: new Date(),
-        rowsProcessed: facultyEntries.length,
+        rowsProcessed: allEntries.length,
       },
     });
 
