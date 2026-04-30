@@ -11,7 +11,7 @@ Phase 2 ships the Variant B publication-ranking buildout end-to-end and the home
 1. **`lib/ranking.ts` rewrite to Variant B** — `reciterai_impact × authorship_weight × pub_type_weight × recency_weight` with four surface-specific recency curves (Selected highlights, Recent highlights, Recent contributions, Top scholars chip row). Replaces the existing additive Variant A; profile pages adopt Variant B in this phase, not later.
 2. **Topic-taxonomy projection ETL extension** — extend the existing ReCiterAI minimal-projection Lambda to land the 67-parent / ~2,000-subtopic taxonomy from DynamoDB into MySQL. MySQL schema shape (separate `topic` table vs columns on `topic_assignment`) is decided in research after inspecting DynamoDB.
 3. **Home page composition** — replace the current `app/page.tsx` placeholder with: hero (existing pattern), Recent contributions 3×2 grid (6 cards, scholar-attributed, eligibility-carved, first/senior author only), Selected research subtopic carousel (8 cards, weekly refresh, scroll-snap), Browse all research areas grid (67 parent topics + scholar counts, 4-column).
-4. **Topic-page sub-components mounted at a placeholder `/topics/{slug}` route** — Top scholars chip row (7 chips, eligibility-carved, no authorship-position filter) and Recent highlights (3 papers, no citations). Phase 3 fills out the full Topic detail page (rail + main column, sorts, curated tag); Phase 2 ships only enough route surface to verify the two components work against real data and real URLs.
+4. **Topic-page sub-components mounted at a placeholder `/topics/{slug}` route** — Top scholars chip row (7 chips, **Full-time-faculty-only carve, first-or-senior author papers only at aggregation**, surface-specific compressed recency curve per D-13/D-14) and Recent highlights (3 papers, no citations). Phase 3 fills out the full Topic detail page (rail + main column, sorts, curated tag); Phase 2 ships only enough route surface to verify the two components work against real data and real URLs.
 5. **Methodology page at `/about/methodology`** — Phase 2 owns this technical page (formula explanation, eligibility carve, recency-curve descriptions, hard-exclusion list). All algorithmic-surface "How this works" links deeplink to anchor sections on it. `/about` itself ships as a stub or redirect; Phase 4 expands `/about` into the broader institutional page while `/about/methodology` stays at the same URL.
 
 **Out of scope for this phase:**
@@ -53,6 +53,31 @@ Phase 2 ships the Variant B publication-ranking buildout end-to-end and the home
 
 ### Sparse-state policy
 - **D-12:** **Hide a section entirely when below its per-surface floor.** Floors are decided in PLAN.md but should be set conservatively (suggested defaults: ≥3 of 6 cards for Recent contributions, ≥3 of 7 chips for Top scholars, ≥4 of 8 cards for Selected research carousel; Browse grid always renders all 67). When hidden, emit a structured log line so the absence is observable when component-render logging lands in Phase 6. Do NOT relax the eligibility carve, do NOT show fewer with a caveat line, do NOT 5xx — those create either spec drift or fragile UX.
+
+### Top scholars chip row formula resolution
+- **D-13:** **Top scholars chip row formula matches `design-spec-v1.7.1.md:1127-1145` with phase-specific overrides for eligibility and authorship.** Per-scholar aggregation: `scholar_score = SUM over scholar's first-or-senior papers in topic of (reciterai_impact × authorship_weight × pub_type_weight × recency_weight_top_scholars)`. Pool of publications considered for scoring is publication-centric (any paper attributed to the topic gets a per-publication score), but the per-scholar **aggregation** sums only that scholar's first-or-senior contributions. Middle, second, and penultimate authorship contribute 0 at aggregation time (their papers do not count toward the scholar's chip-row score). **Resolves the spec contradiction** previously between CONTEXT.md/ROADMAP wording and spec line 1135 — spec line 1135 is canonical.
+
+- **D-14:** **Top scholars chip row narrows the eligibility carve and uses a compressed recency curve (Phase 2 override of design-spec-v1.7.1).** This surface is for principal investigators specifically, so:
+  - **Eligibility carve = Full-time faculty only** (NOT the broader carve of FT faculty + Postdoc + Fellow + Doctoral student that applies to other surfaces — those role categories continue to apply unchanged for Recent contributions per ROADMAP success criterion #1).
+  - **Recency curve = compressed Option A (recency-preferring, less dramatic spread):**
+
+    | Paper age | Weight |
+    |---|---|
+    | 0–3 months | 0.7 |
+    | 3 months–3 years | 1.0 (peak) |
+    | 3–6 years | 0.85 |
+    | 6+ years | 0.7 (will not fire until 2027 given 2020+ ReCiterAI data floor) |
+
+    Delta range 0.3 (vs. spec's 0.4–1.0 = delta 0.6 on Recent highlights curve). Rationale: PIs don't need the full 0–3 month stability discount that Recent highlights uses; established PI work in the 3–6 year range still meaningfully credits.
+
+  - **Authorship weights at aggregation:** first/last = 1.0 (filter; only these contribute), 2nd/penult = 0 (omit), middle = 0 (omit). Note: this differs from the Variant B global authorship weights (1.0 / 0.4 / 0.1) — those still apply to the per-publication score for other surfaces; Top scholars chip row aggregation simply filters the input set rather than down-weighting.
+
+  - **The methodology page documents this surface override explicitly** so the divergence from the underlying Variant B per-publication formula is transparent. Spec line 1135 framing ("first-or-senior author papers only at aggregation") still applies; D-14 narrows further by also restricting eligibility to FT faculty.
+
+### Selected highlights / 2020+ data floor
+- **D-15:** **ReCiterAI publication scoring extends back to 2020 only.** As of 2026-04-30 the effective data range is ~2020-04 → present (~6.3 years). Selected highlights spec curve buckets that don't fire (10–20 years at 0.7 / 20+ years at 0.5) are dead in practice; the 18mo–10yr peak bucket effectively narrows to 18mo–6yr. **Decision (option a):** accept the gap; do not redefine the surface in code or rename it. The methodology page (`/about/methodology#selected-highlights`) explicitly documents: "Selected highlights ranks scholars' WCM-attributed work scored by ReCiterAI from 2020 onward. Older landmark publications are visible in the most-recent-papers feed but not algorithmically scored." Senior PIs whose foundational work pre-dates 2020 will see those papers appear only in the publication feed, not on the Selected highlights surface. Phase 5+ ReCiterAI backfill is out of scope.
+
+- **D-16:** **De-dupe Selected highlights against the most-recent-papers feed within a single profile-page render.** Papers that surface as Selected highlights are filtered out of the most-recent-papers feed on the same page (or vice versa — planner picks the cheaper API-layer suppression direction). Mitigates the structural overlap on the 6–24 month range where both surfaces can claim the same paper, especially impactful for early-career scholars whose best work IS recent. Methodology page footnote explains the de-dup behavior so it's not a hidden inconsistency.
 
 ### Claude's Discretion (planner / researcher decide from existing patterns)
 - Per-surface floor values for sparse-state hiding (D-12)

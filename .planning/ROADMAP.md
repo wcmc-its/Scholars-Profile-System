@@ -85,7 +85,7 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   1. A user visiting the home page sees a 3×2 grid of 6 scholar cards under "Recent contributions" — each shows headshot, name, title, contribution paper title, journal · year · authorship role; no citation counts; only Full-time faculty / Postdoc / Fellow / Doctoral students appear; first/senior-author papers only
   2. A user visiting the home page sees a horizontal scroll-snap carousel of 8 subtopic cards under "Selected research" with the visible plain-English rule "Eight subtopics with the strongest recent activity at WCM, one per parent area, refreshed weekly" and a methodology link
   3. A user visiting the home page sees 67 parent topic names with counts in a 4-column grid under "Browse all research areas"
-  4. A user visiting any topic page sees a 7-faculty chip row under "Top scholars in this area" (publication-centric — no authorship-position filter; eligibility carve applies; methodology link visible)
+  4. A user visiting any topic page sees a 7-faculty chip row under "Top scholars in this area" (Full-time-faculty-only carve; per-scholar aggregation sums first-or-senior papers only; compressed recency curve per Phase 2 D-14; methodology link visible)
   5. A user visiting any topic page sees 3 paper cards under "Recent highlights" with no citation counts and a methodology link
 **Plans**: TBD
 **UI hint**: yes
