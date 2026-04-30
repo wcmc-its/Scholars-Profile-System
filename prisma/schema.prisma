@@ -106,9 +106,14 @@ model Grant {
 
 /// Publications are global (shared across authors). Keyed by PMID.
 /// citationCount refreshes from reciter-db (spec line 78: weekly minimum).
+/// authorsString holds the full pre-rendered author list including externals,
+/// in canonical order (from analysis_summary_article.authors). PublicationAuthor
+/// rows are inserted only for WCM scholars; profile rendering overlays
+/// hyperlinks onto the matching substrings in authorsString.
 model Publication {
   pmid                  String    @id @db.VarChar(32)
   title                 String    @db.Text
+  authorsString         String?   @map("authors_string") @db.VarChar(2000)
   journal               String?   @db.VarChar(512)
   year                  Int?
   publicationType       String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
