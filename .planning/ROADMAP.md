@@ -89,9 +89,9 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   5. A user visiting any topic page sees 3 paper cards under "Recent highlights" with no citation counts and a methodology link
 **Plans**: 9 plans
 - [x] 02-01-PLAN.md — Wave 0: Design tokens port + shadcn primitives (scroll-area, skeleton)
-- [ ] 02-02-PLAN.md — Wave 0: DynamoDB taxonomy probe + locked schema decision (D-02)
-- [ ] 02-03-PLAN.md — Wave 0: scholar.role_category Prisma migration + ED ETL extension (FTE + ou=students PHD branch) + search-index ETL fix + lib/eligibility.ts
-- [ ] 02-04-PLAN.md — Wave 1 (TDD): Variant B ranking rewrite + worked-example fixtures + profile retrofit (D-06/07/08/13/14/16)
+- [x] 02-02-PLAN.md — Wave 0: DynamoDB taxonomy probe + locked schema decision (D-02)
+- [x] 02-03-PLAN.md — Wave 0: scholar.role_category Prisma migration + ED ETL extension (FTE + ou=students PHD branch) + search-index ETL fix + lib/eligibility.ts
+- [x] 02-04-PLAN.md — Wave 1 (TDD): Variant B ranking rewrite + worked-example fixtures + profile retrofit (D-06/07/08/13/14/16)
 - [ ] 02-05-PLAN.md — Wave 2: Topic Prisma schema + DynamoDB taxonomy ETL extension + D-08 verification
 - [ ] 02-06-PLAN.md — Wave 3: methodology-anchors constants + /about/methodology page (D-04/14/15/16) + /about stub + e2e
 - [ ] 02-07-PLAN.md — Wave 3: lib/api/home.ts + 5 home components + app/page.tsx replacement (RANKING-01, HOME-02, HOME-03)
