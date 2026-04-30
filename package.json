@@ -24,7 +24,9 @@
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",
-    "etl:asms": "tsx etl/asms/index.ts"
+    "etl:asms": "tsx etl/asms/index.ts",
+    "etl:infoed:probe": "tsx etl/infoed/probe.ts",
+    "etl:infoed": "tsx etl/infoed/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",
