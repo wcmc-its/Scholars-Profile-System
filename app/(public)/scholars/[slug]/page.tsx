@@ -249,6 +249,43 @@ export default async function ScholarProfilePage({
           })()}
         </Section>
       ) : null}
+
+      {profile.disclosures.length > 0 ? (
+        <Section title="Disclosures">
+          {(() => {
+            // Group by activityGroup so related entries cluster.
+            const groups = new Map<string, typeof profile.disclosures>();
+            for (const d of profile.disclosures) {
+              const key = d.activityGroup ?? "Other";
+              if (!groups.has(key)) groups.set(key, []);
+              groups.get(key)!.push(d);
+            }
+            return (
+              <div className="flex flex-col gap-6">
+                {Array.from(groups.entries()).map(([group, entries]) => (
+                  <div key={group}>
+                    <h3 className="mb-2 text-sm font-medium uppercase tracking-wide text-zinc-500">
+                      {group}
+                    </h3>
+                    <ul className="flex flex-col gap-3">
+                      {entries.map((d, i) => (
+                        <li key={i}>
+                          {d.entity ? <div className="font-medium">{d.entity}</div> : null}
+                          <div className="text-muted-foreground text-sm">
+                            {[d.activityType, d.value, d.activityRelatesTo]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </Section>
+      ) : null}
     </main>
   );
 }

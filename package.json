@@ -26,7 +26,8 @@
     "etl:asms:probe": "tsx etl/asms/probe.ts",
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
-    "etl:infoed": "tsx etl/infoed/index.ts"
+    "etl:infoed": "tsx etl/infoed/index.ts",
+    "etl:coi": "tsx etl/coi/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",
