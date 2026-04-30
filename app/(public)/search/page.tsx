@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -151,9 +151,12 @@ async function PeopleResults({
                   href={`/scholars/${h.slug}`}
                   className="flex gap-4 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
                 >
-                  <Avatar className="h-12 w-12 shrink-0">
-                    <AvatarFallback>{initials(h.preferredName)}</AvatarFallback>
-                  </Avatar>
+                  <HeadshotAvatar
+                    size="md"
+                    cwid={h.cwid}
+                    preferredName={h.preferredName}
+                    identityImageEndpoint={h.identityImageEndpoint}
+                  />
                   <div className="flex flex-col gap-0.5">
                     <div className="font-medium">{h.preferredName}</div>
                     {h.primaryTitle ? (
@@ -610,12 +613,3 @@ function PaginationButton({
   );
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
