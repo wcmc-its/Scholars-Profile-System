@@ -19,7 +19,8 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
     "seed": "tsx --env-file=.env seed/index.ts",
-    "search:index": "tsx --env-file=.env etl/search-index/index.ts"
+    "search:index": "tsx --env-file=.env etl/search-index/index.ts",
+    "etl:ed": "tsx --env-file=.env etl/ed/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",
@@ -27,6 +28,7 @@
     "@prisma/client": "^7.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ldapts": "^8.1.7",
     "lucide-react": "^0.469.0",
     "mariadb": "^3.5.2",
     "next": "15.5.15",
