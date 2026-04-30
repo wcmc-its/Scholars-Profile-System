@@ -18,9 +18,9 @@
     "db:down": "docker compose down",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset --force",
-    "seed": "tsx --env-file=.env seed/index.ts",
-    "search:index": "tsx --env-file=.env etl/search-index/index.ts",
-    "etl:ed": "tsx --env-file=.env etl/ed/index.ts"
+    "seed": "tsx seed/index.ts",
+    "search:index": "tsx etl/search-index/index.ts",
+    "etl:ed": "tsx etl/ed/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",
