@@ -1,11 +1,12 @@
 ---
 phase: 2
 slug: algorithmic-surfaces-and-home-composition
-status: draft
+status: approved
 shadcn_initialized: true
 preset: new-york / neutral / radix / lucide
 created: 2026-04-30
 revised: 2026-04-30
+reviewed_at: 2026-04-30
 revision_reason: Typography BLOCK (8 sizes / 4 weights → 4 sizes / 2 weights); Visuals FLAG (no focal point declared); Spacing FLAG (12px exception unnamed)
 ---
 
