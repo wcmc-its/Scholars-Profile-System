@@ -22,7 +22,9 @@
     "search:index": "tsx etl/search-index/index.ts",
     "etl:ed": "tsx etl/ed/index.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
-    "etl:reciter": "tsx etl/reciter/index.ts"
+    "etl:reciter": "tsx etl/reciter/index.ts",
+    "etl:asms:probe": "tsx etl/asms/probe.ts",
+    "etl:asms": "tsx etl/asms/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",
@@ -33,6 +35,7 @@
     "ldapts": "^8.1.7",
     "lucide-react": "^0.469.0",
     "mariadb": "^3.5.2",
+    "mssql": "^12.5.0",
     "next": "15.5.15",
     "prisma": "^7.8.0",
     "radix-ui": "^1.4.3",
@@ -44,6 +47,7 @@
     "@playwright/test": "^1.49.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@testing-library/react": "^16.1.0",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^22.10.6",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
