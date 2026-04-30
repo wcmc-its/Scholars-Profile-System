@@ -9,8 +9,8 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
-  rankForHighlights,
-  rankForRecent,
+  rankForSelectedHighlights,
+  rankForRecentFeed,
   type ScoredPublication,
 } from "@/lib/ranking";
 
@@ -28,7 +28,10 @@ export type ProfilePublication = ScoredPublication<{
   journal: string | null;
   year: number | null;
   publicationType: string | null;
+  /** Display-only — Variant B ranking does not consume citation count. */
   citationCount: number;
+  /** ReCiterAI per-scholar publication score (D-08); 0 for pre-2020 papers (D-15). */
+  reciteraiImpact: number;
   dateAddedToEntrez: Date | null;
   doi: string | null;
   pubmedUrl: string | null;
@@ -160,6 +163,10 @@ export async function getScholarFullProfileBySlug(
               },
             },
           },
+          // ReCiterAI per-scholar publication score (D-08). Filtered to this
+          // scholar's row only; PublicationScore is keyed by (cwid, pmid)
+          // unique pair so this returns at most one row per publication.
+          publicationScores: { where: { cwid: scholar.cwid } },
         },
       },
     },
@@ -172,7 +179,12 @@ export async function getScholarFullProfileBySlug(
     journal: a.publication.journal,
     year: a.publication.year,
     publicationType: a.publication.publicationType,
-    citationCount: a.publication.citationCount,
+    citationCount: a.publication.citationCount, // display-only — NOT used by Variant B ranking
+    // ReCiterAI publication score for this scholar+pmid pair (D-08).
+    // Falls back to 0 when no PublicationScore row exists (covers the
+    // pre-2020 ReCiterAI floor per D-15 — those papers won't surface as
+    // Selected highlights but remain visible in the most-recent feed).
+    reciteraiImpact: a.publication.publicationScores[0]?.score ?? 0,
     dateAddedToEntrez: a.publication.dateAddedToEntrez,
     doi: a.publication.doi,
     pubmedUrl: a.publication.pubmedUrl,
@@ -198,8 +210,12 @@ export async function getScholarFullProfileBySlug(
       })),
   }));
 
-  const highlights = rankForHighlights(rankablePubs, now).slice(0, 3);
-  const recent = rankForRecent(rankablePubs, now);
+  const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
+  // D-16 dedup: papers in Selected highlights filter out of the most-recent
+  // feed within a single profile-page render, avoiding the structural overlap
+  // on the 6–24 month range where both surfaces can claim the same paper.
+  const highlightPmids = new Set(highlights.map((h) => h.pmid));
+  const recent = rankForRecentFeed(rankablePubs, now).filter((p) => !highlightPmids.has(p.pmid));
 
   const annotatedAppointments = annotateAppointments(scholar.appointments, now);
 
