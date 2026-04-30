@@ -27,9 +27,13 @@
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
     "etl:infoed": "tsx etl/infoed/index.ts",
-    "etl:coi": "tsx etl/coi/index.ts"
+    "etl:coi": "tsx etl/coi/index.ts",
+    "etl:dynamodb": "tsx etl/dynamodb/index.ts",
+    "etl:daily": "tsx etl/orchestrate.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1039.0",
+    "@aws-sdk/lib-dynamodb": "^3.1039.0",
     "@opensearch-project/opensearch": "^3.6.0",
     "@prisma/adapter-mariadb": "^7.8.0",
     "@prisma/client": "^7.8.0",
