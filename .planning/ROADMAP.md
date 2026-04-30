@@ -88,7 +88,7 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   4. A user visiting any topic page sees a 7-faculty chip row under "Top scholars in this area" (Full-time-faculty-only carve; per-scholar aggregation sums first-or-senior papers only; compressed recency curve per Phase 2 D-14; methodology link visible)
   5. A user visiting any topic page sees 3 paper cards under "Recent highlights" with no citation counts and a methodology link
 **Plans**: 9 plans
-- [ ] 02-01-PLAN.md — Wave 0: Design tokens port + shadcn primitives (scroll-area, skeleton)
+- [x] 02-01-PLAN.md — Wave 0: Design tokens port + shadcn primitives (scroll-area, skeleton)
 - [ ] 02-02-PLAN.md — Wave 0: DynamoDB taxonomy probe + locked schema decision (D-02)
 - [ ] 02-03-PLAN.md — Wave 0: scholar.role_category Prisma migration + ED ETL extension (FTE + ou=students PHD branch) + search-index ETL fix + lib/eligibility.ts
 - [ ] 02-04-PLAN.md — Wave 1 (TDD): Variant B ranking rewrite + worked-example fixtures + profile retrofit (D-06/07/08/13/14/16)
