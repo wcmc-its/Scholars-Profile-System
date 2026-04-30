@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 005 — Browse · Scholars @ WCM</title>
+<style>
+/* ==========================================================================
+   Scholars @ WCM — Sketch 005: Browse page
+   Directory hub. Sections for: departments, centers & institutes,
+   leadership, A-Z faculty index. More structural / less editorial than home.
+   ========================================================================== */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  --color-primary: #B31B1B;
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;
+  --color-link-hover: #1f3b53;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Charter', 'Tiempos Headline', Georgia, serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+
+  --max-content: 1100px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+
+body { padding-top: 44px; }
+
+/* Sketch chrome */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4; transition: opacity 0.2s;
+}
+#sketch-tools:hover { opacity: 1; }
+
+/* Header — same red treatment */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__search { flex: 1; max-width: 480px; position: relative; }
+.wcm-header__search input {
+  width: 100%; height: 36px;
+  padding: 0 var(--space-3) 0 36px;
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--color-text);
+}
+.wcm-header__search input::placeholder { color: var(--color-text-muted); }
+.wcm-header__search input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+.wcm-header__search::before {
+  content: "⌕"; position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%); color: var(--color-text-muted);
+  font-size: 16px; pointer-events: none;
+}
+.wcm-header__nav { display: flex; gap: var(--space-5); margin-left: auto; font-size: var(--text-sm); }
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); position: relative; }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+.wcm-header__nav a.is-current {
+  color: white;
+  font-weight: var(--weight-semibold);
+}
+.wcm-header__nav a.is-current::after {
+  content: ""; position: absolute;
+  left: 0; right: 0; bottom: -22px;
+  height: 2px; background: white;
+}
+
+/* ============================================================
+   Page header
+   ============================================================ */
+.page-header {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-6);
+}
+.page-header__title {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+  margin-bottom: var(--space-3);
+}
+.page-header__subtitle {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+  max-width: 60ch;
+  line-height: var(--leading-snug);
+}
+
+/* On-this-page anchor strip */
+.anchor-strip {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: 0 var(--space-6) var(--space-8);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-10);
+}
+.anchor-strip__list {
+  display: flex; gap: var(--space-1);
+  font-size: var(--text-sm);
+  flex-wrap: wrap;
+}
+.anchor-strip__item {
+  display: inline-flex; align-items: center;
+  height: 32px; padding: 0 var(--space-3);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-pill);
+  transition: background 0.15s, color 0.15s;
+}
+.anchor-strip__item:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* ============================================================
+   Section headers — shared
+   ============================================================ */
+.section {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: 0 var(--space-6) var(--space-12);
+}
+.section__head {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.section__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.section__count {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  font-weight: var(--weight-normal);
+}
+.section__more {
+  margin-left: auto;
+  font-size: var(--text-sm); color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.section__sub {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  margin-bottom: var(--space-6);
+  max-width: 70ch;
+}
+
+/* ============================================================
+   Departments grid
+   ============================================================ */
+.dept-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+@media (max-width: 900px) { .dept-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 540px) { .dept-grid { grid-template-columns: 1fr; } }
+
+.dept-card {
+  display: block;
+  padding: var(--space-4) var(--space-5);
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.dept-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: var(--color-text);
+}
+.dept-card__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+.dept-card__name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+.dept-card__count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+.dept-card__chair {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.dept-card__chair strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+/* ============================================================
+   Centers & institutes — slightly different shape (more text)
+   ============================================================ */
+.centers-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+@media (max-width: 700px) { .centers-grid { grid-template-columns: 1fr; } }
+
+.center-card {
+  display: block;
+  padding: var(--space-5);
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.center-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: var(--color-text);
+}
+.center-card__name {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+}
+.center-card:hover .center-card__name { color: var(--color-accent); }
+.center-card__desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-3);
+}
+.center-card__meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: flex; gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.center-card__meta strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+/* ============================================================
+   A-Z directory
+   ============================================================ */
+.az-bar {
+  display: flex; flex-wrap: wrap;
+  gap: 2px;
+  padding: var(--space-3) 0;
+  margin-bottom: var(--space-5);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.az-letter {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 1; min-width: 36px; height: 36px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-accent);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  font-feature-settings: "tnum";
+}
+.az-letter:hover {
+  background: var(--color-accent-light);
+  text-decoration: none;
+}
+.az-letter.is-active {
+  background: var(--color-accent);
+  color: white;
+}
+.az-letter--disabled {
+  color: var(--color-border-strong);
+  pointer-events: none;
+}
+
+.az-results {
+  margin-top: var(--space-3);
+}
+.az-results__head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+}
+.az-results__head strong {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+.az-results__head .meta {
+  color: var(--color-text-muted);
+}
+
+.az-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0 var(--space-8);
+}
+@media (max-width: 700px) { .az-list { grid-template-columns: 1fr; } }
+
+.az-row {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.az-row__name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+}
+.az-row__name:hover { color: var(--color-accent); text-decoration: none; }
+.az-row__title {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-left: var(--space-2);
+}
+.az-row .role-tag {
+  display: inline-flex; align-items: center;
+  height: 16px; padding: 0 5px;
+  margin-left: var(--space-2);
+  font-size: 9px; font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* Subtle entrance */
+.fade-in { animation: fadeIn 0.4s ease-out both; }
+.fade-in-2 { animation: fadeIn 0.4s ease-out 0.08s both; }
+.fade-in-3 { animation: fadeIn 0.4s ease-out 0.16s both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <span class="label">Sketch 005 · Browse</span>
+  <span class="badge">New</span>
+  <span style="color:#999;font-size:11px">Directory hub — what users see when they click "Browse" in the nav</span>
+</div>
+
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <div class="wcm-header__search">
+    <input type="search" placeholder="Search scholars and publications…">
+  </div>
+  <nav class="wcm-header__nav">
+    <a href="#" class="is-current">Browse</a>
+    <a href="#">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<!-- ============================================================
+     Page header
+     ============================================================ -->
+<section class="page-header fade-in">
+  <h1 class="page-header__title">Browse</h1>
+  <p class="page-header__subtitle">Navigate Weill Cornell Medicine by department, center, or alphabetically.</p>
+</section>
+
+<div class="anchor-strip">
+  <div class="anchor-strip__list">
+    <a class="anchor-strip__item" href="#departments">Departments</a>
+    <a class="anchor-strip__item" href="#centers">Centers &amp; institutes</a>
+    <a class="anchor-strip__item" href="#a-z">A–Z directory</a>
+    <a class="anchor-strip__item" href="#" style="margin-left:auto;color:var(--color-text-muted)">Research areas →</a>
+  </div>
+</div>
+
+<!-- ============================================================
+     Departments
+     ============================================================ -->
+<section class="section fade-in" id="departments">
+  <div class="section__head">
+    <h2 class="section__title">Departments</h2>
+    <span class="section__count">29 departments · 3,247 scholars</span>
+  </div>
+  <p class="section__sub">Clinical and research departments at Weill Cornell Medicine. Click through to a department's scholars, publications, and divisions.</p>
+
+  <div class="dept-grid">
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Anesthesiology</div><div class="dept-card__count">198</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Hon-Wai Chan, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Biochemistry</div><div class="dept-card__count">87</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Sarah Henderson, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Cell &amp; Developmental Biology</div><div class="dept-card__count">142</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Maria Vega, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Dermatology</div><div class="dept-card__count">42</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Susan Cohen, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Emergency Medicine</div><div class="dept-card__count">168</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Robert Singh, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Family &amp; Community Medicine</div><div class="dept-card__count">91</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Linda Park, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Genetic Medicine</div><div class="dept-card__count">76</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Daniel Cohen, MD, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Healthcare Policy &amp; Research</div><div class="dept-card__count">112</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Adela Reyes, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Medicine</div><div class="dept-card__count">872</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Margaret R. Whitcomb, MD, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Microbiology &amp; Immunology</div><div class="dept-card__count">147</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Devi Sharma, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Molecular Biology</div><div class="dept-card__count">119</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Sergei Novak, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Neurological Surgery</div><div class="dept-card__count">78</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Catherine Ngozi-Brown, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Neurology</div><div class="dept-card__count">214</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Yuval Ben-Ari, MD, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Neuroscience</div><div class="dept-card__count">156</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Akira Nakamura, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Obstetrics &amp; Gynecology</div><div class="dept-card__count">189</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Shauna Williams, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Ophthalmology</div><div class="dept-card__count">68</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> James Park, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Otolaryngology</div><div class="dept-card__count">54</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Carlos Mendez, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Pathology &amp; Lab Medicine</div><div class="dept-card__count">163</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Marina Petrov, MD, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Pediatrics</div><div class="dept-card__count">312</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Aisha Khan, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Pharmacology</div><div class="dept-card__count">98</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Wei Zhang, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Physiology &amp; Biophysics</div><div class="dept-card__count">81</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Karl Höffner, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Population Health Sciences</div><div class="dept-card__count">147</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> David Chen, MD, MPH</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Psychiatry</div><div class="dept-card__count">203</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Rebecca Goldman, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Public Health</div><div class="dept-card__count">127</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Imani Washington, PhD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Radiation Oncology</div><div class="dept-card__count">71</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Vikram Singh, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Radiology</div><div class="dept-card__count">218</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Robert Tanaka, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Reproductive Medicine</div><div class="dept-card__count">38</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Daniela Russo, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Surgery</div><div class="dept-card__count">241</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Nathaniel O'Brien, MD</div>
+    </a>
+    <a href="#" class="dept-card">
+      <div class="dept-card__head"><div class="dept-card__name">Urology</div><div class="dept-card__count">62</div></div>
+      <div class="dept-card__chair"><strong>Chair:</strong> Antonio Rivera, MD</div>
+    </a>
+  </div>
+</section>
+
+<!-- ============================================================
+     Centers & institutes
+     ============================================================ -->
+<section class="section fade-in-2" id="centers">
+  <div class="section__head">
+    <h2 class="section__title">Centers &amp; institutes</h2>
+    <span class="section__count">9 cross-disciplinary research centers</span>
+  </div>
+  <p class="section__sub">Research organizations that span departments. Faculty appointments roll up to a department; center affiliations are layered on top.</p>
+
+  <div class="centers-grid">
+    <a href="#" class="center-card">
+      <div class="center-card__name">Englander Institute for Precision Medicine</div>
+      <div class="center-card__desc">Genomic medicine, precision diagnostics, and translational therapeutics across cancer, rare disease, and immunology.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> H. Park, MD, PhD</span>
+        <span>· 142 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Sandra and Edward Meyer Cancer Center</div>
+      <div class="center-card__desc">NCI-designated cancer center spanning basic, translational, and clinical oncology research at WCM and NewYork-Presbyterian.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> M. Garcia, MD, PhD</span>
+        <span>· 287 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Feil Family Brain &amp; Mind Research Institute</div>
+      <div class="center-card__desc">Neuroscience and clinical neurology research, with concentrations in neurodegeneration, cerebrovascular disease, and neuroimaging.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> A. Foster, PhD</span>
+        <span>· 168 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Cardiovascular Research Institute</div>
+      <div class="center-card__desc">Multidisciplinary cardiovascular science from molecular pathways to clinical trials, including the cardio-oncology consortium.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> E. M. Ramirez, MD</span>
+        <span>· 124 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Institute for Computational Biomedicine</div>
+      <div class="center-card__desc">Computational genomics, biomedical informatics, machine learning in medicine, and clinical decision support research.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> R. Tran, PhD</span>
+        <span>· 98 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Center for Aging Research</div>
+      <div class="center-card__desc">Geroscience, late-life cognitive and physical decline, and the clinical care of older adults across WCM and partner sites.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> L. Okello, PhD</span>
+        <span>· 87 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Iris Cantor Women's Health Center</div>
+      <div class="center-card__desc">Sex-specific medicine, reproductive endocrinology, and clinical research focused on women's cardiovascular and metabolic health.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> S. Williams, MD</span>
+        <span>· 64 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Center for Inflammation Research</div>
+      <div class="center-card__desc">Innate and adaptive immunity in chronic disease, autoimmune mechanisms, and immunotherapy development.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> D. Sharma, PhD</span>
+        <span>· 78 scholars</span>
+      </div>
+    </a>
+    <a href="#" class="center-card">
+      <div class="center-card__name">Center for Health Equity Research</div>
+      <div class="center-card__desc">Population health, social determinants of health, and disparities research across NYC and national cohorts.</div>
+      <div class="center-card__meta">
+        <span><strong>Director:</strong> I. Washington, PhD</span>
+        <span>· 56 scholars</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ============================================================
+     A-Z directory
+     ============================================================ -->
+<section class="section fade-in-3" id="a-z">
+  <div class="section__head">
+    <h2 class="section__title">A–Z directory</h2>
+    <span class="section__count">3,247 scholars</span>
+    <a href="#" class="section__more">Open full directory →</a>
+  </div>
+  <p class="section__sub">Alphabetical index by last name. Click a letter to jump.</p>
+
+  <div class="az-bar">
+    <a class="az-letter" href="#">A</a>
+    <a class="az-letter is-active" href="#">B</a>
+    <a class="az-letter" href="#">C</a>
+    <a class="az-letter" href="#">D</a>
+    <a class="az-letter" href="#">E</a>
+    <a class="az-letter" href="#">F</a>
+    <a class="az-letter" href="#">G</a>
+    <a class="az-letter" href="#">H</a>
+    <a class="az-letter" href="#">I</a>
+    <a class="az-letter" href="#">J</a>
+    <a class="az-letter" href="#">K</a>
+    <a class="az-letter" href="#">L</a>
+    <a class="az-letter" href="#">M</a>
+    <a class="az-letter" href="#">N</a>
+    <a class="az-letter" href="#">O</a>
+    <a class="az-letter" href="#">P</a>
+    <a class="az-letter az-letter--disabled">Q</a>
+    <a class="az-letter" href="#">R</a>
+    <a class="az-letter" href="#">S</a>
+    <a class="az-letter" href="#">T</a>
+    <a class="az-letter" href="#">U</a>
+    <a class="az-letter" href="#">V</a>
+    <a class="az-letter" href="#">W</a>
+    <a class="az-letter az-letter--disabled">X</a>
+    <a class="az-letter" href="#">Y</a>
+    <a class="az-letter" href="#">Z</a>
+  </div>
+
+  <div class="az-results">
+    <div class="az-results__head">
+      <strong>B</strong>
+      <span class="meta">214 scholars · showing 1–10 · <a href="#">view all in B</a></span>
+    </div>
+    <div class="az-list">
+      <div class="az-row">
+        <a class="az-row__name" href="#">Babatunde, Olumide, MD</a>
+        <span class="az-row__title">Asst Prof of Surgery</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Bachmann, Nora, PhD</a>
+        <span class="az-row__title">Assoc Prof of Pharmacology</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Baker, Helena T., MD</a>
+        <span class="az-row__title">Prof of Pediatrics</span>
+        <span class="role-tag">Voluntary faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Bansal, Aditya, MD, PhD</a>
+        <span class="az-row__title">Assoc Prof of Medicine</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Barnes, Eleanor M., MD</a>
+        <span class="az-row__title">Asst Prof of Psychiatry</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Bartlett, Joseph R., MD</a>
+        <span class="az-row__title">Prof of Radiology</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Ben-Ari, Yuval, MD, PhD</a>
+        <span class="az-row__title">Chair, Department of Neurology</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Berkowitz, Sarah L., PhD</a>
+        <span class="az-row__title">Postdoctoral Associate · OB/GYN</span>
+        <span class="role-tag">Postdoc</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Bhattacharya, Riya</a>
+        <span class="az-row__title">MD/PhD candidate</span>
+        <span class="role-tag">Doctoral student</span>
+      </div>
+      <div class="az-row">
+        <a class="az-row__name" href="#">Bianchi, Marco, MD</a>
+        <span class="az-row__title">Prof of Surgery</span>
+        <span class="role-tag">Full-time faculty</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="sketch-tools">Sketch 005 · Browse</div>
+
+</body>
+</html>

@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 003 — Home (revised) · Scholars @ WCM</title>
+<style>
+/* ==========================================================================
+   Scholars @ WCM — Sketch 003 revised proposal: home/landing
+   Folds in:
+     - Reduced carousel from 15 → 8 cards (fewer, with breathing room)
+     - Visible selection rule above the carousel (one plain-language line)
+     - Parent-topic grid as a second discovery surface (the 67 topics)
+     - Simplified stats strip (no "last updated 4:00 AM")
+     - Slate accent palette (red reserved for brand mark + curated tag)
+   ========================================================================== */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  --color-primary: #B31B1B;
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;
+  --color-link-hover: #1f3b53;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Tiempos Headline', 'Charter', Georgia, serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+  --text-5xl: 56px;
+
+  --leading-tight: 1.1;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px; --space-20: 80px;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
+
+  --max-content: 1100px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+
+body { padding-top: 44px; }
+
+/* Sketch chrome */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label {
+  color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4; transition: opacity 0.2s;
+}
+#sketch-tools:hover { opacity: 1; }
+
+/* Header */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: 'Charter', 'Tiempos Headline', Georgia, serif;
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__nav { display: flex; gap: var(--space-5); margin-left: auto; font-size: var(--text-sm); }
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+
+/* ============================================================
+   Hero — search-dominant, clean
+   ============================================================ */
+.hero {
+  background: linear-gradient(180deg, var(--color-surface) 0%, var(--color-surface-tint) 100%);
+  padding: var(--space-16) var(--space-6) var(--space-12);
+  border-bottom: 1px solid var(--color-border);
+}
+.hero__inner {
+  max-width: 760px; margin: 0 auto; text-align: center;
+}
+.hero__title {
+  font-size: var(--text-5xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.03em;
+  line-height: var(--leading-tight);
+  margin-bottom: var(--space-4);
+}
+.hero__subtitle {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-8);
+  line-height: var(--leading-snug);
+}
+.search-big {
+  display: flex; gap: var(--space-2);
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.search-big:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(44, 79, 110, 0.12);
+}
+.search-big input {
+  flex: 1;
+  height: 44px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-md);
+  border: 0; outline: none;
+  background: transparent;
+  font-family: inherit;
+}
+.search-big button {
+  height: 44px; padding: 0 var(--space-5);
+  background: var(--color-accent);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.search-big button:hover { background: var(--color-accent-hover); }
+
+.search-suggestions {
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  display: flex; gap: var(--space-2); justify-content: center;
+  flex-wrap: wrap; align-items: center;
+}
+.search-suggestions a {
+  display: inline-flex;
+  padding: 2px 10px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+}
+.search-suggestions a:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* ============================================================
+   Stats strip — simplified
+   ============================================================ */
+.stats-strip {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-5) var(--space-6);
+  display: flex; gap: var(--space-8); justify-content: center; flex-wrap: wrap;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+.stats-strip strong {
+  color: var(--color-text-secondary); font-weight: var(--weight-semibold);
+  margin-right: 4px;
+}
+
+/* ============================================================
+   Topic carousel — refined
+   8 cards, visible selection rule, larger card width
+   ============================================================ */
+.topic-feed {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-8);
+}
+.topic-feed__header {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.topic-feed__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.topic-feed__all {
+  margin-left: auto;
+  font-size: var(--text-sm); color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.topic-feed__rule {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  margin-bottom: var(--space-6);
+  max-width: 70ch;
+}
+.topic-feed__rule a {
+  color: var(--color-text-muted);
+  text-decoration: underline; text-decoration-style: dotted;
+}
+.topic-feed__rule a:hover { color: var(--color-accent); }
+
+.carousel-wrapper {
+  position: relative;
+}
+.topic-carousel {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 360px;
+  gap: var(--space-5);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: var(--space-6);
+  padding: var(--space-2) 2px var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+.topic-carousel::-webkit-scrollbar { height: 6px; }
+.topic-carousel::-webkit-scrollbar-track { background: transparent; }
+.topic-carousel::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
+
+.carousel-arrow {
+  position: absolute; top: 50%;
+  transform: translateY(-50%);
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+  font-size: 20px; color: var(--color-text-secondary);
+  display: grid; place-items: center;
+  cursor: pointer;
+  z-index: 2;
+  transition: opacity 0.15s, transform 0.15s;
+  opacity: 0.85;
+}
+.carousel-arrow:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.05);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.carousel-arrow--prev { left: -8px; }
+.carousel-arrow--next { right: -8px; }
+
+.topic-card {
+  scroll-snap-align: start;
+  display: flex; flex-direction: column;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  min-height: 320px;
+}
+.topic-card:hover {
+  border-color: var(--color-accent);
+  text-decoration: none; color: var(--color-text);
+  box-shadow: var(--shadow-md);
+}
+
+.topic-card__head {
+  margin-bottom: var(--space-4);
+}
+.topic-card__parent {
+  display: inline-block;
+  font-size: 10px; font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-accent);
+  margin-bottom: var(--space-2);
+}
+.topic-card__topic {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+}
+.topic-card__topic a { color: var(--color-text); }
+.topic-card__topic a:hover { color: var(--color-accent); text-decoration: none; }
+.topic-card__count {
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+
+.topic-card__pub {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+.topic-card__pub-title {
+  display: block;
+  font-weight: var(--weight-medium);
+  color: var(--color-text);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+}
+.topic-card__pub-title:hover { color: var(--color-accent); text-decoration: none; }
+.topic-card__pub-meta {
+  display: flex; align-items: center; gap: var(--space-2);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.topic-card__author {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--color-text-secondary);
+}
+.topic-card__author + .topic-card__author { margin-left: 2px; }
+.topic-card__avatar {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  display: grid; place-items: center;
+  color: white; font-size: 9px; font-weight: var(--weight-semibold);
+}
+.topic-card__journal { font-style: italic; }
+.topic-card__journal::before { content: "·"; margin-right: 6px; }
+
+.topic-card__footnote {
+  margin-top: auto;
+  padding-top: var(--space-3);
+  font-size: 11px; color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ============================================================
+   Faculty feed — algorithmic "Recent contributions" surface
+   Shows scholars + their recent high-impact work
+   ============================================================ */
+.faculty-feed {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-8);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-6);
+}
+.faculty-feed__header {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.faculty-feed__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.faculty-feed__all {
+  margin-left: auto;
+  font-size: var(--text-sm); color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.faculty-feed__rule {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  margin-bottom: var(--space-6); max-width: 70ch;
+}
+.faculty-feed__rule a {
+  color: var(--color-text-muted);
+  text-decoration: underline; text-decoration-style: dotted;
+}
+.faculty-feed__rule a:hover { color: var(--color-accent); }
+
+.faculty-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-5) var(--space-6);
+}
+@media (max-width: 900px) {
+  .faculty-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .faculty-grid { grid-template-columns: 1fr; }
+}
+
+.faculty-card {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: var(--space-4);
+  text-decoration: none; color: var(--color-text);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  transition: background 0.15s;
+}
+.faculty-card:hover {
+  background: var(--color-surface-alt);
+  text-decoration: none; color: var(--color-text);
+}
+.faculty-card__photo {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: white; font-size: 20px; font-weight: var(--weight-semibold);
+  flex-shrink: 0;
+}
+.faculty-card__body {
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+.faculty-card__name {
+  font-size: var(--text-base); font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  margin-bottom: 2px;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2);
+}
+.faculty-card:hover .faculty-card__name { color: var(--color-accent); }
+
+/* Role tag — actual ED person-type, not chip-row category */
+.role-tag {
+  display: inline-flex; align-items: center;
+  height: 16px; padding: 0 5px;
+  font-size: 9px; font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.faculty-card__title {
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-3);
+}
+.faculty-card__contribution {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+}
+.faculty-card__venue {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: auto;
+}
+.faculty-card__venue em {
+  font-style: italic;
+  color: var(--color-text-secondary);
+}
+
+/* ============================================================
+   Parent-topic grid — second discovery surface
+   The full WCM research taxonomy in 4 columns
+   ============================================================ */
+.topic-grid-section {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-16);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-6);
+}
+.topic-grid-section__head {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  margin-bottom: var(--space-2);
+}
+.topic-grid-section__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.topic-grid-section__rule {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  margin-bottom: var(--space-6);
+}
+
+.topic-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0 var(--space-6);
+}
+@media (max-width: 900px) {
+  .topic-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .topic-grid { grid-template-columns: 1fr; }
+}
+
+.topic-grid__item {
+  display: flex; align-items: baseline; gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+  text-decoration: none;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+.topic-grid__item:hover {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.topic-grid__item:hover .topic-grid__name {
+  text-decoration: underline;
+}
+.topic-grid__name { flex: 1; }
+.topic-grid__count {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+.wcm-footer {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  padding: var(--space-8) var(--space-6);
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.wcm-footer__inner {
+  max-width: var(--max-wide); margin: 0 auto;
+  display: flex; gap: var(--space-8); flex-wrap: wrap;
+  align-items: baseline;
+}
+.wcm-footer__inner a { color: var(--color-text-secondary); }
+.wcm-footer__attr {
+  margin-left: auto;
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+
+/* Subtle entrance */
+.fade-in { animation: fadeIn 0.5s ease-out both; }
+.fade-in-2 { animation: fadeIn 0.5s ease-out 0.1s both; }
+.fade-in-3 { animation: fadeIn 0.5s ease-out 0.2s both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <span class="label">Sketch 003 · Home/landing</span>
+  <span class="badge">Revised proposal</span>
+  <span style="color:#999;font-size:11px">Counter to Variant D ★ Selected — refines the carousel and adds a topic-grid second surface</span>
+</div>
+
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <nav class="wcm-header__nav">
+    <a href="#">Browse</a>
+    <a href="#">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<!-- ============================================================
+     Hero
+     ============================================================ -->
+<section class="hero fade-in">
+  <div class="hero__inner">
+    <h1 class="hero__title">Scholars at Weill Cornell Medicine</h1>
+    <p class="hero__subtitle">Discover the people, publications, and programs that drive research at WCM.</p>
+    <div class="search-big">
+      <input type="search" placeholder="Search by name, topic, department, or publication…" autofocus>
+      <button>Search</button>
+    </div>
+    <div class="search-suggestions">
+      <span style="color:var(--color-text-muted)">Try:</span>
+      <a href="#">cardio-oncology</a>
+      <a href="#">CRISPR</a>
+      <a href="#">long COVID</a>
+      <a href="#">infectious disease</a>
+      <a href="#">dean of medicine</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     Stats — simplified
+     ============================================================ -->
+<div class="stats-strip">
+  <span><strong>3,247</strong> scholars</span>
+  <span><strong>184,512</strong> publications</span>
+  <span><strong>67</strong> research areas</span>
+</div>
+
+<!-- ============================================================
+     Carousel — 8 curated subtopic cards
+     Selection rule made visible: one parent per card, max 8
+     ============================================================ -->
+<section class="topic-feed fade-in-2">
+  <div class="topic-feed__header">
+    <h2 class="topic-feed__title">Selected research</h2>
+    <a href="#" class="topic-feed__all">Browse all 67 areas ↓</a>
+  </div>
+  <p class="topic-feed__rule">
+    Eight subtopics with the strongest recent activity at WCM, one per parent area, refreshed weekly. <a href="#">How this works</a>
+  </p>
+
+  <div class="carousel-wrapper">
+    <button class="carousel-arrow carousel-arrow--prev" onclick="scrollCarousel(-1)" aria-label="Scroll left">‹</button>
+    <button class="carousel-arrow carousel-arrow--next" onclick="scrollCarousel(1)" aria-label="Scroll right">›</button>
+
+    <div class="topic-carousel" id="topic-carousel">
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Aging &amp; Geroscience</a>
+          <h3 class="topic-card__topic"><a href="#">Cellular Senescence &amp; Molecular Aging</a></h3>
+          <span class="topic-card__count">31 publications · 12 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Senolytic clearance of p16+ cells reverses age-related muscle dysfunction</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span>Latifa Okello
+            </span>
+            <span class="topic-card__journal">Cell Metabolism · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">NAD+ metabolism markers as clinical aging biomarkers</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">AF</span>Andrew Foster
+            </span>
+            <span class="topic-card__journal">Nature Aging · 2024</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Cardiovascular Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Cardiotoxicity from Cancer Therapies</a></h3>
+          <span class="topic-card__count">87 publications · 24 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Anthracycline cardiotoxicity in long-term breast cancer survivors</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">ER</span>Eleanor Ramirez
+            </span>
+            <span class="topic-card__author">+3</span>
+            <span class="topic-card__journal">JAMA Cardiology · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">CL</span>Cynthia Liu
+            </span>
+            <span class="topic-card__journal">NEJM · 2023</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Neurodegenerative Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Tau-Targeting Therapeutics in Alzheimer's</a></h3>
+          <span class="topic-card__count">38 publications · 18 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Tau-targeting immunotherapy slows hippocampal atrophy in early Alzheimer's disease</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span>David Kim
+            </span>
+            <span class="topic-card__author">+2</span>
+            <span class="topic-card__journal">Nature · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Microglial TREM2 signaling and amyloid clearance</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">AF</span>Andrew Foster
+            </span>
+            <span class="topic-card__journal">Neuron · 2024</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Infectious Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Long COVID Immune Signatures</a></h3>
+          <span class="topic-card__count">62 publications · 31 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Long COVID immune signatures across age and disease severity</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">CL</span>Cynthia Liu
+            </span>
+            <span class="topic-card__author">+4</span>
+            <span class="topic-card__journal">Cell · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">T cell exhaustion patterns predict persistent post-acute COVID symptoms</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">MG</span>Maria Garcia
+            </span>
+            <span class="topic-card__journal">Nature Medicine · 2024</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Oncology</a>
+          <h3 class="topic-card__topic"><a href="#">HER2-Low Breast Cancer Therapeutics</a></h3>
+          <span class="topic-card__count">52 publications · 19 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">HER2-low breast cancer: redefining therapeutic targeting</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">MG</span>Maria Garcia
+            </span>
+            <span class="topic-card__author">+3</span>
+            <span class="topic-card__journal">Lancet Oncology · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Trastuzumab-induced cardiomyopathy: long-term outcomes</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">ER</span>Eleanor Ramirez
+            </span>
+            <span class="topic-card__journal">JACC · 2024</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Health Services Research</a>
+          <h3 class="topic-card__topic"><a href="#">Inpatient Antibiotic Stewardship</a></h3>
+          <span class="topic-card__count">71 publications · 22 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">A national pragmatic trial of inpatient antibiotic stewardship</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">MW</span>Margaret Whitcomb
+            </span>
+            <span class="topic-card__author">+2</span>
+            <span class="topic-card__journal">NEJM · 2021</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Diagnostic stewardship in sepsis: a cluster-randomized trial</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">MW</span>Margaret Whitcomb
+            </span>
+            <span class="topic-card__journal">JAMA · 2023</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Genetics &amp; Genomics</a>
+          <h3 class="topic-card__topic"><a href="#">CRISPR Editing in Hematopoietic Disorders</a></h3>
+          <span class="topic-card__count">44 publications · 16 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Base editing for sickle cell disease: 3-year clinical outcomes</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">RT</span>Rachel Tran
+            </span>
+            <span class="topic-card__author">+2</span>
+            <span class="topic-card__journal">NEJM · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Off-target editing risk profiles in clinical CRISPR therapeutics</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">CL</span>Cynthia Liu
+            </span>
+            <span class="topic-card__journal">Nature Medicine · 2024</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Women's Health</a>
+          <h3 class="topic-card__topic"><a href="#">Endometriosis Pathophysiology &amp; Therapeutics</a></h3>
+          <span class="topic-card__count">29 publications · 11 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Single-cell atlas of endometrial inflammation in endometriosis</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">JR</span>Jennifer Reynolds
+            </span>
+            <span class="topic-card__author">+3</span>
+            <span class="topic-card__journal">Nature · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">GnRH antagonists in deep infiltrating endometriosis: phase III RCT</a>
+          <div class="topic-card__pub-meta">
+            <span class="topic-card__author">
+              <span class="topic-card__avatar">AW</span>Ada Wong
+            </span>
+            <span class="topic-card__journal">JAMA · 2024</span>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     Faculty feed — "Recent contributions"
+     Algorithmic, no editorial curation
+     ============================================================ -->
+<section class="faculty-feed fade-in-3">
+  <div class="faculty-feed__header">
+    <h2 class="faculty-feed__title">Recent contributions</h2>
+    <a href="#" class="faculty-feed__all">View all 3,247 scholars →</a>
+  </div>
+  <p class="faculty-feed__rule">
+    Six WCM scholars whose recent first-author or senior-author work appeared in top-tier venues, one per research area. Includes full-time faculty, postdocs, fellows, and doctoral students. Refreshed weekly. <a href="#">How this works</a>
+  </p>
+
+  <div class="faculty-grid">
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#b8a3a3,#8a7575)">DK</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">David S. Kim, PhD<span class="role-tag">Postdoc</span></div>
+        <div class="faculty-card__title">Postdoctoral Associate · Foster Lab</div>
+        <div class="faculty-card__contribution">Tau-targeting immunotherapy slows hippocampal atrophy in early Alzheimer's disease</div>
+        <div class="faculty-card__venue"><em>Nature</em> · 2024 · First author</div>
+      </div>
+    </a>
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#a3b8a3,#75907a)">LO</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">Latifa Okello, PhD<span class="role-tag">Full-time faculty</span></div>
+        <div class="faculty-card__title">Assistant Professor of Cell Biology</div>
+        <div class="faculty-card__contribution">Senolytic clearance of p16+ cells reverses age-related muscle dysfunction</div>
+        <div class="faculty-card__venue"><em>Cell Metabolism</em> · 2024 · First author</div>
+      </div>
+    </a>
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">ER</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">Eleanor M. Ramirez, MD<span class="role-tag">Full-time faculty</span></div>
+        <div class="faculty-card__title">Chief, Division of Cardiology</div>
+        <div class="faculty-card__contribution">Anthracycline cardiotoxicity in long-term breast cancer survivors</div>
+        <div class="faculty-card__venue"><em>JAMA Cardiology</em> · 2024 · First author</div>
+      </div>
+    </a>
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#a3a8c2,#7580a0)">CL</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">Cynthia Liu, MD<span class="role-tag">Full-time faculty</span></div>
+        <div class="faculty-card__title">Assistant Professor of Pathology</div>
+        <div class="faculty-card__contribution">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes</div>
+        <div class="faculty-card__venue"><em>NEJM</em> · 2023 · First author</div>
+      </div>
+    </a>
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">MW</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">Margaret R. Whitcomb, MD, PhD<span class="role-tag">Full-time faculty</span></div>
+        <div class="faculty-card__title">Chair, Department of Medicine</div>
+        <div class="faculty-card__contribution">Race, ethnicity, and inpatient mortality in academic medical centers</div>
+        <div class="faculty-card__venue"><em>NEJM</em> · 2024 · First author</div>
+      </div>
+    </a>
+
+    <a href="#" class="faculty-card">
+      <div class="faculty-card__photo" style="background:linear-gradient(135deg,#c2bba3,#a09a75)">JR</div>
+      <div class="faculty-card__body">
+        <div class="faculty-card__name">Jennifer Reynolds<span class="role-tag">Doctoral student</span></div>
+        <div class="faculty-card__title">MD/PhD candidate · WCM-Tri-Institutional Program</div>
+        <div class="faculty-card__contribution">CSF biomarkers and progression in mild cognitive impairment: 7-year cohort</div>
+        <div class="faculty-card__venue"><em>Lancet Neurology</em> · 2024 · First author</div>
+      </div>
+    </a>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     Parent-topic grid — second discovery surface
+     The full WCM research taxonomy (67 parent areas)
+     ============================================================ -->
+<section class="topic-grid-section fade-in-3">
+  <div class="topic-grid-section__head">
+    <h2 class="topic-grid-section__title">Browse all research areas</h2>
+  </div>
+  <p class="topic-grid-section__rule">All 67 research areas at WCM, with publication counts. The full taxonomy.</p>
+
+  <div class="topic-grid">
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Aging &amp; Geroscience</span><span class="topic-grid__count">512</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Allergy &amp; Immunology</span><span class="topic-grid__count">241</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Anesthesiology</span><span class="topic-grid__count">198</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Behavioral &amp; Social Sciences</span><span class="topic-grid__count">184</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Bioinformatics</span><span class="topic-grid__count">312</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Cardiovascular Disease</span><span class="topic-grid__count">847</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Cell Biology</span><span class="topic-grid__count">529</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Clinical Epidemiology</span><span class="topic-grid__count">387</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Clinical Trials Methods</span><span class="topic-grid__count">154</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Computational Biology</span><span class="topic-grid__count">298</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">COVID-19 &amp; Long COVID</span><span class="topic-grid__count">419</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Critical Care</span><span class="topic-grid__count">213</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Dermatology</span><span class="topic-grid__count">142</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Developmental Biology</span><span class="topic-grid__count">187</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Diabetes &amp; Endocrine</span><span class="topic-grid__count">359</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Digital Health &amp; Informatics</span><span class="topic-grid__count">227</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Drug Development</span><span class="topic-grid__count">276</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Emergency Medicine</span><span class="topic-grid__count">168</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Environmental Health</span><span class="topic-grid__count">94</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Family Medicine</span><span class="topic-grid__count">112</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Gastroenterology</span><span class="topic-grid__count">263</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Genetics &amp; Genomics</span><span class="topic-grid__count">441</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Geriatrics</span><span class="topic-grid__count">298</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Global Health</span><span class="topic-grid__count">203</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Health Policy</span><span class="topic-grid__count">178</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Health Services Research</span><span class="topic-grid__count">389</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Hematology</span><span class="topic-grid__count">324</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Hepatology</span><span class="topic-grid__count">167</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">HIV &amp; AIDS</span><span class="topic-grid__count">189</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Hospital Medicine</span><span class="topic-grid__count">256</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Imaging &amp; Radiology</span><span class="topic-grid__count">412</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Immunology</span><span class="topic-grid__count">478</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Infectious Disease</span><span class="topic-grid__count">523</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Maternal &amp; Fetal Medicine</span><span class="topic-grid__count">147</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Medical Education</span><span class="topic-grid__count">208</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Mental Health &amp; Psychiatry</span><span class="topic-grid__count">367</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Microbiome</span><span class="topic-grid__count">211</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Molecular Biology</span><span class="topic-grid__count">462</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Nephrology</span><span class="topic-grid__count">198</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Neurodegenerative Disease</span><span class="topic-grid__count">358</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Neurology &amp; Neuroscience</span><span class="topic-grid__count">587</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Neurosurgery</span><span class="topic-grid__count">142</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Nursing Research</span><span class="topic-grid__count">87</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Nutrition</span><span class="topic-grid__count">156</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Obstetrics &amp; Gynecology</span><span class="topic-grid__count">241</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Oncology</span><span class="topic-grid__count">934</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Ophthalmology</span><span class="topic-grid__count">183</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Orthopedics</span><span class="topic-grid__count">219</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Otolaryngology</span><span class="topic-grid__count">128</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Pain Medicine</span><span class="topic-grid__count">112</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Pathology</span><span class="topic-grid__count">274</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Pediatrics</span><span class="topic-grid__count">461</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Pharmacology</span><span class="topic-grid__count">293</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Physiology</span><span class="topic-grid__count">186</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Population Health</span><span class="topic-grid__count">298</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Precision Medicine</span><span class="topic-grid__count">347</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Pulmonary &amp; Respiratory</span><span class="topic-grid__count">256</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Radiation Oncology</span><span class="topic-grid__count">147</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Regenerative Medicine</span><span class="topic-grid__count">168</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Rehabilitation</span><span class="topic-grid__count">94</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Reproductive Medicine</span><span class="topic-grid__count">131</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Rheumatology</span><span class="topic-grid__count">183</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Sleep Medicine</span><span class="topic-grid__count">87</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Stem Cell Biology</span><span class="topic-grid__count">242</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Structural Biology</span><span class="topic-grid__count">218</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Surgery</span><span class="topic-grid__count">389</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Transplantation</span><span class="topic-grid__count">196</span></a>
+    <a href="#" class="topic-grid__item"><span class="topic-grid__name">Urology</span><span class="topic-grid__count">163</span></a>
+  </div>
+</section>
+
+<footer class="wcm-footer">
+  <div class="wcm-footer__inner">
+    <a href="#">About Scholars @ WCM</a>
+    <a href="#">Methodology</a>
+    <a href="#">For faculty</a>
+    <a href="#">Contact</a>
+    <span class="wcm-footer__attr">Powered by ReCiter · Updated daily</span>
+  </div>
+</footer>
+
+<div id="sketch-tools">Sketch 003 · Revised proposal</div>
+
+<script>
+function scrollCarousel(direction) {
+  const carousel = document.getElementById('topic-carousel');
+  const cardWidth = 360 + 20; // card + gap
+  carousel.scrollBy({ left: direction * cardWidth * 2, behavior: 'smooth' });
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 006 — Department · Scholars @ WCM</title>
+<style>
+/* ==========================================================================
+   Scholars @ WCM — Sketch 006: Department detail
+   The page someone lands on after clicking a department from Browse.
+   This mockup is the dense case (Medicine, 872 scholars, 11 divisions).
+   Smaller departments collapse the divisions rail.
+   ========================================================================== */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  --color-primary: #B31B1B;
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;
+  --color-link-hover: #1f3b53;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Charter', 'Tiempos Headline', Georgia, serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+
+  --max-content: 1100px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+
+body { padding-top: 44px; }
+
+/* Sketch chrome */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4;
+}
+#sketch-tools:hover { opacity: 1; }
+
+/* Header — same red treatment */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__search { flex: 1; max-width: 480px; position: relative; }
+.wcm-header__search input {
+  width: 100%; height: 36px;
+  padding: 0 var(--space-3) 0 36px;
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--color-text);
+}
+.wcm-header__search input::placeholder { color: var(--color-text-muted); }
+.wcm-header__search input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+.wcm-header__search::before {
+  content: "⌕"; position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%); color: var(--color-text-muted);
+  font-size: 16px; pointer-events: none;
+}
+.wcm-header__nav { display: flex; gap: var(--space-5); margin-left: auto; font-size: var(--text-sm); }
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); position: relative; }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+.wcm-header__nav a.is-current { color: white; font-weight: var(--weight-semibold); }
+.wcm-header__nav a.is-current::after {
+  content: ""; position: absolute;
+  left: 0; right: 0; bottom: -22px;
+  height: 2px; background: white;
+}
+
+/* Crumbs */
+.crumbs {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-4) var(--space-6) 0;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.crumbs a { color: var(--color-text-secondary); }
+.crumbs .sep { margin: 0 var(--space-2); color: var(--color-border-strong); }
+
+/* ============================================================
+   Department hero
+   Title, description, chair card, stats, research areas.
+   ============================================================ */
+.dept-hero {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
+  border-bottom: 1px solid var(--color-border);
+}
+.dept-hero__label {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-accent); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
+}
+.dept-hero__title {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl); font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+  margin-bottom: var(--space-3);
+}
+.dept-hero__desc {
+  font-size: var(--text-md); color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  max-width: 70ch; margin-bottom: var(--space-6);
+}
+
+/* Chair card — embedded in hero, not a separate section */
+.chair-card {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-6);
+  max-width: 560px;
+  text-decoration: none;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.chair-card:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+  color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+.chair-card__photo {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: white; font-size: 18px; font-weight: var(--weight-semibold);
+}
+.chair-card__role {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-accent); font-weight: var(--weight-semibold);
+  margin-bottom: 2px;
+}
+.chair-card__name {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  margin-bottom: 2px;
+}
+.chair-card:hover .chair-card__name { color: var(--color-accent); }
+.chair-card__title {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+}
+
+/* Research areas as pills below chair */
+.areas-row {
+  margin-bottom: var(--space-5);
+}
+.areas-row__label {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
+}
+.areas-row__pills {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+}
+.area-pill {
+  display: inline-flex; align-items: center;
+  height: 26px; padding: 0 12px;
+  font-size: var(--text-xs); font-weight: var(--weight-medium);
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.area-pill:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.area-pill__count {
+  margin-left: 6px; opacity: 0.6;
+  font-feature-settings: "tnum";
+}
+
+.dept-hero__stats {
+  display: flex; gap: var(--space-6); flex-wrap: wrap;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-border);
+}
+.dept-hero__stats .stat strong {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-semibold);
+  margin-right: 4px;
+}
+
+/* ============================================================
+   Layout: divisions rail + faculty list
+   Same pattern as topic page B
+   ============================================================ */
+.layout {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-16);
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--space-10);
+}
+.rail {
+  align-self: start;
+  position: sticky;
+  top: calc(44px + var(--header-h) + var(--space-4));
+  max-height: calc(100vh - 44px - var(--header-h) - var(--space-8));
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+.rail__title {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-3);
+}
+.rail-list { list-style: none; padding: 0; margin: 0; }
+.rail-item {
+  display: flex; gap: var(--space-2); align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  line-height: var(--leading-snug);
+  text-decoration: none;
+}
+.rail-item:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.rail-item.active {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.rail-item__count {
+  margin-left: auto;
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  font-feature-settings: "tnum";
+}
+.rail-item.active .rail-item__count { color: var(--color-accent); opacity: 0.8; }
+.rail-divider {
+  height: 1px; background: var(--color-border);
+  margin: var(--space-3) 0;
+}
+
+/* ============================================================
+   Faculty list (main column)
+   ============================================================ */
+.faculty-section { min-width: 0; }
+
+.faculty-header {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.faculty-header__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.faculty-header__chief {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.faculty-header__chief a { color: var(--color-accent); }
+.faculty-header__desc {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  margin-bottom: var(--space-5);
+  max-width: 70ch;
+}
+
+/* Role filter chips — scope the list by person type */
+.role-chips {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.role-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+}
+.role-chip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.role-chip.active {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+.role-chip__count {
+  font-size: 11px;
+  opacity: 0.7;
+  font-feature-settings: "tnum";
+}
+.role-chip.active .role-chip__count { opacity: 0.9; }
+
+/* Inline role tag on person rows — small label after the name */
+.role-tag {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 6px;
+  margin-left: var(--space-2);
+  font-size: 10px; font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  vertical-align: 2px;
+}
+.person-name {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+}
+
+.faculty-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.faculty-toolbar__sort {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  color: var(--color-text-secondary);
+}
+.faculty-toolbar__sort select {
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text);
+}
+.faculty-toolbar__sort select:focus {
+  outline: none; border-color: var(--color-accent);
+}
+
+/* Person rows — reused pattern from search results */
+.person-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: var(--space-4);
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.person-photo {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  color: white; font-size: 18px; font-weight: var(--weight-semibold);
+}
+.person-name {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  margin-bottom: 2px;
+}
+.person-name a { color: var(--color-text); }
+.person-name a:hover { color: var(--color-accent); text-decoration: none; }
+.person-title {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  margin-bottom: 2px;
+  line-height: var(--leading-snug);
+}
+.person-snippet {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-snug);
+}
+.person-meta-right {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  text-align: right;
+  white-space: nowrap;
+}
+.person-meta-right .stat-num {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  font-feature-settings: "tnum";
+}
+
+.pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: var(--space-1);
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+}
+.pagination__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; height: 32px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+.pagination__btn:hover {
+  border-color: var(--color-accent); color: var(--color-accent);
+  text-decoration: none;
+}
+.pagination__btn.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+  font-weight: var(--weight-medium);
+}
+.pagination__ellipsis {
+  padding: 0 var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Mobile */
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; }
+  .rail { position: static; max-height: none; }
+  .person-row { grid-template-columns: 48px 1fr; }
+  .person-meta-right {
+    grid-column: 1 / -1; flex-direction: row;
+    text-align: left; padding-left: 64px;
+  }
+}
+
+/* Subtle entrance */
+.fade-in { animation: fadeIn 0.4s ease-out both; }
+.fade-in-2 { animation: fadeIn 0.4s ease-out 0.1s both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <span class="label">Sketch 006 · Department</span>
+  <span class="badge">New</span>
+  <span style="color:#999;font-size:11px">Department of Medicine — the dense case (872 scholars · 11 divisions)</span>
+</div>
+
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <div class="wcm-header__search">
+    <input type="search" placeholder="Search scholars and publications…">
+  </div>
+  <nav class="wcm-header__nav">
+    <a href="#" class="is-current">Browse</a>
+    <a href="#">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<div class="crumbs">
+  <a href="#">Home</a>
+  <span class="sep">›</span>
+  <a href="#">Browse</a>
+  <span class="sep">›</span>
+  <a href="#">Departments</a>
+  <span class="sep">›</span>
+  Medicine
+</div>
+
+<!-- ============================================================
+     Department hero
+     ============================================================ -->
+<section class="dept-hero fade-in">
+  <div class="dept-hero__label">Department</div>
+  <h1 class="dept-hero__title">Medicine</h1>
+  <p class="dept-hero__desc">
+    The largest department at Weill Cornell Medicine — over 870 scholars across full-time faculty, affiliated faculty (including NYP-employed clinicians), postdocs and research staff, and doctoral students, organized into eleven clinical and research divisions. Faculty hold appointments at NewYork-Presbyterian Hospital and lead NIH-funded research programs across cardiovascular disease, aging, antimicrobial stewardship, and health equity.
+  </p>
+
+  <a href="#" class="chair-card">
+    <div class="chair-card__photo" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">MW</div>
+    <div>
+      <div class="chair-card__role">Department Chair</div>
+      <div class="chair-card__name">Margaret R. Whitcomb, MD, PhD</div>
+      <div class="chair-card__title">Stephen &amp; Suzanne Weiss Chair · Professor of Medicine</div>
+    </div>
+  </a>
+
+  <div class="areas-row">
+    <div class="areas-row__label">Top research areas</div>
+    <div class="areas-row__pills">
+      <a href="#" class="area-pill">Cardiovascular Disease <span class="area-pill__count">847</span></a>
+      <a href="#" class="area-pill">Aging &amp; Geroscience <span class="area-pill__count">512</span></a>
+      <a href="#" class="area-pill">Infectious Disease <span class="area-pill__count">523</span></a>
+      <a href="#" class="area-pill">Health Services Research <span class="area-pill__count">389</span></a>
+      <a href="#" class="area-pill">Hospital Medicine <span class="area-pill__count">256</span></a>
+      <a href="#" class="area-pill">Endocrine &amp; Diabetes <span class="area-pill__count">359</span></a>
+      <a href="#" class="area-pill">COVID-19 &amp; Long COVID <span class="area-pill__count">419</span></a>
+      <a href="#" class="area-pill">Hematology <span class="area-pill__count">324</span></a>
+      <a href="#" class="area-pill">Critical Care <span class="area-pill__count">213</span></a>
+      <a href="#" class="area-pill">Health Equity <span class="area-pill__count">178</span></a>
+    </div>
+  </div>
+
+  <div class="dept-hero__stats">
+    <span class="stat"><strong>872</strong> scholars</span>
+    <span class="stat"><strong>11</strong> divisions</span>
+    <span class="stat"><strong>4,287</strong> publications since 2020</span>
+    <span class="stat"><strong>312</strong> active grants</span>
+  </div>
+</section>
+
+<!-- ============================================================
+     Layout: divisions rail + faculty list
+     ============================================================ -->
+<main class="layout fade-in-2">
+
+  <aside class="rail">
+    <div class="rail__title">Divisions (11)</div>
+    <ul class="rail-list">
+      <li><a href="#" class="rail-item">All faculty <span class="rail-item__count">872</span></a></li>
+      <div class="rail-divider"></div>
+      <li><a href="#" class="rail-item active">Cardiology <span class="rail-item__count">145</span></a></li>
+      <li><a href="#" class="rail-item">General Internal Medicine <span class="rail-item__count">135</span></a></li>
+      <li><a href="#" class="rail-item">Hospital Medicine <span class="rail-item__count">95</span></a></li>
+      <li><a href="#" class="rail-item">Hematology &amp; Medical Oncology <span class="rail-item__count">92</span></a></li>
+      <li><a href="#" class="rail-item">Pulmonary &amp; Critical Care <span class="rail-item__count">88</span></a></li>
+      <li><a href="#" class="rail-item">Infectious Diseases <span class="rail-item__count">67</span></a></li>
+      <li><a href="#" class="rail-item">Endocrinology, Diabetes &amp; Metabolism <span class="rail-item__count">64</span></a></li>
+      <li><a href="#" class="rail-item">Gastroenterology &amp; Hepatology <span class="rail-item__count">62</span></a></li>
+      <li><a href="#" class="rail-item">Geriatrics &amp; Palliative Medicine <span class="rail-item__count">48</span></a></li>
+      <li><a href="#" class="rail-item">Nephrology <span class="rail-item__count">47</span></a></li>
+      <li><a href="#" class="rail-item">Rheumatology <span class="rail-item__count">29</span></a></li>
+    </ul>
+  </aside>
+
+  <section class="faculty-section">
+    <div class="faculty-header">
+      <h2 class="faculty-header__title">Cardiology</h2>
+      <span class="faculty-header__chief">Chief: <a href="#">Eleanor M. Ramirez, MD</a></span>
+    </div>
+    <p class="faculty-header__desc">
+      The Division of Cardiology at WCM is one of the largest cardiology programs in the Northeast, with concentrations in cardio-oncology, heart failure, electrophysiology, structural heart disease, and cardiovascular imaging. The division leads multiple NIH-funded centers including the WCM Cardiovascular Research Institute.
+    </p>
+
+    <div class="role-chips">
+      <a href="#" class="role-chip active">All <span class="role-chip__count">145</span></a>
+      <a href="#" class="role-chip">Full-time faculty <span class="role-chip__count">62</span></a>
+      <a href="#" class="role-chip">Affiliated faculty <span class="role-chip__count">48</span></a>
+      <a href="#" class="role-chip">Postdocs &amp; non-faculty <span class="role-chip__count">28</span></a>
+      <a href="#" class="role-chip">Doctoral students <span class="role-chip__count">7</span></a>
+    </div>
+
+    <div class="faculty-toolbar">
+      <span>Showing 1–10 of 145 scholars</span>
+      <span class="faculty-toolbar__sort">
+        Sort:
+        <select>
+          <option>Relevance</option>
+          <option>Last name (A–Z)</option>
+          <option>Most recent publication</option>
+          <option>Most cited</option>
+        </select>
+      </span>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">ER</div>
+      <div>
+        <div class="person-name"><a href="#">Eleanor M. Ramirez, MD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Chief, Division of Cardiology · Sandra A. Daugherty Professor</div>
+        <div class="person-snippet">Cardio-oncology — cardiovascular complications of cancer therapies; sex differences in heart failure with preserved ejection fraction; women's heart health.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">142</span> pubs</span>
+        <span><span class="stat-num">4</span> grants</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#a3a8c2,#7580a0)">AT</div>
+      <div>
+        <div class="person-name"><a href="#">Akira Tanaka, MD, PhD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Professor of Medicine · Director, Cardiovascular Imaging Lab</div>
+        <div class="person-snippet">Cardiac MRI and PET; molecular imaging of myocardial inflammation; cardio-oncology imaging in cancer survivors.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">213</span> pubs</span>
+        <span><span class="stat-num">3</span> grants</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#a3b8a3,#75907a)">DP</div>
+      <div>
+        <div class="person-name"><a href="#">Daniel J. Patel, MD, PhD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Associate Professor of Medicine · Director, Electrophysiology Laboratory</div>
+        <div class="person-snippet">Atrial fibrillation; catheter ablation outcomes; sudden cardiac death prevention; wearable arrhythmia detection.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">98</span> pubs</span>
+        <span><span class="stat-num">2</span> grants</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#c2bba3,#a09a75)">HK</div>
+      <div>
+        <div class="person-name"><a href="#">Hannah Kim, PhD</a><span class="role-tag">Research staff</span></div>
+        <div class="person-title">Senior Research Scientist · Cardiovascular Imaging Lab</div>
+        <div class="person-snippet">Cardiac MRI image-analysis pipelines; deep learning for myocardial tissue characterization. Manages the imaging core for the Cardiovascular Research Institute.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">23</span> pubs</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">SP</div>
+      <div>
+        <div class="person-name"><a href="#">Sanjay R. Patel, MD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Assistant Professor of Medicine</div>
+        <div class="person-snippet">Heart failure with preserved ejection fraction; sex differences in HFpEF; cardio-oncology outcomes research.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">42</span> pubs</span>
+        <span><span class="stat-num">1</span> grant</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#a3a8c2,#7580a0)">YS</div>
+      <div>
+        <div class="person-name"><a href="#">Yuki Saito, MD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Assistant Professor of Medicine</div>
+        <div class="person-snippet">Echocardiography; strain imaging; early detection of cardiotoxicity in cancer survivors receiving anthracycline-based chemotherapy.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">31</span> pubs</span>
+        <span><span class="stat-num">1</span> grant</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">HP</div>
+      <div>
+        <div class="person-name"><a href="#">Hyun Joo Park, MD</a><span class="role-tag">Voluntary faculty</span></div>
+        <div class="person-title">Assistant Attending Physician, NewYork-Presbyterian Hospital</div>
+        <div class="person-snippet">Structural heart disease; transcatheter aortic and mitral valve interventions; clinical outcomes in older adults.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">38</span> pubs</span>
+        <span><span class="stat-num">1</span> grant</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#a3b8a3,#75907a)">MV</div>
+      <div>
+        <div class="person-name"><a href="#">Marcus Vargas, PhD</a><span class="role-tag">Postdoc</span></div>
+        <div class="person-title">Postdoctoral Associate · Ramirez Lab</div>
+        <div class="person-snippet">Senolytics in cardio-oncology; molecular mechanisms of anthracycline-induced senescence in cardiomyocytes; preclinical models of cardiotoxicity.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">14</span> pubs</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#c2bba3,#a09a75)">PK</div>
+      <div>
+        <div class="person-name"><a href="#">Priya Krishnan</a><span class="role-tag">Doctoral student</span></div>
+        <div class="person-title">MD/PhD candidate · WCM-Tri-Institutional Program</div>
+        <div class="person-snippet">Thesis research on cardiac genetics in inherited cardiomyopathies; mentored by Dr. Bennett. NIH F30 awardee.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">5</span> pubs</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo" style="background:linear-gradient(135deg,#b8a3a3,#8a7575)">CB</div>
+      <div>
+        <div class="person-name"><a href="#">Christopher Bennett, MD</a><span class="role-tag">Full-time faculty</span></div>
+        <div class="person-title">Assistant Professor of Medicine</div>
+        <div class="person-snippet">Cardiac genetics; inherited arrhythmia syndromes; cardiomyopathy genotype-phenotype studies.</div>
+      </div>
+      <div class="person-meta-right">
+        <span><span class="stat-num">19</span> pubs</span>
+        <span><span class="stat-num">1</span> grant</span>
+      </div>
+    </div>
+
+    <div class="pagination">
+      <a class="pagination__btn" href="#">‹ Prev</a>
+      <a class="pagination__btn active" href="#">1</a>
+      <a class="pagination__btn" href="#">2</a>
+      <a class="pagination__btn" href="#">3</a>
+      <a class="pagination__btn" href="#">4</a>
+      <a class="pagination__btn" href="#">5</a>
+      <span class="pagination__ellipsis">…</span>
+      <a class="pagination__btn" href="#">14</a>
+      <a class="pagination__btn" href="#">15</a>
+      <a class="pagination__btn" href="#">Next ›</a>
+    </div>
+  </section>
+</main>
+
+<div id="sketch-tools">Sketch 006 · Department</div>
+
+</body>
+</html>

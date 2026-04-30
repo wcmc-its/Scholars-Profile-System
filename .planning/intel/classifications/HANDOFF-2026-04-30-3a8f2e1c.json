@@ -1,0 +1,32 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/HANDOFF-2026-04-30.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Scholars Profile System — Handoff Document",
+  "summary": "Current-state snapshot of the local Scholars Profile System prototype as of 2026-04-30, summarizing what works, the stack, integrations, deferred phases, and production handoff recommendations.",
+  "scope": [
+    "Scholars Profile System prototype",
+    "VIVO replacement",
+    "WCM faculty profiles",
+    "ETL chain",
+    "search",
+    "source-system integrations (ED, ReciterDB, ASMS, InfoEd, COI, DynamoDB)",
+    "stack (Next.js, MySQL, OpenSearch, Prisma)",
+    "build phases 5-7 deferred work",
+    "production handoff"
+  ],
+  "cross_refs": [
+    "Scholars Functional Spec - Phase 1 - 2026-04-28.md",
+    "Scholars Project Charter - 2026-04-28.md",
+    "Phase 1 Design Decisions - 2026-04-29.md",
+    "BUILD-PLAN.md",
+    "lib/sources/<source>.ts",
+    "etl/<source>/index.ts",
+    "etl/reciter/index.ts",
+    "etl/search-index/index.ts",
+    "lib/api/*"
+  ],
+  "locked": false,
+  "precedence": 0
+}

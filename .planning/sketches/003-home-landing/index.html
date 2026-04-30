@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 003 — Home / landing · Scholars @ WCM</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  body { padding-top: 44px; }
+
+  /* Variant nav */
+  #variant-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+    background: #1a1a1a; color: #e5e5e5;
+    height: 44px; display: flex; align-items: center; gap: 4px;
+    padding: 0 12px;
+    font-family: var(--font-sans); font-size: 13px;
+  }
+  #variant-nav .label { color: #999; margin-right: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .variant-tab { background: transparent; border: 1px solid transparent; color: #c8c8c8; padding: 6px 12px; border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .variant-tab:hover { background: #2a2a2a; color: white; }
+  .variant-tab.active { background: var(--color-primary); color: white; }
+  .variant { display: none; }
+  .variant.active { display: block; }
+
+  /* SHARED */
+  .stats-strip {
+    text-align: center;
+    font-size: var(--text-sm); color: var(--color-text-muted);
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-alt);
+  }
+  .stats-strip strong { color: var(--color-text); font-weight: var(--weight-semibold); margin: 0 4px; }
+  .stats-strip span { margin: 0 var(--space-3); }
+
+  .browse-grid {
+    max-width: var(--max-content); margin: 0 auto;
+    padding: var(--space-12) var(--space-6);
+  }
+  .browse-grid__title {
+    font-size: var(--text-lg); font-weight: var(--weight-semibold);
+    color: var(--color-text); margin-bottom: var(--space-2);
+  }
+  .browse-grid__subtitle {
+    color: var(--color-text-muted); font-size: var(--text-sm);
+    margin-bottom: var(--space-6);
+  }
+  .browse-grid__items {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-4);
+  }
+  .browse-tile {
+    display: block;
+    padding: var(--space-5);
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--color-text);
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .browse-tile:hover {
+    border-color: var(--color-primary);
+    text-decoration: none;
+    color: var(--color-text);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+  .browse-tile__title {
+    font-size: var(--text-md); font-weight: var(--weight-semibold);
+    margin-bottom: var(--space-1);
+  }
+  .browse-tile__desc {
+    font-size: var(--text-sm); color: var(--color-text-muted);
+    line-height: var(--leading-snug);
+  }
+
+  /* ============== VARIANT A: SEARCH-DOMINANT HERO ============== */
+  .hero-A {
+    background: linear-gradient(180deg, #fafafa 0%, white 100%);
+    padding: var(--space-20) var(--space-6) var(--space-16);
+    border-bottom: 1px solid var(--color-border);
+    text-align: center;
+  }
+  .hero-A__inner { max-width: 720px; margin: 0 auto; }
+  .hero-A__title {
+    font-size: var(--text-4xl); font-weight: var(--weight-bold);
+    color: var(--color-text);
+    margin-bottom: var(--space-3);
+    letter-spacing: -0.02em;
+  }
+  .hero-A__subtitle {
+    font-size: var(--text-lg); color: var(--color-text-secondary);
+    margin-bottom: var(--space-8);
+    line-height: var(--leading-snug);
+  }
+  .search-big {
+    display: flex; gap: var(--space-2);
+    box-shadow: var(--shadow-lg);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: white;
+  }
+  .search-big input {
+    flex: 1; height: 56px;
+    padding: 0 var(--space-5);
+    font-size: var(--text-md);
+    border: 1px solid var(--color-border-strong); border-right: 0;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+  .search-big input:focus { outline: none; border-color: var(--color-primary); }
+  .search-big button {
+    height: 56px; padding: 0 var(--space-6);
+    background: var(--color-primary); color: white;
+    border: 1px solid var(--color-primary);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    font-size: var(--text-md); font-weight: var(--weight-medium);
+  }
+  .search-big button:hover { background: var(--color-primary-hover); }
+  .search-suggestions {
+    margin-top: var(--space-4);
+    font-size: var(--text-sm); color: var(--color-text-muted);
+  }
+  .search-suggestions a { margin: 0 var(--space-2); color: var(--color-text-secondary); }
+
+  /* ============== VARIANT B: HERO + INTENT TILES ============== */
+  .hero-B {
+    padding: var(--space-12) var(--space-6) var(--space-6);
+    background: linear-gradient(180deg, #fafafa 0%, white 100%);
+  }
+  .hero-B__inner { max-width: 720px; margin: 0 auto; text-align: center; }
+  .hero-B__title { font-size: var(--text-3xl); font-weight: var(--weight-bold); margin-bottom: var(--space-3); letter-spacing: -0.02em; }
+  .hero-B__subtitle { font-size: var(--text-md); color: var(--color-text-secondary); margin-bottom: var(--space-6); }
+
+  .intent-tiles {
+    max-width: var(--max-content); margin: var(--space-8) auto;
+    padding: 0 var(--space-6);
+  }
+  .intent-tiles__title {
+    font-size: var(--text-base); font-weight: var(--weight-semibold);
+    color: var(--color-text-secondary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: var(--space-5); text-align: center;
+  }
+  .intent-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--space-4);
+  }
+  .intent-tile {
+    display: block;
+    padding: var(--space-5);
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: var(--color-text);
+    position: relative;
+    overflow: hidden;
+  }
+  .intent-tile:hover {
+    border-color: var(--color-primary); text-decoration: none; color: var(--color-text);
+    box-shadow: var(--shadow-md); transform: translateY(-2px);
+    transition: all 0.15s;
+  }
+  .intent-tile__icon {
+    width: 40px; height: 40px;
+    background: var(--color-primary-light); color: var(--color-primary);
+    border-radius: var(--radius-md);
+    display: grid; place-items: center;
+    font-size: 20px; margin-bottom: var(--space-3);
+  }
+  .intent-tile__title { font-size: var(--text-md); font-weight: var(--weight-semibold); margin-bottom: var(--space-1); }
+  .intent-tile__desc { font-size: var(--text-sm); color: var(--color-text-muted); line-height: var(--leading-snug); }
+  .intent-tile__count { display: block; font-size: var(--text-xs); color: var(--color-text-muted); margin-top: var(--space-3); }
+
+  /* ============== VARIANT C: TWO-COLUMN EDITORIAL HERO ============== */
+  .hero-C {
+    max-width: var(--max-wide);
+    margin: 0 auto;
+    padding: var(--space-12) var(--space-6) var(--space-12);
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: var(--space-12);
+    align-items: center;
+  }
+  .hero-C__title { font-size: var(--text-4xl); font-weight: var(--weight-bold); letter-spacing: -0.02em; margin-bottom: var(--space-4); line-height: var(--leading-tight); }
+  .hero-C__title em { color: var(--color-primary); font-style: normal; }
+  .hero-C__subtitle {
+    font-size: var(--text-md); color: var(--color-text-secondary);
+    line-height: var(--leading-relaxed); margin-bottom: var(--space-6);
+    max-width: 50ch;
+  }
+  .hero-C__search {
+    display: flex; gap: 0; max-width: 520px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md); overflow: hidden;
+  }
+  .hero-C__search input { flex: 1; height: 48px; padding: 0 var(--space-4); font-size: var(--text-base); border: 0; }
+  .hero-C__search input:focus { outline: none; }
+  .hero-C__search button { height: 48px; padding: 0 var(--space-5); background: var(--color-primary); color: white; border: 0; font-weight: var(--weight-medium); }
+
+  .hero-C__featured {
+    background: var(--color-surface-alt);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+  }
+  .hero-C__featured-label {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--color-primary); font-weight: var(--weight-semibold);
+    margin-bottom: var(--space-3);
+  }
+  .featured-scholar {
+    display: flex; gap: var(--space-3); align-items: start;
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .featured-scholar:last-child { border-bottom: 0; }
+  .featured-scholar__photo {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+    display: grid; place-items: center;
+    color: white; font-weight: var(--weight-semibold); font-size: var(--text-sm);
+    flex-shrink: 0;
+  }
+  .featured-scholar__name { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-bottom: 2px; }
+  .featured-scholar__title { font-size: var(--text-xs); color: var(--color-text-muted); line-height: var(--leading-snug); }
+
+  /* Sketch toolbar */
+  #sketch-tools {
+    position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+    background: rgba(0,0,0,0.85); color: white;
+    padding: 6px 10px; border-radius: 6px;
+    font-family: system-ui; font-size: 11px;
+    opacity: 0.5; transition: opacity 0.2s;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #sketch-tools:hover { opacity: 1; }
+
+  @media (max-width: 800px) {
+    .hero-A { padding: var(--space-12) var(--space-4); }
+    .hero-A__title { font-size: var(--text-3xl); }
+    .hero-C { grid-template-columns: 1fr; }
+    .stats-strip span { display: block; margin: 2px 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Variant Navigation -->
+<div id="variant-nav">
+  <span class="label">Sketch 003 · Home / landing</span>
+  <button class="variant-tab" onclick="showVariant('a', this)">A: Search-dominant hero</button>
+  <button class="variant-tab" onclick="showVariant('b', this)">B: Hero + intent tiles</button>
+  <button class="variant-tab" onclick="showVariant('c', this)">C: Two-column editorial</button>
+  <button class="variant-tab active" onclick="showVariant('d', this)">D: A's hero + ReciterAI topic carousel ★ Selected</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT A: SEARCH-DOMINANT HERO                              -->
+<!-- ============================================================ -->
+<div id="variant-a" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <section class="hero-A">
+    <div class="hero-A__inner">
+      <h1 class="hero-A__title">Scholars at Weill Cornell Medicine</h1>
+      <p class="hero-A__subtitle">Discover the people, publications, and programs that drive research at WCM.</p>
+      <div class="search-big">
+        <input type="search" placeholder="Search by name, topic, department, or publication…" autofocus>
+        <button>Search</button>
+      </div>
+      <div class="search-suggestions">
+        Try: <a href="#">cardio-oncology</a><a href="#">CRISPR</a><a href="#">infectious disease</a><a href="#">dean of medicine</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-strip">
+    <span><strong>3,247</strong> scholars</span>·<span><strong>184,512</strong> publications</span>·<span>Last updated <strong>today, 4:00 AM</strong></span>
+  </div>
+
+  <section class="browse-grid">
+    <h2 class="browse-grid__title">Browse</h2>
+    <p class="browse-grid__subtitle">Explore scholars by program, department, or role.</p>
+    <div class="browse-grid__items">
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Department of Medicine</div>
+        <div class="browse-tile__desc">512 scholars · the largest department</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Surgery</div>
+        <div class="browse-tile__desc">218 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Pediatrics</div>
+        <div class="browse-tile__desc">187 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Population Health Sciences</div>
+        <div class="browse-tile__desc">94 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Full-time faculty</div>
+        <div class="browse-tile__desc">2,108 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Postdoctoral fellows</div>
+        <div class="browse-tile__desc">412 scholars</div>
+      </a>
+    </div>
+  </section>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT B: HERO + INTENT TILES (UCSF-inspired)               -->
+<!-- ============================================================ -->
+<div id="variant-b" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <section class="hero-B">
+    <div class="hero-B__inner">
+      <h1 class="hero-B__title">Scholars at Weill Cornell Medicine</h1>
+      <p class="hero-B__subtitle">Discover the people, publications, and programs that drive research at WCM.</p>
+      <div class="search-big" style="max-width:600px;margin:0 auto">
+        <input type="search" placeholder="Search by name, topic, department, or publication…">
+        <button>Search</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-strip">
+    <span><strong>3,247</strong> scholars</span>·<span><strong>184,512</strong> publications</span>·<span>Last updated <strong>today, 4:00 AM</strong></span>
+  </div>
+
+  <section class="intent-tiles">
+    <div class="intent-tiles__title">Find researchers by intent</div>
+    <div class="intent-grid">
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">🎓</div>
+        <div class="intent-tile__title">Mentors for trainees</div>
+        <div class="intent-tile__desc">Faculty currently accepting graduate students or postdocs.</div>
+        <span class="intent-tile__count">~340 scholars</span>
+      </a>
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">🔬</div>
+        <div class="intent-tile__title">Currently NIH-funded</div>
+        <div class="intent-tile__desc">Active R01, R03, K-series, U-series, and other NIH grants.</div>
+        <span class="intent-tile__count">~1,240 scholars</span>
+      </a>
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">🏥</div>
+        <div class="intent-tile__title">Clinical trial investigators</div>
+        <div class="intent-tile__desc">Faculty leading registered clinical trials at WCM and NYP.</div>
+        <span class="intent-tile__count">~480 scholars</span>
+      </a>
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">🌐</div>
+        <div class="intent-tile__title">Global health</div>
+        <div class="intent-tile__desc">Researchers with international collaborations and field programs.</div>
+        <span class="intent-tile__count">~210 scholars</span>
+      </a>
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">📰</div>
+        <div class="intent-tile__title">For the media</div>
+        <div class="intent-tile__desc">Faculty available for press inquiries and expert commentary.</div>
+        <span class="intent-tile__count">~180 scholars</span>
+      </a>
+      <a href="#" class="intent-tile">
+        <div class="intent-tile__icon">🆕</div>
+        <div class="intent-tile__title">Recently joined</div>
+        <div class="intent-tile__desc">Scholars who joined WCM in the last 12 months.</div>
+        <span class="intent-tile__count">~94 scholars</span>
+      </a>
+    </div>
+  </section>
+
+  <section class="browse-grid">
+    <h2 class="browse-grid__title">Or browse by department</h2>
+    <div class="browse-grid__items">
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Medicine</div>
+        <div class="browse-tile__desc">512 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Surgery</div>
+        <div class="browse-tile__desc">218 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Pediatrics</div>
+        <div class="browse-tile__desc">187 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Radiology</div>
+        <div class="browse-tile__desc">142 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Psychiatry</div>
+        <div class="browse-tile__desc">128 scholars</div>
+      </a>
+      <a href="#" class="browse-tile" style="display:flex;align-items:center;justify-content:center;color:var(--color-link);font-weight:var(--weight-medium)">
+        <div>See all 47 departments →</div>
+      </a>
+    </div>
+  </section>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT C: TWO-COLUMN EDITORIAL HERO                         -->
+<!-- ============================================================ -->
+<div id="variant-c" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <section class="hero-C">
+    <div>
+      <h1 class="hero-C__title">Discover the scholars and science of <em>Weill Cornell Medicine</em>.</h1>
+      <p class="hero-C__subtitle">Search 3,247 scholars and 184,512 publications spanning research, education, and patient care across NewYork-Presbyterian, Memorial Sloan Kettering, and Hospital for Special Surgery.</p>
+      <div class="hero-C__search">
+        <input type="search" placeholder="Search by name, topic, department…">
+        <button>Search</button>
+      </div>
+      <div style="margin-top:var(--space-4);font-size:var(--text-sm);color:var(--color-text-muted)">
+        Try: <a href="#" style="margin-right:var(--space-3)">cardio-oncology</a><a href="#" style="margin-right:var(--space-3)">CRISPR</a><a href="#">dean of medicine</a>
+      </div>
+    </div>
+    <div class="hero-C__featured">
+      <div class="hero-C__featured-label">Recently featured</div>
+      <div class="featured-scholar">
+        <div class="featured-scholar__photo">ER</div>
+        <div>
+          <div class="featured-scholar__name">Eleanor M. Ramirez, MD</div>
+          <div class="featured-scholar__title">Chief, Cardiology · Sandra A. Daugherty Professor</div>
+        </div>
+      </div>
+      <div class="featured-scholar">
+        <div class="featured-scholar__photo" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</div>
+        <div>
+          <div class="featured-scholar__name">David S. Kim, MD, PhD</div>
+          <div class="featured-scholar__title">Stephen J. Riggio Distinguished Professor of Genomics</div>
+        </div>
+      </div>
+      <div class="featured-scholar">
+        <div class="featured-scholar__photo" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</div>
+        <div>
+          <div class="featured-scholar__name">Latifa Okello, MD, MPH</div>
+          <div class="featured-scholar__title">Associate Professor of Population Health Sciences</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-strip">
+    <span>Last updated <strong>today, 4:00 AM</strong></span>·<span><strong>3,247</strong> scholars</span>·<span><strong>184,512</strong> publications</span>·<span><strong>1,240</strong> currently NIH-funded</span>
+  </div>
+
+  <section class="browse-grid">
+    <h2 class="browse-grid__title">Browse the community</h2>
+    <p class="browse-grid__subtitle">Explore scholars by department, role, or area of work.</p>
+    <div class="browse-grid__items">
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Department of Medicine</div>
+        <div class="browse-tile__desc">512 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Surgery</div>
+        <div class="browse-tile__desc">218 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Pediatrics</div>
+        <div class="browse-tile__desc">187 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Full-time faculty</div>
+        <div class="browse-tile__desc">2,108 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Postdoctoral fellows</div>
+        <div class="browse-tile__desc">412 scholars</div>
+      </a>
+      <a href="#" class="browse-tile">
+        <div class="browse-tile__title">Currently NIH-funded</div>
+        <div class="browse-tile__desc">1,240 scholars</div>
+      </a>
+    </div>
+  </section>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT D: A's HERO + ReCITER AI TOPIC FEED (refinement)     -->
+<!-- ============================================================ -->
+<div id="variant-d" class="variant active">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <section class="hero-A">
+    <div class="hero-A__inner">
+      <h1 class="hero-A__title">Scholars at Weill Cornell Medicine</h1>
+      <p class="hero-A__subtitle">Discover the people, publications, and programs that drive research at WCM.</p>
+      <div class="search-big">
+        <input type="search" placeholder="Search by name, topic, department, or publication…" autofocus>
+        <button>Search</button>
+      </div>
+      <div class="search-suggestions">
+        Try: <a href="#">cardio-oncology</a><a href="#">CRISPR</a><a href="#">infectious disease</a><a href="#">dean of medicine</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="stats-strip">
+    <span><strong>3,247</strong> scholars</span>·<span><strong>184,512</strong> publications</span>·<span>Last updated <strong>today, 4:00 AM</strong></span>
+  </div>
+
+  <section class="topic-feed">
+    <div class="topic-feed__header">
+      <div>
+        <h2 class="topic-feed__title">Selected research at Weill Cornell Medicine</h2>
+        <p class="topic-feed__subtitle">Recent highlights across active research areas, curated by ReCiterAI. <a href="#" style="color:var(--color-text-muted);text-decoration:underline;text-decoration-style:dotted">How is this selected?</a></p>
+      </div>
+      <a href="#" class="topic-feed__all">Browse all 67 topics →</a>
+    </div>
+
+    <div class="topic-carousel-wrapper">
+      <button class="carousel-arrow carousel-arrow--prev" onclick="scrollCarousel(-1)" aria-label="Scroll left">‹</button>
+      <button class="carousel-arrow carousel-arrow--next" onclick="scrollCarousel(1)" aria-label="Scroll right">›</button>
+      <div class="topic-carousel" id="topic-carousel">
+
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Aging &amp; Geroscience</a>
+          <h3 class="topic-card__topic"><a href="#">Cellular Senescence &amp; Molecular Aging</a></h3>
+          <span class="topic-card__count">31 publications · 12 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Senolytic clearance of p16+ cells reverses age-related muscle dysfunction</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span> Latifa Okello</a>
+            <span class="topic-card__journal"><em>Cell Metabolism</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">NAD+ metabolism markers as clinical aging biomarkers</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">AF</span> Andrew Foster</a>
+            <span class="topic-card__journal"><em>Nature Aging</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Cardiovascular Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Cardiotoxicity from Cancer Therapies</a></h3>
+          <span class="topic-card__count">87 publications · 24 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Anthracycline cardiotoxicity in long-term breast cancer survivors</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">ER</span> Eleanor Ramirez</a>
+            <span class="topic-card__author">+3 WCM</span>
+            <span class="topic-card__journal"><em>JAMA Cardiology</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">CL</span> Cynthia Liu</a>
+            <span class="topic-card__author">+1 WCM</span>
+            <span class="topic-card__journal"><em>NEJM</em> · 2023</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Neurodegenerative Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Tau-Targeting Therapeutics in Alzheimer's</a></h3>
+          <span class="topic-card__count">38 publications · 18 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Tau-targeting immunotherapy slows hippocampal atrophy in early Alzheimer's disease</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span> David Kim</a>
+            <span class="topic-card__author">+2 WCM</span>
+            <span class="topic-card__journal"><em>Nature</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Microglial TREM2 signaling and amyloid clearance in transgenic models</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">AF</span> Andrew Foster</a>
+            <span class="topic-card__journal"><em>Neuron</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Infectious Disease &amp; Host Defense</a>
+          <h3 class="topic-card__topic"><a href="#">Long COVID Immune Signatures</a></h3>
+          <span class="topic-card__count">62 publications · 31 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Long COVID immune signatures across age and disease severity</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">CL</span> Cynthia Liu</a>
+            <span class="topic-card__author">+4 WCM</span>
+            <span class="topic-card__journal"><em>Cell</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">T cell exhaustion patterns predict persistent post-acute COVID symptoms</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">MG</span> Maria Garcia</a>
+            <span class="topic-card__journal"><em>Nature Medicine</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Breast Cancer</a>
+          <h3 class="topic-card__topic"><a href="#">HER2-Low Breast Cancer Therapeutics</a></h3>
+          <span class="topic-card__count">52 publications · 19 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">HER2-low breast cancer: redefining therapeutic targeting</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">MG</span> Maria Garcia</a>
+            <span class="topic-card__author">+3 WCM</span>
+            <span class="topic-card__journal"><em>Lancet Oncology</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Trastuzumab-induced cardiomyopathy: long-term outcomes meta-analysis</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">ER</span> Eleanor Ramirez</a>
+            <span class="topic-card__journal"><em>JACC</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Mental Health &amp; Psychiatry</a>
+          <h3 class="topic-card__topic"><a href="#">Behavioral Activation for Late-Life Depression</a></h3>
+          <span class="topic-card__count">22 publications · 11 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Behavioral activation for late-life depression: 5-year pragmatic RCT</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">JR</span> Jennifer Reynolds</a>
+            <span class="topic-card__journal"><em>JAMA Psychiatry</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Inflammation biomarkers in adolescent anxiety disorders</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">AW</span> Andrea Wong</a>
+            <span class="topic-card__journal"><em>Biological Psychiatry</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Genetics, Genomics &amp; Precision Medicine</a>
+          <h3 class="topic-card__topic"><a href="#">Polygenic Risk Scores in Cancer Screening</a></h3>
+          <span class="topic-card__count">31 publications · 14 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Polygenic risk scores improve early detection in pancreatic cancer screening</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span> David Kim</a>
+            <span class="topic-card__journal"><em>Nature Medicine</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Whole-genome sequencing in newborn screening: implementation framework</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">RT</span> Rachel Tran</a>
+            <span class="topic-card__author">+2 WCM</span>
+            <span class="topic-card__journal"><em>NEJM</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Single-Cell &amp; Spatial Biology</a>
+          <h3 class="topic-card__topic"><a href="#">Spatial Transcriptomics in Pancreatic Cancer</a></h3>
+          <span class="topic-card__count">24 publications · 9 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Spatial transcriptomics reveals tumor microenvironment heterogeneity in pancreatic adenocarcinoma</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">AF</span> Andrew Foster</a>
+            <span class="topic-card__journal"><em>Nature</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Single-cell atlas of the human kidney across aging and disease</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span> Latifa Okello</a>
+            <span class="topic-card__author">+5 WCM</span>
+            <span class="topic-card__journal"><em>Cell</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Immunology &amp; Inflammation</a>
+          <h3 class="topic-card__topic"><a href="#">CAR-T Engineering for Solid Tumors</a></h3>
+          <span class="topic-card__count">45 publications · 21 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">CAR-T cell engineering for solid tumor penetration</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span> David Kim</a>
+            <span class="topic-card__author">+4 WCM</span>
+            <span class="topic-card__journal"><em>Nature</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Autoreactive T cell signatures in checkpoint-inhibitor myocarditis</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">CL</span> Cynthia Liu</a>
+            <span class="topic-card__journal"><em>Cell</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Women's Health &amp; Reproductive Medicine</a>
+          <h3 class="topic-card__topic"><a href="#">Postpartum Cardiovascular Surveillance</a></h3>
+          <span class="topic-card__count">28 publications · 13 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Postpartum cardiovascular surveillance protocols: a multicenter validation</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">ER</span> Eleanor Ramirez</a>
+            <span class="topic-card__author">+2 WCM</span>
+            <span class="topic-card__journal"><em>Obstetrics &amp; Gynecology</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Hormone therapy and breast cancer recurrence: an updated meta-analysis</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">MG</span> Maria Garcia</a>
+            <span class="topic-card__journal"><em>JNCI</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Health Equity &amp; Social Determinants</a>
+          <h3 class="topic-card__topic"><a href="#">Care Fragmentation in Older Adults</a></h3>
+          <span class="topic-card__count">27 publications · 14 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Neighborhood-level food insecurity and metabolic disease across NYC</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span> Latifa Okello</a>
+            <span class="topic-card__journal"><em>JAMA Network Open</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Race-conscious risk prediction in cardiovascular medicine: an empirical reassessment</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">JR</span> Jennifer Reynolds</a>
+            <span class="topic-card__author">+1 WCM</span>
+            <span class="topic-card__journal"><em>NEJM</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Digital Health &amp; Telemedicine</a>
+          <h3 class="topic-card__topic"><a href="#">Wearable Atrial Fibrillation Detection</a></h3>
+          <span class="topic-card__count">18 publications · 11 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Wearable-based atrial fibrillation detection: real-world clinical implementation</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">SP</span> Sanjay Patel</a>
+            <span class="topic-card__author">+2 WCM</span>
+            <span class="topic-card__journal"><em>JAMA</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Asynchronous telemental health for adolescent depression: pragmatic trial</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">JR</span> Jennifer Reynolds</a>
+            <span class="topic-card__journal"><em>JAMA Psychiatry</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Cardiovascular Disease</a>
+          <h3 class="topic-card__topic"><a href="#">Heart Failure with Preserved EF</a></h3>
+          <span class="topic-card__count">120 publications · 38 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Sex differences in heart failure with preserved ejection fraction</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">ER</span> Eleanor Ramirez</a>
+            <span class="topic-card__author">+2 WCM</span>
+            <span class="topic-card__journal"><em>Circulation</em> · 2022</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Outcomes of TAVR in patients aged 90 and older</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">SP</span> Sanjay Patel</a>
+            <span class="topic-card__journal"><em>JACC</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card">
+        <header class="topic-card__head">
+          <a href="#" class="topic-card__parent">Pediatrics &amp; Neonatology</a>
+          <h3 class="topic-card__topic"><a href="#">Preterm Infant Outcomes</a></h3>
+          <span class="topic-card__count">42 publications · 16 scholars</span>
+        </header>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Postnatal corticosteroid timing in extremely preterm infants</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">RT</span> Rachel Tran</a>
+            <span class="topic-card__journal"><em>NEJM</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__pub">
+          <a href="#" class="topic-card__pub-title">Pediatric cancer survivorship cardiovascular surveillance guidelines</a>
+          <div class="topic-card__pub-meta">
+            <a href="#" class="topic-card__author"><span class="topic-card__avatar">ER</span> Eleanor Ramirez</a>
+            <span class="topic-card__author">+1 WCM</span>
+            <span class="topic-card__journal"><em>JAMA Pediatrics</em> · 2024</span>
+          </div>
+        </div>
+        <div class="topic-card__footnote">Selected by ReCiterAI · <a href="#">methodology</a></div>
+      </article>
+
+      <article class="topic-card topic-card--more">
+        <header class="topic-card__head">
+          <h3 class="topic-card__topic">Browse all subtopics →</h3>
+          <span class="topic-card__count">From all 67 research areas</span>
+        </header>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted);line-height:var(--leading-relaxed);margin-top:var(--space-3)">
+          ~2,000 subtopics across the WCM research portfolio. Browse by parent topic — Cardiovascular Disease, Neuroscience &amp; Neurology, Aging &amp; Geroscience, Cancer Biology, Health Equity, Infectious Disease, and 61 other areas — or search directly for a subtopic by name.
+        </div>
+      </article>
+
+
+      </div><!-- /topic-carousel -->
+    </div><!-- /topic-carousel-wrapper -->
+
+    <div class="topic-feed__more">
+      <a href="#">Or browse the full topic taxonomy →</a>
+    </div>
+  </section>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+    </div>
+  </footer>
+
+</div>
+
+<style>
+  /* Topic feed (variant D) */
+  .topic-feed {
+    max-width: var(--max-wide);
+    margin: 0 auto;
+    padding: var(--space-12) var(--space-6) var(--space-16);
+  }
+  .topic-feed__header {
+    display: flex; align-items: baseline; gap: var(--space-4);
+    margin-bottom: var(--space-8);
+    flex-wrap: wrap;
+  }
+  .topic-feed__title {
+    font-size: var(--text-2xl); font-weight: var(--weight-bold);
+    margin-bottom: var(--space-1);
+    letter-spacing: -0.01em;
+  }
+  .topic-feed__subtitle {
+    font-size: var(--text-sm); color: var(--color-text-muted);
+    margin: 0;
+  }
+  .topic-feed__all {
+    margin-left: auto;
+    font-size: var(--text-sm); font-weight: var(--weight-medium);
+  }
+  /* Carousel layout */
+  .topic-carousel-wrapper {
+    position: relative;
+    margin: 0 -8px; /* counter horizontal arrow space */
+  }
+  .topic-carousel {
+    display: flex;
+    gap: var(--space-5);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    padding: var(--space-2) var(--space-2) var(--space-6);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  .topic-carousel::-webkit-scrollbar {
+    height: 6px;
+  }
+  .topic-carousel::-webkit-scrollbar-track { background: transparent; }
+  .topic-carousel::-webkit-scrollbar-thumb {
+    background: var(--color-border-strong);
+    border-radius: var(--radius-pill);
+  }
+  .topic-carousel::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+  .carousel-arrow {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: white;
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-text);
+    font-size: 22px; font-weight: var(--weight-medium);
+    line-height: 1;
+    display: grid; place-items: center;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+    z-index: 5;
+    transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  }
+  .carousel-arrow:hover {
+    background: var(--color-primary); border-color: var(--color-primary); color: white;
+  }
+  .carousel-arrow--prev { left: -20px; }
+  .carousel-arrow--next { right: -20px; }
+  .carousel-arrow:active { transform: translateY(-50%) scale(0.95); }
+  @media (max-width: 800px) {
+    .carousel-arrow { display: none; }
+  }
+
+  .topic-card {
+    flex: 0 0 360px;
+    scroll-snap-align: start;
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    display: flex; flex-direction: column;
+  }
+  @media (max-width: 600px) {
+    .topic-card { flex: 0 0 88vw; }
+  }
+  .topic-card--more {
+    background: var(--color-surface-alt);
+    border-style: dashed;
+  }
+  .topic-card--more .topic-card__topic { color: var(--color-primary); }
+  .topic-card:hover {
+    border-color: var(--color-border-strong);
+    box-shadow: var(--shadow-md);
+  }
+  .topic-card__head {
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+  .topic-card__parent {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: var(--weight-semibold);
+    text-decoration: none;
+    margin-bottom: var(--space-2);
+  }
+  .topic-card__parent:hover { color: var(--color-primary); text-decoration: none; }
+  .topic-card__topic {
+    font-size: var(--text-md); font-weight: var(--weight-semibold);
+    margin: 0 0 var(--space-1);
+    line-height: var(--leading-snug);
+  }
+  .topic-card__topic a { color: var(--color-text); }
+  .topic-card__topic a:hover { color: var(--color-primary); text-decoration: none; }
+  .topic-card__count {
+    font-size: var(--text-xs); color: var(--color-text-muted);
+  }
+  .topic-card__footnote {
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px dashed var(--color-border);
+    font-size: 11px; color: var(--color-text-muted);
+    font-style: italic;
+  }
+  .topic-card__footnote a { color: var(--color-text-muted); text-decoration: underline; text-decoration-style: dotted; }
+  .topic-card__footnote a:hover { color: var(--color-primary); }
+  .topic-card__pub {
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--color-border);
+  }
+  .topic-card__pub:first-of-type { border-top: 0; padding-top: 0; }
+  .topic-card__pub-title {
+    display: block;
+    font-size: var(--text-sm); font-weight: var(--weight-medium);
+    color: var(--color-text);
+    line-height: var(--leading-snug);
+    margin-bottom: var(--space-2);
+  }
+  .topic-card__pub-title:hover { color: var(--color-primary); text-decoration: none; }
+  .topic-card__pub-meta {
+    display: flex; flex-wrap: wrap; gap: var(--space-2);
+    font-size: var(--text-xs); color: var(--color-text-muted);
+    align-items: center;
+  }
+  .topic-card__author {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--color-text-secondary);
+  }
+  .topic-card__author:hover { color: var(--color-primary); text-decoration: none; }
+  .topic-card__avatar {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+    display: grid; place-items: center;
+    color: white; font-size: 9px; font-weight: var(--weight-semibold);
+  }
+  .topic-card__journal { color: var(--color-text-muted); }
+  .topic-feed__more {
+    margin-top: var(--space-8);
+    text-align: center;
+    font-size: var(--text-sm);
+  }
+</style>
+
+<!-- Sketch toolbar -->
+<div id="sketch-tools">
+  <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+    <option value="default">Theme: Default</option>
+  </select>
+  <span style="color:#999">·</span>
+  <span style="color:#999">Sketch 003</span>
+</div>
+
+<script>
+function showVariant(id, btn) {
+  document.querySelectorAll('.variant').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.variant-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('variant-' + id).classList.add('active');
+  btn.classList.add('active');
+  window.scrollTo(0, 0);
+}
+function scrollCarousel(direction) {
+  const carousel = document.getElementById('topic-carousel');
+  if (!carousel) return;
+  const card = carousel.querySelector('.topic-card');
+  const cardWidth = card.offsetWidth + 20; // card + gap
+  const visibleCards = Math.max(1, Math.floor(carousel.offsetWidth / cardWidth));
+  carousel.scrollBy({ left: direction * cardWidth * visibleCards, behavior: 'smooth' });
+}
+</script>
+
+</body>
+</html>

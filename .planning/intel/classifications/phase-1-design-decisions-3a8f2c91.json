@@ -1,0 +1,36 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/phase-1-design-decisions.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Scholars @ WCM — Phase 1 Design Decisions",
+  "summary": "Eight ratified Phase 1 architectural decisions covering API architecture, identity, URLs, departed faculty, refresh failures, DynamoDB ETL, search engine, and render strategy.",
+  "scope": [
+    "API architecture",
+    "Next.js API routes",
+    "CWID identity",
+    "cwid_aliases",
+    "URL slug strategy",
+    "slug_history",
+    "departed faculty lifecycle",
+    "soft-delete retention",
+    "daily ETL refresh",
+    "ED-first abort cascade",
+    "DynamoDB minimal-projection ETL",
+    "ReCiterAI",
+    "OpenSearch",
+    "BM25 per-field boosting",
+    "Next.js ISR",
+    "on-demand revalidation",
+    "CloudFront caching",
+    "VIVO 301 redirects"
+  ],
+  "cross_refs": [
+    "Scholars Functional Spec - Phase 1 - 2026-04-28.md",
+    "Scholars Project Charter - 2026-04-28.md",
+    "openapi.yaml"
+  ],
+  "locked": true,
+  "precedence": 2,
+  "notes": "Manifest declared ADR with precedence 2; document explicitly states decisions are LOCKED for Phase 1 prototype except decision #1 (API architecture in production) which is preliminary/deferred to Mohammad's design kickoff. All eight decisions ratified 2026-04-29."
+}

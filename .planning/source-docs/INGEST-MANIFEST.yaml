@@ -1,0 +1,19 @@
+docs:
+  - path: .planning/source-docs/HANDOFF-2026-04-30.md
+    type: DOC
+    precedence: 0
+  - path: .planning/source-docs/design-spec-v1.7.1.md
+    type: SPEC
+    precedence: 1
+  - path: .planning/source-docs/phase-1-design-decisions.md
+    type: ADR
+    precedence: 2
+  - path: .planning/source-docs/functional-spec-phase-1.md
+    type: SPEC
+    precedence: 3
+  - path: .planning/source-docs/BUILD-PLAN.md
+    type: DOC
+    precedence: 4
+  - path: .planning/source-docs/charter.md
+    type: PRD
+    precedence: 9

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 008 — About · Scholars @ WCM</title>
+<style>
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  --color-primary: #B31B1B;
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;
+  --color-link-hover: #1f3b53;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Charter', 'Tiempos Headline', Georgia, serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+  --text-4xl: 44px;
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+
+  --max-content: 760px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+
+body { padding-top: 44px; }
+
+/* Sketch chrome */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label { color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4;
+}
+
+/* Header */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: var(--font-display);
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__search { flex: 1; max-width: 480px; position: relative; }
+.wcm-header__search input {
+  width: 100%; height: 36px;
+  padding: 0 var(--space-3) 0 36px;
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--color-text);
+}
+.wcm-header__search input::placeholder { color: var(--color-text-muted); }
+.wcm-header__search input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+.wcm-header__search::before {
+  content: "⌕"; position: absolute; left: 12px; top: 50%;
+  transform: translateY(-50%); color: var(--color-text-muted);
+  font-size: 16px; pointer-events: none;
+}
+.wcm-header__nav { display: flex; gap: var(--space-5); margin-left: auto; font-size: var(--text-sm); }
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); position: relative; }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+.wcm-header__nav a.is-current { color: white; font-weight: var(--weight-semibold); }
+.wcm-header__nav a.is-current::after {
+  content: ""; position: absolute;
+  left: 0; right: 0; bottom: -22px;
+  height: 2px; background: white;
+}
+
+/* About content — narrow column for editorial reading */
+.about-page {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-6) var(--space-16);
+}
+
+.about-page__head {
+  margin-bottom: var(--space-10);
+}
+.about-page__title {
+  font-family: var(--font-display);
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+  margin-bottom: var(--space-3);
+}
+.about-page__lede {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-snug);
+}
+
+/* Anchor strip */
+.about-anchors {
+  display: flex; gap: var(--space-1); flex-wrap: wrap;
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-10);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+.about-anchors a {
+  display: inline-flex; align-items: center;
+  height: 30px; padding: 0 var(--space-3);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-pill);
+}
+.about-anchors a:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* Sections */
+.about-section {
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--color-border);
+}
+.about-section:first-of-type { border-top: 0; padding-top: 0; }
+.about-section__title {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-5);
+}
+.about-section h3 {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  margin-top: var(--space-8);
+  margin-bottom: var(--space-3);
+  letter-spacing: -0.005em;
+}
+.about-section h3:first-child { margin-top: 0; }
+.about-section p {
+  margin: 0 0 var(--space-4);
+  line-height: var(--leading-relaxed);
+  color: var(--color-text);
+}
+.about-section p:last-child { margin-bottom: 0; }
+.about-section ul {
+  padding-left: var(--space-5);
+  margin: 0 0 var(--space-4);
+}
+.about-section li {
+  margin-bottom: var(--space-2);
+  line-height: var(--leading-relaxed);
+}
+.about-section strong {
+  font-weight: var(--weight-semibold);
+}
+
+/* Data source cards */
+.source-grid {
+  display: grid; gap: var(--space-3);
+  margin: var(--space-5) 0;
+}
+.source-card {
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface-alt);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+.source-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--color-accent);
+  margin-bottom: var(--space-2);
+}
+.source-card__body {
+  font-size: var(--text-base);
+  color: var(--color-text);
+  line-height: var(--leading-relaxed);
+}
+.source-card__cadence {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: var(--space-2);
+}
+
+/* Pull-quote callouts for important facts */
+.callout {
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-primary-light);
+  border: 1px solid #f0d6d6;
+  border-radius: var(--radius-md);
+  margin: var(--space-5) 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+}
+.callout__label {
+  display: inline-block;
+  font-size: var(--text-xs); font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--color-primary);
+  margin-bottom: var(--space-2);
+}
+
+/* Contact cards */
+.contact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+@media (max-width: 600px) {
+  .contact-grid { grid-template-columns: 1fr; }
+}
+.contact-card {
+  padding: var(--space-4) var(--space-5);
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.contact-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
+}
+.contact-card__desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-3);
+}
+.contact-card__action {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+/* Footer */
+.wcm-footer {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  padding: var(--space-8) var(--space-6);
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.wcm-footer__inner {
+  max-width: var(--max-wide); margin: 0 auto;
+  display: flex; gap: var(--space-8); flex-wrap: wrap; align-items: baseline;
+}
+.wcm-footer__inner a { color: var(--color-text-secondary); }
+.wcm-footer__attr { margin-left: auto; font-size: var(--text-xs); color: var(--color-text-muted); }
+
+.fade-in { animation: fadeIn 0.4s ease-out both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <span class="label">Sketch 008 · About</span>
+  <span class="badge">New</span>
+  <span style="color:#999;font-size:11px">What Scholars is, where the data comes from, how attribution works, how to suggest corrections</span>
+</div>
+
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <div class="wcm-header__search">
+    <input type="search" placeholder="Search scholars and publications…">
+  </div>
+  <nav class="wcm-header__nav">
+    <a href="#">Browse</a>
+    <a href="#" class="is-current">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<main class="about-page fade-in">
+
+  <header class="about-page__head">
+    <h1 class="about-page__title">About Scholars</h1>
+    <p class="about-page__lede">
+      Scholars is the public-facing directory of research, scholars, and publications at Weill Cornell Medicine. It is built and maintained by WCM's Information Technologies and Services team.
+    </p>
+  </header>
+
+  <nav class="about-anchors">
+    <a href="#what">What Scholars is</a>
+    <a href="#sources">Where the data comes from</a>
+    <a href="#attribution">How publications get attributed</a>
+    <a href="#corrections">Suggest a correction</a>
+    <a href="#contact" style="margin-left:auto">Contact</a>
+  </nav>
+
+  <!-- ============================================================
+       What Scholars is
+       ============================================================ -->
+  <section class="about-section" id="what">
+    <h2 class="about-section__title">What Scholars is</h2>
+    <p>
+      Scholars exists to make WCM's research output discoverable. It surfaces three things: the people doing research at WCM, the publications they have produced, and the topics those publications cover. The site is read-only; faculty, postdocs, and other scholars do not maintain their profiles directly here.
+    </p>
+    <p>
+      Scholars replaces VIVO, the previous WCM research-information system. The migration consolidates several institutional systems — appointment data from Enterprise Directory, publication attribution from ReCiter, and topic classification from ReCiterAI — behind a single public interface.
+    </p>
+
+    <h3>What Scholars is not</h3>
+    <p>
+      Scholars is not a faculty homepage system, a course-listing tool, a clinical-services directory, or a referral platform. For clinical referrals, see <a href="https://weillcornell.org">weillcornell.org</a>. For course listings and academic program details, see the relevant graduate program or department site.
+    </p>
+    <p>
+      Scholars also does not list every WCM affiliate. Some categories of personnel — administrative staff, contractors, visitors — do not appear because they are not classified as scholars in WCM's identity systems.
+    </p>
+  </section>
+
+  <!-- ============================================================
+       Where the data comes from
+       ============================================================ -->
+  <section class="about-section" id="sources">
+    <h2 class="about-section__title">Where the data comes from</h2>
+    <p>
+      Scholars combines data from three institutional systems, each of which is the authoritative source for a different part of the picture. We do not collect new data; we present existing data more usefully.
+    </p>
+
+    <div class="source-grid">
+      <div class="source-card">
+        <div class="source-card__title">Enterprise Directory</div>
+        <div class="source-card__body">
+          The institutional source of truth for who is affiliated with WCM. Provides each scholar's name, title, primary appointment, department, and role (full-time faculty, voluntary faculty, postdoc, doctoral student, etc.).
+        </div>
+        <div class="source-card__cadence">Refreshed daily</div>
+      </div>
+
+      <div class="source-card">
+        <div class="source-card__title">ReCiter</div>
+        <div class="source-card__body">
+          WCM's publication-attribution system. Identifies which PubMed-indexed publications belong to which WCM scholar by matching author names, affiliations, email addresses, and other identifying information against WCM identity records.
+        </div>
+        <div class="source-card__cadence">Refreshed daily</div>
+      </div>
+
+      <div class="source-card">
+        <div class="source-card__title">ReCiterAI</div>
+        <div class="source-card__body">
+          A research-curation tool that scores publications by impact and assigns them to topics and subtopics from WCM's research taxonomy. Drives the "Selected research," "Recent contributions," and "Curated" surfaces across the site.
+        </div>
+        <div class="source-card__cadence">Refreshed weekly</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <div class="callout__label">Important</div>
+      <strong>ReCiterAI scoring is computed for full-time WCM faculty publications.</strong> Co-authors of those publications — including postdocs, doctoral students, and other roles — inherit visibility on curated surfaces. Voluntary faculty, adjunct faculty, and other scholars who do not co-author with full-time faculty are listed in directories and search but do not appear on curated surfaces. This is a deliberate scoping choice driven by computational cost.
+    </div>
+  </section>
+
+  <!-- ============================================================
+       How publications get attributed
+       ============================================================ -->
+  <section class="about-section" id="attribution">
+    <h2 class="about-section__title">How publications get attributed</h2>
+    <p>
+      Most attribution happens automatically. ReCiter compares publication metadata from PubMed against WCM identity records using a combination of author-name matching, institutional affiliation strings, ORCID identifiers (when available), and machine-learning models trained on WCM's publication history. Publications are matched to scholars with high confidence; ambiguous cases are flagged for review.
+    </p>
+    <p>
+      No system is perfect. Common reasons a publication might be missing or misattributed:
+    </p>
+    <ul>
+      <li><strong>Recent publications.</strong> PubMed indexing lags publication by days to weeks; ReCiter's daily sync follows. Expect a 1–2 week delay between publication and appearance on Scholars.</li>
+      <li><strong>Name ambiguity.</strong> Authors with common names or who publish under multiple variants may have publications attributed incorrectly. ORCID adoption and consistent author-name use help.</li>
+      <li><strong>Affiliation strings.</strong> A WCM scholar publishing under a different institutional affiliation (e.g., during a sabbatical) may not be correctly identified.</li>
+      <li><strong>Pre-indexing publications.</strong> Work published before the scholar joined WCM is included if the publication record itself attributes WCM affiliation.</li>
+    </ul>
+    <p>
+      Scholars who notice a missing or incorrect publication on their profile can suggest a correction — see below.
+    </p>
+  </section>
+
+  <!-- ============================================================
+       Corrections
+       ============================================================ -->
+  <section class="about-section" id="corrections">
+    <h2 class="about-section__title">Suggest a correction</h2>
+    <p>
+      If you are a WCM scholar and you notice a problem with your profile — a missing publication, an incorrect attribution, an outdated title, a wrong department — there are two ways to address it.
+    </p>
+
+    <h3>For publication attribution issues</h3>
+    <p>
+      Publication attribution is managed through Publication Manager, a tool available to all WCM scholars. Sign in with your WCM credentials at <a href="#">publications.weill.cornell.edu</a> to confirm pending publications, reject incorrect attributions, or report missing ones. Changes propagate to Scholars within 24 hours.
+    </p>
+
+    <h3>For identity, appointment, or department information</h3>
+    <p>
+      Identity data flows from Enterprise Directory, which is the authoritative WCM record. To update your title, primary appointment, contact email, or department, contact your departmental HR coordinator. Once Enterprise Directory is updated, Scholars reflects the change within 24 hours.
+    </p>
+
+    <h3>For everything else</h3>
+    <p>
+      For corrections that do not fall into the above categories — Areas of interest that seem wrong, a topic page description that is inaccurate, a missing center affiliation — use the contact form below.
+    </p>
+  </section>
+
+  <!-- ============================================================
+       Contact
+       ============================================================ -->
+  <section class="about-section" id="contact">
+    <h2 class="about-section__title">Contact</h2>
+    <p>
+      Scholars is built and maintained by the Information Technologies and Services team at Weill Cornell Medicine, in collaboration with the Office of Faculty Affairs and the Samuel J. Wood Library.
+    </p>
+
+    <div class="contact-grid">
+      <div class="contact-card">
+        <div class="contact-card__title">Site feedback</div>
+        <div class="contact-card__desc">Bug reports, accessibility issues, suggestions for improvement.</div>
+        <a href="#" class="contact-card__action">scholars-feedback@med.cornell.edu →</a>
+      </div>
+
+      <div class="contact-card">
+        <div class="contact-card__title">Data inquiries</div>
+        <div class="contact-card__desc">For journalists, researchers, and partners interested in WCM research-output data.</div>
+        <a href="#" class="contact-card__action">Office of Communications →</a>
+      </div>
+
+      <div class="contact-card">
+        <div class="contact-card__title">Methodology</div>
+        <div class="contact-card__desc">Detailed documentation of how curated surfaces, scoring, and topic assignment work.</div>
+        <a href="#" class="contact-card__action">Methodology page →</a>
+      </div>
+
+      <div class="contact-card">
+        <div class="contact-card__title">Accessibility</div>
+        <div class="contact-card__desc">If you encounter an accessibility barrier on Scholars, please let us know.</div>
+        <a href="#" class="contact-card__action">accessibility@med.cornell.edu →</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wcm-footer">
+  <div class="wcm-footer__inner">
+    <a href="#">About Scholars @ WCM</a>
+    <a href="#">Methodology</a>
+    <a href="#">For faculty</a>
+    <a href="#">Contact</a>
+    <span class="wcm-footer__attr">Powered by ReCiter · Updated daily</span>
+  </div>
+</footer>
+
+<div id="sketch-tools">Sketch 008 · About</div>
+
+</body>
+</html>

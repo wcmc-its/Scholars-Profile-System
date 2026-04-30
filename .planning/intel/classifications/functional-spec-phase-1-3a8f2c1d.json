@@ -1,0 +1,31 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/functional-spec-phase-1.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Scholars @ WCM — Phase 1 Functional Specification",
+  "summary": "Phase 1 functional specification defining user-facing behavior of the Scholars @ WCM application: profiles, search index composition, self-edit, support, sitemap/SEO, and analytics instrumentation.",
+  "scope": [
+    "scholar profile page",
+    "publications ranking",
+    "grants display",
+    "people search index",
+    "publications search index",
+    "autocomplete",
+    "home page",
+    "self-edit (overview)",
+    "support page",
+    "sitemap and SEO",
+    "analytics instrumentation",
+    "empty-state and sparse-profile behavior"
+  ],
+  "cross_refs": [
+    "Scholars Project Charter - 2026-04-28.docx",
+    "WCM_Scholar_Proposal-v2.pptx",
+    "AppointmentsFetchFromED.java",
+    "GrantsFetchFromED.java"
+  ],
+  "locked": false,
+  "precedence": 3,
+  "notes": "Manifest-declared SPEC. Document contains multiple calibration TODOs flagged as open items (AOI relevance threshold, publication-type point weights, citation refresh cadence floor, completeness threshold, edit-event logging channel, service-desk target, character limit) — these are pending requirements/constraints, not locked decisions. One explicit 'Locked' marker in the doc body (numbered pagination, 20 per page) is a SPEC-level constraint, not an ADR-locked decision."
+}

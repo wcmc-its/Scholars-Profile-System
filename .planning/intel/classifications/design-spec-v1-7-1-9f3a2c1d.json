@@ -1,0 +1,39 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/design-spec-v1.7.1.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Scholars @ WCM — Design Spec (Phase 1)",
+  "summary": "Phase 1 UI/UX design specification for the Scholars Profile System (VIVO replacement) covering seven page types, five role categories, components, data sources, and algorithmic surface rules.",
+  "scope": [
+    "Profile page",
+    "Search page",
+    "Topic detail page",
+    "Department detail page",
+    "Browse hub",
+    "Home / Landing page",
+    "About page",
+    "role model (five chip categories)",
+    "Highlight selection formula",
+    "External relationships section",
+    "Status pill",
+    "Scholar chip",
+    "Mentor/Advisor card",
+    "Areas of interest pills",
+    "Copy citations component",
+    "design tokens",
+    "data sources (Enterprise Directory, reciter-db, DynamoDB/ReCiterAI, Jenzabar, COI)",
+    "ReCiterAI scoring rules",
+    "publication-type weighting",
+    "recency curves"
+  ],
+  "cross_refs": [
+    ".planning/sketches/",
+    "DESIGN-FORKS.md",
+    "Functional Spec",
+    ".planning/source-docs/mockups/"
+  ],
+  "locked": false,
+  "precedence": 1,
+  "notes": "Manifest-declared SPEC with precedence 1; treated as locked UI/UX contract per orchestrator instructions even though SPEC type itself does not set locked=true."
+}

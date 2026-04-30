@@ -1,0 +1,26 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/charter.md",
+  "type": "PRD",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Project Charter: Scholars @ Weill Cornell Medicine",
+  "summary": "Project charter establishing business case, stakeholders, objectives, scope, and success criteria for replacing VIVO with a custom AWS-native scholar profile platform.",
+  "scope": [
+    "Scholars @ WCM public site",
+    "Scholar API",
+    "VIVO decommissioning",
+    "Enterprise Directory integration",
+    "ASMS integration",
+    "InfoEd integration",
+    "ReCiter integration",
+    "COI integration",
+    "Faculty self-edit (interim)",
+    "AWS infrastructure (Fargate, RDS, CloudFront, Redis, Route 53, ACM)",
+    "SAML identity integration",
+    "WCM branding standards"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": 9,
+  "notes": "Manifest-declared PRD with precedence 9 (lowest). User explicitly downplayed this doc — they intend to be more ambitious than charter scopes. Where charter conflicts with HANDOFF or design spec, newer docs win. Capture business case, stakeholders, and scope-as-stated but treat as lowest-precedence baseline."
+}

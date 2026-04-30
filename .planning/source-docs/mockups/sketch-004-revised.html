@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 004 — Topic detail (revised proposal) · Scholars @ WCM</title>
+<style>
+/* ==========================================================================
+   Scholars @ WCM — Sketch 004 revised proposal
+   Self-contained for standalone preview. Folds in:
+     - Reduced-red palette (red is now an accent, not a workhorse)
+     - Hero with scholars row + recent highlights
+     - Long-tail rail treatment
+     - Single consolidated feed header
+     - Default sort = Newest (no AI badge unless opted in)
+     - Softer "Curated" framing for AI sort
+   ========================================================================== */
+
+:root {
+  /* Surfaces */
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  /* Text */
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  /* Reduced-red palette: Cornell red is now reserved for brand mark + curated tag.
+     Slate is the new active/affordance color so the page doesn't feel undergrad. */
+  --color-primary: #B31B1B;          /* brand mark + curated tag only */
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;            /* slate — was muted, now load-bearing */
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;              /* slate, not red */
+  --color-link-hover: #1f3b53;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-serif: 'Tiempos Text', 'Charter', Georgia, 'Times New Roman', serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Spacing */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  /* Radius */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.08);
+
+  /* Layout */
+  --max-content: 1100px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; }
+img { max-width: 100%; display: block; }
+
+body { padding-top: 44px; }
+
+/* ============================================================
+   Sketch chrome (the dark bar — review-only, not part of design)
+   ============================================================ */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label {
+  color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4; transition: opacity 0.2s;
+}
+#sketch-tools:hover { opacity: 1; }
+
+/* ============================================================
+   Header
+   ============================================================ */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: 'Charter', 'Tiempos Headline', Georgia, serif;
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__search { flex: 1; max-width: 480px; }
+.wcm-header__search input {
+  width: 100%; height: 36px; padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--color-text);
+}
+.wcm-header__search input::placeholder { color: var(--color-text-muted); }
+.wcm-header__search input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+.wcm-header__nav {
+  display: flex; gap: var(--space-5);
+  margin-left: auto; font-size: var(--text-sm);
+}
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+
+/* ============================================================
+   Crumbs
+   ============================================================ */
+.crumbs {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-4) var(--space-6) 0;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.crumbs a { color: var(--color-text-secondary); }
+.crumbs .sep { margin: 0 var(--space-2); color: var(--color-border-strong); }
+
+/* ============================================================
+   Topic hero — REVISED
+   Now does work: title + description + scholar avatar row.
+   Stats are de-emphasized below.
+   ============================================================ */
+.topic-hero {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
+  border-bottom: 1px solid var(--color-border);
+}
+.topic-hero__label {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-accent); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
+}
+.topic-hero__title {
+  font-size: var(--text-3xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-3);
+}
+.topic-hero__desc {
+  font-size: var(--text-md); color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  max-width: 70ch; margin-bottom: var(--space-6);
+}
+
+/* Scholars row — the new piece. */
+.scholars-row {
+  display: flex; align-items: center;
+  gap: var(--space-3); flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.scholar-chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: 4px 12px 4px 4px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.scholar-chip:hover {
+  border-color: var(--color-accent);
+  text-decoration: none; color: var(--color-text);
+  box-shadow: var(--shadow-sm);
+}
+.scholar-chip__avatar {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  display: grid; place-items: center;
+  color: white; font-size: 10px; font-weight: var(--weight-semibold);
+  flex-shrink: 0;
+}
+.scholar-chip__name { line-height: 1.2; }
+.scholar-chip__title { font-size: 11px; color: var(--color-text-muted); display: block; }
+.scholars-more {
+  display: inline-flex; align-items: center;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.scholars-more:hover { color: var(--color-accent-hover); }
+
+.topic-hero__stats {
+  display: flex; gap: var(--space-6); flex-wrap: wrap;
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-border);
+}
+.topic-hero__stats .stat strong {
+  color: var(--color-text-secondary); font-weight: var(--weight-semibold);
+  margin-right: 4px;
+}
+
+/* ============================================================
+   Recent highlights surface — NEW
+   Three pubs above the rail. No synopsis, no gradient card.
+   Just a clean editorial cap so the page isn't all firehose.
+   ============================================================ */
+.highlights {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-3);
+}
+.highlights__head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+.highlights__title {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+}
+.highlights__caveat {
+  font-size: 11px; color: var(--color-text-muted);
+  font-style: italic;
+}
+.highlights__caveat a {
+  color: var(--color-text-muted); text-decoration: underline; text-decoration-style: dotted;
+}
+.highlights__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-6);
+}
+@media (max-width: 900px) {
+  .highlights__grid { grid-template-columns: 1fr; gap: var(--space-4); }
+}
+.highlight {
+  display: block;
+  padding-right: var(--space-4);
+  border-right: 1px solid var(--color-border);
+}
+.highlight:last-child { border-right: 0; }
+@media (max-width: 900px) {
+  .highlight { border-right: 0; border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-4); padding-right: 0; }
+  .highlight:last-child { border-bottom: 0; }
+}
+.highlight__subtopic {
+  font-size: var(--text-xs); color: var(--color-accent);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: var(--space-2);
+}
+.highlight__title {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+  display: block;
+}
+.highlight__title:hover { color: var(--color-accent); text-decoration: none; }
+.highlight__meta {
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  display: flex; gap: var(--space-3); align-items: center;
+}
+.highlight__author {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--color-text-secondary);
+}
+.highlight__avatar {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  display: grid; place-items: center;
+  color: white; font-size: 9px; font-weight: var(--weight-semibold);
+}
+
+/* ============================================================
+   Layout: rail + main column
+   ============================================================ */
+.layout-B {
+  max-width: var(--max-wide); margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-16);
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--space-10);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-6);
+}
+.layout-B__rail {
+  align-self: start;
+  position: sticky;
+  top: calc(44px + var(--header-h) + var(--space-4));
+  max-height: calc(100vh - 44px - var(--header-h) - var(--space-8));
+  overflow-y: auto;
+  padding-right: var(--space-2);
+}
+
+.rail-title {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-3);
+}
+.rail-search {
+  width: 100%; height: 32px;
+  padding: 0 var(--space-3);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+.rail-search:focus { outline: none; border-color: var(--color-accent); background: white; }
+
+.rail-list { list-style: none; padding: 0; margin: 0; }
+.rail-item {
+  display: flex; gap: var(--space-2); align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  line-height: var(--leading-snug);
+  text-decoration: none;
+}
+.rail-item:hover {
+  background: var(--color-surface-alt); color: var(--color-text);
+  text-decoration: none;
+}
+.rail-item.active {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.rail-item__count {
+  margin-left: auto;
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+.rail-item.active .rail-item__count { color: var(--color-accent); opacity: 0.8; }
+
+/* Long-tail treatment: subtopics with low pub counts get muted. */
+.rail-item--minor {
+  opacity: 0.6;
+}
+.rail-item--minor:hover { opacity: 1; }
+
+.rail-divider {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin: var(--space-4) var(--space-3) var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+}
+
+/* ============================================================
+   Feed — single header (no stacked card)
+   ============================================================ */
+.feed-section { /* main column */ }
+
+.feed-header {
+  margin-bottom: var(--space-6);
+}
+.feed-header__row1 {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.feed-header__title {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+.feed-header__meta {
+  margin-left: auto;
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.feed-header__count { white-space: nowrap; }
+.feed-header__sort {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+}
+.feed-header__sort select {
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text);
+}
+.feed-header__sort select:focus { outline: none; border-color: var(--color-accent); }
+.feed-header__desc {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  max-width: 70ch;
+}
+
+/* Curated tag — soft, replaces the all-caps red ReCiterAI badge.
+   Only renders when AI sort is active. */
+.curated-tag {
+  display: none;  /* hidden by default — Newest is default sort */
+  align-items: center; gap: 4px;
+  height: 22px; padding: 0 10px;
+  font-size: 11px; font-weight: var(--weight-medium);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: var(--radius-pill);
+  border: 1px solid #f0d6d6;
+}
+.curated-tag.is-active { display: inline-flex; }
+.curated-tag__info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px;
+  font-size: 10px;
+  border-radius: 50%;
+  background: rgba(179, 27, 27, 0.15);
+  color: var(--color-primary);
+  cursor: help;
+}
+
+/* Pub rows */
+.feed-pub {
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--color-border);
+}
+.feed-pub:first-of-type { border-top: 0; padding-top: 0; }
+.feed-pub__title {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2); line-height: var(--leading-snug);
+}
+.feed-pub__title a { color: var(--color-text); }
+.feed-pub__title a:hover { color: var(--color-accent); text-decoration: none; }
+.feed-pub__meta {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  margin-bottom: var(--space-2); line-height: var(--leading-snug);
+}
+.feed-pub__meta em { font-style: italic; }
+
+.feed-pub__authors {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.author-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 3px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.author-chip:hover {
+  border-color: var(--color-accent); color: var(--color-accent);
+  text-decoration: none;
+}
+.author-chip__avatar {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  display: grid; place-items: center;
+  color: white; font-size: 10px; font-weight: var(--weight-semibold);
+}
+
+.feed-pub__stats {
+  margin-top: var(--space-2);
+  display: flex; gap: var(--space-3);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+.feed-pub__stats .citations {
+  color: var(--color-text-secondary); font-weight: var(--weight-medium);
+}
+.feed-pub__stats a { color: var(--color-text-muted); text-decoration: underline; text-decoration-style: dotted; }
+.feed-pub__stats a:hover { color: var(--color-accent); }
+
+.show-all {
+  display: inline-block;
+  margin-top: var(--space-6);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+/* Mobile */
+@media (max-width: 800px) {
+  .layout-B { grid-template-columns: 1fr; }
+  .layout-B__rail { position: static; max-height: none; }
+}
+
+/* Subtle entrance — page load only */
+.fade-in { animation: fadeIn 0.4s ease-out both; }
+.fade-in-2 { animation: fadeIn 0.4s ease-out 0.08s both; }
+.fade-in-3 { animation: fadeIn 0.4s ease-out 0.16s both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     Sketch chrome — review-only label
+     ============================================================ -->
+<div id="variant-nav">
+  <span class="label">Sketch 004 · Topic detail</span>
+  <span class="badge">Revised proposal</span>
+  <span style="color:#999;font-size:11px">Counter to Variant B ★ Selected — open the original alongside to compare</span>
+</div>
+
+<!-- ============================================================
+     Header
+     ============================================================ -->
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <div class="wcm-header__search">
+    <input type="search" placeholder="Search…">
+  </div>
+  <nav class="wcm-header__nav">
+    <a href="#">Browse</a>
+    <a href="#">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<div class="crumbs">
+  <a href="#">Home</a> <span class="sep">›</span> <a href="#">Topics</a> <span class="sep">›</span> Aging &amp; Geroscience
+</div>
+
+<!-- ============================================================
+     Topic hero — now does work
+     - Faculty avatar row (the primary discovery affordance)
+     - Stats demoted to a single dashed-divider line
+     ============================================================ -->
+<section class="topic-hero fade-in">
+  <div class="topic-hero__label">Research area</div>
+  <h1 class="topic-hero__title">Aging &amp; Geroscience</h1>
+  <p class="topic-hero__desc">Multidisciplinary research on the biology of aging and the clinical care of older adults — spanning cellular senescence, neurodegeneration, frailty and geriatric syndromes, late-life mental health, caregiving, and end-of-life care.</p>
+
+  <div style="font-size:var(--text-xs);text-transform:uppercase;letter-spacing:0.08em;color:var(--color-text-muted);font-weight:var(--weight-semibold);margin-bottom:var(--space-2)">Top scholars in this area</div>
+  <div class="scholars-row">
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span>
+      <span class="scholar-chip__name">Latifa Okello<span class="scholar-chip__title">Cellular senescence</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar">AF</span>
+      <span class="scholar-chip__name">Andrew Foster<span class="scholar-chip__title">Microglial biology</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span>
+      <span class="scholar-chip__name">David Kim<span class="scholar-chip__title">Tau therapeutics</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar">JR</span>
+      <span class="scholar-chip__name">Jennifer Reynolds<span class="scholar-chip__title">CSF biomarkers</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar">RT</span>
+      <span class="scholar-chip__name">Rachel Tran<span class="scholar-chip__title">Plasma biomarkers</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar">AW</span>
+      <span class="scholar-chip__name">Ada Wong<span class="scholar-chip__title">Digital health</span></span>
+    </a>
+    <a href="#" class="scholar-chip">
+      <span class="scholar-chip__avatar">AK</span>
+      <span class="scholar-chip__name">Aliyah Karim<span class="scholar-chip__title">Cerebrovascular</span></span>
+    </a>
+    <a href="#" class="scholars-more">+ 51 more scholars →</a>
+  </div>
+
+  <div class="topic-hero__stats">
+    <span class="stat"><strong>512</strong> publications</span>
+    <span class="stat"><strong>30</strong> subtopics</span>
+    <span class="stat"><strong>$48M</strong> active funding</span>
+  </div>
+</section>
+
+<!-- ============================================================
+     Recent highlights — was removed in original because
+     synopses didn't work. Re-added without synopses.
+     Three pubs, plain metadata, clear "ReCiterAI" attribution
+     in a small caveat line, not on each card.
+     ============================================================ -->
+<section class="highlights fade-in-2">
+  <div class="highlights__head">
+    <div class="highlights__title">Recent highlights</div>
+    <div class="highlights__caveat">Three publications surfaced by ReCiterAI · <a href="#">how this works</a></div>
+  </div>
+  <div class="highlights__grid">
+    <a href="#" class="highlight">
+      <div class="highlight__subtopic">Alzheimer's &amp; neurodegeneration</div>
+      <div class="highlight__title">Tau-targeting immunotherapy slows hippocampal atrophy in early Alzheimer's disease</div>
+      <div class="highlight__meta">
+        <span class="highlight__author">
+          <span class="highlight__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span>
+          Kim et al.
+        </span>
+        <span><em>Nature</em> · 2024</span>
+      </div>
+    </a>
+    <a href="#" class="highlight">
+      <div class="highlight__subtopic">Cellular senescence</div>
+      <div class="highlight__title">Senolytic clearance of p16+ cells reverses age-related muscle dysfunction</div>
+      <div class="highlight__meta">
+        <span class="highlight__author">
+          <span class="highlight__avatar" style="background:linear-gradient(135deg,#c2a3a3,#a07575)">LO</span>
+          Okello et al.
+        </span>
+        <span><em>Cell Metabolism</em> · 2024</span>
+      </div>
+    </a>
+    <a href="#" class="highlight">
+      <div class="highlight__subtopic">Brain imaging &amp; cerebrovascular</div>
+      <div class="highlight__title">White matter hyperintensities and MoCA decline in cognitively healthy older adults</div>
+      <div class="highlight__meta">
+        <span class="highlight__author">
+          <span class="highlight__avatar">AK</span>
+          Karim et al.
+        </span>
+        <span><em>Annals of Neurology</em> · 2024</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ============================================================
+     Layout: rail + main feed
+     ============================================================ -->
+<main class="layout-B fade-in-3">
+
+  <!-- Subtopic rail with long-tail treatment -->
+  <aside class="layout-B__rail">
+    <div class="rail-title">Subtopics (30)</div>
+    <input type="search" class="rail-search" placeholder="Filter subtopics…">
+    <ul class="rail-list">
+      <li class="rail-item">All publications <span class="rail-item__count">512</span></li>
+      <li class="rail-item active">Alzheimer's &amp; neurodegeneration <span class="rail-item__count">50</span></li>
+      <li class="rail-item">Elder mistreatment &amp; APS <span class="rail-item__count">39</span></li>
+      <li class="rail-item">Tech &amp; cognitive training <span class="rail-item__count">37</span></li>
+      <li class="rail-item">Late-life depression <span class="rail-item__count">34</span></li>
+      <li class="rail-item">Social determinants <span class="rail-item__count">33</span></li>
+      <li class="rail-item">Heart failure &amp; geriatric cardiology <span class="rail-item__count">32</span></li>
+      <li class="rail-item">Cellular senescence <span class="rail-item__count">31</span></li>
+      <li class="rail-item">Brain imaging &amp; cerebrovascular <span class="rail-item__count">28</span></li>
+      <li class="rail-item">Caregiving interventions <span class="rail-item__count">26</span></li>
+      <li class="rail-item">Nursing home quality <span class="rail-item__count">25</span></li>
+      <li class="rail-item">Cancer &amp; aging <span class="rail-item__count">23</span></li>
+      <li class="rail-item">Stroke &amp; cerebrovascular <span class="rail-item__count">21</span></li>
+      <li class="rail-item">Frailty &amp; functional decline <span class="rail-item__count">19</span></li>
+      <li class="rail-item">COVID-19 outcomes <span class="rail-item__count">19</span></li>
+      <li class="rail-item">Aging with HIV <span class="rail-item__count">16</span></li>
+      <li class="rail-item">Geriatric emergency &amp; acute care <span class="rail-item__count">15</span></li>
+      <li class="rail-item">CV procedures &amp; surgical outcomes <span class="rail-item__count">14</span></li>
+      <li class="rail-item">Hospice &amp; palliative care <span class="rail-item__count">12</span></li>
+      <li class="rail-item">Pain management <span class="rail-item__count">10</span></li>
+
+      <!-- Long-tail divider — the cluster below has fewer than 10 pubs each -->
+      <li class="rail-divider">Less common</li>
+      <li class="rail-item rail-item--minor">Spinal &amp; orthopedic surgery <span class="rail-item__count">10</span></li>
+      <li class="rail-item rail-item--minor">Aging &amp; pulmonary <span class="rail-item__count">9</span></li>
+      <li class="rail-item rail-item--minor">Epigenetic clocks <span class="rail-item__count">8</span></li>
+      <li class="rail-item rail-item--minor">Liver fibrosis &amp; cognition <span class="rail-item__count">7</span></li>
+      <li class="rail-item rail-item--minor">Blood-brain barrier <span class="rail-item__count">7</span></li>
+      <li class="rail-item rail-item--minor">Telehealth &amp; home care <span class="rail-item__count">6</span></li>
+      <li class="rail-item rail-item--minor">Neuroendocrine aging <span class="rail-item__count">6</span></li>
+      <li class="rail-item rail-item--minor">Social isolation &amp; well-being <span class="rail-item__count">6</span></li>
+      <li class="rail-item rail-item--minor">COVID-19 neurological <span class="rail-item__count">4</span></li>
+      <li class="rail-item rail-item--minor">Diabetes &amp; aging <span class="rail-item__count">4</span></li>
+      <li class="rail-item rail-item--minor">High-cost Medicare patients <span class="rail-item__count">3</span></li>
+    </ul>
+  </aside>
+
+  <!-- Single consolidated feed header — was two stacked cards before -->
+  <section class="feed-section">
+    <div class="feed-header">
+      <div class="feed-header__row1">
+        <h2 class="feed-header__title" id="feed-title">Alzheimer's Disease &amp; Neurodegenerative Pathology</h2>
+        <span class="curated-tag" id="curated-tag">
+          Curated
+          <span class="curated-tag__info" title="Ranked by ReCiterAI weekly. Scoring covers publications co-authored by full-time WCM faculty; co-authors inherit visibility regardless of role.">i</span>
+        </span>
+        <span class="feed-header__meta">
+          <span class="feed-header__count">50 results</span>
+          <span class="feed-header__sort">
+            Sort:
+            <select id="sort-select" onchange="updateSort(this)">
+              <option value="newest" selected>Newest</option>
+              <option value="cited">Most cited</option>
+              <option value="impact">By impact (ReCiterAI)</option>
+              <option value="curated">Curated by ReCiterAI</option>
+            </select>
+          </span>
+        </span>
+      </div>
+      <p class="feed-header__desc">AD biomarkers (amyloid-beta, tau, neuroinflammation), neuroimaging, microglial activation and neurovascular dysfunction, and therapeutic targets — including disease progression, cognitive decline, and preclinical detection.</p>
+    </div>
+
+    <article class="feed-pub">
+      <div class="feed-pub__title"><a href="#">Tau-targeting immunotherapy slows hippocampal atrophy in early Alzheimer's disease</a></div>
+      <div class="feed-pub__meta">Kim DS, Reynolds J, Foster A, Liu C, et al. <em>Nature</em>. 2024.</div>
+      <div class="feed-pub__authors">
+        <a href="#" class="author-chip"><span class="author-chip__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span> David Kim</a>
+        <a href="#" class="author-chip"><span class="author-chip__avatar">JR</span> Jennifer Reynolds</a>
+        <a href="#" class="author-chip"><span class="author-chip__avatar">AF</span> Andrew Foster</a>
+      </div>
+      <div class="feed-pub__stats">
+        <span class="citations">187 citations</span>
+        <span>Published Sep 2024</span>
+        <a href="#">DOI</a>
+        <a href="#">PubMed</a>
+      </div>
+    </article>
+
+    <article class="feed-pub">
+      <div class="feed-pub__title"><a href="#">Microglial TREM2 signaling and amyloid clearance in transgenic models of Alzheimer's disease</a></div>
+      <div class="feed-pub__meta">Foster A, Kim DS, Liu C. <em>Neuron</em>. 2024.</div>
+      <div class="feed-pub__authors">
+        <a href="#" class="author-chip"><span class="author-chip__avatar">AF</span> Andrew Foster</a>
+        <a href="#" class="author-chip"><span class="author-chip__avatar" style="background:linear-gradient(135deg,#a3a3c2,#7575a0)">DK</span> David Kim</a>
+      </div>
+      <div class="feed-pub__stats">
+        <span class="citations">112 citations</span>
+        <span>Published Jul 2024</span>
+        <a href="#">DOI</a>
+      </div>
+    </article>
+
+    <article class="feed-pub">
+      <div class="feed-pub__title"><a href="#">CSF biomarkers and progression in mild cognitive impairment: a 7-year prospective cohort</a></div>
+      <div class="feed-pub__meta">Reynolds J, Tran R. <em>Lancet Neurology</em>. 2024.</div>
+      <div class="feed-pub__authors">
+        <a href="#" class="author-chip"><span class="author-chip__avatar">JR</span> Jennifer Reynolds</a>
+        <a href="#" class="author-chip"><span class="author-chip__avatar">RT</span> Rachel Tran</a>
+      </div>
+      <div class="feed-pub__stats">
+        <span class="citations">89 citations</span>
+        <span>Published May 2024</span>
+        <a href="#">DOI</a>
+      </div>
+    </article>
+
+    <article class="feed-pub">
+      <div class="feed-pub__title"><a href="#">Plasma p-tau217 as a screening biomarker in primary care</a></div>
+      <div class="feed-pub__meta">Tran R, Foster A. <em>JAMA Neurology</em>. 2024.</div>
+      <div class="feed-pub__authors">
+        <a href="#" class="author-chip"><span class="author-chip__avatar">RT</span> Rachel Tran</a>
+        <a href="#" class="author-chip"><span class="author-chip__avatar">AF</span> Andrew Foster</a>
+      </div>
+      <div class="feed-pub__stats">
+        <span class="citations">63 citations</span>
+        <span>Published Apr 2024</span>
+        <a href="#">DOI</a>
+      </div>
+    </article>
+
+    <a href="#" class="show-all">Show all 50 publications in this subtopic →</a>
+  </section>
+</main>
+
+<!-- Sketch toolbar -->
+<div id="sketch-tools">
+  Sketch 004 · Revised proposal
+</div>
+
+<script>
+// Curated tag only appears when an AI sort is active.
+// Default sort = Newest, so the tag is hidden on load.
+const AI_SORTS = ['impact', 'curated'];
+
+function updateSort(select) {
+  const tag = document.getElementById('curated-tag');
+  if (AI_SORTS.includes(select.value)) {
+    tag.classList.add('is-active');
+  } else {
+    tag.classList.remove('is-active');
+  }
+}
+</script>
+
+</body>
+</html>

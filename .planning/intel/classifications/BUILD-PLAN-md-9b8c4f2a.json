@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.planning/source-docs/BUILD-PLAN.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": true,
+  "title": "Scholars Profile System — Local Prototype Build Plan",
+  "summary": "Phased local prototype build plan (Phases 0-7) covering stack choices, repo layout, and per-phase deliverables for the Scholars Profile System.",
+  "scope": ["build phases", "stack selection", "repo layout", "local prototype", "ETL", "Next.js app", "MySQL", "OpenSearch", "AWS production targets"],
+  "cross_refs": ["docs/BUILD.md", "docs/ETL.md", "docs/ADR-001-runtime-dal-vs-etl-transform.md", "openapi.yaml", "HANDOFF"],
+  "locked": false,
+  "precedence": 4,
+  "notes": ""
+}

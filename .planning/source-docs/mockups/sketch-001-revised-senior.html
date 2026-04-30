@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 001 — Profile (senior faculty, revised) · Scholars @ WCM</title>
+<style>
+/* ==========================================================================
+   Scholars @ WCM — Sketch 001 revised proposal: senior faculty scaling
+   Stress-tests the two-column layout at department-chair scale
+   (412 pubs, 28 grants, 35 years).
+
+   Folds in:
+     - Year-collapsed publication list (recent expanded, older grouped)
+     - Inline filter chips above the pub list (type filter + search)
+     - Grants split into active (inline) and completed (collapsed)
+     - Dismissible "what's missing" checklist (owner-only)
+     - Status pill in sidebar (Active / On leave / Emeritus hook)
+     - "Show more" for long overview prose
+     - Reduced-red palette (slate accent, red reserved for brand mark)
+   ========================================================================== */
+
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f6f3;
+  --color-surface-tint: #fafaf8;
+  --color-border: #e3e2dd;
+  --color-border-strong: #c8c6be;
+
+  --color-text: #1a1a1a;
+  --color-text-secondary: #4a4a4a;
+  --color-text-muted: #757575;
+
+  --color-primary: #B31B1B;
+  --color-primary-hover: #8c1414;
+  --color-primary-light: #faf3f3;
+  --color-accent: #2c4f6e;
+  --color-accent-light: #eaf0f5;
+  --color-accent-hover: #1f3b53;
+  --color-link: #2c4f6e;
+  --color-link-hover: #1f3b53;
+
+  --color-success: #2f7d3f;
+  --color-success-light: #ebf5ed;
+  --color-warning: #b07300;
+  --color-warning-light: #fdf6e3;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 34px;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.06);
+
+  --max-content: 1100px;
+  --max-wide: 1280px;
+  --header-h: 60px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+h1, h2, h3, h4 { line-height: var(--leading-tight); margin: 0; font-weight: var(--weight-semibold); }
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+button { font-family: inherit; cursor: pointer; border: 0; background: transparent; }
+img { max-width: 100%; display: block; }
+
+body { padding-top: 44px; }
+
+/* Sketch chrome */
+#variant-nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+  background: #1a1a1a; color: #e5e5e5;
+  height: 44px; display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 var(--space-4);
+  font-family: var(--font-sans); font-size: 13px;
+}
+#variant-nav .label {
+  color: #999; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+#variant-nav .badge {
+  background: #2c4f6e; color: white; padding: 2px 8px; border-radius: 3px;
+  font-size: 11px; font-weight: 500;
+}
+#sketch-tools {
+  position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+  background: rgba(0,0,0,0.85); color: white;
+  padding: 6px 10px; border-radius: 6px;
+  font-family: system-ui; font-size: 11px;
+  opacity: 0.4; transition: opacity 0.2s;
+}
+#sketch-tools:hover { opacity: 1; }
+
+/* Header */
+.wcm-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--color-primary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  height: var(--header-h);
+  display: flex; align-items: center;
+  padding: 0 var(--space-6); gap: var(--space-6);
+}
+.wcm-header__brand {
+  display: flex; flex-direction: column; justify-content: center;
+  line-height: 1; text-decoration: none;
+}
+.wcm-header__brand:hover { text-decoration: none; }
+.wcm-header__brand-mark {
+  font-family: 'Charter', 'Tiempos Headline', Georgia, serif;
+  font-size: 20px; font-weight: 600;
+  color: white; line-height: 1;
+  margin-bottom: 4px; letter-spacing: -0.005em;
+}
+.wcm-header__brand-tag {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82); line-height: 1;
+}
+.wcm-header__search { flex: 1; max-width: 480px; }
+.wcm-header__search input {
+  width: 100%; height: 36px; padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: white;
+  color: var(--color-text);
+}
+.wcm-header__search input::placeholder { color: var(--color-text-muted); }
+.wcm-header__search input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+.wcm-header__nav { display: flex; gap: var(--space-5); margin-left: auto; font-size: var(--text-sm); }
+.wcm-header__nav a { color: rgba(255, 255, 255, 0.85); }
+.wcm-header__nav a:hover { color: white; text-decoration: none; }
+
+/* Layout */
+.layout {
+  max-width: var(--max-content); margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-16);
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: var(--space-10);
+}
+.sidebar {
+  align-self: start;
+  position: sticky;
+  top: calc(44px + var(--header-h) + var(--space-6));
+  max-height: calc(100vh - 44px - var(--header-h) - var(--space-8));
+  overflow-y: auto;
+}
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+.sidebar__identity {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+.sidebar__photo {
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #b8b3a8, #8a8377);
+  display: grid; place-items: center;
+  color: white; font-size: 32px; font-weight: var(--weight-semibold);
+  margin: 0 auto var(--space-3);
+}
+.sidebar__name {
+  font-size: var(--text-xl); font-weight: var(--weight-bold);
+  margin-bottom: var(--space-1);
+  letter-spacing: -0.01em;
+}
+.sidebar__title {
+  color: var(--color-text-secondary); font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+.sidebar__dept {
+  color: var(--color-text-muted); font-size: var(--text-sm);
+  margin-top: var(--space-2);
+}
+
+/* Status pill — active/leave/emeritus signal */
+.status-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 10px;
+  margin-top: var(--space-3);
+  font-size: 11px; font-weight: var(--weight-medium);
+  background: var(--color-success-light);
+  color: var(--color-success);
+  border: 1px solid #c5e0cb;
+  border-radius: var(--radius-pill);
+}
+.status-pill__dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-success);
+}
+
+.sidebar-card {
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--color-border);
+}
+.sidebar-card__title {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-3);
+}
+.sidebar-card__row {
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-3);
+  line-height: var(--leading-snug);
+}
+.sidebar-card__row:last-child { margin-bottom: 0; }
+.sidebar-card__row strong { font-weight: var(--weight-semibold); }
+.sidebar-card__row .meta {
+  color: var(--color-text-muted);
+  display: block; margin-top: 2px;
+}
+.sidebar-more {
+  font-size: 12px;
+  color: var(--color-accent);
+  margin-top: var(--space-2);
+  display: inline-block;
+}
+
+.sidebar__actions {
+  display: flex; gap: var(--space-2); flex-wrap: wrap;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 32px; padding: 0 var(--space-3);
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+}
+.btn:hover { background: var(--color-surface-alt); text-decoration: none; }
+
+/* ============================================================
+   Main column
+   ============================================================ */
+.main { min-width: 0; }  /* prevent grid blowout */
+
+.section {
+  padding: var(--space-8) 0;
+  border-top: 1px solid var(--color-border);
+}
+.section:first-child { padding-top: 0; border-top: 0; }
+.section__title {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--color-text-muted); font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-4);
+  display: flex; align-items: center; gap: var(--space-3);
+}
+.section__title--lg {
+  font-size: var(--text-lg); text-transform: none; letter-spacing: -0.01em;
+  color: var(--color-text); font-weight: var(--weight-bold);
+}
+.section__count {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  font-weight: var(--weight-normal); text-transform: none; letter-spacing: 0;
+}
+.edit-pencil {
+  margin-left: auto;
+  font-size: var(--text-xs); color: var(--color-text-muted);
+  text-decoration: none;
+}
+.edit-pencil:hover { color: var(--color-accent); }
+
+/* "What's missing" checklist — now dismissible */
+.checklist {
+  position: relative;
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  background: var(--color-warning-light);
+  border: 1px solid #ecdcb0;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+.checklist__title {
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  margin-bottom: var(--space-1);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.checklist__title::before { content: "•"; color: var(--color-warning); font-size: 18px; }
+.checklist__dismiss {
+  position: absolute; top: 8px; right: 8px;
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.checklist__dismiss:hover {
+  background: rgba(0,0,0,0.05);
+  color: var(--color-text);
+}
+.checklist a { color: var(--color-accent); }
+
+/* Overview prose — collapsible if long */
+.overview {
+  font-size: var(--text-md);
+  color: var(--color-text);
+  line-height: var(--leading-relaxed);
+  position: relative;
+}
+.overview__body {
+  max-height: 6em;
+  overflow: hidden;
+  position: relative;
+}
+.overview__body.is-expanded { max-height: none; }
+.overview__body:not(.is-expanded)::after {
+  content: "";
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2.5em;
+  background: linear-gradient(to bottom, transparent, white);
+  pointer-events: none;
+}
+.overview__toggle {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+
+/* Areas of interest pills */
+.aoi-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.aoi-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  margin-left: var(--space-2);
+  font-size: 11px; font-weight: var(--weight-semibold);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  cursor: help;
+}
+.aoi-help:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.pill__count {
+  margin-left: 6px; opacity: 0.55;
+  font-feature-settings: "tnum";
+  font-weight: var(--weight-normal);
+}
+.pill {
+  display: inline-flex; align-items: center;
+  height: 26px; padding: 0 12px;
+  font-size: var(--text-xs); font-weight: var(--weight-medium);
+  background: var(--color-surface-alt);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+}
+
+/* Selected highlights */
+.pub-highlight {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--color-border);
+}
+.pub-highlight:first-of-type { border-top: 0; padding-top: 0; }
+.pub-rank {
+  font-size: var(--text-2xl); font-weight: var(--weight-bold);
+  color: var(--color-text-muted);
+  line-height: 1;
+  font-feature-settings: "tnum";
+}
+.pub-title {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-1);
+}
+.pub-meta {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  line-height: var(--leading-snug);
+  margin-bottom: var(--space-2);
+}
+.pub-meta em { font-style: italic; }
+.pub-meta .self {
+  background: var(--color-accent-light);
+  padding: 1px 4px; border-radius: 2px;
+  color: var(--color-accent); font-weight: var(--weight-medium);
+}
+.pub-stats {
+  display: flex; gap: var(--space-3);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+.pub-stats .citations { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+.pub-stats a { color: var(--color-text-muted); text-decoration: underline; text-decoration-style: dotted; }
+
+/* ============================================================
+   Publications — year-collapsed (the centerpiece)
+   ============================================================ */
+.pubs-toolbar {
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  background: white;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--color-accent); color: var(--color-accent); }
+.filter-chip.active {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+.filter-chip__count {
+  font-size: 11px; opacity: 0.7;
+}
+.filter-chip.active .filter-chip__count { opacity: 0.9; }
+
+.pubs-search {
+  margin-left: auto;
+  height: 28px; padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+  width: 220px;
+}
+.pubs-search:focus { outline: none; border-color: var(--color-accent); background: white; }
+
+.year-group {
+  border-bottom: 1px solid var(--color-border);
+}
+.year-group:last-child { border-bottom: 0; }
+.year-group__head {
+  width: 100%;
+  display: flex; align-items: baseline; gap: var(--space-3);
+  padding: var(--space-4) 0;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-text);
+}
+.year-group__head:hover { color: var(--color-accent); }
+.year-group__caret {
+  font-size: 10px; color: var(--color-text-muted);
+  width: 12px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.year-group.is-expanded .year-group__caret {
+  transform: rotate(90deg);
+}
+.year-group__year {
+  font-size: var(--text-lg); font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+}
+.year-group__count {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+.year-group__body {
+  display: none;
+  padding-bottom: var(--space-4);
+}
+.year-group.is-expanded .year-group__body { display: block; }
+
+.pub-row {
+  padding: var(--space-3) 0 var(--space-3) calc(12px + var(--space-3));
+  border-top: 1px solid var(--color-border);
+}
+.pub-row:first-child { border-top: 0; }
+.pub-row__title {
+  font-size: var(--text-base); font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  margin-bottom: 2px;
+}
+.pub-row__title a { color: var(--color-text); }
+.pub-row__title a:hover { color: var(--color-accent); text-decoration: none; }
+.pub-row__meta {
+  font-size: var(--text-sm); color: var(--color-text-secondary);
+  line-height: var(--leading-snug);
+}
+.pub-row__meta em { font-style: italic; }
+.pub-row__meta .self {
+  background: var(--color-accent-light);
+  padding: 1px 4px; border-radius: 2px;
+  color: var(--color-accent); font-weight: var(--weight-medium);
+}
+.pub-row__stats {
+  margin-top: var(--space-1);
+  font-size: var(--text-xs); color: var(--color-text-muted);
+}
+
+/* Large-author-list pattern: et al. truncation + collapsible WCM-author chips */
+.wcm-authors {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+}
+.wcm-authors__toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  background: none; border: 0; padding: 0;
+}
+.wcm-authors__toggle:hover { color: var(--color-accent-hover); }
+.wcm-authors__caret {
+  font-size: 9px; transition: transform 0.15s;
+}
+.wcm-authors.is-expanded .wcm-authors__caret { transform: rotate(90deg); }
+.wcm-authors__chips {
+  display: none;
+  margin-top: var(--space-2);
+  flex-wrap: wrap; gap: 6px;
+}
+.wcm-authors.is-expanded .wcm-authors__chips { display: flex; }
+.wcm-author-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px 2px 2px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--color-text);
+  text-decoration: none;
+}
+.wcm-author-chip:hover {
+  border-color: var(--color-accent); color: var(--color-accent);
+  text-decoration: none;
+}
+.wcm-author-chip__avatar {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+  display: grid; place-items: center;
+  color: white; font-size: 9px; font-weight: var(--weight-semibold);
+}
+
+.pubs-deeper {
+  padding: var(--space-3) 0 var(--space-3) calc(12px + var(--space-3));
+  font-size: var(--text-sm); color: var(--color-text-muted);
+  font-style: italic;
+}
+.pubs-deeper a { color: var(--color-accent); font-style: normal; }
+
+/* ============================================================
+   Grants — split into active (inline) + completed (collapsed)
+   ============================================================ */
+.grants-group__head {
+  display: flex; align-items: baseline; gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  margin-top: var(--space-5);
+}
+.grants-group__head:first-child { margin-top: 0; }
+.grants-group__title {
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+}
+.grants-group__count {
+  font-size: var(--text-sm); color: var(--color-text-muted);
+}
+
+.grant-row {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-border);
+  align-items: baseline;
+}
+.grant-row:first-child { border-top: 0; }
+.grant-status {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 20px; padding: 0 8px;
+  font-size: 10px; font-weight: var(--weight-semibold);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-radius: var(--radius-sm);
+}
+.grant-status--active {
+  background: var(--color-success-light);
+  color: var(--color-success);
+}
+.grant-status--completed {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+.grant-title { font-weight: var(--weight-medium); font-size: var(--text-base); line-height: var(--leading-snug); }
+.grant-meta { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 2px; }
+.grant-id {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.collapsible {
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-4);
+}
+.collapsible__head {
+  width: 100%;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-3) 0;
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-medium);
+}
+.collapsible__caret {
+  font-size: 10px; color: var(--color-text-muted);
+  width: 12px;
+  transition: transform 0.15s;
+}
+.collapsible.is-expanded .collapsible__caret { transform: rotate(90deg); }
+.collapsible__body { display: none; padding-bottom: var(--space-3); }
+.collapsible.is-expanded .collapsible__body { display: block; }
+
+/* External relationships section */
+.external-relationships {
+  padding-top: var(--space-10);
+}
+.external-relationships__preamble {
+  font-size: var(--text-sm);
+  font-style: italic;
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+  margin-bottom: var(--space-6);
+  max-width: 60em;
+}
+.er-category {
+  margin-bottom: var(--space-5);
+}
+.er-category:last-of-type {
+  margin-bottom: var(--space-6);
+}
+.er-category__label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+  margin: 0 0 var(--space-2);
+}
+.er-category__entities {
+  font-size: var(--text-base);
+  color: var(--color-text);
+  line-height: var(--leading-snug);
+  margin: 0;
+}
+.external-relationships__footer {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Mobile */
+@media (max-width: 800px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { position: static; max-height: none; }
+  .pubs-search { margin-left: 0; width: 100%; }
+}
+
+/* Subtle entrance */
+.fade-in { animation: fadeIn 0.4s ease-out both; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+</style>
+</head>
+<body>
+
+<div id="variant-nav">
+  <span class="label">Sketch 001 · Profile</span>
+  <span class="badge">Senior faculty (revised)</span>
+  <span style="color:#999;font-size:11px">Stress-tests Variant C ★ Selected at department-chair scale (412 pubs · 28 grants · 35 yrs)</span>
+</div>
+
+<header class="wcm-header">
+  <a href="#" class="wcm-header__brand">
+    <span class="wcm-header__brand-mark">Scholars</span>
+    <span class="wcm-header__brand-tag">Weill Cornell Medicine</span>
+  </a>
+  <div class="wcm-header__search">
+    <input type="search" placeholder="Search scholars and publications…">
+  </div>
+  <nav class="wcm-header__nav">
+    <a href="#">Browse</a>
+    <a href="#">About</a>
+    <a href="#">Support</a>
+  </nav>
+</header>
+
+<main class="layout fade-in">
+
+  <!-- ============================================================
+       Sidebar
+       ============================================================ -->
+  <aside class="sidebar">
+    <div class="sidebar__identity">
+      <div class="sidebar__photo">MW</div>
+      <h1 class="sidebar__name">Margaret R. Whitcomb, MD, PhD</h1>
+      <div class="sidebar__title">
+        Stephen &amp; Suzanne Weiss Chair, Department of Medicine<br>
+        Professor of Medicine
+      </div>
+      <div class="sidebar__dept">Department of Medicine</div>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="sidebar-card__title">Contact</div>
+      <div class="sidebar-card__row">
+        <a href="mailto:mrw9013@med.cornell.edu">mrw9013@med.cornell.edu</a>
+      </div>
+      <div class="sidebar-card__row">
+        <a href="https://weillcornell.org/mwhitcomb" target="_blank" rel="noopener">Clinical profile →</a>
+      </div>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="sidebar-card__title">Appointments</div>
+      <div class="sidebar-card__row">
+        <strong>Department Chair, Medicine</strong>
+        <span class="meta">Weill Department of Medicine · 2019–</span>
+      </div>
+      <div class="sidebar-card__row">
+        <strong>Stephen &amp; Suzanne Weiss Chair</strong>
+        <span class="meta">Endowed chair · 2019–</span>
+      </div>
+      <div class="sidebar-card__row">
+        <strong>Attending Physician</strong>
+        <span class="meta">NewYork-Presbyterian Hospital · 1992–</span>
+      </div>
+      <a href="#" class="sidebar-more">Show all 7 →</a>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="sidebar-card__title">Education</div>
+      <div class="sidebar-card__row">
+        <strong>Fellowship, General Internal Medicine</strong>
+        <span class="meta">Brigham &amp; Women's, 1992</span>
+      </div>
+      <div class="sidebar-card__row">
+        <strong>Residency, Internal Medicine</strong>
+        <span class="meta">Mass General, 1990</span>
+      </div>
+      <div class="sidebar-card__row">
+        <strong>MD, PhD (Epidemiology)</strong>
+        <span class="meta">Johns Hopkins, 1987</span>
+      </div>
+      <div class="sidebar-card__row">
+        <strong>BA, Biochemistry</strong>
+        <span class="meta">Princeton, 1979</span>
+      </div>
+    </div>
+
+    <div class="sidebar__actions">
+      <a href="#" class="btn">Copy citations</a>
+      <a href="#" class="btn">Print</a>
+    </div>
+  </aside>
+
+  <!-- ============================================================
+       Main column
+       ============================================================ -->
+  <div class="main">
+
+    <!-- Dismissible "what's missing" — owner-only -->
+    <div class="checklist" id="checklist">
+      <div class="checklist__title">Your profile is mostly complete.</div>
+      <div>3 unconfirmed publications and 1 missing grant period in <a href="#">Publication Manager</a>.</div>
+      <button class="checklist__dismiss" onclick="dismissChecklist()" aria-label="Dismiss">×</button>
+    </div>
+
+    <!-- Overview with show-more for senior faculty (longer prose) -->
+    <section class="section" style="padding-top:0">
+      <div class="section__title">Overview <a href="#" class="edit-pencil">✎ Edit</a></div>
+      <div class="overview">
+        <div class="overview__body" id="overview-body">
+          Dr. Whitcomb is the Stephen &amp; Suzanne Weiss Chair of the Department of Medicine and a Professor of Medicine at Weill Cornell Medicine, where she has served on the faculty since 1992. Trained as both a clinician and an epidemiologist, her research has focused on three intertwined questions: how to make hospital care safer, how to translate clinical-trial evidence into routine practice, and how to address persistent inequities in the quality of care delivered across patient populations.
+          Her early work established several of the methodological foundations for modern hospital quality measurement, including risk-adjusted mortality models that have since been adopted by CMS and the Joint Commission. Over the past two decades she has led pragmatic clinical trials in antibiotic stewardship, transitions of care, and inpatient decision support, with continuous NIH and AHRQ funding since 1996. As Department Chair since 2019 she has overseen the strategic expansion of the department's hospital medicine, geriatrics, and digital health programs, and she chairs the WCM Faculty Affairs and Promotions Committee.
+          Dr. Whitcomb has been elected to the American Society for Clinical Investigation, the Association of American Physicians, and the National Academy of Medicine. She has trained more than 60 physician-scientists, many of whom now lead departments and research programs across U.S. academic medical centers.
+        </div>
+        <button class="overview__toggle" onclick="toggleOverview()" id="overview-toggle">Show more ↓</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title">
+        Areas of interest
+        <span class="aoi-help" title="Derived automatically from publication keywords. The number on each pill is the count of attributed publications indexed with that keyword.">?</span>
+      </div>
+      <div class="aoi-list">
+        <span class="pill">Hospital quality &amp; safety <span class="pill__count">87</span></span>
+        <span class="pill">Pragmatic clinical trials <span class="pill__count">62</span></span>
+        <span class="pill">Antibiotic stewardship <span class="pill__count">48</span></span>
+        <span class="pill">Health equity <span class="pill__count">34</span></span>
+        <span class="pill">Inpatient decision support <span class="pill__count">29</span></span>
+        <span class="pill">Care transitions <span class="pill__count">26</span></span>
+        <span class="pill">Hospitalist workforce <span class="pill__count">19</span></span>
+        <span class="pill">Risk-adjusted outcomes <span class="pill__count">17</span></span>
+        <span class="pill">Health policy <span class="pill__count">12</span></span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Selected highlights</div>
+      <div class="pub-highlight">
+        <div class="pub-rank">1</div>
+        <div>
+          <div class="pub-title">A national pragmatic trial of inpatient antibiotic stewardship across academic medical centers</div>
+          <div class="pub-meta"><span class="self">Whitcomb MR</span>, Cohen DR, Sato Y, et al. <em>NEJM</em>. 2021.</div>
+          <div class="pub-stats">
+            <span class="citations">486 citations</span>
+            <span>Senior author</span>
+            <a href="#">DOI</a>
+          </div>
+        </div>
+      </div>
+      <div class="pub-highlight">
+        <div class="pub-rank">2</div>
+        <div>
+          <div class="pub-title">Risk-adjusted in-hospital mortality: a methodological framework</div>
+          <div class="pub-meta"><span class="self">Whitcomb MR</span>, Patel D. <em>JAMA</em>. 2008.</div>
+          <div class="pub-stats">
+            <span class="citations">1,247 citations</span>
+            <span>First author</span>
+            <a href="#">DOI</a>
+          </div>
+        </div>
+      </div>
+      <div class="pub-highlight">
+        <div class="pub-rank">3</div>
+        <div>
+          <div class="pub-title">Race, ethnicity, and inpatient mortality in academic medical centers</div>
+          <div class="pub-meta"><span class="self">Whitcomb MR</span>, Okello L, Reynolds J. <em>NEJM</em>. 2024.</div>
+          <div class="pub-stats">
+            <span class="citations">198 citations</span>
+            <span>First author</span>
+            <a href="#">DOI</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         Publications — year-collapsed
+         ============================================================ -->
+    <section class="section">
+      <div class="section__title section__title--lg">
+        Publications
+        <span class="section__count">412 total · 1989–2024</span>
+      </div>
+
+      <div class="pubs-toolbar">
+        <button class="filter-chip active">All <span class="filter-chip__count">412</span></button>
+        <button class="filter-chip">Articles <span class="filter-chip__count">348</span></button>
+        <button class="filter-chip">Reviews <span class="filter-chip__count">42</span></button>
+        <button class="filter-chip">Editorials <span class="filter-chip__count">22</span></button>
+        <input type="search" class="pubs-search" placeholder="Search this list…">
+      </div>
+
+      <!-- 2024 — expanded -->
+      <div class="year-group is-expanded">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2024</span>
+          <span class="year-group__count">22 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Race, ethnicity, and inpatient mortality in academic medical centers</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Okello L, Reynolds J. <em>NEJM</em>.</div>
+            <div class="pub-row__stats">198 citations · First author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Burnout among hospitalists in US academic medical centers: a longitudinal cohort</a></div>
+            <div class="pub-row__meta">Foster A, <span class="self">Whitcomb MR</span>, Park S. <em>JAMA Internal Medicine</em>.</div>
+            <div class="pub-row__stats">76 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">The future of hospital quality measurement: a national consensus statement</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Goldberg RS, Patel D, et al. <em>JAMA</em>.</div>
+            <div class="pub-row__stats">63 citations · First author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Pragmatic trials embedded in real-world clinical decision support: a methodological primer</a></div>
+            <div class="pub-row__meta">Tran R, <span class="self">Whitcomb MR</span>. <em>Annals of Internal Medicine</em>.</div>
+            <div class="pub-row__stats">41 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Care transitions in older adults: a 10-year update from the Re-Engineered Discharge program</a></div>
+            <div class="pub-row__meta">Wong A, <span class="self">Whitcomb MR</span>. <em>Health Affairs</em>.</div>
+            <div class="pub-row__stats">29 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Geographic variation in low-value care across US academic centers</a></div>
+            <div class="pub-row__meta">Cohen DR, <span class="self">Whitcomb MR</span>, Foster A. <em>JAMA Network Open</em>.</div>
+            <div class="pub-row__stats">18 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pubs-deeper">…and 16 more from 2024 — <a href="#">expand all</a></div>
+        </div>
+      </div>
+
+      <!-- 2023 — expanded -->
+      <div class="year-group is-expanded">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2023</span>
+          <span class="year-group__count">26 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Stewardship-driven antibiotic prescribing in inpatient settings: 5-year follow-up</a></div>
+            <div class="pub-row__meta">Sato Y, <span class="self">Whitcomb MR</span>, Patel D. <em>NEJM</em>.</div>
+            <div class="pub-row__stats">142 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Diagnostic stewardship in sepsis: a cluster-randomized trial</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Goldberg RS. <em>JAMA</em>.</div>
+            <div class="pub-row__stats">98 citations · First author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Implementation of clinical decision support: lessons from 14 academic medical centers</a></div>
+            <div class="pub-row__meta">Tran R, Foster A, <span class="self">Whitcomb MR</span>. <em>Annals of Internal Medicine</em>.</div>
+            <div class="pub-row__stats">67 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Hospitalist staffing models and 30-day readmission rates</a></div>
+            <div class="pub-row__meta">Park S, <span class="self">Whitcomb MR</span>. <em>Health Affairs</em>.</div>
+            <div class="pub-row__stats">44 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pubs-deeper">…and 22 more from 2023 — <a href="#">expand all</a></div>
+        </div>
+      </div>
+
+      <!-- Recent years collapsed -->
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2022</span>
+          <span class="year-group__count">19 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Patient safety culture in academic medical centers: a multicenter survey</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Liu C. <em>JAMA Internal Medicine</em>.</div>
+            <div class="pub-row__stats">78 citations · First author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pubs-deeper">…and 18 more — <a href="#">expand all</a></div>
+        </div>
+      </div>
+
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2021</span>
+          <span class="year-group__count">28 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">A national pragmatic trial of inpatient antibiotic stewardship across academic medical centers</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Cohen DR, Sato Y, et al. <em>NEJM</em>.</div>
+            <div class="pub-row__stats">486 citations · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pubs-deeper">…and 27 more — <a href="#">expand all</a></div>
+        </div>
+      </div>
+
+      <div class="year-group is-expanded">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2020</span>
+          <span class="year-group__count">31 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Clinical characteristics, racial inequities, and outcomes in hospitalized COVID-19 patients across 30 New York metro hospitals</a></div>
+            <div class="pub-row__meta">Petrov MM, Goldman LR, Sato Y, ..., Foster A, <span class="self">Whitcomb MR</span>. <em>JAMA</em>.</div>
+            <div class="wcm-authors" id="wcm-authors-covid">
+              <button class="wcm-authors__toggle" onclick="toggleWcmAuthors('wcm-authors-covid')">
+                <span class="wcm-authors__caret">▶</span>
+                <span>+ 8 WCM authors</span>
+              </button>
+              <div class="wcm-authors__chips">
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">MP</span>Marina Petrov</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">YS</span>Yuki Saito</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">AF</span>Andrew Foster</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">CL</span>Cynthia Liu</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">JR</span>Jennifer Reynolds</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">DR</span>David Cohen</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar">RT</span>Rachel Tran</a>
+                <a href="#" class="wcm-author-chip"><span class="wcm-author-chip__avatar" style="background:linear-gradient(135deg,#b8b3a8,#8a8377)">MW</span>Margaret Whitcomb</a>
+              </div>
+            </div>
+            <div class="pub-row__stats">312 citations · 247 total authors · Senior author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pub-row">
+            <div class="pub-row__title"><a href="#">Hospitalist staffing and outcomes during the first COVID-19 surge</a></div>
+            <div class="pub-row__meta"><span class="self">Whitcomb MR</span>, Park S, Liu C. <em>Annals of Internal Medicine</em>.</div>
+            <div class="pub-row__stats">187 citations · First author · <a href="#">DOI</a></div>
+          </div>
+          <div class="pubs-deeper">…and 29 more from 2020 (a heavy COVID year) — <a href="#">expand all</a></div>
+        </div>
+      </div>
+
+      <!-- Decade groups for the long tail -->
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2015–2019</span>
+          <span class="year-group__count">128 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pubs-deeper" style="font-style:normal;color:var(--color-text-secondary)">Most-cited from this period: <a href="#">Risk adjustment in hospital comparison (2017)</a>, <a href="#">Decision-support reduces low-value testing (2018)</a> — <a href="#">expand all 128</a></div>
+        </div>
+      </div>
+
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2010–2014</span>
+          <span class="year-group__count">87 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pubs-deeper" style="font-style:normal;color:var(--color-text-secondary)">Most-cited: <a href="#">Care-transitions intervention RCT (2012)</a> · <a href="#">expand all 87</a></div>
+        </div>
+      </div>
+
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">2000–2009</span>
+          <span class="year-group__count">52 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pubs-deeper" style="font-style:normal;color:var(--color-text-secondary)">Most-cited: <a href="#">Risk-adjusted in-hospital mortality framework (2008, JAMA, 1,247 cit.)</a> · <a href="#">expand all 52</a></div>
+        </div>
+      </div>
+
+      <div class="year-group">
+        <button class="year-group__head" onclick="toggleYear(this)">
+          <span class="year-group__caret">▶</span>
+          <span class="year-group__year">1989–1999</span>
+          <span class="year-group__count">19 publications</span>
+        </button>
+        <div class="year-group__body">
+          <div class="pubs-deeper" style="font-style:normal;color:var(--color-text-secondary)">Earliest works from training and early-career period · <a href="#">expand all 19</a></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         Grants — split into active + completed
+         ============================================================ -->
+    <section class="section">
+      <div class="section__title section__title--lg">
+        Grants
+        <span class="section__count">28 total · 8 active</span>
+      </div>
+
+      <div class="grants-group__head">
+        <h3 class="grants-group__title">Active</h3>
+        <span class="grants-group__count">8 grants</span>
+      </div>
+
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">PI</span>
+        <div>
+          <div class="grant-title">National network for inpatient diagnostic stewardship</div>
+          <div class="grant-meta">AHRQ · 2023–2028</div>
+        </div>
+        <span class="grant-id">R01 HS028840</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">PI</span>
+        <div>
+          <div class="grant-title">Pragmatic clinical trials in transitions of care</div>
+          <div class="grant-meta">NIA · 2022–2027</div>
+        </div>
+        <span class="grant-id">R01 AG076512</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">PI</span>
+        <div>
+          <div class="grant-title">Health equity in inpatient outcomes</div>
+          <div class="grant-meta">NIMHD · 2022–2026</div>
+        </div>
+        <span class="grant-id">R01 MD016203</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">MPI</span>
+        <div>
+          <div class="grant-title">Antibiotic stewardship across the AMC consortium</div>
+          <div class="grant-meta">CDC · 2021–2026</div>
+        </div>
+        <span class="grant-id">U54 CK000725</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">PI</span>
+        <div>
+          <div class="grant-title">Faculty mentoring &amp; physician-scientist development (T32)</div>
+          <div class="grant-meta">NIGMS · 2020–2025</div>
+        </div>
+        <span class="grant-id">T32 GM136632</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">Co-I</span>
+        <div>
+          <div class="grant-title">Implementation science for clinical decision support</div>
+          <div class="grant-meta">NHLBI · 2023–2027</div>
+        </div>
+        <span class="grant-id">R01 HL164881</span>
+      </div>
+      <a href="#" style="font-size:13px;color:var(--color-accent);display:inline-block;margin-top:var(--space-3)">Show 2 more active →</a>
+
+      <!-- Completed grants — collapsed by default -->
+      <div class="collapsible" id="completed-grants">
+        <button class="collapsible__head" onclick="toggleCollapsible('completed-grants')">
+          <span class="collapsible__caret">▶</span>
+          <span>Completed grants (20)</span>
+        </button>
+        <div class="collapsible__body">
+          <div class="grant-row">
+            <span class="grant-status grant-status--completed">PI</span>
+            <div>
+              <div class="grant-title">Re-Engineered Discharge program: long-term outcomes</div>
+              <div class="grant-meta">AHRQ · 2017–2022</div>
+            </div>
+            <span class="grant-id">R01 HS024211</span>
+          </div>
+          <div class="grant-row">
+            <span class="grant-status grant-status--completed">PI</span>
+            <div>
+              <div class="grant-title">Antibiotic stewardship in academic medical centers</div>
+              <div class="grant-meta">AHRQ · 2014–2019</div>
+            </div>
+            <span class="grant-id">R01 HS022404</span>
+          </div>
+          <div class="grant-row">
+            <span class="grant-status grant-status--completed">PI</span>
+            <div>
+              <div class="grant-title">Risk adjustment for hospital comparison</div>
+              <div class="grant-meta">NHLBI · 2010–2015</div>
+            </div>
+            <span class="grant-id">R01 HL098712</span>
+          </div>
+          <div class="grant-row">
+            <span class="grant-status grant-status--completed">PI</span>
+            <div>
+              <div class="grant-title">Mentored career development in clinical investigation</div>
+              <div class="grant-meta">NHLBI · 1996–2001</div>
+            </div>
+            <span class="grant-id">K24 HL003245</span>
+          </div>
+          <a href="#" style="font-size:13px;color:var(--color-accent);display:inline-block;margin-top:var(--space-3);padding-left:calc(64px + 12px)">Show 16 more completed →</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section external-relationships">
+      <div class="section__title section__title--lg">
+        External relationships
+      </div>
+
+      <p class="external-relationships__preamble">
+        Relationships and collaborations with for-profit and not-for-profit organizations are of vital importance to our faculty because these exchanges of scientific information foster innovation. As experts in their fields, WCM physicians and scientists are sought after by many organizations to consult and educate. WCM and its faculty make this information available to the public, thus creating a transparent environment.
+      </p>
+
+      <div class="er-category">
+        <h3 class="er-category__label">Leadership Roles</h3>
+        <p class="er-category__entities">National Quality Forum; Society of Hospital Medicine</p>
+      </div>
+
+      <div class="er-category">
+        <h3 class="er-category__label">Professional Services</h3>
+        <p class="er-category__entities">Agency for Healthcare Research and Quality; Centers for Medicare &amp; Medicaid Services</p>
+      </div>
+
+      <div class="er-category">
+        <h3 class="er-category__label">Other Interests</h3>
+        <p class="er-category__entities">Press Ganey Associates LLC</p>
+      </div>
+
+      <p class="external-relationships__footer">
+        <a href="#">About these disclosures →</a>
+      </p>
+    </section>
+
+  </div>
+</main>
+
+<div id="sketch-tools">Sketch 001 · Senior faculty (revised)</div>
+
+<script>
+function toggleWcmAuthors(id) {
+  document.getElementById(id).classList.toggle('is-expanded');
+}
+function toggleYear(btn) {
+  btn.parentElement.classList.toggle('is-expanded');
+}
+function toggleCollapsible(id) {
+  document.getElementById(id).classList.toggle('is-expanded');
+}
+function toggleOverview() {
+  const body = document.getElementById('overview-body');
+  const toggle = document.getElementById('overview-toggle');
+  const expanded = body.classList.toggle('is-expanded');
+  toggle.textContent = expanded ? 'Show less ↑' : 'Show more ↓';
+}
+function dismissChecklist() {
+  const c = document.getElementById('checklist');
+  c.style.transition = 'opacity 0.2s, transform 0.2s';
+  c.style.opacity = '0';
+  c.style.transform = 'translateY(-8px)';
+  setTimeout(() => c.remove(), 200);
+}
+</script>
+
+</body>
+</html>

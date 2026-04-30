@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 001 — Profile page · Scholars @ WCM</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  body { padding-top: 44px; }
+
+  /* Variant nav (fixed top bar) */
+  #variant-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+    background: #1a1a1a; color: #e5e5e5;
+    height: 44px; display: flex; align-items: center; gap: 4px;
+    padding: 0 12px;
+    font-family: var(--font-sans); font-size: 13px;
+  }
+  #variant-nav .label { color: #999; margin-right: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .variant-tab {
+    background: transparent; border: 1px solid transparent; color: #c8c8c8;
+    padding: 6px 12px; border-radius: 4px; font-family: inherit; font-size: 12px;
+  }
+  .variant-tab:hover { background: #2a2a2a; color: white; }
+  .variant-tab.active { background: var(--color-primary); color: white; }
+  .variant { display: none; }
+  .variant.active { display: block; }
+
+  /* Profile-shared building blocks */
+  .container { max-width: var(--max-content); margin: 0 auto; padding: 0 var(--space-6); }
+  .profile-hero {
+    display: grid; grid-template-columns: 200px 1fr; gap: var(--space-8);
+    padding: var(--space-10) 0 var(--space-6);
+    align-items: start;
+  }
+  .profile-hero__photo {
+    width: 200px; height: 200px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+    display: grid; place-items: center;
+    color: white; font-size: 60px; font-weight: var(--weight-semibold);
+    border: 4px solid var(--color-surface);
+    box-shadow: var(--shadow-md);
+  }
+  .profile-hero__name {
+    font-size: var(--text-3xl); font-weight: var(--weight-bold);
+    color: var(--color-text);
+    margin-bottom: var(--space-2);
+  }
+  .profile-hero__title {
+    font-size: var(--text-lg); color: var(--color-text-secondary);
+    margin-bottom: var(--space-1); line-height: var(--leading-snug);
+  }
+  .profile-hero__dept {
+    font-size: var(--text-base); color: var(--color-text-muted);
+    margin-bottom: var(--space-4);
+  }
+  .profile-hero__contact {
+    display: flex; gap: var(--space-4); flex-wrap: wrap;
+    font-size: var(--text-sm); color: var(--color-text-secondary);
+    margin-top: var(--space-2);
+  }
+  .profile-hero__contact a { color: var(--color-text-secondary); }
+  .profile-hero__contact .icon { color: var(--color-text-muted); margin-right: 4px; }
+
+  .section { padding: var(--space-8) 0; border-top: 1px solid var(--color-border); }
+  .section:first-of-type { border-top: 0; }
+  .section__title {
+    font-size: var(--text-xs); font-weight: var(--weight-semibold);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-4);
+  }
+  .section__title--lg { font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--color-text); margin-bottom: var(--space-5); }
+
+  /* Overview */
+  .overview-text {
+    font-size: var(--text-md);
+    line-height: var(--leading-relaxed);
+    color: var(--color-text);
+    max-width: 65ch;
+  }
+
+  /* Areas of interest */
+  .aoi-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+  /* Selected highlights */
+  .pub-highlight {
+    display: grid; grid-template-columns: auto 1fr; gap: var(--space-4);
+    padding: var(--space-4) 0;
+    align-items: start;
+  }
+  .pub-highlight + .pub-highlight { border-top: 1px solid var(--color-border); }
+  .pub-rank {
+    width: 28px; height: 28px;
+    background: var(--color-primary-light); color: var(--color-primary);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: var(--text-xs); font-weight: var(--weight-semibold);
+    margin-top: 2px;
+  }
+  .pub-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--color-text); margin-bottom: var(--space-1); line-height: var(--leading-snug); }
+  .pub-meta { font-size: var(--text-sm); color: var(--color-text-secondary); line-height: var(--leading-snug); margin-bottom: var(--space-2); }
+  .pub-meta .author--wcm { color: var(--color-link); }
+  .pub-meta .author--wcm.self { font-weight: var(--weight-semibold); color: var(--color-text); }
+  .pub-stats { display: flex; gap: var(--space-4); font-size: var(--text-xs); color: var(--color-text-muted); }
+  .pub-stats .stat { display: inline-flex; gap: 4px; align-items: center; }
+  .pub-stats .stat--cited { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+
+  /* Recent publications - denser */
+  .pub-row {
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--color-border);
+  }
+  .pub-row:first-child { border-top: 0; }
+  .pub-row .pub-title { font-size: var(--text-base); margin-bottom: 2px; }
+  .pub-row .pub-meta { font-size: var(--text-sm); }
+
+  /* Grants */
+  .grant-row {
+    padding: var(--space-4) 0; border-top: 1px solid var(--color-border);
+    display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-4);
+    align-items: start;
+  }
+  .grant-row:first-child { border-top: 0; }
+  .grant-status {
+    font-size: var(--text-xs); font-weight: var(--weight-semibold);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 2px 8px; border-radius: var(--radius-sm);
+    margin-top: 2px;
+  }
+  .grant-status--active { background: #e8f3ec; color: var(--color-success); }
+  .grant-status--ended { background: #f1f1f1; color: var(--color-text-muted); }
+  .grant-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--color-text); margin-bottom: var(--space-1); }
+  .grant-meta { font-size: var(--text-sm); color: var(--color-text-secondary); }
+  .grant-id { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); white-space: nowrap; }
+
+  /* Appointments */
+  .appt-row {
+    padding: var(--space-3) 0; border-top: 1px solid var(--color-border);
+    font-size: var(--text-sm);
+  }
+  .appt-row:first-child { border-top: 0; }
+  .appt-title { font-weight: var(--weight-semibold); color: var(--color-text); margin-bottom: 2px; font-size: var(--text-base); }
+  .appt-org { color: var(--color-text-secondary); }
+  .appt-dates { color: var(--color-text-muted); font-size: var(--text-xs); margin-top: 2px; }
+
+  /* Education */
+  .edu-row { padding: var(--space-3) 0; border-top: 1px solid var(--color-border); font-size: var(--text-sm); }
+  .edu-row:first-child { border-top: 0; }
+  .edu-degree { font-weight: var(--weight-semibold); color: var(--color-text); }
+  .edu-inst { color: var(--color-text-secondary); }
+  .edu-date { color: var(--color-text-muted); font-size: var(--text-xs); }
+
+  /* Two-column layout (variant C) */
+  .layout-2col {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: var(--space-12);
+    padding: var(--space-10) 0;
+  }
+  .layout-2col__sidebar {
+    position: sticky; top: calc(var(--header-h) + var(--space-4));
+    align-self: start;
+  }
+  .sidebar-card {
+    background: var(--color-surface-alt);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    margin-bottom: var(--space-4);
+  }
+  .sidebar-card__title {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--color-text-muted); font-weight: var(--weight-semibold);
+    margin-bottom: var(--space-3);
+  }
+
+  /* Tabbed variant (B) */
+  .tab-bar {
+    display: flex; gap: var(--space-1);
+    border-bottom: 2px solid var(--color-border);
+    margin-bottom: var(--space-6);
+    margin-top: var(--space-4);
+  }
+  .tab-bar__btn {
+    background: transparent; border: 0;
+    padding: var(--space-3) var(--space-5);
+    font-size: var(--text-sm); font-weight: var(--weight-medium);
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+  }
+  .tab-bar__btn:hover { color: var(--color-text); }
+  .tab-bar__btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Action buttons in hero (variant A and C) */
+  .hero-actions { display: flex; gap: var(--space-2); margin-top: var(--space-4); }
+
+  /* Show all link */
+  .show-all { font-size: var(--text-sm); color: var(--color-link); margin-top: var(--space-4); display: inline-block; }
+
+  /* Sketch toolbar */
+  #sketch-tools {
+    position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+    background: rgba(0,0,0,0.85); color: white;
+    padding: 6px 10px; border-radius: 6px;
+    font-family: system-ui; font-size: 11px;
+    opacity: 0.5; transition: opacity 0.2s;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #sketch-tools:hover { opacity: 1; }
+  #sketch-tools select { background: #333; color: white; border: 1px solid #555; padding: 2px 4px; font-size: 11px; }
+
+  /* Edit affordance (signed-in state) */
+  .edit-state-toggle { font-size: 12px; color: #999; margin-left: auto; }
+  .edit-state-toggle input { vertical-align: middle; }
+  .edit-pencil {
+    display: none;
+    margin-left: var(--space-2);
+    color: var(--color-primary);
+    font-size: var(--text-xs); font-weight: var(--weight-medium);
+    cursor: pointer;
+  }
+  .signed-in .edit-pencil { display: inline-block; }
+  .checklist {
+    display: none;
+    background: #fffbea; border: 1px solid #f0d97a; border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4); margin: var(--space-4) 0;
+    font-size: var(--text-sm); color: #6b5400;
+  }
+  .checklist__title { font-weight: var(--weight-semibold); margin-bottom: var(--space-2); }
+  .signed-in .checklist { display: block; }
+
+  /* Mobile responsive */
+  @media (max-width: 760px) {
+    .profile-hero { grid-template-columns: 1fr; gap: var(--space-4); text-align: left; }
+    .profile-hero__photo { width: 120px; height: 120px; font-size: 36px; }
+    .layout-2col { grid-template-columns: 1fr; gap: var(--space-6); }
+    .layout-2col__sidebar { position: static; }
+    .wcm-header__nav { display: none; }
+    .wcm-header__search { max-width: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Variant Navigation -->
+<div id="variant-nav">
+  <span class="label">Sketch 001 · Profile page</span>
+  <button class="variant-tab active" onclick="showVariant('a', this)">A: Single-column scroll</button>
+  <button class="variant-tab" onclick="showVariant('b', this)">B: Tabbed sub-nav</button>
+  <button class="variant-tab" onclick="showVariant('c', this)">C: Two-column w/ sidebar ★ Selected</button>
+  <label class="edit-state-toggle">
+    <input type="checkbox" id="signed-in-toggle" onchange="toggleSignedIn(this)">
+    Signed-in view
+  </label>
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT A: SINGLE-COLUMN SCROLL (Yale-inspired editorial)    -->
+<!-- ============================================================ -->
+<div id="variant-a" class="variant active">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" placeholder="Search scholars and publications…">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <div class="profile-hero">
+      <div class="profile-hero__photo">ER</div>
+      <div>
+        <h1 class="profile-hero__name">Eleanor M. Ramirez, MD</h1>
+        <div class="profile-hero__title">Chief, Division of Cardiology · Sandra A. Daugherty Professor of Cardiology</div>
+        <div class="profile-hero__dept">Joan and Sanford I. Weill Department of Medicine</div>
+        <div class="profile-hero__contact">
+          <span><span class="icon">✉</span> <a href="mailto:emr2018@med.cornell.edu">emr2018@med.cornell.edu</a></span>
+        </div>
+        <div class="hero-actions">
+          <a href="#" class="btn">Copy citation list</a>
+          <a href="#" class="btn">Print profile</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="checklist">
+      <div class="checklist__title">Your profile is mostly complete.</div>
+      <div>1 unconfirmed publication awaiting your review in <a href="#">Publication Manager</a>. Last edited 14 days ago.</div>
+    </div>
+
+    <section class="section">
+      <div class="section__title">Overview <a href="#" class="edit-pencil">✎ Edit</a></div>
+      <p class="overview-text">Dr. Ramirez is the Chief of the Division of Cardiology and the Sandra A. Daugherty Professor of Cardiology at Weill Cornell Medicine. Her research focuses on cardio-oncology — the cardiovascular complications of cancer therapies — and on understanding why heart disease presents differently in women than men. She leads the Women's Heart Health Program at NewYork-Presbyterian Hospital and directs an NIH-funded research program investigating cardioprotective strategies for patients receiving immune checkpoint inhibitors and anthracycline-based chemotherapy. Her clinical practice emphasizes long-term cardiovascular surveillance for cancer survivors, with particular attention to the unique presentations of cardiotoxicity in women.</p>
+    </section>
+
+    <section class="section">
+      <div class="section__title">Areas of interest</div>
+      <div class="aoi-list">
+        <span class="pill">Cardio-oncology</span>
+        <span class="pill">Heart failure</span>
+        <span class="pill">Cardiovascular disease in women</span>
+        <span class="pill">Cardiotoxicity</span>
+        <span class="pill">Anthracyclines</span>
+        <span class="pill">Immune checkpoint inhibitors</span>
+        <span class="pill">Echocardiography</span>
+        <span class="pill">Ventricular function</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Selected highlights</div>
+
+      <div class="pub-highlight">
+        <div class="pub-rank">1</div>
+        <div>
+          <div class="pub-title">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes and management</div>
+          <div class="pub-meta">Liu C, Park S, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>New England Journal of Medicine</em>. 2023.</div>
+          <div class="pub-stats">
+            <span class="stat stat--cited">412 citations</span>
+            <span class="stat">Senior author</span>
+            <span class="stat">Academic Article</span>
+            <a href="#">DOI</a>
+            <a href="#">PubMed</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="pub-highlight">
+        <div class="pub-rank">2</div>
+        <div>
+          <div class="pub-title">Sex differences in heart failure with preserved ejection fraction</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, et al. <em>Circulation</em>. 2022.</div>
+          <div class="pub-stats">
+            <span class="stat stat--cited">234 citations</span>
+            <span class="stat">First author</span>
+            <span class="stat">Academic Article</span>
+            <a href="#">DOI</a>
+            <a href="#">PubMed</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="pub-highlight">
+        <div class="pub-rank">3</div>
+        <div>
+          <div class="pub-title">Trastuzumab-induced cardiomyopathy: a meta-analysis of long-term outcomes</div>
+          <div class="pub-meta">Park S, Liu C, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>Journal of the American College of Cardiology</em>. 2021.</div>
+          <div class="pub-stats">
+            <span class="stat stat--cited">156 citations</span>
+            <span class="stat">Senior author</span>
+            <span class="stat">Academic Article</span>
+            <a href="#">DOI</a>
+            <a href="#">PubMed</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Recent publications</div>
+
+      <div class="pub-row">
+        <div class="pub-title">Anthracycline cardiotoxicity in long-term breast cancer survivors: a multicenter prospective cohort</div>
+        <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, Liu C. <em>JAMA Cardiology</em>. 2024. <span style="color:var(--color-text-muted)">· 87 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes and management</div>
+        <div class="pub-meta">Liu C, Park S, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>NEJM</em>. 2023. <span style="color:var(--color-text-muted)">· 412 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Cardiac MRI surveillance protocols in cardio-oncology: a position statement</div>
+        <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Williams J, <span class="author--wcm">Karim A</span>, Saito Y. <em>Cardiovascular Imaging</em>. 2023. <span style="color:var(--color-text-muted)">· 41 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Sex differences in heart failure with preserved ejection fraction</div>
+        <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, et al. <em>Circulation</em>. 2022. <span style="color:var(--color-text-muted)">· 234 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Trastuzumab-induced cardiomyopathy: a meta-analysis</div>
+        <div class="pub-meta">Park S, Liu C, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>JACC</em>. 2021. <span style="color:var(--color-text-muted)">· 156 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Echocardiographic strain imaging for early detection of cardiotoxicity</div>
+        <div class="pub-meta">Saito Y, <span class="author--wcm self">Ramirez EM</span>, Williams J. <em>JACC: Cardiovascular Imaging</em>. 2021. <span style="color:var(--color-text-muted)">· 98 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <div class="pub-row">
+        <div class="pub-title">Cardiac MRI in cardio-oncology surveillance: review</div>
+        <div class="pub-meta">Williams J, Patel D, <span class="author--wcm self">Ramirez EM</span>, et al. <em>Circulation</em>. 2020. <span style="color:var(--color-text-muted)">· 89 citations · <a href="#">DOI</a></span></div>
+      </div>
+      <a href="#" class="show-all">Show all 142 publications →</a>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Grants</div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">Active</span>
+        <div>
+          <div class="grant-title">Cardioprotective strategies in immune checkpoint therapy</div>
+          <div class="grant-meta">Principal Investigator · National Heart, Lung, and Blood Institute (NHLBI) · 2022–2027</div>
+        </div>
+        <span class="grant-id">R01 HL158012</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">Active</span>
+        <div>
+          <div class="grant-title">Mentored career development in cardio-oncology</div>
+          <div class="grant-meta">Principal Investigator · NHLBI · 2020–2025</div>
+        </div>
+        <span class="grant-id">K24 HL142235</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">Active</span>
+        <div>
+          <div class="grant-title">Sex-specific responses to anthracyclines in breast cancer</div>
+          <div class="grant-meta">Principal Investigator · American Heart Association · 2023–2025</div>
+        </div>
+        <span class="grant-id">AHA 23-IRG-05</span>
+      </div>
+      <div class="grant-row">
+        <span class="grant-status grant-status--active">Active</span>
+        <div>
+          <div class="grant-title">Cancer therapy cardiovascular surveillance network</div>
+          <div class="grant-meta">Co-Investigator · National Cancer Institute · 2021–2026</div>
+        </div>
+        <span class="grant-id">U01 CA245678</span>
+      </div>
+      <a href="#" class="show-all">Show all 11 grants →</a>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Appointments</div>
+      <div class="appt-row">
+        <div class="appt-title">Chief, Division of Cardiology</div>
+        <div class="appt-org">Joan and Sanford I. Weill Department of Medicine</div>
+        <div class="appt-dates">2023 – present</div>
+      </div>
+      <div class="appt-row">
+        <div class="appt-title">Sandra A. Daugherty Professor of Cardiology</div>
+        <div class="appt-org">Weill Cornell Medicine</div>
+        <div class="appt-dates">2022 – present</div>
+      </div>
+      <div class="appt-row">
+        <div class="appt-title">Director, Women's Heart Health Program</div>
+        <div class="appt-org">NewYork-Presbyterian Hospital</div>
+        <div class="appt-dates">2018 – present</div>
+      </div>
+      <div class="appt-row">
+        <div class="appt-title">Attending Physician, Cardiology</div>
+        <div class="appt-org">NewYork-Presbyterian Hospital / Weill Cornell Medical Center</div>
+        <div class="appt-dates">2010 – present</div>
+      </div>
+      <a href="#" class="show-all">Show past appointments →</a>
+    </section>
+
+    <section class="section">
+      <div class="section__title section__title--lg">Education and training</div>
+      <div class="edu-row">
+        <div><span class="edu-degree">Cardiology Fellowship</span> · <span class="edu-inst">Brigham and Women's Hospital</span></div>
+        <div class="edu-date">2006–2010</div>
+      </div>
+      <div class="edu-row">
+        <div><span class="edu-degree">Internal Medicine Residency</span> · <span class="edu-inst">Massachusetts General Hospital</span></div>
+        <div class="edu-date">2003–2006</div>
+      </div>
+      <div class="edu-row">
+        <div><span class="edu-degree">MD</span> · <span class="edu-inst">Yale School of Medicine</span></div>
+        <div class="edu-date">2003</div>
+      </div>
+      <div class="edu-row">
+        <div><span class="edu-degree">BS, Biology</span> · <span class="edu-inst">Stanford University</span></div>
+        <div class="edu-date">1999</div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+      <div style="margin-left:auto">Last data refresh: today, 4:00 AM</div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT B: TABBED SUB-NAV (Yale-style)                       -->
+<!-- ============================================================ -->
+<div id="variant-b" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" placeholder="Search scholars and publications…">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <main class="container">
+
+    <div class="profile-hero">
+      <div class="profile-hero__photo">ER</div>
+      <div>
+        <h1 class="profile-hero__name">Eleanor M. Ramirez, MD</h1>
+        <div class="profile-hero__title">Chief, Division of Cardiology · Sandra A. Daugherty Professor of Cardiology</div>
+        <div class="profile-hero__dept">Joan and Sanford I. Weill Department of Medicine</div>
+        <div class="profile-hero__contact">
+          <span><span class="icon">✉</span> <a href="mailto:emr2018@med.cornell.edu">emr2018@med.cornell.edu</a></span>
+        </div>
+        <div class="hero-actions">
+          <a href="#" class="btn">Copy citation list</a>
+          <a href="#" class="btn">Print profile</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="checklist">
+      <div class="checklist__title">Your profile is mostly complete.</div>
+      <div>1 unconfirmed publication awaiting your review in <a href="#">Publication Manager</a>. Last edited 14 days ago.</div>
+    </div>
+
+    <nav class="tab-bar" role="tablist">
+      <button class="tab-bar__btn active" onclick="showProfileTab('about', this)">About</button>
+      <button class="tab-bar__btn" onclick="showProfileTab('research', this)">Research</button>
+      <button class="tab-bar__btn" onclick="showProfileTab('publications', this)">Publications <span style="color:var(--color-text-muted);font-weight:var(--weight-normal)">142</span></button>
+      <button class="tab-bar__btn" onclick="showProfileTab('appts', this)">Appointments &amp; Education</button>
+    </nav>
+
+    <!-- ABOUT tab -->
+    <section class="tab-panel active" id="tab-about">
+      <div class="section" style="padding-top:0;border-top:0">
+        <div class="section__title">Overview <a href="#" class="edit-pencil">✎ Edit</a></div>
+        <p class="overview-text">Dr. Ramirez is the Chief of the Division of Cardiology and the Sandra A. Daugherty Professor of Cardiology at Weill Cornell Medicine. Her research focuses on cardio-oncology — the cardiovascular complications of cancer therapies — and on understanding why heart disease presents differently in women than men. She leads the Women's Heart Health Program at NewYork-Presbyterian Hospital and directs an NIH-funded research program investigating cardioprotective strategies for patients receiving immune checkpoint inhibitors and anthracycline-based chemotherapy.</p>
+      </div>
+
+      <div class="section">
+        <div class="section__title">Areas of interest</div>
+        <div class="aoi-list">
+          <span class="pill">Cardio-oncology</span>
+          <span class="pill">Heart failure</span>
+          <span class="pill">Cardiovascular disease in women</span>
+          <span class="pill">Cardiotoxicity</span>
+          <span class="pill">Anthracyclines</span>
+          <span class="pill">Immune checkpoint inhibitors</span>
+          <span class="pill">Echocardiography</span>
+          <span class="pill">Ventricular function</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESEARCH tab -->
+    <section class="tab-panel" id="tab-research">
+      <div class="section" style="padding-top:0;border-top:0">
+        <div class="section__title section__title--lg">Active grants</div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Cardioprotective strategies in immune checkpoint therapy</div>
+            <div class="grant-meta">Principal Investigator · NHLBI · 2022–2027</div>
+          </div>
+          <span class="grant-id">R01 HL158012</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Mentored career development in cardio-oncology</div>
+            <div class="grant-meta">Principal Investigator · NHLBI · 2020–2025</div>
+          </div>
+          <span class="grant-id">K24 HL142235</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Sex-specific responses to anthracyclines</div>
+            <div class="grant-meta">Principal Investigator · AHA · 2023–2025</div>
+          </div>
+          <span class="grant-id">AHA 23-IRG-05</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Cancer therapy cardiovascular surveillance network</div>
+            <div class="grant-meta">Co-Investigator · NCI · 2021–2026</div>
+          </div>
+          <span class="grant-id">U01 CA245678</span>
+        </div>
+        <a href="#" class="show-all">Show all 11 grants (including ended) →</a>
+      </div>
+    </section>
+
+    <!-- PUBLICATIONS tab -->
+    <section class="tab-panel" id="tab-publications">
+      <div class="section" style="padding-top:0;border-top:0">
+        <div class="section__title section__title--lg">Selected highlights</div>
+        <div class="pub-highlight">
+          <div class="pub-rank">1</div>
+          <div>
+            <div class="pub-title">Immune checkpoint inhibitor-associated myocarditis</div>
+            <div class="pub-meta">Liu C, Park S, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>NEJM</em>. 2023.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">412 citations</span>
+              <span class="stat">Senior author</span>
+              <a href="#">DOI</a>
+              <a href="#">PubMed</a>
+            </div>
+          </div>
+        </div>
+        <div class="pub-highlight">
+          <div class="pub-rank">2</div>
+          <div>
+            <div class="pub-title">Sex differences in heart failure with preserved ejection fraction</div>
+            <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, et al. <em>Circulation</em>. 2022.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">234 citations</span>
+              <span class="stat">First author</span>
+              <a href="#">DOI</a>
+            </div>
+          </div>
+        </div>
+        <div class="pub-highlight">
+          <div class="pub-rank">3</div>
+          <div>
+            <div class="pub-title">Trastuzumab-induced cardiomyopathy: a meta-analysis</div>
+            <div class="pub-meta">Park S, Liu C, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>JACC</em>. 2021.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">156 citations</span>
+              <span class="stat">Senior author</span>
+              <a href="#">DOI</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section__title section__title--lg">Recent publications</div>
+        <div class="pub-row">
+          <div class="pub-title">Anthracycline cardiotoxicity in long-term breast cancer survivors</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, et al. <em>JAMA Cardiology</em>. 2024. · 87 citations · <a href="#">DOI</a></div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Cardiac MRI surveillance protocols in cardio-oncology</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Williams J, <span class="author--wcm">Karim A</span>. <em>Cardiovascular Imaging</em>. 2023. · 41 citations</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Echocardiographic strain imaging for early detection of cardiotoxicity</div>
+          <div class="pub-meta">Saito Y, <span class="author--wcm self">Ramirez EM</span>, Williams J. <em>JACC: Cardiovascular Imaging</em>. 2021. · 98 citations</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Cardiac MRI in cardio-oncology surveillance</div>
+          <div class="pub-meta">Williams J, Patel D, <span class="author--wcm self">Ramirez EM</span>. <em>Circulation</em>. 2020. · 89 citations</div>
+        </div>
+        <a href="#" class="show-all">Show all 142 publications →</a>
+      </div>
+    </section>
+
+    <!-- APPOINTMENTS tab -->
+    <section class="tab-panel" id="tab-appts">
+      <div class="section" style="padding-top:0;border-top:0">
+        <div class="section__title section__title--lg">Appointments</div>
+        <div class="appt-row">
+          <div class="appt-title">Chief, Division of Cardiology</div>
+          <div class="appt-org">Joan and Sanford I. Weill Department of Medicine</div>
+          <div class="appt-dates">2023 – present</div>
+        </div>
+        <div class="appt-row">
+          <div class="appt-title">Sandra A. Daugherty Professor of Cardiology</div>
+          <div class="appt-org">Weill Cornell Medicine</div>
+          <div class="appt-dates">2022 – present</div>
+        </div>
+        <div class="appt-row">
+          <div class="appt-title">Director, Women's Heart Health Program</div>
+          <div class="appt-org">NewYork-Presbyterian Hospital</div>
+          <div class="appt-dates">2018 – present</div>
+        </div>
+        <div class="appt-row">
+          <div class="appt-title">Attending Physician, Cardiology</div>
+          <div class="appt-org">NewYork-Presbyterian / Weill Cornell Medical Center</div>
+          <div class="appt-dates">2010 – present</div>
+        </div>
+        <a href="#" class="show-all">Show past appointments →</a>
+      </div>
+      <div class="section">
+        <div class="section__title section__title--lg">Education and training</div>
+        <div class="edu-row">
+          <div><span class="edu-degree">Cardiology Fellowship</span> · <span class="edu-inst">Brigham and Women's Hospital</span></div>
+          <div class="edu-date">2006–2010</div>
+        </div>
+        <div class="edu-row">
+          <div><span class="edu-degree">Internal Medicine Residency</span> · <span class="edu-inst">Massachusetts General Hospital</span></div>
+          <div class="edu-date">2003–2006</div>
+        </div>
+        <div class="edu-row">
+          <div><span class="edu-degree">MD</span> · <span class="edu-inst">Yale School of Medicine</span></div>
+          <div class="edu-date">2003</div>
+        </div>
+        <div class="edu-row">
+          <div><span class="edu-degree">BS, Biology</span> · <span class="edu-inst">Stanford University</span></div>
+          <div class="edu-date">1999</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+      <div style="margin-left:auto">Last data refresh: today, 4:00 AM</div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT C: TWO-COLUMN W/ STICKY SIDEBAR                       -->
+<!-- ============================================================ -->
+<div id="variant-c" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" placeholder="Search scholars and publications…">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <main class="container layout-2col">
+
+    <!-- Left rail -->
+    <aside class="layout-2col__sidebar">
+      <div style="text-align:center;margin-bottom:var(--space-4)">
+        <div class="profile-hero__photo" style="margin:0 auto var(--space-3)">ER</div>
+        <h1 style="font-size:var(--text-xl);font-weight:var(--weight-bold);margin-bottom:var(--space-1)">Eleanor M. Ramirez, MD</h1>
+        <div style="color:var(--color-text-secondary);font-size:var(--text-sm);line-height:var(--leading-snug)">Chief, Division of Cardiology<br>Sandra A. Daugherty Professor of Cardiology</div>
+        <div style="color:var(--color-text-muted);font-size:var(--text-sm);margin-top:var(--space-2)">Weill Department of Medicine</div>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-card__title">Contact</div>
+        <div style="font-size:var(--text-sm)"><a href="mailto:emr2018@med.cornell.edu">emr2018@med.cornell.edu</a></div>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-card__title">Appointments</div>
+        <div style="font-size:var(--text-sm);line-height:var(--leading-relaxed)">
+          <div style="margin-bottom:var(--space-2)"><strong>Chief, Division of Cardiology</strong><br><span style="color:var(--color-text-muted)">Weill Department of Medicine · 2023–</span></div>
+          <div style="margin-bottom:var(--space-2)"><strong>Sandra A. Daugherty Professor</strong><br><span style="color:var(--color-text-muted)">2022–</span></div>
+          <div style="margin-bottom:var(--space-2)"><strong>Director, Women's Heart Health Program</strong><br><span style="color:var(--color-text-muted)">NewYork-Presbyterian · 2018–</span></div>
+          <a href="#" style="font-size:var(--text-xs)">Show all 4 →</a>
+        </div>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-card__title">Education</div>
+        <div style="font-size:var(--text-sm);line-height:var(--leading-relaxed)">
+          <div><strong>Fellowship, Cardiology</strong><br><span style="color:var(--color-text-muted)">Brigham &amp; Women's, 2010</span></div>
+          <div style="margin-top:var(--space-2)"><strong>Residency, Internal Medicine</strong><br><span style="color:var(--color-text-muted)">Mass General, 2006</span></div>
+          <div style="margin-top:var(--space-2)"><strong>MD</strong> · <span style="color:var(--color-text-muted)">Yale, 2003</span></div>
+          <div style="margin-top:var(--space-2)"><strong>BS, Biology</strong> · <span style="color:var(--color-text-muted)">Stanford, 1999</span></div>
+        </div>
+      </div>
+
+      <div class="hero-actions" style="justify-content:center">
+        <a href="#" class="btn">Copy citations</a>
+        <a href="#" class="btn">Print</a>
+      </div>
+    </aside>
+
+    <!-- Right column -->
+    <div>
+      <div class="checklist">
+        <div class="checklist__title">Your profile is mostly complete.</div>
+        <div>1 unconfirmed publication awaiting your review in <a href="#">Publication Manager</a>.</div>
+      </div>
+
+      <section class="section" style="padding-top:0;border-top:0">
+        <div class="section__title">Overview <a href="#" class="edit-pencil">✎ Edit</a></div>
+        <p class="overview-text">Dr. Ramirez is the Chief of the Division of Cardiology and the Sandra A. Daugherty Professor of Cardiology at Weill Cornell Medicine. Her research focuses on cardio-oncology — the cardiovascular complications of cancer therapies — and on understanding why heart disease presents differently in women than men. She leads the Women's Heart Health Program at NewYork-Presbyterian Hospital and directs an NIH-funded research program investigating cardioprotective strategies for patients receiving immune checkpoint inhibitors and anthracycline-based chemotherapy.</p>
+      </section>
+
+      <section class="section">
+        <div class="section__title">Areas of interest</div>
+        <div class="aoi-list">
+          <span class="pill">Cardio-oncology</span>
+          <span class="pill">Heart failure</span>
+          <span class="pill">Cardiovascular disease in women</span>
+          <span class="pill">Cardiotoxicity</span>
+          <span class="pill">Anthracyclines</span>
+          <span class="pill">Immune checkpoint inhibitors</span>
+          <span class="pill">Echocardiography</span>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section__title section__title--lg">Selected highlights</div>
+        <div class="pub-highlight">
+          <div class="pub-rank">1</div>
+          <div>
+            <div class="pub-title">Immune checkpoint inhibitor-associated myocarditis</div>
+            <div class="pub-meta">Liu C, Park S, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>NEJM</em>. 2023.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">412 citations</span>
+              <span class="stat">Senior author</span>
+              <a href="#">DOI</a>
+            </div>
+          </div>
+        </div>
+        <div class="pub-highlight">
+          <div class="pub-rank">2</div>
+          <div>
+            <div class="pub-title">Sex differences in heart failure with preserved ejection fraction</div>
+            <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, et al. <em>Circulation</em>. 2022.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">234 citations</span>
+              <span class="stat">First author</span>
+              <a href="#">DOI</a>
+            </div>
+          </div>
+        </div>
+        <div class="pub-highlight">
+          <div class="pub-rank">3</div>
+          <div>
+            <div class="pub-title">Trastuzumab-induced cardiomyopathy: a meta-analysis</div>
+            <div class="pub-meta">Park S, Liu C, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>JACC</em>. 2021.</div>
+            <div class="pub-stats">
+              <span class="stat stat--cited">156 citations</span>
+              <span class="stat">Senior author</span>
+              <a href="#">DOI</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section__title section__title--lg">Recent publications</div>
+        <div class="pub-row">
+          <div class="pub-title">Anthracycline cardiotoxicity in long-term breast cancer survivors</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Patel D, Chen H, Liu C. <em>JAMA Cardiology</em>. 2024. · 87 cit.</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Immune checkpoint inhibitor-associated myocarditis</div>
+          <div class="pub-meta">Liu C, Park S, Wong M, <span class="author--wcm self">Ramirez EM</span>. <em>NEJM</em>. 2023. · 412 cit.</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Cardiac MRI surveillance protocols in cardio-oncology</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, Williams J, <span class="author--wcm">Karim A</span>. <em>Cardiovascular Imaging</em>. 2023. · 41 cit.</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Sex differences in heart failure with preserved ejection fraction</div>
+          <div class="pub-meta"><span class="author--wcm self">Ramirez EM</span>, et al. <em>Circulation</em>. 2022. · 234 cit.</div>
+        </div>
+        <div class="pub-row">
+          <div class="pub-title">Echocardiographic strain imaging for early detection of cardiotoxicity</div>
+          <div class="pub-meta">Saito Y, <span class="author--wcm self">Ramirez EM</span>, Williams J. <em>JACC: CV Imaging</em>. 2021. · 98 cit.</div>
+        </div>
+        <a href="#" class="show-all">Show all 142 publications →</a>
+      </section>
+
+      <section class="section">
+        <div class="section__title section__title--lg">Grants</div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Cardioprotective strategies in immune checkpoint therapy</div>
+            <div class="grant-meta">PI · NHLBI · 2022–2027</div>
+          </div>
+          <span class="grant-id">R01 HL158012</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Mentored career development in cardio-oncology</div>
+            <div class="grant-meta">PI · NHLBI · 2020–2025</div>
+          </div>
+          <span class="grant-id">K24 HL142235</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Sex-specific responses to anthracyclines</div>
+            <div class="grant-meta">PI · AHA · 2023–2025</div>
+          </div>
+          <span class="grant-id">AHA 23-IRG-05</span>
+        </div>
+        <div class="grant-row">
+          <span class="grant-status grant-status--active">Active</span>
+          <div>
+            <div class="grant-title">Cancer therapy cardiovascular surveillance network</div>
+            <div class="grant-meta">Co-I · NCI · 2021–2026</div>
+          </div>
+          <span class="grant-id">U01 CA245678</span>
+        </div>
+        <a href="#" class="show-all">Show all 11 grants →</a>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="wcm-footer">
+    <div class="wcm-footer__inner">
+      <div>© Weill Cornell Medicine</div>
+      <div><a href="#">About Scholars</a></div>
+      <div><a href="#">Support</a></div>
+      <div><a href="#">Sitemap</a></div>
+      <div style="margin-left:auto">Last data refresh: today, 4:00 AM</div>
+    </div>
+  </footer>
+
+</div>
+
+<!-- Sketch toolbar -->
+<div id="sketch-tools">
+  <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+    <option value="default">Theme: Default (WCM placeholder)</option>
+  </select>
+  <span style="color:#999">·</span>
+  <span style="color:#999">Sketch 001</span>
+</div>
+
+<script>
+function showVariant(id, btn) {
+  document.querySelectorAll('.variant').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.variant-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('variant-' + id).classList.add('active');
+  btn.classList.add('active');
+  window.scrollTo(0, 0);
+}
+function showProfileTab(id, btn) {
+  const container = btn.closest('.variant');
+  container.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  container.querySelectorAll('.tab-bar__btn').forEach(b => b.classList.remove('active'));
+  container.querySelector('#tab-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+function toggleSignedIn(checkbox) {
+  document.body.classList.toggle('signed-in', checkbox.checked);
+}
+</script>
+
+</body>
+</html>

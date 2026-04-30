@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sketch 002 — Search results · Scholars @ WCM</title>
+<link rel="stylesheet" href="../themes/default.css">
+<style>
+  body { padding-top: 44px; }
+
+  /* Variant nav */
+  #variant-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+    background: #1a1a1a; color: #e5e5e5;
+    height: 44px; display: flex; align-items: center; gap: 4px;
+    padding: 0 12px;
+    font-family: var(--font-sans); font-size: 13px;
+  }
+  #variant-nav .label { color: #999; margin-right: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .variant-tab { background: transparent; border: 1px solid transparent; color: #c8c8c8; padding: 6px 12px; border-radius: 4px; font-family: inherit; font-size: 12px; }
+  .variant-tab:hover { background: #2a2a2a; color: white; }
+  .variant-tab.active { background: var(--color-primary); color: white; }
+  .variant { display: none; }
+  .variant.active { display: block; }
+
+  /* Search context */
+  .search-meta {
+    background: var(--color-surface-alt);
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-4) var(--space-6);
+  }
+  .search-meta__inner {
+    max-width: var(--max-wide); margin: 0 auto;
+    display: flex; gap: var(--space-4); align-items: center;
+  }
+  .search-meta__big {
+    flex: 1;
+    display: flex; gap: var(--space-3); align-items: center;
+  }
+  .search-meta__big input {
+    flex: 1;
+    height: 44px; padding: 0 var(--space-4);
+    font-size: var(--text-md);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: white;
+  }
+  .search-meta__big input:focus { outline: none; border-color: var(--color-primary); }
+  .search-meta__count {
+    font-size: var(--text-sm); color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+
+  /* Result mode tabs (variants A, B) */
+  .mode-tabs {
+    display: flex; gap: var(--space-2);
+    border-bottom: 2px solid var(--color-border);
+    padding: 0 var(--space-6);
+    margin-top: var(--space-2);
+    max-width: var(--max-wide); margin-left: auto; margin-right: auto;
+  }
+  .mode-tab {
+    background: transparent; border: 0;
+    padding: var(--space-3) var(--space-4);
+    font-size: var(--text-base); font-weight: var(--weight-medium);
+    color: var(--color-text-secondary);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    display: flex; align-items: center; gap: var(--space-2);
+  }
+  .mode-tab__count {
+    font-size: var(--text-xs); color: var(--color-text-muted);
+    background: var(--color-surface-alt);
+    padding: 1px 6px; border-radius: var(--radius-pill);
+    font-weight: var(--weight-normal);
+  }
+  .mode-tab:hover { color: var(--color-text); }
+  .mode-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  .mode-tab.active .mode-tab__count { background: var(--color-primary-light); color: var(--color-primary); }
+
+  /* Layout: filter sidebar + results (variant A) */
+  .results-layout-A {
+    max-width: var(--max-wide);
+    margin: 0 auto;
+    padding: var(--space-6);
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: var(--space-8);
+  }
+
+  /* Layout: full-width with horizontal filter strip (variant B) */
+  .results-layout-B {
+    max-width: var(--max-wide);
+    margin: 0 auto;
+    padding: var(--space-4) var(--space-6) var(--space-6);
+  }
+  .filter-strip {
+    display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+    margin-bottom: var(--space-4);
+  }
+  .filter-pill {
+    display: inline-flex; align-items: center; gap: var(--space-2);
+    height: 32px; padding: 0 var(--space-3);
+    font-size: var(--text-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+  }
+  .filter-pill:hover { border-color: var(--color-primary); }
+  .filter-pill__caret { color: var(--color-text-muted); font-size: 10px; }
+  .filter-pill--active { background: var(--color-primary-light); border-color: var(--color-primary); color: var(--color-primary); }
+
+  /* Layout: stacked sections, no tabs (variant C) */
+  .results-layout-C {
+    max-width: var(--max-wide);
+    margin: 0 auto;
+    padding: var(--space-6);
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: var(--space-8);
+  }
+  .section-header {
+    display: flex; align-items: baseline; gap: var(--space-3);
+    padding: var(--space-2) 0;
+    margin-bottom: var(--space-4);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .section-header__title { font-size: var(--text-xl); font-weight: var(--weight-bold); }
+  .section-header__count { color: var(--color-text-muted); font-size: var(--text-base); font-weight: var(--weight-normal); }
+  .section-header__sort {
+    margin-left: auto;
+    font-size: var(--text-sm); color: var(--color-text-secondary);
+  }
+  .section-header__sort select {
+    background: transparent; border: 1px solid var(--color-border);
+    padding: 4px 8px; border-radius: var(--radius-sm);
+    font-size: var(--text-sm); font-family: inherit;
+  }
+
+  /* Filter sidebar */
+  .filter-sidebar h3 {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--color-text-muted); font-weight: var(--weight-semibold);
+    margin-top: var(--space-5); margin-bottom: var(--space-2);
+  }
+  .filter-sidebar h3:first-child { margin-top: 0; }
+  .filter-list {
+    list-style: none; padding: 0; margin: 0;
+    font-size: var(--text-sm);
+  }
+  .filter-list li {
+    display: flex; justify-content: space-between;
+    padding: 4px 0;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+  .filter-list li:hover { color: var(--color-primary); }
+  .filter-list li.active { color: var(--color-primary); font-weight: var(--weight-medium); }
+  .filter-list .count { color: var(--color-text-muted); }
+  .filter-list input[type="checkbox"] { margin-right: 6px; }
+
+  /* People result row */
+  .person-row {
+    display: grid;
+    grid-template-columns: 64px 1fr auto;
+    gap: var(--space-4);
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--color-border);
+    align-items: start;
+  }
+  .person-row:first-child { border-top: 0; padding-top: 0; }
+  .person-photo {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+    display: grid; place-items: center;
+    color: white; font-weight: var(--weight-semibold);
+    font-size: var(--text-md);
+  }
+  .person-name { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--color-text); }
+  .person-name a { color: inherit; }
+  .person-name a:hover { color: var(--color-primary); }
+  .person-title { font-size: var(--text-sm); color: var(--color-text-secondary); margin: 2px 0; }
+  .person-dept { font-size: var(--text-xs); color: var(--color-text-muted); }
+  .person-snippet {
+    font-size: var(--text-sm); color: var(--color-text-secondary);
+    margin-top: var(--space-2);
+    line-height: var(--leading-snug);
+  }
+  .person-snippet em { background: #fff5cc; font-style: normal; padding: 0 2px; }
+  .person-meta-right {
+    text-align: right;
+    font-size: var(--text-xs); color: var(--color-text-muted);
+    line-height: 1.5;
+  }
+  .person-meta-right .stat { display: block; }
+  .person-meta-right .stat-num { color: var(--color-text); font-weight: var(--weight-semibold); font-size: var(--text-sm); }
+
+  /* Publication result row */
+  .pub-result {
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--color-border);
+  }
+  .pub-result:first-child { border-top: 0; padding-top: 0; }
+  .pub-result__title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--color-text); margin-bottom: var(--space-2); line-height: var(--leading-snug); }
+  .pub-result__title a { color: inherit; }
+  .pub-result__title a:hover { color: var(--color-primary); }
+  .pub-result__meta { font-size: var(--text-sm); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+  .pub-result__meta em { font-style: italic; }
+  .wcm-author-chips {
+    display: flex; flex-wrap: wrap; gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+  }
+  .wcm-author-chips__label {
+    font-size: var(--text-xs); color: var(--color-text-muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    align-self: center;
+    margin-right: var(--space-1);
+  }
+  .author-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px 3px 3px;
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-xs);
+    color: var(--color-text);
+    text-decoration: none;
+  }
+  .author-chip:hover { border-color: var(--color-primary); color: var(--color-primary); text-decoration: none; }
+  .author-chip__avatar {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #d4d4d4, #a3a3a3);
+    display: grid; place-items: center;
+    color: white; font-size: 10px; font-weight: var(--weight-semibold);
+  }
+  .pub-result__stats {
+    margin-top: var(--space-2);
+    font-size: var(--text-xs); color: var(--color-text-muted);
+    display: flex; gap: var(--space-4);
+  }
+  .pub-result__stats .citations { color: var(--color-text-secondary); font-weight: var(--weight-medium); }
+
+  /* Snippet variants */
+  .results-toolbar {
+    display: flex; align-items: baseline;
+    margin-bottom: var(--space-3);
+    font-size: var(--text-sm); color: var(--color-text-muted);
+  }
+  .results-toolbar__sort { margin-left: auto; }
+  .results-toolbar__sort select {
+    background: transparent; border: 1px solid var(--color-border);
+    padding: 3px 8px; border-radius: var(--radius-sm);
+    font-size: var(--text-sm); font-family: inherit;
+  }
+
+  /* Pagination */
+  .pagination {
+    display: flex; gap: var(--space-1); justify-content: center; align-items: center;
+    padding: var(--space-8) 0 var(--space-4);
+    font-size: var(--text-sm);
+  }
+  .pagination__btn {
+    min-width: 32px; height: 32px;
+    display: inline-grid; place-items: center;
+    border: 1px solid var(--color-border);
+    background: white;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    text-decoration: none; padding: 0 var(--space-2);
+  }
+  .pagination__btn:hover { border-color: var(--color-primary); color: var(--color-primary); text-decoration: none; }
+  .pagination__btn.active { background: var(--color-primary); border-color: var(--color-primary); color: white; }
+  .pagination__sep { padding: 0 var(--space-1); color: var(--color-text-muted); }
+
+  /* Sketch toolbar */
+  #sketch-tools {
+    position: fixed; bottom: 12px; right: 12px; z-index: 9999;
+    background: rgba(0,0,0,0.85); color: white;
+    padding: 6px 10px; border-radius: 6px;
+    font-family: system-ui; font-size: 11px;
+    opacity: 0.5; transition: opacity 0.2s;
+    display: flex; gap: 8px; align-items: center;
+  }
+  #sketch-tools:hover { opacity: 1; }
+
+  @media (max-width: 900px) {
+    .results-layout-A, .results-layout-C { grid-template-columns: 1fr; }
+    .person-row { grid-template-columns: 56px 1fr; }
+    .person-meta-right { grid-column: 1 / -1; text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Variant Navigation -->
+<div id="variant-nav">
+  <span class="label">Sketch 002 · Search results</span>
+  <button class="variant-tab active" onclick="showVariant('a', this)">A: Tabs + left filter sidebar ★ Selected</button>
+  <button class="variant-tab" onclick="showVariant('b', this)">B: Tabs + horizontal filter strip</button>
+  <button class="variant-tab" onclick="showVariant('c', this)">C: Stacked, no tabs</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT A: TABS + LEFT FILTER SIDEBAR                        -->
+<!-- ============================================================ -->
+<div id="variant-a" class="variant active">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" value="cardio-oncology">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <div class="search-meta">
+    <div class="search-meta__inner">
+      <div class="search-meta__big">
+        <input type="search" value="cardio-oncology" placeholder="Search scholars and publications…">
+        <button class="btn btn--primary">Search</button>
+      </div>
+      <div class="search-meta__count">14 people · 847 publications</div>
+    </div>
+  </div>
+
+  <nav class="mode-tabs">
+    <button class="mode-tab active">People <span class="mode-tab__count">14</span></button>
+    <button class="mode-tab">Publications <span class="mode-tab__count">847</span></button>
+  </nav>
+
+  <main class="results-layout-A">
+    <!-- Sidebar -->
+    <aside class="filter-sidebar">
+      <h3>Person type</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox" checked> Full-time faculty</label> <span class="count">11</span></li>
+        <li><label><input type="checkbox"> Adjunct faculty</label> <span class="count">2</span></li>
+        <li><label><input type="checkbox"> Postdoctoral fellow</label> <span class="count">1</span></li>
+      </ul>
+      <h3>Department</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox" checked> Medicine</label> <span class="count">7</span></li>
+        <li><label><input type="checkbox"> Pediatrics</label> <span class="count">2</span></li>
+        <li><label><input type="checkbox"> Pathology &amp; Lab Med</label> <span class="count">1</span></li>
+        <li><label><input type="checkbox"> Radiology</label> <span class="count">2</span></li>
+        <li><label><input type="checkbox"> Population Health Sciences</label> <span class="count">2</span></li>
+      </ul>
+      <h3>Activity</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox"> Has active grants</label> <span class="count">9</span></li>
+      </ul>
+    </aside>
+
+    <!-- Results -->
+    <section>
+      <div class="results-toolbar">
+        <span>Showing 1–10 of 14 people</span>
+        <span class="results-toolbar__sort">Sort: <select><option>Relevance</option><option>Last name (A–Z)</option><option>Most recent publication</option></select></span>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">ER</div>
+        <div>
+          <div class="person-name"><a href="#">Eleanor M. Ramirez, MD</a></div>
+          <div class="person-title">Chief, Division of Cardiology · Sandra A. Daugherty Professor of Cardiology</div>
+          <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+          <div class="person-snippet">Research focuses on <em>cardio-oncology</em> — the cardiovascular complications of cancer therapies — and on understanding why heart disease presents differently in women than men…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">142</span> pubs</span>
+          <span class="stat"><span class="stat-num">4</span> active grants</span>
+        </div>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">JW</div>
+        <div>
+          <div class="person-name"><a href="#">Joseph T. Williams, MD, PhD</a></div>
+          <div class="person-title">Associate Professor of Radiology in Medicine</div>
+          <div class="person-dept">Department of Radiology</div>
+          <div class="person-snippet">Cardiovascular imaging in <em>cardio-oncology</em>; cardiac MRI; strain imaging for early detection of cardiotoxicity…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">88</span> pubs</span>
+          <span class="stat"><span class="stat-num">2</span> active grants</span>
+        </div>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">SP</div>
+        <div>
+          <div class="person-name"><a href="#">Sanjay R. Patel, MD</a></div>
+          <div class="person-title">Assistant Professor of Medicine</div>
+          <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+          <div class="person-snippet">Heart failure with preserved ejection fraction; sex differences in HFpEF; <em>cardio-oncology</em> outcomes research…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">42</span> pubs</span>
+          <span class="stat"><span class="stat-num">1</span> active grant</span>
+        </div>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">YS</div>
+        <div>
+          <div class="person-name"><a href="#">Yuki Saito, MD</a></div>
+          <div class="person-title">Assistant Professor of Medicine</div>
+          <div class="person-dept">Department of Medicine</div>
+          <div class="person-snippet">Echocardiography; strain imaging; early detection of <em>cardiotoxicity</em> in cancer survivors…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">31</span> pubs</span>
+          <span class="stat"><span class="stat-num">1</span> active grant</span>
+        </div>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">CL</div>
+        <div>
+          <div class="person-name"><a href="#">Cynthia Liu, MD</a></div>
+          <div class="person-title">Assistant Professor of Pathology and Laboratory Medicine</div>
+          <div class="person-dept">Department of Pathology and Laboratory Medicine</div>
+          <div class="person-snippet">Cardiac pathology; <em>immune checkpoint inhibitor</em>-associated myocarditis…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">29</span> pubs</span>
+        </div>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">AK</div>
+        <div>
+          <div class="person-name"><a href="#">Anika Karim, MD</a></div>
+          <div class="person-title">Assistant Professor of Radiology</div>
+          <div class="person-dept">Department of Radiology</div>
+          <div class="person-snippet">Cardiovascular MRI; molecular imaging; <em>cardio-oncology</em> applications of T1/T2 mapping…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">24</span> pubs</span>
+          <span class="stat"><span class="stat-num">1</span> active grant</span>
+        </div>
+      </div>
+
+      <div class="pagination">
+        <a class="pagination__btn" href="#">‹</a>
+        <a class="pagination__btn active" href="#">1</a>
+        <a class="pagination__btn" href="#">2</a>
+        <a class="pagination__btn" href="#">›</a>
+      </div>
+    </section>
+  </main>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT B: TABS + HORIZONTAL FILTER STRIP                    -->
+<!-- ============================================================ -->
+<div id="variant-b" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" value="cardio-oncology">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <div class="search-meta">
+    <div class="search-meta__inner">
+      <div class="search-meta__big">
+        <input type="search" value="cardio-oncology" placeholder="Search…">
+        <button class="btn btn--primary">Search</button>
+      </div>
+      <div class="search-meta__count">14 people · 847 publications</div>
+    </div>
+  </div>
+
+  <nav class="mode-tabs">
+    <button class="mode-tab active">People <span class="mode-tab__count">14</span></button>
+    <button class="mode-tab">Publications <span class="mode-tab__count">847</span></button>
+  </nav>
+
+  <main class="results-layout-B">
+    <div class="filter-strip">
+      <span style="font-size:var(--text-xs); color:var(--color-text-muted); text-transform:uppercase; letter-spacing:0.06em; margin-right:var(--space-2);">Filter:</span>
+      <button class="filter-pill filter-pill--active">Person type: Full-time faculty <span class="filter-pill__caret">▼</span></button>
+      <button class="filter-pill">Department <span class="filter-pill__caret">▼</span></button>
+      <button class="filter-pill">Has active grants <span class="filter-pill__caret">▼</span></button>
+      <span style="margin-left:auto; font-size:var(--text-sm); color:var(--color-text-secondary);">
+        Sort: <select style="background:transparent;border:0;font-family:inherit;font-size:var(--text-sm);"><option>Relevance</option><option>Last name (A–Z)</option><option>Most recent publication</option></select>
+      </span>
+    </div>
+
+    <div class="results-toolbar">
+      <span>Showing 1–10 of 11 full-time faculty matching "cardio-oncology"</span>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo">ER</div>
+      <div>
+        <div class="person-name"><a href="#">Eleanor M. Ramirez, MD</a></div>
+        <div class="person-title">Chief, Division of Cardiology · Sandra A. Daugherty Professor</div>
+        <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+        <div class="person-snippet">Research focuses on <em>cardio-oncology</em> — cardiovascular complications of cancer therapies…</div>
+      </div>
+      <div class="person-meta-right">
+        <span class="stat"><span class="stat-num">142</span> pubs</span>
+        <span class="stat"><span class="stat-num">4</span> active grants</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo">JW</div>
+      <div>
+        <div class="person-name"><a href="#">Joseph T. Williams, MD, PhD</a></div>
+        <div class="person-title">Associate Professor of Radiology in Medicine</div>
+        <div class="person-dept">Department of Radiology</div>
+        <div class="person-snippet">Cardiovascular imaging in <em>cardio-oncology</em>; cardiac MRI; strain imaging…</div>
+      </div>
+      <div class="person-meta-right">
+        <span class="stat"><span class="stat-num">88</span> pubs</span>
+        <span class="stat"><span class="stat-num">2</span> active grants</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo">SP</div>
+      <div>
+        <div class="person-name"><a href="#">Sanjay R. Patel, MD</a></div>
+        <div class="person-title">Assistant Professor of Medicine</div>
+        <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+        <div class="person-snippet">Heart failure with preserved ejection fraction; sex differences in HFpEF; <em>cardio-oncology</em> outcomes research…</div>
+      </div>
+      <div class="person-meta-right">
+        <span class="stat"><span class="stat-num">42</span> pubs</span>
+        <span class="stat"><span class="stat-num">1</span> active grant</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo">YS</div>
+      <div>
+        <div class="person-name"><a href="#">Yuki Saito, MD</a></div>
+        <div class="person-title">Assistant Professor of Medicine</div>
+        <div class="person-dept">Department of Medicine</div>
+        <div class="person-snippet">Echocardiography; strain imaging; early detection of <em>cardiotoxicity</em>…</div>
+      </div>
+      <div class="person-meta-right">
+        <span class="stat"><span class="stat-num">31</span> pubs</span>
+      </div>
+    </div>
+
+    <div class="person-row">
+      <div class="person-photo">CL</div>
+      <div>
+        <div class="person-name"><a href="#">Cynthia Liu, MD</a></div>
+        <div class="person-title">Assistant Professor of Pathology and Laboratory Medicine</div>
+        <div class="person-dept">Department of Pathology and Laboratory Medicine</div>
+        <div class="person-snippet">Cardiac pathology; <em>immune checkpoint inhibitor</em>-associated myocarditis…</div>
+      </div>
+      <div class="person-meta-right">
+        <span class="stat"><span class="stat-num">29</span> pubs</span>
+      </div>
+    </div>
+
+    <div class="pagination">
+      <a class="pagination__btn" href="#">‹</a>
+      <a class="pagination__btn active" href="#">1</a>
+      <a class="pagination__btn" href="#">2</a>
+      <a class="pagination__btn" href="#">›</a>
+    </div>
+  </main>
+
+</div>
+
+<!-- ============================================================ -->
+<!-- VARIANT C: STACKED PEOPLE + PUBS, NO TABS                    -->
+<!-- ============================================================ -->
+<div id="variant-c" class="variant">
+
+  <header class="wcm-header">
+    <div class="wcm-header__brand">
+      <div class="wcm-header__brand-mark">W</div>
+      <span>Scholars at Weill Cornell Medicine</span>
+    </div>
+    <div class="wcm-header__search">
+      <input type="search" value="cardio-oncology">
+    </div>
+    <nav class="wcm-header__nav">
+      <a href="#">Browse</a>
+      <a href="#">About</a>
+      <a href="#">Support</a>
+    </nav>
+  </header>
+
+  <div class="search-meta">
+    <div class="search-meta__inner">
+      <div class="search-meta__big">
+        <input type="search" value="cardio-oncology" placeholder="Search…">
+        <button class="btn btn--primary">Search</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="results-layout-C">
+    <aside class="filter-sidebar">
+      <h3>Person type</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox" checked> Full-time faculty</label> <span class="count">11</span></li>
+        <li><label><input type="checkbox"> Adjunct faculty</label> <span class="count">2</span></li>
+        <li><label><input type="checkbox"> Postdoctoral fellow</label> <span class="count">1</span></li>
+      </ul>
+      <h3>Department</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox" checked> Medicine</label> <span class="count">7</span></li>
+        <li><label><input type="checkbox"> Pediatrics</label> <span class="count">2</span></li>
+        <li><label><input type="checkbox"> Radiology</label> <span class="count">2</span></li>
+      </ul>
+      <h3>Year (publications)</h3>
+      <ul class="filter-list">
+        <li><label><input type="checkbox" checked> 2020 – present</label> <span class="count">312</span></li>
+        <li><label><input type="checkbox"> 2010 – 2019</label> <span class="count">421</span></li>
+        <li><label><input type="checkbox"> Before 2010</label> <span class="count">114</span></li>
+      </ul>
+    </aside>
+
+    <section>
+      <!-- People section -->
+      <div class="section-header">
+        <h2 class="section-header__title">People</h2>
+        <span class="section-header__count">14 results</span>
+        <span class="section-header__sort">
+          Sort: <select><option>Relevance</option><option>Last name</option><option>Most recent pub</option></select>
+        </span>
+      </div>
+
+      <div class="person-row">
+        <div class="person-photo">ER</div>
+        <div>
+          <div class="person-name"><a href="#">Eleanor M. Ramirez, MD</a></div>
+          <div class="person-title">Chief, Division of Cardiology · Sandra A. Daugherty Professor</div>
+          <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+          <div class="person-snippet">Research focuses on <em>cardio-oncology</em> — cardiovascular complications of cancer therapies…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">142</span> pubs</span>
+          <span class="stat"><span class="stat-num">4</span> active grants</span>
+        </div>
+      </div>
+      <div class="person-row">
+        <div class="person-photo">JW</div>
+        <div>
+          <div class="person-name"><a href="#">Joseph T. Williams, MD, PhD</a></div>
+          <div class="person-title">Associate Professor of Radiology in Medicine</div>
+          <div class="person-dept">Department of Radiology</div>
+          <div class="person-snippet">Cardiovascular imaging in <em>cardio-oncology</em>; cardiac MRI; strain imaging…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">88</span> pubs</span>
+          <span class="stat"><span class="stat-num">2</span> active grants</span>
+        </div>
+      </div>
+      <div class="person-row">
+        <div class="person-photo">SP</div>
+        <div>
+          <div class="person-name"><a href="#">Sanjay R. Patel, MD</a></div>
+          <div class="person-title">Assistant Professor of Medicine</div>
+          <div class="person-dept">Joan and Sanford I. Weill Department of Medicine</div>
+          <div class="person-snippet">Heart failure with preserved EF; sex differences in HFpEF; <em>cardio-oncology</em> outcomes research…</div>
+        </div>
+        <div class="person-meta-right">
+          <span class="stat"><span class="stat-num">42</span> pubs</span>
+        </div>
+      </div>
+      <a href="#" class="show-all" style="display:inline-block;margin-top:var(--space-3);font-size:var(--text-sm);color:var(--color-link);">Show all 14 people →</a>
+
+      <!-- Publications section -->
+      <div class="section-header" style="margin-top:var(--space-12)">
+        <h2 class="section-header__title">Publications</h2>
+        <span class="section-header__count">847 results</span>
+        <span class="section-header__sort">
+          Sort: <select><option>Relevance</option><option>Year (newest)</option><option>Citation count</option></select>
+        </span>
+      </div>
+
+      <div class="pub-result">
+        <div class="pub-result__title"><a href="#">Immune checkpoint inhibitor-associated myocarditis: clinical phenotypes and management</a></div>
+        <div class="pub-result__meta">Liu C, Park S, Wong M, Ramirez EM. <em>New England Journal of Medicine</em>. 2023.</div>
+        <div class="wcm-author-chips">
+          <span class="wcm-author-chips__label">WCM:</span>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">CL</span> Cynthia Liu</a>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">ER</span> Eleanor Ramirez</a>
+        </div>
+        <div class="pub-result__stats">
+          <span class="citations">412 citations</span>
+          <a href="#">DOI</a>
+          <a href="#">PubMed</a>
+        </div>
+      </div>
+
+      <div class="pub-result">
+        <div class="pub-result__title"><a href="#">Anthracycline cardiotoxicity in long-term breast cancer survivors: a multicenter prospective cohort</a></div>
+        <div class="pub-result__meta">Ramirez EM, Patel D, Chen H, Liu C, Williams J. <em>JAMA Cardiology</em>. 2024.</div>
+        <div class="wcm-author-chips">
+          <span class="wcm-author-chips__label">WCM:</span>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">ER</span> Eleanor Ramirez</a>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">SP</span> Sanjay Patel</a>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">CL</span> Cynthia Liu</a>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">JW</span> Joseph Williams</a>
+        </div>
+        <div class="pub-result__stats">
+          <span class="citations">87 citations</span>
+          <a href="#">DOI</a>
+          <a href="#">PubMed</a>
+        </div>
+      </div>
+
+      <div class="pub-result">
+        <div class="pub-result__title"><a href="#">Sex differences in heart failure with preserved ejection fraction</a></div>
+        <div class="pub-result__meta">Ramirez EM, Patel D, Chen H, et al. <em>Circulation</em>. 2022.</div>
+        <div class="wcm-author-chips">
+          <span class="wcm-author-chips__label">WCM:</span>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">ER</span> Eleanor Ramirez</a>
+          <a href="#" class="author-chip"><span class="author-chip__avatar">SP</span> Sanjay Patel</a>
+        </div>
+        <div class="pub-result__stats">
+          <span class="citations">234 citations</span>
+          <a href="#">DOI</a>
+        </div>
+      </div>
+
+      <a href="#" class="show-all" style="display:inline-block;margin-top:var(--space-3);font-size:var(--text-sm);color:var(--color-link);">Show all 847 publications →</a>
+    </section>
+  </main>
+
+</div>
+
+<!-- Sketch toolbar -->
+<div id="sketch-tools">
+  <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+    <option value="default">Theme: Default</option>
+  </select>
+  <span style="color:#999">·</span>
+  <span style="color:#999">Sketch 002</span>
+</div>
+
+<script>
+function showVariant(id, btn) {
+  document.querySelectorAll('.variant').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.variant-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('variant-' + id).classList.add('active');
+  btn.classList.add('active');
+  window.scrollTo(0, 0);
+}
+</script>
+
+</body>
+</html>
