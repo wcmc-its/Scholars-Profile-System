@@ -7,6 +7,7 @@
  * external API endpoint would call the same function.
  */
 import { prisma } from "@/lib/db";
+import { identityImageEndpoint } from "@/lib/headshot";
 import {
   rankForHighlights,
   rankForRecent,
@@ -50,7 +51,7 @@ export type ProfilePayload = {
   primaryTitle: string | null;
   primaryDepartment: string | null;
   email: string | null;
-  headshotUrl: string | null;
+  identityImageEndpoint: string;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -210,7 +211,7 @@ export async function getScholarFullProfileBySlug(
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
     email: scholar.email,
-    headshotUrl: scholar.headshotUrl,
+    identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     overview: scholar.overview,
     appointments: annotatedAppointments.map((a) => ({
       title: a.title,
