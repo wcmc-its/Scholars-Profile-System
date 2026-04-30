@@ -5,6 +5,7 @@
  * dependency — see `Phase 1 Design Decisions - 2026-04-29.md` § decision #1.
  */
 import { prisma } from "@/lib/db";
+import { identityImageEndpoint } from "@/lib/headshot";
 
 /** Public shape returned to API consumers. */
 export type ScholarPayload = {
@@ -16,6 +17,7 @@ export type ScholarPayload = {
   primaryDepartment: string | null;
   email: string | null;
   overview: string | null;
+  identityImageEndpoint: string;
   appointments: Array<{
     title: string;
     organization: string;
@@ -56,6 +58,7 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     primaryDepartment: scholar.primaryDepartment,
     email: scholar.email,
     overview: scholar.overview,
+    identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     appointments: scholar.appointments.map((a) => ({
       title: a.title,
       organization: a.organization,
