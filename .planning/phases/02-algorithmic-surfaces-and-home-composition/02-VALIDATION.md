@@ -2,7 +2,7 @@
 phase: 2
 slug: algorithmic-surfaces-and-home-composition
 status: draft
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-04-30
 ---
@@ -94,11 +94,11 @@ created: 2026-04-30
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (9 test/fixture files identified above)
-- [ ] No watch-mode flags (CI-safe `vitest run` not `vitest`)
-- [ ] Feedback latency < 30s per-task / < 120s phase gate
-- [ ] `nyquist_compliant: true` set in frontmatter once planner finalizes per-task assignments
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (9 test/fixture files identified above)
+- [x] No watch-mode flags (CI-safe `vitest run` not `vitest`)
+- [x] Feedback latency < 30s per-task / < 120s phase gate
+- [x] `nyquist_compliant: true` set in frontmatter once planner finalizes per-task assignments
 
-**Approval:** pending
+**Approval:** approved 2026-04-30 (planner sign-off after gsd-plan-checker iteration 1)

@@ -87,7 +87,16 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   3. A user visiting the home page sees 67 parent topic names with counts in a 4-column grid under "Browse all research areas"
   4. A user visiting any topic page sees a 7-faculty chip row under "Top scholars in this area" (Full-time-faculty-only carve; per-scholar aggregation sums first-or-senior papers only; compressed recency curve per Phase 2 D-14; methodology link visible)
   5. A user visiting any topic page sees 3 paper cards under "Recent highlights" with no citation counts and a methodology link
-**Plans**: TBD
+**Plans**: 9 plans
+- [ ] 02-01-PLAN.md — Wave 0: Design tokens port + shadcn primitives (scroll-area, skeleton)
+- [ ] 02-02-PLAN.md — Wave 0: DynamoDB taxonomy probe + locked schema decision (D-02)
+- [ ] 02-03-PLAN.md — Wave 0: scholar.role_category Prisma migration + ED ETL extension (FTE + ou=students PHD branch) + search-index ETL fix + lib/eligibility.ts
+- [ ] 02-04-PLAN.md — Wave 1 (TDD): Variant B ranking rewrite + worked-example fixtures + profile retrofit (D-06/07/08/13/14/16)
+- [ ] 02-05-PLAN.md — Wave 2: Topic Prisma schema + DynamoDB taxonomy ETL extension + D-08 verification
+- [ ] 02-06-PLAN.md — Wave 3: methodology-anchors constants + /about/methodology page (D-04/14/15/16) + /about stub + e2e
+- [ ] 02-07-PLAN.md — Wave 3: lib/api/home.ts + 5 home components + app/page.tsx replacement (RANKING-01, HOME-02, HOME-03)
+- [ ] 02-08-PLAN.md — Wave 3: lib/api/topics.ts + 4 topic components + /topics/{slug} placeholder (RANKING-02, RANKING-03 with D-13/D-14)
+- [ ] 02-09-PLAN.md — Wave 4: /api/revalidate route + ETL revalidation hook + full e2e gate + visual checkpoint
 **UI hint**: yes
 
 ### Phase 3: Topic and Department detail pages
@@ -166,7 +175,7 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
 | BUILD-PLAN 3. Search | Milestone 1 | — | Complete | 2026-04-30 |
 | BUILD-PLAN 4. ETL pipelines | Milestone 1 | — | Complete | 2026-04-30 |
 | 1. Headshot integration | Milestone 2 | 0/4 | Not started | - |
-| 2. Algorithmic surfaces and home composition | Milestone 2 | 0/TBD | Not started | - |
+| 2. Algorithmic surfaces and home composition | Milestone 2 | 0/9 | Not started | - |
 | 3. Topic and Department detail pages | Milestone 2 | 0/TBD | Not started | - |
 | 4. Browse hub and About / methodology | Milestone 2 | 0/TBD | Not started | - |
 | 5. SEO and URL machinery | Milestone 2 | 0/TBD | Not started | - |

@@ -863,31 +863,36 @@ export async function getTopScholarsForTopic(topicSlug: string, now = new Date()
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Doctoral-student data feed (carried from Milestone 1)**
    - What we know: Spec says `ou=students` + `degreeCode = PHD` "or similar"; STATE.md flags as "working assumption pending registrar confirmation."
    - What's unclear: Whether ED actually exposes doctoral students to the bind DN; what the exact filter is.
    - Recommendation: W0 includes an ED probe — run a one-off LDAP query against `ou=students,dc=weill,dc=cornell,dc=edu` with the existing bind DN and inspect attributes. If doctoral students don't surface, escalate to user before W2 (the eligibility-carve population would be ~40% smaller than spec assumes).
+   - **RESOLVED:** Plan 03 Task 2 adds the `ou=students` LDAP branch with `degreeCode=PHD` filter; ED probe runs as Plan 03 Task 1 to validate filter shape before migration.
 
 2. **Co-corresponding author handling (D-09)**
    - What we know: Spec says weight 1.0; schema has no `is_corresponding` flag.
    - What's unclear: Whether ReCiter's source data contains corresponding-author info recoverable via projection.
    - Recommendation: Default to D-09 option (a) — leave first/last only at 1.0, document the gap on the methodology page. Revisit if user pushes back.
+   - **RESOLVED:** CONTEXT.md D-09 option (a) — first/last only at 1.0; gap documented on methodology page per Plan 06.
 
 3. **Apparent contradiction in Top scholars chip row spec**
    - What we know: Spec line 1135 says first-or-senior filter applies on Top scholars row aggregation. ROADMAP success criterion #4 + UI-SPEC + CONTEXT.md describe the row as "publication-centric — no authorship-position filter."
    - What's unclear: Whether the contradiction is intentional (publication-centric scope = no scholar-eligibility filter on the publication pool, but per-scholar aggregation still uses first-or-senior) or a spec drift.
    - Recommendation: Treat spec line 1135 as canonical (most specific, multi-paragraph derivation). The pool of publications considered is publication-centric (all scored, all author positions); the per-scholar aggregation that determines who appears as a CHIP applies first-or-senior. Surface to user if a planner challenges.
+   - **RESOLVED:** CONTEXT.md D-13 — spec line 1135 canonical; per-scholar aggregation filters to first-or-senior; CONTEXT.md/ROADMAP/CLAUDE.md amended 2026-04-30.
 
 4. **`/about` stub vs. redirect (D-05 Claude's discretion)**
    - What we know: Either is acceptable; cheaper choice that doesn't constrain Phase 4.
    - Recommendation: Stub page (3-line placeholder per UI-SPEC §`/about (stub)`). A redirect would require Phase 4 to undo the redirect when expanding `/about`; a stub is one-line content swap.
+   - **RESOLVED:** CONTEXT.md D-05 — stub chosen; Plan 06 Task 3 implements the 3-line stub at `app/(public)/about/page.tsx`.
 
 5. **Eligibility-carve scope on the BROWSE grid count vs. RANKING-01 dedup**
    - What we know: D-03 says count is "all scholars" (no eligibility carve) for Browse grid. RANKING-01 dedup is "one per parent research area" — meaning a parent area must HAVE a qualifying scholar for the dedup to land.
    - What's unclear: If a parent area exists in the taxonomy but has zero eligibility-carved scholars, can the home Recent contributions surface still pull a card from that area? Spec is silent.
    - Recommendation: One-per-parent dedup applies to PRESENT scholars only; areas with no eligibility-carved scholars are skipped naturally. A planner should not over-engineer this — top-N over the ranked list with a `seenAreas` set handles it.
+   - **RESOLVED:** CONTEXT.md D-03 — Browse grid count is all-scholars (no eligibility carve, just active-only); RANKING-01 dedup applies to PRESENT scholars only via `seenAreas` Set per Plan 07.
 
 ---
 
