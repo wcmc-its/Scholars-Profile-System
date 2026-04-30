@@ -1,18 +1,21 @@
 /**
  * LDAP connection helper for the ED ETL.
  *
- * Connection params mirror the existing ReCiter-Institutional-Client conventions:
- *   - Bind DN:    cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu
- *   - Search base: ou=people,dc=weill,dc=cornell,dc=edu
- *   - Active-faculty filter: (&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))
+ * Env vars use a SCHOLARS_LDAP_* namespace to avoid colliding with other
+ * tooling that might also be reading LDAP_* in the user's shell. Defaults
+ * mirror ReCiter-Institutional-Client conventions:
  *
- * Env: LDAP_URL (full ldaps://host:port), LDAP_BIND_PASSWORD.
+ *   SCHOLARS_LDAP_URL              (required) — full ldaps://host:port
+ *   SCHOLARS_LDAP_BIND_PASSWORD    (required) — password for the bind DN
+ *   SCHOLARS_LDAP_BIND_DN          (optional) — defaults to inst.client service DN
+ *   SCHOLARS_LDAP_SEARCH_BASE      (optional) — defaults to ou=people,...
+ *   SCHOLARS_LDAP_ACTIVE_FILTER    (optional) — defaults to active-academic filter
  */
 import { Client } from "ldapts";
 
-export const ED_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
-export const ED_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
-export const ED_ACTIVE_ACADEMIC_FILTER =
+export const DEFAULT_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
+export const DEFAULT_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
+export const DEFAULT_ACTIVE_FILTER =
   "(&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))";
 
 /** Attributes we pull on the active-faculty search. */
@@ -44,13 +47,14 @@ export type EdFacultyEntry = {
  * Open a bound LDAP connection. Caller is responsible for `await client.unbind()`.
  */
 export async function openLdap(): Promise<Client> {
-  const url = process.env.LDAP_URL;
-  const password = process.env.LDAP_BIND_PASSWORD;
-  if (!url) throw new Error("LDAP_URL is not set");
-  if (!password) throw new Error("LDAP_BIND_PASSWORD is not set");
+  const url = process.env.SCHOLARS_LDAP_URL;
+  const password = process.env.SCHOLARS_LDAP_BIND_PASSWORD;
+  const bindDn = process.env.SCHOLARS_LDAP_BIND_DN ?? DEFAULT_BIND_DN;
+  if (!url) throw new Error("SCHOLARS_LDAP_URL is not set");
+  if (!password) throw new Error("SCHOLARS_LDAP_BIND_PASSWORD is not set");
 
   const client = new Client({ url, timeout: 30_000, connectTimeout: 10_000 });
-  await client.bind(ED_BIND_DN, password);
+  await client.bind(bindDn, password);
   return client;
 }
 
@@ -59,9 +63,11 @@ export async function openLdap(): Promise<Client> {
  * Returns one entry per CWID; skips records without a CWID.
  */
 export async function fetchActiveFaculty(client: Client): Promise<EdFacultyEntry[]> {
-  const { searchEntries } = await client.search(ED_SEARCH_BASE, {
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const filter = process.env.SCHOLARS_LDAP_ACTIVE_FILTER ?? DEFAULT_ACTIVE_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
     scope: "sub",
-    filter: ED_ACTIVE_ACADEMIC_FILTER,
+    filter,
     attributes: [...ED_FACULTY_ATTRIBUTES],
     paged: { pageSize: 500 },
   });
