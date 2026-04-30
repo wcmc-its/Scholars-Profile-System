@@ -59,7 +59,17 @@ async function indexPeople() {
   const client = searchClient();
   const scholars = await prisma.scholar.findMany({
     where: { deletedAt: null, status: "active" },
-    include: {
+    select: {
+      cwid: true,
+      slug: true,
+      preferredName: true,
+      fullName: true,
+      primaryTitle: true,
+      primaryDepartment: true,
+      overview: true,
+      // Phase 2 — replaces the Phase-1 hard-coded "Faculty" placeholder.
+      // Sourced from ED ETL deriveRoleCategory (see etl/ed/index.ts).
+      roleCategory: true,
       topicAssignments: { orderBy: { score: "desc" } },
       grants: true,
       authorships: {
@@ -117,7 +127,10 @@ async function indexPeople() {
     const hasActiveGrants = s.grants.some((g) => g.endDate.getTime() > Date.now());
     const isComplete =
       !!s.overview && s.authorships.length >= 3 && hasActiveGrants ? true : false;
-    const personType = "Faculty"; // Phase 1 seed is faculty-only; ETL will refine.
+    // Phase 2 — sourced from ED ETL derivation (lib/eligibility.ts RoleCategory).
+    // "unknown" only fires for scholars whose ED ETL has not yet backfilled
+    // role_category (transitional state during the first refresh after migration).
+    const personType = s.roleCategory ?? "unknown";
 
     const aoi = s.topicAssignments.map((t) => t.topic).join(" ");
 

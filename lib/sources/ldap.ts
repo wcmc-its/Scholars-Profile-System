@@ -15,8 +15,13 @@ import { Client } from "ldapts";
 
 export const DEFAULT_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
+export const DEFAULT_STUDENT_SEARCH_BASE =
+  "ou=students,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_ACTIVE_FILTER =
   "(&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))";
+/** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve. */
+export const DEFAULT_DOCTORAL_STUDENT_FILTER =
+  "(weillCornellEduDegreeCode=PHD)";
 
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
@@ -32,6 +37,8 @@ export const ED_FACULTY_ATTRIBUTES = [
   "ou",
   "title",
   "departmentNumber",
+  "weillCornellEduFTE",         // Phase 2 — drives full_time_faculty derivation
+  "weillCornellEduDegreeCode",  // Phase 2 — drives doctoral_student derivation
 ] as const;
 
 export type EdFacultyEntry = {
@@ -41,6 +48,11 @@ export type EdFacultyEntry = {
   primaryTitle: string | null;
   primaryDepartment: string | null;
   email: string | null;
+  // Phase 2 — feeds deriveRoleCategory in etl/ed/index.ts.
+  personTypeCode: string | null;
+  fte: number | null;
+  ou: string;
+  degreeCode: string | null;
 };
 
 /**
@@ -72,6 +84,40 @@ export async function fetchActiveFaculty(client: Client): Promise<EdFacultyEntry
     paged: { pageSize: 500 },
   });
 
+  return projectEntries(searchEntries, /* fallbackOu */ "people");
+}
+
+/**
+ * Phase 2 second branch: doctoral students live under ou=students, not ou=people,
+ * so the active-faculty filter excludes them. Pull PHD students separately and
+ * concatenate before the upsert. Filter restricted to weillCornellEduDegreeCode=PHD
+ * per design-spec-v1.7.1.md:352-356 (only PHD students count as eligible-carve
+ * doctoral_students; masters / professional students are out of scope).
+ */
+export async function fetchDoctoralStudents(client: Client): Promise<EdFacultyEntry[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_STUDENT_SEARCH_BASE ?? DEFAULT_STUDENT_SEARCH_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_STUDENT_FILTER ?? DEFAULT_DOCTORAL_STUDENT_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...ED_FACULTY_ATTRIBUTES],
+    paged: { pageSize: 500 },
+  });
+
+  return projectEntries(searchEntries, /* fallbackOu */ "students");
+}
+
+/**
+ * Shared projection: LDAP search entries → EdFacultyEntry[]. Skips records with
+ * no CWID. Phase 2 fields (personTypeCode, fte, ou, degreeCode) are populated
+ * here so downstream deriveRoleCategory has everything it needs.
+ */
+function projectEntries(
+  searchEntries: ReadonlyArray<Record<string, unknown>>,
+  fallbackOu: string,
+): EdFacultyEntry[] {
   const out: EdFacultyEntry[] = [];
   for (const e of searchEntries) {
     const cwid = firstString(e.weillCornellEduCWID);
@@ -90,6 +136,10 @@ export async function fetchActiveFaculty(client: Client): Promise<EdFacultyEntry
       primaryTitle: firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
       primaryDepartment: firstString(e.weillCornellEduDepartment) ?? firstString(e.ou) ?? null,
       email: firstString(e.mail) ?? null,
+      personTypeCode: firstString(e.weillCornellEduPersonTypeCode),
+      fte: parseFte(e.weillCornellEduFTE),
+      ou: firstString(e.ou) ?? fallbackOu,
+      degreeCode: firstString(e.weillCornellEduDegreeCode),
     });
   }
   return out;
@@ -101,6 +151,18 @@ function firstString(v: unknown): string | null {
     return typeof first === "string" ? first : null;
   }
   return typeof v === "string" ? v : null;
+}
+
+/**
+ * weillCornellEduFTE is stored as a string like "100" or "50" in ED. Parse to
+ * number; null on missing or unparseable. The full_time_faculty derivation
+ * checks fte === 100 strictly (per design-spec-v1.7.1.md:352-356).
+ */
+function parseFte(v: unknown): number | null {
+  const s = firstString(v);
+  if (s === null) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**

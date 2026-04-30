@@ -27,6 +27,11 @@ model Scholar {
   overviewUpdatedAt   DateTime? @map("overview_updated_at")
   slug                String    @unique @db.VarChar(255)
   status              String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
+  // Phase 2: derived in ED ETL per design-spec-v1.7.1.md:352-356.
+  // Drives the algorithmic-surface eligibility carve (lib/eligibility.ts).
+  // Nullable so the additive migration applies cleanly to existing rows;
+  // ED ETL backfills on next refresh.
+  roleCategory        String?   @map("role_category") @db.VarChar(32)
   deletedAt           DateTime? @map("deleted_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
@@ -43,6 +48,7 @@ model Scholar {
 
   @@index([deletedAt])
   @@index([status])
+  @@index([roleCategory])
   @@map("scholar")
 }
 
