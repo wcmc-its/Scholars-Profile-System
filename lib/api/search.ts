@@ -17,6 +17,7 @@
  * filter when the user hasn't typed a name-anchored query (heuristic: query
  * length < 3 OR no quotes).
  */
+import { identityImageEndpoint } from "@/lib/headshot";
 import {
   PEOPLE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -51,6 +52,7 @@ export type PeopleHit = {
   primaryDepartment: string | null;
   publicationCount: number;
   hasActiveGrants: boolean;
+  identityImageEndpoint: string;
   highlight?: string[];
 };
 
@@ -194,6 +196,7 @@ export async function searchPeople(opts: {
       primaryDepartment: h._source.primaryDepartment,
       publicationCount: h._source.publicationCount,
       hasActiveGrants: h._source.hasActiveGrants,
+      identityImageEndpoint: identityImageEndpoint(h._source.cwid),
       highlight: h.highlight ? Object.values(h.highlight).flat() : undefined,
     })),
     total: r.hits.total.value,
