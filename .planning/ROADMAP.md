@@ -70,7 +70,11 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   3. A user viewing the home page sees headshots in every Recent contributions card and every Top scholars chip on a topic page
   4. The scholar API response (`/api/scholars/:cwid`) includes an `identityImageEndpoint` string field for every scholar, empty when the directory returns 404
   5. No server-side proxy or ETL pre-fetch exists in this phase — the browser hits `directory.weill.cornell.edu` directly
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 01-01-PLAN.md — Wave 0: RED test skeletons + shared scholar fixture
+- [ ] 01-02-PLAN.md — Wave 1: lib/headshot.ts, initials extraction, HeadshotAvatar component, next.config.ts remotePatterns, surface mounts at profile sidebar + search row
+- [ ] 01-03-PLAN.md — Wave 2: identityImageEndpoint field on ScholarPayload, ProfilePayload, PeopleHit (three serializers)
+- [ ] 01-04-PLAN.md — Wave 3: full-suite gate + security/scope grep guards + human visual verification
 **UI hint**: yes
 
 ### Phase 2: Algorithmic surfaces and home composition
@@ -161,7 +165,7 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
 | BUILD-PLAN 2. Profile rendering | Milestone 1 | — | Complete | 2026-04-30 |
 | BUILD-PLAN 3. Search | Milestone 1 | — | Complete | 2026-04-30 |
 | BUILD-PLAN 4. ETL pipelines | Milestone 1 | — | Complete | 2026-04-30 |
-| 1. Headshot integration | Milestone 2 | 0/TBD | Not started | - |
+| 1. Headshot integration | Milestone 2 | 0/4 | Not started | - |
 | 2. Algorithmic surfaces and home composition | Milestone 2 | 0/TBD | Not started | - |
 | 3. Topic and Department detail pages | Milestone 2 | 0/TBD | Not started | - |
 | 4. Browse hub and About / methodology | Milestone 2 | 0/TBD | Not started | - |
