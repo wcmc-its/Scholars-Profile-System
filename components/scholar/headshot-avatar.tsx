@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn, initials } from "@/lib/utils";
 
@@ -52,21 +51,15 @@ export function HeadshotAvatar({
     >
       {!noImage && (
         <AvatarImage
-          asChild
+          src={identityImageEndpoint}
+          alt={preferredName}
+          className="aspect-square h-full w-full object-cover"
           onLoadingStatusChange={(s) =>
             setImgStatus(
               s === "loaded" ? "loaded" : s === "error" ? "error" : "loading"
             )
           }
-        >
-          <Image
-            src={identityImageEndpoint}
-            alt={preferredName}
-            fill
-            unoptimized
-            sizes="(max-width: 640px) 96px, 112px"
-          />
-        </AvatarImage>
+        />
       )}
       <AvatarFallback className={FALLBACK_TEXT_CLASS[size]}>
         {initials(preferredName)}
