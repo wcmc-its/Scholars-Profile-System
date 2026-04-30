@@ -4,8 +4,8 @@ milestone: v1.7.1
 milestone_name: milestone
 status: executing
 stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-04-30T19:55:20.401Z"
-last_activity: 2026-04-30 -- Phase 2 planning complete
+last_updated: "2026-04-30T20:11:53.541Z"
+last_activity: 2026-04-30 -- Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-30)
 
 **Core value:** WCM faculty profiles, search, and algorithmic surfaces serve as a usable VIVO replacement — and Mohammad's production team can consume the prototype as reference implementation.
-**Current focus:** Phase 01 — headshot-integration
+**Current focus:** Phase 02 — algorithmic-surfaces-and-home-composition
 
 ## Current Position
 
 Milestone: 2 of 2 (Public-launch readiness)
-Phase: 2
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-30 -- Phase 2 planning complete
+Phase: 02 (algorithmic-surfaces-and-home-composition) — EXECUTING
+Plan: 1 of 9
+Status: Executing Phase 02
+Last activity: 2026-04-30 -- Phase 02 execution started
 
 Progress: [██░░░░░░░░] ~36% (Milestone 1 BUILD-PLAN Phases 0–4 shipped; Milestone 2 not started)
 
