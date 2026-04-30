@@ -76,6 +76,14 @@ export type ProfilePayload = {
     isActive: boolean;
   }>;
   areasOfInterest: Array<{ topic: string; score: number }>;
+  disclosures: Array<{
+    entity: string | null;
+    activityType: string | null;
+    value: string | null;
+    activityRelatesTo: string | null;
+    activityGroup: string | null;
+    description: string | null;
+  }>;
   highlights: ProfilePublication[]; // already top-3
   recent: ProfilePublication[]; // full list, sorted by recent_score
 };
@@ -122,6 +130,9 @@ export async function getScholarFullProfileBySlug(
       },
       topicAssignments: {
         orderBy: [{ score: "desc" }],
+      },
+      coiActivities: {
+        orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
       },
     },
   });
@@ -227,6 +238,14 @@ export async function getScholarFullProfileBySlug(
     areasOfInterest: scholar.topicAssignments.map((t) => ({
       topic: t.topic,
       score: t.score,
+    })),
+    disclosures: scholar.coiActivities.map((c) => ({
+      entity: c.entity,
+      activityType: c.activityType,
+      value: c.value,
+      activityRelatesTo: c.activityRelatesTo,
+      activityGroup: c.activityGroup,
+      description: c.description,
     })),
     highlights,
     recent,

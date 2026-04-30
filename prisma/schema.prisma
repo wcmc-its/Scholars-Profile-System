@@ -39,6 +39,7 @@ model Scholar {
   publicationScores   PublicationScore[]
   cwidAliasesAsCurrent CwidAlias[] @relation("AliasCurrent")
   slugHistoryAsCurrent SlugHistory[] @relation("SlugHistoryCurrent")
+  coiActivities        CoiActivity[]
 
   @@index([deletedAt])
   @@index([status])
@@ -188,6 +189,29 @@ model PublicationScore {
   @@index([cwid])
   @@index([pmid])
   @@map("publication_score")
+}
+
+/// COI disclosures from v_coi_vivo_activity_group. Phase 1 spec amendment
+/// (the spec didn't enumerate a Disclosures section but VIVO had one).
+model CoiActivity {
+  id                    String   @id @default(uuid()) @db.VarChar(64)
+  cwid                  String   @db.VarChar(32)
+  scholar               Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  entity                String?  @db.VarChar(255)
+  activityType          String?  @map("activity_type") @db.VarChar(255)
+  value                 String?  @db.VarChar(64)            // e.g. "0-$4,999"
+  activityRelatesTo     String?  @map("activity_relates_to") @db.VarChar(64)
+  wcmcFacilities        String?  @map("wcmc_facilities") @db.VarChar(8)
+  purchasingProcurement String?  @map("purchasing_procurement") @db.VarChar(8)
+  chairApproval         String?  @map("chair_approval") @db.VarChar(64)
+  activityGroup         String?  @map("activity_group") @db.VarChar(128) // vivo_pops_activity_group
+  description           String?  @db.Text
+  source                String   @default("COI") @db.VarChar(32)
+  lastRefreshedAt       DateTime @default(now()) @map("last_refreshed_at")
+
+  @@index([cwid])
+  @@index([cwid, activityGroup])
+  @@map("coi_activity")
 }
 
 /// CWID aliases for redirects (Q2'). Auto-populated from ED replacement_cwid.
