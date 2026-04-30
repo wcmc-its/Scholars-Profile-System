@@ -1,0 +1,61 @@
+import { describe, expect, it, vi } from "vitest";
+import { EXPECTED_HEADSHOT_URL, FIXTURE_CWID } from "../fixtures/scholar";
+
+// Mock the OpenSearch wrapper module so the hit mapper runs over a fixture.
+// lib/api/search.ts imports `searchClient`, `PEOPLE_INDEX`, `PEOPLE_FIELD_BOOSTS`,
+// `PUBLICATIONS_INDEX`, `PUBLICATION_FIELD_BOOSTS` from @/lib/search.
+vi.mock("@/lib/search", () => ({
+  PEOPLE_INDEX: "scholars-people",
+  PUBLICATIONS_INDEX: "scholars-publications",
+  PEOPLE_FIELD_BOOSTS: ["preferredName^10"],
+  PUBLICATION_FIELD_BOOSTS: ["title^1"],
+  searchClient: () => ({
+    async search() {
+      return {
+        body: {
+          hits: {
+            total: { value: 1 },
+            hits: [
+              {
+                _source: {
+                  cwid: FIXTURE_CWID,
+                  slug: "jane-doe",
+                  preferredName: "Jane Doe",
+                  primaryTitle: "Associate Professor",
+                  primaryDepartment: "Medicine",
+                  publicationCount: 12,
+                  hasActiveGrants: true,
+                },
+                highlight: undefined,
+              },
+            ],
+          },
+          aggregations: {
+            departments: { buckets: [] },
+            personTypes: { buckets: [] },
+          },
+        },
+      };
+    },
+    async mget() {
+      return { body: { docs: [] } };
+    },
+  }),
+}));
+
+describe("search hit mapper (PeopleHit)", () => {
+  it("each hit includes identityImageEndpoint computed from CWID", async () => {
+    const mod: Record<string, unknown> = await import("@/lib/api/search");
+    // Use the existing public people-search function name; Wave 1 must not
+    // rename it. Current export is `searchPeople`.
+    const fn =
+      (mod as { searchPeople?: (opts: unknown) => Promise<unknown> }).searchPeople ??
+      (mod as { peopleSearch?: (opts: unknown) => Promise<unknown> }).peopleSearch ??
+      (mod as { search?: (opts: unknown) => Promise<unknown> }).search;
+    expect(fn, "search module must export a public people-search function").toBeTruthy();
+    const result = (await fn!({ q: "doe", page: 0 })) as {
+      hits: Array<{ identityImageEndpoint?: string }>;
+    };
+    expect(result.hits[0].identityImageEndpoint).toBe(EXPECTED_HEADSHOT_URL);
+  });
+});
