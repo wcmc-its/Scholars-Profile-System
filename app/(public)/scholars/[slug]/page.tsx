@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -80,9 +80,12 @@ export default async function ScholarProfilePage({
     <main className="mx-auto max-w-4xl px-6 py-10">
       {/* Header */}
       <section className="flex flex-col gap-6 sm:flex-row sm:items-center">
-        <Avatar className="h-24 w-24 sm:h-28 sm:w-28">
-          <AvatarFallback className="text-xl">{initials(profile.preferredName)}</AvatarFallback>
-        </Avatar>
+        <HeadshotAvatar
+          size="lg"
+          cwid={profile.cwid}
+          preferredName={profile.preferredName}
+          identityImageEndpoint={profile.identityImageEndpoint}
+        />
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-semibold tracking-tight">{profile.preferredName}</h1>
           {profile.primaryTitle ? (
@@ -343,12 +346,3 @@ function PublicationRow({ pub }: { pub: ProfilePublication; ownerCwid: string })
   );
 }
 
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
-}
