@@ -24,6 +24,34 @@
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
   --radius: 0.625rem;
+
+  /* === Phase 2 design tokens (ported from .planning/sketches/themes/default.css) === */
+  /* Typography */
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-lg: 18px;
+  --text-4xl: 44px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Charter', 'Tiempos', 'Georgia', serif;
+  /* Weights (only normal + semibold used in Phase 2 per UI-SPEC checker) */
+  --weight-normal: 400;
+  --weight-semibold: 600;
+  /* Spacing — 8-point grid with named 12px exception */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  /* Color (locked by design spec v1.7.1) */
+  --color-primary-cornell-red: #B31B1B;
+  --color-accent-slate: #2c4f6e;
+  /* Layout */
+  --max-content: 1100px;
+  --max-narrow: 720px;
+  --header-h: 60px;
 }
 
 .dark {
@@ -71,6 +99,15 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+  /* Phase 2 — remap Tailwind size/weight utilities to design-spec tokens */
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-lg: var(--text-lg);
+  --text-4xl: var(--text-4xl);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-weight-normal: var(--weight-normal);
+  --font-weight-semibold: var(--weight-semibold);
 }
 
 @layer base {
