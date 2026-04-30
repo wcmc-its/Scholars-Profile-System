@@ -53,7 +53,7 @@ export function HeadshotAvatar({
         <AvatarImage
           src={identityImageEndpoint}
           alt={preferredName}
-          className="aspect-square h-full w-full object-cover"
+          className="aspect-square h-full w-full object-cover object-top"
           onLoadingStatusChange={(s) =>
             setImgStatus(
               s === "loaded" ? "loaded" : s === "error" ? "error" : "loading"
