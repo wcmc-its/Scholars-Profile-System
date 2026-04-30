@@ -20,7 +20,9 @@
     "db:reset": "prisma migrate reset --force",
     "seed": "tsx seed/index.ts",
     "search:index": "tsx etl/search-index/index.ts",
-    "etl:ed": "tsx etl/ed/index.ts"
+    "etl:ed": "tsx etl/ed/index.ts",
+    "etl:reciter:probe": "tsx etl/reciter/probe.ts",
+    "etl:reciter": "tsx etl/reciter/index.ts"
   },
   "dependencies": {
     "@opensearch-project/opensearch": "^3.6.0",

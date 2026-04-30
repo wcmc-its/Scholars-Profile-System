@@ -22,6 +22,8 @@ export type CoauthorChip = {
 export type ProfilePublication = ScoredPublication<{
   pmid: string;
   title: string;
+  /** Full PubMed-style author list including externals (from analysis_summary_article). */
+  authorsString: string | null;
   journal: string | null;
   year: number | null;
   publicationType: string | null;
@@ -31,13 +33,12 @@ export type ProfilePublication = ScoredPublication<{
   pubmedUrl: string | null;
   authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
   isConfirmed: boolean;
-  /** Authors in canonical order. cwid populated only for active WCM scholars. */
-  authors: Array<{
+  /** Active WCM scholars who are also confirmed authors on this publication. */
+  wcmCoauthors: Array<{
+    cwid: string;
+    slug: string;
+    preferredName: string;
     position: number;
-    cwid: string | null;
-    slug: string | null;
-    preferredName: string | null;
-    externalName: string | null;
   }>;
 }>;
 
@@ -155,6 +156,7 @@ export async function getScholarFullProfileBySlug(
   const rankablePubs = authorships.map((a) => ({
     pmid: a.publication.pmid,
     title: a.publication.title,
+    authorsString: a.publication.authorsString,
     journal: a.publication.journal,
     year: a.publication.year,
     publicationType: a.publication.publicationType,
@@ -168,22 +170,20 @@ export async function getScholarFullProfileBySlug(
       isPenultimate: a.isPenultimate,
     },
     isConfirmed: a.isConfirmed,
-    authors: a.publication.authors.map((au) => ({
-      position: au.position,
-      cwid:
-        au.scholar && !au.scholar.deletedAt && au.scholar.status === "active"
-          ? au.scholar.cwid
-          : null,
-      slug:
-        au.scholar && !au.scholar.deletedAt && au.scholar.status === "active"
-          ? au.scholar.slug
-          : null,
-      preferredName:
-        au.scholar && !au.scholar.deletedAt && au.scholar.status === "active"
-          ? au.scholar.preferredName
-          : null,
-      externalName: au.externalName,
-    })),
+    wcmCoauthors: a.publication.authors
+      .filter(
+        (au) =>
+          au.scholar &&
+          au.cwid !== scholar.cwid && // exclude the profile owner
+          !au.scholar.deletedAt &&
+          au.scholar.status === "active",
+      )
+      .map((au) => ({
+        cwid: au.scholar!.cwid,
+        slug: au.scholar!.slug,
+        preferredName: au.scholar!.preferredName,
+        position: au.position,
+      })),
   }));
 
   const highlights = rankForHighlights(rankablePubs, now).slice(0, 3);

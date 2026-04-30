@@ -262,7 +262,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function PublicationRow({ pub, ownerCwid }: { pub: ProfilePublication; ownerCwid: string }) {
+function PublicationRow({ pub }: { pub: ProfilePublication; ownerCwid: string }) {
   return (
     <div>
       <div className="font-medium leading-snug">
@@ -279,22 +279,24 @@ function PublicationRow({ pub, ownerCwid }: { pub: ProfilePublication; ownerCwid
           pub.title
         )}
       </div>
-      <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-        {pub.authors.map((a, i) => (
-          <span key={i}>
-            {i > 0 ? ", " : ""}
-            {a.cwid && a.slug && a.preferredName && a.cwid !== ownerCwid ? (
-              <a href={`/scholars/${a.slug}`} className="hover:underline">
-                {a.preferredName}
-              </a>
-            ) : a.preferredName ? (
-              <span className="font-semibold">{a.preferredName}</span>
-            ) : (
-              a.externalName
-            )}
-          </span>
-        ))}
-      </div>
+      {pub.authorsString ? (
+        <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+          {pub.authorsString}
+        </div>
+      ) : null}
+      {pub.wcmCoauthors.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {pub.wcmCoauthors.map((a) => (
+            <a
+              key={a.cwid}
+              href={`/scholars/${a.slug}`}
+              className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              {a.preferredName}
+            </a>
+          ))}
+        </div>
+      ) : null}
       <div className="text-muted-foreground mt-1 text-xs">
         {pub.journal} · {pub.year}
         {pub.publicationType ? ` · ${pub.publicationType}` : ""}
