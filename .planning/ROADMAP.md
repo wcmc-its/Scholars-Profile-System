@@ -71,10 +71,10 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
   4. The scholar API response (`/api/scholars/:cwid`) includes an `identityImageEndpoint` string field for every scholar, empty when the directory returns 404
   5. No server-side proxy or ETL pre-fetch exists in this phase — the browser hits `directory.weill.cornell.edu` directly
 **Plans**: 4 plans
-- [ ] 01-01-PLAN.md — Wave 0: RED test skeletons + shared scholar fixture
-- [ ] 01-02-PLAN.md — Wave 1: lib/headshot.ts, initials extraction, HeadshotAvatar component, next.config.ts remotePatterns, surface mounts at profile sidebar + search row
-- [ ] 01-03-PLAN.md — Wave 2: identityImageEndpoint field on ScholarPayload, ProfilePayload, PeopleHit (three serializers)
-- [ ] 01-04-PLAN.md — Wave 3: full-suite gate + security/scope grep guards + human visual verification
+- [x] 01-01-PLAN.md — Wave 0: RED test skeletons + shared scholar fixture
+- [x] 01-02-PLAN.md — Wave 1: lib/headshot.ts, initials extraction, HeadshotAvatar component, next.config.ts remotePatterns, surface mounts at profile sidebar + search row
+- [x] 01-03-PLAN.md — Wave 2: identityImageEndpoint field on ScholarPayload, ProfilePayload, PeopleHit (three serializers)
+- [x] 01-04-PLAN.md — Wave 3: full-suite gate + security/scope grep guards + human visual verification
 **UI hint**: yes
 
 ### Phase 2: Algorithmic surfaces and home composition

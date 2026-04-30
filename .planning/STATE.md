@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.7.1
 milestone_name: milestone
-status: planning
+status: ready_to_plan
 stopped_at: Phase 1 UI-SPEC approved
-last_updated: "2026-04-30T14:25:29.336Z"
-last_activity: 2026-04-30 — Roadmap created from intel + ADDENDUM after Milestone 1 ship
+last_updated: "2026-04-30T15:00:49.722Z"
+last_activity: 2026-04-30 -- Phase 01 execution started
 progress:
   total_phases: 7
-  completed_phases: 0
-  total_plans: 0
+  completed_phases: 1
+  total_plans: 4
   completed_plans: 0
-  percent: 36
+  percent: 14
 ---
 
 # Project State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-30)
 
 **Core value:** WCM faculty profiles, search, and algorithmic surfaces serve as a usable VIVO replacement — and Mohammad's production team can consume the prototype as reference implementation.
-**Current focus:** Milestone 2 Phase 1 — Headshot integration
+**Current focus:** Phase 01 — headshot-integration
 
 ## Current Position
 
 Milestone: 2 of 2 (Public-launch readiness)
-Phase: 1 of 7 (Headshot integration)
-Plan: 0 of TBD in current phase
+Phase: 2
+Plan: Not started
 Status: Ready to plan
-Last activity: 2026-04-30 — Roadmap created from intel + ADDENDUM after Milestone 1 ship
+Last activity: 2026-04-30
 
 Progress: [██░░░░░░░░] ~36% (Milestone 1 BUILD-PLAN Phases 0–4 shipped; Milestone 2 not started)
 
@@ -46,6 +46,7 @@ Progress: [██░░░░░░░░] ~36% (Milestone 1 BUILD-PLAN Phases 0
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | — | — | — | — |
+| 01 | 4 | - | - |
 
 **Recent Trend:** N/A — Milestone 2 not yet started
 
