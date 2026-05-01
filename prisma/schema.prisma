@@ -192,8 +192,28 @@ model Topic {
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
 
   publications  PublicationTopic[]
+  subtopics     Subtopic[]
 
   @@map("topic")
+}
+
+/// Subtopic catalog projected from DynamoDB TAXONOMY#taxonomy_v2 embedded subtopic
+/// data per Phase 3 D-05. The `id` is the slug (no human-readable label in source);
+/// `label` is derived via subtopicLabel() (slug → title-case + underscore replace).
+/// Description is null for the long tail; editorial copy fills top ~300 post-launch.
+/// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — this is a catalog
+/// table; old slugs flush out on weekly ETL refresh (02-SCHEMA-DECISION.md risk #2).
+model Subtopic {
+  id            String   @id @db.VarChar(128)              // slug, e.g. "breast_screening_risk_prediction"
+  parentTopicId String   @map("parent_topic_id") @db.VarChar(128)
+  parentTopic   Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  label         String   @db.VarChar(255)                  // derived: slug.split('_').map(titleCase).join(' ')
+  description   String?  @db.Text                          // null for long tail (D-06)
+  source        String   @db.VarChar(64)                   // "reciterai-taxonomy_v2"
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@index([parentTopicId])
+  @@map("subtopic")
 }
 
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
