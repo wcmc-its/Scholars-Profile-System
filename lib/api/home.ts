@@ -331,12 +331,15 @@ export async function getSelectedResearch(
   const scholarCountRows: ScholarCountRow[] =
     parentIds.length > 0
       ? ((await prisma.$queryRawUnsafe(
-          `SELECT parent_topic_id, primary_subtopic_id, COUNT(DISTINCT cwid) AS scholar_count
-             FROM publication_topic
-            WHERE primary_subtopic_id IS NOT NULL
-              AND year >= ?
-              AND parent_topic_id IN (${parentIds.map(() => "?").join(",")})
-            GROUP BY parent_topic_id, primary_subtopic_id`,
+          `SELECT pt.parent_topic_id, pt.primary_subtopic_id, COUNT(DISTINCT pt.cwid) AS scholar_count
+             FROM publication_topic pt
+             JOIN scholar s ON s.cwid = pt.cwid
+            WHERE pt.primary_subtopic_id IS NOT NULL
+              AND pt.year >= ?
+              AND pt.parent_topic_id IN (${parentIds.map(() => "?").join(",")})
+              AND s.deleted_at IS NULL
+              AND s.status = 'active'
+            GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
           RECITERAI_YEAR_FLOOR,
           ...parentIds,
         )) as ScholarCountRow[]) ?? []
@@ -436,9 +439,11 @@ export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
     scholar_count: number | bigint;
   };
   const countRows = ((await prisma.$queryRawUnsafe(
-    `SELECT parent_topic_id, COUNT(DISTINCT cwid) AS scholar_count
-       FROM publication_topic
-      GROUP BY parent_topic_id`,
+    `SELECT pt.parent_topic_id, COUNT(DISTINCT pt.cwid) AS scholar_count
+       FROM publication_topic pt
+       JOIN scholar s ON s.cwid = pt.cwid
+      WHERE s.deleted_at IS NULL AND s.status = 'active'
+      GROUP BY pt.parent_topic_id`,
   )) as CountRow[]) ?? [];
   const countByParent = new Map<string, number>(
     countRows.map((r) => [r.parent_topic_id, Number(r.scholar_count)]),
