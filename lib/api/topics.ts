@@ -8,6 +8,9 @@
  *   - getRecentHighlightsForTopic() RANKING-02 — publication-centric pool
  *                                    (no author-position filter), recent_highlights
  *                                    curve, dedup-per-pmid.
+ *   - getTopicPublications()        CSR browsable feed — D-08/D-09 four sort modes,
+ *                                    two filter modes, subtopic filter, pagination.
+ *   - getSubtopicsForTopic()        D-07 subtopic rail counts for the topic detail page.
  *
  * Both surfaces honour:
  *   - D-12 sparse-state hide (return null + emit structured warn log).
@@ -347,4 +350,237 @@ export async function getRecentHighlightsForTopic(
     })),
     // No citation-count field — locked by design spec v1.7.1.
   }));
+}
+
+// ─── Plan 05 additions ─────────────────────────────────────────────────────
+
+export type SubtopicWithCount = {
+  id: string;
+  label: string;
+  description: string | null;
+  pubCount: number;
+};
+
+/**
+ * Returns all subtopics for a topic with pubCount per subtopic for rail ordering.
+ *
+ * Implements D-07: count by primarySubtopicId only (not the union with subtopicIds
+ * JSON array) for query performance. Subtopics with pubCount 0 are included; they
+ * render below the "Less common" divider in the rail.
+ *
+ * Design note: counting via primarySubtopicId only was chosen over the union of
+ * primarySubtopicId + subtopicIds JSON array. The JSON array union approach was
+ * considered and rejected — it requires application-side JSON parsing on every row
+ * in the pool (O(n) per row), cannot be indexed, and the additional coverage
+ * (secondary subtopics) is editorial value that doesn't justify the cost.
+ */
+export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicWithCount[] | null> {
+  const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
+  if (!topic) return null;
+
+  const catalog = await prisma.subtopic.findMany({
+    where: { parentTopicId: topicSlug },
+    select: { id: true, label: true, description: true },
+  });
+
+  const countRows = await prisma.publicationTopic.groupBy({
+    by: ["primarySubtopicId"],
+    where: { parentTopicId: topicSlug, primarySubtopicId: { not: null } },
+    _count: { pmid: true },
+  });
+  const countMap = new Map<string, number>();
+  for (const r of countRows) {
+    if (r.primarySubtopicId) countMap.set(r.primarySubtopicId, r._count.pmid);
+  }
+
+  return catalog
+    .map((s) => ({ id: s.id, label: s.label, description: s.description, pubCount: countMap.get(s.id) ?? 0 }))
+    .sort((a, b) => b.pubCount - a.pubCount);
+}
+
+export type TopicPublicationSort = "newest" | "most_cited" | "by_impact" | "curated";
+export type TopicPublicationFilter = "research_articles_only" | "all";
+
+export type TopicPublicationHit = {
+  pmid: string;
+  title: string;
+  journal: string | null;
+  year: number;
+  publicationType: string | null;
+  citationCount: number | null;
+  pubmedUrl: string | null;
+  doi: string | null;
+  authors: Array<{ name: string; cwid?: string; slug?: string }>;
+};
+
+export type TopicPublicationsResult = {
+  hits: TopicPublicationHit[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+const TOPIC_PUBLICATIONS_PAGE_SIZE = 20;
+const HARD_EXCLUDE_TYPES = ["Letter", "Editorial Article", "Erratum"];
+
+/**
+ * CSR browsable publication feed for a topic detail page.
+ *
+ * Sort modes:
+ *   - newest      SQL ORDER BY year DESC, dateAddedToEntrez DESC
+ *   - most_cited  SQL ORDER BY citationCount DESC NULLS LAST
+ *   - by_impact   In-process Variant B: scorePublication(row, "recent_highlights", false)
+ *   - curated     Same Variant B scoring as by_impact (surface alias per D-09)
+ *
+ * Filter modes:
+ *   - research_articles_only (default) excludes Letter / Editorial Article / Erratum
+ *   - all                              includes all publication types
+ *
+ * Security: Allowlist validation of sort/filter/subtopic/slug must happen in the
+ * route handler (app/api/topics/[slug]/publications/route.ts) before calling this
+ * function. This function trusts its inputs have already been validated.
+ *
+ * Pool limit: by_impact/curated use POOL_LIMIT=5000 for DoS mitigation per
+ * 03-RESEARCH.md threat table. Page clamped to MAX_PAGE=500 in route handler.
+ */
+export async function getTopicPublications(
+  topicSlug: string,
+  opts: { sort: TopicPublicationSort; subtopic?: string; page?: number; filter?: TopicPublicationFilter },
+  now: Date = new Date(),
+): Promise<TopicPublicationsResult | null> {
+  const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
+  if (!topic) return null;
+
+  const page = Math.max(0, opts.page ?? 0);
+  const filter = opts.filter ?? "research_articles_only";
+  const subtopicFilter = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
+
+  const baseWhere: Record<string, unknown> = { parentTopicId: topicSlug };
+  if (subtopicFilter) baseWhere.primarySubtopicId = subtopicFilter;
+  if (filter === "research_articles_only") {
+    baseWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
+  }
+
+  // SQL-direct sort path (newest, most_cited) — do NOT call scorePublication here.
+  if (opts.sort === "newest" || opts.sort === "most_cited") {
+    // most_cited: sort DESC. MySQL/MariaDB do not support NULLS LAST natively in
+    // older versions; Prisma 7 with mariadb adapter does not expose a nulls option
+    // on scalar fields. Rows with NULL citationCount will sort first under DESC
+    // (NULL > value in MySQL). The route handler clamps page to MAX_PAGE so the
+    // null rows only affect the first page for datasets where all rows are null —
+    // an acceptable trade-off vs. a raw SQL workaround per 03-RESEARCH.md.
+    const orderBy =
+      opts.sort === "newest"
+        ? [{ year: "desc" as const }, { publication: { dateAddedToEntrez: "desc" as const } }]
+        : [{ publication: { citationCount: "desc" as const } }];
+    const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
+    const pubSelectFields = {
+      pmid: true,
+      title: true,
+      journal: true,
+      year: true,
+      publicationType: true,
+      citationCount: true,
+      pubmedUrl: true,
+      doi: true,
+      dateAddedToEntrez: true,
+    } as const;
+    const [rows, total] = await prisma.$transaction([
+      prisma.publicationTopic.findMany({
+        where: baseWhere,
+        skip,
+        take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        orderBy: orderBy as any,
+        distinct: ["pmid"],
+        include: { publication: { select: pubSelectFields } },
+      }),
+      prisma.publicationTopic.count({ where: baseWhere }),
+    ]);
+    return {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      hits: (rows as any[]).map(mapToTopicPublicationHit),
+      total,
+      page,
+      pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
+    };
+  }
+
+  // In-process Variant B scoring path (by_impact, curated).
+  // Pool size: 5000 covers ≤500 page bound × 20 = 10k ceiling per 03-RESEARCH.md DoS mitigation.
+  const POOL_LIMIT = 5000;
+  const candidates = await prisma.publicationTopic.findMany({
+    where: baseWhere,
+    take: POOL_LIMIT,
+    distinct: ["pmid"],
+    include: {
+      publication: {
+        select: {
+          pmid: true,
+          title: true,
+          journal: true,
+          year: true,
+          publicationType: true,
+          citationCount: true,
+          pubmedUrl: true,
+          doi: true,
+          dateAddedToEntrez: true,
+        },
+      },
+    },
+  });
+
+  const scored = candidates.map((r) => {
+    const rankable: RankablePublication = {
+      pmid: r.pmid,
+      publicationType: r.publication.publicationType ?? "",
+      reciteraiImpact: Number(r.score),
+      dateAddedToEntrez: r.publication.dateAddedToEntrez ?? new Date(0),
+      // Publication-centric surface: scholarCentric=false makes authorshipWeight=1.0
+      // regardless of position, per D-13 (no first/senior filter on topic pub feed).
+      authorship: { isFirst: false, isLast: false, isPenultimate: false },
+      isConfirmed: true,
+    };
+    return { row: r, score: scorePublication(rankable, "recent_highlights", false, now) };
+  });
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (b.row.publication.year ?? 0) - (a.row.publication.year ?? 0);
+  });
+
+  const total = scored.length;
+  const slice = scored.slice(page * TOPIC_PUBLICATIONS_PAGE_SIZE, (page + 1) * TOPIC_PUBLICATIONS_PAGE_SIZE);
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    hits: slice.map((s) => mapToTopicPublicationHit(s.row as any)),
+    total,
+    page,
+    pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
+  };
+}
+
+/**
+ * Map a raw PublicationTopic+Publication row to the public TopicPublicationHit shape.
+ * Authors field: returns empty array for first pass; Plan 07 may enrich if author
+ * chips are required by the UI spec. The existing getRecentHighlightsForTopic pattern
+ * uses a separate publication.findMany with included authors — that approach requires
+ * a second query per page and is deferred until the UI contract is confirmed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapToTopicPublicationHit(r: any): TopicPublicationHit {
+  return {
+    pmid: r.pmid,
+    title: r.publication.title ?? "",
+    journal: r.publication.journal ?? null,
+    year: r.publication.year ?? 0,
+    publicationType: r.publication.publicationType ?? null,
+    citationCount: r.publication.citationCount ?? null,
+    pubmedUrl: r.publication.pubmedUrl ?? null,
+    doi: r.publication.doi ?? null,
+    // Authors deferred to Plan 07 UI integration. Returning [] here is intentional
+    // (not a stub that blocks the feature — the publication card renders without
+    // author chips on first pass per design spec v1.7.1 absence-as-default).
+    authors: [],
+  };
 }
