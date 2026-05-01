@@ -71,9 +71,16 @@ async function main() {
     // Phase 2: doctoral students live under ou=students, not ou=people, so the
     // active-faculty filter excludes them. Pull them as a second branch and
     // merge before the upsert. Eligibility-carve consumers depend on this.
-    console.log("Fetching doctoral (PHD) students from ou=students...");
-    const studentEntries = await fetchDoctoralStudents(client);
-    console.log(`ED returned ${studentEntries.length} doctoral students.`);
+    let studentEntries: Awaited<ReturnType<typeof fetchDoctoralStudents>> = [];
+    try {
+      console.log("Fetching doctoral (PHD) students from ou=students...");
+      studentEntries = await fetchDoctoralStudents(client);
+      console.log(`ED returned ${studentEntries.length} doctoral students.`);
+    } catch (err) {
+      console.warn(
+        `Doctoral student fetch skipped (ou=students unavailable): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     await client.unbind();
 
