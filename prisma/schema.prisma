@@ -32,6 +32,10 @@ model Scholar {
   // Nullable so the additive migration applies cleanly to existing rows;
   // ED ETL backfills on next refresh.
   roleCategory        String?   @map("role_category") @db.VarChar(32)
+  // Phase 3: org-unit FKs from ED LDAP. Nullable so additive migration applies cleanly;
+  // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
+  deptCode            String?   @map("dept_code") @db.VarChar(64)
+  divCode             String?   @map("div_code") @db.VarChar(64)
   deletedAt           DateTime? @map("deleted_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
@@ -46,10 +50,14 @@ model Scholar {
   cwidAliasesAsCurrent CwidAlias[] @relation("AliasCurrent")
   slugHistoryAsCurrent SlugHistory[] @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
+  department          Department? @relation(fields: [deptCode], references: [code], onDelete: SetNull)
+  division            Division?   @relation(fields: [divCode], references: [code], onDelete: SetNull)
 
   @@index([deletedAt])
   @@index([status])
   @@index([roleCategory])
+  @@index([deptCode])
+  @@index([divCode])
   @@map("scholar")
 }
 
@@ -192,8 +200,77 @@ model Topic {
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
 
   publications  PublicationTopic[]
+  subtopics     Subtopic[]
 
   @@map("topic")
+}
+
+/// Subtopic catalog projected from DynamoDB TAXONOMY#taxonomy_v2 embedded subtopic
+/// data per Phase 3 D-05. The `id` is the slug (no human-readable label in source);
+/// `label` is derived via subtopicLabel() (slug → title-case + underscore replace).
+/// Description is null for the long tail; editorial copy fills top ~300 post-launch.
+/// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — this is a catalog
+/// table; old slugs flush out on weekly ETL refresh (02-SCHEMA-DECISION.md risk #2).
+model Subtopic {
+  id            String   @id @db.VarChar(128)              // slug, e.g. "breast_screening_risk_prediction"
+  parentTopicId String   @map("parent_topic_id") @db.VarChar(128)
+  parentTopic   Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  label         String   @db.VarChar(255)                  // derived: slug.split('_').map(titleCase).join(' ')
+  description   String?  @db.Text                          // null for long tail (D-06)
+  source        String   @db.VarChar(64)                   // "reciterai-taxonomy_v2"
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@index([parentTopicId])
+  @@map("subtopic")
+}
+
+/// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
+/// `code` is the stable org-unit code from LDAP — joined on, never display names.
+/// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
+/// `slug` is derived via deriveSlug() from `name`. ETL upsert refreshes scholarCount.
+model Department {
+  code          String   @id @db.VarChar(64)
+  name          String   @db.VarChar(255)
+  slug          String   @unique @db.VarChar(255)
+  description   String?  @db.Text
+  chairCwid     String?  @map("chair_cwid") @db.VarChar(32)
+  scholarCount  Int      @default(0) @map("scholar_count")
+  source        String   @default("ED") @db.VarChar(32)
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  divisions     Division[]
+  scholars      Scholar[]
+
+  @@index([slug])
+  @@map("department")
+}
+
+/// WCM division from ED LDAP `weillCornellEduOrgUnit` level2.
+/// `code` is the stable division code from LDAP. `deptCode` FK enforces
+/// the level2-belongs-to-level1 invariant. The two Cardiology divisions
+/// (Medicine vs. Pediatrics) disambiguated by deptCode + slug per D-12.
+model Division {
+  code          String     @id @db.VarChar(64)
+  deptCode      String     @map("dept_code") @db.VarChar(64)
+  department    Department @relation(fields: [deptCode], references: [code], onDelete: Cascade)
+  name          String     @db.VarChar(255)
+  slug          String     @db.VarChar(255)
+  description   String?    @db.Text
+  chiefCwid     String?    @map("chief_cwid") @db.VarChar(32)
+  scholarCount  Int        @default(0) @map("scholar_count")
+  source        String     @default("ED") @db.VarChar(32)
+  refreshedAt   DateTime   @default(now()) @map("refreshed_at")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  scholars      Scholar[]
+
+  @@unique([deptCode, slug])
+  @@index([deptCode])
+  @@index([slug])
+  @@map("division")
 }
 
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
