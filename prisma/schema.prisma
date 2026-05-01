@@ -16,40 +16,48 @@ datasource db {
 /// One row per actively-affiliated WCM scholar. PK is CWID.
 /// deleted_at != NULL marks a soft-deleted scholar; cleanup job hard-deletes after 60 days.
 model Scholar {
-  cwid                String    @id @db.VarChar(32)
-  preferredName       String    @map("preferred_name") @db.VarChar(255)
-  fullName            String    @map("full_name") @db.VarChar(255)
-  primaryTitle        String?   @map("primary_title") @db.VarChar(255)
-  primaryDepartment   String?   @map("primary_department") @db.VarChar(255)
-  email               String?   @db.VarChar(255)
-  headshotUrl         String?   @map("headshot_url") @db.VarChar(512)
-  overview            String?   @db.Text
-  overviewUpdatedAt   DateTime? @map("overview_updated_at")
-  slug                String    @unique @db.VarChar(255)
-  status              String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
+  cwid              String    @id @db.VarChar(32)
+  preferredName     String    @map("preferred_name") @db.VarChar(255)
+  fullName          String    @map("full_name") @db.VarChar(255)
+  primaryTitle      String?   @map("primary_title") @db.VarChar(255)
+  primaryDepartment String?   @map("primary_department") @db.VarChar(255)
+  email             String?   @db.VarChar(255)
+  headshotUrl       String?   @map("headshot_url") @db.VarChar(512)
+  overview          String?   @db.Text
+  overviewUpdatedAt DateTime? @map("overview_updated_at")
+  slug              String    @unique @db.VarChar(255)
+  status            String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
   // Phase 2: derived in ED ETL per design-spec-v1.7.1.md:352-356.
   // Drives the algorithmic-surface eligibility carve (lib/eligibility.ts).
   // Nullable so the additive migration applies cleanly to existing rows;
   // ED ETL backfills on next refresh.
-  roleCategory        String?   @map("role_category") @db.VarChar(32)
-  deletedAt           DateTime? @map("deleted_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  roleCategory      String?   @map("role_category") @db.VarChar(32)
+  // Phase 3: org-unit FKs from ED LDAP. Nullable so additive migration applies cleanly;
+  // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
+  deptCode          String?   @map("dept_code") @db.VarChar(64)
+  divCode           String?   @map("div_code") @db.VarChar(64)
+  deletedAt         DateTime? @map("deleted_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  appointments        Appointment[]
-  educations          Education[]
-  grants              Grant[]
-  authorships         PublicationAuthor[]
-  topicAssignments    TopicAssignment[]
-  publicationScores   PublicationScore[]
-  publicationTopics   PublicationTopic[]
-  cwidAliasesAsCurrent CwidAlias[] @relation("AliasCurrent")
-  slugHistoryAsCurrent SlugHistory[] @relation("SlugHistoryCurrent")
+  appointments         Appointment[]
+  educations           Education[]
+  grants               Grant[]
+  authorships          PublicationAuthor[]
+  topicAssignments     TopicAssignment[]
+  publicationScores    PublicationScore[]
+  publicationTopics    PublicationTopic[]
+  cwidAliasesAsCurrent CwidAlias[]         @relation("AliasCurrent")
+  slugHistoryAsCurrent SlugHistory[]       @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
+  department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
+  division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
 
   @@index([deletedAt])
   @@index([status])
   @@index([roleCategory])
+  @@index([deptCode])
+  @@index([divCode])
   @@map("scholar")
 }
 
@@ -57,18 +65,18 @@ model Scholar {
 /// Display logic per spec line 43: primary first, active only by default,
 /// interim excluded if any non-interim exists.
 model Appointment {
-  id                String    @id @default(uuid()) @db.VarChar(64)
-  cwid              String    @db.VarChar(32)
-  scholar           Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  title             String    @db.VarChar(255)
-  organization      String    @db.VarChar(255)
-  startDate         DateTime? @map("start_date") @db.Date
-  endDate           DateTime? @map("end_date") @db.Date // NULL = current
-  isPrimary         Boolean   @default(false) @map("is_primary")
-  isInterim         Boolean   @default(false) @map("is_interim")
-  externalId        String?   @map("external_id") @db.VarChar(128) // ED appointment ID for upsert
-  source            String    @default("ED") @db.VarChar(32)
-  lastRefreshedAt   DateTime  @default(now()) @map("last_refreshed_at")
+  id              String    @id @default(uuid()) @db.VarChar(64)
+  cwid            String    @db.VarChar(32)
+  scholar         Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  title           String    @db.VarChar(255)
+  organization    String    @db.VarChar(255)
+  startDate       DateTime? @map("start_date") @db.Date
+  endDate         DateTime? @map("end_date") @db.Date // NULL = current
+  isPrimary       Boolean   @default(false) @map("is_primary")
+  isInterim       Boolean   @default(false) @map("is_interim")
+  externalId      String?   @map("external_id") @db.VarChar(128) // ED appointment ID for upsert
+  source          String    @default("ED") @db.VarChar(32)
+  lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
   @@index([cwid, isPrimary, endDate])
@@ -77,16 +85,16 @@ model Appointment {
 
 /// Education and training entries from ASMS.
 model Education {
-  id                String    @id @default(uuid()) @db.VarChar(64)
-  cwid              String    @db.VarChar(32)
-  scholar           Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  degree            String    @db.VarChar(255)
-  institution       String    @db.VarChar(255)
-  year              Int?
-  field             String?   @db.VarChar(255)
-  externalId        String?   @map("external_id") @db.VarChar(128)
-  source            String    @default("ASMS") @db.VarChar(32)
-  lastRefreshedAt   DateTime  @default(now()) @map("last_refreshed_at")
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  degree          String   @db.VarChar(255)
+  institution     String   @db.VarChar(255)
+  year            Int?
+  field           String?  @db.VarChar(255)
+  externalId      String?  @map("external_id") @db.VarChar(128)
+  source          String   @default("ASMS") @db.VarChar(32)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
   @@map("education")
@@ -95,17 +103,17 @@ model Education {
 /// Grants from InfoEd, filtered per spec line 125 (Confidential != 'Y',
 /// program_type != 'Contract without funding', valid roles, valid dates).
 model Grant {
-  id                String    @id @default(uuid()) @db.VarChar(64)
-  cwid              String    @db.VarChar(32)
-  scholar           Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  title             String    @db.Text
-  role              String    @db.VarChar(64) // PI | PI-Subaward | Co-PI | Co-I | Key Personnel
-  funder            String    @db.VarChar(255)
-  startDate         DateTime  @map("start_date") @db.Date
-  endDate           DateTime  @map("end_date") @db.Date
-  externalId        String?   @map("external_id") @db.VarChar(128)
-  source            String    @default("InfoEd") @db.VarChar(32)
-  lastRefreshedAt   DateTime  @default(now()) @map("last_refreshed_at")
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  title           String   @db.Text
+  role            String   @db.VarChar(64) // PI | PI-Subaward | Co-PI | Co-I | Key Personnel
+  funder          String   @db.VarChar(255)
+  startDate       DateTime @map("start_date") @db.Date
+  endDate         DateTime @map("end_date") @db.Date
+  externalId      String?  @map("external_id") @db.VarChar(128)
+  source          String   @default("InfoEd") @db.VarChar(32)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
   @@index([cwid, endDate]) // active-first ordering
@@ -119,23 +127,23 @@ model Grant {
 /// rows are inserted only for WCM scholars; profile rendering overlays
 /// hyperlinks onto the matching substrings in authorsString.
 model Publication {
-  pmid                  String    @id @db.VarChar(32)
-  title                 String    @db.Text
-  authorsString         String?   @map("authors_string") @db.VarChar(2000)
-  journal               String?   @db.VarChar(512)
-  year                  Int?
-  publicationType       String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
-  citationCount         Int       @default(0) @map("citation_count")
-  dateAddedToEntrez     DateTime? @map("date_added_to_entrez") @db.Date
-  doi                   String?   @db.VarChar(255)
-  pubmedUrl             String?   @map("pubmed_url") @db.VarChar(512)
-  meshTerms             Json?     @map("mesh_terms") // array of MeSH descriptor strings
-  source                String    @default("ReCiter") @db.VarChar(32)
-  lastRefreshedAt       DateTime  @default(now()) @map("last_refreshed_at")
+  pmid              String    @id @db.VarChar(32)
+  title             String    @db.Text
+  authorsString     String?   @map("authors_string") @db.VarChar(2000)
+  journal           String?   @db.VarChar(512)
+  year              Int?
+  publicationType   String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
+  citationCount     Int       @default(0) @map("citation_count")
+  dateAddedToEntrez DateTime? @map("date_added_to_entrez") @db.Date
+  doi               String?   @db.VarChar(255)
+  pubmedUrl         String?   @map("pubmed_url") @db.VarChar(512)
+  meshTerms         Json?     @map("mesh_terms") // array of MeSH descriptor strings
+  source            String    @default("ReCiter") @db.VarChar(32)
+  lastRefreshedAt   DateTime  @default(now()) @map("last_refreshed_at")
 
-  authors               PublicationAuthor[]
-  publicationScores     PublicationScore[]
-  publicationTopics     PublicationTopic[]
+  authors           PublicationAuthor[]
+  publicationScores PublicationScore[]
+  publicationTopics PublicationTopic[]
 
   @@index([year])
   @@index([dateAddedToEntrez])
@@ -145,19 +153,19 @@ model Publication {
 /// Join between scholars and publications. cwid is NULLABLE for non-WCM authors
 /// (Q2' refinement; spec line 200 — render as plain text without profile link).
 model PublicationAuthor {
-  id                String      @id @default(uuid()) @db.VarChar(64)
-  pmid              String      @db.VarChar(32)
-  publication       Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
-  cwid              String?     @db.VarChar(32) // NULL for non-WCM authors
-  scholar           Scholar?    @relation(fields: [cwid], references: [cwid], onDelete: SetNull)
-  externalName      String?     @map("external_name") @db.VarChar(255) // for non-WCM authors
-  position          Int         // 1-based author position
-  totalAuthors      Int         @map("total_authors")
-  isFirst           Boolean     @default(false) @map("is_first")
-  isLast            Boolean     @default(false) @map("is_last")
-  isPenultimate     Boolean     @default(false) @map("is_penultimate")
-  isConfirmed       Boolean     @default(true) @map("is_confirmed") // ReCiter authorship-confirmation (spec line 118)
-  lastRefreshedAt   DateTime    @default(now()) @map("last_refreshed_at")
+  id              String      @id @default(uuid()) @db.VarChar(64)
+  pmid            String      @db.VarChar(32)
+  publication     Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  cwid            String?     @db.VarChar(32) // NULL for non-WCM authors
+  scholar         Scholar?    @relation(fields: [cwid], references: [cwid], onDelete: SetNull)
+  externalName    String?     @map("external_name") @db.VarChar(255) // for non-WCM authors
+  position        Int // 1-based author position
+  totalAuthors    Int         @map("total_authors")
+  isFirst         Boolean     @default(false) @map("is_first")
+  isLast          Boolean     @default(false) @map("is_last")
+  isPenultimate   Boolean     @default(false) @map("is_penultimate")
+  isConfirmed     Boolean     @default(true) @map("is_confirmed") // ReCiter authorship-confirmation (spec line 118)
+  lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
 
   @@index([cwid])
   @@index([pmid])
@@ -168,13 +176,13 @@ model PublicationAuthor {
 /// ReCiterAI topic assignments per scholar (Q6 minimal projection).
 /// One of two fields that flow DynamoDB to MySQL via the projection Lambda.
 model TopicAssignment {
-  id                String   @id @default(uuid()) @db.VarChar(64)
-  cwid              String   @db.VarChar(32)
-  scholar           Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  topic             String   @db.VarChar(255)
-  score             Float
-  source            String   @default("ReCiterAI-DynamoDB") @db.VarChar(64)
-  lastRefreshedAt   DateTime @default(now()) @map("last_refreshed_at")
+  id              String   @id @default(uuid()) @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  topic           String   @db.VarChar(255)
+  score           Float
+  source          String   @default("ReCiterAI-DynamoDB") @db.VarChar(64)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
   @@unique([cwid, topic])
   @@index([cwid])
@@ -185,55 +193,124 @@ model TopicAssignment {
 /// 67 rows. Subtopics are NOT modeled as Topic rows under D-02 candidate (e);
 /// they live as embedded fields on PublicationTopic. See 02-SCHEMA-DECISION.md.
 model Topic {
-  id            String   @id @db.VarChar(128)              // slug, e.g. "cancer_genomics"
-  label         String   @db.VarChar(255)                  // from TAXONOMY#.topics[].label
-  description   String?  @db.Text                          // from TAXONOMY#.topics[].description
-  source        String   @db.VarChar(64)                   // "reciterai-taxonomy_v2"
-  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  id          String   @id @db.VarChar(128) // slug, e.g. "cancer_genomics"
+  label       String   @db.VarChar(255) // from TAXONOMY#.topics[].label
+  description String?  @db.Text // from TAXONOMY#.topics[].description
+  source      String   @db.VarChar(64) // "reciterai-taxonomy_v2"
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
 
-  publications  PublicationTopic[]
+  publications PublicationTopic[]
+  subtopics    Subtopic[]
 
   @@map("topic")
+}
+
+/// Subtopic catalog projected from DynamoDB TAXONOMY#taxonomy_v2 embedded subtopic
+/// data per Phase 3 D-05. The `id` is the slug (no human-readable label in source);
+/// `label` is derived via subtopicLabel() (slug → title-case + underscore replace).
+/// Description is null for the long tail; editorial copy fills top ~300 post-launch.
+/// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — this is a catalog
+/// table; old slugs flush out on weekly ETL refresh (02-SCHEMA-DECISION.md risk #2).
+model Subtopic {
+  id            String   @id @db.VarChar(128) // slug, e.g. "breast_screening_risk_prediction"
+  parentTopicId String   @map("parent_topic_id") @db.VarChar(128)
+  parentTopic   Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  label         String   @db.VarChar(255) // derived: slug.split('_').map(titleCase).join(' ')
+  description   String?  @db.Text // null for long tail (D-06)
+  source        String   @db.VarChar(64) // "reciterai-taxonomy_v2"
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@index([parentTopicId])
+  @@map("subtopic")
+}
+
+/// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
+/// `code` is the stable org-unit code from LDAP — joined on, never display names.
+/// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
+/// `slug` is derived via deriveSlug() from `name`. ETL upsert refreshes scholarCount.
+model Department {
+  code         String   @id @db.VarChar(64)
+  name         String   @db.VarChar(255)
+  slug         String   @unique @db.VarChar(255)
+  description  String?  @db.Text
+  chairCwid    String?  @map("chair_cwid") @db.VarChar(32)
+  scholarCount Int      @default(0) @map("scholar_count")
+  source       String   @default("ED") @db.VarChar(32)
+  refreshedAt  DateTime @default(now()) @map("refreshed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  divisions Division[]
+  scholars  Scholar[]
+
+  @@index([slug])
+  @@map("department")
+}
+
+/// WCM division from ED LDAP `weillCornellEduOrgUnit` level2.
+/// `code` is the stable division code from LDAP. `deptCode` FK enforces
+/// the level2-belongs-to-level1 invariant. The two Cardiology divisions
+/// (Medicine vs. Pediatrics) disambiguated by deptCode + slug per D-12.
+model Division {
+  code         String     @id @db.VarChar(64)
+  deptCode     String     @map("dept_code") @db.VarChar(64)
+  department   Department @relation(fields: [deptCode], references: [code], onDelete: Cascade)
+  name         String     @db.VarChar(255)
+  slug         String     @db.VarChar(255)
+  description  String?    @db.Text
+  chiefCwid    String?    @map("chief_cwid") @db.VarChar(32)
+  scholarCount Int        @default(0) @map("scholar_count")
+  source       String     @default("ED") @db.VarChar(32)
+  refreshedAt  DateTime   @default(now()) @map("refreshed_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  scholars Scholar[]
+
+  @@unique([deptCode, slug])
+  @@index([deptCode])
+  @@index([slug])
+  @@map("division")
 }
 
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
 /// One PublicationTopic row per `TOPIC#<parent_topic_id>` item in DynamoDB.
 /// Subtopic data lives as embedded JSON fields here (no separate subtopic table).
 model PublicationTopic {
-  pmid                  String             @db.VarChar(32)
-  cwid                  String             @db.VarChar(32)
-  parentTopicId         String             @db.VarChar(128) @map("parent_topic_id")
-  primarySubtopicId     String?            @db.VarChar(128) @map("primary_subtopic_id")  // slug; NO FK
-  subtopicIds           Json?              @map("subtopic_ids")                            // ["slug1","slug2",...]
-  subtopicConfidences   Json?              @map("subtopic_confidences")                    // {slug: score}
-  score                 Decimal            @db.Decimal(8, 4)                                // ReciterAI parent-topic score
-  impactScore           Decimal?           @db.Decimal(8, 4) @map("impact_score")
-  authorPosition        String             @db.VarChar(16)  @map("author_position")
-  year                  Int                @db.SmallInt
+  pmid                String   @db.VarChar(32)
+  cwid                String   @db.VarChar(32)
+  parentTopicId       String   @map("parent_topic_id") @db.VarChar(128)
+  primarySubtopicId   String?  @map("primary_subtopic_id") @db.VarChar(128) // slug; NO FK
+  subtopicIds         Json?    @map("subtopic_ids") // ["slug1","slug2",...]
+  subtopicConfidences Json?    @map("subtopic_confidences") // {slug: score}
+  score               Decimal  @db.Decimal(8, 4) // ReciterAI parent-topic score
+  impactScore         Decimal? @map("impact_score") @db.Decimal(8, 4)
+  authorPosition      String   @map("author_position") @db.VarChar(16)
+  year                Int      @db.SmallInt
 
-  publication           Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
-  scholar               Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  topic                 Topic       @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  scholar     Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  topic       Topic       @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
 
   @@id([pmid, cwid, parentTopicId])
-  @@index([cwid, parentTopicId, score(sort: Desc)])               // profile Selected highlights + chip-row aggregations
-  @@index([parentTopicId, year(sort: Desc), score(sort: Desc)])   // /topics/{slug} Recent highlights
-  @@index([cwid, year(sort: Desc)])                               // profile most-recent feed (with D-16 dedup)
-  @@index([parentTopicId, cwid])                                  // Top scholars chip row group-by
+  @@index([cwid, parentTopicId, score(sort: Desc)]) // profile Selected highlights + chip-row aggregations
+  @@index([parentTopicId, year(sort: Desc), score(sort: Desc)]) // /topics/{slug} Recent highlights
+  @@index([cwid, year(sort: Desc)]) // profile most-recent feed (with D-16 dedup)
+  @@index([parentTopicId, cwid]) // Top scholars chip row group-by
   @@map("publication_topic")
 }
 
 /// ReCiterAI publication scores per scholar+pmid pair (Q6 minimal projection).
 /// The other of the two fields that flow DynamoDB to MySQL.
 model PublicationScore {
-  id                String      @id @default(uuid()) @db.VarChar(64)
-  cwid              String      @db.VarChar(32)
-  scholar           Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  pmid              String      @db.VarChar(32)
-  publication       Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
-  score             Float
-  source            String      @default("ReCiterAI-DynamoDB") @db.VarChar(64)
-  lastRefreshedAt   DateTime    @default(now()) @map("last_refreshed_at")
+  id              String      @id @default(uuid()) @db.VarChar(64)
+  cwid            String      @db.VarChar(32)
+  scholar         Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  pmid            String      @db.VarChar(32)
+  publication     Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  score           Float
+  source          String      @default("ReCiterAI-DynamoDB") @db.VarChar(64)
+  lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
 
   @@unique([cwid, pmid])
   @@index([cwid])
@@ -249,7 +326,7 @@ model CoiActivity {
   scholar               Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   entity                String?  @db.VarChar(255)
   activityType          String?  @map("activity_type") @db.VarChar(255)
-  value                 String?  @db.VarChar(64)            // e.g. "0-$4,999"
+  value                 String?  @db.VarChar(64) // e.g. "0-$4,999"
   activityRelatesTo     String?  @map("activity_relates_to") @db.VarChar(64)
   wcmcFacilities        String?  @map("wcmc_facilities") @db.VarChar(8)
   purchasingProcurement String?  @map("purchasing_procurement") @db.VarChar(8)
@@ -267,11 +344,11 @@ model CoiActivity {
 /// CWID aliases for redirects (Q2'). Auto-populated from ED replacement_cwid.
 /// On detection: FKs migrate to current_cwid, old scholar row drops, alias row inserted.
 model CwidAlias {
-  oldCwid           String   @id @map("old_cwid") @db.VarChar(32)
-  currentCwid       String   @map("current_cwid") @db.VarChar(32)
-  current           Scholar  @relation("AliasCurrent", fields: [currentCwid], references: [cwid], onDelete: Cascade)
-  source            String   @default("ed_replacement_cwid") @db.VarChar(64) // 'ed_replacement_cwid' | 'admin_manual'
-  createdAt         DateTime @default(now()) @map("created_at")
+  oldCwid     String   @id @map("old_cwid") @db.VarChar(32)
+  currentCwid String   @map("current_cwid") @db.VarChar(32)
+  current     Scholar  @relation("AliasCurrent", fields: [currentCwid], references: [cwid], onDelete: Cascade)
+  source      String   @default("ed_replacement_cwid") @db.VarChar(64) // 'ed_replacement_cwid' | 'admin_manual'
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([currentCwid])
   @@map("cwid_alias")
@@ -279,10 +356,10 @@ model CwidAlias {
 
 /// Slug history for 301 redirects (Q3'). Every former slug points to its current scholar.
 model SlugHistory {
-  oldSlug           String   @id @map("old_slug") @db.VarChar(255)
-  currentCwid       String   @map("current_cwid") @db.VarChar(32)
-  current           Scholar  @relation("SlugHistoryCurrent", fields: [currentCwid], references: [cwid], onDelete: Cascade)
-  createdAt         DateTime @default(now()) @map("created_at")
+  oldSlug     String   @id @map("old_slug") @db.VarChar(255)
+  currentCwid String   @map("current_cwid") @db.VarChar(32)
+  current     Scholar  @relation("SlugHistoryCurrent", fields: [currentCwid], references: [cwid], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([currentCwid])
   @@map("slug_history")
@@ -291,13 +368,13 @@ model SlugHistory {
 /// ETL run log (Q5'). Tracks per-source success/failure for monitoring.
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
 model EtlRun {
-  id                String    @id @default(uuid()) @db.VarChar(64)
-  source            String    @db.VarChar(32) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
-  startedAt         DateTime  @default(now()) @map("started_at")
-  completedAt       DateTime? @map("completed_at")
-  status            String    @db.VarChar(16) // 'running' | 'success' | 'failed'
-  rowsProcessed     Int       @default(0) @map("rows_processed")
-  errorMessage      String?   @map("error_message") @db.Text
+  id            String    @id @default(uuid()) @db.VarChar(64)
+  source        String    @db.VarChar(32) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
+  startedAt     DateTime  @default(now()) @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  status        String    @db.VarChar(16) // 'running' | 'success' | 'failed'
+  rowsProcessed Int       @default(0) @map("rows_processed")
+  errorMessage  String?   @map("error_message") @db.Text
 
   @@index([source, startedAt])
   @@index([source, status, completedAt])
