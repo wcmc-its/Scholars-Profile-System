@@ -18,9 +18,18 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const mockTopicFindUnique = vi.fn();
-const mockPublicationTopicFindMany = vi.fn();
-const mockPublicationFindMany = vi.fn();
+// `vi.mock` is hoisted above the `import` block at runtime; outer-scope
+// variables must be declared via `vi.hoisted` so they exist when the mock
+// factory runs. Standard vitest idiom.
+const {
+  mockTopicFindUnique,
+  mockPublicationTopicFindMany,
+  mockPublicationFindMany,
+} = vi.hoisted(() => ({
+  mockTopicFindUnique: vi.fn(),
+  mockPublicationTopicFindMany: vi.fn(),
+  mockPublicationFindMany: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -67,9 +76,13 @@ function makePtRow(overrides: {
   primaryTitle?: string | null;
   publicationType?: string;
   dateAddedToEntrez?: Date | null;
+  /** publication_topic.score — drives reciteraiImpact in lib/api/topics.ts. */
+  score?: number;
+  /** legacy alias retained for fixtures that pass impact-style values. */
   reciteraiImpact?: number;
 }) {
   const cwid = overrides.cwid;
+  const score = overrides.score ?? overrides.reciteraiImpact ?? 1.0;
   return {
     pmid: overrides.pmid,
     cwid,
@@ -77,8 +90,8 @@ function makePtRow(overrides: {
     primarySubtopicId: null,
     subtopicIds: [],
     subtopicConfidences: {},
-    score: 1.0,
-    impactScore: overrides.reciteraiImpact ?? 1.0,
+    score,
+    impactScore: score,
     authorPosition: overrides.authorPosition ?? "first",
     year: overrides.year ?? 2024,
     scholar: {
