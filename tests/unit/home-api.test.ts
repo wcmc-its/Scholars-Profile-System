@@ -15,22 +15,38 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // exercised: publicationTopic, topic, and prisma.$queryRawUnsafe / $queryRaw
 // for the distinct-cwid scholar count aggregation that Prisma groupBy can't
 // express directly.
-const mockPubTopicFindMany = vi.fn();
-const mockPubTopicGroupBy = vi.fn();
-const mockTopicFindMany = vi.fn();
-const mockQueryRaw = vi.fn();
+//
+// vi.mock factories are hoisted; closure variables must be declared via
+// vi.hoisted so they're initialized before the factory runs.
+const mocks = vi.hoisted(() => ({
+  pubTopicFindMany: vi.fn(),
+  pubTopicGroupBy: vi.fn(),
+  topicFindMany: vi.fn(),
+  publicationFindMany: vi.fn(),
+  queryRaw: vi.fn(),
+}));
+const {
+  pubTopicFindMany: mockPubTopicFindMany,
+  pubTopicGroupBy: mockPubTopicGroupBy,
+  topicFindMany: mockTopicFindMany,
+  publicationFindMany: mockPublicationFindMany,
+  queryRaw: mockQueryRaw,
+} = mocks;
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     publicationTopic: {
-      findMany: mockPubTopicFindMany,
-      groupBy: mockPubTopicGroupBy,
+      findMany: mocks.pubTopicFindMany,
+      groupBy: mocks.pubTopicGroupBy,
     },
     topic: {
-      findMany: mockTopicFindMany,
+      findMany: mocks.topicFindMany,
     },
-    $queryRaw: mockQueryRaw,
-    $queryRawUnsafe: mockQueryRaw,
+    publication: {
+      findMany: mocks.publicationFindMany,
+    },
+    $queryRaw: mocks.queryRaw,
+    $queryRawUnsafe: mocks.queryRaw,
   },
 }));
 
@@ -44,7 +60,7 @@ const NOW = new Date("2026-04-01");
 
 // ---------- helpers to build fake (e)-shape rows ----------
 
-function makePubTopicRow(over: {
+type FixtureSpec = {
   pmid?: number;
   cwid?: string;
   parentTopicId?: string;
@@ -65,8 +81,16 @@ function makePubTopicRow(over: {
   pubDoi?: string | null;
   pubPubmedUrl?: string | null;
   parentLabel?: string;
-} = {}) {
-  const dateAdded = new Date(NOW.getTime() - (over.daysAgo ?? 30) * 24 * 60 * 60 * 1000);
+};
+
+/**
+ * Build a fake publication_topic row in the candidate-(e) shape that
+ * `getRecentContributions` consumes (after `include: { scholar, topic }`).
+ * Note: there is NO `publication` relation on PublicationTopic under (e);
+ * the test must separately stub `prisma.publication.findMany` to return the
+ * matching publication row(s).
+ */
+function makePubTopicRow(over: FixtureSpec = {}) {
   return {
     pmid: over.pmid ?? 1000001,
     cwid: over.cwid ?? "abc1234",
@@ -92,16 +116,22 @@ function makePubTopicRow(over: {
       label: over.parentLabel ?? "Cancer Genomics",
       description: "Cancer genomics research.",
     },
-    publication: {
-      pmid: String(over.pmid ?? 1000001),
-      title: over.pubTitle ?? "An important paper",
-      journal: over.pubJournal ?? "Nature",
-      year: over.year ?? 2025,
-      publicationType: over.pubType ?? "Academic Article",
-      dateAddedToEntrez: dateAdded,
-      doi: over.pubDoi ?? "10.1000/xyz",
-      pubmedUrl: over.pubPubmedUrl ?? "https://pubmed.ncbi.nlm.nih.gov/1000001",
-    },
+  };
+}
+
+/** Build a Publication row matching makePubTopicRow's pmid. */
+function makePubRow(over: FixtureSpec = {}) {
+  const pmidNum = over.pmid ?? 1000001;
+  const dateAdded = new Date(NOW.getTime() - (over.daysAgo ?? 30) * 24 * 60 * 60 * 1000);
+  return {
+    pmid: String(pmidNum),
+    title: over.pubTitle ?? "An important paper",
+    journal: over.pubJournal ?? "Nature",
+    year: over.year ?? 2025,
+    publicationType: over.pubType ?? "Academic Article",
+    dateAddedToEntrez: dateAdded,
+    pubmedUrl: over.pubPubmedUrl ?? "https://pubmed.ncbi.nlm.nih.gov/1000001",
+    doi: over.pubDoi ?? "10.1000/xyz",
   };
 }
 
@@ -109,6 +139,7 @@ beforeEach(() => {
   mockPubTopicFindMany.mockReset();
   mockPubTopicGroupBy.mockReset();
   mockTopicFindMany.mockReset();
+  mockPublicationFindMany.mockReset();
   mockQueryRaw.mockReset();
 });
 
@@ -118,6 +149,10 @@ describe("getRecentContributions (RANKING-01)", () => {
     mockPubTopicFindMany.mockResolvedValue([
       makePubTopicRow({ pmid: 1, parentTopicId: "cancer_genomics", daysAgo: 120 }),
       makePubTopicRow({ pmid: 2, parentTopicId: "neuroscience", daysAgo: 200, cwid: "def5678" }),
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      makePubRow({ pmid: 1, daysAgo: 120 }),
+      makePubRow({ pmid: 2, daysAgo: 200 }),
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await getRecentContributions(NOW);
@@ -137,38 +172,44 @@ describe("getRecentContributions (RANKING-01)", () => {
       "cancer_genomics", "neuroscience", "immunology", "cardiology",
       "endocrinology", "infectious_disease", "cancer_genomics", "neuroscience",
     ];
-    mockPubTopicFindMany.mockResolvedValue(
-      parents.map((p, i) =>
-        makePubTopicRow({
-          pmid: 100 + i,
-          parentTopicId: p,
-          parentLabel: p.replace(/_/g, " "),
-          cwid: `c${i.toString().padStart(4, "0")}`,
-          scholarSlug: `scholar-${i}`,
-          scholarPreferredName: `Scholar ${i}`,
-          daysAgo: 30 + i * 10,
-          score: 0.9 - i * 0.05,
-        }),
-      ),
+    const ptRows = parents.map((p, i) =>
+      makePubTopicRow({
+        pmid: 100 + i,
+        parentTopicId: p,
+        parentLabel: p.replace(/_/g, " "),
+        cwid: `c${i.toString().padStart(4, "0")}`,
+        scholarSlug: `scholar-${i}`,
+        scholarPreferredName: `Scholar ${i}`,
+        daysAgo: 30 + i * 10,
+        score: 0.9 - i * 0.05,
+      }),
+    );
+    mockPubTopicFindMany.mockResolvedValue(ptRows);
+    mockPublicationFindMany.mockResolvedValue(
+      ptRows.map((r, i) => makePubRow({ pmid: 100 + i, daysAgo: 30 + i * 10 })),
     );
     const result = await getRecentContributions(NOW);
     expect(result).not.toBeNull();
     expect(result!.length).toBeLessThanOrEqual(6);
     expect(result!.length).toBeGreaterThanOrEqual(3);
+    // Dedup: distinct slugs (i.e. no duplicate parent — implicit via score)
+    expect(new Set(result!.map((r) => r.cwid)).size).toBe(result!.length);
   });
 
   it("never includes citationCount field on returned objects (locked by design spec v1.7.1)", async () => {
-    mockPubTopicFindMany.mockResolvedValue(
-      ["cancer_genomics", "neuroscience", "immunology", "cardiology", "endocrinology"].map(
-        (p, i) =>
-          makePubTopicRow({
-            pmid: 200 + i,
-            parentTopicId: p,
-            cwid: `c${i.toString().padStart(4, "0")}`,
-            scholarSlug: `scholar-${i}`,
-            daysAgo: 30,
-          }),
-      ),
+    const parents = ["cancer_genomics", "neuroscience", "immunology", "cardiology", "endocrinology"];
+    const ptRows = parents.map((p, i) =>
+      makePubTopicRow({
+        pmid: 200 + i,
+        parentTopicId: p,
+        cwid: `c${i.toString().padStart(4, "0")}`,
+        scholarSlug: `scholar-${i}`,
+        daysAgo: 30,
+      }),
+    );
+    mockPubTopicFindMany.mockResolvedValue(ptRows);
+    mockPublicationFindMany.mockResolvedValue(
+      ptRows.map((_, i) => makePubRow({ pmid: 200 + i, daysAgo: 30 })),
     );
     const result = await getRecentContributions(NOW);
     expect(result).not.toBeNull();
@@ -178,8 +219,9 @@ describe("getRecentContributions (RANKING-01)", () => {
     }
   });
 
-  it("filter: Prisma where clause includes ELIGIBLE_ROLES roleCategory + first-or-last + year>=2020 + non-excluded pub types", async () => {
+  it("filter: Prisma where clause includes ELIGIBLE_ROLES roleCategory + first-or-last + year>=2020", async () => {
     mockPubTopicFindMany.mockResolvedValue([]);
+    mockPublicationFindMany.mockResolvedValue([]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await getRecentContributions(NOW);
     expect(mockPubTopicFindMany).toHaveBeenCalled();
@@ -192,8 +234,31 @@ describe("getRecentContributions (RANKING-01)", () => {
     expect(callArg.where.authorPosition.in).toEqual(expect.arrayContaining(["first", "last"]));
     // Year floor (D-15 — 2020+)
     expect(callArg.where.year.gte).toBe(2020);
-    // Hard-excluded types
-    expect(callArg.where.publication.publicationType.notIn).toEqual(
+    // Hard-excluded pub-types are filtered at the publication.findMany step
+    // (no FK from publication_topic to publication; the second query applies
+    // the type filter).
+    warn.mockRestore();
+  });
+
+  it("filter: hard-excluded pub-types (Letter / Editorial / Erratum) are dropped", async () => {
+    mockPubTopicFindMany.mockResolvedValue([]);
+    mockPublicationFindMany.mockResolvedValue([]);
+    await getRecentContributions(NOW);
+    // Verify that when a publication.findMany call is made (only when
+    // publication_topic returns rows), the filter includes notIn types.
+    // The current call path with empty rows skips the publication query;
+    // exercise the path with non-empty rows.
+    mockPubTopicFindMany.mockReset();
+    mockPublicationFindMany.mockReset();
+    mockPubTopicFindMany.mockResolvedValue([
+      makePubTopicRow({ pmid: 999, parentTopicId: "x", cwid: "abc" }),
+    ]);
+    mockPublicationFindMany.mockResolvedValue([]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await getRecentContributions(NOW);
+    expect(mockPublicationFindMany).toHaveBeenCalled();
+    const pubCall = mockPublicationFindMany.mock.calls[0][0];
+    expect(pubCall.where.publicationType.notIn).toEqual(
       expect.arrayContaining(["Letter", "Editorial Article", "Erratum"]),
     );
     warn.mockRestore();
