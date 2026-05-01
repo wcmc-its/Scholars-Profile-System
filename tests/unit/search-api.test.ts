@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { EXPECTED_HEADSHOT_URL, FIXTURE_CWID } from "../fixtures/scholar";
 
+// lib/api/search.ts imports @/lib/db for the topic pre-filter (Phase 3 D-10).
+// Mock it out so tests that don't exercise the topic path still work.
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    publicationTopic: {
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
+  },
+}));
+
 // Mock the OpenSearch wrapper module so the hit mapper runs over a fixture.
 // lib/api/search.ts imports `searchClient`, `PEOPLE_INDEX`, `PEOPLE_FIELD_BOOSTS`,
 // `PUBLICATIONS_INDEX`, `PUBLICATION_FIELD_BOOSTS` from @/lib/search.
