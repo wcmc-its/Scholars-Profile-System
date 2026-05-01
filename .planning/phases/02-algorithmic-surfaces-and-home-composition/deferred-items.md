@@ -25,3 +25,28 @@ Files affected:
 3. Fixes the upstream `lib/api/profile.ts` ranking-result-shape mismatch independently.
 
 This becomes a typecheck-gated blocker for any future plan whose acceptance criteria include `npm run typecheck` exit 0 across the full repo. Plans that ran in Wave 1 worked around it by typechecking only modified files in isolation.
+
+## PublicationTopic.pmid ↔ Publication.pmid type mismatch (discovered by 02-07 and 02-08)
+
+`PublicationTopic.pmid` is `Int @db.UnsignedInt` (mirroring DDB's numeric `pmid` field on `TOPIC#` rows). `Publication.pmid` is `String @id` (existing convention). These cannot share a Prisma FK relation, so the natural query pattern `prisma.publicationTopic.findMany({ include: { publication: true } })` fails typecheck.
+
+Both 02-07 (home composition) and 02-08 (topic-page surfaces) worked around this with a **two-step query stitch**:
+
+```typescript
+const ptRows = await prisma.publicationTopic.findMany({ where: { ... }, include: { scholar: true, topic: true } });
+const pmids = [...new Set(ptRows.map(r => String(r.pmid)))];
+const pubs = await prisma.publication.findMany({ where: { pmid: { in: pmids }, type: { notIn: EXCLUDED_PUB_TYPES } } });
+const pubByPmid = new Map(pubs.map(p => [p.pmid, p]));
+// stitch app-side
+```
+
+**Functionally correct.** All 99 unit tests pass. The hard-excluded-pub-type filter (Letter / Editorial / Erratum) gets applied at the publication query rather than in the same WHERE clause as the publication_topic filter — same effect, marginally less efficient at the database layer (the planner can't push the type filter into a single query plan).
+
+**Recommended follow-up:** A small migration plan that reconciles the type. Two options:
+
+1. **Change `PublicationTopic.pmid` to `String`** to match `Publication.pmid`. Requires re-running the ETL with stringification, plus a migration that ALTERs the column. Adds an actual `@relation` to `Publication`. Cleanest long-term.
+2. **Change `Publication.pmid` to `Int`.** PMIDs ARE integers in PubMed source data; the existing `String` typing is a legacy choice. Requires touching every consumer of `Publication.pmid` (search index ETL, profile API, scholars API, etc.) — bigger blast radius.
+
+Recommend option (1) — narrower scope, only `publication_topic` is affected. Future plan should also add the `@relation` so `include: { publication }` works directly, eliminating the two-step stitch in `lib/api/home.ts` and `lib/api/topics.ts`.
+
+Until reconciled, the two-step stitch pattern is the canonical approach for any new query that needs both `publication_topic` and `publication` data. Document this in any future plan addendum that surfaces this query shape.
