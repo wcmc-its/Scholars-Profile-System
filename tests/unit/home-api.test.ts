@@ -85,14 +85,14 @@ type FixtureSpec = {
 
 /**
  * Build a fake publication_topic row in the candidate-(e) shape that
- * `getRecentContributions` consumes (after `include: { scholar, topic }`).
- * Note: there is NO `publication` relation on PublicationTopic under (e);
- * the test must separately stub `prisma.publication.findMany` to return the
- * matching publication row(s).
+ * `getRecentContributions` and `getSelectedResearch` consume (after
+ * `include: { scholar, topic, publication }`). Under candidate (e),
+ * publication_topic.pmid is VARCHAR(32) FK-related to publication.pmid,
+ * so the publication payload is included via Prisma `include`.
  */
 function makePubTopicRow(over: FixtureSpec = {}) {
   return {
-    pmid: over.pmid ?? 1000001,
+    pmid: String(over.pmid ?? 1000001),
     cwid: over.cwid ?? "abc1234",
     parentTopicId: over.parentTopicId ?? "cancer_genomics",
     primarySubtopicId: over.primarySubtopicId ?? null,
@@ -116,6 +116,7 @@ function makePubTopicRow(over: FixtureSpec = {}) {
       label: over.parentLabel ?? "Cancer Genomics",
       description: "Cancer genomics research.",
     },
+    publication: makePubRow(over),
   };
 }
 
@@ -234,31 +235,20 @@ describe("getRecentContributions (RANKING-01)", () => {
     expect(callArg.where.authorPosition.in).toEqual(expect.arrayContaining(["first", "last"]));
     // Year floor (D-15 — 2020+)
     expect(callArg.where.year.gte).toBe(2020);
-    // Hard-excluded pub-types are filtered at the publication.findMany step
-    // (no FK from publication_topic to publication; the second query applies
-    // the type filter).
+    // Hard-excluded pub-types are filtered in the publicationTopic WHERE clause
+    // via the included publication relation (FK).
     warn.mockRestore();
   });
 
   it("filter: hard-excluded pub-types (Letter / Editorial / Erratum) are dropped", async () => {
+    // Hard-exclude is enforced in the publicationTopic.findMany WHERE clause
+    // via `publication: { publicationType: { notIn: [...] } }` (FK relation).
     mockPubTopicFindMany.mockResolvedValue([]);
-    mockPublicationFindMany.mockResolvedValue([]);
-    await getRecentContributions(NOW);
-    // Verify that when a publication.findMany call is made (only when
-    // publication_topic returns rows), the filter includes notIn types.
-    // The current call path with empty rows skips the publication query;
-    // exercise the path with non-empty rows.
-    mockPubTopicFindMany.mockReset();
-    mockPublicationFindMany.mockReset();
-    mockPubTopicFindMany.mockResolvedValue([
-      makePubTopicRow({ pmid: 999, parentTopicId: "x", cwid: "abc" }),
-    ]);
-    mockPublicationFindMany.mockResolvedValue([]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await getRecentContributions(NOW);
-    expect(mockPublicationFindMany).toHaveBeenCalled();
-    const pubCall = mockPublicationFindMany.mock.calls[0][0];
-    expect(pubCall.where.publicationType.notIn).toEqual(
+    expect(mockPubTopicFindMany).toHaveBeenCalled();
+    const callArg = mockPubTopicFindMany.mock.calls[0][0];
+    expect(callArg.where.publication.publicationType.notIn).toEqual(
       expect.arrayContaining(["Letter", "Editorial Article", "Erratum"]),
     );
     warn.mockRestore();

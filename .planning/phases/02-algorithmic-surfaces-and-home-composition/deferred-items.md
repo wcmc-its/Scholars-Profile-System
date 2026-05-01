@@ -26,7 +26,15 @@ Files affected:
 
 This becomes a typecheck-gated blocker for any future plan whose acceptance criteria include `npm run typecheck` exit 0 across the full repo. Plans that ran in Wave 1 worked around it by typechecking only modified files in isolation.
 
-## PublicationTopic.pmid ↔ Publication.pmid type mismatch (discovered by 02-07 and 02-08)
+## ~~PublicationTopic.pmid ↔ Publication.pmid type mismatch~~ — RESOLVED 2026-04-30
+
+**Resolved.** Reconciled `PublicationTopic.pmid` from `Int @db.UnsignedInt` to `String @db.VarChar(32)` matching `Publication.pmid`, added `@relation` between the two models, added `publication_topic_pmid_fkey` FK to the migration SQL, updated ETL to stringify DDB's numeric pmid, and unwound the two-step query stitches in `lib/api/home.ts` and `lib/api/topics.ts` to use `include: { publication }` directly. All 99 unit tests + lint + typecheck still pass. Test fixtures updated to nest the publication payload inside `publicationTopic` row mocks.
+
+The migration file was edited in place (rather than stacking a follow-up) because no environment had yet applied it — live ETL run was deferred per 02-05 SUMMARY.
+
+Original entry below for archive:
+
+## ~~PublicationTopic.pmid ↔ Publication.pmid type mismatch~~ (discovered by 02-07 and 02-08)
 
 `PublicationTopic.pmid` is `Int @db.UnsignedInt` (mirroring DDB's numeric `pmid` field on `TOPIC#` rows). `Publication.pmid` is `String @id` (existing convention). These cannot share a Prisma FK relation, so the natural query pattern `prisma.publicationTopic.findMany({ include: { publication: true } })` fails typecheck.
 

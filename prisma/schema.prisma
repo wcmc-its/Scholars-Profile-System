@@ -135,6 +135,7 @@ model Publication {
 
   authors               PublicationAuthor[]
   publicationScores     PublicationScore[]
+  publicationTopics     PublicationTopic[]
 
   @@index([year])
   @@index([dateAddedToEntrez])
@@ -199,7 +200,7 @@ model Topic {
 /// One PublicationTopic row per `TOPIC#<parent_topic_id>` item in DynamoDB.
 /// Subtopic data lives as embedded JSON fields here (no separate subtopic table).
 model PublicationTopic {
-  pmid                  Int                @db.UnsignedInt
+  pmid                  String             @db.VarChar(32)
   cwid                  String             @db.VarChar(32)
   parentTopicId         String             @db.VarChar(128) @map("parent_topic_id")
   primarySubtopicId     String?            @db.VarChar(128) @map("primary_subtopic_id")  // slug; NO FK
@@ -210,8 +211,9 @@ model PublicationTopic {
   authorPosition        String             @db.VarChar(16)  @map("author_position")
   year                  Int                @db.SmallInt
 
-  scholar               Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
-  topic                 Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  publication           Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  scholar               Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  topic                 Topic       @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
 
   @@id([pmid, cwid, parentTopicId])
   @@index([cwid, parentTopicId, score(sort: Desc)])               // profile Selected highlights + chip-row aggregations
