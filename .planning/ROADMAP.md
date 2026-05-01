@@ -96,7 +96,7 @@ Phases below are Milestone 2 phases, numbered 1–7 within this milestone.
 - [x] 02-06-PLAN.md — Wave 3: methodology-anchors constants + /about/methodology page (D-04/14/15/16) + /about stub + e2e
 - [x] 02-07-PLAN.md — Wave 3: lib/api/home.ts + 5 home components + app/page.tsx replacement (RANKING-01, HOME-02, HOME-03)
 - [x] 02-08-PLAN.md — Wave 3: lib/api/topics.ts + 4 topic components + /topics/{slug} placeholder (RANKING-02, RANKING-03 with D-13/D-14)
-- [ ] 02-09-PLAN.md — Wave 4: /api/revalidate route + ETL revalidation hook + full e2e gate + visual checkpoint
+- [x] 02-09-PLAN.md — Wave 4: /api/revalidate route + ETL revalidation hook + full e2e gate + visual checkpoint
 **UI hint**: yes
 
 ### Phase 3: Topic and Department detail pages
