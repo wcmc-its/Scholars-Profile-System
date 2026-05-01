@@ -101,6 +101,11 @@ async function main() {
     let reactivated = 0;
     const incomingCwids = new Set<string>();
 
+    // Phase 3 — accumulate distinct (deptCode, deptName) and (divCode, deptCode, divName)
+    // tuples while iterating scholars. These feed the Department + Division upsert block.
+    const seenDepts = new Map<string, { code: string; name: string }>();
+    const seenDivs = new Map<string, { code: string; deptCode: string; name: string }>();
+
     for (const f of allEntries) {
       incomingCwids.add(f.cwid);
       const existingScholar = existingByCwid.get(f.cwid);
@@ -122,6 +127,9 @@ async function main() {
             // changed, derive a new one and write the old to slug_history.
             ...(await maybeUpdatedSlug(existingScholar.slug, f.preferredName, f.cwid, existingSlugs)),
             ...(wasDeleted ? { deletedAt: null } : {}),
+            // Phase 3 — D-01: populate org-unit FK columns from LDAP attributes.
+            deptCode: f.deptCode ?? null,
+            divCode: f.divCode ?? null,
           },
         });
         if (wasDeleted) reactivated += 1;
@@ -142,6 +150,9 @@ async function main() {
             email: f.email,
             slug,
             roleCategory,
+            // Phase 3 — D-01:
+            deptCode: f.deptCode ?? null,
+            divCode: f.divCode ?? null,
             // ED ETL doesn't have appointment date detail in the basic search;
             // a richer query will add appointments in a follow-up. Insert a
             // placeholder primary appointment so the profile renders.
@@ -162,6 +173,22 @@ async function main() {
         });
         created += 1;
       }
+
+      // Accumulate distinct department + division tuples for bulk upsert after the loop.
+      if (f.deptCode && !seenDepts.has(f.deptCode)) {
+        // Parse orgUnit for level1 name; format is "level2 · level1" per design spec line 906-920.
+        const orgParts = (f.orgUnit ?? "").split(" · ");
+        const deptName =
+          orgParts.length >= 2
+            ? orgParts[orgParts.length - 1]
+            : (f.primaryDepartment ?? f.deptCode);
+        seenDepts.set(f.deptCode, { code: f.deptCode, name: deptName });
+      }
+      if (f.divCode && f.deptCode && !seenDivs.has(f.divCode)) {
+        const orgParts = (f.orgUnit ?? "").split(" · ");
+        const divName = orgParts.length >= 2 ? orgParts[0] : f.divCode;
+        seenDivs.set(f.divCode, { code: f.divCode, deptCode: f.deptCode, name: divName });
+      }
     }
 
     // Soft-delete: scholars in DB but not in ED this run.
@@ -175,6 +202,100 @@ async function main() {
         data: { deletedAt: new Date() },
       });
       softDeleted += 1;
+    }
+
+    // Phase 3 — Department + Division upsert from accumulated org-unit tuples.
+    // Runs under the same "ED" source EtlRun (one run for the whole ED source per ETL-01).
+    let deptUpserts = 0;
+    for (const dept of seenDepts.values()) {
+      const slug = deriveSlug(dept.name);
+      await prisma.department.upsert({
+        where: { code: dept.code },
+        create: {
+          code: dept.code,
+          name: dept.name,
+          slug,
+          source: "ED",
+          refreshedAt: new Date(),
+        },
+        update: {
+          name: dept.name,
+          slug,
+          refreshedAt: new Date(),
+        },
+      });
+      deptUpserts += 1;
+    }
+    console.log(`[ED] upserted ${deptUpserts} departments`);
+
+    let divUpserts = 0;
+    for (const div of seenDivs.values()) {
+      const slug = deriveSlug(div.name);
+      await prisma.division.upsert({
+        where: { code: div.code },
+        create: {
+          code: div.code,
+          deptCode: div.deptCode,
+          name: div.name,
+          slug,
+          source: "ED",
+          refreshedAt: new Date(),
+        },
+        update: {
+          deptCode: div.deptCode,
+          name: div.name,
+          slug,
+          refreshedAt: new Date(),
+        },
+      });
+      divUpserts += 1;
+    }
+    console.log(`[ED] upserted ${divUpserts} divisions`);
+
+    // Phase 3 — D-03 chair identification per department.
+    // Match appointment.title startsWith "Chair" (covers "Chair", "Chairman", "Chairperson",
+    // "Chairman and Professor", etc.). Per Pitfall 3: log distinct values matched for
+    // post-launch audit. Pick the most-recent active (endDate IS NULL) appointment in
+    // the department; tiebreak on isPrimary DESC then startDate DESC.
+    const chairTitleVariants = new Set<string>();
+    let chairAssignments = 0;
+    for (const dept of seenDepts.values()) {
+      const candidate = await prisma.appointment.findFirst({
+        where: {
+          // Scholars in this dept (joined via Scholar.deptCode FK).
+          scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
+          // Chair-like title prefix. Case-insensitive match via Prisma `startsWith`.
+          title: { startsWith: "Chair" },
+          // Active appointment only.
+          endDate: null,
+        },
+        orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+        select: { cwid: true, title: true },
+      });
+      if (candidate) {
+        chairTitleVariants.add(candidate.title);
+        await prisma.department.update({
+          where: { code: dept.code },
+          data: { chairCwid: candidate.cwid },
+        });
+        chairAssignments += 1;
+      }
+    }
+    console.log(`[ED] assigned chairs to ${chairAssignments}/${seenDepts.size} departments`);
+    console.log(`[ED] distinct chair-title variants observed:`, [...chairTitleVariants]);
+
+    // Phase 3 — scholarCount refresh per Department and Division.
+    for (const dept of seenDepts.values()) {
+      const count = await prisma.scholar.count({
+        where: { deptCode: dept.code, deletedAt: null, status: "active" },
+      });
+      await prisma.department.update({ where: { code: dept.code }, data: { scholarCount: count } });
+    }
+    for (const div of seenDivs.values()) {
+      const count = await prisma.scholar.count({
+        where: { divCode: div.code, deletedAt: null, status: "active" },
+      });
+      await prisma.division.update({ where: { code: div.code }, data: { scholarCount: count } });
     }
 
     await prisma.etlRun.update({

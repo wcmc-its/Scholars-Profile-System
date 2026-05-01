@@ -39,6 +39,14 @@ export const ED_FACULTY_ATTRIBUTES = [
   "departmentNumber",
   "weillCornellEduFTE",         // Phase 2 — drives full_time_faculty derivation
   "weillCornellEduDegreeCode",  // Phase 2 — drives doctoral_student derivation
+  // Phase 3 — D-02 org-unit attributes for Department/Division population.
+  // Attribute names match the WCM LDAP schema per design-spec-v1.7.1 and PATTERNS.md.
+  // Empirical probe in 03-LDAP-PROBE.md (Plan 02 Task 4) confirms which attributes
+  // return non-empty values; if that probe reveals different attribute names, update
+  // the projectEntries() mapping below and add an inline comment citing the probe.
+  "weillCornellEduOrgUnit",         // human-readable "level2 · level1" display string
+  "weillCornellEduOrgUnitCode",     // stable level1 (department) code, e.g. "MED"
+  "weillCornellEduDepartmentCode",  // stable level2 (division) code
 ] as const;
 
 export type EdFacultyEntry = {
@@ -53,6 +61,10 @@ export type EdFacultyEntry = {
   fte: number | null;
   ou: string;
   degreeCode: string | null;
+  // Phase 3 — D-02 org-unit fields. Nullable: not all entries have all three.
+  deptCode: string | null;       // primary department code (level1 in org-unit hierarchy)
+  divCode: string | null;        // division code (level2 in org-unit hierarchy)
+  orgUnit: string | null;        // human-readable "level2 · level1" string for display fallback
 };
 
 /**
@@ -140,6 +152,14 @@ function projectEntries(
       fte: parseFte(e.weillCornellEduFTE),
       ou: firstString(e.ou) ?? fallbackOu,
       degreeCode: firstString(e.weillCornellEduDegreeCode),
+      // Phase 3 — D-02: prefer `weillCornellEduOrgUnitCode` (level1/department code)
+      // with fallback to `departmentNumber` if the former is empty for a given entry.
+      // Per PATTERNS.md line 674; adjust if 03-LDAP-PROBE.md reveals different mapping.
+      deptCode: firstString(e.weillCornellEduOrgUnitCode) ?? firstString(e.departmentNumber) ?? null,
+      // `weillCornellEduDepartmentCode` is the level2 (division) code per design spec.
+      divCode: firstString(e.weillCornellEduDepartmentCode) ?? null,
+      // Display string from level2 · level1 hierarchy.
+      orgUnit: firstString(e.weillCornellEduOrgUnit) ?? null,
     });
   }
   return out;
