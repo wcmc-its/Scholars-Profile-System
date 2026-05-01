@@ -17,9 +17,8 @@
  *     subtopic data embedded (`primary_subtopic_id`, `subtopic_ids`).
  *   - Subtopics are NOT first-class entities; subtopic display labels are
  *     slug-derived (titlecase + replace underscores).
- *   - publication_topic.pmid is Int (no FK to publication.pmid which is String).
- *     Publication metadata for card rendering is fetched in a separate query
- *     and stitched by pmid (with Int↔String coercion).
+ *   - publication_topic.pmid FK-relates to publication.pmid (both VARCHAR(32))
+ *     so card-rendering joins use Prisma `include: { publication }` directly.
  */
 
 import { prisma } from "@/lib/db";
@@ -132,10 +131,9 @@ function subtopicLabelFromSlug(slug: string): string {
  *
  * Pulls eligible-role first-or-senior author rows from `publication_topic`
  * (candidate (e)). Variant B ranking applied app-side via lib/ranking.ts;
- * dedup keeps the highest-scoring row per parent topic.
- *
- * publication_topic has no FK to publication (pmid types differ). We pull
- * publication metadata in a second query keyed by the pmid set.
+ * dedup keeps the highest-scoring row per parent topic. Publication metadata
+ * is included via the `publication` FK relation; hard-excluded pub types are
+ * filtered in the same WHERE clause.
  */
 export async function getRecentContributions(
   now: Date = new Date(),
@@ -149,6 +147,7 @@ export async function getRecentContributions(
         status: "active",
         roleCategory: { in: [...ELIGIBLE_ROLES] },
       },
+      publication: { publicationType: { notIn: [...EXCLUDED_PUB_TYPES] } },
     },
     include: {
       scholar: {
@@ -161,6 +160,18 @@ export async function getRecentContributions(
         },
       },
       topic: { select: { id: true, label: true } },
+      publication: {
+        select: {
+          pmid: true,
+          title: true,
+          journal: true,
+          year: true,
+          publicationType: true,
+          dateAddedToEntrez: true,
+          pubmedUrl: true,
+          doi: true,
+        },
+      },
     },
     take: 200, // bounded pull; further sort+filter in JS
   });
@@ -170,37 +181,11 @@ export async function getRecentContributions(
     return null;
   }
 
-  // Stitch publication metadata by pmid (Int → String coercion since
-  // publication.pmid is String @id while publication_topic.pmid is Int).
-  const pmidStrings = Array.from(new Set(rows.map((r) => String(r.pmid))));
-  const pubs = await prisma.publication.findMany({
-    where: {
-      pmid: { in: pmidStrings },
-      publicationType: { notIn: [...EXCLUDED_PUB_TYPES] },
-    },
-    select: {
-      pmid: true,
-      title: true,
-      journal: true,
-      year: true,
-      publicationType: true,
-      dateAddedToEntrez: true,
-      pubmedUrl: true,
-      doi: true,
-    },
-  });
-  const pubByPmid = new Map(pubs.map((p) => [p.pmid, p]));
-
   type Row = (typeof rows)[number];
 
   const scored = rows
     .map((r: Row) => {
-      const pub = pubByPmid.get(String(r.pmid));
-      if (!pub) {
-        // Either pmid missing from publication table or publicationType is
-        // hard-excluded. Drop the row.
-        return null;
-      }
+      const pub = r.publication;
       const isFirst = r.authorPosition === "first";
       const isLast = r.authorPosition === "last";
       const rankable: RankablePublication = {
@@ -220,7 +205,7 @@ export async function getRecentContributions(
       const score = scorePublication(rankable, "recent_contributions", true, now);
       return { row: r, pub, score, parentId: r.parentTopicId, isFirst, isLast };
     })
-    .filter((s): s is NonNullable<typeof s> => s !== null && s.score > 0)
+    .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score);
 
   // Dedup one card per parent research area (one card per parent_topic_id).
@@ -374,37 +359,23 @@ export async function getSelectedResearch(
         primarySubtopicId: t.primarySubtopicId,
       })),
       year: { gte: RECITERAI_YEAR_FLOOR },
+      publication: { publicationType: { notIn: [...EXCLUDED_PUB_TYPES] } },
     },
     include: {
       scholar: { select: { cwid: true, slug: true, preferredName: true } },
+      publication: { select: { pmid: true, title: true } },
     },
     orderBy: [{ score: "desc" }],
     take: top.length * 8, // generous; we'll bucket and slice 2 per pair
   });
 
-  const samplePmids = Array.from(new Set(sampleRows.map((s) => String(s.pmid))));
-  const samplePubs =
-    samplePmids.length > 0
-      ? await prisma.publication.findMany({
-          where: {
-            pmid: { in: samplePmids },
-            publicationType: { notIn: [...EXCLUDED_PUB_TYPES] },
-          },
-          select: { pmid: true, title: true },
-        })
-      : [];
-  const samplePubByPmid = new Map(samplePubs.map((p) => [p.pmid, p]));
-
   type SampleRow = (typeof sampleRows)[number];
   const sampleByPair = new Map<string, Array<{ row: SampleRow; pubTitle: string; pubPmid: string }>>();
   for (const s of sampleRows) {
-    const pmidStr = String(s.pmid);
-    const pub = samplePubByPmid.get(pmidStr);
-    if (!pub) continue; // missing publication or hard-excluded type
     const key = scholarCountKey(s.parentTopicId, s.primarySubtopicId ?? "");
     const arr = sampleByPair.get(key) ?? [];
     if (arr.length < 2) {
-      arr.push({ row: s, pubTitle: pub.title, pubPmid: pub.pmid });
+      arr.push({ row: s, pubTitle: s.publication.title, pubPmid: s.publication.pmid });
       sampleByPair.set(key, arr);
     }
   }

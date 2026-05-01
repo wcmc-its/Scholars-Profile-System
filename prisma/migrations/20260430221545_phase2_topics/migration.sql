@@ -22,7 +22,7 @@ CREATE TABLE `topic` (
 
 -- CreateTable
 CREATE TABLE `publication_topic` (
-    `pmid` INTEGER UNSIGNED NOT NULL,
+    `pmid` VARCHAR(32) NOT NULL,
     `cwid` VARCHAR(32) NOT NULL,
     `parent_topic_id` VARCHAR(128) NOT NULL,
     `primary_subtopic_id` VARCHAR(128) NULL,
@@ -39,6 +39,9 @@ CREATE TABLE `publication_topic` (
     INDEX `publication_topic_parent_topic_id_cwid_idx`(`parent_topic_id`, `cwid`),
     PRIMARY KEY (`pmid`, `cwid`, `parent_topic_id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- AddForeignKey
+ALTER TABLE `publication_topic` ADD CONSTRAINT `publication_topic_pmid_fkey` FOREIGN KEY (`pmid`) REFERENCES `publication`(`pmid`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `publication_topic` ADD CONSTRAINT `publication_topic_cwid_fkey` FOREIGN KEY (`cwid`) REFERENCES `scholar`(`cwid`) ON DELETE CASCADE ON UPDATE CASCADE;

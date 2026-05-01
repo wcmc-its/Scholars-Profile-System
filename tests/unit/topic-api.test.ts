@@ -84,7 +84,7 @@ function makePtRow(overrides: {
   const cwid = overrides.cwid;
   const score = overrides.score ?? overrides.reciteraiImpact ?? 1.0;
   return {
-    pmid: overrides.pmid,
+    pmid: String(overrides.pmid),
     cwid,
     parentTopicId: TOPIC_SLUG,
     primarySubtopicId: null,
@@ -103,9 +103,18 @@ function makePtRow(overrides: {
       status: overrides.scholarStatus ?? "active",
       deletedAt: overrides.scholarDeletedAt ?? null,
     },
-    // Embedded publication metadata (the topics module fetches publications
-    // separately in the GREEN implementation; these tests treat the embedded
-    // fields as illustrative — the real shape comes from publication.findMany).
+    // Publication payload nested via the FK relation (candidate (e) reconciliation:
+    // PublicationTopic.pmid is now String, FK-related to Publication.pmid).
+    // getTopScholarsForTopic queries `include: { publication: { select: ... } }`
+    // and reads pmid + publicationType + dateAddedToEntrez here.
+    publication: {
+      pmid: String(overrides.pmid),
+      publicationType: overrides.publicationType ?? "Academic Article",
+      dateAddedToEntrez:
+        overrides.dateAddedToEntrez === undefined
+          ? new Date("2025-04-01T00:00:00Z")
+          : overrides.dateAddedToEntrez,
+    },
   };
 }
 
@@ -342,22 +351,17 @@ describe("getTopScholarsForTopic (RANKING-03 / D-13 / D-14)", () => {
 
   it("excludes Letter / Editorial Article / Erratum publications (hard-excluded)", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-    // One scholar with three papers but ALL are Letters → all score 0 →
+    // Three papers, ALL Letters. The publicationType lives on the row's
+    // included `publication` payload (FK relation under candidate (e)). The
+    // hard-exclude WHERE clause won't filter the mock (mocks ignore Prisma
+    // WHERE), but `scorePublication` zeroes Letter weight → all score 0 →
     // sparse-state hide.
     const rows = [
-      makePtRow({ cwid: "let00000", pmid: 300, authorPosition: "first" }),
-      makePtRow({ cwid: "let11111", pmid: 301, authorPosition: "first" }),
-      makePtRow({ cwid: "let22222", pmid: 302, authorPosition: "first" }),
+      makePtRow({ cwid: "let00000", pmid: 300, authorPosition: "first", publicationType: "Letter" }),
+      makePtRow({ cwid: "let11111", pmid: 301, authorPosition: "first", publicationType: "Letter" }),
+      makePtRow({ cwid: "let22222", pmid: 302, authorPosition: "first", publicationType: "Letter" }),
     ];
-    const pubs = [300, 301, 302].map((pmid) =>
-      makePubRow({
-        pmid,
-        publicationType: "Letter",
-        dateAddedToEntrez: new Date("2025-04-01T00:00:00Z"),
-      }),
-    );
     mockPublicationTopicFindMany.mockResolvedValue(rows);
-    mockPublicationFindMany.mockResolvedValue(pubs);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await getTopScholarsForTopic(TOPIC_SLUG, NOW);
     expect(result).toBeNull(); // all scored 0 → 0 qualifying scholars → hide

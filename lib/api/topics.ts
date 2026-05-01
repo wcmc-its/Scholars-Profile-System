@@ -17,9 +17,9 @@
  *
  * Schema shape: D-02 candidate (e). `topic.id` IS the slug. `publication_topic`
  * is the (publication × scholar × parent_topic) triple table; `author_position`
- * already encodes first/last; the table has no Prisma relation to `publication`
- * (pmid types differ — string on `publication`, unsigned int here), so paper
- * metadata is fetched via a second `publication.findMany` keyed by string PMID.
+ * already encodes first/last; the table FK-relates to `publication` (both
+ * VARCHAR(32) on pmid), so paper metadata is fetched via Prisma
+ * `include: { publication }` directly.
  *
  * See:
  *   - .planning/phases/02-algorithmic-surfaces-and-home-composition/02-CONTEXT.md (D-12, D-13, D-14, D-15)
@@ -103,9 +103,7 @@ export async function getTopScholarsForTopic(
   if (!topic) return null;
 
   // Pull all publication_topic rows for this topic that match the D-13/D-14
-  // narrowed carve. Publication metadata is fetched separately because the
-  // schema has no Prisma relation between PublicationTopic.pmid (Int) and
-  // Publication.pmid (String).
+  // narrowed carve. Publication metadata included via FK relation.
   const rows = await prisma.publicationTopic.findMany({
     where: {
       parentTopicId: topicSlug,
@@ -116,6 +114,7 @@ export async function getTopScholarsForTopic(
         status: "active",
         roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] }, // D-14 narrowed (FT only)
       },
+      publication: { publicationType: { notIn: ["Letter", "Editorial Article", "Erratum"] } },
     },
     include: {
       scholar: {
@@ -127,6 +126,9 @@ export async function getTopScholarsForTopic(
           roleCategory: true,
         },
       },
+      publication: {
+        select: { pmid: true, publicationType: true, dateAddedToEntrez: true },
+      },
     },
   });
 
@@ -134,22 +136,6 @@ export async function getTopScholarsForTopic(
     logSparseHide("topic_top_scholars", 0, TOP_SCHOLARS_FLOOR, topicSlug);
     return null;
   }
-
-  // Fetch publication metadata for the unique pmids referenced by these rows.
-  // PublicationTopic.pmid is Int unsigned; Publication.pmid is String — cast.
-  const pmidStrings = Array.from(new Set(rows.map((r) => String(r.pmid))));
-  const pubs = await prisma.publication.findMany({
-    where: {
-      pmid: { in: pmidStrings },
-      publicationType: { notIn: ["Letter", "Editorial Article", "Erratum"] },
-    },
-    select: {
-      pmid: true,
-      publicationType: true,
-      dateAddedToEntrez: true,
-    },
-  });
-  const pubByPmid = new Map(pubs.map((p) => [p.pmid, p]));
 
   // Aggregate per scholar using the compressed top_scholars curve (D-14).
   type AggEntry = {
@@ -165,11 +151,10 @@ export async function getTopScholarsForTopic(
 
   for (const r of rows) {
     if (!r.scholar) continue;
-    const pub = pubByPmid.get(String(r.pmid));
-    if (!pub) continue; // pub filtered out by hard-exclude type or missing
+    const pub = r.publication;
 
     const rankable: RankablePublication = {
-      pmid: String(r.pmid),
+      pmid: r.pmid,
       publicationType: pub.publicationType,
       // Variant B sources reciteraiImpact from PublicationScore.score in
       // profile-page contexts; here `publication_topic.score` is the per-
@@ -267,9 +252,14 @@ export async function getRecentHighlightsForTopic(
   }
 
   // Dedupe pmids (the same paper may have multiple per-author rows).
-  const pmidStrings = Array.from(new Set(rows.map((r) => String(r.pmid))));
+  const pmidStrings = Array.from(new Set(rows.map((r) => r.pmid)));
 
-  // Fetch publication metadata + WCM author chip data, hard-excluding bad types.
+  // Fetch publication metadata + WCM author chip data. The author-chip include
+  // uses the existing publication.authors relation (PublicationAuthor); the
+  // publication_topic FK is used by the rows query above. Hard-exclude bad
+  // types here since publication-centric. (Could be inverted to a single
+  // publication.findMany with a publicationTopics: { some } filter; current
+  // shape preserves per-pmid score lookup which the dedup loop below needs.)
   const pubs = await prisma.publication.findMany({
     where: {
       pmid: { in: pmidStrings },
@@ -302,10 +292,9 @@ export async function getRecentHighlightsForTopic(
   // pmid may have multiple per-author rows in the topic; collapse them).
   const bestRowByPmid = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
-    const key = String(r.pmid);
-    const existing = bestRowByPmid.get(key);
+    const existing = bestRowByPmid.get(r.pmid);
     if (!existing || Number(r.score) > Number(existing.score)) {
-      bestRowByPmid.set(key, r);
+      bestRowByPmid.set(r.pmid, r);
     }
   }
 

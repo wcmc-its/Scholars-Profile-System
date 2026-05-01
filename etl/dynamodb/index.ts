@@ -200,7 +200,7 @@ async function main() {
     let pubTopicRowsUpserted = 0;
 
     type PubTopicWrite = {
-      pmid: number;
+      pmid: string;
       cwid: string;
       parentTopicId: string;
       primarySubtopicId: string | null;
@@ -226,23 +226,25 @@ async function main() {
         continue;
       }
 
-      const pmidNum =
-        typeof it.pmid === "number"
-          ? it.pmid
-          : typeof it.pmid === "string"
-            ? Number.parseInt(it.pmid, 10)
-            : NaN;
+      // pmid is numeric in DDB (TOPIC# items) but stored as VARCHAR(32) in MySQL
+      // to FK-relate to the existing publication.pmid (String @id). Stringify.
+      const pmidStr =
+        typeof it.pmid === "number" && Number.isFinite(it.pmid)
+          ? String(it.pmid)
+          : typeof it.pmid === "string" && /^\d+$/.test(it.pmid.trim())
+            ? it.pmid.trim()
+            : "";
       const score = typeof it.score === "number" ? it.score : NaN;
       const yearNum = typeof it.year === "number" ? it.year : NaN;
       const authorPosition = typeof it.author_position === "string" ? it.author_position : "";
 
-      if (!Number.isFinite(pmidNum) || !Number.isFinite(score) || !Number.isFinite(yearNum) || !authorPosition) {
+      if (!pmidStr || !Number.isFinite(score) || !Number.isFinite(yearNum) || !authorPosition) {
         skippedMissingFields += 1;
         continue;
       }
 
       writes.push({
-        pmid: pmidNum,
+        pmid: pmidStr,
         cwid: rawCwid,
         parentTopicId,
         primarySubtopicId:
