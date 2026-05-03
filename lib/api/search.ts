@@ -18,6 +18,7 @@
  * length < 3 OR no quotes).
  */
 import { identityImageEndpoint } from "@/lib/headshot";
+import { prisma } from "@/lib/db";
 import {
   PEOPLE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -94,11 +95,40 @@ export async function searchPeople(opts: {
   page?: number;
   sort?: PeopleSort;
   filters?: PeopleFilters;
+  /** Phase 3 D-10 — filter results to scholars who have publications in this topic (parent topic slug). */
+  topic?: string;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
+
+  // D-10 topic pre-filter: resolve cwids via Prisma before hitting OpenSearch.
+  // This ensures the search is scoped to scholars attributed to the topic regardless
+  // of whether the OpenSearch index has a dedicated topic field. Pre-filtered at the DB layer.
+  let topicCwidFilter: string[] | undefined;
+  if (opts.topic && opts.topic.length > 0) {
+    const topicCwidRows = await prisma.publicationTopic.groupBy({
+      by: ["cwid"],
+      where: {
+        parentTopicId: opts.topic,
+        scholar: { deletedAt: null, status: "active" },
+      },
+      _count: { _all: true },
+    });
+    const topicCwids = topicCwidRows.map((r: { cwid: string }) => r.cwid);
+    // Edge case: no scholars match the topic — return empty result without hitting OpenSearch.
+    if (topicCwids.length === 0) {
+      return {
+        hits: [],
+        total: 0,
+        page,
+        pageSize: PAGE_SIZE,
+        facets: { departments: [], personTypes: [] },
+      };
+    }
+    topicCwidFilter = topicCwids;
+  }
 
   // Default-result filter: when the user is browsing (empty or very short
   // query), hide sparse profiles unless explicitly opted in.
@@ -130,6 +160,10 @@ export async function searchPeople(opts: {
   }
   if (applySparseFilter) {
     filter.push({ term: { isComplete: true } });
+  }
+  // D-10 topic scope: restrict to the pre-resolved cwid set.
+  if (topicCwidFilter && topicCwidFilter.length > 0) {
+    filter.push({ terms: { cwid: topicCwidFilter } });
   }
 
   const sortClause: Record<string, "asc" | "desc">[] = [];

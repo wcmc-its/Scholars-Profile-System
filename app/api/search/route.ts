@@ -8,6 +8,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// Valid topic slug pattern — same as topic page slug (D-02 candidate (e): topic.id is the slug).
+// Rejects non-slug shapes to prevent blind-comparison probing (T-03-06-01).
+const TOPIC_SLUG_RE = /^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/;
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const q = params.get("q") ?? "";
@@ -35,11 +39,22 @@ export async function GET(request: NextRequest) {
     hasActiveGrantsParam === null ? undefined : hasActiveGrantsParam === "true";
   const includeIncomplete = params.get("includeIncomplete") === "true";
 
+  // D-10 topic filter: validate slug shape before passing to searchPeople.
+  const topicRaw = params.get("topic");
+  let topic: string | undefined;
+  if (topicRaw !== null && topicRaw.length > 0) {
+    if (!TOPIC_SLUG_RE.test(topicRaw)) {
+      return NextResponse.json({ error: "invalid topic" }, { status: 400 });
+    }
+    topic = topicRaw;
+  }
+
   const result = await searchPeople({
     q,
     page,
     sort,
     filters: { department, personType, hasActiveGrants, includeIncomplete },
+    topic,
   });
   return NextResponse.json(result);
 }

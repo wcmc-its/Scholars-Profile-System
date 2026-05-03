@@ -1,16 +1,18 @@
 /**
  * Topic-page data assembly. Reads `publication_topic` rows attributed to a
- * parent topic and computes Variant B rankings via `lib/ranking.ts`. Two
+ * parent topic and computes Variant B rankings via `lib/ranking.ts`. Three
  * surfaces:
- *   - getTopScholarsForTopic()      RANKING-03 — D-13 first-or-senior aggregation
- *                                    + D-14 FT-faculty-only carve + compressed
- *                                    top_scholars recency curve.
- *   - getRecentHighlightsForTopic() RANKING-02 — publication-centric pool
- *                                    (no author-position filter), recent_highlights
- *                                    curve, dedup-per-pmid.
- *   - getTopicPublications()        CSR browsable feed — D-08/D-09 four sort modes,
- *                                    two filter modes, subtopic filter, pagination.
- *   - getSubtopicsForTopic()        D-07 subtopic rail counts for the topic detail page.
+ *   - getTopScholarsForTopic()           RANKING-03 — D-13 first-or-senior aggregation
+ *                                        + D-14 FT-faculty-only carve + compressed
+ *                                        top_scholars recency curve.
+ *   - getRecentHighlightsForTopic()      RANKING-02 — publication-centric pool
+ *                                        (no author-position filter), recent_highlights
+ *                                        curve, dedup-per-pmid.
+ *   - getTopicPublications()             CSR browsable feed — D-08/D-09 four sort modes,
+ *                                        two filter modes, subtopic filter, pagination.
+ *   - getSubtopicsForTopic()             D-07 subtopic rail counts for the topic detail page.
+ *   - getDistinctScholarCountForTopic()  D-10 — all-roles distinct scholar count for
+ *                                        "View all N scholars in this area" affordance.
  *
  * Both surfaces honour:
  *   - D-12 sparse-state hide (return null + emit structured warn log).
@@ -352,8 +354,6 @@ export async function getRecentHighlightsForTopic(
   }));
 }
 
-// ─── Plan 05 additions ─────────────────────────────────────────────────────
-
 export type SubtopicWithCount = {
   id: string;
   label: string;
@@ -583,4 +583,23 @@ function mapToTopicPublicationHit(r: any): TopicPublicationHit {
     // author chips on first pass per design spec v1.7.1 absence-as-default).
     authors: [],
   };
+}
+
+/**
+ * D-10 — Distinct active-scholar count for a topic.
+ *
+ * Powers the "View all N scholars in this area →" affordance on the topic page.
+ * All-roles count (NO eligibility carve) — this is an enumerative surface, not
+ * algorithmic. Returns 0 when the topic has no attributed scholars.
+ */
+export async function getDistinctScholarCountForTopic(topicSlug: string): Promise<number> {
+  const distinctRows = await prisma.publicationTopic.groupBy({
+    by: ["cwid"],
+    where: {
+      parentTopicId: topicSlug,
+      scholar: { deletedAt: null, status: "active" },
+    },
+    _count: { _all: true },
+  });
+  return distinctRows.length;
 }
