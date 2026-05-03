@@ -1,24 +1,46 @@
 import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 
-/**
- * Persistent site header with branding and the always-visible search box.
- * Search input wires through SearchAutocomplete (Phase 3): autocomplete fires
- * on 2 characters, Enter routes to /search, click-through routes to the
- * scholar profile.
- */
 export function SiteHeader() {
   return (
-    <header className="border-border bg-background sticky top-0 z-10 border-b">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-6">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="bg-primary text-primary-foreground rounded-md px-2 py-1 text-sm">
-            WCM
+    <header
+      className="sticky top-0 z-50 h-[60px] border-b border-black/15"
+      style={{
+        backgroundColor: "var(--color-primary-cornell-red)",
+        boxShadow: "inset 0 -1px 0 rgba(255, 255, 255, 0.08)",
+      }}
+    >
+      <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-6">
+        <Link href="/" className="flex flex-col shrink-0 gap-[4px] no-underline">
+          <span
+            className="font-serif leading-none text-white"
+            style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
+          >
+            Scholars
           </span>
-          <span className="text-base">Scholars</span>
+          <span
+            className="font-sans uppercase leading-none text-white/82"
+            style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.12em" }}
+          >
+            Weill Cornell Medicine
+          </span>
         </Link>
-        <div className="flex-1" />
-        <SearchAutocomplete />
+
+        <div className="flex-1">
+          <SearchAutocomplete />
+        </div>
+
+        <nav className="flex shrink-0 items-center gap-6">
+          <Link href="/browse" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
+            Browse
+          </Link>
+          <Link href="/about" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
+            About
+          </Link>
+          <Link href="/support" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
+            Support
+          </Link>
+        </nav>
       </div>
     </header>
   );

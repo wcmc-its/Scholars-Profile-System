@@ -58,15 +58,17 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
         <div className="text-sm text-muted-foreground">{deptLine}</div>
       </div>
       {showStats && (
-        <div className="col-start-1 col-end-3 mt-1 flex flex-col gap-0.5 text-sm text-muted-foreground sm:col-auto sm:row-start-1 sm:mt-0">
+        <div className="col-start-1 col-end-3 mt-1 flex flex-col items-end gap-0.5 text-sm sm:col-start-3 sm:row-start-1 sm:mt-0">
           {hit.pubCount > 0 && (
-            <div>
-              {hit.pubCount.toLocaleString()} {pubLabel}
+            <div className="text-right text-muted-foreground">
+              <span className="font-semibold text-foreground">{hit.pubCount.toLocaleString()}</span>{" "}
+              {pubLabel}
             </div>
           )}
           {hit.grantCount > 0 && (
-            <div>
-              {hit.grantCount.toLocaleString()} {grantLabel}
+            <div className="text-right text-muted-foreground">
+              <span className="font-semibold text-foreground">{hit.grantCount.toLocaleString()}</span>{" "}
+              {grantLabel}
             </div>
           )}
         </div>

@@ -8,6 +8,13 @@ import {
 } from "@/components/department/role-chip-row";
 import { PersonRow } from "@/components/department/person-row";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Pagination,
   PaginationContent,
   PaginationItem,
@@ -34,10 +41,14 @@ export function DepartmentFacultyClient({
   divisionSlug: string | null;
 }) {
   const [activeCategory, setActiveCategory] = useState<RoleCategory>("All");
-  const filtered = useMemo(
-    () => filterByRoleCategory(faculty, activeCategory),
-    [faculty, activeCategory],
-  );
+  const [sortOrder, setSortOrder] = useState<"name-asc" | "name-desc">("name-asc");
+
+  const filtered = useMemo(() => {
+    const base = filterByRoleCategory(faculty, activeCategory);
+    return sortOrder === "name-desc"
+      ? [...base].sort((a, b) => b.preferredName.localeCompare(a.preferredName))
+      : base;
+  }, [faculty, activeCategory, sortOrder]);
 
   // Pagination URL builder — preserves division path; appends ?page=
   const buildHref = (p: number) => {
@@ -62,8 +73,26 @@ export function DepartmentFacultyClient({
     );
   }
 
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  const scholarsLabel = total === 1 ? "scholar" : "scholars";
+
   return (
     <>
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <span className="text-sm text-muted-foreground">
+          Showing {start}–{end} of {total.toLocaleString()} {scholarsLabel}
+        </span>
+        <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as typeof sortOrder)}>
+          <SelectTrigger className="h-8 w-[160px] text-sm">
+            <SelectValue placeholder="Sort by" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name-asc">Name A–Z</SelectItem>
+            <SelectItem value="name-desc">Name Z–A</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <div className="mb-6">
         <RoleChipRow
           faculty={faculty}

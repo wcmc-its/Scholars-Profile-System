@@ -19,8 +19,8 @@ export function DivisionsRail({
 
   return (
     <aside className="w-full" aria-label="Divisions">
-      <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        DIVISIONS
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Divisions ({divisions.length})
       </div>
       <ScrollArea className="h-full">
         <ul className="flex flex-col">
@@ -29,18 +29,17 @@ export function DivisionsRail({
               href={`/departments/${deptSlug}`}
               className={`flex items-center justify-between rounded px-3 py-2 ${
                 activeDivisionSlug === null
-                  ? "bg-[var(--color-accent-slate)] text-white"
+                  ? "bg-[#eaf0f5] text-[var(--color-accent-slate)]"
                   : "hover:bg-accent"
               }`}
             >
-              <span className="text-base">All scholars</span>
-              <span
-                className={`text-sm ${activeDivisionSlug === null ? "text-white" : "text-muted-foreground"}`}
-              >
+              <span className="text-sm font-medium">All scholars</span>
+              <span className="text-sm text-muted-foreground">
                 {totalScholars.toLocaleString()}
               </span>
             </a>
           </li>
+          <li className="my-1 border-t border-border" />
           {divisions.map((d) => {
             const isActive = activeDivisionSlug === d.slug;
             return (
@@ -49,14 +48,12 @@ export function DivisionsRail({
                   href={`/departments/${deptSlug}/divisions/${d.slug}`}
                   className={`flex items-center justify-between rounded px-3 py-2 ${
                     isActive
-                      ? "bg-[var(--color-accent-slate)] text-white"
+                      ? "bg-[#eaf0f5] text-[var(--color-accent-slate)]"
                       : "hover:bg-accent"
                   }`}
                 >
-                  <span className="text-base">{d.name}</span>
-                  <span
-                    className={`text-sm ${isActive ? "text-white" : "text-muted-foreground"}`}
-                  >
+                  <span className="text-sm">{d.name}</span>
+                  <span className="text-sm text-muted-foreground">
                     {d.scholarCount.toLocaleString()}
                   </span>
                 </a>

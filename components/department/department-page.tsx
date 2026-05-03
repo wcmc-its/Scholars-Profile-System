@@ -81,7 +81,7 @@ export async function DepartmentPage({
       {/* Top research areas pill row per UI-SPEC §6.6 — absence-as-default when empty */}
       {detail.topResearchAreas.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-lg font-semibold">Research areas</h2>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Top research areas</h2>
           <div className="flex flex-wrap gap-2">
             {detail.topResearchAreas.map((t) => (
               <a key={t.topicId} href={`/topics/${t.topicSlug}`}>
@@ -155,9 +155,7 @@ export async function DepartmentPage({
                 </p>
               )}
             </section>
-          ) : (
-            <h2 className="mb-6 text-lg font-semibold">Faculty</h2>
-          )}
+          ) : null}
 
           {/* Role chip row + person rows — interactive client wrapper */}
           <DepartmentFacultyClient

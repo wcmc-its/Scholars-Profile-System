@@ -381,7 +381,7 @@ describe("getDepartmentFaculty", () => {
     expect(hit.cwid).toBe("abc12345");
     expect(hit.preferredName).toBe("Dr. Test Scholar");
     expect(hit.primaryTitle).toBe("Associate Professor");
-    expect(hit.roleCategory).toBe("full_time_faculty");
+    expect(hit.roleCategory).toBe("Full-time faculty");
     expect(hit.divisionName).toBe("Cardiology");
     expect(hit.departmentName).toBe("Department of Medicine");
     expect(hit.identityImageEndpoint).toContain("abc12345");

@@ -21,6 +21,7 @@ const ROLE_GROUPS: {
   {
     label: "Affiliated faculty",
     matches: (r) =>
+      r === "Affiliated faculty" ||
       r === "Voluntary faculty" ||
       r === "Adjunct faculty" ||
       r === "Courtesy faculty" ||
