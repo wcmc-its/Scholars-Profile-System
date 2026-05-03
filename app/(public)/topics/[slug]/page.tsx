@@ -1,34 +1,27 @@
-/**
- * /topics/[slug] — placeholder route per CONTEXT.md D-10.
- *
- * Phase 2 ships ONLY the hero (topic name as H1) + Top scholars chip row
- * (RANKING-03) + Recent highlights (RANKING-02). Phase 3 will expand the
- * route to the full Topic detail Layout B with subtopic rail, publication
- * feed, and sort dropdown.
- *
- * Rendering strategy: ISR with 6h fallback TTL. On-demand revalidation fires
- * after each ETL completion via /api/revalidate?path=/topics/{slug} (Plan 09).
- *
- * Schema shape (D-02 candidate (e)): topic.id IS the slug. Lookup uses
- * findUnique on the primary key, not findFirst on a non-existent slug column.
- */
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/db";
 import {
+  getTopic,
   getTopScholarsForTopic,
   getRecentHighlightsForTopic,
+  getSubtopicsForTopic,
+  getDistinctScholarCountForTopic,
 } from "@/lib/api/topics";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { RecentHighlights } from "@/components/topic/recent-highlights";
+import { SubtopicPublicationLayout } from "@/components/topic/subtopic-publication-layout";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
 // 6h fallback TTL; on-demand revalidation triggered by ETL writes (Plan 09).
 export const revalidate = 21600;
 export const dynamicParams = true;
-
-async function getTopic(slug: string) {
-  return prisma.topic.findUnique({ where: { id: slug } });
-}
 
 export async function generateMetadata({
   params,
@@ -44,44 +37,94 @@ export async function generateMetadata({
   };
 }
 
-export default async function TopicPlaceholderPage({
+export default async function TopicPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-
-  // 1. Resolve topic (404 on unknown slug). Sparse data on a real topic
-  //    still renders the page (just the hero).
   const topic = await getTopic(slug);
   if (!topic) notFound();
 
-  // 2. Fetch the two algorithmic surfaces in parallel. Both can null-out
-  //    independently; one returning null does NOT trigger 404.
-  const [topScholars, recentHighlights] = await Promise.all([
+  const [topScholars, recentHighlights, subtopics, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
     getRecentHighlightsForTopic(slug).catch(() => null),
+    getSubtopicsForTopic(slug).catch(() => null),
+    getDistinctScholarCountForTopic(slug).catch(() => 0),
   ]);
 
-  // TODO(Phase 3): expand to full Topic detail Layout B per design spec
-  // v1.7.1 — subtopic rail, publication feed, sort dropdown. See
-  // CONTEXT.md D-10 for the Phase 2 / Phase 3 boundary.
+  const subtopicList = subtopics ?? [];
+  const subtopicCount = subtopicList.length;
+  const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
+
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
-      <header>
-        <h1 className="font-serif text-4xl font-semibold leading-tight">
+      {/* Breadcrumbs — UI-SPEC §7 */}
+      <Breadcrumb className="mb-4">
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/">Home</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator>›</BreadcrumbSeparator>
+          <BreadcrumbItem>
+            <BreadcrumbLink href="/browse">Research areas</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator>›</BreadcrumbSeparator>
+          <BreadcrumbItem>
+            <BreadcrumbPage>{topic.label}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+
+      {/* Hero */}
+      <section className="mb-8">
+        <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
+          RESEARCH AREA
+        </div>
+        <h1 className="mt-2 font-serif text-4xl font-semibold leading-tight">
           {topic.label}
         </h1>
-        {topic.description ? (
-          <p className="mt-3 max-w-prose text-base text-muted-foreground">
+        {topic.description && (
+          <p className="mt-4 max-w-prose text-base text-muted-foreground">
             {topic.description}
           </p>
-        ) : null}
-      </header>
-      {topScholars ? <TopScholarsChipRow scholars={topScholars} /> : null}
-      {recentHighlights ? (
-        <RecentHighlights papers={recentHighlights} />
-      ) : null}
+        )}
+      </section>
+
+      {/* Top scholars chip row (Phase 2 reuse) */}
+      {topScholars && <TopScholarsChipRow scholars={topScholars} />}
+
+      {/* View all N scholars affordance — UI-SPEC §7, D-10 */}
+      {scholarCount > 0 && (
+        <div className="mt-4">
+          <a
+            href={`/search?topic=${encodeURIComponent(slug)}&tab=people`}
+            className="text-base text-[var(--color-accent-slate)] hover:underline"
+          >
+            View all {scholarCount.toLocaleString()} scholars in this area →
+          </a>
+        </div>
+      )}
+
+      {/* Recent highlights (Phase 2 reuse) */}
+      {recentHighlights && <RecentHighlights papers={recentHighlights} />}
+
+      {/* Stats line — UI-SPEC §6.7 */}
+      {(totalPubsForStats > 0 || subtopicCount > 0) && (
+        <div className="mt-6 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
+          {[
+            totalPubsForStats > 0
+              ? `${totalPubsForStats.toLocaleString()} publications`
+              : null,
+            subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subtopics` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      )}
+
+      {/* Layout B: sticky subtopic rail + CSR publication feed */}
+      <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />
     </main>
   );
 }

@@ -46,6 +46,10 @@ const RECENT_HIGHLIGHTS_FLOOR = 1;
 
 const RECITERAI_YEAR_FLOOR = 2020; // D-15
 
+export async function getTopic(slug: string) {
+  return prisma.topic.findUnique({ where: { id: slug } });
+}
+
 export type TopScholarChipData = {
   cwid: string;
   slug: string;
