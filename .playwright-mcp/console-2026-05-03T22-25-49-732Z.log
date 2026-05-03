@@ -1,0 +1,50 @@
+[     139ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[     345ms] [LOG] [Fast Refresh] done in 307ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[    1097ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_react-dom_1e674e59._.js:14537
+[    1104ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[   84624ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[   84651ms] [LOG] [Fast Refresh] done in 56ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  969214ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  969216ms] [LOG] [Fast Refresh] done in 103ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  973599ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  973689ms] [LOG] [Fast Refresh] done in 56ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  973883ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[  978890ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  978943ms] [LOG] [Fast Refresh] done in 51ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  979122ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[  988349ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  988399ms] [LOG] [Fast Refresh] done in 51ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  988558ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[ 1001388ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1001439ms] [LOG] [Fast Refresh] done in 53ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[ 1001554ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[ 1029022ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1029052ms] [LOG] [Fast Refresh] done in 58ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[ 1037991ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1038019ms] [LOG] [Fast Refresh] done in 63ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[ 1043246ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1043275ms] [LOG] [Fast Refresh] done in 50ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[ 1053397ms] [ERROR] ./components/department/department-faculty-client.tsx:163:8
+Parsing ecmascript source code failed
+  161 |           </Pagination>
+  162 |         </div>
+> 163 |       )}
+      |        ^
+  164 |     </>
+  165 |   );
+  166 | }
+
+Unexpected token. Did you mean `{'}'}` or `&rbrace;`?
+
+Import trace:
+  Server Component:
+    ./components/department/department-faculty-client.tsx
+    ./components/department/department-page.tsx
+    ./app/(public)/departments/[slug]/page.tsx @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_b0daae9a._.js:2359
+[ 1053402ms] [LOG] {file: Object} @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_next-devtools_index_a9cb0712.js:16058
+[ 1053412ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1059700ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1059836ms] [LOG] [Fast Refresh] done in 193ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[ 1060279ms] [WARNING] %c%s%c {"event":"sparse_state_hide","surface":"topic_top_scholars","qualifying":0,"floor":3,"topic":"epidemiology_population_health"} background: #e6e6e6;background: light-dark(rgba(0,0,0,0.1), rgba(255,255,255,0.25));color: #000000;color: light-dark(#000000, #ffffff);border-radius: 2px  Server   @ about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__d4967fb3._.js?29:1013
+[ 1075165ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[ 1075177ms] [LOG] [Fast Refresh] done in 113ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809

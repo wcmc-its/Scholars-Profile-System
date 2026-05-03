@@ -1,0 +1,58 @@
+[    2583ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_react-dom_1e674e59._.js:14537
+[    2971ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2033.png?returnGenericOn404=false:0
+[    2981ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac4007.png?returnGenericOn404=false:0
+[    2981ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab4009.png?returnGenericOn404=false:0
+[    2991ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2020.png?returnGenericOn404=false:0
+[    2991ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa3003.png?returnGenericOn404=false:0
+[    2992ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9010.png?returnGenericOn404=false:0
+[    2997ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2009.png?returnGenericOn404=false:0
+[    2997ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4009.png?returnGenericOn404=false:0
+[    3013ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9028.png?returnGenericOn404=false:0
+[    3080ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2014.png?returnGenericOn404=false:0
+[    3080ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac2009.png?returnGenericOn404=false:0
+[    3092ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4022.png?returnGenericOn404=false:0
+[    3131ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2025.png?returnGenericOn404=false:0
+[    3140ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2008.png?returnGenericOn404=false:0
+[    3141ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2019.png?returnGenericOn404=false:0
+[    3150ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9027.png?returnGenericOn404=false:0
+[    3157ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2018.png?returnGenericOn404=false:0
+[    3182ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4007.png?returnGenericOn404=false:0
+[    3195ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[    3239ms] [LOG] [Fast Refresh] done in 146ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[   92111ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[   92203ms] [LOG] [Fast Refresh] done in 71ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[   92330ms] ReferenceError: normalizeRoleCategory is not defined
+    at <anonymous> (about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__ac55da7b._.js?104:1139:27)
+    at Array.map (<anonymous>:1:18)
+    at getDepartmentFaculty (about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__ac55da7b._.js?105:1131:26)
+    at  DepartmentPage (about://React/Server/file:///Users/paulalbert/Dropbox/GitHub/Scholars-Profile-System/.next/server/chunks/ssr/%5Broot-of-the-server%5D__ac55da7b._.js?106:1568:21)
+    at resolveErrorDev (http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_5150ccfd._.js:4306:48)
+    at processFullStringRow (http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_5150ccfd._.js:4554:29)
+    at processFullBinaryRow (http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_5150ccfd._.js:4513:9)
+    at processBinaryChunk (http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_5150ccfd._.js:4622:98)
+    at progress (http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_5150ccfd._.js:4790:25)
+[  103957ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  103983ms] [LOG] [Fast Refresh] done in 80ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  104102ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  104109ms] [LOG] [Fast Refresh] done in 108ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  104733ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_react-dom_1e674e59._.js:14537
+[  105026ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab4009.png?returnGenericOn404=false:0
+[  105028ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2018.png?returnGenericOn404=false:0
+[  105031ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2020.png?returnGenericOn404=false:0
+[  105031ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4022.png?returnGenericOn404=false:0
+[  105032ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2033.png?returnGenericOn404=false:0
+[  105033ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2014.png?returnGenericOn404=false:0
+[  105039ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa3003.png?returnGenericOn404=false:0
+[  105049ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2008.png?returnGenericOn404=false:0
+[  105139ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9027.png?returnGenericOn404=false:0
+[  105145ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac4007.png?returnGenericOn404=false:0
+[  105154ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2019.png?returnGenericOn404=false:0
+[  105181ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2009.png?returnGenericOn404=false:0
+[  105190ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4007.png?returnGenericOn404=false:0
+[  105195ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4009.png?returnGenericOn404=false:0
+[  105212ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2025.png?returnGenericOn404=false:0
+[  105215ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9010.png?returnGenericOn404=false:0
+[  105227ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac2009.png?returnGenericOn404=false:0
+[  105259ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9028.png?returnGenericOn404=false:0
+[  109265ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  109293ms] [LOG] [Fast Refresh] done in 63ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809

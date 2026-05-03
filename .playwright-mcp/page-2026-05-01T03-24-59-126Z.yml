@@ -1,0 +1,24 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]:
+    - img [ref=e8]
+  - generic [ref=e11]:
+    - banner [ref=e12]:
+      - generic [ref=e13]:
+        - link "WCM Scholars" [ref=e14] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e15]: WCM
+          - generic [ref=e16]: Scholars
+        - generic [ref=e18]:
+          - img [ref=e19]
+          - searchbox "Search scholars" [ref=e22]
+    - generic [ref=e25]:
+      - heading "404" [level=1] [ref=e26]
+      - heading "This page could not be found." [level=2] [ref=e28]
+    - contentinfo [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]: Scholars @ Weill Cornell Medicine
+        - generic [ref=e32]:
+          - link "Support" [ref=e33] [cursor=pointer]:
+            - /url: /support
+          - generic [ref=e34]: Phase 1 prototype
+  - alert [ref=e35]

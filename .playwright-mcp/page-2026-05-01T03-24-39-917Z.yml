@@ -1,0 +1,57 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "WCM Scholars" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e6]: WCM
+          - generic [ref=e7]: Scholars
+        - generic [ref=e9]:
+          - img [ref=e10]
+          - searchbox "Search scholars" [ref=e13]
+    - main [ref=e15]:
+      - heading "How algorithmic surfaces work" [level=1] [ref=e16]
+      - paragraph [ref=e17]: "Scholars at Weill Cornell Medicine ranks publications using a multiplicative formula: research impact (from ReCiterAI) × authorship weight × publication type weight × recency weight. Each surface uses a different recency curve tuned to its purpose, and some surfaces apply additional filters described below."
+      - generic [ref=e18]:
+        - heading "Recent contributions" [level=2] [ref=e19]
+        - paragraph [ref=e20]: The Recent contributions surface on the home page shows six recent first- or senior-author papers by WCM researchers in eligible roles (Full-time faculty, Postdocs, Fellows, and Doctoral students), one per parent research area. Letters, editorials, and errata are excluded entirely (weight 0). Citation counts are not displayed.
+        - paragraph [ref=e21]: The recency curve favors papers 6–18 months old (peak weight 1.0), with modest weights for newer (0–6 months) and older (18 months–3 years) work. Voluntary, Adjunct, Courtesy, Instructor, Lecturer, and Emeritus appointees do not appear here — they continue to appear in scholar profiles and search results.
+      - generic [ref=e22]:
+        - heading "Selected research" [level=2] [ref=e23]
+        - paragraph [ref=e24]: The Selected research carousel shows eight subtopics with the strongest recent activity at WCM, one per parent area. The score for each subtopic sums per-publication scores using the Recent highlights recency curve. Refreshes weekly with the ReCiterAI cadence.
+        - paragraph [ref=e25]: ReCiterAI publication scoring extends back to 2020 only. Selected highlights on profile pages rank scholars' WCM-attributed work scored by ReCiterAI from 2020 onward. Older landmark publications are visible in the most-recent-papers feed but not algorithmically scored. Phase 5+ ReCiterAI backfill is out of scope. (D-15)
+        - paragraph [ref=e26]: Within a single profile-page render, papers that appear in Selected highlights are filtered out of the most-recent-papers feed to avoid showing the same paper twice. (D-16)
+      - generic [ref=e27]:
+        - heading "Top scholars" [level=2] [ref=e28]
+        - paragraph [ref=e29]: The Top scholars chip row on a topic page shows the seven full-time faculty members with the strongest recent publication record in that area. Each scholar's score is the sum of per-publication scores for their first-or-senior-author papers in the topic. Second, penultimate, and middle authorship contribute 0 — these papers do not count toward the chip-row score.
+        - paragraph [ref=e30]: "This surface uses a compressed recency curve distinct from Recent highlights:"
+        - list [ref=e31]:
+          - listitem [ref=e32]: "0–3 months: 0.7"
+          - listitem [ref=e33]: "3 months–3 years: 1.0 (peak)"
+          - listitem [ref=e34]: "3–6 years: 0.85"
+          - listitem [ref=e35]: "6+ years: 0.7"
+        - paragraph [ref=e36]: The narrowed eligibility (full-time faculty only) and compressed curve reflect that this surface highlights principal investigators specifically. Postdocs, Fellows, and Doctoral students continue to appear on Recent contributions and on individual scholar profiles. (D-14)
+      - generic [ref=e37]:
+        - heading "Recent highlights" [level=2] [ref=e38]
+        - paragraph [ref=e39]: "The Recent highlights surface on a topic page shows three publications with the strongest recent impact in that area. The pool is publication-centric: papers are ranked individually without an authorship-position filter, so middle-author contributions to high-impact work can surface here. Letters, editorials, and errata are excluded entirely. Citation counts are not displayed."
+        - paragraph [ref=e40]: The recency curve favors papers 6–18 months old (peak), with smaller weights for newer (0–6 months) and older (18 months+) work, capped at 0.4 beyond three years.
+      - generic [ref=e41]:
+        - heading "A note on authorship weight (co-corresponding author limitation)" [level=2] [ref=e42]
+        - paragraph [ref=e43]:
+          - text: Authorship weight 1.0 applies to first and last (senior) authors only. The data feed does not currently mark co-corresponding authors, so a co-corresponding middle-author position will appear with weight 0 even though the spec assigns 1.0. This is tracked for follow-up — the
+          - code [ref=e44]: is_corresponding
+          - text: flag is not yet projected from the upstream source. (D-09)
+      - generic [ref=e45]:
+        - paragraph [ref=e46]: Weights and recency curves are reviewed six months post-launch by the ReCiter lead and the methodology page owner. Calibration draws on actual outputs against ~20 real WCM profiles spanning seniority.
+        - paragraph [ref=e47]:
+          - text: "Note: the profile most-recent-papers feed reuses the"
+          - code [ref=e48]: recent_contributions
+          - text: recency curve (6–18 month sweet spot) because both surfaces are recent scholar-attributed views. The Selected research curve was considered and rejected — the profile recent feed is year-grouped and recency-sorted, so emphasizing the 6–18 month band matches the surface's intent.
+    - contentinfo [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e51]: Scholars @ Weill Cornell Medicine
+        - generic [ref=e52]:
+          - link "Support" [ref=e53] [cursor=pointer]:
+            - /url: /support
+          - generic [ref=e54]: Phase 1 prototype
+  - alert [ref=e55]

@@ -12,6 +12,7 @@ const baseHit: DepartmentFacultyHit = {
   departmentName: "Medicine",
   identityImageEndpoint: "",
   roleCategory: null,
+  overview: null,
   pubCount: 0,
   grantCount: 0,
 };

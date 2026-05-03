@@ -1,0 +1,306 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "WCM Scholars" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: WCM
+        - generic [ref=e7]: Scholars
+      - generic [ref=e9]:
+        - img [ref=e10]
+        - searchbox "Search scholars" [ref=e13]
+  - main [ref=e15]:
+    - navigation "breadcrumb" [ref=e16]:
+      - list [ref=e17]:
+        - listitem [ref=e18]:
+          - link "Home" [ref=e19] [cursor=pointer]:
+            - /url: /
+        - listitem [ref=e20]: ›
+        - listitem [ref=e21]:
+          - link "Browse" [ref=e22] [cursor=pointer]:
+            - /url: /browse
+        - listitem [ref=e23]: ›
+        - listitem [ref=e24]:
+          - link "Departments" [ref=e25] [cursor=pointer]:
+            - /url: /browse#departments
+        - listitem [ref=e26]: ›
+        - listitem [ref=e27]:
+          - link "Medicine" [disabled] [ref=e28]
+    - generic [ref=e29]:
+      - generic [ref=e30]: DEPARTMENT
+      - heading "Medicine" [level=1] [ref=e31]
+      - paragraph [ref=e32]: The Department of Medicine advances understanding of human disease through patient-centered research and translational science.
+    - generic [ref=e33]:
+      - generic [ref=e35]: AB
+      - generic [ref=e36]:
+        - generic [ref=e37]: Chair
+        - link "Adeel Butt" [ref=e38] [cursor=pointer]:
+          - /url: /scholars/adeel-butt
+    - generic [ref=e39]:
+      - heading "Research areas" [level=2] [ref=e40]
+      - generic [ref=e41]:
+        - link "Biomedical Informatics · 15" [ref=e42] [cursor=pointer]:
+          - /url: /topics/biomedical_informatics
+          - generic [ref=e43]:
+            - text: Biomedical Informatics
+            - generic [ref=e44]: · 15
+        - link "Implementation Science · 11" [ref=e45] [cursor=pointer]:
+          - /url: /topics/implementation_science
+          - generic [ref=e46]:
+            - text: Implementation Science
+            - generic [ref=e47]: · 11
+        - link "Digital Health & Telemedicine · 11" [ref=e48] [cursor=pointer]:
+          - /url: /topics/digital_health_telemedicine
+          - generic [ref=e49]:
+            - text: Digital Health & Telemedicine
+            - generic [ref=e50]: · 11
+        - link "Health Services Research & Health Policy · 9" [ref=e51] [cursor=pointer]:
+          - /url: /topics/health_services_policy
+          - generic [ref=e52]:
+            - text: Health Services Research & Health Policy
+            - generic [ref=e53]: · 9
+        - link "Global & Public Health · 5" [ref=e54] [cursor=pointer]:
+          - /url: /topics/global_public_health
+          - generic [ref=e55]:
+            - text: Global & Public Health
+            - generic [ref=e56]: · 5
+        - link "Biostatistics & Quantitative Health Sciences · 4" [ref=e57] [cursor=pointer]:
+          - /url: /topics/biostatistics_quantitative_sciences
+          - generic [ref=e58]:
+            - text: Biostatistics & Quantitative Health Sciences
+            - generic [ref=e59]: · 4
+        - link "Infectious Disease & Host Defense · 4" [ref=e60] [cursor=pointer]:
+          - /url: /topics/infectious_disease_immunology
+          - generic [ref=e61]:
+            - text: Infectious Disease & Host Defense
+            - generic [ref=e62]: · 4
+        - link "Biomedical Engineering · 4" [ref=e63] [cursor=pointer]:
+          - /url: /topics/biomedical_engineering
+          - generic [ref=e64]:
+            - text: Biomedical Engineering
+            - generic [ref=e65]: · 4
+        - link "Epidemiology & Population Health · 3" [ref=e66] [cursor=pointer]:
+          - /url: /topics/epidemiology_population_health
+          - generic [ref=e67]:
+            - text: Epidemiology & Population Health
+            - generic [ref=e68]: · 3
+        - link "Translational & Clinical Science · 3" [ref=e69] [cursor=pointer]:
+          - /url: /topics/translational_clinical_science
+          - generic [ref=e70]:
+            - text: Translational & Clinical Science
+            - generic [ref=e71]: · 3
+    - generic [ref=e72]: 20 scholars · 2 divisions · 90 publications · 3 active grants
+    - generic [ref=e73]:
+      - complementary "Divisions" [ref=e75]:
+        - generic [ref=e76]: DIVISIONS
+        - list [ref=e80]:
+          - listitem [ref=e81]:
+            - link "All scholars 20" [ref=e82] [cursor=pointer]:
+              - /url: /departments/medicine
+              - generic [ref=e83]: All scholars
+              - generic [ref=e84]: "20"
+          - listitem [ref=e85]:
+            - link "General Internal Medicine 12" [ref=e86] [cursor=pointer]:
+              - /url: /departments/medicine/divisions/general-internal-medicine
+              - generic [ref=e87]: General Internal Medicine
+              - generic [ref=e88]: "12"
+          - listitem [ref=e89]:
+            - link "Cardiology 8" [ref=e90] [cursor=pointer]:
+              - /url: /departments/medicine/divisions/cardiology
+              - generic [ref=e91]: Cardiology
+              - generic [ref=e92]: "8"
+      - generic [ref=e93]:
+        - heading "Faculty" [level=2] [ref=e94]
+        - button "All20" [ref=e97]
+        - generic [ref=e98]:
+          - generic [ref=e99]:
+            - generic [ref=e102]: AB
+            - generic [ref=e103]:
+              - generic [ref=e104]:
+                - link "Aaron Berliner" [ref=e105] [cursor=pointer]:
+                  - /url: /scholars/aaron-berliner
+                - generic [ref=e106]: affiliated_faculty
+              - generic [ref=e107]: Research Associate in Radiation Oncology
+              - generic [ref=e108]: Cardiology · Department of Medicine
+          - generic [ref=e109]:
+            - generic [ref=e112]: AA
+            - generic [ref=e113]:
+              - generic [ref=e114]:
+                - link "Abdallah Araji" [ref=e115] [cursor=pointer]:
+                  - /url: /scholars/abdallah-araji
+                - generic [ref=e116]: affiliated_faculty
+              - generic [ref=e117]: Assistant Professor of Radiology
+              - generic [ref=e118]: Cardiology · Department of Medicine
+          - generic [ref=e119]:
+            - generic [ref=e122]: AA
+            - generic [ref=e123]:
+              - generic [ref=e124]:
+                - link "Abdelrahman Abdelaal" [ref=e125] [cursor=pointer]:
+                  - /url: /scholars/abdelrahman-abdelaal
+                - generic [ref=e126]: affiliated_faculty
+              - generic [ref=e127]: Adjunct Assistant Professor of Clinical Surgery
+              - generic [ref=e128]: General Internal Medicine · Department of Medicine
+          - generic [ref=e129]:
+            - generic [ref=e132]: AA
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - link "Abdualsalam Aldaas" [ref=e135] [cursor=pointer]:
+                  - /url: /scholars/abdualsalam-aldaas
+                - generic [ref=e136]: affiliated_faculty
+              - generic [ref=e137]: Instructor in Clinical Emergency Medicine
+              - generic [ref=e138]: General Internal Medicine · Department of Medicine
+          - generic [ref=e139]:
+            - generic [ref=e142]: AA
+            - generic [ref=e143]:
+              - generic [ref=e144]:
+                - link "Abdulaziz Al-Hashemi" [ref=e145] [cursor=pointer]:
+                  - /url: /scholars/abdulaziz-al-hashemi
+                - generic [ref=e146]: affiliated_faculty
+              - generic [ref=e147]: Assistant Professor of Clinical Medicine
+              - generic [ref=e148]: General Internal Medicine · Department of Medicine
+          - generic [ref=e149]:
+            - generic [ref=e152]: AA
+            - generic [ref=e153]:
+              - generic [ref=e154]:
+                - link "Abdulsalam Al-Qahtani" [ref=e155] [cursor=pointer]:
+                  - /url: /scholars/abdulsalam-al-qahtani
+                - generic [ref=e156]: affiliated_faculty
+              - generic [ref=e157]: Associate Professor of Clinical Otolaryngology
+              - generic [ref=e158]: General Internal Medicine · Department of Medicine
+          - generic [ref=e159]:
+            - generic [ref=e162]: AB
+            - generic [ref=e163]:
+              - generic [ref=e164]:
+                - link "Adeel Butt" [ref=e165] [cursor=pointer]:
+                  - /url: /scholars/adeel-butt
+                - generic [ref=e166]: affiliated_faculty
+              - generic [ref=e167]: Professor of Medicine
+              - generic [ref=e168]: General Internal Medicine · Department of Medicine
+          - generic [ref=e169]:
+            - generic [ref=e172]: AB
+            - generic [ref=e173]:
+              - generic [ref=e174]:
+                - link "Adrienne Boire" [ref=e175] [cursor=pointer]:
+                  - /url: /scholars/adrienne-boire
+                - generic [ref=e176]: affiliated_faculty
+              - generic [ref=e177]: Associate Professor of Neurology
+              - generic [ref=e178]: Cardiology · Department of Medicine
+          - generic [ref=e179]:
+            - generic [ref=e182]: AA
+            - generic [ref=e183]:
+              - generic [ref=e184]:
+                - link "Ahmed Al-Mohammed" [ref=e185] [cursor=pointer]:
+                  - /url: /scholars/ahmed-al-mohammed
+                - generic [ref=e186]: affiliated_faculty
+              - generic [ref=e187]: Assistant Professor of Clinical Medicine
+              - generic [ref=e188]: General Internal Medicine · Department of Medicine
+          - generic [ref=e189]:
+            - generic [ref=e192]: AB
+            - generic [ref=e193]:
+              - generic [ref=e194]:
+                - link "Akinpelumi Beckley" [ref=e195] [cursor=pointer]:
+                  - /url: /scholars/akinpelumi-beckley
+                - generic [ref=e196]: affiliated_faculty
+              - generic [ref=e197]: Adjunct Assistant Professor of Clinical Rehabilitation Medicine
+              - generic [ref=e198]: Cardiology · Department of Medicine
+          - generic [ref=e199]:
+            - generic [ref=e202]: AA
+            - generic [ref=e203]:
+              - generic [ref=e204]:
+                - link "Alaa Abd-Alrazaq" [ref=e205] [cursor=pointer]:
+                  - /url: /scholars/alaa-abd-alrazaq
+                - generic [ref=e206]: affiliated_faculty
+              - generic [ref=e207]: Assistant Professor of Research in Population Health Sciences
+              - generic [ref=e208]: Cardiology · Department of Medicine
+            - generic [ref=e210]: 86 pubs
+          - generic [ref=e211]:
+            - generic [ref=e214]: AA
+            - generic [ref=e215]:
+              - generic [ref=e216]:
+                - link "Alaa Al-Taie" [ref=e217] [cursor=pointer]:
+                  - /url: /scholars/alaa-al-taie
+                - generic [ref=e218]: affiliated_faculty
+              - generic [ref=e219]: Assistant Professor of Clinical Radiology
+              - generic [ref=e220]: General Internal Medicine · Department of Medicine
+          - generic [ref=e221]:
+            - generic [ref=e224]: AC
+            - generic [ref=e225]:
+              - generic [ref=e226]:
+                - link "Alexandre Caprio" [ref=e227] [cursor=pointer]:
+                  - /url: /scholars/alexandre-caprio
+                - generic [ref=e228]: affiliated_faculty
+              - generic [ref=e229]: Research Associate in Radiology
+              - generic [ref=e230]: Cardiology · Department of Medicine
+            - generic [ref=e232]: 2 grants
+          - generic [ref=e233]:
+            - generic [ref=e236]: AA
+            - generic [ref=e237]:
+              - generic [ref=e238]:
+                - link "Ali Ahmad Alyafei" [ref=e239] [cursor=pointer]:
+                  - /url: /scholars/ali-ahmad-alyafei
+                - generic [ref=e240]: affiliated_faculty
+              - generic [ref=e241]: Assistant Professor of Clinical Otolaryngology
+              - generic [ref=e242]: General Internal Medicine · Department of Medicine
+          - generic [ref=e243]:
+            - generic [ref=e246]: AA
+            - generic [ref=e247]:
+              - generic [ref=e248]:
+                - link "Alia Ahmed" [ref=e249] [cursor=pointer]:
+                  - /url: /scholars/alia-ahmed
+                - generic [ref=e250]: affiliated_faculty
+              - generic [ref=e251]: Instructor in Clinical Obstetrics and Gynecology
+              - generic [ref=e252]: General Internal Medicine · Department of Medicine
+          - generic [ref=e253]:
+            - generic [ref=e256]: AA
+            - generic [ref=e257]:
+              - generic [ref=e258]:
+                - link "Amal Al-Ali" [ref=e259] [cursor=pointer]:
+                  - /url: /scholars/amal-al-ali
+                - generic [ref=e260]: affiliated_faculty
+              - generic [ref=e261]: Assistant Professor of Family Medicine in Clinical Medicine
+              - generic [ref=e262]: General Internal Medicine · Department of Medicine
+          - generic [ref=e263]:
+            - generic [ref=e266]: AB
+            - generic [ref=e267]:
+              - generic [ref=e268]:
+                - link "Ariel Blanchard" [ref=e269] [cursor=pointer]:
+                  - /url: /scholars/ariel-blanchard
+                - generic [ref=e270]: affiliated_faculty
+              - generic [ref=e271]: Assistant Professor of Surgery (Dentistry, Oral and Maxillofacial Surgery)
+              - generic [ref=e272]: Cardiology · Department of Medicine
+            - generic [ref=e273]:
+              - generic [ref=e274]: 4 pubs
+              - generic [ref=e275]: 1 grant
+          - generic [ref=e276]:
+            - generic [ref=e279]: AC
+            - generic [ref=e280]:
+              - generic [ref=e281]:
+                - link "Ashton Connor" [ref=e282] [cursor=pointer]:
+                  - /url: /scholars/ashton-connor
+                - generic [ref=e283]: affiliated_faculty
+              - generic [ref=e284]: Assistant Professor of Surgery
+              - generic [ref=e285]: Cardiology · Department of Medicine
+          - generic [ref=e286]:
+            - generic [ref=e289]: AA
+            - generic [ref=e290]:
+              - generic [ref=e291]:
+                - link "Asma Al-Thani" [ref=e292] [cursor=pointer]:
+                  - /url: /scholars/asma-al-thani
+                - generic [ref=e293]: affiliated_faculty
+              - generic [ref=e294]: Adjunct Assistant Professor of Microbiology and Immunology
+              - generic [ref=e295]: General Internal Medicine · Department of Medicine
+          - generic [ref=e296]:
+            - generic [ref=e299]: AA
+            - generic [ref=e300]:
+              - generic [ref=e301]:
+                - link "Azza Al-Mujalli" [ref=e302] [cursor=pointer]:
+                  - /url: /scholars/azza-al-mujalli
+                - generic [ref=e303]: affiliated_faculty
+              - generic [ref=e304]: Instructor of Family Medicine in Clinical Medicine
+              - generic [ref=e305]: General Internal Medicine · Department of Medicine
+  - contentinfo [ref=e306]:
+    - generic [ref=e307]:
+      - generic [ref=e308]: Scholars @ Weill Cornell Medicine
+      - generic [ref=e309]:
+        - link "Support" [ref=e310] [cursor=pointer]:
+          - /url: /support
+        - generic [ref=e311]: Phase 1 prototype

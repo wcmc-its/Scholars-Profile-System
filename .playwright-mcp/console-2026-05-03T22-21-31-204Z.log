@@ -1,0 +1,23 @@
+[     334ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_compiled_react-dom_1e674e59._.js:14537
+[     499ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab4009.png?returnGenericOn404=false:0
+[     519ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2025.png?returnGenericOn404=false:0
+[     520ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2033.png?returnGenericOn404=false:0
+[     521ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa3003.png?returnGenericOn404=false:0
+[     612ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4007.png?returnGenericOn404=false:0
+[     613ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2009.png?returnGenericOn404=false:0
+[     614ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4009.png?returnGenericOn404=false:0
+[     614ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9028.png?returnGenericOn404=false:0
+[     614ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9027.png?returnGenericOn404=false:0
+[     614ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2008.png?returnGenericOn404=false:0
+[     617ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2014.png?returnGenericOn404=false:0
+[     646ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2020.png?returnGenericOn404=false:0
+[     647ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2019.png?returnGenericOn404=false:0
+[     654ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac4007.png?returnGenericOn404=false:0
+[     655ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aab9010.png?returnGenericOn404=false:0
+[     661ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aac2009.png?returnGenericOn404=false:0
+[     677ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa4022.png?returnGenericOn404=false:0
+[     682ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://directory.weill.cornell.edu/api/v1/person/profile/aaa2018.png?returnGenericOn404=false:0
+[  134936ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  134938ms] [LOG] [Fast Refresh] done in 103ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809
+[  200763ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5949
+[  200901ms] [LOG] [Fast Refresh] done in 215ms @ http://localhost:3002/_next/static/chunks/node_modules_next_dist_client_cf1d9188._.js:5809

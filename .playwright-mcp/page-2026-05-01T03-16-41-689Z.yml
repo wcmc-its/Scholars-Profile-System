@@ -1,0 +1,386 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - heading "Scholars at Weill Cornell Medicine" [level=1] [ref=e4]
+    - paragraph [ref=e5]: Discover the research, expertise, and people shaping medicine at WCM.
+  - generic [ref=e6]:
+    - heading "Selected research" [level=2] [ref=e7]
+    - paragraph [ref=e8]:
+      - text: Eight subtopics with the strongest recent activity at WCM, one per parent area, refreshed weekly ·
+      - link "How this works" [ref=e9] [cursor=pointer]:
+        - /url: /about/methodology#selected-research
+    - generic [ref=e10]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: Epidemiology & Population Health
+        - link "Epidemiology Covid19 Outcomes Surveillance" [ref=e15] [cursor=pointer]:
+          - /url: /topics/epidemiology_covid19_outcomes_surveillance
+        - generic [ref=e16]: 143 scholars · 299 publications
+        - paragraph [ref=e17]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e18] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e21]:
+        - generic [ref=e22]: Cell & Molecular Biology
+        - link "Cell Intracellular Signaling Pathways" [ref=e23] [cursor=pointer]:
+          - /url: /topics/cell_intracellular_signaling_pathways
+        - generic [ref=e24]: 131 scholars · 207 publications
+        - list [ref=e25]:
+          - listitem [ref=e26]:
+            - generic [ref=e27]: Activation of RhoC by regulatory ubiquitination is mediated by LNX1 and suppressed by LIS1.
+            - link "Margaret Ross" [ref=e28] [cursor=pointer]:
+              - /url: /scholars/margaret-ross
+          - listitem [ref=e29]:
+            - generic [ref=e30]: Activation of RhoC by regulatory ubiquitination is mediated by LNX1 and suppressed by LIS1.
+            - link "Stanislav Kholmanskikh" [ref=e31] [cursor=pointer]:
+              - /url: /scholars/stanislav-kholmanskikh
+        - paragraph [ref=e32]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e33] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e36]:
+        - generic [ref=e37]: Infectious Disease & Host Defense
+        - link "Infectious Covid19 Clinical Outcomes" [ref=e38] [cursor=pointer]:
+          - /url: /topics/infectious_covid19_clinical_outcomes
+        - generic [ref=e39]: 144 scholars · 206 publications
+        - list [ref=e40]:
+          - listitem [ref=e41]:
+            - generic [ref=e42]: Safety and Efficacy of Combination SARS-CoV-2 Neutralizing Monoclonal Antibodies Amubarvimab Plus Romlusevimab in Nonhospitalized Patients With COVID-19.
+            - link "Teresa Evering" [ref=e43] [cursor=pointer]:
+              - /url: /scholars/teresa-evering
+          - listitem [ref=e44]:
+            - generic [ref=e45]: Optimizing the use of Paxlovid in clinical practice.
+            - link "Matthew McCarthy" [ref=e46] [cursor=pointer]:
+              - /url: /scholars/matthew-mccarthy
+        - paragraph [ref=e47]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e48] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e51]:
+        - generic [ref=e52]: Health Services Research & Health Policy
+        - link "Health Hospital Utilization Quality Improvement" [ref=e53] [cursor=pointer]:
+          - /url: /topics/health_hospital_utilization_quality_improvement
+        - generic [ref=e54]: 116 scholars · 213 publications
+        - list [ref=e55]:
+          - listitem [ref=e56]:
+            - generic [ref=e57]: The Association of Hospital-Cardiologist Integration With Patient Outcomes, Care Quality, and Utilization.
+            - link "Vinay Kini" [ref=e58] [cursor=pointer]:
+              - /url: /scholars/vinay-kini
+        - paragraph [ref=e59]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e60] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e63]:
+        - generic [ref=e64]: Biostatistics & Quantitative Health Sciences
+        - link "Biostatistics Prediction Risk Models" [ref=e65] [cursor=pointer]:
+          - /url: /topics/biostatistics_prediction_risk_models
+        - generic [ref=e66]: 164 scholars · 297 publications
+        - paragraph [ref=e67]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e68] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e71]:
+        - generic [ref=e72]: Translational & Clinical Science
+        - link "Translational Oncology Clinical Trials" [ref=e73] [cursor=pointer]:
+          - /url: /topics/translational_oncology_clinical_trials
+        - generic [ref=e74]: 96 scholars · 197 publications
+        - paragraph [ref=e75]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e76] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e79]:
+        - generic [ref=e80]: Health Equity & Social Determinants of Health
+        - link "Health Racial Ethnic Disparities Outcomes" [ref=e81] [cursor=pointer]:
+          - /url: /topics/health_racial_ethnic_disparities_outcomes
+        - generic [ref=e82]: 62 scholars · 110 publications
+        - list [ref=e83]:
+          - listitem [ref=e84]:
+            - generic [ref=e85]: Black patients and women have reduced access to liver transplantation for alcohol-associated liver disease.
+            - link "Russell Rosenblatt" [ref=e86] [cursor=pointer]:
+              - /url: /scholars/russell-rosenblatt
+          - listitem [ref=e87]:
+            - generic [ref=e88]: "Antiemetic Administration and Its Association with Race: A Retrospective Cohort Study."
+            - link "Kane Pryor" [ref=e89] [cursor=pointer]:
+              - /url: /scholars/kane-pryor
+        - paragraph [ref=e90]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e91] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+      - generic [ref=e94]:
+        - generic [ref=e95]: Immunology & Inflammation
+        - link "Immunology Sars Cov2 Immune Response" [ref=e96] [cursor=pointer]:
+          - /url: /topics/immunology_sars_cov2_immune_response
+        - generic [ref=e97]: 60 scholars · 143 publications
+        - paragraph [ref=e98]:
+          - text: Selected by ReCiterAI ·
+          - link "methodology" [ref=e99] [cursor=pointer]:
+            - /url: /about/methodology#selected-research
+  - generic [ref=e100]:
+    - heading "Browse all research areas" [level=2] [ref=e101]
+    - list [ref=e102]:
+      - listitem [ref=e103]:
+        - link "Aging & Geroscience" [ref=e104] [cursor=pointer]:
+          - /url: /topics/aging_geroscience
+        - generic [ref=e105]: 229 scholars
+      - listitem [ref=e106]:
+        - link "Autoimmune & Rheumatologic Disease" [ref=e107] [cursor=pointer]:
+          - /url: /topics/autoimmune_rheumatologic_disease
+        - generic [ref=e108]: 79 scholars
+      - listitem [ref=e109]:
+        - link "Biochemistry & Biophysics" [ref=e110] [cursor=pointer]:
+          - /url: /topics/biochemistry_biophysics
+        - generic [ref=e111]: 232 scholars
+      - listitem [ref=e112]:
+        - link "Bioethics, Medical Humanities & Clinician Wellbeing" [ref=e113] [cursor=pointer]:
+          - /url: /topics/bioethics_medical_humanities
+        - generic [ref=e114]: 156 scholars
+      - listitem [ref=e115]:
+        - link "Biomedical Engineering" [ref=e116] [cursor=pointer]:
+          - /url: /topics/biomedical_engineering
+        - generic [ref=e117]: 113 scholars
+      - listitem [ref=e118]:
+        - link "Biomedical Informatics" [ref=e119] [cursor=pointer]:
+          - /url: /topics/biomedical_informatics
+        - generic [ref=e120]: 206 scholars
+      - listitem [ref=e121]:
+        - link "Biostatistics & Quantitative Health Sciences" [ref=e122] [cursor=pointer]:
+          - /url: /topics/biostatistics_quantitative_sciences
+        - generic [ref=e123]: 504 scholars
+      - listitem [ref=e124]:
+        - link "Breast Cancer" [ref=e125] [cursor=pointer]:
+          - /url: /topics/breast_cancer
+        - generic [ref=e126]: 97 scholars
+      - listitem [ref=e127]:
+        - link "Cancer Biology (General)" [ref=e128] [cursor=pointer]:
+          - /url: /topics/cancer_biology_general
+        - generic [ref=e129]: 254 scholars
+      - listitem [ref=e130]:
+        - link "Cardiovascular Disease" [ref=e131] [cursor=pointer]:
+          - /url: /topics/cardiovascular_disease
+        - generic [ref=e132]: 248 scholars
+      - listitem [ref=e133]:
+        - link "Cell & Molecular Biology" [ref=e134] [cursor=pointer]:
+          - /url: /topics/cell_molecular_biology
+        - generic [ref=e135]: 454 scholars
+      - listitem [ref=e136]:
+        - link "Dermatology & Skin Disease" [ref=e137] [cursor=pointer]:
+          - /url: /topics/dermatology_skin_disease
+        - generic [ref=e138]: 52 scholars
+      - listitem [ref=e139]:
+        - link "Developmental Biology" [ref=e140] [cursor=pointer]:
+          - /url: /topics/developmental_biology
+        - generic [ref=e141]: 102 scholars
+      - listitem [ref=e142]:
+        - link "Digital Health & Telemedicine" [ref=e143] [cursor=pointer]:
+          - /url: /topics/digital_health_telemedicine
+        - generic [ref=e144]: 153 scholars
+      - listitem [ref=e145]:
+        - link "Drug Discovery & Pharmacology" [ref=e146] [cursor=pointer]:
+          - /url: /topics/drug_discovery_pharmacology
+        - generic [ref=e147]: 403 scholars
+      - listitem [ref=e148]:
+        - link "Emergency & Critical Care Medicine" [ref=e149] [cursor=pointer]:
+          - /url: /topics/emergency_critical_care_medicine
+        - generic [ref=e150]: 244 scholars
+      - listitem [ref=e151]:
+        - link "Environmental & Planetary Health" [ref=e152] [cursor=pointer]:
+          - /url: /topics/environmental_planetary_health
+        - generic [ref=e153]: 42 scholars
+      - listitem [ref=e154]:
+        - link "Epidemiology & Population Health" [ref=e155] [cursor=pointer]:
+          - /url: /topics/epidemiology_population_health
+        - generic [ref=e156]: 516 scholars
+      - listitem [ref=e157]:
+        - link "Gastroenterology, Hepatology & Pancreatic Disease" [ref=e158] [cursor=pointer]:
+          - /url: /topics/gastroenterology_hepatology
+        - generic [ref=e159]: 211 scholars
+      - listitem [ref=e160]:
+        - link "Gastrointestinal Cancer" [ref=e161] [cursor=pointer]:
+          - /url: /topics/gi_cancer
+        - generic [ref=e162]: 93 scholars
+      - listitem [ref=e163]:
+        - link "Gene & Cell Therapy" [ref=e164] [cursor=pointer]:
+          - /url: /topics/gene_cell_therapy
+        - generic [ref=e165]: 66 scholars
+      - listitem [ref=e166]:
+        - link "Genetics, Genomics & Precision Medicine" [ref=e167] [cursor=pointer]:
+          - /url: /topics/genetics_genomics_precision_medicine
+        - generic [ref=e168]: 372 scholars
+      - listitem [ref=e169]:
+        - link "Global & Public Health" [ref=e170] [cursor=pointer]:
+          - /url: /topics/global_public_health
+        - generic [ref=e171]: 247 scholars
+      - listitem [ref=e172]:
+        - link "Gynecologic Oncology" [ref=e173] [cursor=pointer]:
+          - /url: /topics/gynecologic_oncology
+        - generic [ref=e174]: 33 scholars
+      - listitem [ref=e175]:
+        - link "Health Economics" [ref=e176] [cursor=pointer]:
+          - /url: /topics/health_economics
+        - generic [ref=e177]: 136 scholars
+      - listitem [ref=e178]:
+        - link "Health Equity & Social Determinants of Health" [ref=e179] [cursor=pointer]:
+          - /url: /topics/health_equity_social_determinants
+        - generic [ref=e180]: 311 scholars
+      - listitem [ref=e181]:
+        - link "Health Services Research & Health Policy" [ref=e182] [cursor=pointer]:
+          - /url: /topics/health_services_policy
+        - generic [ref=e183]: 452 scholars
+      - listitem [ref=e184]:
+        - link "Hematology" [ref=e185] [cursor=pointer]:
+          - /url: /topics/hematology
+        - generic [ref=e186]: 178 scholars
+      - listitem [ref=e187]:
+        - link "Immunology & Inflammation" [ref=e188] [cursor=pointer]:
+          - /url: /topics/immunology_inflammation
+        - generic [ref=e189]: 336 scholars
+      - listitem [ref=e190]:
+        - link "Implementation Science" [ref=e191] [cursor=pointer]:
+          - /url: /topics/implementation_science
+        - generic [ref=e192]: 457 scholars
+      - listitem [ref=e193]:
+        - link "Infectious Disease & Host Defense" [ref=e194] [cursor=pointer]:
+          - /url: /topics/infectious_disease_immunology
+        - generic [ref=e195]: 377 scholars
+      - listitem [ref=e196]:
+        - link "Lung Cancer" [ref=e197] [cursor=pointer]:
+          - /url: /topics/lung_cancer
+        - generic [ref=e198]: 53 scholars
+      - listitem [ref=e199]:
+        - link "Maternal & Child Health" [ref=e200] [cursor=pointer]:
+          - /url: /topics/maternal_child_health
+        - generic [ref=e201]: 134 scholars
+      - listitem [ref=e202]:
+        - link "Medical Education & Healthcare Workforce" [ref=e203] [cursor=pointer]:
+          - /url: /topics/medical_education_workforce
+        - generic [ref=e204]: 255 scholars
+      - listitem [ref=e205]:
+        - link "Melanoma & Skin Cancer" [ref=e206] [cursor=pointer]:
+          - /url: /topics/melanoma_skin_cancer
+        - generic [ref=e207]: 26 scholars
+      - listitem [ref=e208]:
+        - link "Mental Health & Psychiatry" [ref=e209] [cursor=pointer]:
+          - /url: /topics/mental_health_psychiatry
+        - generic [ref=e210]: 189 scholars
+      - listitem [ref=e211]:
+        - link "Metabolic & Endocrine Disease" [ref=e212] [cursor=pointer]:
+          - /url: /topics/metabolic_endocrine_disease
+        - generic [ref=e213]: 227 scholars
+      - listitem [ref=e214]:
+        - link "Microbiome Research" [ref=e215] [cursor=pointer]:
+          - /url: /topics/microbiome_research
+        - generic [ref=e216]: 51 scholars
+      - listitem [ref=e217]:
+        - link "Musculoskeletal & Orthopedic Medicine" [ref=e218] [cursor=pointer]:
+          - /url: /topics/musculoskeletal_orthopedic_medicine
+        - generic [ref=e219]: 77 scholars
+      - listitem [ref=e220]:
+        - link "Nephrology & Renal Disease" [ref=e221] [cursor=pointer]:
+          - /url: /topics/nephrology_renal_disease
+        - generic [ref=e222]: 95 scholars
+      - listitem [ref=e223]:
+        - link "Neuro-Oncology" [ref=e224] [cursor=pointer]:
+          - /url: /topics/neuro_oncology
+        - generic [ref=e225]: 50 scholars
+      - listitem [ref=e226]:
+        - link "Neurodegenerative Disease" [ref=e227] [cursor=pointer]:
+          - /url: /topics/neurodegenerative_disease
+        - generic [ref=e228]: 117 scholars
+      - listitem [ref=e229]:
+        - link "Neuroscience & Neurology" [ref=e230] [cursor=pointer]:
+          - /url: /topics/neuroscience_neurology
+        - generic [ref=e231]: 297 scholars
+      - listitem [ref=e232]:
+        - link "Nutrition & Metabolism" [ref=e233] [cursor=pointer]:
+          - /url: /topics/nutrition_metabolism
+        - generic [ref=e234]: 166 scholars
+      - listitem [ref=e235]:
+        - link "Ophthalmology & Vision Science" [ref=e236] [cursor=pointer]:
+          - /url: /topics/ophthalmology_vision_science
+        - generic [ref=e237]: 48 scholars
+      - listitem [ref=e238]:
+        - link "Oral & Craniofacial Health" [ref=e239] [cursor=pointer]:
+          - /url: /topics/oral_craniofacial_health
+        - generic [ref=e240]: 18 scholars
+      - listitem [ref=e241]:
+        - link "Otolaryngology & Head and Neck Medicine" [ref=e242] [cursor=pointer]:
+          - /url: /topics/otolaryngology_head_neck
+        - generic [ref=e243]: 57 scholars
+      - listitem [ref=e244]:
+        - link "Pain Management & Anesthesiology" [ref=e245] [cursor=pointer]:
+          - /url: /topics/pain_management_anesthesiology
+        - generic [ref=e246]: 127 scholars
+      - listitem [ref=e247]:
+        - link "Palliative & End-of-Life Care" [ref=e248] [cursor=pointer]:
+          - /url: /topics/palliative_end_of_life_care
+        - generic [ref=e249]: 79 scholars
+      - listitem [ref=e250]:
+        - link "Pathology & Laboratory Medicine" [ref=e251] [cursor=pointer]:
+          - /url: /topics/pathology_laboratory_medicine
+        - generic [ref=e252]: 377 scholars
+      - listitem [ref=e253]:
+        - link "Pediatrics & Neonatology" [ref=e254] [cursor=pointer]:
+          - /url: /topics/pediatrics_neonatology
+        - generic [ref=e255]: 241 scholars
+      - listitem [ref=e256]:
+        - link "Primary Care & General Internal Medicine" [ref=e257] [cursor=pointer]:
+          - /url: /topics/primary_care_general_medicine
+        - generic [ref=e258]: 178 scholars
+      - listitem [ref=e259]:
+        - link "Prostate & Urologic Cancer" [ref=e260] [cursor=pointer]:
+          - /url: /topics/prostate_urologic_cancer
+        - generic [ref=e261]: 64 scholars
+      - listitem [ref=e262]:
+        - link "Pulmonary & Critical Care Medicine" [ref=e263] [cursor=pointer]:
+          - /url: /topics/pulmonary_critical_care
+        - generic [ref=e264]: 219 scholars
+      - listitem [ref=e265]:
+        - link "Radiology, Medical Imaging & Medical Physics" [ref=e266] [cursor=pointer]:
+          - /url: /topics/radiology_medical_imaging
+        - generic [ref=e267]: 323 scholars
+      - listitem [ref=e268]:
+        - link "Rehabilitation & Disability Medicine" [ref=e269] [cursor=pointer]:
+          - /url: /topics/rehabilitation_disability_medicine
+        - generic [ref=e270]: 100 scholars
+      - listitem [ref=e271]:
+        - link "Research Infrastructure & Scientific Workforce" [ref=e272] [cursor=pointer]:
+          - /url: /topics/research_infrastructure_workforce
+        - generic [ref=e273]: 108 scholars
+      - listitem [ref=e274]:
+        - link "Single-Cell & Spatial Biology" [ref=e275] [cursor=pointer]:
+          - /url: /topics/single_cell_spatial_biology
+        - generic [ref=e276]: 130 scholars
+      - listitem [ref=e277]:
+        - link "Sleep Medicine & Circadian Biology" [ref=e278] [cursor=pointer]:
+          - /url: /topics/sleep_medicine_circadian_biology
+        - generic [ref=e279]: 49 scholars
+      - listitem [ref=e280]:
+        - link "Stem Cell & Regenerative Medicine" [ref=e281] [cursor=pointer]:
+          - /url: /topics/stem_cell_regenerative_medicine
+        - generic [ref=e282]: 119 scholars
+      - listitem [ref=e283]:
+        - link "Substance Use & Addiction Medicine" [ref=e284] [cursor=pointer]:
+          - /url: /topics/substance_use_addiction_medicine
+        - generic [ref=e285]: 77 scholars
+      - listitem [ref=e286]:
+        - link "Surgery & Perioperative Medicine" [ref=e287] [cursor=pointer]:
+          - /url: /topics/surgery_perioperative_medicine
+        - generic [ref=e288]: 327 scholars
+      - listitem [ref=e289]:
+        - link "Systems Biology" [ref=e290] [cursor=pointer]:
+          - /url: /topics/systems_biology
+        - generic [ref=e291]: 219 scholars
+      - listitem [ref=e292]:
+        - link "Translational & Clinical Science" [ref=e293] [cursor=pointer]:
+          - /url: /topics/translational_clinical_science
+        - generic [ref=e294]: 615 scholars
+      - listitem [ref=e295]:
+        - link "Transplantation Medicine" [ref=e296] [cursor=pointer]:
+          - /url: /topics/transplantation_medicine
+        - generic [ref=e297]: 70 scholars
+      - listitem [ref=e298]:
+        - link "Urology & Men's Health" [ref=e299] [cursor=pointer]:
+          - /url: /topics/urology_mens_health
+        - generic [ref=e300]: 84 scholars
+      - listitem [ref=e301]:
+        - link "Women's Health & Reproductive Medicine" [ref=e302] [cursor=pointer]:
+          - /url: /topics/womens_health_reproductive_medicine
+        - generic [ref=e303]: 229 scholars

@@ -1,0 +1,54 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "WCM Scholars" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e6]: WCM
+          - generic [ref=e7]: Scholars
+        - generic [ref=e9]:
+          - img [ref=e10]
+          - searchbox "Search scholars" [ref=e13]
+    - main [ref=e15]:
+      - generic [ref=e16]:
+        - heading "Cardiovascular Disease" [level=1] [ref=e17]
+        - paragraph [ref=e18]: Clinical and translational research on heart and vascular conditions including heart failure, coronary artery disease, arrhythmias, valvular disease, cardiomyopathy, and vascular surgery. Encompasses cardiac imaging, interventional cardiology, cardiac surgery outcomes, and basic cardiovascular biology. Includes both structural heart disease and cardiovascular risk factor management.
+      - generic [ref=e19]:
+        - heading "Recent highlights" [level=2] [ref=e20]
+        - paragraph [ref=e21]:
+          - text: Three publications surfaced by ReCiterAI ·
+          - link "how this works" [ref=e22] [cursor=pointer]:
+            - /url: /about/methodology#recent-highlights
+        - list [ref=e23]:
+          - listitem [ref=e24]:
+            - article [ref=e25]:
+              - 'link "Percutaneous vs. surgical revascularization of non-ST-segment elevation myocardial infarction with multivessel disease: the SWEDEHEART registry." [ref=e26] [cursor=pointer]':
+                - /url: https://pubmed.ncbi.nlm.nih.gov/39601339/
+              - link "Bjorn Redfors" [ref=e28] [cursor=pointer]:
+                - /url: /scholars/bjorn-redfors
+              - generic [ref=e29]: European heart journal · 2025
+          - listitem [ref=e30]:
+            - article [ref=e31]:
+              - link "Prospective Comparison of Temporal Myocardial Function in Men Versus Women After Anterior ST-Elevation Myocardial Infarction With Timely Reperfusion." [ref=e32] [cursor=pointer]:
+                - /url: https://pubmed.ncbi.nlm.nih.gov/39988035/
+              - link "Bjorn Redfors" [ref=e34] [cursor=pointer]:
+                - /url: /scholars/bjorn-redfors
+              - generic [ref=e35]: The American journal of cardiology · 2025
+          - listitem [ref=e36]:
+            - article [ref=e37]:
+              - link "Navigating Bleeding, Thrombosis, and Antithrombotic Management in Transcatheter Aortic Valve Replacement." [ref=e38] [cursor=pointer]:
+                - /url: https://pubmed.ncbi.nlm.nih.gov/40358404/
+              - generic [ref=e39]:
+                - link "Stephen Peterson" [ref=e40] [cursor=pointer]:
+                  - /url: /scholars/stephen-peterson
+                - link "Manish Parikh" [ref=e41] [cursor=pointer]:
+                  - /url: /scholars/manish-parikh
+              - generic [ref=e42]: Cardiology in review · 2025
+    - contentinfo [ref=e43]:
+      - generic [ref=e44]:
+        - generic [ref=e45]: Scholars @ Weill Cornell Medicine
+        - generic [ref=e46]:
+          - link "Support" [ref=e47] [cursor=pointer]:
+            - /url: /support
+          - generic [ref=e48]: Phase 1 prototype
+  - alert [ref=e49]

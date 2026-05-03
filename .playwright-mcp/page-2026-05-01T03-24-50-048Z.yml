@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "WCM Scholars" [ref=e5] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e6]: WCM
+          - generic [ref=e7]: Scholars
+        - generic [ref=e9]:
+          - img [ref=e10]
+          - searchbox "Search scholars" [ref=e13]
+    - main [ref=e15]:
+      - heading "About Scholars at WCM" [level=1] [ref=e16]
+      - paragraph [ref=e17]:
+        - text: Methodology and algorithmic details are documented on the
+        - link "methodology page" [ref=e18] [cursor=pointer]:
+          - /url: /about/methodology
+        - text: .
+    - contentinfo [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: Scholars @ Weill Cornell Medicine
+        - generic [ref=e22]:
+          - link "Support" [ref=e23] [cursor=pointer]:
+            - /url: /support
+          - generic [ref=e24]: Phase 1 prototype
+  - alert [ref=e25]

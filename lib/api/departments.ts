@@ -27,6 +27,8 @@ export type DepartmentChair = {
   slug: string;
   /** From appointment.title, e.g. "Chairman and Stephen and Suzanne Weiss Professor" */
   chairTitle: string;
+  /** Scholar's primary academic title, e.g. "Professor of Medicine" */
+  primaryTitle: string | null;
   identityImageEndpoint: string;
 };
 
@@ -72,7 +74,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   if (dept.chairCwid) {
     const chairScholar = await prisma.scholar.findUnique({
       where: { cwid: dept.chairCwid },
-      select: { cwid: true, preferredName: true, slug: true },
+      select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chairScholar) {
       // Find the chair's most-recent active appointment with a title starting "Chair" or "Chairman".
@@ -93,6 +95,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         preferredName: chairScholar.preferredName,
         slug: chairScholar.slug,
         chairTitle: chairAppt?.title ?? "Chair",
+        primaryTitle: chairScholar.primaryTitle ?? null,
         identityImageEndpoint: identityImageEndpoint(chairScholar.cwid),
       };
     }
@@ -204,6 +207,8 @@ export type DepartmentFacultyHit = {
   identityImageEndpoint: string;
   /** Role tag — Full-time faculty / Postdoc / etc. */
   roleCategory: string | null;
+  /** First ~120 chars of the scholar's research overview for the person-row snippet */
+  overview: string | null;
   pubCount: number;
   grantCount: number;
 };
@@ -370,6 +375,7 @@ export async function getDepartmentFaculty(
       "",
     identityImageEndpoint: identityImageEndpoint(s.cwid),
     roleCategory: normalizeRoleCategory(s.roleCategory),
+    overview: s.overview ? s.overview.slice(0, 120).trimEnd() + (s.overview.length > 120 ? "…" : "") : null,
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));

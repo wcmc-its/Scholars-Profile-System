@@ -1,0 +1,12 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - generic [ref=e3]:
+      - heading "Scholars at Weill Cornell Medicine" [level=1] [ref=e4]
+      - paragraph [ref=e5]: Discover the research, expertise, and people shaping medicine at WCM.
+    - generic [ref=e6]:
+      - heading "Browse all research areas" [level=2] [ref=e7]
+      - paragraph [ref=e8]:
+        - text: Research areas temporarily unavailable.
+        - link "Retry" [ref=e9] [cursor=pointer]:
+          - /url: /
+  - alert [ref=e10]

@@ -18,6 +18,25 @@ const FALLBACK_TEXT_CLASS: Record<"sm" | "md" | "lg", string> = {
   lg: "text-xl",
 };
 
+// Deterministic warm two-tone gradient from a name string.
+const GRADIENTS = [
+  ["#c2a3a3", "#a07575"],
+  ["#a3b4c2", "#7590a0"],
+  ["#a3c2b4", "#75a08f"],
+  ["#c2b4a3", "#a08f75"],
+  ["#b4a3c2", "#8f75a0"],
+  ["#c2c2a3", "#a0a075"],
+  ["#a3b8c2", "#7598a0"],
+  ["#c2a3b4", "#a07590"],
+];
+
+function nameGradient(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  const [a, b] = GRADIENTS[Math.abs(h) % GRADIENTS.length];
+  return `linear-gradient(135deg, ${a}, ${b})`;
+}
+
 export function HeadshotAvatar({
   cwid,
   preferredName,
@@ -61,7 +80,10 @@ export function HeadshotAvatar({
           }
         />
       )}
-      <AvatarFallback className={FALLBACK_TEXT_CLASS[size]}>
+      <AvatarFallback
+        className={FALLBACK_TEXT_CLASS[size]}
+        style={{ background: nameGradient(preferredName), color: "rgba(255,255,255,0.92)" }}
+      >
         {initials(preferredName)}
       </AvatarFallback>
     </Avatar>

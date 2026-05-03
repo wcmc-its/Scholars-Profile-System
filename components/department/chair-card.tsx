@@ -8,7 +8,7 @@ export function ChairCard({ chair }: { chair: DepartmentChair }) {
     title.toLowerCase() !== "chair" && title.toLowerCase() !== "chairman";
 
   return (
-    <div className="mt-8 max-w-[560px] flex flex-col items-start gap-6 rounded-lg border border-border bg-card p-6 sm:flex-row sm:items-start">
+    <div className="mt-8 max-w-[560px] flex flex-col items-start gap-6 rounded-lg border border-border p-6 sm:flex-row sm:items-start" style={{ backgroundColor: "#f7f6f3" }}>
       <HeadshotAvatar
         size="lg"
         cwid={chair.cwid}
@@ -16,7 +16,7 @@ export function ChairCard({ chair }: { chair: DepartmentChair }) {
         identityImageEndpoint={chair.identityImageEndpoint}
       />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="text-xs font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
+        <div className="text-xs font-semibold tracking-wider text-[var(--color-accent-slate)]">
           Department Chair
         </div>
         <a
@@ -25,9 +25,9 @@ export function ChairCard({ chair }: { chair: DepartmentChair }) {
         >
           {chair.preferredName}
         </a>
-        {showTitle && (
-          <div className="mt-0.5 text-sm italic text-muted-foreground">
-            {title}
+        {chair.primaryTitle && (
+          <div className="mt-0.5 text-sm text-muted-foreground">
+            {chair.primaryTitle}
           </div>
         )}
       </div>

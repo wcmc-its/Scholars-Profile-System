@@ -105,8 +105,7 @@ export function DepartmentFacultyClient({
           <PersonRow key={hit.cwid} hit={hit} />
         ))}
       </div>
-      {totalPages > 1 && (
-        <div className="mt-8">
+      <div className="mt-8">
           <Pagination>
             <PaginationContent>
               <PaginationItem>
@@ -161,7 +160,6 @@ export function DepartmentFacultyClient({
             </PaginationContent>
           </Pagination>
         </div>
-      )}
     </>
   );
 }
