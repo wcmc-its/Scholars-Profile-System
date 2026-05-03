@@ -57,3 +57,12 @@ Thumbs.db
 *.tsbuildinfo
 
 /lib/generated/prisma
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# Session screenshots
+*.png
+
+# Git worktrees (embedded repos)
+.claude/worktrees/
