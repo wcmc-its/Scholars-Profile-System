@@ -131,3 +131,52 @@ describe("POST /api/revalidate", () => {
     expect(serialized).not.toContain("test-token-abc");
   });
 });
+
+describe("POST /api/revalidate — Phase 3 department paths", () => {
+  beforeEach(() => {
+    mockRevalidatePath.mockReset();
+    process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+  });
+
+  it("200 + revalidates /departments/{slug}", async () => {
+    const req = makeRequest({ path: "/departments/medicine", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/departments/medicine");
+  });
+
+  it("200 + revalidates /departments/{slug}/divisions/{div}", async () => {
+    const req = makeRequest({ path: "/departments/medicine/divisions/cardiology", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/departments/medicine/divisions/cardiology");
+  });
+
+  it("400 on /departments/ (bare, no slug)", async () => {
+    const req = makeRequest({ path: "/departments/", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(400);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("400 on /departments/{slug}/divisions (no div slug)", async () => {
+    const req = makeRequest({ path: "/departments/medicine/divisions", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(400);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("400 on path-traversal in dept path", async () => {
+    const req = makeRequest({ path: "/departments/../etc/passwd", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(400);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("401 regression — wrong token still rejected for dept path", async () => {
+    const req = makeRequest({ path: "/departments/medicine", token: "WRONG" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(401);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});

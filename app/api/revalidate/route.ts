@@ -33,6 +33,9 @@ const SLUG_RE_SOURCE = "[a-zA-Z0-9][a-zA-Z0-9-]*";
 const ALLOWED_PATTERNS: RegExp[] = [
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/topics/${SLUG_RE_SOURCE}$`),
+  // Phase 3 — D-01 / D-11: department and nested division paths
+  new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
+  new RegExp(`^/departments/${SLUG_RE_SOURCE}/divisions/${SLUG_RE_SOURCE}$`),
 ];
 
 function isAllowedPath(p: string): boolean {
