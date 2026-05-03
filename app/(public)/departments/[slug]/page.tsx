@@ -1,0 +1,35 @@
+import type { Metadata } from "next";
+import { DepartmentPage } from "@/components/department/department-page";
+import { getDepartment } from "@/lib/api/departments";
+
+export const revalidate = 21600;
+export const dynamicParams = true;
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const dept = await getDepartment(slug).catch(() => null);
+  if (!dept) return { title: "Department not found" };
+  return {
+    title: `${dept.dept.name} — Scholars at WCM`,
+    description: `Scholars and divisions in the ${dept.dept.name} at Weill Cornell Medicine.`,
+  };
+}
+
+export default async function DepartmentRoute({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { slug } = await params;
+  const sp = await searchParams;
+  const pageRaw =
+    (Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1";
+  const page = Math.max(1, parseInt(pageRaw, 10) || 1);
+  return <DepartmentPage deptSlug={slug} initialDivision={null} page={page} />;
+}
