@@ -306,12 +306,14 @@ export async function getDepartmentFaculty(
         by: ["cwid"],
         where: { cwid: { in: cwids } },
         _count: { pmid: true },
-      }) as Promise<PubGroupRow[]>,
+        orderBy: { cwid: "asc" },
+      }) as unknown as Promise<PubGroupRow[]>,
       prisma.grant.groupBy({
         by: ["cwid"],
         where: { cwid: { in: cwids }, endDate: { gte: now } },
         _count: { _all: true },
-      }) as Promise<GrantGroupRow[]>,
+        orderBy: { cwid: "asc" },
+      }) as unknown as Promise<GrantGroupRow[]>,
     ]);
     pubCounts = pc;
     grantCounts = gc;

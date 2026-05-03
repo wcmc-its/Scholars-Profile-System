@@ -95,6 +95,15 @@ async function main() {
     console.log(`[Revalidate] queued / + ${topics.length} topic page(s)`);
   } catch (err) {
     console.warn("[Revalidate] could not enumerate topics:", err);
+  }
+  try {
+    const depts = await prisma.department.findMany({ select: { slug: true } });
+    for (const d of depts) {
+      await revalidatePath(`/departments/${d.slug}`);
+    }
+    console.log(`[Revalidate] queued ${depts.length} department page(s)`);
+  } catch (err) {
+    console.warn("[Revalidate] could not enumerate departments:", err);
   } finally {
     await prisma.$disconnect();
   }
