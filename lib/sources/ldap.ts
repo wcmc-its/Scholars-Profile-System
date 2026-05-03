@@ -44,9 +44,11 @@ export const ED_FACULTY_ATTRIBUTES = [
   // Empirical probe in 03-LDAP-PROBE.md (Plan 02 Task 4) confirms which attributes
   // return non-empty values; if that probe reveals different attribute names, update
   // the projectEntries() mapping below and add an inline comment citing the probe.
-  "weillCornellEduOrgUnit",         // human-readable "level2 · level1" display string
-  "weillCornellEduOrgUnitCode",     // stable level1 (department) code, e.g. "MED"
-  "weillCornellEduDepartmentCode",  // stable level2 (division) code
+  // Probe 2026-05-03 (03-LDAP-PROBE.md): weillCornellEduOrgUnitCode is the authoritative
+  // org-unit attribute (refactored schema). weillCornellEduDepartmentCode is a 10-digit
+  // legacy numeric code (populated but not the stable org-unit join key).
+  "weillCornellEduOrgUnit",      // human-readable org-unit name (e.g. "General Internal Medicine")
+  "weillCornellEduOrgUnitCode",  // stable org-unit code — use for deptCode join key
 ] as const;
 
 export type EdFacultyEntry = {
@@ -152,13 +154,11 @@ function projectEntries(
       fte: parseFte(e.weillCornellEduFTE),
       ou: firstString(e.ou) ?? fallbackOu,
       degreeCode: firstString(e.weillCornellEduDegreeCode),
-      // Phase 3 — D-02: prefer `weillCornellEduOrgUnitCode` (level1/department code)
-      // with fallback to `departmentNumber` if the former is empty for a given entry.
-      // Per PATTERNS.md line 674; adjust if 03-LDAP-PROBE.md reveals different mapping.
-      deptCode: firstString(e.weillCornellEduOrgUnitCode) ?? firstString(e.departmentNumber) ?? null,
-      // `weillCornellEduDepartmentCode` is the level2 (division) code per design spec.
-      divCode: firstString(e.weillCornellEduDepartmentCode) ?? null,
-      // Display string from level2 · level1 hierarchy.
+      // Probe 2026-05-03: weillCornellEduOrgUnitCode is the authoritative org-unit code
+      // (refactored LDAP schema). weillCornellEduDepartmentCode is a legacy 10-digit code.
+      // divCode not available via LDAP in current schema.
+      deptCode: firstString(e.weillCornellEduOrgUnitCode) ?? null,
+      divCode: null,
       orgUnit: firstString(e.weillCornellEduOrgUnit) ?? null,
     });
   }
