@@ -109,6 +109,103 @@ export default function MethodologyPage() {
         </p>
       </section>
 
+      <section id={METHODOLOGY_ANCHORS.selectedHighlights} className="mt-12">
+        <h2 className="text-lg font-semibold">Selected highlights on profiles</h2>
+        <p className="mt-3 text-base">
+          The Selected highlights surface at the top of every scholar profile
+          picks the three most-impactful publications from a scholar&apos;s
+          first- or senior-author work, scored by the same multiplicative
+          formula used elsewhere on the site (research impact &times;
+          authorship weight &times; publication-type weight &times; recency
+          weight).
+        </p>
+        <p className="mt-3 text-base">
+          Selected highlights and the most-recent-papers feed below them are
+          deduplicated within a single profile render: a paper that appears
+          as a Selected highlight is removed from the most-recent feed for
+          that page view, so the same paper is never shown twice on the same
+          profile.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          ReCiterAI scoring covers publications from 2020 onward only. Older
+          landmark publications still appear in the most-recent-papers feed
+          when they fall in the date window, but they cannot surface as a
+          Selected highlight because they sit before the scoring data floor.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          Citation export on profile pages currently supports Vancouver and
+          BibTeX. AMA, APA, and RIS are planned for a later phase.
+        </p>
+      </section>
+
+      <section id={METHODOLOGY_ANCHORS.eligibilityCarves} className="mt-12">
+        <h2 className="text-lg font-semibold">Who appears on algorithmic surfaces</h2>
+        <p className="mt-3 text-base">
+          Recent contributions on the home page and Top scholars on topic
+          pages are researcher-attributed surfaces. They show work by
+          scholars in active appointments at WCM in these roles:
+        </p>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>Full-time faculty</li>
+          <li>Postdoctoral associates and fellows</li>
+          <li>Clinical fellows</li>
+          <li>Doctoral students with active program enrollment</li>
+        </ul>
+        <p className="mt-3 text-base">
+          Voluntary, Adjunct, Courtesy, Instructor, Lecturer, and Emeritus
+          appointees do not appear on these two surfaces. They continue to
+          appear in all search results, profile pages, the A&ndash;Z
+          Directory on Browse, and department detail pages &mdash; the carve
+          only affects the algorithmic surfaces that highlight ongoing
+          research activity.
+        </p>
+        <p className="mt-3 text-base">
+          Top scholars on topic pages narrows further to Full-time faculty
+          only. It is a principal-investigator surface, intended to surface
+          the WCM faculty most actively driving work in a given research
+          area.
+        </p>
+      </section>
+
+      <section id={METHODOLOGY_ANCHORS.exclusions} className="mt-12">
+        <h2 className="text-lg font-semibold">Letters, editorials, and errata</h2>
+        <p className="mt-3 text-base">
+          Letters to the editor, editorials, commentaries, and errata are
+          hard-excluded from every algorithmic surface (weight = 0). They
+          still appear in the full publications list on a scholar&apos;s
+          profile and in publication search, but they cannot surface as
+          Recent contributions, Selected highlights, Recent highlights, or
+          count toward Top scholars rankings.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          The exclusion is applied at the publication-type level: any record
+          tagged as a letter, editorial, comment, news item, or erratum by
+          the upstream PubMed metadata is dropped before scoring.
+        </p>
+      </section>
+
+      <section id={METHODOLOGY_ANCHORS.dataCadence} className="mt-12">
+        <h2 className="text-lg font-semibold">Data refresh cadence</h2>
+        <p className="mt-3 text-base">
+          Source-system data refreshes daily. The ETL chain runs in a fixed
+          order &mdash; Employee Directory, ASMS, InfoEd, ReCiter publication
+          records, and Conflict-of-Interest disclosures &mdash; with an
+          ED-first abort cascade so a downstream failure never replaces good
+          data with stale data.
+        </p>
+        <p className="mt-3 text-base">
+          ReCiterAI publication scores and topic assignments refresh weekly.
+          The algorithmic surfaces on the home page and topic pages use the
+          latest weekly score snapshot; rankings can shift week-over-week as
+          new publications enter the corpus and recency weights advance.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          Self-edit overrides on a scholar&apos;s overview write through
+          immediately and bypass the daily cadence: the public profile
+          reflects the change within seconds of save.
+        </p>
+      </section>
+
       <section className="mt-12">
         <h2 className="text-lg font-semibold">
           A note on authorship weight (co-corresponding author limitation)
