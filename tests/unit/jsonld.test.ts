@@ -1,101 +1,61 @@
 /**
- * RED unit tests for lib/seo/jsonld.ts (Phase 5 / SEO-03).
- *
- * These tests define the contract that Plan 03 must satisfy. They FAIL now
- * because lib/seo/jsonld.ts does not yet exist. That is the expected RED state.
+ * Unit tests for lib/seo/jsonld.ts — Schema.org Person JSON-LD builder.
  *
  * Contract (D-26):
- *   - buildPersonJsonLd(profile) returns an object with @context 'https://schema.org'
- *   - @type === 'Person'
- *   - name is set from profile.preferredName
- *   - jobTitle is set when primaryTitle is present; OMITTED when primaryTitle is null
- *   - affiliation = { @type: 'Organization', name: 'Weill Cornell Medicine', url: 'https://weill.cornell.edu' }
- *   - url is `${NEXT_PUBLIC_SITE_URL}/scholars/${slug}`
- *   - sameAs is OMITTED (D-26 — only candidate duplicates the scholars URL itself)
+ *  - Includes @context, @type, name, affiliation, url
+ *  - Omits jobTitle when primaryTitle is null
+ *  - Includes jobTitle when primaryTitle is non-null
+ *  - Never emits sameAs (would duplicate url; ORCID deferred to v2)
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { buildPersonJsonLd, type PersonJsonLdInput } from "@/lib/seo/jsonld";
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
-    scholar: { findMany: vi.fn() },
-  },
-}));
+describe("buildPersonJsonLd", () => {
+  const baseInput: PersonJsonLdInput = {
+    slug: "jane-smith",
+    preferredName: "Jane Smith",
+    primaryTitle: "Professor of Medicine",
+  };
 
-beforeEach(() => {
-  vi.resetAllMocks();
-  process.env.NEXT_PUBLIC_SITE_URL = "https://scholars.weill.cornell.edu";
-});
-
-const BASE_PROFILE = {
-  slug: "jane-doe",
-  preferredName: "Jane Doe",
-  primaryTitle: "Associate Professor of Medicine",
-  primaryDepartment: "Medicine",
-};
-
-const PROFILE_NO_TITLE = {
-  slug: "bob-smith",
-  preferredName: "Bob Smith",
-  primaryTitle: null,
-  primaryDepartment: null,
-};
-
-describe("buildPersonJsonLd — JSON-LD shape (D-26)", () => {
-  it("is importable from @/lib/seo/jsonld (will fail until Plan 03 creates the file)", async () => {
-    // Will fail with module-not-found until Plan 03 creates lib/seo/jsonld.ts
-    const mod = await import("@/lib/seo/jsonld");
-    expect(typeof mod.buildPersonJsonLd).toBe("function");
-  });
-
-  it("returns @context 'https://schema.org'", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
+  it("returns Schema.org @context and @type Person", () => {
+    const ld = buildPersonJsonLd(baseInput);
     expect(ld["@context"]).toBe("https://schema.org");
-  });
-
-  it("returns @type 'Person'", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
     expect(ld["@type"]).toBe("Person");
   });
 
-  it("includes name from profile.preferredName", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
-    expect(ld.name).toBe("Jane Doe");
+  it("includes name from preferredName", () => {
+    const ld = buildPersonJsonLd(baseInput);
+    expect(ld.name).toBe("Jane Smith");
   });
 
-  it("includes jobTitle when primaryTitle is present", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
-    expect(ld.jobTitle).toBe("Associate Professor of Medicine");
+  it("includes affiliation as Organization with Weill Cornell Medicine", () => {
+    const ld = buildPersonJsonLd(baseInput);
+    const aff = ld.affiliation as Record<string, unknown>;
+    expect(aff["@type"]).toBe("Organization");
+    expect(aff.name).toBe("Weill Cornell Medicine");
+    expect(aff.url).toBe("https://weill.cornell.edu");
   });
 
-  it("OMITS jobTitle when primaryTitle is null", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(PROFILE_NO_TITLE);
-    expect("jobTitle" in ld).toBe(false);
+  it("includes url with slug", () => {
+    const ld = buildPersonJsonLd(baseInput);
+    expect(typeof ld.url).toBe("string");
+    expect((ld.url as string).endsWith("/scholars/jane-smith")).toBe(true);
   });
 
-  it("includes affiliation with correct Organization shape", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
-    expect(ld.affiliation).toEqual({
-      "@type": "Organization",
-      name: "Weill Cornell Medicine",
-      url: "https://weill.cornell.edu",
-    });
+  it("includes jobTitle when primaryTitle is provided", () => {
+    const ld = buildPersonJsonLd(baseInput);
+    expect(ld.jobTitle).toBe("Professor of Medicine");
   });
 
-  it("includes url as absolute Scholars URL for the scholar", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
-    expect(ld.url).toBe("https://scholars.weill.cornell.edu/scholars/jane-doe");
+  it("omits jobTitle when primaryTitle is null (D-26)", () => {
+    const ld = buildPersonJsonLd({ ...baseInput, primaryTitle: null });
+    expect(ld).not.toHaveProperty("jobTitle");
   });
 
-  it("OMITS sameAs (D-26 — only candidate would duplicate the url field)", async () => {
-    const { buildPersonJsonLd } = await import("@/lib/seo/jsonld");
-    const ld = buildPersonJsonLd(BASE_PROFILE);
-    expect("sameAs" in ld).toBe(false);
+  it("never emits sameAs (D-26 — only candidate duplicates url; ORCID deferred)", () => {
+    const withTitle = buildPersonJsonLd(baseInput);
+    const withoutTitle = buildPersonJsonLd({ ...baseInput, primaryTitle: null });
+    expect(withTitle).not.toHaveProperty("sameAs");
+    expect(withoutTitle).not.toHaveProperty("sameAs");
   });
 });

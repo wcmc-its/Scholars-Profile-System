@@ -14,8 +14,9 @@ export async function generateMetadata({
   const dept = await getDepartment(slug).catch(() => null);
   if (!dept) return { title: "Department not found" };
   return {
-    title: `${dept.dept.name} — Scholars at WCM`,
-    description: `Scholars and divisions in the ${dept.dept.name} at Weill Cornell Medicine.`,
+    title: `${dept.dept.name}`,
+    description: `Faculty, publications, and research from ${dept.dept.name} at Weill Cornell Medicine — ${dept.stats.scholars} scholars.`,
+    alternates: { canonical: `/departments/${slug}` },
   };
 }
 

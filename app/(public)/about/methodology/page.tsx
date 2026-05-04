@@ -1,12 +1,14 @@
+import type { Metadata } from "next";
 import { METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 
 export const dynamic = "force-static";
 export const revalidate = false;
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "How algorithmic surfaces work — Scholars at WCM",
   description:
     "Plain-English explanation of how Scholars ranks publications and surfaces faculty work, with formula, eligibility carves, and recency curves.",
+  alternates: { canonical: "/about/methodology" },
 };
 
 export default function MethodologyPage() {

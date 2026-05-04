@@ -18,6 +18,7 @@ export async function generateMetadata({
   return {
     title: `${division.name} — ${dept.dept.name} — Scholars at WCM`,
     description: `Scholars in the ${division.name} division of the ${dept.dept.name} at Weill Cornell Medicine.`,
+    alternates: { canonical: `/departments/${slug}` }, // D-17: canonical points to parent dept, not division URL
   };
 }
 

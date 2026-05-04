@@ -31,9 +31,11 @@ export async function generateMetadata({
   const { slug } = await params;
   const topic = await getTopic(slug).catch(() => null);
   if (!topic) return { title: "Topic not found" };
+  const scholarCount = await getDistinctScholarCountForTopic(slug).catch(() => 0);
   return {
-    title: `${topic.label} — Scholars at WCM`,
-    description: `Top scholars and recent publications in ${topic.label} at Weill Cornell Medicine.`,
+    title: `${topic.label} Research`,
+    description: `Explore WCM researchers and publications in ${topic.label} — ${scholarCount} scholars.`,
+    alternates: { canonical: `/topics/${slug}` },
   };
 }
 
