@@ -5,6 +5,8 @@
  * /#research-areas because /topics listing does not exist
  * (RESEARCH.md Pitfall 3).
  */
+import Link from "next/link";
+
 export function BrowseAnchorStrip() {
   const anchorClass =
     "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors hover:bg-accent text-foreground";
@@ -24,12 +26,12 @@ export function BrowseAnchorStrip() {
           A&ndash;Z Directory
         </a>
       </div>
-      <a
+      <Link
         href="/#research-areas"
         className="text-sm text-[var(--color-accent-slate)] hover:underline"
       >
         Research areas &#x2192;
-      </a>
+      </Link>
     </nav>
   );
 }
