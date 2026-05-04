@@ -87,16 +87,17 @@ async function main() {
   //    stale-cache rate exceeds threshold.
   console.log("\n=== Revalidate ISR caches ===");
   await revalidatePath("/");
+  // Single try/finally wraps both Prisma queries so $disconnect() is always
+  // called even if the topics query throws before reaching the depts block.
+  // WR-01: previously only the depts block had a finally; a topics-query
+  // failure left the connection open.
   try {
     const topics = await prisma.topic.findMany({ select: { id: true } });
     for (const t of topics) {
       await revalidatePath(`/topics/${t.id}`);
     }
     console.log(`[Revalidate] queued / + ${topics.length} topic page(s)`);
-  } catch (err) {
-    console.warn("[Revalidate] could not enumerate topics:", err);
-  }
-  try {
+
     const depts = await prisma.department.findMany({ select: { slug: true } });
     // Phase 4 — Browse hub aggregates department scholar counts; revalidate
     // alongside the per-department pages. Best-effort, same as below.
@@ -108,7 +109,7 @@ async function main() {
     }
     console.log(`[Revalidate] queued ${depts.length} department page(s)`);
   } catch (err) {
-    console.warn("[Revalidate] could not enumerate departments:", err);
+    console.warn("[Revalidate] could not enumerate paths:", err);
   } finally {
     await prisma.$disconnect();
   }
