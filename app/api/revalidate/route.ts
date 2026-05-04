@@ -12,7 +12,7 @@ import { revalidatePath } from "next/cache";
  *   - "/"                    home page
  *   - "/about"               about stub
  *   - "/about/methodology"   methodology page
- *   - "/scholars/{slug}"     profile page (slug = [a-zA-Z0-9][a-zA-Z0-9-]*)
+ *   - "/scholars/{slug}"     profile page (slug = [a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)
  *   - "/topics/{slug}"       topic detail / placeholder
  *
  * Auth: header `x-revalidate-token` must equal `process.env.SCHOLARS_REVALIDATE_TOKEN`.
@@ -31,10 +31,11 @@ const ALLOWED_EXACT = new Set<string>([
   "/browse", // Phase 4 — Browse hub ISR revalidation
 ]);
 
-// Slug = alnum start, then alnum + hyphen. No dots, no slashes, no whitespace.
+// Slug = alnum start, alnum end, hyphens only in interior. No dots, no
+// slashes, no whitespace, no trailing hyphens.
 // Anchored to prevent prefix-match attacks. Matches Next.js dynamic-segment
 // shape used by `/scholars/[slug]` and `/topics/[slug]`.
-const SLUG_RE_SOURCE = "[a-zA-Z0-9][a-zA-Z0-9-]*";
+const SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
 const ALLOWED_PATTERNS: RegExp[] = [
   new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/topics/${SLUG_RE_SOURCE}$`),
