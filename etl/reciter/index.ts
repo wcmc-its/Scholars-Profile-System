@@ -31,7 +31,7 @@
  *
  * Usage: `npm run etl:reciter`
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {

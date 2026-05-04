@@ -30,7 +30,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import { subtopicLabel } from "@/lib/subtopic";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai-chatbot";

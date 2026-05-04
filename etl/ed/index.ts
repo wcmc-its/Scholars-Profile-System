@@ -20,7 +20,7 @@
  *
  * Usage: `npm run etl:ed`
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
 import {

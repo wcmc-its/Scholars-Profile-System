@@ -16,7 +16,7 @@
  *
  * Usage: `npm run etl:asms`
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import { closeAsmsPool, getAsmsPool } from "@/lib/sources/mssql-asms";
 
 type EducationRow = {

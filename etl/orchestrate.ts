@@ -10,7 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { prisma } from "@/lib/db";
+import { prisma } from "../lib/db";
 
 type StepResult = { source: string; ok: boolean; durationMs: number; error?: string };
 

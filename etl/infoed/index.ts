@@ -22,7 +22,7 @@
  *
  * Usage: `npm run etl:infoed`
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 
 type GrantRow = {
