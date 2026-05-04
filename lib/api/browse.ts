@@ -142,11 +142,17 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
 
   return Array.from(bucketMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([letter, all]) => ({
-      letter,
-      count: all.length,
-      scholars: all.slice(0, 10),
-    }));
+    .map(([letter, all]) => {
+      // Sort by the display key ("LastName, GivenName") so the top-10 cap
+      // always takes the alphabetically first 10 scholars within each letter,
+      // not the first 10 by Prisma's preferredName ordering. CR-02.
+      const sorted = all.slice().sort((a, b) => a.name.localeCompare(b.name));
+      return {
+        letter,
+        count: all.length,
+        scholars: sorted.slice(0, 10),
+      };
+    });
 }
 
 export async function getBrowseData(): Promise<BrowseData> {
