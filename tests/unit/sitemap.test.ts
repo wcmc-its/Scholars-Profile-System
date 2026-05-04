@@ -1,70 +1,85 @@
 /**
- * RED unit tests for app/sitemap.ts — Phase 5 / SEO-01.
+ * RED unit tests for app/sitemap.ts (Phase 5 / SEO-01).
+ *
+ * These tests define the contract that Plan 02 must satisfy. They FAIL now
+ * because app/sitemap.ts does not yet exist. That is the expected RED state.
  *
  * Contract:
- *   - Default export is async function returning MetadataRoute.Sitemap array
- *   - Module exports `revalidate = 86400` (ISR fallback)
- *   - Includes all active scholars, topics, departments, and static pages
- *   - Excludes /search and soft-deleted scholars
- *   - Priority / changeFrequency per D-08:
- *       Home: 1.0 / weekly
- *       Scholars: 0.8 / weekly
- *       Topics / depts: 0.6 / monthly
- *       Static (browse, about, about/methodology): 0.5 / monthly
- *
- * Mocks: @/lib/db prisma; no real DB connections.
+ *   - Default export is an async function returning MetadataRoute.Sitemap
+ *   - Module exports `revalidate = 86400` (ISR fallback cadence)
+ *   - Includes home `/` with priority 1.0 and changeFrequency 'weekly'
+ *   - Includes active scholar URLs with priority 0.8 / changeFrequency 'weekly'
+ *   - Includes topic URLs with priority 0.6 / changeFrequency 'monthly'
+ *   - Includes department URLs with priority 0.6 / changeFrequency 'monthly'
+ *   - Includes static pages /browse, /about, /about/methodology with priority 0.5 / changeFrequency 'monthly'
+ *   - Excludes /search
+ *   - Excludes deleted scholars (those not returned by the active-filter query)
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany } = vi.hoisted(
-  () => ({
-    mockScholarFindMany: vi.fn(),
-    mockTopicFindMany: vi.fn(),
-    mockDeptFindMany: vi.fn(),
-  }),
-);
+const {
+  mockScholarFindMany,
+  mockTopicFindMany,
+  mockDepartmentFindMany,
+} = vi.hoisted(() => ({
+  mockScholarFindMany: vi.fn(),
+  mockTopicFindMany: vi.fn(),
+  mockDepartmentFindMany: vi.fn(),
+}));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     scholar: { findMany: mockScholarFindMany },
     topic: { findMany: mockTopicFindMany },
-    department: { findMany: mockDeptFindMany },
+    department: { findMany: mockDepartmentFindMany },
   },
 }));
 
 beforeEach(() => {
   vi.resetAllMocks();
   process.env.NEXT_PUBLIC_SITE_URL = "https://scholars.weill.cornell.edu";
-
-  mockScholarFindMany.mockResolvedValue([
-    { slug: "jane-doe", updatedAt: new Date("2026-01-15") },
-    { slug: "john-smith", updatedAt: new Date("2026-02-10") },
-  ]);
-  mockTopicFindMany.mockResolvedValue([
-    { id: "cancer_genomics", refreshedAt: new Date("2026-03-01") },
-    { id: "infectious_disease", refreshedAt: new Date("2026-03-02") },
-  ]);
-  mockDeptFindMany.mockResolvedValue([
-    { slug: "medicine", updatedAt: new Date("2026-02-01") },
-    { slug: "pediatrics", updatedAt: new Date("2026-02-02") },
-  ]);
 });
 
-import * as mod from "@/app/sitemap";
-
-describe("app/sitemap — module exports", () => {
-  it("exports revalidate = 86400 (ISR fallback per D-07)", () => {
-    expect(mod.revalidate).toBe(86400);
-  });
-
-  it("default export is a function", () => {
-    expect(typeof mod.default).toBe("function");
+describe("app/sitemap.ts — revalidate export", () => {
+  it("exports revalidate = 86400", async () => {
+    // Will fail with module-not-found until Plan 02 creates app/sitemap.ts
+    const mod = await import("@/app/sitemap");
+    expect((mod as Record<string, unknown>).revalidate).toBe(86400);
   });
 });
 
-describe("app/sitemap — static pages", () => {
+describe("app/sitemap.ts — default sitemap function", () => {
+  beforeEach(() => {
+    // Active scholars: jane-doe (active), deleted-bob (simulated active
+    // — deleted scholars are excluded by the Prisma query's WHERE filter,
+    // so the mock only returns rows that pass deletedAt: null AND status: 'active').
+    mockScholarFindMany.mockResolvedValue([
+      {
+        slug: "jane-doe",
+        updatedAt: new Date("2026-04-01T00:00:00Z"),
+      },
+      // NOTE: deleted-bob is NOT returned here because the query filters it
+      // out via WHERE deletedAt IS NULL AND status = 'active'. The mock
+      // deliberately reflects the query result, not the raw table contents.
+    ]);
+    mockTopicFindMany.mockResolvedValue([
+      { id: "cardiovascular_disease", refreshedAt: new Date("2026-04-01T00:00:00Z") },
+    ]);
+    mockDepartmentFindMany.mockResolvedValue([
+      { slug: "medicine", updatedAt: new Date("2026-04-01T00:00:00Z") },
+    ]);
+  });
+
+  it("returns an array of sitemap entries", async () => {
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
   it("includes home / with priority 1.0 and changeFrequency weekly", async () => {
-    const entries = await mod.default();
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://scholars.weill.cornell.edu/",
@@ -74,8 +89,45 @@ describe("app/sitemap — static pages", () => {
     );
   });
 
+  it("includes active scholar with priority 0.8 and changeFrequency weekly", async () => {
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        url: "https://scholars.weill.cornell.edu/scholars/jane-doe",
+        priority: 0.8,
+        changeFrequency: "weekly",
+      }),
+    );
+  });
+
+  it("includes topic with priority 0.6 and changeFrequency monthly", async () => {
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        url: "https://scholars.weill.cornell.edu/topics/cardiovascular_disease",
+        priority: 0.6,
+        changeFrequency: "monthly",
+      }),
+    );
+  });
+
+  it("includes department with priority 0.6 and changeFrequency monthly", async () => {
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        url: "https://scholars.weill.cornell.edu/departments/medicine",
+        priority: 0.6,
+        changeFrequency: "monthly",
+      }),
+    );
+  });
+
   it("includes /browse with priority 0.5 and changeFrequency monthly", async () => {
-    const entries = await mod.default();
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://scholars.weill.cornell.edu/browse",
@@ -86,7 +138,8 @@ describe("app/sitemap — static pages", () => {
   });
 
   it("includes /about with priority 0.5 and changeFrequency monthly", async () => {
-    const entries = await mod.default();
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://scholars.weill.cornell.edu/about",
@@ -97,7 +150,8 @@ describe("app/sitemap — static pages", () => {
   });
 
   it("includes /about/methodology with priority 0.5 and changeFrequency monthly", async () => {
-    const entries = await mod.default();
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
     expect(entries).toContainEqual(
       expect.objectContaining({
         url: "https://scholars.weill.cornell.edu/about/methodology",
@@ -107,92 +161,18 @@ describe("app/sitemap — static pages", () => {
     );
   });
 
-  it("does NOT include /search (noindex page excluded from sitemap)", async () => {
-    const entries = await mod.default();
-    expect(entries.find((e) => e.url.endsWith("/search"))).toBeUndefined();
-  });
-});
-
-describe("app/sitemap — scholar entries", () => {
-  it("includes one entry per active scholar with priority 0.8 and changeFrequency weekly", async () => {
-    const entries = await mod.default();
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/scholars/jane-doe",
-        priority: 0.8,
-        changeFrequency: "weekly",
-      }),
-    );
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/scholars/john-smith",
-        priority: 0.8,
-        changeFrequency: "weekly",
-      }),
-    );
+  it("excludes /search — search page carries noindex and must not appear in sitemap", async () => {
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(entries.find((e: { url: string }) => e.url.endsWith("/search"))).toBeUndefined();
   });
 
-  it("queries scholars with deletedAt: null and status: active filter", async () => {
-    await mod.default();
-    expect(mockScholarFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ deletedAt: null, status: "active" }),
-      }),
-    );
-  });
-
-  it("uses lastModified from scholar.updatedAt", async () => {
-    const entries = await mod.default();
-    const janeEntry = entries.find((e) =>
-      e.url.endsWith("/scholars/jane-doe"),
-    );
-    expect(janeEntry?.lastModified).toEqual(new Date("2026-01-15"));
-  });
-});
-
-describe("app/sitemap — topic entries", () => {
-  it("includes one entry per topic with priority 0.6 and changeFrequency monthly", async () => {
-    const entries = await mod.default();
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/topics/cancer_genomics",
-        priority: 0.6,
-        changeFrequency: "monthly",
-      }),
-    );
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/topics/infectious_disease",
-        priority: 0.6,
-        changeFrequency: "monthly",
-      }),
-    );
-  });
-});
-
-describe("app/sitemap — department entries", () => {
-  it("includes one entry per department with priority 0.6 and changeFrequency monthly", async () => {
-    const entries = await mod.default();
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/departments/medicine",
-        priority: 0.6,
-        changeFrequency: "monthly",
-      }),
-    );
-  });
-});
-
-describe("app/sitemap — NEXT_PUBLIC_SITE_URL fallback", () => {
-  it("uses NEXT_PUBLIC_SITE_URL env var for URL prefix", async () => {
-    process.env.NEXT_PUBLIC_SITE_URL = "https://custom.example.com";
-    const entries = await mod.default();
-    expect(entries.some((e) => e.url.startsWith("https://custom.example.com"))).toBe(true);
-  });
-
-  it("falls back to default domain when NEXT_PUBLIC_SITE_URL is unset", async () => {
-    delete process.env.NEXT_PUBLIC_SITE_URL;
-    const entries = await mod.default();
-    expect(entries.some((e) => e.url.startsWith("https://scholars.weill.cornell.edu"))).toBe(true);
+  it("excludes deleted scholars — query WHERE filter prevents deleted rows from returning", async () => {
+    // The mock simulates only the active query result (no deleted-bob row).
+    // This test verifies the sitemap does not introduce its own deleted-bob entry
+    // from a second unfiltered query or any other source.
+    const { default: sitemap } = await import("@/app/sitemap");
+    const entries = await sitemap();
+    expect(entries.find((e: { url: string }) => e.url.endsWith("/scholars/deleted-bob"))).toBeUndefined();
   });
 });

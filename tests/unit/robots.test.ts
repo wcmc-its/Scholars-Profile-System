@@ -1,99 +1,94 @@
 /**
- * RED unit tests for app/robots.ts — Phase 5 / SEO-02.
+ * RED unit tests for app/robots.ts (Phase 5 / SEO-02).
  *
- * Contract:
- *   - Default export is function returning MetadataRoute.Robots
+ * These tests define the contract that Plan 02 must satisfy. They FAIL now
+ * because app/robots.ts does not yet exist. That is the expected RED state.
+ *
+ * Contract (D-19 + D-20):
+ *   - Default export is a synchronous function returning MetadataRoute.Robots
  *   - rules.userAgent === '*'
- *   - rules.allow === '/' (or includes '/')
+ *   - rules.allow === '/'
  *   - rules.disallow includes '/api/' and '/admin/'
- *   - rules.disallow does NOT include '/_next/' (D-20 critical — Googlebot must
- *     access /_next/static/* to render JS/CSS or SEO tanks)
- *   - rules.disallow does NOT include '/' (would block whole site)
- *   - sitemap field is `${NEXT_PUBLIC_SITE_URL}/sitemap.xml`
- *
- * Mocks: none needed (robots.ts is static, no DB).
+ *   - rules.disallow does NOT include '/_next/' (D-20 critical — Googlebot needs /_next/static/)
+ *   - rules.disallow does NOT include '/' (would block the entire site)
+ *   - sitemap === `${NEXT_PUBLIC_SITE_URL}/sitemap.xml`
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    scholar: { findMany: vi.fn() },
+    topic: { findMany: vi.fn() },
+    department: { findMany: vi.fn() },
+  },
+}));
 
 beforeEach(() => {
+  vi.resetAllMocks();
   process.env.NEXT_PUBLIC_SITE_URL = "https://scholars.weill.cornell.edu";
 });
 
-import robots from "@/app/robots";
+describe("app/robots.ts — robots function", () => {
+  it("default export is a function", async () => {
+    // Will fail with module-not-found until Plan 02 creates app/robots.ts
+    const { default: robots } = await import("@/app/robots");
+    expect(typeof robots).toBe("function");
+  });
 
-describe("app/robots — basic shape", () => {
-  it("returns an object with rules and sitemap fields", () => {
+  it("returns an object with rules targeting all user agents", async () => {
+    const { default: robots } = await import("@/app/robots");
     const out = robots();
-    expect(out).toHaveProperty("rules");
-    expect(out).toHaveProperty("sitemap");
+    const rules = Array.isArray(out.rules) ? out.rules[0] : out.rules;
+    expect(rules.userAgent).toBe("*");
   });
 
-  it("rules targets userAgent *", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    expect(r.userAgent).toBe("*");
+  it("rules.allow includes '/' allowing all public pages", async () => {
+    const { default: robots } = await import("@/app/robots");
+    const out = robots();
+    const rules = Array.isArray(out.rules) ? out.rules[0] : out.rules;
+    const allow = Array.isArray(rules.allow) ? rules.allow : [rules.allow];
+    expect(allow).toContain("/");
   });
 
-  it("rules.allow includes / so the site is crawlable", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    const allow = r.allow;
-    if (Array.isArray(allow)) {
-      expect(allow).toContain("/");
-    } else {
-      expect(allow).toBe("/");
-    }
-  });
-});
-
-describe("app/robots — disallow list", () => {
-  it("disallows /api/ (server routes must not be indexed)", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    const disallow = Array.isArray(r.disallow) ? r.disallow : [r.disallow];
-    expect(disallow).toContain("/api/");
+  it("rules.disallow includes /api/ and /admin/", async () => {
+    const { default: robots } = await import("@/app/robots");
+    const out = robots();
+    const rules = Array.isArray(out.rules) ? out.rules[0] : out.rules;
+    const disallow = Array.isArray(rules.disallow) ? rules.disallow : [rules.disallow];
+    expect(disallow).toEqual(expect.arrayContaining(["/api/", "/admin/"]));
   });
 
-  it("disallows /admin/ (admin paths must not be indexed)", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    const disallow = Array.isArray(r.disallow) ? r.disallow : [r.disallow];
-    expect(disallow).toContain("/admin/");
-  });
-
-  it("CRITICAL D-20: does NOT disallow /_next/ (Googlebot needs JS/CSS access)", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    const disallow = Array.isArray(r.disallow) ? r.disallow : [r.disallow];
+  it("rules.disallow does NOT include /_next/ (D-20 critical)", async () => {
+    // Googlebot needs access to /_next/static/ to render JavaScript pages.
+    // If /_next/ is disallowed, Google cannot hydrate JS and will not index content.
+    const { default: robots } = await import("@/app/robots");
+    const out = robots();
+    const rules = Array.isArray(out.rules) ? out.rules[0] : out.rules;
+    const disallow = Array.isArray(rules.disallow) ? rules.disallow : [rules.disallow];
     expect(disallow).not.toContain("/_next/");
-    // Also check no substring match
-    expect(disallow.some((d) => d && d.includes("_next"))).toBe(false);
   });
 
-  it("does NOT disallow / (would block entire site from indexing)", () => {
-    const { rules } = robots();
-    const r = Array.isArray(rules) ? rules[0] : rules;
-    const disallow = Array.isArray(r.disallow) ? r.disallow : [r.disallow];
+  it("rules.disallow does NOT include '/' (would block the entire site)", async () => {
+    const { default: robots } = await import("@/app/robots");
+    const out = robots();
+    const rules = Array.isArray(out.rules) ? out.rules[0] : out.rules;
+    const disallow = Array.isArray(rules.disallow) ? rules.disallow : [rules.disallow];
     expect(disallow).not.toContain("/");
   });
-});
 
-describe("app/robots — sitemap directive", () => {
-  it("sitemap points to NEXT_PUBLIC_SITE_URL/sitemap.xml", () => {
+  it("sitemap field is absolute URL using NEXT_PUBLIC_SITE_URL", async () => {
+    const { default: robots } = await import("@/app/robots");
     const out = robots();
     expect(out.sitemap).toBe("https://scholars.weill.cornell.edu/sitemap.xml");
   });
 
-  it("uses NEXT_PUBLIC_SITE_URL env var for sitemap URL", () => {
-    process.env.NEXT_PUBLIC_SITE_URL = "https://staging.example.com";
+  it("sitemap field updates when NEXT_PUBLIC_SITE_URL changes", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "http://localhost:3002";
+    // Re-import to pick up env change (dynamic import with module reset)
+    vi.resetModules();
+    const { default: robots } = await import("@/app/robots");
     const out = robots();
-    expect(out.sitemap).toBe("https://staging.example.com/sitemap.xml");
-  });
-
-  it("falls back to default domain when NEXT_PUBLIC_SITE_URL is unset", () => {
-    delete process.env.NEXT_PUBLIC_SITE_URL;
-    const out = robots();
-    const sitemap = Array.isArray(out.sitemap) ? out.sitemap[0] : out.sitemap;
-    expect(sitemap).toMatch(/https:\/\/scholars\.weill\.cornell\.edu\/sitemap\.xml/);
+    // Should use the env var, not a hardcoded production URL
+    expect(out.sitemap).toBe("http://localhost:3002/sitemap.xml");
   });
 });

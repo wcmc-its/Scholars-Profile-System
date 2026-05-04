@@ -282,6 +282,30 @@ export async function getActiveScholarSlugs(): Promise<string[]> {
 }
 
 /**
+ * Slim projection for OG image route (Phase 5 / SEO-03).
+ * Returns null for deleted or inactive scholars (404 from OG route).
+ * Used by app/og/scholars/[slug]/route.tsx — keep query minimal because
+ * route runs per social-share request.
+ */
+export async function getScholarOgData(slug: string): Promise<{
+  preferredName: string;
+  primaryTitle: string | null;
+  primaryDepartment: string | null;
+  slug: string;
+} | null> {
+  const row = await prisma.scholar.findFirst({
+    where: { slug, deletedAt: null, status: "active" },
+    select: {
+      slug: true,
+      preferredName: true,
+      primaryTitle: true,
+      primaryDepartment: true,
+    },
+  });
+  return row ?? null;
+}
+
+/**
  * Spec line 134-136 sparse-profile threshold:
  *   no overview AND fewer than 3 publications AND no active grants
  * Returns true when the "This profile is being populated" affordance should display.
