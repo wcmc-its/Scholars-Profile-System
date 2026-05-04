@@ -125,11 +125,24 @@ async function main() {
  * (T-02-09-01); base URL defaults to localhost for the prototype but is
  * overridable via SCHOLARS_BASE_URL for AWS deployment.
  */
+const ALLOWED_BASE_ORIGINS = [
+  "http://localhost:3000",
+  "https://scholars.weill.cornell.edu",
+];
+
 async function revalidatePath(p: string): Promise<void> {
   const token = process.env.SCHOLARS_REVALIDATE_TOKEN;
   const baseUrl = process.env.SCHOLARS_BASE_URL ?? "http://localhost:3000";
   if (!token) {
     console.warn(`[Revalidate] SCHOLARS_REVALIDATE_TOKEN unset; skipping ${p}`);
+    return;
+  }
+  // WR-02: validate baseUrl against known origins to prevent token exfiltration
+  // if SCHOLARS_BASE_URL is misconfigured or injected.
+  if (!ALLOWED_BASE_ORIGINS.some((o) => baseUrl.startsWith(o))) {
+    console.warn(
+      `[Revalidate] SCHOLARS_BASE_URL "${baseUrl}" not in allowed list; skipping ${p}`,
+    );
     return;
   }
   try {
