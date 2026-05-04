@@ -43,6 +43,9 @@ data/
 *.csv
 seed-output/
 
+# Phase 5 — VIVO redirect map output (contains CWIDs, never commit)
+etl/vivo-redirect/output/
+
 # editor
 .vscode/
 .idea/
