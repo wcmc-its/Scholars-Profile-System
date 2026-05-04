@@ -45,8 +45,23 @@ export async function GET() {
   }
 
   const allFresh = out.every((s) => s.fresh);
+
+  // Phase 6 ANALYTICS-03 / D-09 — surface latest completeness snapshot.
+  // Returns null when no snapshot exists yet (distinguishes "not yet
+  // computed" from "computed at 0%"). Status code semantics unchanged —
+  // completeness does NOT gate fresh/stale 200/503; CloudWatch reads the
+  // boolean to drive its own alarm.
+  const latestSnapshot = await prisma.completenessSnapshot.findFirst({
+    orderBy: { snapshotAt: "desc" },
+  });
+
   return NextResponse.json(
-    { allFresh, sources: out },
+    {
+      allFresh,
+      sources: out,
+      completenessPercent: latestSnapshot?.completenessPercent ?? null,
+      belowThreshold: latestSnapshot?.belowThreshold ?? null,
+    },
     { status: allFresh ? 200 : 503 },
   );
 }
