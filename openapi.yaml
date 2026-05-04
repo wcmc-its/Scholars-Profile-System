@@ -1,0 +1,684 @@
+openapi: "3.1.0"
+info:
+  title: Scholars Profile System API
+  version: "1.0.0"
+  description: |
+    Public read API for Weill Cornell Medicine faculty scholar profiles.
+
+    This document covers READ endpoints only. Write endpoints (self-edit,
+    revalidation, analytics beacon) are deferred to DOCS-03 (Phase 7)
+    and the runtime architecture decisions are documented in
+    `docs/ADR-001-runtime-dal-vs-etl-transform.md`.
+  contact:
+    name: Scholars Profile System
+    url: https://scholars.weill.cornell.edu
+  license:
+    name: Internal — Weill Cornell Medicine
+    url: https://scholars.weill.cornell.edu/about
+
+security: []
+
+servers:
+  - url: https://scholars.weill.cornell.edu
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+paths:
+  /api/scholars/{cwid}:
+    get:
+      operationId: getScholarByCwid
+      summary: Get scholar profile by CWID
+      description: |
+        Returns the full public profile payload for a scholar identified by CWID.
+        Excludes soft-deleted and suppressed scholars. Returns 404 if the scholar
+        is not found, is deleted, or is inactive.
+      parameters:
+        - name: cwid
+          in: path
+          required: true
+          description: Weill Cornell institutional identifier for the scholar.
+          schema:
+            type: string
+            example: "abc1234"
+      responses:
+        "200":
+          description: Scholar profile found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScholarPayload"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/search:
+    get:
+      operationId: searchScholars
+      summary: Search people and publications
+      description: |
+        Full-text search across WCM faculty (people) or their publications.
+        The response shape depends on the `type` query parameter:
+        - `type=people` → `PeopleSearchResult`
+        - `type=publications` → `PublicationsSearchResult`
+
+        Per-field boost order: Name 10× / AOI 6× / Title 4× / Department 3× /
+        Overview 2× / Pub titles 1× / MeSH 0.5×.
+
+        Returns 400 if `topic` is provided but does not match a known topic slug.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Search query string. Empty string or omitted returns all results.
+          schema:
+            type: string
+            default: ""
+        - name: type
+          in: query
+          required: false
+          description: Result set type — people or publications.
+          schema:
+            type: string
+            enum: [people, publications]
+            default: people
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index. Default 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: sort
+          in: query
+          required: false
+          description: |
+            Sort order. Valid values depend on `type`:
+            - For `type=people`: relevance | lastname | recentPub
+            - For `type=publications`: relevance | year | citations
+          schema:
+            type: string
+        - name: department
+          in: query
+          required: false
+          description: Filter people results to this department name.
+          schema:
+            type: string
+        - name: personType
+          in: query
+          required: false
+          description: Filter people results to this person type (e.g., Faculty, Postdoc).
+          schema:
+            type: string
+        - name: hasActiveGrants
+          in: query
+          required: false
+          description: If true, filter to scholars with active grants only (people search).
+          schema:
+            type: boolean
+        - name: includeIncomplete
+          in: query
+          required: false
+          description: If true, include sparse/incomplete profiles in people results. Default false.
+          schema:
+            type: boolean
+        - name: topic
+          in: query
+          required: false
+          description: |
+            Filter people results to scholars attributed to this topic slug.
+            Returns 400 if the slug does not match a known topic.
+          schema:
+            type: string
+        - name: yearMin
+          in: query
+          required: false
+          description: Minimum publication year filter (publications search only).
+          schema:
+            type: integer
+        - name: yearMax
+          in: query
+          required: false
+          description: Maximum publication year filter (publications search only).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Search results. Shape depends on `type` query parameter.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/PeopleSearchResult"
+                  - $ref: "#/components/schemas/PublicationsSearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/search/suggest:
+    get:
+      operationId: suggestScholarNames
+      summary: Autocomplete scholar name suggestions
+      description: |
+        Returns name suggestions for autocomplete UI. Triggered after 2+ characters.
+        Returns up to 10 suggestions matching the query against scholar preferred names.
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Partial name string to match against.
+          schema:
+            type: string
+            default: ""
+      responses:
+        "200":
+          description: List of name suggestions with their profile slugs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestResponse"
+
+  /api/topics/{slug}/publications:
+    get:
+      operationId: getTopicPublications
+      summary: Get publications for a research topic
+      description: |
+        Returns a paginated feed of publications attributed to the given topic.
+        Supports multiple sort modes and a research-articles-only filter.
+        Hard-excludes Letters, Editorial Articles, and Errata from all result sets.
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          description: Topic identifier slug (e.g., "oncology", "genomics").
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: sort
+          in: query
+          required: false
+          description: |
+            Sort mode:
+            - `newest` — most recent publications first (default)
+            - `most_cited` — highest citation count first
+            - `by_impact` — Variant B multiplicative impact score
+            - `curated` — ReCiterAI-curated order (same formula as `by_impact`)
+          schema:
+            type: string
+            enum: [newest, most_cited, by_impact, curated]
+            default: newest
+        - name: filter
+          in: query
+          required: false
+          description: |
+            Publication type filter:
+            - `research_articles_only` — excludes Letters, Editorial Articles, Errata (default)
+            - `all` — includes all publication types
+          schema:
+            type: string
+            enum: [research_articles_only, all]
+            default: research_articles_only
+      responses:
+        "200":
+          description: Paginated topic publication feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopicPublicationsResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/health/refresh-status:
+    get:
+      operationId: getRefreshStatus
+      summary: Get ETL refresh health status
+      description: |
+        Returns the freshness status of all six ETL data sources and the latest
+        profile completeness snapshot. Returns HTTP 200 when all sources are fresh
+        (last successful run within 26 hours), HTTP 503 otherwise.
+
+        The `completenessPercent` and `belowThreshold` fields are null before
+        the first weekly completeness snapshot has been computed.
+      responses:
+        "200":
+          description: All ETL sources are fresh.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: One or more ETL sources are stale.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+components:
+  schemas:
+    ScholarPayload:
+      type: object
+      required:
+        - cwid
+        - slug
+        - preferredName
+        - fullName
+        - identityImageEndpoint
+        - appointments
+      properties:
+        cwid:
+          type: string
+          description: Weill Cornell institutional identifier.
+          example: "abc1234"
+        slug:
+          type: string
+          description: URL-safe slug derived from the scholar's preferred name.
+          example: "jane-doe"
+        preferredName:
+          type: string
+          description: Scholar's preferred display name.
+        fullName:
+          type: string
+          description: Scholar's full legal name.
+        primaryTitle:
+          type: ["string", "null"]
+          description: Primary academic or clinical title.
+        primaryDepartment:
+          type: ["string", "null"]
+          description: Primary department affiliation.
+        email:
+          type: ["string", "null"]
+          description: Institutional email address.
+        overview:
+          type: ["string", "null"]
+          description: Biographical overview or research summary text.
+        identityImageEndpoint:
+          type: string
+          description: WCM directory headshot URL derived from CWID. Browser falls back to a generic headshot if the URL returns 404.
+        appointments:
+          type: array
+          description: Academic and clinical appointment history.
+          items:
+            $ref: "#/components/schemas/ScholarAppointment"
+
+    ScholarAppointment:
+      type: object
+      required:
+        - title
+        - organization
+        - isPrimary
+        - isInterim
+      properties:
+        title:
+          type: string
+          description: Appointment title.
+        organization:
+          type: string
+          description: Organization or institution name.
+        startDate:
+          type: ["string", "null"]
+          format: date
+          description: Appointment start date (ISO 8601 date).
+        endDate:
+          type: ["string", "null"]
+          format: date
+          description: Appointment end date (ISO 8601 date). Null for current appointments.
+        isPrimary:
+          type: boolean
+          description: True if this is the scholar's primary appointment.
+        isInterim:
+          type: boolean
+          description: True if this is an interim appointment.
+
+    PeopleHit:
+      type: object
+      required:
+        - cwid
+        - slug
+        - preferredName
+        - publicationCount
+        - hasActiveGrants
+        - identityImageEndpoint
+      properties:
+        cwid:
+          type: string
+          example: "abc1234"
+        slug:
+          type: string
+          example: "jane-doe"
+        preferredName:
+          type: string
+        primaryTitle:
+          type: ["string", "null"]
+        primaryDepartment:
+          type: ["string", "null"]
+        publicationCount:
+          type: integer
+          description: Total confirmed publication count for this scholar.
+        hasActiveGrants:
+          type: boolean
+          description: True if the scholar has at least one active grant.
+        identityImageEndpoint:
+          type: string
+          description: WCM directory headshot URL.
+        highlight:
+          type: array
+          description: Snippet text fragments matching the search query (optional, present when query matches).
+          items:
+            type: string
+
+    PublicationHit:
+      type: object
+      required:
+        - pmid
+        - title
+        - citationCount
+        - externalAuthors
+        - wcmAuthors
+      properties:
+        pmid:
+          type: string
+          description: PubMed identifier.
+        title:
+          type: string
+          description: Publication title.
+        journal:
+          type: ["string", "null"]
+          description: Journal name.
+        year:
+          type: ["integer", "null"]
+          description: Publication year.
+        publicationType:
+          type: ["string", "null"]
+          description: Publication type (e.g., "Journal Article", "Review").
+        citationCount:
+          type: integer
+          description: Citation count from ReciterDB.
+        doi:
+          type: ["string", "null"]
+          description: Digital Object Identifier.
+        pubmedUrl:
+          type: ["string", "null"]
+          description: Direct PubMed URL for the article.
+        wcmAuthors:
+          type: array
+          description: WCM-affiliated authors with profile links.
+          items:
+            $ref: "#/components/schemas/WcmAuthor"
+        externalAuthors:
+          type: string
+          description: Formatted string of non-WCM authors (Vancouver-style truncated list).
+
+    WcmAuthor:
+      type: object
+      required:
+        - cwid
+        - slug
+        - preferredName
+        - position
+      properties:
+        cwid:
+          type: string
+          example: "abc1234"
+        slug:
+          type: string
+          example: "jane-doe"
+        preferredName:
+          type: string
+        position:
+          type: integer
+          description: 1-based author position in the full author list.
+
+    SearchFacetBucket:
+      type: object
+      required:
+        - value
+        - count
+      properties:
+        value:
+          type: string
+          description: Facet value (e.g., department name or person type).
+        count:
+          type: integer
+          description: Number of results matching this facet value.
+
+    PeopleSearchResult:
+      type: object
+      required:
+        - hits
+        - total
+        - page
+        - pageSize
+        - facets
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PeopleHit"
+        total:
+          type: integer
+          description: Total number of matching scholars (before pagination).
+        page:
+          type: integer
+          description: Current zero-based page index.
+        pageSize:
+          type: integer
+          description: Number of results per page (fixed at 20).
+        facets:
+          type: object
+          required:
+            - departments
+            - personTypes
+          properties:
+            departments:
+              type: array
+              items:
+                $ref: "#/components/schemas/SearchFacetBucket"
+            personTypes:
+              type: array
+              items:
+                $ref: "#/components/schemas/SearchFacetBucket"
+
+    PublicationsSearchResult:
+      type: object
+      required:
+        - hits
+        - total
+        - page
+        - pageSize
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicationHit"
+        total:
+          type: integer
+          description: Total number of matching publications (before pagination).
+        page:
+          type: integer
+          description: Current zero-based page index.
+        pageSize:
+          type: integer
+          description: Number of results per page (fixed at 20).
+
+    SuggestResponse:
+      type: object
+      required:
+        - suggestions
+      properties:
+        suggestions:
+          type: array
+          description: Autocomplete name suggestions.
+          items:
+            type: object
+            required:
+              - text
+              - slug
+            properties:
+              text:
+                type: string
+                description: Scholar name as it should be displayed.
+              slug:
+                type: string
+                description: URL slug for the scholar's profile page.
+                example: "jane-doe"
+
+    TopicPublicationHit:
+      type: object
+      required:
+        - pmid
+        - title
+        - year
+        - authors
+      properties:
+        pmid:
+          type: string
+          description: PubMed identifier.
+        title:
+          type: string
+          description: Publication title.
+        journal:
+          type: ["string", "null"]
+          description: Journal name.
+        year:
+          type: integer
+          description: Publication year.
+        publicationType:
+          type: ["string", "null"]
+          description: Publication type.
+        citationCount:
+          type: ["integer", "null"]
+          description: Citation count. Null if not yet computed.
+        pubmedUrl:
+          type: ["string", "null"]
+          description: Direct PubMed URL.
+        doi:
+          type: ["string", "null"]
+          description: Digital Object Identifier.
+        authors:
+          type: array
+          description: Author list. WCM-affiliated authors include cwid and slug.
+          items:
+            $ref: "#/components/schemas/TopicAuthor"
+
+    TopicAuthor:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Author display name.
+        cwid:
+          type: string
+          description: WCM CWID if author is a WCM faculty member.
+        slug:
+          type: string
+          description: Profile slug if author is a WCM faculty member.
+
+    TopicPublicationsResult:
+      type: object
+      required:
+        - hits
+        - total
+        - page
+        - pageSize
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/TopicPublicationHit"
+        total:
+          type: integer
+          description: Total number of matching publications (before pagination).
+        page:
+          type: integer
+          description: Current zero-based page index.
+        pageSize:
+          type: integer
+          description: Number of results per page (fixed at 20).
+
+    HealthResponse:
+      type: object
+      required:
+        - allFresh
+        - sources
+      properties:
+        allFresh:
+          type: boolean
+          description: True when all ETL sources have run successfully within the past 26 hours.
+        completenessPercent:
+          type: ["number", "null"]
+          description: Latest weekly profile completeness percentage (0-100). Null before the first weekly snapshot has been computed.
+        belowThreshold:
+          type: ["boolean", "null"]
+          description: True when completenessPercent is below 70%. Null before the first weekly snapshot.
+        sources:
+          type: array
+          description: Per-source ETL freshness detail.
+          items:
+            $ref: "#/components/schemas/HealthSourceStatus"
+
+    HealthSourceStatus:
+      type: object
+      required:
+        - source
+        - fresh
+      properties:
+        source:
+          type: string
+          description: ETL data source identifier.
+          enum:
+            - ED
+            - ReCiter
+            - ASMS
+            - InfoEd
+            - COI
+            - ReCiterAI-projection
+            - OpenSearch-index
+        lastSuccessAt:
+          type: ["string", "null"]
+          format: date-time
+          description: ISO 8601 datetime of the last successful ETL run for this source.
+        hoursSinceSuccess:
+          type: ["number", "null"]
+          description: Hours elapsed since the last successful ETL run. Null if never run.
+        fresh:
+          type: boolean
+          description: True when the source has run successfully within the past 26 hours.
+        lastStatus:
+          type: ["string", "null"]
+          description: Status message from the most recent ETL run.
+        rowsProcessed:
+          type: ["integer", "null"]
+          description: Number of rows processed in the most recent ETL run.
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+          example: "Scholar not found"
+
+  responses:
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    BadRequest:
+      description: Invalid request parameters.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
