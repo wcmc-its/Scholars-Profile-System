@@ -380,3 +380,20 @@ model EtlRun {
   @@index([source, status, completedAt])
   @@map("etl_run")
 }
+
+/// Phase 6 ANALYTICS-03 — weekly profile completeness snapshot.
+/// One row per weekly cron run (D-03). Historical rows kept for trending.
+/// `belowThreshold` = true when completenessPercent < COMPLETENESS_THRESHOLD (70).
+/// Read by /api/health/refresh-status (latest row only) per D-09; the
+/// production CloudWatch alarm wires the boolean to PagerDuty.
+model CompletenessSnapshot {
+  id                  String   @id @default(uuid()) @db.VarChar(64)
+  snapshotAt          DateTime @default(now()) @map("snapshot_at")
+  totalScholars       Int      @map("total_scholars")
+  completeCount       Int      @map("complete_count")
+  completenessPercent Float    @map("completeness_percent")
+  belowThreshold      Boolean  @map("below_threshold")
+
+  @@index([snapshotAt(sort: Desc)])
+  @@map("completeness_snapshot")
+}

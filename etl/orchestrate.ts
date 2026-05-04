@@ -73,6 +73,23 @@ async function main() {
   //    index is rebuilt against whatever did succeed.
   results.push(await step("OpenSearch", "etl/search-index/index.ts"));
 
+  // Phase 6 ANALYTICS-03 / Pitfall 3 — completeness snapshot is best-effort.
+  // It runs after the OpenSearch reindex so the publication graph is fresh,
+  // but its failure NEVER affects the chain's exit code. The result is not
+  // appended to `results` so the `process.exit(results.some(r => !r.ok) ? 1 : 0)`
+  // logic at the bottom of `main` ignores completeness outcomes entirely.
+  try {
+    const completeness = await step("Completeness", "etl/completeness/index.ts");
+    if (!completeness.ok) {
+      console.warn(
+        "[Completeness] snapshot step failed (non-fatal):",
+        completeness.error,
+      );
+    }
+  } catch (err) {
+    console.warn("[Completeness] snapshot step threw (non-fatal):", err);
+  }
+
   // 4. ISR cache invalidation. Per ADR-008: profile, home, and topic pages are
   //    rendered with `export const revalidate` time-based ISR; on-demand
   //    revalidation is what actually keeps the cache fresh after an ETL run.
