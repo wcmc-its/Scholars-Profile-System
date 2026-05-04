@@ -14,6 +14,7 @@ import { revalidatePath } from "next/cache";
  *   - "/about/methodology"   methodology page
  *   - "/scholars/{slug}"     profile page (slug = [a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)
  *   - "/topics/{slug}"       topic detail / placeholder
+ *   - "/sitemap.xml"         dynamic sitemap (Phase 5)
  *
  * Auth: header `x-revalidate-token` must equal `process.env.SCHOLARS_REVALIDATE_TOKEN`.
  * Per the project credential policy the token lives in `~/.zshenv`, never in code.
@@ -29,6 +30,7 @@ const ALLOWED_EXACT = new Set<string>([
   "/about",
   "/about/methodology",
   "/browse", // Phase 4 — Browse hub ISR revalidation
+  "/sitemap.xml", // Phase 5 — ETL-triggered sitemap revalidation (SEO-01)
 ]);
 
 // Slug = alnum start, alnum end, hyphens only in interior. No dots, no

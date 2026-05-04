@@ -108,6 +108,9 @@ async function main() {
       await revalidatePath(`/departments/${d.slug}`);
     }
     console.log(`[Revalidate] queued ${depts.length} department page(s)`);
+
+    await revalidatePath("/sitemap.xml");
+    console.log("[Revalidate] queued /sitemap.xml");
   } catch (err) {
     console.warn("[Revalidate] could not enumerate paths:", err);
   } finally {
