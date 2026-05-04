@@ -28,15 +28,29 @@ test.describe("/browse", () => {
     ).toBeVisible();
   });
 
-  test("renders A-Z letter strip with letter A", async ({ page }) => {
+  test("renders A-Z letter strip with active letter buttons", async ({ page }) => {
     await page.goto("/browse");
-    await expect(page.getByRole("button", { name: "A" }).first()).toBeVisible();
+    // At least one active letter button must exist. Use aria-label pattern
+    // added in WR-04 rather than bare "A" (which may not have scholars).
+    await expect(
+      page.getByRole("button", { name: /^Show scholars with last name starting with/ }).first(),
+    ).toBeVisible();
   });
 
   test("A-Z collapsible expands on letter click and shows letter as h3", async ({ page }) => {
     await page.goto("/browse");
-    await page.getByRole("button", { name: "A" }).first().click();
-    await expect(page.getByRole("heading", { name: "A", level: 3 })).toBeVisible();
+    // Find the first active letter button dynamically rather than assuming "A"
+    // has scholars in the test database. IN-03: hardcoding "A" caused a confusing
+    // selector failure when seed data had no scholars with A surnames.
+    const activeButtons = page.getByRole("button").filter({
+      hasText: /^[A-Z]$/,
+    });
+    const firstButton = activeButtons.first();
+    const letterText = await firstButton.textContent();
+    await firstButton.click();
+    await expect(
+      page.getByRole("heading", { name: letterText ?? "", level: 3 }),
+    ).toBeVisible();
   });
 
   test("anchor strip cross-link to research areas exists", async ({ page }) => {
