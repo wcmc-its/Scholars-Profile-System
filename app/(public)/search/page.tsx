@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,12 @@ import {
 } from "@/lib/api/search";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  // D-13: noindex but follow — preserves link equity through to profile pages.
+  // No canonical tag (page is intentionally non-canonical).
+  robots: { index: false, follow: true },
+};
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 

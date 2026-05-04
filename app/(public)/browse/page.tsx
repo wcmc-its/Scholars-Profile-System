@@ -32,6 +32,7 @@ export const metadata: Metadata = {
   title: "Browse Scholars — Scholars at WCM",
   description:
     "Explore WCM faculty by department, research area, or alphabetically.",
+  alternates: { canonical: "/browse" },
 };
 
 export default async function BrowsePage() {

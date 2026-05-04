@@ -16,6 +16,7 @@ export const metadata: Metadata = {
   title: "About — Scholars at WCM",
   description:
     "About the Scholars at Weill Cornell Medicine faculty profiles platform.",
+  alternates: { canonical: "/about" },
 };
 
 export default function AboutPage() {
