@@ -10,6 +10,11 @@ export const METHODOLOGY_ANCHORS = {
   selectedResearch: "selected-research",
   topScholars: "top-scholars",
   recentHighlights: "recent-highlights",
+  // Phase 4 additions — anchor IDs become part of the public URL; must be stable.
+  selectedHighlights: "selected-highlights",
+  eligibilityCarves: "eligibility-carves",
+  exclusions: "exclusions",
+  dataCadence: "data-cadence",
 } as const;
 
 export const METHODOLOGY_BASE = "/about/methodology" as const;
