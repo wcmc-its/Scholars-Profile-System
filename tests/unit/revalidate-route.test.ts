@@ -189,3 +189,33 @@ describe("POST /api/revalidate — Phase 3 department paths", () => {
     expect(mockRevalidatePath).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /api/revalidate — Phase 5 sitemap revalidation (SEO-01)", () => {
+  beforeEach(() => {
+    mockRevalidatePath.mockReset();
+    process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+  });
+
+  it("200 + revalidates /sitemap.xml when ETL calls after run", async () => {
+    const req = makeRequest({ path: "/sitemap.xml", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.revalidated).toBe("/sitemap.xml");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/sitemap.xml");
+  });
+
+  it("400 on /_next/static/foo — static asset paths must not be revalidatable", async () => {
+    const req = makeRequest({ path: "/_next/static/foo", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(400);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("401 regression — wrong token still rejected for sitemap path", async () => {
+    const req = makeRequest({ path: "/sitemap.xml", token: "WRONG" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(401);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
