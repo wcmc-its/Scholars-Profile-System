@@ -1,9 +1,8 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { PeopleResultCard } from "@/components/search/people-result-card";
 import {
   searchPeople,
   searchPublications,
@@ -152,43 +151,19 @@ async function PeopleResults({
           />
         ) : (
           <ul className="mt-4 flex flex-col gap-1 divide-y divide-zinc-200 dark:divide-zinc-800">
-            {result.hits.map((h) => (
+            {result.hits.map((h, i) => (
               <li key={h.cwid}>
-                <Link
-                  href={`/scholars/${h.slug}`}
-                  className="flex gap-4 py-4 hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-                >
-                  <HeadshotAvatar
-                    size="md"
-                    cwid={h.cwid}
-                    preferredName={h.preferredName}
-                    identityImageEndpoint={h.identityImageEndpoint}
-                  />
-                  <div className="flex flex-col gap-0.5">
-                    <div className="font-medium">{h.preferredName}</div>
-                    {h.primaryTitle ? (
-                      <div className="text-sm text-zinc-700 dark:text-zinc-300">
-                        {h.primaryTitle}
-                      </div>
-                    ) : null}
-                    {h.primaryDepartment ? (
-                      <div className="text-muted-foreground text-xs">
-                        {h.primaryDepartment}
-                      </div>
-                    ) : null}
-                    {h.highlight && h.highlight.length > 0 ? (
-                      <div
-                        className="text-muted-foreground mt-1 text-xs"
-                        dangerouslySetInnerHTML={{ __html: h.highlight[0] }}
-                      />
-                    ) : null}
-                  </div>
-                  {h.hasActiveGrants ? (
-                    <Badge variant="secondary" className="ml-auto self-start">
-                      Active grants
-                    </Badge>
-                  ) : null}
-                </Link>
+                <PeopleResultCard
+                  hit={h}
+                  position={page * result.pageSize + i}
+                  q={q}
+                  total={result.total}
+                  filters={{
+                    department: department || undefined,
+                    personType: personType || undefined,
+                    hasActiveGrants,
+                  }}
+                />
               </li>
             ))}
           </ul>
