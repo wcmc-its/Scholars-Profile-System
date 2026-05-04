@@ -93,6 +93,15 @@ describe("POST /api/revalidate", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/about/methodology");
   });
 
+  it("200 + revalidates /browse", async () => {
+    const req = makeRequest({ path: "/browse", token: "test-token-abc" });
+    const resp = await POST(req);
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.revalidated).toBe("/browse");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
+  });
+
   it("200 + revalidates /scholars/{slug}", async () => {
     const req = makeRequest({ path: "/scholars/jane-smith", token: "test-token-abc" });
     const resp = await POST(req);
