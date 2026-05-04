@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,10 +49,31 @@ export async function generateMetadata({
   if (profile.primaryTitle) titleParts.push(profile.primaryTitle);
   const description = [profile.primaryTitle, profile.primaryDepartment].filter(Boolean).join(" — ");
 
+  const nameParts = profile.preferredName.split(" ");
+  const firstName = nameParts[0] ?? profile.preferredName;
+  const lastName = nameParts.slice(1).join(" ") || "";
+
   return {
     title: titleParts.join(" — "),
     description: description || `Scholar profile for ${profile.preferredName}`,
     alternates: { canonical: `/scholars/${profile.slug}` },
+    openGraph: {
+      type: "profile",
+      firstName,
+      lastName,
+      title: profile.preferredName,
+      description: description || `Scholar profile for ${profile.preferredName}`,
+      url: `/scholars/${profile.slug}`,
+      images: [
+        {
+          url: `/og/scholars/${profile.slug}`,
+          width: 1200,
+          height: 630,
+          alt: `${profile.preferredName}${profile.primaryTitle ? `, ${profile.primaryTitle}` : ""} at Weill Cornell Medicine`,
+        },
+      ],
+    },
+    twitter: { card: "summary_large_image" },
   };
 }
 
@@ -72,12 +94,23 @@ export default async function ScholarProfilePage({
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
 
+  const jsonLd = buildPersonJsonLd({
+    slug: profile.slug,
+    preferredName: profile.preferredName,
+    primaryTitle: profile.primaryTitle ?? null,
+  });
+
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
   const pastAppointments = profile.appointments.filter((a) => !a.isActive);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
+      {/* Schema.org Person JSON-LD — D-26 */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Header */}
       <section className="flex flex-col gap-6 sm:flex-row sm:items-center">
         <HeadshotAvatar
