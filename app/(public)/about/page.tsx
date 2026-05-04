@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 /**
  * About — ABOUT-01 hub page.
@@ -29,12 +30,12 @@ export default function AboutPage() {
         drawn from authoritative WCM source systems &mdash; employment records,
         grant databases, publication records, and the ReCiterAI scoring pipeline.
       </p>
-      <a
+      <Link
         href="/about/methodology"
         className="mt-6 block text-base text-[var(--color-accent-slate)] underline underline-offset-4 hover:no-underline"
       >
         How algorithmic surfaces work &#x2192;
-      </a>
+      </Link>
     </main>
   );
 }
