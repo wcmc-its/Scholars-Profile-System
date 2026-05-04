@@ -28,6 +28,17 @@ export async function GET(request: NextRequest) {
       sort,
       filters: { yearMin, yearMax },
     });
+    // ANALYTICS-02 (D-02): structured search-query log (publications branch).
+    console.log(
+      JSON.stringify({
+        event: "search_query",
+        q,
+        type: "publications",
+        resultCount: result.total,
+        filters: { yearMin, yearMax },
+        ts: new Date().toISOString(),
+      }),
+    );
     return NextResponse.json(result);
   }
 
@@ -56,5 +67,16 @@ export async function GET(request: NextRequest) {
     filters: { department, personType, hasActiveGrants, includeIncomplete },
     topic,
   });
+  // ANALYTICS-02 (D-02): structured search-query log (people branch).
+  console.log(
+    JSON.stringify({
+      event: "search_query",
+      q,
+      type: "people",
+      resultCount: result.total,
+      filters: { department, personType, hasActiveGrants, includeIncomplete },
+      ts: new Date().toISOString(),
+    }),
+  );
   return NextResponse.json(result);
 }

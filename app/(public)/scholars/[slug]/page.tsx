@@ -94,6 +94,16 @@ export default async function ScholarProfilePage({
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
 
+  // ANALYTICS-01 (D-01): structured page-view log on each ISR render / cache miss.
+  console.log(
+    JSON.stringify({
+      event: "profile_view",
+      cwid: profile.cwid,
+      slug: profile.slug,
+      ts: new Date().toISOString(),
+    }),
+  );
+
   const jsonLd = buildPersonJsonLd({
     slug: profile.slug,
     preferredName: profile.preferredName,
