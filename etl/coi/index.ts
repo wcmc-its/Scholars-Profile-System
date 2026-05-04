@@ -7,7 +7,7 @@
  *
  * Usage: `npm run etl:coi`
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import { closeCoiPool, withCoiConnection } from "@/lib/sources/mysql-coi";
 
 type Row = {

@@ -10,7 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { prisma } from "@/lib/db";
+import { prisma } from "../lib/db";
 
 type StepResult = { source: string; ok: boolean; durationMs: number; error?: string };
 
@@ -87,16 +87,17 @@ async function main() {
   //    stale-cache rate exceeds threshold.
   console.log("\n=== Revalidate ISR caches ===");
   await revalidatePath("/");
+  // Single try/finally wraps both Prisma queries so $disconnect() is always
+  // called even if the topics query throws before reaching the depts block.
+  // WR-01: previously only the depts block had a finally; a topics-query
+  // failure left the connection open.
   try {
     const topics = await prisma.topic.findMany({ select: { id: true } });
     for (const t of topics) {
       await revalidatePath(`/topics/${t.id}`);
     }
     console.log(`[Revalidate] queued / + ${topics.length} topic page(s)`);
-  } catch (err) {
-    console.warn("[Revalidate] could not enumerate topics:", err);
-  }
-  try {
+
     const depts = await prisma.department.findMany({ select: { slug: true } });
     // Phase 4 — Browse hub aggregates department scholar counts; revalidate
     // alongside the per-department pages. Best-effort, same as below.
@@ -108,7 +109,7 @@ async function main() {
     }
     console.log(`[Revalidate] queued ${depts.length} department page(s)`);
   } catch (err) {
-    console.warn("[Revalidate] could not enumerate departments:", err);
+    console.warn("[Revalidate] could not enumerate paths:", err);
   } finally {
     await prisma.$disconnect();
   }
@@ -124,11 +125,24 @@ async function main() {
  * (T-02-09-01); base URL defaults to localhost for the prototype but is
  * overridable via SCHOLARS_BASE_URL for AWS deployment.
  */
+const ALLOWED_BASE_ORIGINS = [
+  "http://localhost:3000",
+  "https://scholars.weill.cornell.edu",
+];
+
 async function revalidatePath(p: string): Promise<void> {
   const token = process.env.SCHOLARS_REVALIDATE_TOKEN;
   const baseUrl = process.env.SCHOLARS_BASE_URL ?? "http://localhost:3000";
   if (!token) {
     console.warn(`[Revalidate] SCHOLARS_REVALIDATE_TOKEN unset; skipping ${p}`);
+    return;
+  }
+  // WR-02: validate baseUrl against known origins to prevent token exfiltration
+  // if SCHOLARS_BASE_URL is misconfigured or injected.
+  if (!ALLOWED_BASE_ORIGINS.some((o) => baseUrl.startsWith(o))) {
+    console.warn(
+      `[Revalidate] SCHOLARS_BASE_URL "${baseUrl}" not in allowed list; skipping ${p}`,
+    );
     return;
   }
   try {

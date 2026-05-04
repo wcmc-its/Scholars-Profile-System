@@ -56,6 +56,7 @@ export function AZDirectory({ buckets }: { buckets: AZBucket[] }) {
               type="button"
               onClick={() => handleLetterClick(letter)}
               aria-expanded={isOpen}
+              aria-label={`Show scholars with last name starting with ${letter}`}
               className={`inline-flex items-center justify-center w-8 h-8 rounded-md text-sm font-semibold transition-colors ${
                 isOpen
                   ? "bg-[var(--color-accent-slate)] text-white"

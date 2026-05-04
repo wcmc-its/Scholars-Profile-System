@@ -19,7 +19,7 @@
  *     browse-style searches.
  *   - Soft-deleted and suppressed scholars are NOT indexed (decision #4).
  */
-import { prisma } from "@/lib/db";
+import { prisma } from "../../lib/db";
 import {
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
