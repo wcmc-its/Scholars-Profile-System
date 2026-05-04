@@ -98,6 +98,11 @@ async function main() {
   }
   try {
     const depts = await prisma.department.findMany({ select: { slug: true } });
+    // Phase 4 — Browse hub aggregates department scholar counts; revalidate
+    // alongside the per-department pages. Best-effort, same as below.
+    await revalidatePath("/browse");
+    console.log("[Revalidate] queued /browse");
+
     for (const d of depts) {
       await revalidatePath(`/departments/${d.slug}`);
     }

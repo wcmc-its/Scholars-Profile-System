@@ -24,7 +24,12 @@ import { revalidatePath } from "next/cache";
  *   - T-02-09-03 Info disclosure — 401 body never echoes the received token
  */
 
-const ALLOWED_EXACT = new Set<string>(["/", "/about", "/about/methodology"]);
+const ALLOWED_EXACT = new Set<string>([
+  "/",
+  "/about",
+  "/about/methodology",
+  "/browse", // Phase 4 — Browse hub ISR revalidation
+]);
 
 // Slug = alnum start, then alnum + hyphen. No dots, no slashes, no whitespace.
 // Anchored to prevent prefix-match attacks. Matches Next.js dynamic-segment
