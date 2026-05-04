@@ -27,6 +27,7 @@
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
     "etl:infoed": "tsx etl/infoed/index.ts",
+    "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
