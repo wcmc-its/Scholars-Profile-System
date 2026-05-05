@@ -369,7 +369,7 @@ model SlugHistory {
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
 model EtlRun {
   id            String    @id @default(uuid()) @db.VarChar(64)
-  source        String    @db.VarChar(32) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
+  source        String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
   startedAt     DateTime  @default(now()) @map("started_at")
   completedAt   DateTime? @map("completed_at")
   status        String    @db.VarChar(16) // 'running' | 'success' | 'failed'

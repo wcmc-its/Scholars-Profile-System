@@ -16,8 +16,14 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { GET } from "@/app/api/health/refresh-status/route";
+
+/** Build a minimal NextRequest for use in tests (no auth token set in env). */
+function makeRequest(): NextRequest {
+  return new NextRequest("http://localhost/api/health/refresh-status");
+}
 
 const RECENT_RUN = {
   completedAt: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago — fresh
@@ -48,7 +54,7 @@ describe("GET /api/health/refresh-status", () => {
       belowThreshold: false,
     });
 
-    const resp = await GET();
+    const resp = await GET(makeRequest());
     expect(resp.status).toBe(200);
 
     const body = await resp.json();
@@ -63,7 +69,7 @@ describe("GET /api/health/refresh-status", () => {
       belowThreshold: true,
     });
 
-    const resp = await GET();
+    const resp = await GET(makeRequest());
     expect(resp.status).toBe(200);
 
     const body = await resp.json();
@@ -74,7 +80,7 @@ describe("GET /api/health/refresh-status", () => {
   it("Test C: no snapshot yet — completeness fields are null (not 0/false)", async () => {
     (prisma.completenessSnapshot.findFirst as Mock).mockResolvedValue(null);
 
-    const resp = await GET();
+    const resp = await GET(makeRequest());
     const body = await resp.json();
 
     expect(body.completenessPercent).toBeNull();
@@ -92,7 +98,7 @@ describe("GET /api/health/refresh-status", () => {
       belowThreshold: false,
     });
 
-    const resp = await GET();
+    const resp = await GET(makeRequest());
     expect(resp.status).toBe(503);
 
     const body = await resp.json();
@@ -103,7 +109,7 @@ describe("GET /api/health/refresh-status", () => {
   });
 
   it("Test E: preserves existing sources array shape with 7 entries and expected fields", async () => {
-    const resp = await GET();
+    const resp = await GET(makeRequest());
     const body = await resp.json();
 
     expect(Array.isArray(body.sources)).toBe(true);

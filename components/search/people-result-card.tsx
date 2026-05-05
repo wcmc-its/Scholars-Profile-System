@@ -77,10 +77,15 @@ export function PeopleResultCard({
           </div>
         ) : null}
         {hit.highlight && hit.highlight.length > 0 ? (
-          <div
-            className="text-muted-foreground mt-1 text-xs"
-            dangerouslySetInnerHTML={{ __html: hit.highlight[0] }}
-          />
+          <span className="text-muted-foreground mt-1 text-xs">
+            {hit.highlight[0].split(/(<em>.*?<\/em>)/g).map((part, i) =>
+              part.startsWith("<em>") ? (
+                <strong key={i}>{part.replace(/<\/?em>/g, "")}</strong>
+              ) : (
+                part
+              )
+            )}
+          </span>
         ) : null}
       </div>
       {hit.hasActiveGrants ? (

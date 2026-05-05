@@ -26,6 +26,23 @@ export function handleAnalyticsBeacon(payload: unknown): void {
   const event = typeof p.event === "string" ? p.event : "";
   if (!VALID_EVENTS.has(event)) return;
 
+  // Sanitize filters to known fields with explicit type checks (T-06-02-01).
+  const rawFilters =
+    typeof p.filters === "object" && p.filters !== null
+      ? (p.filters as Record<string, unknown>)
+      : {};
+  const filters = {
+    ...(typeof rawFilters.department === "string"
+      ? { department: rawFilters.department }
+      : {}),
+    ...(typeof rawFilters.personType === "string"
+      ? { personType: rawFilters.personType }
+      : {}),
+    ...(typeof rawFilters.hasActiveGrants === "boolean"
+      ? { hasActiveGrants: rawFilters.hasActiveGrants }
+      : {}),
+  };
+
   // Only echo whitelisted fields. Never spread `payload` directly.
   console.log(
     JSON.stringify({
@@ -35,8 +52,7 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       cwid: typeof p.cwid === "string" ? p.cwid : null,
       resultType: typeof p.resultType === "string" ? p.resultType : null,
       resultCount: typeof p.resultCount === "number" ? p.resultCount : null,
-      filters:
-        typeof p.filters === "object" && p.filters !== null ? p.filters : {},
+      filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),
   );

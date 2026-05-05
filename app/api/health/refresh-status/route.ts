@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -8,9 +8,19 @@ export const dynamic = "force-dynamic";
  * source and a freshness flag (>26h stale = not green). Production CloudWatch
  * alarm queries this.
  *
- * Auth: Phase 7 will gate this behind admin SAML. Until then it's open in dev.
+ * Auth: Phase 7 will gate this behind admin SAML (T-07-health-auth).
+ * Stopgap: if SCHOLARS_HEALTH_TOKEN is set, require a matching
+ * `Authorization: Bearer <token>` header (consistent with SCHOLARS_REVALIDATE_TOKEN).
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const healthToken = process.env.SCHOLARS_HEALTH_TOKEN;
+  if (healthToken) {
+    const authHeader = request.headers.get("authorization") ?? "";
+    if (authHeader !== `Bearer ${healthToken}`) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
   const sources = ["ED", "ReCiter", "ASMS", "InfoEd", "COI", "ReCiterAI-projection", "OpenSearch-index"];
   const out: Array<{
     source: string;

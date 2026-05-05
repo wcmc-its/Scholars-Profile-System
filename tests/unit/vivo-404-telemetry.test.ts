@@ -54,6 +54,11 @@ describe("VIVO_PATTERN regex", () => {
     const { VIVO_PATTERN } = await import("@/lib/analytics/vivo-pattern");
     expect(VIVO_PATTERN.test("/display/other-abc123")).toBe(false);
   });
+
+  it("does NOT match /display/cwid-abc123/extra (trailing path segment)", async () => {
+    const { VIVO_PATTERN } = await import("@/lib/analytics/vivo-pattern");
+    expect(VIVO_PATTERN.test("/display/cwid-abc123/extra")).toBe(false);
+  });
 });
 
 describe("logVivoFourOhFour helper", () => {
