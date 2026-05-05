@@ -32,25 +32,106 @@ import {
 
 /**
  * Derive the role-category bucket for the algorithmic-surface eligibility carve.
- * Source: design-spec-v1.7.1.md:352-356.
  *
- * Order matters — the doctoral-student check fires first because PHD students
- * pulled from ou=students may also have a personTypeCode populated. Full-time
- * faculty requires BOTH the personTypeCode and FTE=100; anything else with a
- * faculty class falls through to "affiliated_faculty".
+ * Spec source: design-spec-v1.7.1.md:352-356 describes the *policy intent* using a
+ * leaf-level person-type taxonomy ("Full-Time WCMC Faculty", "Postdoc", "Fellow",
+ * etc.) and a separate FTE=100 attribute.
+ *
+ * LDAP reality (probe 2026-05-04, debug session recent-contributions-hidden):
+ *   - weillCornellEduPersonTypeCode is multi-valued, with the umbrella value
+ *     "academic" first (~8,913 entries) and leaf-level codes carried later in
+ *     the same array (e.g. "academic-faculty-weillfulltime",
+ *     "academic-nonfaculty-postdoc", "academic-nonfaculty-postdoc-fellow").
+ *   - weillCornellEduPrimaryPersonTypeCode is single-valued and carries the
+ *     canonical leaf classification: "employee-faculty-new-york-fulltime",
+ *     "employee-postdoc-new-york", "faculty-affiliated-non-employee", etc.
+ *   - weillCornellEduFTE is NOT populated for any active scholar; the FTE=100
+ *     signal is encoded into the type-code string itself ("-fulltime"/
+ *     "-weillfulltime"). The strict fte === 100 check from the original
+ *     implementation matched zero rows and tagged all 8,913 active scholars as
+ *     "affiliated_faculty", which then dropped them from ELIGIBLE_ROLES and
+ *     hid every algorithmic surface (Recent contributions, etc.).
+ *
+ * This implementation reads BOTH the scalar primary code and the multi-valued
+ * array, applies the spec's policy buckets, and falls through to
+ * "affiliated_faculty" only for genuinely affiliated entries.
+ *
+ * Order matters: doctoral_student fires before any faculty/postdoc check so
+ * a PHD student pulled from ou=students with a residual personTypeCode does
+ * not get re-classified.
  */
 function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
-  if (f.personTypeCode === "Full-Time WCMC Faculty" && f.fte === 100) return "full_time_faculty";
-  if (f.personTypeCode === "Postdoc") return "postdoc";
-  if (f.personTypeCode === "Fellow") return "fellow";
-  if (f.personTypeCode === "Non-Faculty Academic") return "non_faculty_academic";
-  if (f.personTypeCode === "Non-Academic") return "non_academic";
-  if (f.personTypeCode === "Instructor") return "instructor";
-  if (f.personTypeCode === "Lecturer") return "lecturer";
-  if (f.personTypeCode === "Emeritus") return "emeritus";
-  // Catch-all: any faculty class not meeting Full-Time + FTE=100 (including
-  // Full-Time WCMC Faculty with FTE<100 or unknown personTypeCode values).
+
+  const primary = f.primaryPersonTypeCode ?? "";
+  const codes = f.personTypeCodes;
+  const has = (needle: string) => codes.includes(needle);
+
+  // Full-time faculty — the canonical signal is the scalar primary code
+  // "employee-faculty-{location}-fulltime" (covers New York and Qatar campuses).
+  // Fallback: the multi-valued array carries "academic-faculty-weillfulltime"
+  // for any entry where the primary scalar is missing or stale.
+  if (
+    primary === "employee-faculty-new-york-fulltime" ||
+    primary === "employee-faculty-qatar-fulltime" ||
+    has("academic-faculty-weillfulltime")
+  ) {
+    return "full_time_faculty";
+  }
+
+  // Postdoc — scalar covers employee + non-employee variants; array fallback
+  // handles entries where primary is null but the leaf code is present.
+  if (
+    primary === "employee-postdoc-new-york" ||
+    primary === "affiliate-postdoc-non-employee" ||
+    has("academic-nonfaculty-postdoc")
+  ) {
+    // The "-fellow" suffix in the array distinguishes research fellows from
+    // career postdocs. Fellow takes precedence per spec §"Algorithmic surface
+    // eligibility carve" (Postdoc + Fellow are listed separately).
+    if (has("academic-nonfaculty-postdoc-fellow")) return "fellow";
+    return "postdoc";
+  }
+
+  // Standalone fellow (no postdoc designation in the array) — keep the branch
+  // for forward-compat in case the schema starts emitting a fellow-only code.
+  if (has("academic-nonfaculty-postdoc-fellow")) return "fellow";
+
+  // Affiliated faculty — the dominant bucket: voluntary, adjunct, courtesy,
+  // emeritus, part-time, and the catch-all "faculty-affiliated-non-employee"
+  // primary value. Per design-spec-v1.7.1.md:354 these are explicitly NOT
+  // eligible-carve scholars.
+  if (
+    primary === "faculty-affiliated-non-employee" ||
+    has("academic-faculty-voluntary") ||
+    has("academic-faculty-adjunct") ||
+    has("academic-faculty-courtesy") ||
+    has("academic-faculty-emeritus") ||
+    has("academic-faculty-weillparttime") ||
+    has("academic-faculty-visiting")
+  ) {
+    return "affiliated_faculty";
+  }
+
+  // Non-faculty academic — research-track, lab-staff academic appointments
+  // that are NOT postdoc / fellow.
+  if (primary === "employee-academic-new-york" || has("academic-nonfaculty")) {
+    return "non_faculty_academic";
+  }
+
+  // Instructor / Lecturer — discrete academic-faculty leaves.
+  if (has("academic-faculty-instructor")) return "instructor";
+  if (has("academic-faculty-lecturer")) return "lecturer";
+
+  // Non-academic employees (rare in the active-faculty filter; usually filtered
+  // out upstream, but the catch is defensive).
+  if (primary === "employee-staff-new-york" || has("employee-nonacademic")) {
+    return "non_academic";
+  }
+
+  // Catch-all: anything else gets "affiliated_faculty". This includes
+  // "academic-prestart" (entry exists in ED but appointment hasn't started),
+  // residual academic-only entries, and unknown leaves.
   return "affiliated_faculty";
 }
 

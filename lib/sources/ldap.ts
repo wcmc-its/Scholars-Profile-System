@@ -28,7 +28,17 @@ export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
   "weillCornellEduPrimaryTitle",
   "weillCornellEduMiddleName",
+  // Multi-valued leaf-class array — the live WCM directory carries the rich
+  // taxonomy here ("academic", "academic-faculty", "academic-faculty-weillfulltime",
+  // "academic-nonfaculty-postdoc", etc.). Probe 2026-05-04 (debug session
+  // recent-contributions-hidden): the array carries the leaf-level signal we need
+  // for deriveRoleCategory; the scalar is just the umbrella value "academic".
   "weillCornellEduPersonTypeCode",
+  // Single-valued canonical primary type — preferred signal when populated
+  // (e.g. "employee-faculty-new-york-fulltime", "employee-postdoc-new-york").
+  // Probe 2026-05-04: covers ~99% of active scholars; falls back to the array
+  // for the residual ~27 entries with NULL primary.
+  "weillCornellEduPrimaryPersonTypeCode",
   "weillCornellEduDepartment",
   "givenName",
   "sn",
@@ -37,13 +47,14 @@ export const ED_FACULTY_ATTRIBUTES = [
   "ou",
   "title",
   "departmentNumber",
-  "weillCornellEduFTE",         // Phase 2 — drives full_time_faculty derivation
+  // Phase 2 — the design spec assumes a populated weillCornellEduFTE attribute for
+  // the full_time_faculty rule. Probe 2026-05-04: this attribute is NOT populated
+  // in the live WCM directory; the FTE signal is encoded directly into the
+  // *PersonTypeCode* values ("-fulltime"/"-weillfulltime" suffixes). The attribute
+  // stays in the request list for forward-compat in case the schema changes.
+  "weillCornellEduFTE",
   "weillCornellEduDegreeCode",  // Phase 2 — drives doctoral_student derivation
   // Phase 3 — D-02 org-unit attributes for Department/Division population.
-  // Attribute names match the WCM LDAP schema per design-spec-v1.7.1 and PATTERNS.md.
-  // Empirical probe in 03-LDAP-PROBE.md (Plan 02 Task 4) confirms which attributes
-  // return non-empty values; if that probe reveals different attribute names, update
-  // the projectEntries() mapping below and add an inline comment citing the probe.
   // Probe 2026-05-03 (03-LDAP-PROBE.md): weillCornellEduOrgUnitCode is the authoritative
   // org-unit attribute (refactored schema). weillCornellEduDepartmentCode is a 10-digit
   // legacy numeric code (populated but not the stable org-unit join key).
@@ -59,7 +70,18 @@ export type EdFacultyEntry = {
   primaryDepartment: string | null;
   email: string | null;
   // Phase 2 — feeds deriveRoleCategory in etl/ed/index.ts.
-  personTypeCode: string | null;
+  //
+  // primaryPersonTypeCode: scalar "best single signal" value; preferred when populated.
+  //   Examples: "employee-faculty-new-york-fulltime", "employee-postdoc-new-york",
+  //             "faculty-affiliated-non-employee", "academic-prestart".
+  //
+  // personTypeCodes: multi-valued leaf-class array carrying the rich taxonomy.
+  //   Examples: ["academic", "academic-faculty", "academic-faculty-weillfulltime", ...].
+  //   Used as fallback when primaryPersonTypeCode is null and as a tiebreaker for
+  //   fellow vs postdoc detection (the array distinguishes "academic-nonfaculty-postdoc"
+  //   from "academic-nonfaculty-postdoc-fellow").
+  primaryPersonTypeCode: string | null;
+  personTypeCodes: string[];
   fte: number | null;
   ou: string;
   degreeCode: string | null;
@@ -125,8 +147,8 @@ export async function fetchDoctoralStudents(client: Client): Promise<EdFacultyEn
 
 /**
  * Shared projection: LDAP search entries → EdFacultyEntry[]. Skips records with
- * no CWID. Phase 2 fields (personTypeCode, fte, ou, degreeCode) are populated
- * here so downstream deriveRoleCategory has everything it needs.
+ * no CWID. Phase 2 fields (primaryPersonTypeCode, personTypeCodes, ou, degreeCode)
+ * are populated here so downstream deriveRoleCategory has everything it needs.
  */
 function projectEntries(
   searchEntries: ReadonlyArray<Record<string, unknown>>,
@@ -150,7 +172,8 @@ function projectEntries(
       primaryTitle: firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
       primaryDepartment: firstString(e.weillCornellEduDepartment) ?? firstString(e.ou) ?? null,
       email: firstString(e.mail) ?? null,
-      personTypeCode: firstString(e.weillCornellEduPersonTypeCode),
+      primaryPersonTypeCode: firstString(e.weillCornellEduPrimaryPersonTypeCode),
+      personTypeCodes: allStrings(e.weillCornellEduPersonTypeCode),
       fte: parseFte(e.weillCornellEduFTE),
       ou: firstString(e.ou) ?? fallbackOu,
       degreeCode: firstString(e.weillCornellEduDegreeCode),
@@ -174,9 +197,21 @@ function firstString(v: unknown): string | null {
 }
 
 /**
- * weillCornellEduFTE is stored as a string like "100" or "50" in ED. Parse to
- * number; null on missing or unparseable. The full_time_faculty derivation
- * checks fte === 100 strictly (per design-spec-v1.7.1.md:352-356).
+ * Project a multi-valued LDAP attribute to a string[]. Returns [] for null/undefined.
+ * Single-valued attributes (string) are wrapped in a one-element array.
+ */
+function allStrings(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    return v.filter((x): x is string => typeof x === "string");
+  }
+  return typeof v === "string" ? [v] : [];
+}
+
+/**
+ * weillCornellEduFTE is stored as a string like "100" or "50" in ED — when it
+ * is populated. Probe 2026-05-04: the live WCM directory does NOT populate this
+ * attribute; the FTE signal is encoded directly into *PersonTypeCode* values
+ * ("-fulltime"/"-weillfulltime" suffixes). Parser kept for forward-compat.
  */
 function parseFte(v: unknown): number | null {
   const s = firstString(v);
