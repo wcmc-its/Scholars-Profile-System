@@ -10,6 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { prisma } from "../lib/db";
 
 type StepResult = { source: string; ok: boolean; durationMs: number; error?: string };
@@ -17,7 +18,7 @@ type StepResult = { source: string; ok: boolean; durationMs: number; error?: str
 function runScript(file: string): Promise<{ ok: boolean; durationMs: number; error?: string }> {
   return new Promise((resolve) => {
     const start = Date.now();
-    const repo = path.resolve(__dirname, "..");
+    const repo = path.resolve(fileURLToPath(import.meta.url), "../..");
     const child = spawn(
       "node",
       ["--import", "tsx/esm", path.join(repo, file)],
