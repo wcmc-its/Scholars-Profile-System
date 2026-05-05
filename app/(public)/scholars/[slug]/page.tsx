@@ -231,7 +231,7 @@ export default async function ScholarProfilePage({
               <ul className="flex flex-col gap-4">
                 {profile.highlights.map((p) => (
                   <li key={p.pmid}>
-                    <PublicationRow pub={p} ownerCwid={profile.cwid} />
+                    <PublicationRow pub={p} />
                   </li>
                 ))}
               </ul>
@@ -247,12 +247,12 @@ export default async function ScholarProfilePage({
                 defaultItems={profile.recent
                   .slice(0, 10)
                   .map((p) => (
-                    <PublicationRow key={p.pmid} pub={p} ownerCwid={profile.cwid} />
+                    <PublicationRow key={p.pmid} pub={p} showCitations={false} />
                   ))}
                 rest={profile.recent
                   .slice(10)
                   .map((p) => (
-                    <PublicationRow key={p.pmid} pub={p} ownerCwid={profile.cwid} />
+                    <PublicationRow key={p.pmid} pub={p} showCitations={false} />
                   ))}
               />
             </div>
@@ -345,7 +345,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function PublicationRow({ pub }: { pub: ProfilePublication; ownerCwid: string }) {
+function PublicationRow({
+  pub,
+  showCitations = true,
+}: {
+  pub: ProfilePublication;
+  /** Whether to display citation count. False on "recent" surfaces per design spec v1.7.1. */
+  showCitations?: boolean;
+}) {
   return (
     <div>
       <div className="font-medium leading-snug">
@@ -383,7 +390,7 @@ function PublicationRow({ pub }: { pub: ProfilePublication; ownerCwid: string })
       <div className="text-muted-foreground mt-1 text-xs">
         {pub.journal} · {pub.year}
         {pub.publicationType ? ` · ${pub.publicationType}` : ""}
-        {pub.citationCount > 0 ? ` · ${pub.citationCount} citations` : ""}
+        {showCitations && pub.citationCount > 0 ? ` · ${pub.citationCount} citations` : ""}
       </div>
     </div>
   );
