@@ -11,8 +11,8 @@
  * `app/not-found.tsx` is the catch site.
  */
 
-/** VIVO legacy profile URL pattern. Anchored. */
-export const VIVO_PATTERN = /^\/display\/cwid-\w+/;
+/** VIVO legacy profile URL pattern. Anchored at both ends. */
+export const VIVO_PATTERN = /^\/display\/cwid-\w+$/;
 
 /**
  * Emits a structured `vivo_404` log event when `pathname` matches the
