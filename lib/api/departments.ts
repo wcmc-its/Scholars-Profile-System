@@ -20,6 +20,7 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { formatRoleCategory } from "@/lib/role-display";
 
 export type DepartmentChair = {
   cwid: string;
@@ -222,41 +223,7 @@ export type DepartmentFacultyResult = {
 
 const FACULTY_PAGE_SIZE = 20;
 
-// Maps raw DB values (uppercase snake_case from ETL) to display strings.
-// Handles both chip-category values ("AFFILIATED_FACULTY") and individual
-// ED-type values ("VOLUNTARY_FACULTY") so the UI always receives display text.
-const ROLE_DISPLAY: Record<string, string> = {
-  FULL_TIME_FACULTY: "Full-time faculty",
-  AFFILIATED_FACULTY: "Affiliated faculty",
-  VOLUNTARY_FACULTY: "Voluntary faculty",
-  ADJUNCT_FACULTY: "Adjunct faculty",
-  COURTESY_FACULTY: "Courtesy faculty",
-  FACULTY_EMERITUS: "Faculty emeritus",
-  INSTRUCTOR: "Instructor",
-  LECTURER: "Lecturer",
-  POSTDOC: "Postdoc",
-  FELLOW: "Fellow",
-  RESEARCH_STAFF: "Research staff",
-  DOCTORAL_STUDENT: "Doctoral student",
-  // lowercase snake_case aliases (used in unit test fixtures)
-  full_time_faculty: "Full-time faculty",
-  affiliated_faculty: "Affiliated faculty",
-  voluntary_faculty: "Voluntary faculty",
-  adjunct_faculty: "Adjunct faculty",
-  courtesy_faculty: "Courtesy faculty",
-  faculty_emeritus: "Faculty emeritus",
-  instructor: "Instructor",
-  lecturer: "Lecturer",
-  postdoc: "Postdoc",
-  fellow: "Fellow",
-  research_staff: "Research staff",
-  doctoral_student: "Doctoral student",
-};
-
-function normalizeRoleCategory(raw: string | null): string | null {
-  if (!raw) return null;
-  return ROLE_DISPLAY[raw] ?? raw;
-}
+const normalizeRoleCategory = formatRoleCategory;
 
 /**
  * Returns paginated faculty for a department, optionally filtered by division.

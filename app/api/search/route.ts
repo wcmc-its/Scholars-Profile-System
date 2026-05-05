@@ -23,11 +23,12 @@ export async function GET(request: NextRequest) {
     const sort = (params.get("sort") ?? "relevance") as PublicationsSort;
     const yearMin = params.get("yearMin") ? parseInt(params.get("yearMin")!, 10) : undefined;
     const yearMax = params.get("yearMax") ? parseInt(params.get("yearMax")!, 10) : undefined;
+    const publicationType = params.get("publicationType") ?? undefined;
     const result = await searchPublications({
       q,
       page,
       sort,
-      filters: { yearMin, yearMax },
+      filters: { yearMin, yearMax, publicationType },
     });
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     console.log(
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
         q,
         type: "publications",
         resultCount: result.total,
-        filters: { yearMin, yearMax },
+        filters: { yearMin, yearMax, publicationType },
         ts: new Date().toISOString(),
       }),
     );

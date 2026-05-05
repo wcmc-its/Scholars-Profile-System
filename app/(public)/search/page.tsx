@@ -10,6 +10,7 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
+import { formatRoleCategory } from "@/lib/role-display";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
 
   const yearMin = parseOptionalInt(sp.yearMin);
   const yearMax = parseOptionalInt(sp.yearMax);
+  const publicationType =
+    (Array.isArray(sp.publicationType) ? sp.publicationType[0] : sp.publicationType) ?? "";
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -51,6 +54,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             sort={sort as PublicationsSort}
             yearMin={yearMin}
             yearMax={yearMax}
+            publicationType={publicationType || undefined}
           />
         ) : (
           <PeopleResults
@@ -195,18 +199,20 @@ async function PublicationsResults({
   sort,
   yearMin,
   yearMax,
+  publicationType,
 }: {
   q: string;
   page: number;
   sort: PublicationsSort;
   yearMin?: number;
   yearMax?: number;
+  publicationType?: string;
 }) {
   const result = await searchPublications({
     q,
     page,
     sort,
-    filters: { yearMin, yearMax },
+    filters: { yearMin, yearMax, publicationType },
   });
 
   return (
@@ -217,6 +223,8 @@ async function PublicationsResults({
           activeSort={sort}
           yearMin={yearMin}
           yearMax={yearMax}
+          activePublicationType={publicationType}
+          publicationTypes={result.facets.publicationTypes}
         />
       </aside>
       <section>
@@ -283,6 +291,7 @@ async function PublicationsResults({
             sort,
             ...(yearMin !== undefined ? { yearMin: String(yearMin) } : {}),
             ...(yearMax !== undefined ? { yearMax: String(yearMax) } : {}),
+            ...(publicationType ? { publicationType } : {}),
           }}
         />
       </section>
@@ -382,10 +391,18 @@ function FacetSidebar({
 
       {personTypes.length > 0 ? (
         <FacetGroup label="Person type">
+          {activePersonType ? (
+            <Link
+              href={`/search?${baseParams({ personType: "" })}`}
+              className="text-muted-foreground hover:text-foreground text-xs"
+            >
+              ← All person types
+            </Link>
+          ) : null}
           {personTypes.map((p) => (
             <FacetLink
               key={p.value}
-              label={p.value}
+              label={formatRoleCategory(p.value) ?? p.value}
               count={p.count}
               isActive={p.value === activePersonType}
               href={`/search?${baseParams({ personType: p.value })}`}
@@ -412,17 +429,22 @@ function FacetSidebarPubs({
   activeSort,
   yearMin,
   yearMax,
+  activePublicationType,
+  publicationTypes,
 }: {
   query: string;
   activeSort: PublicationsSort;
   yearMin?: number;
   yearMax?: number;
+  activePublicationType?: string;
+  publicationTypes: SearchFacetBucket[];
 }) {
   const baseParams = (overrides: Record<string, string>) => {
     const p = new URLSearchParams({ q: query, type: "publications" });
     if (activeSort !== "relevance") p.set("sort", activeSort);
     if (yearMin !== undefined) p.set("yearMin", String(yearMin));
     if (yearMax !== undefined) p.set("yearMax", String(yearMax));
+    if (activePublicationType) p.set("publicationType", activePublicationType);
     for (const [k, v] of Object.entries(overrides)) {
       if (v === "") p.delete(k);
       else p.set(k, v);
@@ -449,6 +471,28 @@ function FacetSidebarPubs({
           />
         ))}
       </FacetGroup>
+
+      {publicationTypes.length > 0 ? (
+        <FacetGroup label="Publication type">
+          {activePublicationType ? (
+            <Link
+              href={`/search?${baseParams({ publicationType: "" })}`}
+              className="text-muted-foreground hover:text-foreground text-xs"
+            >
+              ← All types
+            </Link>
+          ) : null}
+          {publicationTypes.map((p) => (
+            <FacetLink
+              key={p.value}
+              label={p.value}
+              count={p.count}
+              isActive={p.value === activePublicationType}
+              href={`/search?${baseParams({ publicationType: p.value })}`}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
     </div>
   );
 }

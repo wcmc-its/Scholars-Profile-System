@@ -43,6 +43,7 @@ export type PeopleFilters = {
 export type PublicationsFilters = {
   yearMin?: number;
   yearMax?: number;
+  publicationType?: string;
 };
 
 export type PeopleHit = {
@@ -88,6 +89,9 @@ export type PublicationsSearchResult = {
   total: number;
   page: number;
   pageSize: number;
+  facets: {
+    publicationTypes: SearchFacetBucket[];
+  };
 };
 
 export async function searchPeople(opts: {
@@ -280,6 +284,9 @@ export async function searchPublications(opts: {
     if (filters.yearMax !== undefined) range.lte = filters.yearMax;
     filter.push({ range: { year: range } });
   }
+  if (filters.publicationType) {
+    filter.push({ term: { publicationType: filters.publicationType } });
+  }
 
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "year") {
@@ -293,6 +300,11 @@ export async function searchPublications(opts: {
     size: PAGE_SIZE,
     query: { bool: { must, filter } },
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
+    aggs: {
+      publicationTypes: {
+        terms: { field: "publicationType", size: 15 },
+      },
+    },
   };
 
   const resp = await searchClient().search({ index: PUBLICATIONS_INDEX, body });
@@ -311,7 +323,13 @@ export async function searchPublications(opts: {
       wcmAuthors: Array<{ cwid: string; slug: string; preferredName: string; position: number }>;
     };
   };
-  const r = resp.body as unknown as { hits: { hits: Hit[]; total: { value: number } } };
+  type Bucket = { key: string; doc_count: number };
+  const r = resp.body as unknown as {
+    hits: { hits: Hit[]; total: { value: number } };
+    aggregations?: {
+      publicationTypes?: { buckets: Bucket[] };
+    };
+  };
 
   return {
     hits: r.hits.hits.map((h) => ({
@@ -329,6 +347,12 @@ export async function searchPublications(opts: {
     total: r.hits.total.value,
     page,
     pageSize: PAGE_SIZE,
+    facets: {
+      publicationTypes: (r.aggregations?.publicationTypes?.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+    },
   };
 }
 
