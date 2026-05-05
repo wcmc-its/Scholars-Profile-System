@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const q = params.get("q") ?? "";
   const type = params.get("type") ?? "people";
-  const page = Math.max(0, parseInt(params.get("page") ?? "0", 10));
+  const rawPage = parseInt(params.get("page") ?? "0", 10);
+  const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
 
   if (type === "publications") {
     const sort = (params.get("sort") ?? "relevance") as PublicationsSort;

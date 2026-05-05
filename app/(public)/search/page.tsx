@@ -25,7 +25,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
-  const page = Math.max(0, parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10));
+  const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
+  const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
   const sort = (Array.isArray(sp.sort) ? sp.sort[0] : sp.sort) ?? "relevance";
 
   const department = (Array.isArray(sp.department) ? sp.department[0] : sp.department) ?? "";
