@@ -245,6 +245,7 @@ paths:
 
         The `completenessPercent` and `belowThreshold` fields are null before
         the first weekly completeness snapshot has been computed.
+      security: []  # TODO Phase 7: gate behind admin SAML (T-07-health-auth)
       responses:
         "200":
           description: All ETL sources are fresh.
