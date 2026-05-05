@@ -79,51 +79,45 @@ export default async function TopicPage({
       </Breadcrumb>
 
       {/* Hero */}
-      <section className="mb-8">
+      <section className="mb-10">
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           RESEARCH AREA
         </div>
-        <h1 className="mt-2 font-serif text-4xl font-semibold leading-tight">
+        <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight">
           {topic.label}
         </h1>
         {topic.description && (
-          <p className="mt-4 max-w-prose text-base text-muted-foreground">
+          <p className="mt-3 max-w-prose text-base text-muted-foreground">
             {topic.description}
           </p>
         )}
+
+        {/* Top scholars chip row — inside hero, D-10 */}
+        {topScholars && (
+          <TopScholarsChipRow
+            scholars={topScholars}
+            scholarCount={scholarCount}
+            topicSlug={slug}
+          />
+        )}
+
+        {/* Stats — dashed border under scholars row */}
+        {(totalPubsForStats > 0 || subtopicCount > 0) && (
+          <div className="mt-4 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
+            {[
+              totalPubsForStats > 0
+                ? `${totalPubsForStats.toLocaleString()} publications`
+                : null,
+              subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subtopics` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+        )}
       </section>
-
-      {/* Top scholars chip row (Phase 2 reuse) */}
-      {topScholars && <TopScholarsChipRow scholars={topScholars} />}
-
-      {/* View all N scholars affordance — UI-SPEC §7, D-10 */}
-      {scholarCount > 0 && (
-        <div className="mt-4">
-          <a
-            href={`/search?topic=${encodeURIComponent(slug)}&tab=people`}
-            className="text-base text-[var(--color-accent-slate)] hover:underline"
-          >
-            View all {scholarCount.toLocaleString()} scholars in this area →
-          </a>
-        </div>
-      )}
 
       {/* Recent highlights (Phase 2 reuse) */}
       {recentHighlights && <RecentHighlights papers={recentHighlights} />}
-
-      {/* Stats line — UI-SPEC §6.7 */}
-      {(totalPubsForStats > 0 || subtopicCount > 0) && (
-        <div className="mt-6 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-          {[
-            totalPubsForStats > 0
-              ? `${totalPubsForStats.toLocaleString()} publications`
-              : null,
-            subtopicCount > 0 ? `${subtopicCount.toLocaleString()} subtopics` : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-      )}
 
       {/* Layout B: sticky subtopic rail + CSR publication feed */}
       <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />

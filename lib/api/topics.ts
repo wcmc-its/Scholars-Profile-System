@@ -378,6 +378,65 @@ export type SubtopicWithCount = {
  * in the pool (O(n) per row), cannot be indexed, and the additional coverage
  * (secondary subtopics) is editorial value that doesn't justify the cost.
  */
+/**
+ * Known biomedical acronyms that should be uppercased when they appear as
+ * lowercase/title-case words in ReCiterAI-generated subtopic labels.
+ */
+const BIOMEDICAL_ACRONYMS: Record<string, string> = {
+  csf: "CSF", ml: "ML", ai: "AI", hiv: "HIV", mri: "MRI", mci: "MCI",
+  ftd: "FTD", als: "ALS", pd: "PD", ad: "AD", eeg: "EEG", ct: "CT",
+  dna: "DNA", rna: "RNA", gwas: "GWAS", crispr: "CRISPR",
+  tdp43: "TDP-43", tdp: "TDP", fus: "FUS", sod1: "SOD1",
+  ipsc: "iPSC", bbb: "BBB", tnf: "TNF", ace: "ACE", ms: "MS",
+  tbi: "TBI", ptsd: "PTSD", ocd: "OCD", snp: "SNP", mrna: "mRNA",
+};
+
+/**
+ * Strips the redundant parent-topic prefix from a ReCiterAI subtopic label
+ * and applies acronym casing. Applied when returning subtopics from the DB.
+ *
+ * Example: parent "Neurodegenerative Disease", label "Neurodegenerative Glymphatic Csf Clearance"
+ * → "Glymphatic CSF clearance"
+ */
+function normalizeSubtopicLabel(subtopicLabel: string, parentTopicLabel: string): string {
+  const words = subtopicLabel.trim().split(/\s+/);
+  if (words.length === 0) return subtopicLabel;
+
+  // Build a set of normalized words from the parent topic name.
+  const parentWords = new Set(
+    parentTopicLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, "")
+      .split(" ")
+      .filter(Boolean),
+  );
+
+  // Strip leading subtopic words that appear in the parent topic (prefix removal).
+  let start = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i].toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (parentWords.has(w)) {
+      start = i + 1;
+    } else {
+      break;
+    }
+  }
+
+  // Guard: don't strip everything — fall back to original if nothing remains.
+  const stripped = start > 0 && start < words.length ? words.slice(start) : words;
+
+  // Apply acronym substitution; sentence-case everything else.
+  return stripped
+    .map((w, i) => {
+      const key = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (BIOMEDICAL_ACRONYMS[key]) return BIOMEDICAL_ACRONYMS[key];
+      return i === 0
+        ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+        : w.toLowerCase();
+    })
+    .join(" ");
+}
+
 export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicWithCount[] | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
@@ -398,7 +457,12 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
   }
 
   return catalog
-    .map((s) => ({ id: s.id, label: s.label, description: s.description, pubCount: countMap.get(s.id) ?? 0 }))
+    .map((s) => ({
+      id: s.id,
+      label: normalizeSubtopicLabel(s.label, topic.label),
+      description: s.description,
+      pubCount: countMap.get(s.id) ?? 0,
+    }))
     .sort((a, b) => b.pubCount - a.pubCount);
 }
 

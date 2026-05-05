@@ -1,16 +1,11 @@
 /**
  * RANKING-03 — Top scholars chip row.
  *
- * Server Component. Renders a section heading + methodology footnote +
- * horizontal row of 7 chips. Methodology link uses the constant from
- * lib/methodology-anchors.ts so this component and the methodology page
- * cannot drift (Pitfall 6 in 02-RESEARCH.md).
+ * Server Component. Renders an eyebrow + wrap-flow row of up to 7 chips,
+ * terminated by a "+ N more scholars →" link when scholarCount exceeds
+ * the displayed chip count.
  *
  * Visual contract: 02-UI-SPEC.md §"/topics/{slug} — Top scholars chip row".
- *   - Section heading 18px / weight 600 ("text-lg font-semibold").
- *   - Methodology footnote 13px italic muted, link in Slate accent.
- *   - Horizontal row, gap-2, py-2 (44px tap-target on mobile).
- *
  * Data contract: TopScholarChipData[] from lib/api/topics.ts.
  */
 import { TopScholarChip } from "./top-scholar-chip";
@@ -22,26 +17,44 @@ import type { TopScholarChipData } from "@/lib/api/topics";
 
 export function TopScholarsChipRow({
   scholars,
+  scholarCount,
+  topicSlug,
 }: {
   scholars: TopScholarChipData[];
+  scholarCount?: number;
+  topicSlug?: string;
 }) {
+  const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
+
   return (
-    <section className="mt-12">
-      <h2 className="text-lg font-semibold">Top scholars in this area</h2>
-      <p className="mt-1 text-sm italic text-muted-foreground">
-        Ranked by ReCiterAI publication impact ·{" "}
-        <a
-          href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.topScholars}`}
-          className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-        >
-          How this works
-        </a>
-      </p>
-      <div className="mt-6 flex gap-2 overflow-x-auto py-2">
+    <div className="mt-6">
+      <div className="mb-2 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Top scholars in this area
+        </span>
+        <span className="text-xs italic text-muted-foreground">
+          Ranked by ReCiterAI ·{" "}
+          <a
+            href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.topScholars}`}
+            className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+          >
+            how this works
+          </a>
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2 py-1">
         {scholars.map((s) => (
           <TopScholarChip key={s.cwid} scholar={s} />
         ))}
+        {moreCount > 0 && topicSlug && (
+          <a
+            href={`/search?topic=${encodeURIComponent(topicSlug)}&type=people`}
+            className="flex shrink-0 items-center rounded-full border border-border bg-background px-3 py-1 text-sm text-[var(--color-accent-slate)] hover:border-[1.5px] hover:border-[var(--color-accent-slate)]"
+          >
+            + {moreCount.toLocaleString()} more scholars →
+          </a>
+        )}
       </div>
-    </section>
+    </div>
   );
 }

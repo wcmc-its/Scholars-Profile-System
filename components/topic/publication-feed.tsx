@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -120,33 +119,6 @@ export function PublicationFeed({
         </div>
       </header>
 
-      {/* Publication-type filter toggle per UI-SPEC §6.3 */}
-      <div className="text-sm text-muted-foreground">
-        {filter === "research_articles_only" ? (
-          <>
-            Showing research articles, reviews, case reports, and preprints.{" "}
-            <button
-              type="button"
-              onClick={() => setFilter("all")}
-              className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-            >
-              Show all publication types →
-            </button>
-          </>
-        ) : (
-          <>
-            Showing all publication types including letters, editorials, and errata.{" "}
-            <button
-              type="button"
-              onClick={() => setFilter("research_articles_only")}
-              className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-            >
-              Hide non-research types →
-            </button>
-          </>
-        )}
-      </div>
-
       {loading ? (
         <div className="flex flex-col gap-4">
           {[0, 1, 2].map((i) => (
@@ -166,55 +138,93 @@ export function PublicationFeed({
         </div>
       ) : (
         <>
-          <div className="text-sm text-muted-foreground">
-            {data.total.toLocaleString()} publications
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <span>{data.total.toLocaleString()} results</span>
+            {filter === "research_articles_only" ? (
+              <button
+                type="button"
+                onClick={() => setFilter("all")}
+                className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+              >
+                Show all publication types →
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFilter("research_articles_only")}
+                className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+              >
+                Hide non-research types →
+              </button>
+            )}
           </div>
-          <ul className="flex flex-col gap-4">
+          <ul className="divide-y divide-border">
             {data.hits.map((h) => (
-              <li key={h.pmid}>
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="line-clamp-2 font-semibold leading-snug">
-                      {h.pubmedUrl ? (
-                        <a
-                          href={h.pubmedUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="hover:underline"
-                        >
-                          {h.title}
-                        </a>
-                      ) : (
-                        h.title
-                      )}
-                    </div>
-                    {h.authors.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {h.authors.slice(0, 3).map((a, i) => (
-                          <span
-                            key={i}
-                            className="rounded-full bg-zinc-100 px-2 py-0.5 text-sm"
-                          >
-                            {a.slug ? (
-                              <a href={`/scholars/${a.slug}`} className="hover:underline">
-                                {a.name}
-                              </a>
-                            ) : (
-                              a.name
-                            )}
-                          </span>
-                        ))}
-                        {h.authors.length > 3 && (
-                          <span className="text-sm text-muted-foreground">…</span>
+              <li key={h.pmid} className="py-4">
+                <div className="line-clamp-2 font-semibold leading-snug">
+                  {h.pubmedUrl ? (
+                    <a
+                      href={h.pubmedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      {h.title}
+                    </a>
+                  ) : (
+                    h.title
+                  )}
+                </div>
+                {h.authors.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {h.authors.slice(0, 4).map((a, i) => (
+                      <span
+                        key={i}
+                        className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs dark:bg-zinc-800"
+                      >
+                        {a.slug ? (
+                          <a href={`/scholars/${a.slug}`} className="hover:underline">
+                            {a.name}
+                          </a>
+                        ) : (
+                          a.name
                         )}
-                      </div>
+                      </span>
+                    ))}
+                    {h.authors.length > 4 && (
+                      <span className="text-xs text-muted-foreground">…</span>
                     )}
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {h.journal ?? "—"} · {h.year}
-                      {h.publicationType ? ` · ${h.publicationType}` : ""}
-                    </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                )}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                  {h.journal && <span className="italic">{h.journal}</span>}
+                  {h.year ? <span>· {h.year}</span> : null}
+                  {h.citationCount !== null && h.citationCount > 0 && (
+                    <span className="font-medium text-[var(--color-accent-slate)]">
+                      · {h.citationCount.toLocaleString()} citations
+                    </span>
+                  )}
+                  {h.doi && (
+                    <a
+                      href={`https://doi.org/${h.doi}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      · DOI
+                    </a>
+                  )}
+                  {h.pubmedUrl && (
+                    <a
+                      href={h.pubmedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                    >
+                      · PubMed
+                    </a>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

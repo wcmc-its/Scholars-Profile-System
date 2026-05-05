@@ -1,25 +1,22 @@
 /**
  * Single paper card in the topic-page Recent highlights surface.
  *
- * Server Component. Anatomy per 02-UI-SPEC.md §"/topics/{slug} — Recent
- * highlights":
- *   - Paper title (15px / weight 600, 2-line clamp) — links to PubMed via
- *     pubmedUrl, falling back to DOI, falling back to a no-op anchor.
- *   - Author chip row: first 3 WCM authors as pill links (or plain pills for
- *     non-WCM authors with NULL slug); ellipsis if more.
- *   - Journal · year metadata line (13px muted).
+ * Server Component. Layout per 02-UI-SPEC.md §"/topics/{slug} — Recent highlights":
+ *   - Bold linked title (2-line clamp).
+ *   - One author line: first WCM author (or first author) + "et al." if more.
+ *   - Italic journal · year metadata line (muted).
  *   - NO citation count — locked by design spec v1.7.1.
- *
- * Author-chip pattern mirrors app/(public)/scholars/[slug]/page.tsx:327-339
- * for visual consistency across surfaces.
  */
 import type { RecentHighlight } from "@/lib/api/topics";
 
 export function RecentHighlightCard({ paper }: { paper: RecentHighlight }) {
   const href = paper.pubmedUrl ?? paper.doi ?? "#";
   const isExternal = href !== "#";
-  const visibleAuthors = paper.authors.slice(0, 3);
-  const hasMore = paper.authors.length > 3;
+
+  // Prefer first WCM author (has a slug); fall back to first author overall.
+  const primaryAuthor =
+    paper.authors.find((a) => a.slug !== null) ?? paper.authors[0] ?? null;
+  const hasMore = paper.authors.length > 1;
 
   return (
     <article>
@@ -27,38 +24,31 @@ export function RecentHighlightCard({ paper }: { paper: RecentHighlight }) {
         href={href}
         target={isExternal ? "_blank" : undefined}
         rel={isExternal ? "noopener noreferrer" : undefined}
-        className="block text-base font-semibold leading-snug line-clamp-2 hover:underline"
+        className="block text-sm font-semibold leading-snug line-clamp-3 hover:underline"
       >
         {paper.title}
       </a>
-      {visibleAuthors.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {visibleAuthors.map((a, i) =>
-            a.slug ? (
-              <a
-                key={`${a.slug}-${i}`}
-                href={`/scholars/${a.slug}`}
-                className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-sm hover:bg-zinc-200"
-              >
-                {a.preferredName}
-              </a>
-            ) : (
-              <span
-                key={`unaff-${i}`}
-                className="rounded-full bg-zinc-50 px-2.5 py-0.5 text-sm text-muted-foreground"
-              >
-                {a.preferredName}
-              </span>
-            ),
+      {primaryAuthor && (
+        <div className="mt-2 text-sm text-muted-foreground">
+          {primaryAuthor.slug ? (
+            <a
+              href={`/scholars/${primaryAuthor.slug}`}
+              className="font-medium text-foreground hover:underline"
+            >
+              {primaryAuthor.preferredName}
+            </a>
+          ) : (
+            <span className="font-medium text-foreground">
+              {primaryAuthor.preferredName}
+            </span>
           )}
-          {hasMore ? (
-            <span className="text-sm text-muted-foreground">…</span>
-          ) : null}
+          {hasMore ? " et al." : ""}
         </div>
-      ) : null}
-      <div className="mt-1 text-sm text-muted-foreground">
-        {paper.journal ?? ""}
-        {paper.year !== null ? ` · ${paper.year}` : ""}
+      )}
+      <div className="mt-1 text-xs italic text-muted-foreground">
+        {[paper.journal, paper.year !== null ? String(paper.year) : null]
+          .filter(Boolean)
+          .join(" · ")}
       </div>
     </article>
   );

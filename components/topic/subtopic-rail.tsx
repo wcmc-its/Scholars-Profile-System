@@ -41,8 +41,8 @@ export function SubtopicRail({
 
   return (
     <aside className="w-full" aria-label="Subtopics">
-      <div className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-        SUBTOPICS
+      <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        SUBTOPICS ({subtopics.length})
       </div>
       <div className="relative mb-3">
         <Input
