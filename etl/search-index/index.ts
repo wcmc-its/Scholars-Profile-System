@@ -183,46 +183,62 @@ async function indexPeople() {
 
   if (docs.length === 0) return 0;
 
-  // Bulk index.
-  const body: Record<string, unknown>[] = [];
-  for (const { cwid, doc } of docs) {
-    body.push({ index: { _index: PEOPLE_INDEX, _id: cwid } });
-    body.push(doc);
-  }
-  const resp = await client.bulk({ refresh: true, body });
-  if (resp.body.errors) {
-    const firstError = resp.body.items.find(
-      (it: { index?: { error?: unknown } }) => it.index?.error,
-    );
-    throw new Error(
-      `People bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-    );
+  // Bulk index in chunks to stay under OpenSearch's 10 MB request limit.
+  const CHUNK = 500;
+  for (let i = 0; i < docs.length; i += CHUNK) {
+    const chunk = docs.slice(i, i + CHUNK);
+    const body: Record<string, unknown>[] = [];
+    for (const { cwid, doc } of chunk) {
+      body.push({ index: { _index: PEOPLE_INDEX, _id: cwid } });
+      body.push(doc);
+    }
+    const resp = await client.bulk({ refresh: true, body });
+    if (resp.body.errors) {
+      const firstError = resp.body.items.find(
+        (it: { index?: { error?: unknown } }) => it.index?.error,
+      );
+      throw new Error(
+        `People bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
+      );
+    }
+    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} people`);
   }
   return docs.length;
 }
 
 async function indexPublications() {
   const client = searchClient();
-  // Only publications that have at least one ACTIVE WCM author with a
-  // confirmed authorship — matches the spec's authorship-confirmation logic.
-  const pubs = await prisma.publication.findMany({
-    include: {
-      authors: {
-        orderBy: { position: "asc" },
-        include: {
-          scholar: {
-            select: {
-              cwid: true,
-              slug: true,
-              preferredName: true,
-              deletedAt: true,
-              status: true,
+  const PUB_PAGE = 2000;
+  let cursor: string | undefined;
+  let totalIndexed = 0;
+
+  for (;;) {
+    // Only publications that have at least one ACTIVE WCM author with a
+    // confirmed authorship — matches the spec's authorship-confirmation logic.
+    const pubs = await prisma.publication.findMany({
+      take: PUB_PAGE,
+      ...(cursor ? { skip: 1, cursor: { pmid: cursor } } : {}),
+      orderBy: { pmid: "asc" },
+      include: {
+        authors: {
+          orderBy: { position: "asc" },
+          include: {
+            scholar: {
+              select: {
+                cwid: true,
+                slug: true,
+                preferredName: true,
+                deletedAt: true,
+                status: true,
+              },
             },
           },
         },
       },
-    },
-  });
+    });
+
+    if (pubs.length === 0) break;
+    cursor = pubs[pubs.length - 1].pmid;
 
   const docs: Array<{ pmid: string; doc: Record<string, unknown> }> = [];
   for (const p of pubs) {
@@ -268,23 +284,32 @@ async function indexPublications() {
     });
   }
 
-  if (docs.length === 0) return 0;
+    if (docs.length === 0) { if (pubs.length < PUB_PAGE) break; continue; }
 
-  const body: Record<string, unknown>[] = [];
-  for (const { pmid, doc } of docs) {
-    body.push({ index: { _index: PUBLICATIONS_INDEX, _id: pmid } });
-    body.push(doc);
+    // Bulk index this page's docs in 500-doc chunks.
+    const CHUNK = 500;
+    for (let i = 0; i < docs.length; i += CHUNK) {
+      const chunk = docs.slice(i, i + CHUNK);
+      const body: Record<string, unknown>[] = [];
+      for (const { pmid, doc } of chunk) {
+        body.push({ index: { _index: PUBLICATIONS_INDEX, _id: pmid } });
+        body.push(doc);
+      }
+      const resp = await client.bulk({ refresh: true, body });
+      if (resp.body.errors) {
+        const firstError = resp.body.items.find(
+          (it: { index?: { error?: unknown } }) => it.index?.error,
+        );
+        throw new Error(
+          `Publications bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
+        );
+      }
+    }
+    totalIndexed += docs.length;
+    console.log(`  ...indexed ${totalIndexed} publications so far`);
+    if (pubs.length < PUB_PAGE) break;
   }
-  const resp = await client.bulk({ refresh: true, body });
-  if (resp.body.errors) {
-    const firstError = resp.body.items.find(
-      (it: { index?: { error?: unknown } }) => it.index?.error,
-    );
-    throw new Error(
-      `Publications bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-    );
-  }
-  return docs.length;
+  return totalIndexed;
 }
 
 async function main() {

@@ -12,31 +12,38 @@ import type { SubtopicCard as SubtopicCardData } from "@/lib/api/home";
 
 export function SubtopicCard({ item }: { item: SubtopicCardData }) {
   return (
-    <Card className="h-full">
+    <Card className="group h-full cursor-pointer transition-all duration-150 hover:border-[var(--color-accent-slate)] hover:shadow-md">
       <CardContent className="flex h-full flex-col px-4 py-4">
-        <div className="text-muted-foreground text-sm">{item.parentTopicName}</div>
+        <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">{item.parentTopicName}</div>
         <a
           href={`/topics/${item.subtopicSlug}`}
-          className="mt-1 block text-base font-semibold hover:underline"
+          className="mt-2 block text-base font-semibold leading-snug text-zinc-900 hover:underline group-hover:text-[var(--color-accent-slate)]"
         >
           {item.subtopicName}
         </a>
         <div className="text-muted-foreground mt-1 text-sm">
-          {item.scholarCount} scholars · {item.publicationCount} publications
+          {item.publicationCount} publications · {item.scholarCount} scholars
         </div>
         {item.publications.length > 0 ? (
           <ul className="mt-3 flex flex-col gap-3">
             {item.publications.map((p) => (
               <li key={p.pmid}>
                 <div className="line-clamp-2 text-sm font-semibold">{p.title}</div>
-                {p.firstWcmAuthor ? (
-                  <a
-                    href={`/scholars/${p.firstWcmAuthor.slug}`}
-                    className="mt-1 inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm hover:bg-zinc-200"
-                  >
-                    {p.firstWcmAuthor.preferredName}
-                  </a>
-                ) : null}
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  {p.firstWcmAuthor ? (
+                    <a
+                      href={`/scholars/${p.firstWcmAuthor.slug}`}
+                      className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm hover:bg-zinc-200"
+                    >
+                      {p.firstWcmAuthor.preferredName}
+                    </a>
+                  ) : null}
+                  {(p.journal || p.year) ? (
+                    <span className="text-muted-foreground text-xs italic">
+                      {[p.journal, p.year].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>

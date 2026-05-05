@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 
-export function SiteHeader() {
+export function SiteHeader({ showSearch = true }: { showSearch?: boolean }) {
   return (
     <header
       className="sticky top-0 z-50 h-[60px] border-b border-black/15"
@@ -26,9 +26,13 @@ export function SiteHeader() {
           </span>
         </Link>
 
-        <div className="flex-1">
-          <SearchAutocomplete />
-        </div>
+        {showSearch ? (
+          <div className="flex-1">
+            <SearchAutocomplete />
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
 
         <nav className="flex shrink-0 items-center gap-6">
           <Link href="/browse" className="text-sm font-medium text-white/85 transition-colors hover:text-white">

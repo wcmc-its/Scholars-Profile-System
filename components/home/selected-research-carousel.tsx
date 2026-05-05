@@ -22,7 +22,15 @@ export function SelectedResearchCarousel({
 }) {
   return (
     <section className="mt-12">
-      <h2 className="text-lg font-semibold">Selected research</h2>
+      <div className="flex items-baseline gap-4">
+        <h2 className="text-lg font-semibold">Selected research</h2>
+        <a
+          href="/browse"
+          className="ml-auto text-sm font-medium text-[var(--color-accent-slate)] hover:underline"
+        >
+          Browse all areas ↓
+        </a>
+      </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Eight subtopics with the strongest recent activity at WCM, one per
         parent area, refreshed weekly ·{" "}

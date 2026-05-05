@@ -76,8 +76,16 @@ export type SubtopicCard = {
   publications: Array<{
     pmid: string;
     title: string;
+    journal: string | null;
+    year: number | null;
     firstWcmAuthor: { cwid: string; slug: string; preferredName: string } | null;
   }>;
+};
+
+export type HomeStats = {
+  scholarCount: number;
+  publicationCount: number;
+  researchAreaCount: number;
 };
 
 export type ParentTopic = {
@@ -366,19 +374,19 @@ export async function getSelectedResearch(
     },
     include: {
       scholar: { select: { cwid: true, slug: true, preferredName: true } },
-      publication: { select: { pmid: true, title: true } },
+      publication: { select: { pmid: true, title: true, journal: true, year: true } },
     },
     orderBy: [{ score: "desc" }],
     take: top.length * 8, // generous; we'll bucket and slice 2 per pair
   });
 
   type SampleRow = (typeof sampleRows)[number];
-  const sampleByPair = new Map<string, Array<{ row: SampleRow; pubTitle: string; pubPmid: string }>>();
+  const sampleByPair = new Map<string, Array<{ row: SampleRow; pubTitle: string; pubPmid: string; pubJournal: string | null; pubYear: number | null }>>();
   for (const s of sampleRows) {
     const key = scholarCountKey(s.parentTopicId, s.primarySubtopicId ?? "");
     const arr = sampleByPair.get(key) ?? [];
     if (arr.length < 2) {
-      arr.push({ row: s, pubTitle: s.publication.title, pubPmid: s.publication.pmid });
+      arr.push({ row: s, pubTitle: s.publication.title, pubPmid: s.publication.pmid, pubJournal: s.publication.journal, pubYear: s.publication.year });
       sampleByPair.set(key, arr);
     }
   }
@@ -396,6 +404,8 @@ export async function getSelectedResearch(
       publications: samples.map((s) => ({
         pmid: s.pubPmid,
         title: s.pubTitle,
+        journal: s.pubJournal,
+        year: s.pubYear,
         firstWcmAuthor: s.row.scholar
           ? {
               cwid: s.row.scholar.cwid,
@@ -454,4 +464,17 @@ export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
     name: t.label,
     scholarCount: countByParent.get(t.id) ?? 0,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// getHomeStats — hero stats strip
+// ---------------------------------------------------------------------------
+
+export async function getHomeStats(): Promise<HomeStats> {
+  const [scholarCount, publicationCount, researchAreaCount] = await Promise.all([
+    prisma.scholar.count({ where: { deletedAt: null, status: "active" } }),
+    prisma.publication.count(),
+    prisma.topic.count(),
+  ]);
+  return { scholarCount, publicationCount, researchAreaCount };
 }
