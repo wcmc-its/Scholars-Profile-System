@@ -334,6 +334,9 @@ components:
         isInterim:
           type: boolean
           description: True if this is an interim appointment.
+        isActive:
+          type: boolean
+          description: True if this appointment is currently active (endDate is null or in the future).
 
     PeopleHit:
       type: object
