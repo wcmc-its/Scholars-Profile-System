@@ -69,3 +69,6 @@ Thumbs.db
 
 # Git worktrees (embedded repos)
 .claude/worktrees/
+
+# Superpowers brainstorm scratch (wireframes, session state)
+.superpowers/
