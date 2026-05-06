@@ -140,6 +140,10 @@ async function PeopleResults({
         />
       </aside>
       <section>
+        <ActiveFilterChips
+          chips={buildPeopleChips({ q, sort, department, personType, hasActiveGrants })}
+          clearAllHref={`/search?${new URLSearchParams({ q, type: "people" }).toString()}`}
+        />
         <ResultsHeader
           total={result.total}
           page={result.page}
@@ -228,6 +232,10 @@ async function PublicationsResults({
         />
       </aside>
       <section>
+        <ActiveFilterChips
+          chips={buildPublicationsChips({ q, sort, yearMin, yearMax, publicationType })}
+          clearAllHref={`/search?${new URLSearchParams({ q, type: "publications" }).toString()}`}
+        />
         <ResultsHeader
           total={result.total}
           page={result.page}
@@ -297,6 +305,130 @@ async function PublicationsResults({
       </section>
     </>
   );
+}
+
+type ChipSpec = { label: string; removeHref: string };
+
+function ActiveFilterChips({
+  chips,
+  clearAllHref,
+}: {
+  chips: ChipSpec[];
+  clearAllHref: string;
+}) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      {chips.map((c) => (
+        <Link
+          key={c.label}
+          href={c.removeHref}
+          aria-label={`Remove filter: ${c.label}`}
+          className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pl-3 pr-1.5 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
+        >
+          <span>{c.label}</span>
+          <span
+            aria-hidden="true"
+            className="ml-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-[14px] leading-none text-[#2c4f6e] hover:bg-[#2c4f6e]/15"
+          >
+            ×
+          </span>
+        </Link>
+      ))}
+      {chips.length > 1 ? (
+        <Link
+          href={clearAllHref}
+          className="ml-1 text-xs text-zinc-500 hover:text-[#2c4f6e]"
+        >
+          Clear all
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function buildPeopleChips({
+  q,
+  sort,
+  department,
+  personType,
+  hasActiveGrants,
+}: {
+  q: string;
+  sort: PeopleSort;
+  department?: string;
+  personType?: string;
+  hasActiveGrants?: boolean;
+}): ChipSpec[] {
+  const baseEntries = (omit: string): Array<[string, string]> => {
+    const entries: Array<[string, string]> = [["q", q], ["type", "people"]];
+    if (sort !== "relevance") entries.push(["sort", sort]);
+    if (department && omit !== "department") entries.push(["department", department]);
+    if (personType && omit !== "personType") entries.push(["personType", personType]);
+    if (hasActiveGrants !== undefined && omit !== "hasActiveGrants") {
+      entries.push(["hasActiveGrants", String(hasActiveGrants)]);
+    }
+    return entries;
+  };
+  const hrefWithout = (key: string) =>
+    `/search?${new URLSearchParams(baseEntries(key)).toString()}`;
+
+  const chips: ChipSpec[] = [];
+  if (personType) {
+    chips.push({
+      label: formatRoleCategory(personType) ?? personType,
+      removeHref: hrefWithout("personType"),
+    });
+  }
+  if (department) {
+    chips.push({ label: department, removeHref: hrefWithout("department") });
+  }
+  if (hasActiveGrants === true) {
+    chips.push({ label: "Has active grants", removeHref: hrefWithout("hasActiveGrants") });
+  }
+  return chips;
+}
+
+function buildPublicationsChips({
+  q,
+  sort,
+  yearMin,
+  yearMax,
+  publicationType,
+}: {
+  q: string;
+  sort: PublicationsSort;
+  yearMin?: number;
+  yearMax?: number;
+  publicationType?: string;
+}): ChipSpec[] {
+  const baseEntries = (omit: Array<"yearMin" | "yearMax" | "publicationType">): Array<[string, string]> => {
+    const entries: Array<[string, string]> = [["q", q], ["type", "publications"]];
+    if (sort !== "relevance") entries.push(["sort", sort]);
+    if (yearMin !== undefined && !omit.includes("yearMin")) entries.push(["yearMin", String(yearMin)]);
+    if (yearMax !== undefined && !omit.includes("yearMax")) entries.push(["yearMax", String(yearMax)]);
+    if (publicationType && !omit.includes("publicationType")) entries.push(["publicationType", publicationType]);
+    return entries;
+  };
+  const hrefWithout = (keys: Array<"yearMin" | "yearMax" | "publicationType">) =>
+    `/search?${new URLSearchParams(baseEntries(keys)).toString()}`;
+
+  const chips: ChipSpec[] = [];
+  if (yearMin !== undefined || yearMax !== undefined) {
+    let label: string;
+    if (yearMin !== undefined && yearMax !== undefined) {
+      label = yearMin === yearMax ? `${yearMin}` : `${yearMin}–${yearMax}`;
+    } else if (yearMin !== undefined) {
+      label = `Since ${yearMin}`;
+    } else {
+      label = `Through ${yearMax}`;
+    }
+    chips.push({ label, removeHref: hrefWithout(["yearMin", "yearMax"]) });
+  }
+  if (publicationType) {
+    chips.push({ label: publicationType, removeHref: hrefWithout(["publicationType"]) });
+  }
+  return chips;
 }
 
 function ResultsHeader({
