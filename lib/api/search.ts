@@ -19,6 +19,7 @@
  */
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
+import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import {
   PEOPLE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -67,8 +68,16 @@ export type PublicationHit = {
   citationCount: number;
   doi: string | null;
   pubmedUrl: string | null;
-  wcmAuthors: Array<{ cwid: string; slug: string; preferredName: string; position: number }>;
-  externalAuthors: string;
+  /** Chip-ready WCM author list with first/senior flags + headshot endpoint,
+   *  matching the topic page's TopicPublicationHit.authors shape. */
+  wcmAuthors: Array<{
+    name: string;
+    cwid: string;
+    slug: string;
+    identityImageEndpoint: string;
+    isFirst: boolean;
+    isLast: boolean;
+  }>;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -319,8 +328,6 @@ export async function searchPublications(opts: {
       citationCount: number;
       doi: string | null;
       pubmedUrl: string | null;
-      authorNames: string;
-      wcmAuthors: Array<{ cwid: string; slug: string; preferredName: string; position: number }>;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -331,19 +338,39 @@ export async function searchPublications(opts: {
     };
   };
 
+  // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
+  // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
+  const pmids = r.hits.hits.map((h) => h._source.pmid);
+  const wcmAuthorsByPmid = await fetchWcmAuthorsForPmids(pmids);
+
   return {
-    hits: r.hits.hits.map((h) => ({
-      pmid: h._source.pmid,
-      title: h._source.title,
-      journal: h._source.journal,
-      year: h._source.year,
-      publicationType: h._source.publicationType,
-      citationCount: h._source.citationCount,
-      doi: h._source.doi,
-      pubmedUrl: h._source.pubmedUrl,
-      wcmAuthors: h._source.wcmAuthors ?? [],
-      externalAuthors: h._source.authorNames,
-    })),
+    hits: r.hits.hits.map((h) => {
+      const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
+      return {
+        pmid: h._source.pmid,
+        title: h._source.title,
+        journal: h._source.journal,
+        year: h._source.year,
+        publicationType: h._source.publicationType,
+        citationCount: h._source.citationCount,
+        doi: h._source.doi,
+        pubmedUrl: h._source.pubmedUrl,
+        wcmAuthors: enriched.flatMap((a) =>
+          a.cwid && a.slug && a.identityImageEndpoint
+            ? [
+                {
+                  name: a.name,
+                  cwid: a.cwid,
+                  slug: a.slug,
+                  identityImageEndpoint: a.identityImageEndpoint,
+                  isFirst: a.isFirst,
+                  isLast: a.isLast,
+                },
+              ]
+            : [],
+        ),
+      };
+    }),
     total: r.hits.total.value,
     page,
     pageSize: PAGE_SIZE,
@@ -361,7 +388,7 @@ export async function searchPublications(opts: {
  * Returns up to `size` distinct suggestions from the people index.
  */
 export async function suggestNames(prefix: string, size = 5): Promise<
-  Array<{ text: string; slug: string }>
+  Array<{ text: string; slug: string; cwid: string; primaryTitle: string | null; primaryDepartment: string | null }>
 > {
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
@@ -376,7 +403,6 @@ export async function suggestNames(prefix: string, size = 5): Promise<
           completion: { field: "nameSuggest", size, skip_duplicates: true },
         },
       },
-      // Also fetch scholar slug for click-through
       _source: false,
     },
   });
@@ -386,22 +412,210 @@ export async function suggestNames(prefix: string, size = 5): Promise<
   const suggestPayload = (resp.body as unknown as { suggest?: { scholar?: SuggestEntry[] } })
     .suggest?.scholar?.[0]?.options ?? [];
 
-  // The completion suggester returns the document _id (CWID) and text.
-  // We need the slug for the link target — fetch in a single mget.
   if (suggestPayload.length === 0) return [];
   const cwids = suggestPayload.map((o) => o._id);
   const mget = await searchClient().mget({
     index: PEOPLE_INDEX,
     body: { ids: cwids },
   });
-  type MGetDoc = { _id: string; _source?: { slug?: string } };
-  const slugByCwid = new Map<string, string>();
+  type MGetDoc = {
+    _id: string;
+    _source?: {
+      slug?: string;
+      primaryTitle?: string | null;
+      primaryDepartment?: string | null;
+    };
+  };
+  const sourceByCwid = new Map<string, MGetDoc["_source"]>();
   for (const d of (mget.body as unknown as { docs: MGetDoc[] }).docs) {
-    if (d._source?.slug) slugByCwid.set(d._id, d._source.slug);
+    if (d._source) sourceByCwid.set(d._id, d._source);
   }
 
-  return suggestPayload.map((o) => ({
-    text: o.text,
-    slug: slugByCwid.get(o._id) ?? "",
-  }));
+  return suggestPayload.map((o) => {
+    const src = sourceByCwid.get(o._id);
+    return {
+      text: o.text,
+      cwid: o._id,
+      slug: src?.slug ?? "",
+      primaryTitle: src?.primaryTitle ?? null,
+      primaryDepartment: src?.primaryDepartment ?? null,
+    };
+  });
+}
+
+export type EntityKind =
+  | "person"
+  | "topic"
+  | "subtopic"
+  | "department"
+  | "division"
+  | "center";
+
+export type EntitySuggestion = {
+  kind: EntityKind;
+  title: string;
+  subtitle?: string;
+  href: string;
+  /** Present for `person` rows; powers avatar / future enrichment. */
+  cwid?: string;
+};
+
+/**
+ * Mixed-entity autocomplete: returns people, topics, subtopics, departments,
+ * divisions, and centers in a single ranked list. Per-source caps keep the
+ * dropdown predictable; total ≤ `perKind * 6`.
+ */
+export async function suggestEntities(
+  prefix: string,
+  perKind = 3,
+): Promise<EntitySuggestion[]> {
+  const trimmed = prefix.trim();
+  if (trimmed.length < 2) return [];
+
+  const [people, topics, subtopics, departments, divisions, centers] =
+    await Promise.all([
+      suggestNames(trimmed, perKind).catch(() => []),
+      prisma.topic
+        .findMany({
+          where: { label: { contains: trimmed } },
+          orderBy: { label: "asc" },
+          take: perKind,
+          select: { id: true, label: true },
+        })
+        .catch(() => [] as Array<{ id: string; label: string }>),
+      prisma.subtopic
+        .findMany({
+          where: { label: { contains: trimmed } },
+          orderBy: { label: "asc" },
+          take: perKind,
+          select: {
+            id: true,
+            label: true,
+            parentTopicId: true,
+            parentTopic: { select: { label: true } },
+          },
+        })
+        .catch(
+          () =>
+            [] as Array<{
+              id: string;
+              label: string;
+              parentTopicId: string;
+              parentTopic: { label: string } | null;
+            }>,
+        ),
+      prisma.department
+        .findMany({
+          where: { name: { contains: trimmed } },
+          orderBy: { name: "asc" },
+          take: perKind,
+          select: { slug: true, name: true, scholarCount: true },
+        })
+        .catch(
+          () =>
+            [] as Array<{ slug: string; name: string; scholarCount: number }>,
+        ),
+      prisma.division
+        .findMany({
+          where: { name: { contains: trimmed } },
+          orderBy: { name: "asc" },
+          take: perKind,
+          select: {
+            slug: true,
+            name: true,
+            scholarCount: true,
+            department: { select: { slug: true, name: true } },
+          },
+        })
+        .catch(
+          () =>
+            [] as Array<{
+              slug: string;
+              name: string;
+              scholarCount: number;
+              department: { slug: string; name: string } | null;
+            }>,
+        ),
+      prisma.center
+        .findMany({
+          where: { name: { contains: trimmed } },
+          orderBy: { name: "asc" },
+          take: perKind,
+          select: { slug: true, name: true, scholarCount: true },
+        })
+        .catch(
+          () =>
+            [] as Array<{ slug: string; name: string; scholarCount: number }>,
+        ),
+    ]);
+
+  const out: EntitySuggestion[] = [];
+
+  for (const p of people) {
+    if (!p.slug) continue;
+    const subParts = [p.primaryTitle, p.primaryDepartment].filter(
+      (s): s is string => Boolean(s),
+    );
+    out.push({
+      kind: "person",
+      title: p.text,
+      subtitle: subParts.join(" · ") || undefined,
+      href: `/scholars/${p.slug}`,
+      cwid: p.cwid,
+    });
+  }
+
+  for (const t of topics) {
+    out.push({
+      kind: "topic",
+      title: t.label,
+      subtitle: "Research topic",
+      href: `/topics/${t.id}`,
+    });
+  }
+
+  for (const s of subtopics) {
+    out.push({
+      kind: "subtopic",
+      title: s.label,
+      subtitle: s.parentTopic
+        ? `Subtopic in ${s.parentTopic.label}`
+        : "Subtopic",
+      href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}`,
+    });
+  }
+
+  for (const d of departments) {
+    out.push({
+      kind: "department",
+      title: d.name,
+      subtitle: d.scholarCount
+        ? `Department · ${d.scholarCount.toLocaleString()} scholars`
+        : "Department",
+      href: `/departments/${d.slug}`,
+    });
+  }
+
+  for (const d of divisions) {
+    if (!d.department) continue;
+    out.push({
+      kind: "division",
+      title: d.name,
+      subtitle: `Division of ${d.department.name}`,
+      href: `/departments/${d.department.slug}/divisions/${d.slug}`,
+    });
+  }
+
+  for (const c of centers) {
+    out.push({
+      kind: "center",
+      title: c.name,
+      subtitle: c.scholarCount
+        ? `Center · ${c.scholarCount.toLocaleString()} scholars`
+        : "Center",
+      href: `/centers/${c.slug}`,
+    });
+  }
+
+  return out;
 }

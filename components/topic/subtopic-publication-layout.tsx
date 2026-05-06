@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { SubtopicRail, type SubtopicRailItem } from "@/components/topic/subtopic-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
 
@@ -11,12 +12,28 @@ export function SubtopicPublicationLayout({
   topicSlug: string;
   subtopics: SubtopicRailItem[];
 }) {
-  const [activeSubtopic, setActiveSubtopic] = useState<string | null>(null);
-  const subtopicLabel =
-    activeSubtopic ? (subtopics.find((s) => s.id === activeSubtopic)?.label ?? null) : null;
+  const searchParams = useSearchParams();
+  const requestedSubtopic = searchParams.get("subtopic");
+  const [activeSubtopic, setActiveSubtopic] = useState<string | null>(
+    requestedSubtopic && subtopics.some((s) => s.id === requestedSubtopic)
+      ? requestedSubtopic
+      : null,
+  );
+
+  useEffect(() => {
+    if (requestedSubtopic && subtopics.some((s) => s.id === requestedSubtopic)) {
+      setActiveSubtopic(requestedSubtopic);
+    }
+  }, [requestedSubtopic, subtopics]);
+
+  const activeSubtopicData = activeSubtopic ? subtopics.find((s) => s.id === activeSubtopic) ?? null : null;
+  const subtopicLabel = activeSubtopicData?.label ?? null;
+  const subtopicDescription = activeSubtopicData?.description ?? null;
 
   return (
-    <div className="mt-12 flex flex-col gap-6 lg:flex-row lg:gap-8">
+    <div className="mt-16">
+      <hr className="mb-10 border-border" />
+    <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
         <SubtopicRail
           subtopics={subtopics}
@@ -29,8 +46,10 @@ export function SubtopicPublicationLayout({
           topicSlug={topicSlug}
           activeSubtopic={activeSubtopic}
           subtopicLabel={subtopicLabel}
+          subtopicDescription={subtopicDescription}
         />
       </div>
+    </div>
     </div>
   );
 }
