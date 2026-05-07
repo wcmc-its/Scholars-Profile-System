@@ -36,6 +36,12 @@ model Scholar {
   // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
   deptCode          String?   @map("dept_code") @db.VarChar(64)
   divCode           String?   @map("div_code") @db.VarChar(64)
+  /// Derived from LDAP personTypeCodes — true when the scholar carries a
+  /// clinical or NYP-credentialed signal, indicating they likely have a
+  /// public physician profile at weillcornell.org. Drives whether the
+  /// "Clinical profile →" link appears in the profile sidebar (absence-as-
+  /// default per design spec v1.7.1). Backfilled on next ED ETL run.
+  hasClinicalProfile Boolean  @default(false) @map("has_clinical_profile")
   deletedAt         DateTime? @map("deleted_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -112,6 +118,10 @@ model Grant {
   startDate       DateTime @map("start_date") @db.Date
   endDate         DateTime @map("end_date") @db.Date
   externalId      String?  @map("external_id") @db.VarChar(128)
+  /// Sponsor-issued award number (e.g. NIH "R01 AG067497"). Nullable —
+  /// many grants don't have one (industry contracts, internal awards).
+  /// Populated from InfoEd CONSOLIDATED_QUERY's Award_Number column.
+  awardNumber     String?  @map("award_number") @db.VarChar(128)
   source          String   @default("InfoEd") @db.VarChar(32)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
