@@ -77,24 +77,21 @@ describe("SubtopicRail", () => {
     expect(typeof SubtopicRail).toBe("function");
   });
 
-  it("renders short_description as the second line when present", () => {
+  it("does NOT render short_description in the rail (moved to publication-feed h2 subtitle)", () => {
     render(<SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />);
-    expect(screen.getByText("Procedures on the heart and great vessels")).toBeTruthy();
-    expect(screen.getByText("Therapeutic delivery of genetic material")).toBeTruthy();
+    expect(screen.queryByText("Procedures on the heart and great vessels")).toBeNull();
+    expect(screen.queryByText("Therapeutic delivery of genetic material")).toBeNull();
   });
 
-  it("renders no second line when short_description is null (Phase 3 D-06 absence-as-default)", () => {
+  it("renders only the displayName (no second line) regardless of short_description presence", () => {
     const { container } = render(
       <SubtopicRail subtopics={subtopics} activeSubtopic={null} onSelect={() => {}} />
     );
-    // Oncology has shortDescription: null. Its row should contain "Oncology" but no
-    // sibling muted-text node beyond the count. Find the Oncology button and assert
-    // it has no truncate-styled second-line div.
+    // Each row should contain a displayName but no truncated description sibling.
     const oncologyButton = Array.from(container.querySelectorAll("button[type='button']"))
       .find((btn) => btn.textContent?.includes("Oncology"));
     expect(oncologyButton).toBeTruthy();
-    const truncateChild = oncologyButton?.querySelector(".truncate");
-    expect(truncateChild).toBeFalsy();
+    expect(oncologyButton?.querySelector(".truncate")).toBeFalsy();
   });
 
   it("filter input matches against the displayName (top-line text), not the underlying label", () => {

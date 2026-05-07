@@ -102,12 +102,7 @@ export function SubtopicRail({
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="text-base">{s.displayName}</div>
-                      {s.shortDescription ? (
-                        <div className={`mt-0.5 truncate text-xs ${isActive ? "text-white/80" : "text-muted-foreground"}`}>
-                          {s.shortDescription}
-                        </div>
-                      ) : null}
+                      <div className="text-base break-words">{s.displayName}</div>
                     </div>
                     <span
                       className={`shrink-0 text-sm tabular-nums ${isActive ? "text-white" : "text-muted-foreground"}`}
