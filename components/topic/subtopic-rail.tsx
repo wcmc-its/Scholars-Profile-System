@@ -6,7 +6,14 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
-export type SubtopicRailItem = { id: string; label: string; pubCount: number };
+export type SubtopicRailItem = {
+  id: string;
+  label: string;
+  displayName: string;
+  description: string | null;
+  shortDescription: string | null;
+  pubCount: number;
+};
 
 const LESS_COMMON_THRESHOLD = 10;
 
@@ -24,7 +31,7 @@ export function SubtopicRail({
 
   const visible = useMemo(() => {
     if (!filterLower) return subtopics;
-    return subtopics.filter((s) => s.label.toLowerCase().includes(filterLower));
+    return subtopics.filter((s) => s.displayName.toLowerCase().includes(filterLower));
   }, [subtopics, filterLower]);
 
   // First index where pubCount <= threshold (subtopics pre-sorted DESC by pubCount).
@@ -88,15 +95,22 @@ export function SubtopicRail({
                   <button
                     type="button"
                     onClick={() => handleClick(s.id)}
-                    className={`flex w-full items-center justify-between rounded px-3 py-2 text-left ${
+                    className={`flex w-full items-start justify-between gap-2 rounded px-3 py-2 text-left ${
                       isActive
                         ? "bg-[var(--color-accent-slate)] text-white"
                         : `hover:bg-accent${isLessCommon ? " opacity-60" : ""}`
                     }`}
                   >
-                    <span className="text-base">{s.label}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-base">{s.displayName}</div>
+                      {s.shortDescription ? (
+                        <div className={`mt-0.5 truncate text-xs ${isActive ? "text-white/80" : "text-muted-foreground"}`}>
+                          {s.shortDescription}
+                        </div>
+                      ) : null}
+                    </div>
                     <span
-                      className={`text-sm ${isActive ? "text-white" : "text-muted-foreground"}`}
+                      className={`shrink-0 text-sm tabular-nums ${isActive ? "text-white" : "text-muted-foreground"}`}
                     >
                       {s.pubCount}
                     </span>

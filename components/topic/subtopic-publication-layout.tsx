@@ -27,7 +27,9 @@ export function SubtopicPublicationLayout({
   }, [requestedSubtopic, subtopics]);
 
   const activeSubtopicData = activeSubtopic ? subtopics.find((s) => s.id === activeSubtopic) ?? null : null;
-  const subtopicLabel = activeSubtopicData?.label ?? null;
+  // D-09: prefer displayName for the publication-feed heading; falls back to label
+  // through the rail's type (Plan 04 already applied (display_name ?? label) at API).
+  const subtopicLabel = activeSubtopicData?.displayName ?? activeSubtopicData?.label ?? null;
   const subtopicDescription = activeSubtopicData?.description ?? null;
 
   return (
