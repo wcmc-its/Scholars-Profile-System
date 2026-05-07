@@ -72,7 +72,7 @@ export function RoleChipRow({
             key={g.label}
             type="button"
             onClick={() => onChange(g.label)}
-            className={`rounded-full border px-4 py-1.5 text-base ${
+            className={`rounded-full border px-3 py-1 text-sm ${
               isActive
                 ? "border-transparent bg-[var(--color-accent-slate)] text-white"
                 : "border-border bg-white text-foreground hover:bg-accent"
