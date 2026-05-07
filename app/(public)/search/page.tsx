@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { PeopleResultCard } from "@/components/search/people-result-card";
+import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import {
   searchPeople,
   searchPublications,
@@ -264,17 +265,7 @@ async function PublicationsResults({
                     h.title
                   )}
                 </div>
-                {h.wcmAuthors.length > 0 ? (
-                  <div className="mt-1.5 text-sm text-muted-foreground">
-                    <Link
-                      href={`/scholars/${h.wcmAuthors[0].slug}`}
-                      className="font-medium text-foreground hover:underline"
-                    >
-                      {h.wcmAuthors[0].name}
-                    </Link>
-                    {h.wcmAuthors.length > 1 ? " et al." : ""}
-                  </div>
-                ) : null}
+                <AuthorChipRow authors={h.wcmAuthors} />
                 <div className="text-muted-foreground mt-1 text-xs">
                   {h.journal} · {h.year}
                   {h.publicationType ? ` · ${h.publicationType}` : ""}

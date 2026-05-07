@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -32,7 +33,14 @@ type Hit = {
   citationCount: number | null;
   pubmedUrl: string | null;
   doi: string | null;
-  authors: Array<{ name: string; cwid?: string; slug?: string }>;
+  authors: Array<{
+    name: string;
+    cwid: string;
+    slug: string;
+    identityImageEndpoint: string;
+    isFirst: boolean;
+    isLast: boolean;
+  }>;
 };
 
 type FeedResponse = { hits: Hit[]; total: number; page: number; pageSize: number };
@@ -185,31 +193,7 @@ export function PublicationFeed({
                     h.title
                   )}
                 </div>
-                {(() => {
-                  // Mirror RecentHighlightCard: feature the first WCM author
-                  // (or first author overall as fallback) + "et al." if more.
-                  // Locked here so this list reads consistently with /topics/{slug}
-                  // Recent highlights and the home Recent contributions surface.
-                  const primary =
-                    h.authors.find((a) => a.slug) ?? h.authors[0] ?? null;
-                  const hasMore = h.authors.length > 1;
-                  if (!primary) return null;
-                  return (
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {primary.slug ? (
-                        <a
-                          href={`/scholars/${primary.slug}`}
-                          className="font-medium text-foreground hover:underline"
-                        >
-                          {primary.name}
-                        </a>
-                      ) : (
-                        <span className="font-medium text-foreground">{primary.name}</span>
-                      )}
-                      {hasMore ? " et al." : ""}
-                    </div>
-                  );
-                })()}
+                <AuthorChipRow authors={h.authors} />
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                   {h.journal && <span className="italic">{h.journal}</span>}
                   {h.year ? <span>· {h.year}</span> : null}

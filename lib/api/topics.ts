@@ -520,7 +520,17 @@ export type TopicPublicationHit = {
   citationCount: number | null;
   pubmedUrl: string | null;
   doi: string | null;
-  authors: Array<{ name: string; cwid?: string; slug?: string }>;
+  /** WCM-confirmed coauthors with chip-render data (headshot + first/last role
+   *  flags). Empty array when the publication has no confirmed WCM authors;
+   *  publication-feed UI suppresses the chip row in that case. */
+  authors: Array<{
+    name: string;
+    cwid: string;
+    slug: string;
+    identityImageEndpoint: string;
+    isFirst: boolean;
+    isLast: boolean;
+  }>;
 };
 
 export type TopicPublicationsResult = {
