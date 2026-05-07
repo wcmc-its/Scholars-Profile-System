@@ -290,6 +290,49 @@ model Division {
   @@map("division")
 }
 
+/// Cross-disciplinary research centers and institutes that span departments.
+/// Faculty appointments roll up to a Department; center affiliations are
+/// layered on top (no FK from Scholar — membership lives in a separate table
+/// when sources land, e.g. reporting_cancer_center for the Meyer Cancer Center).
+/// `code` is a stable slug-like identifier (e.g. "englander_ipm").
+model Center {
+  code         String   @id @db.VarChar(64)
+  name         String   @db.VarChar(255)
+  slug         String   @unique @db.VarChar(255)
+  description  String?  @db.Text
+  directorCwid String?  @map("director_cwid") @db.VarChar(32)
+  scholarCount Int      @default(0) @map("scholar_count")
+  sortOrder    Int      @default(0) @map("sort_order")
+  source       String   @default("seed") @db.VarChar(32)
+  refreshedAt  DateTime @default(now()) @map("refreshed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  members CenterMembership[]
+
+  @@index([slug])
+  @@index([sortOrder])
+  @@map("center")
+}
+
+/// Per-scholar membership in a Center. Sourced from manual exports
+/// (e.g. data/center-members/meyer-cancer-center.txt) until upstream
+/// systems land. Composite unique on (centerCode, cwid). Scholars deleted
+/// from `scholar` cascade-remove the row; centers cascade-remove their
+/// memberships.
+model CenterMembership {
+  centerCode      String   @map("center_code") @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  source          String   @default("manual") @db.VarChar(64)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
+
+  center  Center  @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+
+  @@id([centerCode, cwid])
+  @@index([cwid])
+  @@map("center_membership")
+}
+
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
 /// One PublicationTopic row per `TOPIC#<parent_topic_id>` item in DynamoDB.
 /// Subtopic data lives as embedded JSON fields here (no separate subtopic table).
