@@ -176,6 +176,14 @@ async function main() {
     const knownTopics = await prisma.topic.findMany({ select: { id: true } });
     const knownTopicIds = new Set(knownTopics.map((t) => t.id));
 
+    // Pre-load known publication PMIDs. ReCiterAI's TOPIC# scope can include
+    // PMIDs that haven't yet been ingested into our `publication` table (the
+    // PubMed ETL runs separately); upserting those would violate
+    // publication_topic.pmid → publication.pmid FK. Skip them with a counted
+    // log line, same pattern as the scholar/parent-topic guards.
+    const knownPubs = await prisma.publication.findMany({ select: { pmid: true } });
+    const knownPmidSet = new Set(knownPubs.map((p) => p.pmid));
+
     console.log(`Scanning ${TABLE} for TOPIC# records (paginated)...`);
     const topicItems: TopicRecord[] = [];
     {
@@ -207,6 +215,7 @@ async function main() {
     // Log the skip reasons by category so the ETL bookkeeping is auditable.
     let skippedMissingScholar = 0;
     let skippedMissingTopic = 0;
+    let skippedMissingPublication = 0;
     let skippedMissingFields = 0;
     let pubTopicRowsUpserted = 0;
 
@@ -254,6 +263,11 @@ async function main() {
         continue;
       }
 
+      if (!knownPmidSet.has(pmidStr)) {
+        skippedMissingPublication += 1;
+        continue;
+      }
+
       writes.push({
         pmid: pmidStr,
         cwid: rawCwid,
@@ -276,7 +290,7 @@ async function main() {
       });
     }
     console.log(
-      `publication_topic candidates: ${writes.length} (skipped: ${skippedMissingScholar} missing scholar, ${skippedMissingTopic} missing parent topic, ${skippedMissingFields} missing required fields).`,
+      `publication_topic candidates: ${writes.length} (skipped: ${skippedMissingScholar} missing scholar, ${skippedMissingTopic} missing parent topic, ${skippedMissingPublication} missing publication, ${skippedMissingFields} missing required fields).`,
     );
 
     // Idempotent upsert keyed on the composite (pmid, cwid, parentTopicId).
