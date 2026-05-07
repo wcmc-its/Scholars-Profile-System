@@ -265,16 +265,14 @@ async function PublicationsResults({
                   )}
                 </div>
                 {h.wcmAuthors.length > 0 ? (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {h.wcmAuthors.map((a) => (
-                      <Link
-                        key={a.cwid}
-                        href={`/scholars/${a.slug}`}
-                        className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                      >
-                        {a.name}
-                      </Link>
-                    ))}
+                  <div className="mt-1.5 text-sm text-muted-foreground">
+                    <Link
+                      href={`/scholars/${h.wcmAuthors[0].slug}`}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {h.wcmAuthors[0].name}
+                    </Link>
+                    {h.wcmAuthors.length > 1 ? " et al." : ""}
                   </div>
                 ) : null}
                 <div className="text-muted-foreground mt-1 text-xs">

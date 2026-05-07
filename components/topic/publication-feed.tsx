@@ -185,27 +185,31 @@ export function PublicationFeed({
                     h.title
                   )}
                 </div>
-                {h.authors.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {h.authors.slice(0, 4).map((a, i) => (
-                      <span
-                        key={i}
-                        className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs dark:bg-zinc-800"
-                      >
-                        {a.slug ? (
-                          <a href={`/scholars/${a.slug}`} className="hover:underline">
-                            {a.name}
-                          </a>
-                        ) : (
-                          a.name
-                        )}
-                      </span>
-                    ))}
-                    {h.authors.length > 4 && (
-                      <span className="text-xs text-muted-foreground">…</span>
-                    )}
-                  </div>
-                )}
+                {(() => {
+                  // Mirror RecentHighlightCard: feature the first WCM author
+                  // (or first author overall as fallback) + "et al." if more.
+                  // Locked here so this list reads consistently with /topics/{slug}
+                  // Recent highlights and the home Recent contributions surface.
+                  const primary =
+                    h.authors.find((a) => a.slug) ?? h.authors[0] ?? null;
+                  const hasMore = h.authors.length > 1;
+                  if (!primary) return null;
+                  return (
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      {primary.slug ? (
+                        <a
+                          href={`/scholars/${primary.slug}`}
+                          className="font-medium text-foreground hover:underline"
+                        >
+                          {primary.name}
+                        </a>
+                      ) : (
+                        <span className="font-medium text-foreground">{primary.name}</span>
+                      )}
+                      {hasMore ? " et al." : ""}
+                    </div>
+                  );
+                })()}
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                   {h.journal && <span className="italic">{h.journal}</span>}
                   {h.year ? <span>· {h.year}</span> : null}
