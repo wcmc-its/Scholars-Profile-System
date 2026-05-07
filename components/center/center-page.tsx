@@ -3,12 +3,19 @@ import {
   getCenter,
   getCenterMembers,
   getCenterPublicationsList,
+  getCenterGrantsList,
+  getCenterHighlights,
+  getCenterTopResearchAreas,
 } from "@/lib/api/centers";
 import { CenterMembersClient } from "@/components/center/center-members-client";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
+import { DeptGrantsList } from "@/components/department/dept-grants-list";
+import { HighlightsSection } from "@/components/department/highlights-section";
+import { PublicationCard } from "@/components/department/publication-card";
+import { GrantCard } from "@/components/department/grant-card";
 import { LeaderCard } from "@/components/scholar/leader-card";
-import type { PubSort } from "@/lib/api/dept-lists";
+import type { PubSort, GrantSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -18,12 +25,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "people" | "publications";
+type Tab = "scholars" | "publications" | "grants";
 
 export async function CenterPage({
   centerSlug,
   page,
-  tab = "people",
+  tab = "scholars",
   sort = null,
 }: {
   centerSlug: string;
@@ -36,20 +43,50 @@ export async function CenterPage({
 
   const basePath = `/centers/${detail.slug}`;
 
-  // Always need the publications count for the tab label, but only fetch the
-  // full paginated list when the Publications tab is active. The data layer
-  // returns total === 0 fast when there are no member-authored pubs.
+  // Counts needed for tab labels regardless of active tab. The publications
+  // count comes from a lightweight first-page fetch; grants count from the
+  // grants-list distinct enumeration. Highlights and top research areas only
+  // render on the Scholars (default) tab — but we always compute them so the
+  // hero shows top research areas no matter which tab is active.
+  const [topResearchAreas, highlights] = await Promise.all([
+    getCenterTopResearchAreas(detail.code),
+    getCenterHighlights(detail.code),
+  ]);
+
+  // Tab counts: pull totals up-front for the tab labels.
+  const pubsCountResult = await getCenterPublicationsList(detail.code, {
+    page: 0,
+    sort: "newest",
+  });
+  const grantsCountResult = await getCenterGrantsList(detail.code, {
+    page: 0,
+    sort: "most_recent",
+  });
+
+  // Tab-specific paginated data.
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
+  const grantSort = (sort === "end_date"
+    ? "end_date"
+    : "most_recent") as GrantSort;
+
   const pubsList =
     tab === "publications"
       ? await getCenterPublicationsList(detail.code, {
           page: Math.max(0, page - 1),
           sort: pubSort,
         })
-      : await getCenterPublicationsList(detail.code, { page: 0, sort: "newest" });
+      : pubsCountResult;
+
+  const grantsList =
+    tab === "grants"
+      ? await getCenterGrantsList(detail.code, {
+          page: Math.max(0, page - 1),
+          sort: grantSort,
+        })
+      : grantsCountResult;
 
   const members =
-    tab === "people"
+    tab === "scholars"
       ? await getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
       : null;
 
@@ -77,37 +114,107 @@ export async function CenterPage({
         </BreadcrumbList>
       </Breadcrumb>
 
-      <section className="mb-2">
-        <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
-          CENTER
+      <section className="rounded-lg border border-border bg-background px-7 py-[26px]">
+        <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)]">
+          Center
         </div>
-        <h1 className="mt-2 font-serif text-4xl font-semibold leading-tight">
+        <h1 className="mb-[18px] font-serif text-[40px] font-medium leading-none tracking-[-0.01em]">
           {detail.name}
         </h1>
         {detail.description && (
-          <p className="mt-4 max-w-prose text-base text-muted-foreground">
+          <p className="mb-[22px] max-w-prose text-[15px] leading-[1.65] text-muted-foreground">
             {detail.description}
           </p>
         )}
+
+        {detail.director && <LeaderCard leader={detail.director} role="Director" />}
+
+        {topResearchAreas.length > 0 && (
+          <div className="mt-6">
+            <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Top research areas
+            </div>
+            <div className="flex flex-wrap gap-[7px]">
+              {topResearchAreas.map((t) => (
+                <a
+                  key={t.topicId}
+                  href={`/topics/${t.topicSlug}`}
+                  className="inline-flex items-center gap-[7px] rounded-full border border-border bg-background px-3 py-[5px] text-[13px] text-foreground hover:bg-accent"
+                  style={{ textDecoration: "none" }}
+                >
+                  {t.topicLabel}
+                  <span className="text-[12px] text-[var(--color-text-tertiary)]">
+                    {t.pubCount.toLocaleString()}
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-[22px] flex flex-wrap gap-[9px] border-t border-dashed border-border pt-4 text-[14px] text-muted-foreground">
+          {(
+            [
+              detail.scholarCount > 0
+                ? { value: detail.scholarCount, label: "scholars" }
+                : null,
+              pubsCountResult.total > 0
+                ? { value: pubsCountResult.total, label: "publications" }
+                : null,
+              grantsCountResult.total > 0
+                ? { value: grantsCountResult.total, label: "active grants" }
+                : null,
+            ].filter(Boolean) as Array<{ value: number; label: string }>
+          ).map((s, i, all) => (
+            <span key={s.label}>
+              <b className="font-medium text-foreground">
+                {s.value.toLocaleString()}
+              </b>{" "}
+              {s.label}
+              {i < all.length - 1 && (
+                <span className="ml-[9px] text-[var(--color-text-tertiary)]">
+                  ·
+                </span>
+              )}
+            </span>
+          ))}
+          {detail.scholarCount === 0 && pubsCountResult.total === 0 && (
+            <span>Membership data pending</span>
+          )}
+        </div>
       </section>
 
-      {detail.director && <LeaderCard leader={detail.director} role="Director" />}
+      <HighlightsSection
+        eyebrow="Recent publications"
+        caveatItem="publications"
+        cards={highlights.publications.map((p) => (
+          <PublicationCard key={p.pmid} pub={p} />
+        ))}
+        totalCount={pubsCountResult.total}
+        viewAllHref={`${basePath}?tab=publications`}
+        viewAllLabel="publications"
+      />
+      <HighlightsSection
+        eyebrow="Active grants"
+        caveatItem="grants"
+        cards={highlights.grants.map((g, i) => (
+          <GrantCard key={g.externalId ?? `g-${i}`} grant={g} />
+        ))}
+        totalCount={grantsCountResult.total}
+        viewAllHref={`${basePath}?tab=grants`}
+        viewAllLabel="active grants"
+      />
 
-      <div className="mt-6 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-        {detail.scholarCount > 0
-          ? `${detail.scholarCount.toLocaleString()} members · ${pubsList.total.toLocaleString()} publications`
-          : "Membership data pending"}
-      </div>
-
-      <div className="mt-8">
+      <div className="mt-12">
         <CenterTabs
           active={tab}
           basePath={basePath}
-          peopleCount={detail.scholarCount}
-          publicationsCount={pubsList.total}
+          scholarsCount={detail.scholarCount}
+          publicationsCount={pubsCountResult.total}
+          grantsCount={grantsCountResult.total}
         />
 
-        {tab === "people" && members && (
+        {tab === "scholars" && members && (
           <CenterMembersClient
             members={members.hits}
             total={members.total}
@@ -124,6 +231,17 @@ export async function CenterPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={pubSort}
+            basePath={basePath}
+          />
+        )}
+
+        {tab === "grants" && (
+          <DeptGrantsList
+            hits={grantsList.hits}
+            total={grantsList.total}
+            page={grantsList.page + 1}
+            pageSize={grantsList.pageSize}
+            sort={grantSort}
             basePath={basePath}
           />
         )}

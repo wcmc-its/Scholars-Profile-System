@@ -1,27 +1,30 @@
 /**
- * Underline-style tabs for the center page. Two tabs only — People (default)
- * and Publications. Same visual treatment as DeptTabs so the dept and center
- * pages feel consistent.
+ * Underline-style tabs for the center page. Three tabs — Scholars (default),
+ * Publications, Grants. Same visual treatment as DeptTabs so the dept and
+ * center pages feel consistent.
  */
 import Link from "next/link";
 import type { Route } from "next";
 
-type TabKey = "people" | "publications";
+type TabKey = "scholars" | "publications" | "grants";
 
 export function CenterTabs({
   active,
   basePath,
-  peopleCount,
+  scholarsCount,
   publicationsCount,
+  grantsCount,
 }: {
   active: TabKey;
   basePath: string;
-  peopleCount: number;
+  scholarsCount: number;
   publicationsCount: number;
+  grantsCount: number;
 }) {
   const tabs: { key: TabKey; label: string; count: number }[] = [
-    { key: "people", label: "People", count: peopleCount },
+    { key: "scholars", label: "Scholars", count: scholarsCount },
     { key: "publications", label: "Publications", count: publicationsCount },
+    { key: "grants", label: "Grants", count: grantsCount },
   ];
 
   return (
@@ -64,7 +67,7 @@ export function CenterTabs({
           );
         }
         const href =
-          t.key === "people"
+          t.key === "scholars"
             ? (basePath as Route)
             : (`${basePath}?tab=${t.key}` as Route);
         return (
