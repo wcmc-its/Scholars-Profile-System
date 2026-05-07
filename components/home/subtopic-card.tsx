@@ -21,6 +21,11 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
         >
           {item.subtopicName}
         </a>
+        {item.subtopicShortDescription ? (
+          <p className="text-muted-foreground mt-1 line-clamp-1 text-sm">
+            {item.subtopicShortDescription}
+          </p>
+        ) : null}
         <div className="text-muted-foreground mt-1 text-sm">
           {item.publicationCount} publications · {item.scholarCount} scholars
         </div>
