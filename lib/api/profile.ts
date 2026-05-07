@@ -8,9 +8,9 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { sanitizeVIVOHtml } from "@/lib/utils";
 import {
   rankForSelectedHighlights,
-  rankForRecentFeed,
   type ScoredPublication,
 } from "@/lib/ranking";
 
@@ -37,11 +37,15 @@ export type ProfilePublication = ScoredPublication<{
   pubmedUrl: string | null;
   authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
   isConfirmed: boolean;
-  /** Active WCM scholars who are also confirmed authors on this publication. */
-  wcmCoauthors: Array<{
+  /** Active WCM scholars (incl. the profile owner) who are confirmed authors
+   *  on this publication. Chip-row shape matching the topic/search surfaces. */
+  wcmAuthors: Array<{
+    name: string;
     cwid: string;
     slug: string;
-    preferredName: string;
+    identityImageEndpoint: string;
+    isFirst: boolean;
+    isLast: boolean;
     position: number;
   }>;
 }>;
@@ -55,6 +59,10 @@ export type ProfilePayload = {
   primaryDepartment: string | null;
   email: string | null;
   identityImageEndpoint: string;
+  /** Derived in ED ETL — true when LDAP carries a clinical or NYP-credentialed
+   *  signal. Drives whether the "Clinical profile →" link renders in the
+   *  Contact card (absence-as-default per design spec v1.7.1). */
+  hasClinicalProfile: boolean;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -78,6 +86,8 @@ export type ProfilePayload = {
     startDate: string;
     endDate: string;
     isActive: boolean;
+    /** Sponsor-issued award number (e.g. "R01 AG067497"); null when not provided. */
+    awardNumber: string | null;
   }>;
   areasOfInterest: Array<{ topic: string; score: number }>;
   disclosures: Array<{
@@ -88,8 +98,8 @@ export type ProfilePayload = {
     activityGroup: string | null;
     description: string | null;
   }>;
-  highlights: ProfilePublication[]; // already top-3
-  recent: ProfilePublication[]; // full list, sorted by recent_score
+  highlights: ProfilePublication[]; // top-3 first/senior, ranked by selected_highlights curve
+  publications: ProfilePublication[]; // every confirmed authorship, year desc → dateAddedToEntrez desc
 };
 
 /**
@@ -114,6 +124,46 @@ function annotateAppointments<
     return annotated.filter((a) => !(a.isActive && a.isInterim));
   }
   return annotated;
+}
+
+/**
+ * Collapse multiple SOR-flagged primary appointments down to a single visible
+ * "Primary" designation. The WOOFA SOR can mark a scholar as primary in more
+ * than one department (joint chairs, dual-affiliation chairs); rendering two
+ * "Primary" badges is confusing for the reader.
+ *
+ * Tie-break order, applied only across rows where DB `isPrimary === true`:
+ *   1. Title starts with "Chair" / "Chairman" / "Chairperson" / "Chairwoman".
+ *   2. Title starts with "Director".
+ *   3. Earliest startDate (longest-tenured).
+ *
+ * Rows that lose the tie-break get `isPrimary: false`. DB rows are NOT
+ * modified — the underlying SOR truth is preserved on the Appointment table.
+ */
+function collapseToSingleVisiblePrimary<
+  T extends { title: string; isPrimary: boolean; startDate: Date | null },
+>(appts: T[]): T[] {
+  const primaries = appts.filter((a) => a.isPrimary);
+  if (primaries.length <= 1) return appts;
+  const isChair = (t: string) => /^Chair(man|person|woman)?\b/i.test(t);
+  const isDirector = (t: string) => /^Director\b/i.test(t);
+  const ranked = primaries
+    .map((a, idx) => ({ a, idx }))
+    .sort((x, y) => {
+      const xc = isChair(x.a.title);
+      const yc = isChair(y.a.title);
+      if (xc !== yc) return xc ? -1 : 1;
+      const xd = isDirector(x.a.title);
+      const yd = isDirector(y.a.title);
+      if (xd !== yd) return xd ? -1 : 1;
+      const xs = x.a.startDate?.getTime() ?? Infinity;
+      const ys = y.a.startDate?.getTime() ?? Infinity;
+      return xs - ys;
+    });
+  const winner = ranked[0].a;
+  return appts.map((a) =>
+    a.isPrimary && a !== winner ? { ...a, isPrimary: false } : a,
+  );
 }
 
 export async function getScholarFullProfileBySlug(
@@ -172,6 +222,25 @@ export async function getScholarFullProfileBySlug(
     },
   });
 
+  // Fallback impact source: the IMPACT# DynamoDB projection that populates
+  // `publication_score` is documented as pending (etl/dynamodb/index.ts:14-22),
+  // so `publication_score` is empty in the prototype DB. The TOPIC# projection
+  // (`publication_topic`) carries the canonical per-paper impact in
+  // `impact_score` (mirrored from IMPACT#.impact_score; same value across all
+  // topic rows for a single pmid, so MAX collapses safely). NOT `score` —
+  // that's per-topic relevance (0–1), not impact, and using it ranks high-
+  // relevance lightweight papers above true high-impact ones.
+  const topicImpactRows = (await prisma.$queryRawUnsafe(
+    `SELECT pmid, MAX(impact_score) AS max_impact
+       FROM publication_topic
+      WHERE cwid = ? AND impact_score IS NOT NULL
+      GROUP BY pmid`,
+    scholar.cwid,
+  )) as Array<{ pmid: string; max_impact: number | string | null }>;
+  const topicImpactByPmid = new Map<string, number>(
+    topicImpactRows.map((r) => [r.pmid, Number(r.max_impact ?? 0)]),
+  );
+
   const rankablePubs = authorships.map((a) => ({
     pmid: a.publication.pmid,
     title: a.publication.title,
@@ -180,11 +249,15 @@ export async function getScholarFullProfileBySlug(
     year: a.publication.year,
     publicationType: a.publication.publicationType,
     citationCount: a.publication.citationCount, // display-only — NOT used by Variant B ranking
-    // ReCiterAI publication score for this scholar+pmid pair (D-08).
-    // Falls back to 0 when no PublicationScore row exists (covers the
-    // pre-2020 ReCiterAI floor per D-15 — those papers won't surface as
-    // Selected highlights but remain visible in the most-recent feed).
-    reciteraiImpact: a.publication.publicationScores[0]?.score ?? 0,
+    // ReCiterAI publication score for this scholar+pmid pair (D-08). Prefers
+    // PublicationScore (IMPACT# projection); falls back to MAX across the
+    // scholar's PublicationTopic rows (TOPIC# projection — populated). Both
+    // pre-2020 papers and papers ReCiterAI didn't score at all yield 0, which
+    // legitimately excludes them from Selected highlights per D-15.
+    reciteraiImpact:
+      a.publication.publicationScores[0]?.score
+        ?? topicImpactByPmid.get(a.publication.pmid)
+        ?? 0,
     dateAddedToEntrez: a.publication.dateAddedToEntrez,
     doi: a.publication.doi,
     pubmedUrl: a.publication.pubmedUrl,
@@ -194,28 +267,47 @@ export async function getScholarFullProfileBySlug(
       isPenultimate: a.isPenultimate,
     },
     isConfirmed: a.isConfirmed,
-    wcmCoauthors: a.publication.authors
+    // All confirmed WCM authors on this publication, including the profile
+    // owner. Same chip-row shape as topic/search; the page renders chips and
+    // omits the plain authorsString to avoid duplicating WCM author names.
+    wcmAuthors: a.publication.authors
       .filter(
         (au) =>
           au.scholar &&
-          au.cwid !== scholar.cwid && // exclude the profile owner
           !au.scholar.deletedAt &&
           au.scholar.status === "active",
       )
       .map((au) => ({
+        name: au.scholar!.preferredName,
         cwid: au.scholar!.cwid,
         slug: au.scholar!.slug,
-        preferredName: au.scholar!.preferredName,
+        identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
+        isFirst: au.isFirst,
+        isLast: au.isLast,
         position: au.position,
       })),
   }));
 
   const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
-  // D-16 dedup: papers in Selected highlights filter out of the most-recent
-  // feed within a single profile-page render, avoiding the structural overlap
-  // on the 6–24 month range where both surfaces can claim the same paper.
-  const highlightPmids = new Set(highlights.map((h) => h.pmid));
-  const recent = rankForRecentFeed(rankablePubs, now).filter((p) => !highlightPmids.has(p.pmid));
+
+  // Full publications record: every confirmed authorship, no scholar-centric
+  // filter. The year-grouped Publications list is the canonical "papers by
+  // this person" record — middle-author and penultimate papers belong here
+  // even though they don't surface as Selected highlights (D-13 first/senior
+  // filter applies to the highlight surface only).
+  //
+  // Sort key is `dateAddedToEntrez` for ALL chronological ordering, not the
+  // PubMed PubDate `year` — `year` is the journal-issue label (used for
+  // bucketing) but `dateAddedToEntrez` is the canonical signal for "when this
+  // paper became known" and is the more reliable per-paper sort across edge
+  // cases (e-pub-ahead-of-print, missing year, retroactive indexing).
+  const publications: ProfilePublication[] = rankablePubs
+    .map((p) => ({ ...p, score: 0 } satisfies ProfilePublication))
+    .sort((a, b) => {
+      const ad = a.dateAddedToEntrez?.getTime() ?? 0;
+      const bd = b.dateAddedToEntrez?.getTime() ?? 0;
+      return bd - ad;
+    });
 
   const annotatedAppointments = annotateAppointments(scholar.appointments, now);
 
@@ -228,8 +320,9 @@ export async function getScholarFullProfileBySlug(
     primaryDepartment: scholar.primaryDepartment,
     email: scholar.email,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
-    overview: scholar.overview,
-    appointments: annotatedAppointments.map((a) => ({
+    hasClinicalProfile: scholar.hasClinicalProfile,
+    overview: scholar.overview ? sanitizeVIVOHtml(scholar.overview) : null,
+    appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
       title: a.title,
       organization: a.organization,
       startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
@@ -251,6 +344,7 @@ export async function getScholarFullProfileBySlug(
       startDate: g.startDate.toISOString().slice(0, 10),
       endDate: g.endDate.toISOString().slice(0, 10),
       isActive: g.endDate.getTime() > now.getTime(),
+      awardNumber: g.awardNumber ?? null,
     })),
     areasOfInterest: scholar.topicAssignments.map((t) => ({
       topic: t.topic,
@@ -265,7 +359,7 @@ export async function getScholarFullProfileBySlug(
       description: c.description,
     })),
     highlights,
-    recent,
+    publications,
   };
 }
 
@@ -312,7 +406,7 @@ export async function getScholarOgData(slug: string): Promise<{
  */
 export function isSparseProfile(p: ProfilePayload): boolean {
   const noOverview = !p.overview || p.overview.trim().length === 0;
-  const fewPubs = p.recent.length < 3;
+  const fewPubs = p.publications.length < 3;
   const noActiveGrants = !p.grants.some((g) => g.isActive);
   return noOverview && fewPubs && noActiveGrants;
 }

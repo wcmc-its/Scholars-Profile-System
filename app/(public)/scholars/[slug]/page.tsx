@@ -4,9 +4,9 @@ import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { ShowMoreList } from "@/components/profile/show-more-list";
-import { PastAppointmentsExpander } from "@/components/profile/past-appointments";
+import { GrantsSection } from "@/components/profile/grants-section";
+import { PublicationsSection } from "@/components/profile/publications-section";
+import { PublicationRow } from "@/components/profile/publication-row";
 import {
   getActiveScholarSlugs,
   getScholarFullProfileBySlug,
@@ -14,6 +14,7 @@ import {
   type ProfilePayload,
   type ProfilePublication,
 } from "@/lib/api/profile";
+import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { resolveBySlugOrHistory } from "@/lib/url-resolver";
 import { redirect } from "next/navigation";
 
@@ -112,287 +113,321 @@ export default async function ScholarProfilePage({
 
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
-  const pastAppointments = profile.appointments.filter((a) => !a.isActive);
+
+  const pubGroups = groupPublicationsByYear(profile.publications);
+  const pubMinYear = pubGroups
+    .flatMap((g) => g.pubs.map((p) => p.year ?? 0))
+    .filter((y) => y > 0)
+    .reduce<number | null>((acc, y) => (acc === null ? y : Math.min(acc, y)), null);
+  const pubMaxYear = pubGroups
+    .flatMap((g) => g.pubs.map((p) => p.year ?? 0))
+    .reduce((acc, y) => Math.max(acc, y), 0);
+
+  const activeGrantCount = profile.grants.filter((g) => g.isActive).length;
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
-      {/* Schema.org Person JSON-LD — D-26 */}
+    <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      {/* Header */}
-      <section className="flex flex-col gap-6 sm:flex-row sm:items-center">
-        <HeadshotAvatar
-          size="lg"
-          cwid={profile.cwid}
-          preferredName={profile.preferredName}
-          identityImageEndpoint={profile.identityImageEndpoint}
-        />
-        <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-semibold tracking-tight">{profile.preferredName}</h1>
-          {profile.primaryTitle ? (
-            <div className="text-lg text-zinc-700 dark:text-zinc-300">{profile.primaryTitle}</div>
-          ) : null}
-          {profile.primaryDepartment ? (
-            <div className="text-muted-foreground">{profile.primaryDepartment}</div>
-          ) : null}
-        </div>
-      </section>
-
-      {sparse ? (
-        <Card className="mt-6 border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
-          <CardContent className="py-4 text-sm">
-            This profile is being populated. Some content may not yet be available.
-            {profile.primaryDepartment ? (
-              <>
-                {" "}
-                See {profile.primaryDepartment} for additional information.
-              </>
+      <main className="mx-auto grid max-w-[1100px] grid-cols-1 gap-10 px-6 py-10 md:grid-cols-[280px_1fr] md:py-12">
+        {/* ============== Sidebar ============== */}
+        <aside className="md:sticky md:top-[calc(var(--header-h,60px)+24px)] md:self-start md:max-h-[calc(100vh-var(--header-h,60px)-32px)] md:overflow-y-auto">
+          <div className="mb-5 text-center">
+            <div className="mx-auto mb-3 size-24">
+              <HeadshotAvatar
+                size="lg"
+                cwid={profile.cwid}
+                preferredName={profile.preferredName}
+                identityImageEndpoint={profile.identityImageEndpoint}
+              />
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">{profile.preferredName}</h1>
+            {profile.primaryTitle ? (
+              <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                {profile.primaryTitle}
+              </div>
             ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+            {profile.primaryDepartment ? (
+              <div className="text-muted-foreground mt-2 text-sm">{profile.primaryDepartment}</div>
+            ) : null}
+          </div>
 
-      <Separator className="my-8" />
+          {profile.email || profile.hasClinicalProfile ? (
+            <SidebarCard title="Contact">
+              <ul className="flex flex-col gap-2">
+                {profile.email ? (
+                  <li>
+                    <a
+                      href={`mailto:${profile.email}`}
+                      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                    >
+                      {profile.email}
+                    </a>
+                  </li>
+                ) : null}
+                {profile.hasClinicalProfile ? (
+                  <li>
+                    <a
+                      href={`https://weillcornell.org/doctors-directory?searchVal=${encodeURIComponent(
+                        // Prefer the (likely) surname for a tighter directory hit;
+                        // fall back to full preferred name if the split fails.
+                        profile.preferredName.split(/\s+/).pop() || profile.preferredName,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                    >
+                      Clinical profile →
+                    </a>
+                  </li>
+                ) : null}
+              </ul>
+            </SidebarCard>
+          ) : null}
 
-      {profile.overview ? (
-        <Section title="Overview">
-          <p className="leading-relaxed text-zinc-800 dark:text-zinc-200">{profile.overview}</p>
-        </Section>
-      ) : null}
-
-      {profile.email ? (
-        <Section title="Contact">
-          <a
-            href={`mailto:${profile.email}`}
-            className="text-primary underline-offset-4 hover:underline"
-          >
-            {profile.email}
-          </a>
-        </Section>
-      ) : null}
-
-      {activeAppointments.length > 0 ? (
-        <Section title="Appointments">
-          <ul className="flex flex-col gap-3">
-            {activeAppointments.map((a, i) => (
-              <li key={i}>
-                <div className="font-medium">{a.title}</div>
-                <div className="text-muted-foreground text-sm">{a.organization}</div>
-                <div className="text-muted-foreground text-xs">
-                  {a.startDate ? a.startDate.slice(0, 4) : ""} – Present
-                  {a.isPrimary ? <Badge variant="secondary" className="ml-2">Primary</Badge> : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-          <PastAppointmentsExpander items={pastAppointments} />
-        </Section>
-      ) : null}
-
-      {profile.educations.length > 0 ? (
-        <Section title="Education and training">
-          <ul className="flex flex-col gap-3">
-            {profile.educations.map((e, i) => (
-              <li key={i}>
-                <div className="font-medium">{e.degree}{e.field ? `, ${e.field}` : ""}</div>
-                <div className="text-muted-foreground text-sm">
-                  {e.institution}
-                  {e.year ? ` · ${e.year}` : ""}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
-
-      {profile.areasOfInterest.length > 0 ? (
-        <Section title="Areas of interest">
-          <ul className="flex flex-wrap gap-2">
-            {profile.areasOfInterest.map((t) => (
-              <li key={t.topic}>
-                <Badge variant="secondary" className="text-sm font-normal">
-                  {t.topic}
-                </Badge>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
-
-      {(profile.highlights.length > 0 || profile.recent.length > 0) ? (
-        <Section title="Publications">
-          {profile.highlights.length > 0 ? (
-            <div>
-              <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-zinc-500">
-                Selected highlights
-              </h3>
-              <ul className="flex flex-col gap-4">
-                {profile.highlights.map((p) => (
-                  <li key={p.pmid}>
-                    <PublicationRow pub={p} />
+          {activeAppointments.length > 0 ? (
+            <SidebarCard title="Appointments">
+              <ul className="flex flex-col gap-3">
+                {activeAppointments.map((a, i) => (
+                  <li key={i} className="leading-snug">
+                    <div className="font-semibold">
+                      {a.title}
+                      {a.isPrimary ? (
+                        <Badge variant="secondary" className="ml-2 align-middle">Primary</Badge>
+                      ) : null}
+                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-xs">
+                      {a.organization}
+                      {a.startDate ? ` · ${a.startDate.slice(0, 4)}–` : ""}
+                    </div>
                   </li>
                 ))}
               </ul>
-            </div>
+            </SidebarCard>
           ) : null}
 
-          {profile.recent.length > 0 ? (
-            <div className="mt-8">
-              <h3 className="mb-3 text-sm font-medium uppercase tracking-wide text-zinc-500">
-                Recent publications
-              </h3>
-              <ShowMoreList
-                defaultItems={profile.recent
-                  .slice(0, 10)
-                  .map((p) => (
-                    <PublicationRow key={p.pmid} pub={p} showCitations={false} />
-                  ))}
-                rest={profile.recent
-                  .slice(10)
-                  .map((p) => (
-                    <PublicationRow key={p.pmid} pub={p} showCitations={false} />
-                  ))}
-              />
-            </div>
-          ) : null}
-        </Section>
-      ) : null}
-
-      {profile.grants.length > 0 ? (
-        <Section title="Grants">
-          {(() => {
-            const sorted = [...profile.grants].sort((a, b) =>
-              a.isActive === b.isActive
-                ? b.endDate.localeCompare(a.endDate)
-                : a.isActive
-                  ? -1
-                  : 1,
-            );
-            const renderGrant = (g: ProfilePayload["grants"][number], i: number) => (
-              <div key={`${g.title}-${i}`}>
-                <div className="font-medium">{g.title}</div>
-                <div className="text-muted-foreground text-sm">
-                  {g.role} · {g.funder}
-                </div>
-                <div className="text-muted-foreground text-xs">
-                  {g.startDate.slice(0, 4)} – {g.endDate.slice(0, 4)}
-                  {g.isActive ? (
-                    <Badge variant="secondary" className="ml-2">
-                      Active
-                    </Badge>
-                  ) : null}
-                </div>
-              </div>
-            );
-            return (
-              <ShowMoreList
-                defaultItems={sorted.slice(0, 10).map(renderGrant)}
-                rest={sorted.slice(10).map((g, i) => renderGrant(g, i + 10))}
-              />
-            );
-          })()}
-        </Section>
-      ) : null}
-
-      {profile.disclosures.length > 0 ? (
-        <Section title="Disclosures">
-          {(() => {
-            // Group by activityGroup so related entries cluster.
-            const groups = new Map<string, typeof profile.disclosures>();
-            for (const d of profile.disclosures) {
-              const key = d.activityGroup ?? "Other";
-              if (!groups.has(key)) groups.set(key, []);
-              groups.get(key)!.push(d);
-            }
-            return (
-              <div className="flex flex-col gap-6">
-                {Array.from(groups.entries()).map(([group, entries]) => (
-                  <div key={group}>
-                    <h3 className="mb-2 text-sm font-medium uppercase tracking-wide text-zinc-500">
-                      {group}
-                    </h3>
-                    <ul className="flex flex-col gap-3">
-                      {entries.map((d, i) => (
-                        <li key={i}>
-                          {d.entity ? <div className="font-medium">{d.entity}</div> : null}
-                          <div className="text-muted-foreground text-sm">
-                            {[d.activityType, d.value, d.activityRelatesTo]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+          {profile.educations.length > 0 ? (
+            <SidebarCard title="Education">
+              <ul className="flex flex-col gap-3">
+                {profile.educations.map((e, i) => (
+                  <li key={i} className="leading-snug">
+                    <div className="font-semibold">
+                      {e.degree}
+                      {e.field ? `, ${e.field}` : ""}
+                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-xs">
+                      {e.institution}
+                      {e.year ? `, ${e.year}` : ""}
+                    </div>
+                  </li>
                 ))}
-              </div>
-            );
-          })()}
-        </Section>
-      ) : null}
-    </main>
+              </ul>
+            </SidebarCard>
+          ) : null}
+        </aside>
+
+        {/* ============== Main column ============== */}
+        <div className="min-w-0">
+          {sparse ? (
+            <Card className="mb-6 border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
+              <CardContent className="py-4 text-sm">
+                This profile is being populated. Some content may not yet be available.
+                {profile.primaryDepartment ? (
+                  <> See {profile.primaryDepartment} for additional information.</>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {profile.overview ? (
+            <Section title="Overview">
+              <div
+                className="text-base leading-relaxed text-zinc-800 dark:text-zinc-200 [&_a]:text-[var(--color-accent-slate)] [&_a]:underline-offset-4 [&_a:hover]:underline [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:mb-1"
+                dangerouslySetInnerHTML={{ __html: profile.overview }}
+              />
+            </Section>
+          ) : null}
+
+          {profile.areasOfInterest.length > 0 ? (
+            <Section title="Areas of interest">
+              <ul className="flex flex-wrap gap-2">
+                {profile.areasOfInterest.map((t) => (
+                  <li key={t.topic}>
+                    <Badge variant="secondary" className="text-sm font-normal">
+                      {t.topic}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
+
+          {profile.highlights.length > 0 ? (
+            <Section title="Selected highlights" headingLg>
+              <ol className="flex flex-col">
+                {profile.highlights.map((p, i) => (
+                  <li
+                    key={p.pmid}
+                    className="grid grid-cols-[32px_1fr] gap-3 border-t border-border py-4 first:border-t-0 first:pt-0"
+                  >
+                    <div className="text-muted-foreground font-bold leading-none text-2xl tabular-nums">
+                      {i + 1}
+                    </div>
+                    <PublicationRow pub={p} />
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          ) : null}
+
+          {profile.publications.length > 0 ? (
+            <Section
+              title="Publications"
+              headingLg
+              count={
+                <>
+                  {profile.publications.length} total
+                  {pubMaxYear > 0 && pubMinYear !== null
+                    ? ` · ${pubMinYear}–${pubMaxYear}`
+                    : ""}
+                </>
+              }
+            >
+              <PublicationsSection publications={profile.publications} />
+            </Section>
+          ) : null}
+
+          {profile.grants.length > 0 ? (
+            <Section
+              title="Grants"
+              headingLg
+              count={
+                <>
+                  {profile.grants.length} total
+                  {activeGrantCount > 0 ? ` · ${activeGrantCount} active` : ""}
+                </>
+              }
+            >
+              <GrantsSection grants={profile.grants} />
+            </Section>
+          ) : null}
+
+          {profile.disclosures.length > 0 ? (
+            <Section title="External relationships" headingLg>
+              <p className="mb-6 max-w-[60em] text-sm italic leading-relaxed text-zinc-700 dark:text-zinc-300">
+                Relationships and collaborations with for-profit and not-for-profit organizations
+                are of vital importance to our faculty because these exchanges of scientific
+                information foster innovation. As experts in their fields, WCM physicians and
+                scientists are sought after by many organizations to consult and educate. WCM and
+                its faculty make this information available to the public, thus creating a
+                transparent environment.
+              </p>
+              {(() => {
+                const grouped = new Map<string, Set<string>>();
+                for (const d of profile.disclosures) {
+                  if (!d.entity) continue;
+                  const key = d.activityGroup ?? "Other";
+                  const set = grouped.get(key) ?? new Set<string>();
+                  set.add(d.entity);
+                  grouped.set(key, set);
+                }
+                // Stable ordering: known groups first in mockup order, then any others alpha,
+                // "Other" last.
+                const KNOWN_ORDER = [
+                  "Leadership Roles",
+                  "Ownership",
+                  "Advisory/Scientific Board Member",
+                  "Professional Services",
+                  "Speaker/Lecturer",
+                  "Proprietary Interest",
+                  "Other Interest",
+                ];
+                const keys = [...grouped.keys()];
+                keys.sort((a, b) => {
+                  if (a === "Other") return 1;
+                  if (b === "Other") return -1;
+                  const ia = KNOWN_ORDER.indexOf(a);
+                  const ib = KNOWN_ORDER.indexOf(b);
+                  if (ia === -1 && ib === -1) return a.localeCompare(b);
+                  if (ia === -1) return 1;
+                  if (ib === -1) return -1;
+                  return ia - ib;
+                });
+                return (
+                  <div className="flex flex-col gap-5">
+                    {keys.map((group) => {
+                      const entities = [...grouped.get(group)!].sort((a, b) =>
+                        a.localeCompare(b),
+                      );
+                      return (
+                        <div key={group}>
+                          <h3 className="text-muted-foreground mb-2 text-xs font-semibold uppercase tracking-wider">
+                            {group}
+                          </h3>
+                          <p className="text-base leading-snug">{entities.join("; ")}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <p className="text-muted-foreground mt-6 border-t border-border pt-4 text-sm">
+                <a
+                  href="/about/methodology#disclosures"
+                  className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                >
+                  About these disclosures →
+                </a>
+              </p>
+            </Section>
+          ) : null}
+        </div>
+      </main>
+    </>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  headingLg = false,
+  count,
+}: {
+  title: string;
+  children: React.ReactNode;
+  headingLg?: boolean;
+  count?: React.ReactNode;
+}) {
   return (
-    <section className="mt-10">
-      <h2 className="mb-4 text-xl font-semibold">{title}</h2>
+    <section className="border-t border-border py-8 first:border-t-0 first:pt-0">
+      {headingLg ? (
+        <h2 className="mb-4 flex items-baseline gap-3 text-lg font-bold tracking-tight">
+          {title}
+          {count ? (
+            <span className="text-muted-foreground text-sm font-normal tracking-normal">
+              {count}
+            </span>
+          ) : null}
+        </h2>
+      ) : (
+        <h2 className="text-muted-foreground mb-4 text-xs font-semibold uppercase tracking-wider">
+          {title}
+        </h2>
+      )}
       {children}
     </section>
   );
 }
 
-function PublicationRow({
-  pub,
-  showCitations = true,
-}: {
-  pub: ProfilePublication;
-  /** Whether to display citation count. False on "recent" surfaces per design spec v1.7.1. */
-  showCitations?: boolean;
-}) {
+function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="font-medium leading-snug">
-        {pub.pubmedUrl ? (
-          <a
-            href={pub.pubmedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:underline"
-          >
-            {pub.title}
-          </a>
-        ) : (
-          pub.title
-        )}
+    <div className="border-t border-border py-4">
+      <div className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wider">
+        {title}
       </div>
-      {pub.authorsString ? (
-        <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-          {pub.authorsString}
-        </div>
-      ) : null}
-      {pub.wcmCoauthors.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {pub.wcmCoauthors.map((a) => (
-            <a
-              key={a.cwid}
-              href={`/scholars/${a.slug}`}
-              className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            >
-              {a.preferredName}
-            </a>
-          ))}
-        </div>
-      ) : null}
-      <div className="text-muted-foreground mt-1 text-xs">
-        {pub.journal} · {pub.year}
-        {pub.publicationType ? ` · ${pub.publicationType}` : ""}
-        {showCitations && pub.citationCount > 0 ? ` · ${pub.citationCount} citations` : ""}
-      </div>
+      <div className="text-sm">{children}</div>
     </div>
   );
 }
-
