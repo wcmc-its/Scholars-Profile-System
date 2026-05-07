@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   pubTopicGroupBy: vi.fn(),
   topicFindMany: vi.fn(),
   publicationFindMany: vi.fn(),
+  subtopicFindMany: vi.fn().mockResolvedValue([]),
   queryRaw: vi.fn(),
 }));
 const {
@@ -41,6 +42,9 @@ vi.mock("@/lib/db", () => ({
     },
     topic: {
       findMany: mocks.topicFindMany,
+    },
+    subtopic: {
+      findMany: mocks.subtopicFindMany,
     },
     publication: {
       findMany: mocks.publicationFindMany,

@@ -15,8 +15,10 @@
  *   - `topic` table contains 67 rows — ALL parents (no parentId column).
  *   - `publication_topic` holds (pmid, cwid, parent_topic_id) triples with
  *     subtopic data embedded (`primary_subtopic_id`, `subtopic_ids`).
- *   - Subtopics are NOT first-class entities; subtopic display labels are
- *     slug-derived (titlecase + replace underscores).
+ *   - Subtopics ARE first-class entities (Phase 8 / HIERARCHY-05): the
+ *     `Subtopic` catalog is sole-written by `etl/hierarchy/index.ts` from the
+ *     S3 hierarchy artifact. `getSelectedResearch` joins to read display_name
+ *     + short_description with a (display_name ?? label ?? slug) D-09 fallback.
  *   - publication_topic.pmid FK-relates to publication.pmid (both VARCHAR(32))
  *     so card-rendering joins use Prisma `include: { publication }` directly.
  */
@@ -70,7 +72,10 @@ export type SubtopicCard = {
   parentTopicSlug: string;
   parentTopicName: string;
   subtopicSlug: string;
+  // (display_name ?? label) — applied at the API boundary per D-09
   subtopicName: string;
+  // D-19 / HIERARCHY-05: subtitle source for components/home/subtopic-card.tsx (Plan 05)
+  subtopicShortDescription: string | null;
   scholarCount: number;
   publicationCount: number;
   publications: Array<{
@@ -116,18 +121,6 @@ function logSparseHide(
       ...context,
     }),
   );
-}
-
-/**
- * Subtopics are NOT first-class entities under candidate (e). DDB has no
- * human-readable label or description for them; the slug IS the canonical
- * identifier. Render a friendly name via titlecase + underscore replacement.
- */
-function subtopicLabelFromSlug(slug: string): string {
-  return slug
-    .split("_")
-    .map((s) => (s.length === 0 ? s : s[0].toUpperCase() + s.slice(1)))
-    .join(" ");
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +322,27 @@ export async function getSelectedResearch(
       : [];
   const parentLabelById = new Map(parents.map((p) => [p.id, p.label]));
 
+  // HIERARCHY-05 — fetch display_name and short_description for the chosen
+  // subtopic IDs from the Subtopic catalog (now populated by Hierarchy ETL).
+  // D-09: apply (display_name ?? label) fallback at the API boundary so the
+  // UI in Plan 05 doesn't reimplement the rule per surface.
+  const subtopicIds = top
+    .map((t) => t.primarySubtopicId)
+    .filter((id): id is string => id !== null);
+  const subtopicMeta =
+    subtopicIds.length > 0
+      ? await prisma.subtopic.findMany({
+          where: { id: { in: subtopicIds } },
+          select: {
+            id: true,
+            label: true,
+            displayName: true,
+            shortDescription: true,
+          },
+        })
+      : [];
+  const subtopicMetaById = new Map(subtopicMeta.map((s) => [s.id, s]));
+
   // Resolve scholar count per (parent, subtopic) — distinct cwids. Prisma
   // groupBy can't express COUNT(DISTINCT cwid), so use raw SQL.
   type ScholarCountRow = {
@@ -394,11 +408,19 @@ export async function getSelectedResearch(
   return top.map((t) => {
     const key = scholarCountKey(t.parentTopicId, t.primarySubtopicId);
     const samples = sampleByPair.get(key) ?? [];
+    const meta = subtopicMetaById.get(t.primarySubtopicId);
+    // D-09: prefer display_name, fall back to label, fall back to slug-derived
+    // (the slug-derived path is reached only if Hierarchy ETL hasn't run yet
+    // OR the artifact is missing this subtopic id — both transient states).
+    const subtopicName =
+      (meta?.displayName?.trim() || meta?.label?.trim() || t.primarySubtopicId);
+    const subtopicShortDescription = meta?.shortDescription?.trim() || null;
     return {
       parentTopicSlug: t.parentTopicId,
       parentTopicName: parentLabelById.get(t.parentTopicId) ?? t.parentTopicId,
       subtopicSlug: t.primarySubtopicId,
-      subtopicName: subtopicLabelFromSlug(t.primarySubtopicId),
+      subtopicName,
+      subtopicShortDescription,
       scholarCount: scholarCountByPair.get(key) ?? 0,
       publicationCount: t.publicationCount,
       publications: samples.map((s) => ({
