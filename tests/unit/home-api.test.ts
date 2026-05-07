@@ -391,13 +391,13 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
       { id: "neuroscience", label: "Neuroscience", description: null },
     ]);
     mockQueryRaw.mockResolvedValue([
-      { parent_topic_id: "cancer_genomics", scholar_count: 42 },
-      { parent_topic_id: "neuroscience", scholar_count: 17 },
+      { parent_topic_id: "cancer_genomics", scholar_count: 42, publication_count: 312 },
+      { parent_topic_id: "neuroscience", scholar_count: 17, publication_count: 89 },
     ]);
     const result = await getBrowseAllResearchAreas();
     expect(result).toEqual([
-      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42 },
-      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17 },
+      { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312 },
+      { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89 },
     ]);
   });
 });

@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({
         email: null,
         overview: null,
         headshotUrl: null,
+        hasClinicalProfile: false,
         deletedAt: null,
         status: "active",
         appointments: [],
@@ -24,6 +25,7 @@ vi.mock("@/lib/db", () => ({
         grants: [],
         topicAssignments: [],
         coiActivities: [],
+        publicationScores: [],
       })),
       findUnique: vi.fn(async () => ({
         cwid: FIXTURE_CWID,
@@ -47,6 +49,7 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: {
       findMany: vi.fn(async () => []),
     },
+    $queryRawUnsafe: vi.fn(async () => []),
   },
 }));
 
