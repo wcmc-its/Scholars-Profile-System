@@ -30,7 +30,6 @@ export function SubtopicPublicationLayout({
   // D-09: prefer displayName for the publication-feed heading; falls back to label
   // through the rail's type (Plan 04 already applied (display_name ?? label) at API).
   const subtopicLabel = activeSubtopicData?.displayName ?? activeSubtopicData?.label ?? null;
-  const subtopicDescription = activeSubtopicData?.description ?? null;
 
   return (
     <div className="mt-16">
@@ -48,7 +47,6 @@ export function SubtopicPublicationLayout({
           topicSlug={topicSlug}
           activeSubtopic={activeSubtopic}
           subtopicLabel={subtopicLabel}
-          subtopicDescription={subtopicDescription}
         />
       </div>
     </div>

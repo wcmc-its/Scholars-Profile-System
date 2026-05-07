@@ -546,17 +546,9 @@ export async function suggestEntities(
               department: { slug: string; name: string } | null;
             }>,
         ),
-      prisma.center
-        .findMany({
-          where: { name: { contains: trimmed } },
-          orderBy: { name: "asc" },
-          take: perKind,
-          select: { slug: true, name: true, scholarCount: true },
-        })
-        .catch(
-          () =>
-            [] as Array<{ slug: string; name: string; scholarCount: number }>,
-        ),
+      Promise.resolve(
+        [] as Array<{ slug: string; name: string; scholarCount: number }>,
+      ),
     ]);
 
   const out: EntitySuggestion[] = [];

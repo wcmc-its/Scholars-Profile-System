@@ -272,14 +272,11 @@ async function PublicationsResults({
                         href={`/scholars/${a.slug}`}
                         className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
                       >
-                        {a.preferredName}
+                        {a.name}
                       </Link>
                     ))}
                   </div>
                 ) : null}
-                <div className="text-muted-foreground mt-1 text-xs">
-                  {h.externalAuthors}
-                </div>
                 <div className="text-muted-foreground mt-1 text-xs">
                   {h.journal} · {h.year}
                   {h.publicationType ? ` · ${h.publicationType}` : ""}

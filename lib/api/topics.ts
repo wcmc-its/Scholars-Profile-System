@@ -695,6 +695,57 @@ function mapToTopicPublicationHit(r: any): TopicPublicationHit {
   };
 }
 
+export type WcmAuthorChip = {
+  name: string;
+  cwid: string;
+  slug: string;
+  identityImageEndpoint: string;
+  isFirst: boolean;
+  isLast: boolean;
+};
+
+/**
+ * Batch-fetch WCM-affiliated confirmed authors for a list of pmids.
+ * Returns a Map keyed by pmid; each value is the publication's confirmed
+ * authors ordered first → last → middle. Used by the publication search
+ * route to render author chips with headshots.
+ */
+export async function fetchWcmAuthorsForPmids(
+  pmids: string[],
+): Promise<Map<string, WcmAuthorChip[]>> {
+  if (pmids.length === 0) return new Map();
+  const rows = await prisma.publicationAuthor.findMany({
+    where: {
+      pmid: { in: pmids },
+      isConfirmed: true,
+      cwid: { not: null },
+      scholar: { deletedAt: null, status: "active" },
+    },
+    orderBy: [{ isFirst: "desc" }, { isLast: "desc" }, { position: "asc" }],
+    select: {
+      pmid: true,
+      isFirst: true,
+      isLast: true,
+      scholar: { select: { cwid: true, slug: true, preferredName: true } },
+    },
+  });
+  const byPmid = new Map<string, WcmAuthorChip[]>();
+  for (const row of rows) {
+    if (!row.scholar) continue;
+    const arr = byPmid.get(row.pmid) ?? [];
+    arr.push({
+      name: row.scholar.preferredName,
+      cwid: row.scholar.cwid,
+      slug: row.scholar.slug,
+      identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
+      isFirst: row.isFirst,
+      isLast: row.isLast,
+    });
+    byPmid.set(row.pmid, arr);
+  }
+  return byPmid;
+}
+
 /**
  * D-10 — Distinct active-scholar count for a topic.
  *
