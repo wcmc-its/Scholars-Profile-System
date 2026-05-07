@@ -21,6 +21,7 @@
  * Usage: `npm run etl:ed`
  */
 import { prisma } from "../../lib/db";
+import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
 import {
@@ -429,16 +430,21 @@ async function main() {
         slug = `${slug}-${dept.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
       }
       usedDeptSlugs.add(slug);
+      const seedCategory = DEPARTMENT_CATEGORIES[dept.code] ?? "clinical";
       await prisma.department.upsert({
         where: { code: dept.code },
         create: {
           code: dept.code,
           name: dept.name,
           slug,
+          category: seedCategory,
           source: "ED",
           refreshedAt: new Date(),
         },
         update: {
+          // INTENTIONALLY does NOT update `category` — manual reclassification
+          // (UPDATE department SET category = '...' WHERE code = '...') sticks
+          // across ETL refreshes. The seed map only seeds new rows on CREATE.
           name: dept.name,
           slug,
           refreshedAt: new Date(),

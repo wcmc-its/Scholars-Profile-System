@@ -250,6 +250,12 @@ model Department {
   name         String   @db.VarChar(255)
   slug         String   @unique @db.VarChar(255)
   description  String?  @db.Text
+  /// Browse-page grouping bucket. Hand-curated via lib/department-categories.ts;
+  /// the ED ETL preserves existing values rather than overwriting, so manual
+  /// reclassification sticks across refreshes. Display label mapping ("mixed"
+  /// renders as "Basic & Clinical") lives at the UI layer.
+  /// Allowed values: "clinical" | "basic" | "mixed" | "administrative".
+  category     String   @default("clinical") @map("category") @db.VarChar(32)
   chairCwid    String?  @map("chair_cwid") @db.VarChar(32)
   scholarCount Int      @default(0) @map("scholar_count")
   source       String   @default("ED") @db.VarChar(32)
