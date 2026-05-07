@@ -8,7 +8,6 @@ import {
   type GrantSort,
 } from "@/lib/api/dept-lists";
 import { LeaderCard } from "@/components/scholar/leader-card";
-import { DivisionsRail } from "@/components/department/divisions-rail";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { HighlightsSection } from "@/components/department/highlights-section";
 import { PublicationCard } from "@/components/department/publication-card";
@@ -29,13 +28,11 @@ type Tab = "scholars" | "publications" | "grants";
 
 export async function DepartmentPage({
   deptSlug,
-  initialDivision,
   page,
   tab = "scholars",
   sort = null,
 }: {
   deptSlug: string;
-  initialDivision: string | null;
   page: number;
   tab?: Tab;
   sort?: string | null;
@@ -43,21 +40,9 @@ export async function DepartmentPage({
   const detail = await getDepartment(deptSlug);
   if (!detail) notFound();
 
-  // Resolve division if initialDivision is set; 404 on unknown.
-  let activeDivision: (typeof detail.divisions)[number] | null = null;
-  if (initialDivision !== null) {
-    activeDivision = detail.divisions.find((d) => d.slug === initialDivision) ?? null;
-    if (!activeDivision) notFound();
-  }
-
-  // Tabs always link to the dept-scoped path. Publications + Grants tabs are
-  // dept-wide (no per-division view yet), so a division URL → Publications
-  // click navigates to /departments/{slug}?tab=publications, dropping the
-  // division scope intentionally.
-  const deptPath = `/departments/${detail.dept.slug}`;
-  const basePath = activeDivision
-    ? `${deptPath}/divisions/${activeDivision.slug}`
-    : deptPath;
+  // Single base path for tab links. Division navigation is handled by
+  // the chip-row in the hero, which links to first-class division pages.
+  const basePath = `/departments/${detail.dept.slug}`;
 
   // Fetch highlights regardless of tab — they render above the tabs on every
   // tab view per the spec. Each section returns null when its list is empty.
@@ -67,7 +52,6 @@ export async function DepartmentPage({
   const faculty =
     tab === "scholars"
       ? await getDepartmentFaculty(detail.dept.code, {
-          divCode: activeDivision?.code,
           page: Math.max(0, page - 1),
         })
       : null;
@@ -151,6 +135,26 @@ export async function DepartmentPage({
           </div>
         )}
 
+        {detail.divisions.length > 0 && (
+          <div className="mt-6">
+            <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              {detail.divisions.length} {detail.divisions.length === 1 ? "division" : "divisions"}
+            </div>
+            <div className="flex flex-wrap gap-[6px]">
+              {detail.divisions.map((d) => (
+                <a
+                  key={d.code}
+                  href={`/departments/${detail.dept.slug}/divisions/${d.slug}`}
+                  className="rounded-full border border-[var(--color-accent-slate)] bg-white px-3 py-[3px] text-[12px] text-[var(--color-accent-slate)] hover:bg-[var(--color-accent-slate)] hover:text-white"
+                  style={{ textDecoration: "none" }}
+                >
+                  {d.name}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Stats line — dashed top divider, dept-tertiary em separators. */}
         <div className="mt-[22px] flex flex-wrap gap-[9px] border-t border-dashed border-border pt-4 text-[14px] text-muted-foreground">
           {(
@@ -210,68 +214,26 @@ export async function DepartmentPage({
       <div className="mt-12">
         <DeptTabs
           active={tab}
-          basePath={deptPath}
+          basePath={basePath}
           scholarsCount={detail.stats.scholars}
           publicationsCount={detail.stats.publications}
           grantsCount={detail.stats.activeGrants}
         />
 
         {tab === "scholars" && faculty && (
-          // Body card wrap per neurology_dept_body_per_spec.html — divisions
-          // rail + scholars list share a single bordered card. Two-column grid
-          // with a fixed 175px rail on desktop (matches mockup); collapses to
-          // a stacked column at narrow widths.
-          <div
-            className={`rounded-lg border border-border bg-background p-6 ${
-              detail.divisions.length > 0
-                ? "grid grid-cols-1 gap-6 lg:grid-cols-[175px_1fr]"
-                : ""
-            }`}
-          >
-            {detail.divisions.length > 0 && (
-              <DivisionsRail
-                deptSlug={detail.dept.slug}
-                divisions={detail.divisions}
-                activeDivisionSlug={activeDivision?.slug ?? null}
-                totalScholars={detail.stats.scholars}
-              />
-            )}
-
-            <div className="min-w-0">
-              {activeDivision ? (
-                <section className="mb-[18px]">
-                  <h2 className="mb-[5px] font-serif text-[24px] font-medium leading-[1.15]">
-                    {activeDivision.name}
-                  </h2>
-                  {activeDivision.chiefName && activeDivision.chiefSlug && (
-                    <div className="mb-3 text-[13px] text-muted-foreground">
-                      Chief:{" "}
-                      <a
-                        href={`/scholars/${activeDivision.chiefSlug}`}
-                        className="text-[var(--color-primary-cornell-red)] hover:underline"
-                        style={{ textDecoration: "none" }}
-                      >
-                        {activeDivision.chiefName}
-                      </a>
-                    </div>
-                  )}
-                  {activeDivision.description && (
-                    <p className="text-[14px] leading-[1.6] text-muted-foreground">
-                      {activeDivision.description}
-                    </p>
-                  )}
-                </section>
-              ) : null}
-
-              <DepartmentFacultyClient
-                faculty={faculty.hits}
-                total={faculty.total}
-                page={faculty.page + 1}
-                pageSize={faculty.pageSize}
-                deptSlug={detail.dept.slug}
-                divisionSlug={activeDivision?.slug ?? null}
-              />
-            </div>
+          // Scholars tab body — single bordered card containing the
+          // full-dept faculty list. The DivisionsRail is gone; division
+          // navigation now happens via the chip-row in the hero, which
+          // links out to the first-class division page.
+          <div className="rounded-lg border border-border bg-background p-6">
+            <DepartmentFacultyClient
+              faculty={faculty.hits}
+              total={faculty.total}
+              page={faculty.page + 1}
+              pageSize={faculty.pageSize}
+              deptSlug={detail.dept.slug}
+              divisionSlug={null}
+            />
           </div>
         )}
 

@@ -32,5 +32,16 @@ export default async function DepartmentRoute({
   const pageRaw =
     (Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1";
   const page = Math.max(1, parseInt(pageRaw, 10) || 1);
-  return <DepartmentPage deptSlug={slug} initialDivision={null} page={page} />;
+  const tabRaw = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
+  const tab =
+    tabRaw === "publications" || tabRaw === "grants" ? tabRaw : "scholars";
+  const sortRaw = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
+  return (
+    <DepartmentPage
+      deptSlug={slug}
+      page={page}
+      tab={tab}
+      sort={sortRaw ?? null}
+    />
+  );
 }
