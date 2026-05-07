@@ -41,10 +41,12 @@ export function PublicationFeed({
   topicSlug,
   activeSubtopic,
   subtopicLabel,
+  subtopicShortDescription,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
   subtopicLabel: string | null;
+  subtopicShortDescription: string | null;
 }) {
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
@@ -96,13 +98,21 @@ export function PublicationFeed({
     };
   }, [topicSlug, sort, activeSubtopic, page, filter]);
 
+  const showSubtopicSubtitle =
+    activeSubtopic !== null && subtopicShortDescription !== null && subtopicShortDescription.trim() !== "";
+
   return (
     <section className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <span>{heading}</span>
-          {isCuratedSort && <CuratedTag surface="publication_centric" />}
-        </h2>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-1 min-w-0">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <span>{heading}</span>
+            {isCuratedSort && <CuratedTag surface="publication_centric" />}
+          </h2>
+          {showSubtopicSubtitle && (
+            <p className="text-sm text-muted-foreground">{subtopicShortDescription}</p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Sort by</span>
           <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
