@@ -607,9 +607,13 @@ export async function getTopicPublications(
       }),
       prisma.publicationTopic.count({ where: baseWhere }),
     ]);
+    const pmids = rows.map((r) => r.pmid);
+    const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
     return {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hits: (rows as any[]).map(mapToTopicPublicationHit),
+      hits: (rows as Array<{ pmid: string }>).map((r) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid)),
+      ),
       total,
       page,
       pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
@@ -661,9 +665,13 @@ export async function getTopicPublications(
 
   const total = scored.length;
   const slice = scored.slice(page * TOPIC_PUBLICATIONS_PAGE_SIZE, (page + 1) * TOPIC_PUBLICATIONS_PAGE_SIZE);
+  const slicePmids = slice.map((s) => s.row.pmid);
+  const authorsByPmid = await fetchWcmAuthorsForPmids(slicePmids);
   return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    hits: slice.map((s) => mapToTopicPublicationHit(s.row as any)),
+    hits: slice.map((s) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mapToTopicPublicationHit(s.row as any, authorsByPmid.get(s.row.pmid)),
+    ),
     total,
     page,
     pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
@@ -672,13 +680,15 @@ export async function getTopicPublications(
 
 /**
  * Map a raw PublicationTopic+Publication row to the public TopicPublicationHit shape.
- * Authors field: returns empty array for first pass; Plan 07 may enrich if author
- * chips are required by the UI spec. The existing getRecentHighlightsForTopic pattern
- * uses a separate publication.findMany with included authors — that approach requires
- * a second query per page and is deferred until the UI contract is confirmed.
+ * Optional `wcmAuthors` argument carries the confirmed WCM coauthors for this pmid
+ * (fetched in batch via fetchWcmAuthorsForPmids); when omitted, authors defaults to []
+ * which the publication-feed UI suppresses per Phase 3 D-06 absence-as-default.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapToTopicPublicationHit(r: any): TopicPublicationHit {
+function mapToTopicPublicationHit(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  r: any,
+  wcmAuthors?: TopicPublicationHit["authors"],
+): TopicPublicationHit {
   return {
     pmid: r.pmid,
     title: r.publication.title ?? "",
@@ -688,10 +698,7 @@ function mapToTopicPublicationHit(r: any): TopicPublicationHit {
     citationCount: r.publication.citationCount ?? null,
     pubmedUrl: r.publication.pubmedUrl ?? null,
     doi: r.publication.doi ?? null,
-    // Authors deferred to Plan 07 UI integration. Returning [] here is intentional
-    // (not a stub that blocks the feature — the publication card renders without
-    // author chips on first pass per design spec v1.7.1 absence-as-default).
-    authors: [],
+    authors: wcmAuthors ?? [],
   };
 }
 

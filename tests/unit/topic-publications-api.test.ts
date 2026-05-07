@@ -25,6 +25,7 @@ const {
   mockPublicationTopicCount,
   mockSubtopicFindMany,
   mockPublicationTopicGroupBy,
+  mockPublicationAuthorFindMany,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockTopicFindUnique: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockPublicationTopicCount: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
+  mockPublicationAuthorFindMany: vi.fn(),
   mockTransaction: vi.fn(),
 }));
 
@@ -44,6 +46,7 @@ vi.mock("@/lib/db", () => ({
       count: mockPublicationTopicCount,
       groupBy: mockPublicationTopicGroupBy,
     },
+    publicationAuthor: { findMany: mockPublicationAuthorFindMany },
     $transaction: mockTransaction,
   },
 }));
@@ -117,6 +120,11 @@ beforeEach(() => {
   mockPublicationTopicCount.mockReset();
   mockSubtopicFindMany.mockReset();
   mockPublicationTopicGroupBy.mockReset();
+  mockPublicationAuthorFindMany.mockReset();
+  // Default: no WCM coauthor enrichment data (existing tests don't assert on
+  // authors — they assert on ordering / scoring / pagination). Tests that care
+  // about author enrichment override this in-line.
+  mockPublicationAuthorFindMany.mockResolvedValue([]);
   mockTransaction.mockReset();
   mockScorePublication.mockReset();
   mockScorePublication.mockReturnValue(1.0);
