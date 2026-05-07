@@ -205,17 +205,20 @@ model Topic {
   @@map("topic")
 }
 
-/// Subtopic catalog projected from DynamoDB TAXONOMY#taxonomy_v2 embedded subtopic
-/// data per Phase 3 D-05. The `id` is the slug (no human-readable label in source);
-/// `label` is derived via subtopicLabel() (slug → title-case + underscore replace).
-/// Description is null for the long tail; editorial copy fills top ~300 post-launch.
-/// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — this is a catalog
-/// table; old slugs flush out on weekly ETL refresh (02-SCHEMA-DECISION.md risk #2).
+/// Subtopic catalog. Sole writer: Hierarchy ETL (etl/hierarchy/index.ts), which
+/// fetches s3://wcmc-reciterai-hierarchy/latest/hierarchy.json (a co-published JSON
+/// Schema 2020-12 contract — see ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/hierarchy-contract.md).
+/// `display_name` and `short_description` are D-19 LOCKED UI fields; `label` and
+/// `description` are LLM-canonical (synthesis-injected, no LLM use in SPS today).
+/// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — old slugs flush
+/// out on the next Hierarchy ETL refresh (Phase 8 contract D-06: subtopic IDs are
+/// NOT stable across annual recomputes; PublicationTopic FK remediation deferred
+/// per CONTEXT.md A1-D1).
 model Subtopic {
   id               String   @id @db.VarChar(128) // slug, e.g. "breast_screening_risk_prediction"
   parentTopicId    String   @map("parent_topic_id") @db.VarChar(128)
   parentTopic      Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
-  label            String   @db.VarChar(255) // derived: slug.split('_').map(titleCase).join(' ')
+  label            String   @db.VarChar(255) // LLM-canonical label from artifact (synthesis-injected, no LLM use in SPS today)
   description      String?  @db.Text // null for long tail (D-06)
   displayName      String?  @map("display_name") @db.VarChar(255) // D-19 / D-05: UI card title; falls back to `label` when null/empty
   shortDescription String?  @map("short_description") @db.Text // D-19 / D-05: UI subtitle; rendered silently when null/empty (Phase 3 D-06 absence-as-default)
