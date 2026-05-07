@@ -485,12 +485,20 @@ export async function suggestEntities(
         .catch(() => [] as Array<{ id: string; label: string }>),
       prisma.subtopic
         .findMany({
+          // Search-on-label is intentional. `label` is the synthesis/retrieval-
+          // canonical field per D-19; users typing research-domain words match
+          // it more reliably than the UI-stylized `display_name`. Switching to
+          // displayName for matching would shrink hit counts AND introduce
+          // D-19-forbidden retrieval over UI fields. Render uses display_name;
+          // matching uses label.
           where: { label: { contains: trimmed } },
           orderBy: { label: "asc" },
           take: perKind,
           select: {
             id: true,
             label: true,
+            displayName: true,
+            shortDescription: true,
             parentTopicId: true,
             parentTopic: { select: { label: true } },
           },
@@ -500,6 +508,8 @@ export async function suggestEntities(
             [] as Array<{
               id: string;
               label: string;
+              displayName: string | null;
+              shortDescription: string | null;
               parentTopicId: string;
               parentTopic: { label: string } | null;
             }>,
@@ -575,12 +585,23 @@ export async function suggestEntities(
   }
 
   for (const s of subtopics) {
+    // D-09 universal fallback for the suggestion title.
+    const title = s.displayName?.trim() || s.label?.trim() || s.id;
+    // D-07: short_description is the autocomplete subtitle source for subtopic
+    // entries. When the artifact's short_description is empty (legacy/long-tail
+    // not yet relabeled), fall back to "Subtopic in {parent}" — more useful
+    // than blank space, consistent with Phase 3 D-06 absence-as-default (no
+    // generic absence-placeholder string).
+    const trimmedShort = s.shortDescription?.trim();
+    const subtitle = trimmedShort
+      ? trimmedShort
+      : s.parentTopic
+        ? `Subtopic in ${s.parentTopic.label}`
+        : "Subtopic";
     out.push({
       kind: "subtopic",
-      title: s.label,
-      subtitle: s.parentTopic
-        ? `Subtopic in ${s.parentTopic.label}`
-        : "Subtopic",
+      title,
+      subtitle,
       href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}`,
     });
   }
