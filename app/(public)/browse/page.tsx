@@ -54,8 +54,11 @@ export default async function BrowsePage() {
 
       <BrowseHero />
       <BrowseAnchorStrip />
-      <DepartmentsGrid departments={data.departments} />
-      <CentersGrid />
+      <DepartmentsGrid
+        departments={data.departments}
+        departmentsByCategory={data.departmentsByCategory}
+      />
+      <CentersGrid centers={data.centers} />
       <AZDirectory buckets={data.azBuckets} />
     </main>
   );

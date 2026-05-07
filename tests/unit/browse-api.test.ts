@@ -8,15 +8,30 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockDepartmentFindMany, mockScholarFindMany } = vi.hoisted(() => ({
+const {
+  mockDepartmentFindMany,
+  mockScholarFindMany,
+  mockDivisionFindMany,
+  mockCenterFindMany,
+  mockTopicFindMany,
+  mockQueryRawUnsafe,
+} = vi.hoisted(() => ({
   mockDepartmentFindMany: vi.fn(),
   mockScholarFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockCenterFindMany: vi.fn(),
+  mockTopicFindMany: vi.fn(),
+  mockQueryRawUnsafe: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     department: { findMany: mockDepartmentFindMany },
     scholar: { findMany: mockScholarFindMany },
+    division: { findMany: mockDivisionFindMany },
+    center: { findMany: mockCenterFindMany },
+    topic: { findMany: mockTopicFindMany },
+    $queryRawUnsafe: mockQueryRawUnsafe,
   },
 }));
 
@@ -30,6 +45,10 @@ describe("getDepartmentsList", () => {
   beforeEach(() => {
     mockDepartmentFindMany.mockReset();
     mockScholarFindMany.mockReset();
+    mockDivisionFindMany.mockReset().mockResolvedValue([]);
+    mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockTopicFindMany.mockReset().mockResolvedValue([]);
+    mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
 
   it("returns empty array when no departments", async () => {
@@ -82,6 +101,10 @@ describe("getAZBuckets", () => {
   beforeEach(() => {
     mockDepartmentFindMany.mockReset();
     mockScholarFindMany.mockReset();
+    mockDivisionFindMany.mockReset().mockResolvedValue([]);
+    mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockTopicFindMany.mockReset().mockResolvedValue([]);
+    mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
 
   it("groups scholars by last-name initial (last token of preferredName)", async () => {
@@ -127,6 +150,10 @@ describe("getBrowseData", () => {
   beforeEach(() => {
     mockDepartmentFindMany.mockReset();
     mockScholarFindMany.mockReset();
+    mockDivisionFindMany.mockReset().mockResolvedValue([]);
+    mockCenterFindMany.mockReset().mockResolvedValue([]);
+    mockTopicFindMany.mockReset().mockResolvedValue([]);
+    mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
 
   it("returns composite { departments, centers: [], azBuckets }", async () => {

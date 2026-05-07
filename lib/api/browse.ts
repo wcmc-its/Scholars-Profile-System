@@ -1,27 +1,59 @@
 /**
- * Browse-hub data assembly (Phase 4).
+ * Browse-hub data assembly.
  *
- * Three exported functions:
- *   - getDepartmentsList(): department cards for the Browse hub 3-col grid
- *   - getAZBuckets():       A-Z directory buckets, capped at 10 names per letter
- *   - getBrowseData():      composite — calls both in parallel, plus empty centers
- *
- * Centers & Institutes data does not yet exist in the schema (no Center model
- * — see RESEARCH.md §Common Pitfalls 4 + STATE.md deferred PHASE2-08).
- * `getBrowseData().centers` is always `[]`; the UI renders an empty-state
- * placeholder per UI-SPEC §6.4 + §7.
+ * Exports:
+ *   - getDepartmentsList():   one BrowseDepartment per dept, with category,
+ *                             division chip-row, and top topic chips.
+ *   - getCentersList():       one BrowseCenter per row in `center`.
+ *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per letter.
+ *   - getBrowseData():        composite — calls the three in parallel and
+ *                             returns departments grouped by category.
  *
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
+import type {
+  DepartmentCategory,
+} from "@/lib/department-categories";
+
+export type BrowseDepartmentDivisionChip = {
+  code: string;
+  name: string;
+  slug: string;
+};
+
+export type BrowseDepartmentTopicChip = {
+  topicId: string;
+  topicLabel: string;
+  topicSlug: string;
+};
 
 export type BrowseDepartment = {
   code: string;
   name: string;
   slug: string;
+  category: DepartmentCategory;
   scholarCount: number;
   chairName: string | null;
   chairSlug: string | null;
+  divisions: BrowseDepartmentDivisionChip[];
+  topResearchAreas: BrowseDepartmentTopicChip[];
+};
+
+export type CategorizedDepartments = Record<
+  DepartmentCategory,
+  BrowseDepartment[]
+>;
+
+export type BrowseCenter = {
+  code: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  directorName: string | null;
+  directorSlug: string | null;
+  scholarCount: number;
+  sortOrder: number;
 };
 
 export type AZScholar = {
@@ -33,16 +65,16 @@ export type AZScholar = {
 
 export type AZBucket = {
   letter: string;
-  /** Total scholars under this letter — may exceed scholars.length when capped. */
   count: number;
-  /** Capped at 10 (UI-SPEC §6.5). Sorted alphabetically by surname. */
   scholars: AZScholar[];
 };
 
 export type BrowseData = {
+  /** Flat list (preserved for legacy callers / tests). */
   departments: BrowseDepartment[];
-  /** No Center model in schema; always []. UI renders empty-state. */
-  centers: never[];
+  /** Same data, grouped by category for the Browse hub render. */
+  departmentsByCategory: CategorizedDepartments;
+  centers: BrowseCenter[];
   azBuckets: AZBucket[];
 };
 
@@ -50,6 +82,7 @@ type DeptRow = {
   code: string;
   name: string;
   slug: string;
+  category: string;
   scholarCount: number;
   chairCwid: string | null;
 };
@@ -66,6 +99,8 @@ type ScholarAZRow = {
   primaryDepartment: string | null;
 };
 
+const TOPIC_CHIP_LIMIT = 2;
+
 export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
   const depts = (await prisma.department.findMany({
     orderBy: { name: "asc" },
@@ -73,18 +108,16 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       code: true,
       name: true,
       slug: true,
+      category: true,
       scholarCount: true,
       chairCwid: true,
     },
   })) as DeptRow[];
 
-  // Batch-fetch chair scholars in one query — same pattern as
-  // lib/api/departments.ts getDepartment(). Skip query entirely
-  // when no department has a chair.
+  // --- Chairs ---
   const chairCwids = depts
-    .map((d: DeptRow) => d.chairCwid)
-    .filter((c: string | null): c is string => c !== null);
-
+    .map((d) => d.chairCwid)
+    .filter((c): c is string => c !== null);
   const chairs: ChairRow[] =
     chairCwids.length > 0
       ? ((await prisma.scholar.findMany({
@@ -92,20 +125,137 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
           select: { cwid: true, preferredName: true, slug: true },
         })) as ChairRow[])
       : [];
+  const chairMap = new Map(chairs.map((c) => [c.cwid, c]));
 
-  const chairMap = new Map<string, ChairRow>(chairs.map((c: ChairRow) => [c.cwid, c]));
+  // --- Divisions per dept ---
+  const divisions = await prisma.division.findMany({
+    where: { deptCode: { in: depts.map((d) => d.code) } },
+    select: { code: true, deptCode: true, name: true, slug: true },
+    orderBy: { name: "asc" },
+  });
+  const divsByDept = new Map<string, BrowseDepartmentDivisionChip[]>();
+  for (const d of divisions) {
+    const list = divsByDept.get(d.deptCode) ?? [];
+    list.push({ code: d.code, name: d.name, slug: d.slug });
+    divsByDept.set(d.deptCode, list);
+  }
 
-  return depts.map((d: DeptRow) => ({
-    code: d.code,
-    name: d.name,
-    slug: d.slug,
-    scholarCount: d.scholarCount,
-    chairName: d.chairCwid
-      ? (chairMap.get(d.chairCwid)?.preferredName ?? null)
+  // --- Top research areas per dept ---
+  // For each dept, find the top N parent topics by distinct PMID count among
+  // dept-affiliated scholars. One raw query for all depts at once.
+  type TopicRow = {
+    dept_code: string;
+    parent_topic_id: string;
+    pub_count: number | bigint;
+    rk: number | bigint;
+  };
+  const topicRows =
+    depts.length === 0
+      ? ([] as TopicRow[])
+      : ((await prisma.$queryRawUnsafe(
+          `SELECT * FROM (
+             SELECT s.dept_code AS dept_code,
+                    pt.parent_topic_id AS parent_topic_id,
+                    COUNT(DISTINCT pt.pmid) AS pub_count,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY s.dept_code
+                      ORDER BY COUNT(DISTINCT pt.pmid) DESC
+                    ) AS rk
+               FROM publication_topic pt
+               JOIN scholar s ON s.cwid = pt.cwid
+              WHERE s.deleted_at IS NULL AND s.status = 'active'
+                AND s.dept_code IS NOT NULL
+              GROUP BY s.dept_code, pt.parent_topic_id
+           ) ranked
+           WHERE rk <= ${TOPIC_CHIP_LIMIT}`,
+        )) as TopicRow[]);
+
+  const topicIds = Array.from(
+    new Set(topicRows.map((r) => r.parent_topic_id)),
+  );
+  const topicById =
+    topicIds.length === 0
+      ? new Map<string, { id: string; label: string }>()
+      : new Map(
+          (
+            await prisma.topic.findMany({
+              where: { id: { in: topicIds } },
+              select: { id: true, label: true },
+            })
+          ).map((t) => [t.id, t]),
+        );
+
+  const topicsByDept = new Map<string, BrowseDepartmentTopicChip[]>();
+  for (const r of topicRows) {
+    const t = topicById.get(r.parent_topic_id);
+    if (!t) continue;
+    const list = topicsByDept.get(r.dept_code) ?? [];
+    list.push({ topicId: t.id, topicLabel: t.label, topicSlug: t.id });
+    topicsByDept.set(r.dept_code, list);
+  }
+
+  return depts.map<BrowseDepartment>((d) => {
+    const cat = (d.category as DepartmentCategory) ?? "clinical";
+    return {
+      code: d.code,
+      name: d.name,
+      slug: d.slug,
+      category: cat,
+      scholarCount: d.scholarCount,
+      chairName: d.chairCwid
+        ? (chairMap.get(d.chairCwid)?.preferredName ?? null)
+        : null,
+      chairSlug: d.chairCwid
+        ? (chairMap.get(d.chairCwid)?.slug ?? null)
+        : null,
+      // Administrative cards are lean: no division chips, no topic chips.
+      divisions: cat === "administrative" ? [] : (divsByDept.get(d.code) ?? []),
+      topResearchAreas:
+        cat === "administrative" ? [] : (topicsByDept.get(d.code) ?? []),
+    };
+  });
+}
+
+export async function getCentersList(): Promise<BrowseCenter[]> {
+  const centers = await prisma.center.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: {
+      code: true,
+      name: true,
+      slug: true,
+      description: true,
+      directorCwid: true,
+      scholarCount: true,
+      sortOrder: true,
+    },
+  });
+  if (centers.length === 0) return [];
+
+  const directorCwids = centers
+    .map((c) => c.directorCwid)
+    .filter((c): c is string => c !== null);
+  const directors =
+    directorCwids.length === 0
+      ? ([] as ChairRow[])
+      : ((await prisma.scholar.findMany({
+          where: { cwid: { in: directorCwids } },
+          select: { cwid: true, preferredName: true, slug: true },
+        })) as ChairRow[]);
+  const directorMap = new Map(directors.map((d) => [d.cwid, d]));
+
+  return centers.map((c) => ({
+    code: c.code,
+    name: c.name,
+    slug: c.slug,
+    description: c.description,
+    directorName: c.directorCwid
+      ? (directorMap.get(c.directorCwid)?.preferredName ?? null)
       : null,
-    chairSlug: d.chairCwid
-      ? (chairMap.get(d.chairCwid)?.slug ?? null)
+    directorSlug: c.directorCwid
+      ? (directorMap.get(c.directorCwid)?.slug ?? null)
       : null,
+    scholarCount: c.scholarCount,
+    sortOrder: c.sortOrder,
   }));
 }
 
@@ -120,10 +270,6 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
     orderBy: { preferredName: "asc" },
   })) as ScholarAZRow[];
 
-  // Group by last-name initial. preferredName is "Given Family"
-  // (LDAP convention) — split on space and treat the LAST token
-  // as the surname. Hyphenated/multi-word surnames bucket on the
-  // last token's initial; acceptable per RESEARCH.md Pitfall 1.
   const bucketMap = new Map<string, AZScholar[]>();
   for (const s of scholars) {
     const tokens = s.preferredName.trim().split(/\s+/).filter(Boolean);
@@ -143,9 +289,6 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
   return Array.from(bucketMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([letter, all]) => {
-      // Sort by the display key ("LastName, GivenName") so the top-10 cap
-      // always takes the alphabetically first 10 scholars within each letter,
-      // not the first 10 by Prisma's preferredName ordering. CR-02.
       const sorted = all.slice().sort((a, b) => a.name.localeCompare(b.name));
       return {
         letter,
@@ -156,9 +299,21 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
 }
 
 export async function getBrowseData(): Promise<BrowseData> {
-  const [departments, azBuckets] = await Promise.all([
+  const [departments, centers, azBuckets] = await Promise.all([
     getDepartmentsList(),
+    getCentersList(),
     getAZBuckets(),
   ]);
-  return { departments, centers: [], azBuckets };
+
+  const departmentsByCategory: CategorizedDepartments = {
+    clinical: [],
+    basic: [],
+    mixed: [],
+    administrative: [],
+  };
+  for (const d of departments) {
+    departmentsByCategory[d.category].push(d);
+  }
+
+  return { departments, departmentsByCategory, centers, azBuckets };
 }
