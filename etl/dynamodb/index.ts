@@ -1,5 +1,5 @@
 /**
- * DynamoDB ETL — Phase 4f + Phase 2 D-02.
+ * DynamoDB ETL — Phase 4f + Phase 2 D-02 + Phase 8 D-03 (Block 2b retired).
  *
  * Three projection blocks land ReCiterAI ground truth into MySQL:
  *
@@ -11,6 +11,17 @@
  * locked in .planning/phases/02-algorithmic-surfaces-and-home-composition/02-SCHEMA-DECISION.md.
  * The FACULTY# block stays as-is for backwards compatibility; future plans may
  * retire topic_assignment after Phase 2 surfaces validate against publication_topic.
+ *
+ * Phase 8 D-03 retirement: the legacy slug-derived sub-topic upsert (formerly
+ * a TOPIC# -> sub-topic block that derived labels client-side from the slug
+ * and wrote a hard-coded null description) is removed. The Hierarchy ETL
+ * (etl/hierarchy/index.ts), which runs immediately before this script per the
+ * D-04 orchestrator order, is the SOLE writer of the Subtopic table from this
+ * point forward -- it sources display_name and short_description from the
+ * canonical reciterai-hierarchy artifact rather than deriving them client-side.
+ * Block 3 below still references Subtopic.id via publication_topic.primarySubtopicId
+ * / subtopicIds[]; the graceful-skip behavior on missing FK rows handles the
+ * rare case where Hierarchy ETL fails on a given day (Q5' fail-isolated semantics).
  *
  * D-08 verification: publication_score is NOT currently projected by this ETL —
  * the existing FACULTY# scan only lands topic_assignment rows. The IMPACT# →
@@ -31,7 +42,6 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
-import { subtopicLabel } from "@/lib/subtopic";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai-chatbot";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -317,125 +327,6 @@ async function main() {
     console.log(`publication_topic upserts complete: ${pubTopicRowsUpserted} rows.`);
 
     // ===================================================================
-    // Block 2b: TOPIC# → subtopic  (Phase 3 D-05)
-    // ===================================================================
-    // Subtopics are NOT embedded in TAXONOMY#taxonomy_v2 (confirmed by probe —
-    // topics[] contains only id/label/description, no subtopics array).
-    // Instead, subtopic slugs appear as embedded fields on TOPIC# rows:
-    //   - primary_subtopic_id: the dominant subtopic for this pub×topic triple
-    //   - subtopic_ids[]: secondary attributions with lower confidence
-    //
-    // Strategy: enumerate all unique (subtopic_id, parent_topic_id) pairs from
-    // topicItems; for each unique subtopic, choose the parent_topic_id where it
-    // appears most as primary_subtopic_id (tiebreak: first seen). Descriptions
-    // are NULL for all rows — no human-readable description exists in DynamoDB
-    // (02-SCHEMA-DECISION.md empirical finding; editorial copy fills top ~300
-    // post-launch per D-06).
-    //
-    // Note: reuses topicItems already loaded in Block 2 — no additional DDB scan.
-
-    console.log("[DDB] Starting Subtopic projection from TOPIC# embedded data (Phase 3 D-05)...");
-
-    // Build: subtopicId → { parentCounts: Map<parentTopicId, number> }
-    // "counts" = how many times this subtopic appears as primary for a given parent topic.
-    // We also collect any parent observed via subtopic_ids[] (secondary) to fall back to
-    // if the slug never appears as primary.
-    const subtopicParentPrimary = new Map<string, Map<string, number>>();
-    const subtopicParentAny = new Map<string, Set<string>>();
-
-    for (const it of topicItems) {
-      const parentTopicId = it.PK.replace("TOPIC#", "");
-      if (!parentTopicId || !knownTopicIds.has(parentTopicId)) continue;
-
-      // primary_subtopic_id: increment primary-count for this parent
-      if (typeof it.primary_subtopic_id === "string" && it.primary_subtopic_id.length > 0) {
-        const slug = it.primary_subtopic_id;
-        if (!subtopicParentPrimary.has(slug)) subtopicParentPrimary.set(slug, new Map());
-        const counts = subtopicParentPrimary.get(slug)!;
-        counts.set(parentTopicId, (counts.get(parentTopicId) ?? 0) + 1);
-        // Also add to "any" set
-        if (!subtopicParentAny.has(slug)) subtopicParentAny.set(slug, new Set());
-        subtopicParentAny.get(slug)!.add(parentTopicId);
-      }
-
-      // subtopic_ids[]: collect secondary parents for fallback resolution
-      if (Array.isArray(it.subtopic_ids)) {
-        for (const sid of it.subtopic_ids as unknown[]) {
-          if (typeof sid !== "string" || sid.length === 0) continue;
-          if (!subtopicParentAny.has(sid)) subtopicParentAny.set(sid, new Set());
-          subtopicParentAny.get(sid)!.add(parentTopicId);
-        }
-      }
-    }
-
-    // Resolve each subtopic slug to a single canonical parent_topic_id:
-    //   1. Prefer parent with highest primary-occurrence count
-    //   2. Tiebreak: lexicographically first parent (deterministic)
-    //   3. Fallback (no primary appearance): first parent from subtopic_ids[] traversal
-    const allSubtopicSlugs = new Set([
-      ...subtopicParentPrimary.keys(),
-      ...subtopicParentAny.keys(),
-    ]);
-
-    let subtopicRowsUpserted = 0;
-    const taxonomyVersion =
-      taxItems.length > 0
-        ? String(taxItems[0].taxonomy_version ?? taxItems[0].PK.replace("TAXONOMY#", ""))
-        : "taxonomy_v2";
-    const subtopicSource = `reciterai-${taxonomyVersion}`;
-
-    console.log(`[DDB] Resolved ${allSubtopicSlugs.size} unique subtopic slugs from TOPIC# data.`);
-
-    for (const slug of allSubtopicSlugs) {
-      // Resolve canonical parent
-      let canonicalParent: string | null = null;
-      const primaryCounts = subtopicParentPrimary.get(slug);
-      if (primaryCounts && primaryCounts.size > 0) {
-        // Pick parent with highest primary count; tiebreak by lex sort
-        let maxCount = 0;
-        for (const [parent, count] of primaryCounts) {
-          if (count > maxCount || (count === maxCount && (canonicalParent === null || parent < canonicalParent))) {
-            maxCount = count;
-            canonicalParent = parent;
-          }
-        }
-      } else {
-        // Fallback: first parent from any-set (Set iteration order = insertion order)
-        const anySet = subtopicParentAny.get(slug);
-        if (anySet && anySet.size > 0) {
-          canonicalParent = anySet.values().next().value ?? null;
-        }
-      }
-
-      if (!canonicalParent || !knownTopicIds.has(canonicalParent)) {
-        console.log(`[DDB] subtopic "${slug}" has no valid parent topic — skipped`);
-        continue;
-      }
-
-      await prisma.subtopic.upsert({
-        where: { id: slug },
-        create: {
-          id: slug,
-          parentTopicId: canonicalParent,
-          label: subtopicLabel(slug),
-          description: null,  // no description available in DynamoDB (D-06: null renders silently)
-          source: subtopicSource,
-          refreshedAt: new Date(),
-        },
-        update: {
-          parentTopicId: canonicalParent,  // re-anchor if subtopic moved between topics
-          label: subtopicLabel(slug),
-          description: null,
-          source: subtopicSource,
-          refreshedAt: new Date(),
-        },
-      });
-      subtopicRowsUpserted += 1;
-    }
-
-    console.log(`[DDB] upserted ${subtopicRowsUpserted} subtopics`);
-
-    // ===================================================================
     // Block 3: FACULTY# → topic_assignment  (existing Q6 minimal projection)
     // ===================================================================
     // PRESERVED UNCHANGED from Phase 4f. Future plans may retire topic_assignment
@@ -511,7 +402,7 @@ async function main() {
     // ===================================================================
     // Bookkeeping
     // ===================================================================
-    const totalRowsProcessed = topicRowsUpserted + subtopicRowsUpserted + pubTopicRowsUpserted + rows.length;
+    const totalRowsProcessed = topicRowsUpserted + pubTopicRowsUpserted + rows.length;
     await prisma.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -519,7 +410,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, subtopic=${subtopicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}`,
     );
   } catch (err) {
     await prisma.etlRun.update({
