@@ -72,3 +72,16 @@ Thumbs.db
 
 # Superpowers brainstorm scratch (wireframes, session state)
 .superpowers/
+
+# Local planning + AI-workflow artifacts — NEVER commit (project meta)
+.planning/
+.claude/
+CLAUDE.md
+docs/superpowers/
+
+# Ad-hoc debug/probe scripts (kept locally, never committed)
+scripts/_apply-fix.cjs
+scripts/debug-*.ts
+scripts/probe-*.ts
+scripts/query-reciterdb.ts
+scripts/query-scholars.ts
