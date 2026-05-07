@@ -7,7 +7,7 @@ import {
 import { CenterMembersClient } from "@/components/center/center-members-client";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
-import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { LeaderCard } from "@/components/scholar/leader-card";
 import type { PubSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
@@ -91,32 +91,7 @@ export async function CenterPage({
         )}
       </section>
 
-      {detail.director && (
-        <section className="mt-8 flex items-center gap-4 rounded-lg border border-border bg-white p-4">
-          <HeadshotAvatar
-            size="md"
-            cwid={detail.director.cwid}
-            preferredName={detail.director.preferredName}
-            identityImageEndpoint={detail.director.identityImageEndpoint}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Director
-            </div>
-            <a
-              href={`/scholars/${detail.director.slug}`}
-              className="text-base font-semibold hover:underline"
-            >
-              {detail.director.preferredName}
-            </a>
-            {detail.director.primaryTitle && (
-              <div className="text-sm text-muted-foreground">
-                {detail.director.primaryTitle}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+      {detail.director && <LeaderCard leader={detail.director} role="Director" />}
 
       <div className="mt-6 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
         {detail.scholarCount > 0

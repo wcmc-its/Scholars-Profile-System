@@ -7,7 +7,7 @@ import {
   type PubSort,
   type GrantSort,
 } from "@/lib/api/dept-lists";
-import { ChairCard } from "@/components/department/chair-card";
+import { LeaderCard } from "@/components/scholar/leader-card";
 import { DivisionsRail } from "@/components/department/divisions-rail";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { HighlightsSection } from "@/components/department/highlights-section";
@@ -126,7 +126,7 @@ export async function DepartmentPage({
           </p>
         )}
 
-        {detail.chair && <ChairCard chair={detail.chair} />}
+        {detail.chair && <LeaderCard leader={detail.chair} role="Chair" />}
 
         {detail.topResearchAreas.length > 0 && (
           <div className="mt-6">
