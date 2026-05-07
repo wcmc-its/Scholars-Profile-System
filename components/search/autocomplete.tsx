@@ -48,12 +48,20 @@ const KIND_ICON: Record<EntityKind, string> = {
   center: "✦",
 };
 
+type Variant = "header" | "hero";
+
 /**
- * Header search input with entity-aware autocomplete (spec line 184: fires on
- * 2 chars). Submitting routes to /search?q=<query>; clicking a suggestion
- * routes to the entity's canonical page.
+ * Search input with entity-aware autocomplete (spec line 184: fires on 2 chars).
+ * Submitting routes to /search?q=<query>; clicking a suggestion routes to the
+ * entity's canonical page.
+ *
+ * Two visual variants share the same suggestion logic:
+ *   - "header" (default): compact, fits the 60px sticky red header bar.
+ *   - "hero":             larger input, explicit Search button, sized for the
+ *                         centered home-page hero placement.
  */
-export function SearchAutocomplete() {
+export function SearchAutocomplete({ variant = "header" }: { variant?: Variant } = {}) {
+  const isHero = variant === "hero";
   const router = useRouter();
   const [value, setValue] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -105,10 +113,22 @@ export function SearchAutocomplete() {
     router.push(`/search?q=${encodeURIComponent(value.trim())}`);
   };
 
+  const containerClass = isHero
+    ? "relative mx-auto w-full max-w-[600px]"
+    : "relative w-full max-w-xl";
+
+  const inputBoxClass = isHero
+    ? "flex items-center gap-1 rounded-md border border-zinc-300 bg-white p-1 shadow-sm transition-all focus-within:border-[var(--color-accent-slate)] focus-within:ring-2 focus-within:ring-[var(--color-accent-slate)]/20"
+    : "text-muted-foreground flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm focus-within:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900";
+
+  const inputClass = isHero
+    ? "flex-1 bg-transparent px-3 py-2.5 text-base text-zinc-900 outline-none placeholder:text-zinc-400"
+    : "placeholder:text-muted-foreground flex-1 bg-transparent text-zinc-900 outline-none dark:text-zinc-100";
+
   return (
-    <div ref={containerRef} className="relative w-full max-w-xl">
-      <div className="text-muted-foreground flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-sm focus-within:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900">
-        <Search className="h-4 w-4" />
+    <div ref={containerRef} className={containerClass}>
+      <div className={inputBoxClass}>
+        <Search className={isHero ? "ml-3 h-4 w-4 shrink-0 text-zinc-400" : "h-4 w-4"} />
         <input
           type="search"
           value={value}
@@ -133,11 +153,23 @@ export function SearchAutocomplete() {
             }
           }}
           onFocus={() => suggestions.length > 0 && setOpen(true)}
-          placeholder="Search by name, topic, department…"
-          className="placeholder:text-muted-foreground flex-1 bg-transparent text-zinc-900 outline-none dark:text-zinc-100"
-          aria-label="Search"
+          placeholder={
+            isHero
+              ? "Search by name, topic, department, or publication…"
+              : "Search by name, topic, department…"
+          }
+          className={inputClass}
+          aria-label="Search scholars"
           autoComplete="off"
         />
+        {isHero ? (
+          <button
+            onClick={submit}
+            className="shrink-0 rounded bg-[var(--color-accent-slate)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#1f3b53]"
+          >
+            Search
+          </button>
+        ) : null}
       </div>
       {open && suggestions.length > 0 ? (
         <ul
