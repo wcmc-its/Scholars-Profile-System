@@ -97,6 +97,7 @@ export type ParentTopic = {
   slug: string;
   name: string;
   scholarCount: number;
+  publicationCount: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -464,27 +465,36 @@ export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
     return [];
   }
 
-  // Distinct active-scholar count per parent — D-03 says "no eligibility
-  // filter", so any scholar-attributed publication contributes.
+  // Distinct active-scholar AND distinct-publication counts per parent —
+  // D-03 says "no eligibility filter", so any scholar-attributed publication
+  // contributes. Both counts come from the same publication_topic join in a
+  // single query so we don't pay two round-trips.
   type CountRow = {
     parent_topic_id: string;
     scholar_count: number | bigint;
+    publication_count: number | bigint;
   };
   const countRows = ((await prisma.$queryRawUnsafe(
-    `SELECT pt.parent_topic_id, COUNT(DISTINCT pt.cwid) AS scholar_count
+    `SELECT pt.parent_topic_id,
+            COUNT(DISTINCT pt.cwid) AS scholar_count,
+            COUNT(DISTINCT pt.pmid) AS publication_count
        FROM publication_topic pt
        JOIN scholar s ON s.cwid = pt.cwid
       WHERE s.deleted_at IS NULL AND s.status = 'active'
       GROUP BY pt.parent_topic_id`,
   )) as CountRow[]) ?? [];
-  const countByParent = new Map<string, number>(
+  const scholarByParent = new Map<string, number>(
     countRows.map((r) => [r.parent_topic_id, Number(r.scholar_count)]),
+  );
+  const pubByParent = new Map<string, number>(
+    countRows.map((r) => [r.parent_topic_id, Number(r.publication_count)]),
   );
 
   return topics.map((t) => ({
     slug: t.id,
     name: t.label,
-    scholarCount: countByParent.get(t.id) ?? 0,
+    scholarCount: scholarByParent.get(t.id) ?? 0,
+    publicationCount: pubByParent.get(t.id) ?? 0,
   }));
 }
 
