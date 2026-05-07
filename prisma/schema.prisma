@@ -212,13 +212,17 @@ model Topic {
 /// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — this is a catalog
 /// table; old slugs flush out on weekly ETL refresh (02-SCHEMA-DECISION.md risk #2).
 model Subtopic {
-  id            String   @id @db.VarChar(128) // slug, e.g. "breast_screening_risk_prediction"
-  parentTopicId String   @map("parent_topic_id") @db.VarChar(128)
-  parentTopic   Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
-  label         String   @db.VarChar(255) // derived: slug.split('_').map(titleCase).join(' ')
-  description   String?  @db.Text // null for long tail (D-06)
-  source        String   @db.VarChar(64) // "reciterai-taxonomy_v2"
-  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  id               String   @id @db.VarChar(128) // slug, e.g. "breast_screening_risk_prediction"
+  parentTopicId    String   @map("parent_topic_id") @db.VarChar(128)
+  parentTopic      Topic    @relation(fields: [parentTopicId], references: [id], onDelete: Cascade)
+  label            String   @db.VarChar(255) // derived: slug.split('_').map(titleCase).join(' ')
+  description      String?  @db.Text // null for long tail (D-06)
+  displayName      String?  @map("display_name") @db.VarChar(255) // D-19 / D-05: UI card title; falls back to `label` when null/empty
+  shortDescription String?  @map("short_description") @db.Text // D-19 / D-05: UI subtitle; rendered silently when null/empty (Phase 3 D-06 absence-as-default)
+  activityCount    Int?     @map("activity_count") // D-05: ReCiterAI seed-PMID count; advisory only (D-06 keeps PublicationTopic count for rail order)
+  totalWeight      Float?   @map("total_weight") // D-05: ReCiterAI sum of articleScores; advisory only
+  source           String   @db.VarChar(64) // "reciterai-taxonomy_v2"
+  refreshedAt      DateTime @default(now()) @map("refreshed_at")
 
   @@index([parentTopicId])
   @@map("subtopic")
@@ -368,13 +372,15 @@ model SlugHistory {
 /// ETL run log (Q5'). Tracks per-source success/failure for monitoring.
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
 model EtlRun {
-  id            String    @id @default(uuid()) @db.VarChar(64)
-  source        String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
-  startedAt     DateTime  @default(now()) @map("started_at")
-  completedAt   DateTime? @map("completed_at")
-  status        String    @db.VarChar(16) // 'running' | 'success' | 'failed'
-  rowsProcessed Int       @default(0) @map("rows_processed")
-  errorMessage  String?   @map("error_message") @db.Text
+  id                      String    @id @default(uuid()) @db.VarChar(64)
+  source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
+  startedAt               DateTime  @default(now()) @map("started_at")
+  completedAt             DateTime? @map("completed_at")
+  status                  String    @db.VarChar(16) // 'running' | 'success' | 'failed'
+  rowsProcessed           Int       @default(0) @map("rows_processed")
+  errorMessage            String?   @map("error_message") @db.Text
+  manifestSha256          String?   @map("manifest_sha256") @db.VarChar(64) // D-02 / Claude's Discretion: hex sha256 of last successful Hierarchy run's hierarchy.json bytes
+  manifestTaxonomyVersion String?   @map("manifest_taxonomy_version") @db.VarChar(64) // D-02: persists manifest.taxonomy_version for drift detection (loud WARN on diff)
 
   @@index([source, startedAt])
   @@index([source, status, completedAt])
