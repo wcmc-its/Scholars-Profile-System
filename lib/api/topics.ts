@@ -360,7 +360,15 @@ export async function getRecentHighlightsForTopic(
 
 export type SubtopicWithCount = {
   id: string;
+  // EXISTING — kept; subtopic rail filter still operates on this per D-08.
   label: string;
+  // NEW — D-19 / D-09: (display_name ?? label) applied at API boundary;
+  // Plan 05's SubtopicRail renders this on the top line.
+  displayName: string;
+  // NEW — D-19 / D-08: rendered as second line in SubtopicRail (Plan 05);
+  // null = silent absence per Phase 3 D-06.
+  shortDescription: string | null;
+  // EXISTING — kept; LLM-canonical per D-19 (no LLM use today, future-proofing).
   description: string | null;
   pubCount: number;
 };
@@ -443,7 +451,13 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
 
   const catalog = await prisma.subtopic.findMany({
     where: { parentTopicId: topicSlug },
-    select: { id: true, label: true, description: true },
+    select: {
+      id: true,
+      label: true,
+      displayName: true,
+      shortDescription: true,
+      description: true,
+    },
   });
 
   const countRows = await prisma.publicationTopic.groupBy({
@@ -456,13 +470,41 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
     if (r.primarySubtopicId) countMap.set(r.primarySubtopicId, r._count.pmid);
   }
 
+  // HIERARCHY-05 (Path B — defensive normalization retained):
+  //
+  //   The artifact's editorial backfill populated `display_name` only for the
+  //   subset of subtopics that were relabeled. Long-tail rows still have
+  //   `display_name === label`, so they inherit the parent-prefix contamination
+  //   from the original ReCiterAI label generation (e.g. parent
+  //   "Neurodegenerative Disease" + label
+  //   "Neurodegenerative Glymphatic Csf Clearance"). Applying
+  //   `normalizeSubtopicLabel` to `display_name` (NOT to `label`, which stays
+  //   as-is for the rail filter target per D-08) strips the redundant prefix
+  //   on long-tail rows and is a no-op on already-editorial-clean rows whose
+  //   first words don't appear in the parent topic name. The function also
+  //   applies acronym substitution (csf -> CSF, etc.).
+  //
+  //   Per CONTEXT.md "Claude's Discretion": evaluate normalizeSubtopicLabel
+  //   fate. Path A (delete) would be correct if all rows were editorial-clean;
+  //   the documented backfill scope (relabeled set only) means Path B is the
+  //   safer default. If/when a future content-task populates display_name for
+  //   the full long tail, this normalizer can be removed and Path A taken.
   return catalog
-    .map((s) => ({
-      id: s.id,
-      label: normalizeSubtopicLabel(s.label, topic.label),
-      description: s.description,
-      pubCount: countMap.get(s.id) ?? 0,
-    }))
+    .map((s) => {
+      const rawDisplay = s.displayName?.trim() || s.label?.trim() || s.id;
+      const normalizedDisplay = normalizeSubtopicLabel(rawDisplay, topic.label);
+      return {
+        id: s.id,
+        // unchanged — rail filter still uses this per D-08.
+        label: s.label,
+        // D-09 universal fallback applied above + defensive parent-prefix strip.
+        displayName: normalizedDisplay,
+        // D-19 subtitle source; null on absence (Phase 3 D-06).
+        shortDescription: s.shortDescription?.trim() || null,
+        description: s.description,
+        pubCount: countMap.get(s.id) ?? 0,
+      };
+    })
     .sort((a, b) => b.pubCount - a.pubCount);
 }
 
