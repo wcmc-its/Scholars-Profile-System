@@ -24,8 +24,10 @@ import { prisma } from "../../lib/db";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
 import {
+  type EdFacultyAppointment,
   type EdFacultyEntry,
   fetchActiveFaculty,
+  fetchActiveFacultyAppointments,
   fetchDoctoralStudents,
   openLdap,
 } from "@/lib/sources/ldap";
@@ -135,6 +137,55 @@ function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   return "affiliated_faculty";
 }
 
+/** Detect whether the scholar likely has a public physician profile at
+ *  weillcornell.org. ED LDAP carries clinical signals as multi-valued person-
+ *  type codes — "affiliate-nyp-clinical" and "affiliate-nyp-*-credentialed"
+ *  are reliable proxies for "is a clinician with a Cornell Health profile".
+ *  Pure researchers / non-clinical faculty don't carry these codes, so the
+ *  link defaults to absent (design spec v1.7.1 absence-as-default rule). */
+function inferHasClinicalProfile(personTypeCodes: string[]): boolean {
+  return personTypeCodes.some((c) => /clinical|credentialed/i.test(c));
+}
+
+/**
+ * Replace the scholar's ED-source appointments with the structured rows from
+ * the WOOFA SOR (`ou=faculty,ou=sors`). Caller passes the per-scholar slice
+ * of `fetchActiveFacultyAppointments()` output (already filtered to status =
+ * faculty:active). Each row carries its own department, real start/end dates,
+ * and `isPrimary` flag — much richer than the multi-valued `title` attribute
+ * on the person entry, which mixed clinical/admin roles in alongside academic
+ * appointments and had no per-row dates or status.
+ *
+ * Idempotent: deletes ED-source appointments for this scholar first. Other
+ * sources' appointments (none today, but ASMS may add historical rows later)
+ * are preserved. Scholars with no SOR rows (rare — typically PHD students
+ * pulled in via the ou=students branch) end up with zero appointments and
+ * the profile sidebar simply omits the section.
+ */
+async function refreshEdAppointments(
+  cwid: string,
+  appts: EdFacultyAppointment[],
+): Promise<void> {
+  await prisma.appointment.deleteMany({
+    where: { cwid, source: "ED" },
+  });
+  if (appts.length === 0) return;
+
+  await prisma.appointment.createMany({
+    data: appts.map((a) => ({
+      cwid: a.cwid,
+      title: a.title,
+      organization: a.organization ?? "Weill Cornell Medicine",
+      startDate: a.startDate,
+      endDate: a.endDate,
+      isPrimary: a.isPrimary,
+      isInterim: false,
+      externalId: a.externalId,
+      source: "ED",
+    })),
+  });
+}
+
 async function main() {
   const start = new Date();
   const run = await prisma.etlRun.create({
@@ -163,6 +214,16 @@ async function main() {
       );
     }
 
+    console.log("Fetching active faculty appointments from ou=faculty SOR...");
+    const facultyAppointments = await fetchActiveFacultyAppointments(client);
+    console.log(`ED returned ${facultyAppointments.length} active faculty appointment rows.`);
+    const appointmentsByCwid = new Map<string, EdFacultyAppointment[]>();
+    for (const a of facultyAppointments) {
+      const arr = appointmentsByCwid.get(a.cwid) ?? [];
+      arr.push(a);
+      appointmentsByCwid.set(a.cwid, arr);
+    }
+
     await client.unbind();
 
     const allEntries = [...facultyEntries, ...studentEntries];
@@ -183,14 +244,251 @@ async function main() {
     const incomingCwids = new Set<string>();
 
     // Phase 3 — accumulate distinct (deptCode, deptName) and (divCode, deptCode, divName)
-    // tuples while iterating scholars. These feed the Department + Division upsert block.
+    // tuples that feed the Department + Division upsert block. We populate
+    // these in a pre-pass over allEntries / appointmentsByCwid so the dept
+    // and division rows exist BEFORE any Scholar row references them via
+    // FK (otherwise scholar.update fails with P2003 ForeignKeyConstraintViolation).
     const seenDepts = new Map<string, { code: string; name: string }>();
     const seenDivs = new Map<string, { code: string; deptCode: string; name: string }>();
+
+    /**
+     * Pick the row whose org-unit codes should drive Scholar.deptCode/divCode.
+     *
+     * `appts` is already filtered to weillCornellEduStatus=faculty:active by
+     * the LDAP search — every row here is an active appointment. We do NOT
+     * additionally filter on endDate: many active appointments have a real
+     * future end date (e.g. ccole's primary in Medicine ends 2026-06-30,
+     * not the 2099 indefinite sentinel that parses to null).
+     *
+     * Selection precedence:
+     *   1. A chair-titled appointment (title starts with "Chair") — dept
+     *      chair affiliation is the strongest signal of which dept the
+     *      scholar represents, even when LDAP marks a different appointment
+     *      as PrimaryEntry=TRUE (e.g. Ronald Crystal's LDAP primary is
+     *      Medicine but he chairs Genetic Medicine — defer to GM).
+     *   2. The LDAP-flagged primary (`weillCornellEduPrimaryEntry=TRUE`).
+     *   3. First active appointment.
+     *   null when the scholar has zero active appointments (e.g. PHD
+     *   students under ou=students).
+     */
+    function pickPrimaryActiveAppt(
+      appts: EdFacultyAppointment[],
+    ): EdFacultyAppointment | null {
+      const chair = appts.find((a) => /^Chair/i.test(a.title));
+      if (chair) return chair;
+      const primary = appts.find((a) => a.isPrimary);
+      return primary ?? appts[0] ?? null;
+    }
+
+    /** Org-unit names that LDAP returns as the level1 unit but which are
+     *  not academic departments (admin units, support orgs). Scholars whose
+     *  primary appointment is in one of these get null dept_code/div_code
+     *  so they don't appear under a fake dept on /browse. */
+    const EXCLUDED_DEPT_NAMES = new Set<string>([
+      "Information Technologies and Services",
+      "Administration & Finance",
+    ]);
+
+    /** Level2 names that should be promoted to dept (level1) status. The
+     *  WCM Library appears as level2 under Information Technologies and
+     *  Services in LDAP, but is an academic dept in its own right.
+     *  Scholars whose primary appointment has level2 == one of these get
+     *  level2 used as their dept (level2 code → deptCode, level2 name →
+     *  deptName) and no division. */
+    const PROMOTE_LEVEL2_TO_DEPT = new Set<string>(["Library"]);
+
+    /** Manual rename map: LDAP returns these org-unit names, but the
+     *  display should reflect the WCM academic department they roll up
+     *  under. The level1 code is preserved (so scholar.deptCode stays
+     *  stable) — only the display name + slug change. */
+    const DEPT_NAME_OVERRIDES: Record<string, string> = {
+      // WCM faculty at HSS are members of the Orthopaedic Surgery dept;
+      // HSS is the affiliate hospital, not an academic dept.
+      "Hospital for Special Surgery": "Orthopaedic Surgery",
+    };
+
+    /** Resolve the (deptCode, divCode, deptName, divName) tuple a single
+     *  scholar should land at — same logic the scholar loop uses below. */
+    function resolveOrgUnit(f: EdFacultyEntry): {
+      deptCode: string | null;
+      divCode: string | null;
+      deptName: string | null;
+      divName: string | null;
+    } {
+      const appts = appointmentsByCwid.get(f.cwid) ?? [];
+      const primary = pickPrimaryActiveAppt(appts);
+      const rawDeptName =
+        primary?.organization ?? f.primaryDepartment ?? f.orgUnit ?? null;
+      const rawDivName = primary?.divName ?? null;
+      const rawDivCode = primary?.divCode ?? null;
+
+      // Promote level2 → dept when LDAP nests an academic unit (Library)
+      // under a non-academic level1 (ITS). The level2 code becomes the
+      // scholar's dept_code; no division on this scholar.
+      if (rawDivName && PROMOTE_LEVEL2_TO_DEPT.has(rawDivName) && rawDivCode) {
+        return {
+          deptCode: rawDivCode,
+          divCode: null,
+          deptName: rawDivName,
+          divName: null,
+        };
+      }
+
+      if (rawDeptName && EXCLUDED_DEPT_NAMES.has(rawDeptName)) {
+        return { deptCode: null, divCode: null, deptName: null, divName: null };
+      }
+
+      const deptName = rawDeptName
+        ? (DEPT_NAME_OVERRIDES[rawDeptName] ?? rawDeptName)
+        : null;
+
+      return {
+        deptCode: primary?.deptCode ?? f.deptCode ?? null,
+        divCode: rawDivCode,
+        deptName,
+        divName: rawDivName,
+      };
+    }
+
+    // Pre-pass: collect every (deptCode, divCode) combination + per-code
+    // scholar tally so the Department + Division upserts can run BEFORE the
+    // scholar loop creates FK references.
+    const deptScholarTally = new Map<string, number>();
+    for (const f of allEntries) {
+      const { deptCode, divCode, deptName, divName } = resolveOrgUnit(f);
+      if (deptCode && !seenDepts.has(deptCode)) {
+        seenDepts.set(deptCode, { code: deptCode, name: deptName ?? deptCode });
+      }
+      if (deptCode) {
+        deptScholarTally.set(deptCode, (deptScholarTally.get(deptCode) ?? 0) + 1);
+      }
+      if (divCode && deptCode && !seenDivs.has(divCode)) {
+        seenDivs.set(divCode, {
+          code: divCode,
+          deptCode,
+          name: divName ?? divCode,
+        });
+      }
+    }
+
+    // Consolidation: WCM LDAP returns parallel codes for the same conceptual
+    // department (e.g. "Medicine" appears as N1280, N1871, N1460, N1030,
+    // N1020, N1876, N1050, N1933 — historical / sub-org-unit codes from
+    // expired or fringe appointments that share the dept name). We collapse
+    // to the canonical code per name (the one with the most scholars) and
+    // remap every aliased code in seenDepts/seenDivs/scholar deptCode.
+    const deptAlias = new Map<string, string>();
+    {
+      const byName = new Map<string, string[]>();
+      for (const dept of seenDepts.values()) {
+        const key = dept.name.trim().toLowerCase();
+        if (!byName.has(key)) byName.set(key, []);
+        byName.get(key)!.push(dept.code);
+      }
+      for (const codes of byName.values()) {
+        if (codes.length <= 1) continue;
+        const canonical = codes.reduce((best, c) =>
+          (deptScholarTally.get(c) ?? 0) > (deptScholarTally.get(best) ?? 0)
+            ? c
+            : best,
+        );
+        for (const c of codes) {
+          if (c !== canonical) deptAlias.set(c, canonical);
+        }
+      }
+    }
+    if (deptAlias.size > 0) {
+      console.log(
+        `[ED] consolidating ${deptAlias.size} duplicate-name dept codes into canonicals`,
+      );
+      // Drop aliased dept rows from upsert set.
+      for (const aliasedCode of deptAlias.keys()) {
+        seenDepts.delete(aliasedCode);
+      }
+      // Re-point divisions whose parent was an aliased code.
+      for (const div of seenDivs.values()) {
+        const remap = deptAlias.get(div.deptCode);
+        if (remap) div.deptCode = remap;
+      }
+    }
+    function canonicalDeptCode(code: string | null): string | null {
+      if (!code) return null;
+      return deptAlias.get(code) ?? code;
+    }
+
+    // Upsert dept + division rows now (before scholar updates would
+    // FK-reference them). Slug collisions (two distinct codes producing the
+    // same name-derived slug — e.g. legacy "1280000000" vs modern "N1280"
+    // both → "medicine") are disambiguated by appending the code suffix
+    // to whichever row is upserted second.
+    const usedDeptSlugs = new Set<string>();
+    let deptUpsertsPre = 0;
+    for (const dept of seenDepts.values()) {
+      let slug = deriveSlug(dept.name) || dept.code.toLowerCase();
+      if (usedDeptSlugs.has(slug)) {
+        slug = `${slug}-${dept.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      }
+      usedDeptSlugs.add(slug);
+      await prisma.department.upsert({
+        where: { code: dept.code },
+        create: {
+          code: dept.code,
+          name: dept.name,
+          slug,
+          source: "ED",
+          refreshedAt: new Date(),
+        },
+        update: {
+          name: dept.name,
+          slug,
+          refreshedAt: new Date(),
+        },
+      });
+      deptUpsertsPre += 1;
+    }
+    const usedDivSlugs = new Set<string>();
+    let divUpsertsPre = 0;
+    for (const div of seenDivs.values()) {
+      let slug = deriveSlug(div.name) || div.code.toLowerCase();
+      if (usedDivSlugs.has(slug)) {
+        slug = `${slug}-${div.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      }
+      usedDivSlugs.add(slug);
+      await prisma.division.upsert({
+        where: { code: div.code },
+        create: {
+          code: div.code,
+          deptCode: div.deptCode,
+          name: div.name,
+          slug,
+          source: "ED",
+          refreshedAt: new Date(),
+        },
+        update: {
+          deptCode: div.deptCode,
+          name: div.name,
+          slug,
+          refreshedAt: new Date(),
+        },
+      });
+      divUpsertsPre += 1;
+    }
+    console.log(
+      `[ED] pre-upserted ${deptUpsertsPre} departments, ${divUpsertsPre} divisions`,
+    );
 
     for (const f of allEntries) {
       incomingCwids.add(f.cwid);
       const existingScholar = existingByCwid.get(f.cwid);
       const roleCategory = deriveRoleCategory(f);
+
+      // SOR is authoritative for dept + division (probe 2026-05-06: only the
+      // SOR child role records carry `weillCornellEduOrgUnit;level2` for the
+      // division name + code). Same resolution as the pre-pass above, then
+      // remap through the duplicate-name dept consolidation.
+      const resolved = resolveOrgUnit(f);
+      const effectiveDeptCode = canonicalDeptCode(resolved.deptCode);
+      const effectiveDivCode = resolved.divCode;
 
       if (existingScholar) {
         // Update in place; reactivate if soft-deleted.
@@ -208,11 +506,14 @@ async function main() {
             // changed, derive a new one and write the old to slug_history.
             ...(await maybeUpdatedSlug(existingScholar.slug, f.preferredName, f.cwid, existingSlugs)),
             ...(wasDeleted ? { deletedAt: null } : {}),
-            // Phase 3 — D-01: populate org-unit FK columns from LDAP attributes.
-            deptCode: f.deptCode ?? null,
-            divCode: f.divCode ?? null,
+            // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
+            // SOR primary active appointment (level1/level2 subtypes).
+            deptCode: effectiveDeptCode,
+            divCode: effectiveDivCode,
+            hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
           },
         });
+        await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
         if (wasDeleted) reactivated += 1;
         updated += 1;
       } else {
@@ -231,45 +532,21 @@ async function main() {
             email: f.email,
             slug,
             roleCategory,
-            // Phase 3 — D-01:
-            deptCode: f.deptCode ?? null,
-            divCode: f.divCode ?? null,
-            // ED ETL doesn't have appointment date detail in the basic search;
-            // a richer query will add appointments in a follow-up. Insert a
-            // placeholder primary appointment so the profile renders.
-            appointments: {
-              create: [
-                {
-                  title: f.primaryTitle ?? "Faculty",
-                  organization: f.primaryDepartment ?? "Weill Cornell Medicine",
-                  startDate: null,
-                  endDate: null,
-                  isPrimary: true,
-                  isInterim: false,
-                  externalId: `ED-${f.cwid}-1`,
-                },
-              ],
-            },
+            // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from SOR.
+            deptCode: effectiveDeptCode,
+            divCode: effectiveDivCode,
+            hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
+            // Appointments are populated by refreshEdAppointments below — one
+            // row per LDAP `title` value. ED LDAP only returns current-state
+            // titles (no historical appointments), so every row written here
+            // has endDate=null / isActive=true.
           },
         });
+        await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
         created += 1;
       }
 
-      // Accumulate distinct department + division tuples for bulk upsert after the loop.
-      if (f.deptCode && !seenDepts.has(f.deptCode)) {
-        // Parse orgUnit for level1 name; format is "level2 · level1" per design spec line 906-920.
-        const orgParts = (f.orgUnit ?? "").split(" · ");
-        const deptName =
-          orgParts.length >= 2
-            ? orgParts[orgParts.length - 1]
-            : (f.primaryDepartment ?? f.deptCode);
-        seenDepts.set(f.deptCode, { code: f.deptCode, name: deptName });
-      }
-      if (f.divCode && f.deptCode && !seenDivs.has(f.divCode)) {
-        const orgParts = (f.orgUnit ?? "").split(" · ");
-        const divName = orgParts.length >= 2 ? orgParts[0] : f.divCode;
-        seenDivs.set(f.divCode, { code: f.divCode, deptCode: f.deptCode, name: divName });
-      }
+      // Dept + division rows already upserted in the pre-pass above.
     }
 
     // Soft-delete: scholars in DB but not in ED this run.
@@ -285,99 +562,106 @@ async function main() {
       softDeleted += 1;
     }
 
-    // Phase 3 — Department + Division upsert from accumulated org-unit tuples.
-    // Runs under the same "ED" source EtlRun (one run for the whole ED source per ETL-01).
-    let deptUpserts = 0;
-    for (const dept of seenDepts.values()) {
-      const slug = deriveSlug(dept.name);
-      await prisma.department.upsert({
-        where: { code: dept.code },
-        create: {
-          code: dept.code,
-          name: dept.name,
-          slug,
-          source: "ED",
-          refreshedAt: new Date(),
-        },
-        update: {
-          name: dept.name,
-          slug,
-          refreshedAt: new Date(),
-        },
-      });
-      deptUpserts += 1;
-    }
-    console.log(`[ED] upserted ${deptUpserts} departments`);
-
-    let divUpserts = 0;
-    for (const div of seenDivs.values()) {
-      const slug = deriveSlug(div.name);
-      await prisma.division.upsert({
-        where: { code: div.code },
-        create: {
-          code: div.code,
-          deptCode: div.deptCode,
-          name: div.name,
-          slug,
-          source: "ED",
-          refreshedAt: new Date(),
-        },
-        update: {
-          deptCode: div.deptCode,
-          name: div.name,
-          slug,
-          refreshedAt: new Date(),
-        },
-      });
-      divUpserts += 1;
-    }
-    console.log(`[ED] upserted ${divUpserts} divisions`);
+    console.log(
+      `[ED] upserted ${deptUpsertsPre} departments (pre-pass), ${divUpsertsPre} divisions`,
+    );
 
     // Phase 3 — D-03 chair identification per department.
-    // Match appointment.title startsWith "Chair" (covers "Chair", "Chairman", "Chairperson",
-    // "Chairman and Professor", etc.). Per Pitfall 3: log distinct values matched for
-    // post-launch audit. Pick the most-recent active (endDate IS NULL) appointment in
-    // the department; tiebreak on isPrimary DESC then startDate DESC.
+    //
+    // Match `Chair of {dept name}` exactly (or with a trailing space/comma
+    // for multi-clause titles like "Chair of X and Y"). Crucially, we do NOT
+    // restrict to scholars whose `deptCode = dept.code`: a scholar's primary
+    // dept is sometimes Medicine while their chair role is in a different
+    // unit (e.g. Crystal — primary Medicine, "Chair of Genetic Medicine").
+    // Title-based matching attributes the role to the right dept regardless
+    // of where LDAP marks the scholar's primary appointment.
+    //
+    // Tiebreak on isPrimary DESC then startDate DESC.
     const chairTitleVariants = new Set<string>();
     let chairAssignments = 0;
     for (const dept of seenDepts.values()) {
+      const expected = `Chair of ${dept.name}`;
       const candidate = await prisma.appointment.findFirst({
         where: {
-          // Scholars in this dept (joined via Scholar.deptCode FK).
-          scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
-          // Chair-like title prefix. Case-insensitive match via Prisma `startsWith`.
-          title: { startsWith: "Chair" },
-          // Active appointment only.
+          scholar: { deletedAt: null, status: "active" },
+          OR: [
+            { title: expected },
+            { title: { startsWith: `${expected} ` } },
+            { title: { startsWith: `${expected},` } },
+          ],
           endDate: null,
         },
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
         select: { cwid: true, title: true },
       });
+      // Ensure we always clear stale assignments first — if no candidate
+      // matches this run, the dept gets chair_cwid=null instead of keeping
+      // the wrong scholar from a prior run.
+      await prisma.department.update({
+        where: { code: dept.code },
+        data: { chairCwid: candidate?.cwid ?? null },
+      });
       if (candidate) {
         chairTitleVariants.add(candidate.title);
-        await prisma.department.update({
-          where: { code: dept.code },
-          data: { chairCwid: candidate.cwid },
-        });
         chairAssignments += 1;
       }
     }
     console.log(`[ED] assigned chairs to ${chairAssignments}/${seenDepts.size} departments`);
     console.log(`[ED] distinct chair-title variants observed:`, [...chairTitleVariants]);
 
-    // Phase 3 — scholarCount refresh per Department and Division.
-    for (const dept of seenDepts.values()) {
+    // Phase 3 — scholarCount refresh.
+    //
+    // Iterate EVERY dept/division row in the DB (not just those seen this
+    // run) so stale rows from prior runs — codes that no scholar resolves
+    // to anymore after a picker change — get scholar_count=0 and qualify
+    // for the prune step below. Without this, the prior-run counts persist
+    // forever and the orphans never get cleaned up.
+    const allDepts = await prisma.department.findMany({ select: { code: true } });
+    for (const dept of allDepts) {
       const count = await prisma.scholar.count({
         where: { deptCode: dept.code, deletedAt: null, status: "active" },
       });
-      await prisma.department.update({ where: { code: dept.code }, data: { scholarCount: count } });
+      await prisma.department.update({
+        where: { code: dept.code },
+        data: { scholarCount: count },
+      });
     }
-    for (const div of seenDivs.values()) {
+    const allDivs = await prisma.division.findMany({ select: { code: true } });
+    for (const div of allDivs) {
       const count = await prisma.scholar.count({
         where: { divCode: div.code, deletedAt: null, status: "active" },
       });
-      await prisma.division.update({ where: { code: div.code }, data: { scholarCount: count } });
+      await prisma.division.update({
+        where: { code: div.code },
+        data: { scholarCount: count },
+      });
     }
+
+    // Cleanup: remove dept + division rows that no scholar references (these
+    // are the codes that got consolidated into canonicals via deptAlias, plus
+    // any historical rows from prior runs that are now orphaned).
+    if (deptAlias.size > 0) {
+      const aliasedCodes = Array.from(deptAlias.keys());
+      // Divisions whose parent was aliased had deptCode rewritten in the
+      // pre-pass; only the dept rows themselves need deleting.
+      const deletedDepts = await prisma.department.deleteMany({
+        where: { code: { in: aliasedCodes } },
+      });
+      console.log(
+        `[ED] consolidated ${deletedDepts.count} duplicate-name dept rows`,
+      );
+    }
+    // Belt + suspenders: any dept or division row with zero scholars referencing
+    // it after the refresh is dead weight.
+    const orphanDepts = await prisma.department.deleteMany({
+      where: { scholarCount: 0, source: "ED" },
+    });
+    const orphanDivs = await prisma.division.deleteMany({
+      where: { scholarCount: 0, source: "ED" },
+    });
+    console.log(
+      `[ED] pruned ${orphanDepts.count} empty depts, ${orphanDivs.count} empty divisions`,
+    );
 
     await prisma.etlRun.update({
       where: { id: run.id },

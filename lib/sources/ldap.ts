@@ -17,11 +17,22 @@ export const DEFAULT_BIND_DN = "cn=reciter,ou=binds,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_SEARCH_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_STUDENT_SEARCH_BASE =
   "ou=students,dc=weill,dc=cornell,dc=edu";
+/** WOOFA-sourced System-of-Record for faculty academic appointments. One LDAP
+ *  entry per appointment row with per-appointment dept, dates, status, etc.
+ *  We pull from here instead of the multi-valued `title` attribute on the
+ *  person entry — that mixed clinical/admin roles in with academic appointments
+ *  and had no per-row dates or status. */
+export const DEFAULT_FACULTY_SOR_BASE =
+  "ou=faculty,ou=sors,dc=weill,dc=cornell,dc=edu";
 export const DEFAULT_ACTIVE_FILTER =
   "(&(objectClass=eduPerson)(weillCornellEduPersonTypeCode=academic))";
 /** Phase 2 — only doctoral students (PHD degree code) feed the eligibility carve. */
 export const DEFAULT_DOCTORAL_STUDENT_FILTER =
   "(weillCornellEduDegreeCode=PHD)";
+/** Faculty SOR search: only currently-active appointments. Excludes
+ *  faculty:expired rows so the profile sidebar shows live titles only. */
+export const DEFAULT_FACULTY_SOR_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:active))";
 
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
@@ -58,8 +69,18 @@ export const ED_FACULTY_ATTRIBUTES = [
   // Probe 2026-05-03 (03-LDAP-PROBE.md): weillCornellEduOrgUnitCode is the authoritative
   // org-unit attribute (refactored schema). weillCornellEduDepartmentCode is a 10-digit
   // legacy numeric code (populated but not the stable org-unit join key).
-  "weillCornellEduOrgUnit",      // human-readable org-unit name (e.g. "General Internal Medicine")
-  "weillCornellEduOrgUnitCode",  // stable org-unit code — use for deptCode join key
+  "weillCornellEduOrgUnit",                  // returns subtypes ;level1 / ;level2
+  "weillCornellEduOrgUnit;level1",           // dept name
+  "weillCornellEduOrgUnit;level2",           // division name (when present)
+  "weillCornellEduOrgUnitCode",
+  "weillCornellEduOrgUnitCode;level1",       // dept code (e.g. N1280)
+  "weillCornellEduOrgUnitCode;level2",       // division code (e.g. N2856)
+  "weillCornellEduPrimaryOrgUnit;level1",    // primary appointment dept name
+  "weillCornellEduPrimaryOrgUnitCode;level1",// primary appointment dept code
+  "weillCornellEduPrimaryDepartment",        // primary dept name (single-value)
+  "weillCornellEduPrimaryDepartmentCode",    // primary dept code (legacy 10-digit)
+  "weillCornellEduDepartmentCode",           // multi-valued legacy 10-digit code
+  "weillCornellEduDepartment",               // multi-valued dept name (per-appointment)
 ] as const;
 
 export type EdFacultyEntry = {
@@ -123,6 +144,130 @@ export async function fetchActiveFaculty(client: Client): Promise<EdFacultyEntry
   return projectEntries(searchEntries, /* fallbackOu */ "people");
 }
 
+/** Structured faculty appointment row sourced from
+ *  `ou=faculty,ou=sors,dc=weill,dc=cornell,dc=edu` (WOOFA SOR). One per active
+ *  academic appointment — fields mirror what the profile sidebar renders.
+ *
+ *  Org-unit fields come from the LDAP subtype attributes
+ *  `weillCornellEduOrgUnit;level1` (dept name), `weillCornellEduOrgUnit;level2`
+ *  (division name), and matching `weillCornellEduOrgUnitCode;level{1,2}`
+ *  (probed 2026-05-06 against ccole). level2 is null for appointments
+ *  without a sub-department (e.g. Library, where the dept itself is the
+ *  leaf unit). */
+export type EdFacultyAppointment = {
+  cwid: string;
+  title: string;
+  /** Per-appointment department NAME (level1). Same value previously stored
+   *  as `organization` — kept under that name for back-compat with existing
+   *  callers, plus deptCode below for the FK join. */
+  organization: string | null;
+  startDate: Date | null;
+  /** Null when the SOR end-date is the 2099-06-30 sentinel (= indefinite). */
+  endDate: Date | null;
+  isPrimary: boolean;
+  /** Stable per-appointment ID from `weillCornellEduSORID`, prefixed for
+   *  attribution. Survives ETL reruns so the externalId column doesn't churn. */
+  externalId: string;
+  /** Joint-appointment flag (e.g. "The Bruce Webster Professor of Internal
+   *  Medicine" is a Joint appointment in Medicine while Crystal's primary
+   *  dept is Genetic Medicine). Available to UI if needed. */
+  isJoint: boolean;
+  /** Stable level1 dept code (e.g. "N1280" for Medicine). Use as Scholar.deptCode. */
+  deptCode: string | null;
+  /** Stable level2 division code (e.g. "N2856" for General Internal Medicine).
+   *  Null when the appointment is at the dept level (no sub-division). */
+  divCode: string | null;
+  /** Division NAME (level2). Used to upsert the Division row's display name. */
+  divName: string | null;
+};
+
+const FACULTY_SOR_ATTRS = [
+  "weillCornellEduCWID",
+  "title",
+  "weillCornellEduDepartment",
+  "weillCornellEduStartDate",
+  "weillCornellEduEndDate",
+  "weillCornellEduPrimaryEntry",
+  "weillCornellEduStatus",
+  "weillCornellEduSORID",
+  "weillCornellEduType",
+  // Bare base attribute requests usually return ALL subtypes as separate
+  // keys in ldapts. Listing the explicit subtype names too is harmless and
+  // documents the assumption.
+  "weillCornellEduOrgUnit",
+  "weillCornellEduOrgUnit;level1",
+  "weillCornellEduOrgUnit;level2",
+  "weillCornellEduOrgUnitCode",
+  "weillCornellEduOrgUnitCode;level1",
+  "weillCornellEduOrgUnitCode;level2",
+] as const;
+
+/** Fetch all currently-active faculty appointment records across every
+ *  scholar in one paginated search. Caller groups by CWID before write.
+ *  Filter is `weillCornellEduStatus=faculty:active` so expired rows don't
+ *  reach the database (no need to mirror the SOR's history table). */
+export async function fetchActiveFacultyAppointments(
+  client: Client,
+): Promise<EdFacultyAppointment[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_BASE ?? DEFAULT_FACULTY_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_FACULTY_SOR_FILTER ?? DEFAULT_FACULTY_SOR_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...FACULTY_SOR_ATTRS],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdFacultyAppointment[] = [];
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const title = firstString(e.title);
+    const sorId = firstString(e.weillCornellEduSORID);
+    if (!cwid || !title || !sorId) continue;
+
+    // Subtype-aware reads. ldapts surfaces option-tagged attributes with
+    // their tag suffix in the key (probed: "weillCornellEduOrgUnit;level1").
+    const r = e as Record<string, unknown>;
+    const deptName =
+      firstString(r["weillCornellEduOrgUnit;level1"]) ??
+      firstString(r["weillCornellEduDepartment"]);
+    const divName = firstString(r["weillCornellEduOrgUnit;level2"]);
+    const deptCode = firstString(r["weillCornellEduOrgUnitCode;level1"]);
+    const divCode = firstString(r["weillCornellEduOrgUnitCode;level2"]);
+
+    out.push({
+      cwid,
+      title,
+      organization: deptName,
+      startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
+      endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
+      isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+      externalId: `ED-FACULTY-${sorId}`,
+      isJoint: firstString(e.weillCornellEduType) === "Joint",
+      deptCode,
+      divCode,
+      divName,
+    });
+  }
+  return out;
+}
+
+/** LDAP generalizedTime is `YYYYMMDDhhmmssZ` (e.g. "19930301050000Z"). The
+ *  SOR uses `20990630050000Z` as a sentinel for "no end date / open-ended".
+ *  Anything in 2050+ is treated as null so the UI can render it as "active". */
+function parseLdapGeneralizedTime(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  const date = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.getUTCFullYear() >= 2050) return null;
+  return date;
+}
+
 /**
  * Phase 2 second branch: doctoral students live under ou=students, not ou=people,
  * so the active-faculty filter excludes them. Pull PHD students separately and
@@ -165,27 +310,82 @@ function projectEntries(
     const preferredName = [givenName, sn].filter(Boolean).join(" ").trim();
     const fullName = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
 
+    const r = e as Record<string, unknown>;
+
     out.push({
       cwid,
       preferredName: preferredName || cwid,
       fullName: fullName || preferredName || cwid,
       primaryTitle: firstString(e.weillCornellEduPrimaryTitle) ?? firstString(e.title) ?? null,
-      primaryDepartment: firstString(e.weillCornellEduDepartment) ?? firstString(e.ou) ?? null,
+      primaryDepartment:
+        firstString(r["weillCornellEduPrimaryDepartment"]) ??
+        firstString(e.weillCornellEduDepartment) ??
+        firstString(e.ou) ??
+        null,
       email: firstString(e.mail) ?? null,
       primaryPersonTypeCode: firstString(e.weillCornellEduPrimaryPersonTypeCode),
       personTypeCodes: allStrings(e.weillCornellEduPersonTypeCode),
       fte: parseFte(e.weillCornellEduFTE),
       ou: firstString(e.ou) ?? fallbackOu,
       degreeCode: firstString(e.weillCornellEduDegreeCode),
-      // Probe 2026-05-03: weillCornellEduOrgUnitCode is the authoritative org-unit code
-      // (refactored LDAP schema). weillCornellEduDepartmentCode is a legacy 10-digit code.
-      // divCode not available via LDAP in current schema.
-      deptCode: firstString(e.weillCornellEduOrgUnitCode) ?? null,
-      divCode: null,
-      orgUnit: firstString(e.weillCornellEduOrgUnit) ?? null,
+      // Probe 2026-05-06: org-unit data is exposed via LDAP option subtypes
+      // (`;level1` / `;level2`). On the people branch the **primary** subtypes
+      // mark the scholar's main appointment unambiguously even when the
+      // person has multiple joint appointments. Division (level2) is only
+      // populated on SOR child role records — see fetchActiveFacultyAppointments
+      // for the authoritative div_code source.
+      //
+      // We deliberately do NOT fall back to weillCornellEduDepartmentCode
+      // (10-digit legacy) here: that creates parallel rows for the same
+      // conceptual dept (Medicine appears as both N1280 and 1280000000),
+      // which collides on the dept slug unique index. Scholars without
+      // an N-prefixed primary code get null deptCode and resolve via the
+      // SOR appointment fallback in etl/ed/index.ts (resolveOrgUnit).
+      deptCode:
+        firstString(r["weillCornellEduPrimaryOrgUnitCode;level1"]) ??
+        firstString(r["weillCornellEduOrgUnitCode;level1"]),
+      divCode: null, // hydrated from SOR primary appointment in etl/ed/index.ts
+      orgUnit:
+        firstString(r["weillCornellEduPrimaryOrgUnit;level1"]) ??
+        firstString(r["weillCornellEduOrgUnit;level1"]),
     });
   }
   return out;
+}
+
+/**
+ * Slugify an org-unit name to UPPER_SNAKE for use as a stable code.
+ * Used as a deptCode fallback when LDAP returns no numeric code.
+ */
+function slugifyOrgName(name: string | null): string | null {
+  if (!name) return null;
+  const t = name.trim();
+  if (!t) return null;
+  return t
+    .toUpperCase()
+    .replace(/&/g, "AND")
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+}
+
+/**
+ * Derive a stable division code from the LDAP `weillCornellEduOrgUnit` value
+ * when it differs from the dept name. Same UPPER_SNAKE shape as deptCode so
+ * dept and division share a slugify convention. Returns null when the
+ * scholar has no division (orgUnit absent or equal to the dept name) — the
+ * Division upsert path in etl/ed/index.ts skips null divCodes.
+ */
+function deriveDivCode(
+  orgUnit: string | null,
+  deptName: string | null,
+): string | null {
+  if (!orgUnit) return null;
+  const trimmedOrg = orgUnit.trim();
+  const trimmedDept = deptName?.trim() ?? "";
+  if (trimmedOrg.length === 0) return null;
+  if (trimmedDept && trimmedOrg === trimmedDept) return null;
+  return slugifyOrgName(trimmedOrg);
 }
 
 function firstString(v: unknown): string | null {

@@ -214,6 +214,7 @@ async function main() {
         startDate: r.begin_date!,
         endDate: r.end_date!,
         externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
+        awardNumber: r.Award_Number?.trim() || null,
         source: "InfoEd",
       };
     });
