@@ -50,6 +50,9 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       q: typeof p.q === "string" ? p.q : null,
       position: typeof p.position === "number" ? p.position : null,
       cwid: typeof p.cwid === "string" ? p.cwid : null,
+      // Funding tab clicks identify by InfoEd account number rather than
+      // cwid since hits aggregate across multiple WCM scholars.
+      projectId: typeof p.projectId === "string" ? p.projectId : null,
       resultType: typeof p.resultType === "string" ? p.resultType : null,
       resultCount: typeof p.resultCount === "number" ? p.resultCount : null,
       filters,

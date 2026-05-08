@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
+import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { sanitizePubTitle } from "@/lib/utils";
-import type { FundingHit } from "@/lib/api/search-funding";
+import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
 /**
  * Issue #78 F2 — Funding result row.
@@ -41,12 +42,47 @@ function awardSerial(awardNumber: string, mechanism: string): string {
   return awardNumber.replace(re, "").trim();
 }
 
-export function FundingResultRow({ hit }: { hit: FundingHit }) {
+export function FundingResultRow({
+  hit,
+  q,
+  position,
+  total,
+  filters,
+}: {
+  hit: FundingHit;
+  /** Optional analytics context. Issue #80 item 9 — when present, clicks
+   *  on a person chip in this row fire a `search_click` beacon mirroring
+   *  the People + Publications tabs. */
+  q?: string;
+  position?: number;
+  total?: number;
+  filters?: FundingFilters;
+}) {
   const startYear = hit.startDate.slice(0, 4);
   const endYear = hit.endDate.slice(0, 4);
   const typeLabel = programTypeLabel(hit.programType);
   const visiblePeople = hit.people.slice(0, VISIBLE_COI_CAP);
   const remainder = hit.totalPeople - visiblePeople.length;
+
+  function trackClick(cwid: string) {
+    if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
+    if (q === undefined || position === undefined || total === undefined) return;
+    const payload = {
+      event: "search_click",
+      q,
+      position,
+      cwid,
+      projectId: hit.projectId,
+      resultType: "funding",
+      resultCount: total,
+      filters: filters ?? {},
+      ts: Date.now(),
+    };
+    navigator.sendBeacon(
+      "/api/analytics",
+      new Blob([JSON.stringify(payload)], { type: "application/json" }),
+    );
+  }
 
   return (
     <article className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[#e3e2dd] py-5">
@@ -63,6 +99,7 @@ export function FundingResultRow({ hit }: { hit: FundingHit }) {
             <Link
               key={p.cwid}
               href={`/scholars/${p.slug}`}
+              onClick={() => trackClick(p.cwid)}
               className="inline-flex items-center gap-1.5 text-[13px] text-[#2c4f6e] hover:underline"
             >
               <HeadshotAvatar
@@ -93,7 +130,7 @@ export function FundingResultRow({ hit }: { hit: FundingHit }) {
 
         {/* Sponsor · dates · via [direct]. */}
         <div className="mt-1.5 text-[13px] text-[#5a5a5a]">
-          <SponsorAbbr short={hit.primeSponsor} />
+          <FunderEyebrow short={hit.primeSponsor} />
           {" · "}
           {startYear}
           {"–"}
