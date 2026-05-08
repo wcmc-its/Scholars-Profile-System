@@ -203,6 +203,10 @@ async function indexPeople() {
       : s.preferredName;
     const nameSuggestInputs: Array<{ input: string; weight: number }> = [
       { input: displayName, weight: 100 },
+      // CWID is the canonical scholar identifier; a prefix match resolves
+      // back to the canonical preferredName via mget in suggestNames(),
+      // so a paste of "pja2002" surfaces the same row a name lookup would.
+      { input: s.cwid, weight: 99 },
     ];
     const slices = trailingNameSlices(s.preferredName);
     for (const slice of slices) {

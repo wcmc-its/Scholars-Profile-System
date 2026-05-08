@@ -151,10 +151,21 @@ export async function searchPeople(opts: {
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
     must.push({
-      multi_match: {
-        query: trimmed,
-        fields: [...PEOPLE_FIELD_BOOSTS],
-        type: "best_fields",
+      bool: {
+        should: [
+          // CWIDs are stored lowercase as a `keyword` field; an exact term
+          // match wins over the multi_match by a wide boost so a pasted
+          // CWID resolves to its scholar at the top of the result list.
+          { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
+          {
+            multi_match: {
+              query: trimmed,
+              fields: [...PEOPLE_FIELD_BOOSTS],
+              type: "best_fields",
+            },
+          },
+        ],
+        minimum_should_match: 1,
       },
     });
   } else {

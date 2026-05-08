@@ -43,6 +43,17 @@ export const peopleIndexMapping = {
           tokenizer: "standard",
           filter: ["lowercase", "english_stop", "english_stemmer"],
         },
+        // The completion suggester's default analyzer is `simple`, which
+        // strips digits — so a CWID like "pja9004" indexes as the bare
+        // prefix "pja" and any digits-only-different query (e.g.
+        // "pja2002") spuriously matches it. Use a digits-preserving
+        // analyzer (standard tokenizer keeps letter+digit runs intact)
+        // so CWIDs survive while names still tokenize cleanly.
+        scholar_suggest: {
+          type: "custom" as const,
+          tokenizer: "standard",
+          filter: ["lowercase"],
+        },
       },
       filter: {
         english_stop: { type: "stop", stopwords: "_english_" },
@@ -64,6 +75,8 @@ export const peopleIndexMapping = {
       // Suggests "name + primary title" (Stanford-style; FunReq Figure C).
       nameSuggest: {
         type: "completion",
+        analyzer: "scholar_suggest",
+        search_analyzer: "scholar_suggest",
       },
       primaryTitle: { type: "text", analyzer: "scholar_text" },
       primaryDepartment: {
