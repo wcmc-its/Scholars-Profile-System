@@ -8,8 +8,8 @@
  *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per
  *                             letter. Consumed by /search empty-People state
  *                             (relocated from /browse per docs/browse-vs-search.md).
- *   - getBrowseData():        composite for /browse — calls departments + centers
- *                             in parallel and returns departments grouped by category.
+ *   - getBrowseData():        composite for /browse — runs departments and
+ *                             centers in parallel.
  *
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
@@ -42,11 +42,6 @@ export type BrowseDepartment = {
   topResearchAreas: BrowseDepartmentTopicChip[];
 };
 
-export type CategorizedDepartments = Record<
-  DepartmentCategory,
-  BrowseDepartment[]
->;
-
 export type BrowseCenter = {
   code: string;
   name: string;
@@ -72,10 +67,7 @@ export type AZBucket = {
 };
 
 export type BrowseData = {
-  /** Flat list (preserved for legacy callers / tests). */
   departments: BrowseDepartment[];
-  /** Same data, grouped by category for the Browse hub render. */
-  departmentsByCategory: CategorizedDepartments;
   centers: BrowseCenter[];
 };
 
@@ -304,16 +296,5 @@ export async function getBrowseData(): Promise<BrowseData> {
     getDepartmentsList(),
     getCentersList(),
   ]);
-
-  const departmentsByCategory: CategorizedDepartments = {
-    clinical: [],
-    basic: [],
-    mixed: [],
-    administrative: [],
-  };
-  for (const d of departments) {
-    departmentsByCategory[d.category].push(d);
-  }
-
-  return { departments, departmentsByCategory, centers };
+  return { departments, centers };
 }
