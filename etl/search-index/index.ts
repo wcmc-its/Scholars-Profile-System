@@ -62,6 +62,24 @@ function trailingNameSlices(name: string): string[] {
   return slices;
 }
 
+/**
+ * Build a "first + last" slice that drops middle tokens, so users typing
+ * "Ronald Crystal" find "Ronald G. Crystal". Returns null for names that
+ * don't have at least one middle token, and for names whose first/last is
+ * already the full name (avoid duplicating the canonical input).
+ */
+function firstLastSlice(name: string): string | null {
+  if (!name) return null;
+  const raw = name.trim().split(/\s+/).filter(Boolean);
+  if (raw.length < 3) return null;
+  const SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
+  let end = raw.length;
+  while (end > 1 && SUFFIXES.test(raw[end - 1])) end -= 1;
+  const tokens = raw.slice(0, end);
+  if (tokens.length < 3) return null;
+  return `${tokens[0]} ${tokens[tokens.length - 1]}`;
+}
+
 function classifyAuthorship(a: {
   isFirst: boolean;
   isLast: boolean;
@@ -189,6 +207,17 @@ async function indexPeople() {
     const slices = trailingNameSlices(s.preferredName);
     for (const slice of slices) {
       nameSuggestInputs.push({ input: slice, weight: 95 });
+    }
+    // "First Last" with middle tokens dropped — so "Ronald Crystal" matches
+    // "Ronald G. Crystal". Apply to both preferredName and fullName since the
+    // two can differ (e.g. fullName carries an unabridged middle name).
+    const firstLastFromPreferred = firstLastSlice(s.preferredName);
+    if (firstLastFromPreferred) {
+      nameSuggestInputs.push({ input: firstLastFromPreferred, weight: 92 });
+    }
+    const firstLastFromFull = firstLastSlice(s.fullName);
+    if (firstLastFromFull && firstLastFromFull !== firstLastFromPreferred) {
+      nameSuggestInputs.push({ input: firstLastFromFull, weight: 92 });
     }
     const lastName = slices[slices.length - 1];
     if (lastName) {
