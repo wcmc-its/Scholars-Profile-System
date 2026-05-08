@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 /**
  * Funder facet with type-ahead (issue #80 items 6 + 7).
@@ -127,34 +128,40 @@ export function FunderFacet({ items, directItems, collapseAfter = 6 }: Props) {
 
 function FunderRow({ item, via }: { item: FunderFacetItem; via?: boolean }) {
   const display = item.nihIc ? `NIH/${item.short}` : item.short;
-  const titleAttr = item.full
+  // Tooltip text — full name when present in the canonical lookup;
+  // otherwise the bare short label so the styled tooltip still appears
+  // on hover for visual consistency across rows. Mirrors the
+  // author-chip-row treatment (HoverTooltip wrapping the click target).
+  const tooltipText = item.full
     ? via
       ? `via ${item.full}`
       : item.full
-    : undefined;
+    : null;
+  const row = (
+    <Link
+      href={item.href}
+      className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+    >
+      <input
+        type="checkbox"
+        readOnly
+        checked={item.isActive}
+        tabIndex={-1}
+        aria-hidden="true"
+        className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
+      />
+      <span className="min-w-0 flex-1 break-words">
+        {via ? <span className="text-[#757575]">via </span> : null}
+        {display}
+      </span>
+      <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+        {item.count.toLocaleString()}
+      </span>
+    </Link>
+  );
   return (
     <li className="py-1 leading-[1.4]">
-      <Link
-        href={item.href}
-        title={titleAttr}
-        className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
-      >
-        <input
-          type="checkbox"
-          readOnly
-          checked={item.isActive}
-          tabIndex={-1}
-          aria-hidden="true"
-          className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
-        />
-        <span className="min-w-0 flex-1 break-words">
-          {via ? <span className="text-[#757575]">via </span> : null}
-          {display}
-        </span>
-        <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
-          {item.count.toLocaleString()}
-        </span>
-      </Link>
+      {tooltipText ? <HoverTooltip text={tooltipText}>{row}</HoverTooltip> : row}
     </li>
   );
 }
