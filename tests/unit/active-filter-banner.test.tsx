@@ -85,4 +85,55 @@ describe("ActiveFilterBanner", () => {
     );
     expect(screen.getByRole("status").textContent ?? "").toMatch(/1\s*publication\b/);
   });
+
+  it("renders position-only filter without a topic segment", () => {
+    render(
+      <ActiveFilterBanner
+        count={138}
+        selected={[]}
+        position="senior"
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/Filtered to\s*138\s*publications/);
+    expect(text).toMatch(/·\s*Senior author/);
+    expect(text).not.toMatch(/using/);
+    expect(screen.getByRole("button", { name: "Clear filter" })).toBeTruthy();
+  });
+
+  it("composes one topic + position into 'using <kw> · <pos>'", () => {
+    render(
+      <ActiveFilterBanner
+        count={119}
+        selected={[k("D015316", "Genetic Therapy")]}
+        position="senior"
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/using\s*Genetic Therapy\s*·\s*Senior author/);
+    // Two filter chips active → 'Clear all', not 'Clear filter'
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+  });
+
+  it("composes two topics + position", () => {
+    render(
+      <ActiveFilterBanner
+        count={50}
+        selected={[k("D1", "Alpha"), k("D2", "Beta")]}
+        position="first"
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/Alpha\s*or\s*Beta\s*·\s*First author/);
+  });
+
+  it("renders nothing when neither topic nor position filter is active", () => {
+    const { container } = render(
+      <ActiveFilterBanner count={140} selected={[]} position="all" onClearAll={() => {}} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
 });
