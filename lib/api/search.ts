@@ -619,7 +619,7 @@ export async function suggestEntities(
       kind: "subtopic",
       title,
       subtitle,
-      href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}`,
+      href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}#publications`,
     });
   }
 
