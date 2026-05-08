@@ -65,10 +65,18 @@ export type RecentHighlight = {
   year: number | null;
   pubmedUrl: string | null;
   doi: string | null;
+  /**
+   * Up to 5 confirmed WCM coauthors with the chip-row payload (avatar +
+   * first/senior signal). Same shape `AuthorChipRow` consumes elsewhere.
+   * (#15)
+   */
   authors: Array<{
-    cwid: string | null;
-    slug: string | null;
-    preferredName: string;
+    name: string;
+    cwid: string;
+    slug: string;
+    identityImageEndpoint: string;
+    isFirst: boolean;
+    isLast: boolean;
   }>;
   // No citation-count field — locked by design spec v1.7.1.
 };
@@ -225,9 +233,29 @@ export async function getTopScholarsForTopic(
  * Hard-excluded pub types are filtered at publication.findMany.
  * Sparse-state hide if 0 papers qualify.
  */
+/**
+ * #15: Recent Highlights uses a deterministic filter + most-recent sort
+ * instead of the previous recency-curve scoring path.
+ *
+ *   - publicationType = "Academic Article"
+ *   - scholar.role_category = "full_time_faculty"
+ *   - publication_topic.author_position IN ('first', 'last')
+ *   - publication_topic.score >= RECENT_HIGHLIGHTS_IMPACT_FLOOR
+ *   - year >= RECITERAI_YEAR_FLOOR (2020+)
+ *
+ * Sort: publication.dateAddedToEntrez DESC, ties by year DESC, score DESC.
+ * Target 3, hide section if 0 qualify (sparse-state floor preserved).
+ *
+ * `now` retained for signature parity with the previous version (and the
+ * existing tests). It's no longer consulted: selection no longer depends
+ * on a recency curve.
+ */
+const RECENT_HIGHLIGHTS_IMPACT_FLOOR = 40;
+
 export async function getRecentHighlightsForTopic(
   topicSlug: string,
-  now: Date = new Date(),
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _now: Date = new Date(),
 ): Promise<RecentHighlight[] | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
@@ -236,18 +264,31 @@ export async function getRecentHighlightsForTopic(
     where: {
       parentTopicId: topicSlug,
       year: { gte: RECITERAI_YEAR_FLOOR }, // D-15
-      // NO authorPosition filter — publication-centric pool per D-13.
+      score: { gte: RECENT_HIGHLIGHTS_IMPACT_FLOOR }, // #15: hard impact threshold
+      authorPosition: { in: ["first", "last"] }, // #15: first or senior author
       scholar: {
         deletedAt: null,
         status: "active",
-        // Recent highlights uses the general carve per spec v1.7.1; however,
-        // for Phase 2 the carve is applied at the scholar attribution layer
-        // when rendering author chips. The raw pool is publication-centric:
-        // a pmid is in the pool if ANY of its WCM author rows attributes the
-        // paper to the topic. We do NOT pre-filter by role here.
+        roleCategory: "full_time_faculty", // #15: FT faculty only
+      },
+      publication: {
+        publicationType: "Academic Article", // #15
       },
     },
-    orderBy: [{ year: "desc" }, { score: "desc" }],
+    include: {
+      publication: {
+        select: {
+          pmid: true,
+          title: true,
+          journal: true,
+          year: true,
+          publicationType: true,
+          pubmedUrl: true,
+          doi: true,
+          dateAddedToEntrez: true,
+        },
+      },
+    },
   });
 
   if (rows.length === 0) {
@@ -260,100 +301,50 @@ export async function getRecentHighlightsForTopic(
     return null;
   }
 
-  // Dedupe pmids (the same paper may have multiple per-author rows).
-  const pmidStrings = Array.from(new Set(rows.map((r) => r.pmid)));
-
-  // Fetch publication metadata + WCM author chip data. The author-chip include
-  // uses the existing publication.authors relation (PublicationAuthor); the
-  // publication_topic FK is used by the rows query above. Hard-exclude bad
-  // types here since publication-centric. (Could be inverted to a single
-  // publication.findMany with a publicationTopics: { some } filter; current
-  // shape preserves per-pmid score lookup which the dedup loop below needs.)
-  const pubs = await prisma.publication.findMany({
-    where: {
-      pmid: { in: pmidStrings },
-      publicationType: { notIn: ["Letter", "Editorial Article", "Erratum"] },
-    },
-    include: {
-      authors: {
-        where: {
-          isConfirmed: true,
-          scholar: { deletedAt: null, status: "active" },
-        },
-        orderBy: [{ isFirst: "desc" }, { isLast: "desc" }, { position: "asc" }],
-        include: {
-          scholar: {
-            select: {
-              cwid: true,
-              slug: true,
-              preferredName: true,
-              status: true,
-              deletedAt: true,
-            },
-          },
-        },
-      },
-    },
-  });
-  const pubByPmid = new Map(pubs.map((p) => [p.pmid, p]));
-
-  // For score lookup we want the highest publication_topic score per pmid (a
-  // pmid may have multiple per-author rows in the topic; collapse them).
-  const bestRowByPmid = new Map<string, (typeof rows)[number]>();
+  // Dedupe per pmid — multiple WCM authors may attribute the same paper.
+  // Keep the row with the highest score so the (impact-floor) tiebreaker
+  // is stable.
+  const bestByPmid = new Map<string, (typeof rows)[number]>();
   for (const r of rows) {
-    const existing = bestRowByPmid.get(r.pmid);
+    const existing = bestByPmid.get(r.pmid);
     if (!existing || Number(r.score) > Number(existing.score)) {
-      bestRowByPmid.set(r.pmid, r);
+      bestByPmid.set(r.pmid, r);
     }
   }
 
-  // Score each unique pmid via the recent_highlights curve.
-  const scored: Array<{
-    pub: (typeof pubs)[number];
-    score: number;
-  }> = [];
-  for (const [pmid, pub] of pubByPmid) {
-    const r = bestRowByPmid.get(pmid);
-    if (!r) continue;
-    const rankable: RankablePublication = {
-      pmid,
-      publicationType: pub.publicationType,
-      reciteraiImpact: Number(r.score),
-      dateAddedToEntrez: pub.dateAddedToEntrez,
-      // For publication-centric scoring, scholarCentric=false makes
-      // authorshipWeight return 1.0 regardless of position values here.
-      authorship: { isFirst: false, isLast: false, isPenultimate: false },
-      isConfirmed: true,
-    };
-    const score = scorePublication(rankable, "recent_highlights", false, now);
-    if (score > 0) scored.push({ pub, score });
-  }
+  const candidates = Array.from(bestByPmid.values());
+  candidates.sort((a, b) => {
+    const at = a.publication.dateAddedToEntrez?.getTime() ?? 0;
+    const bt = b.publication.dateAddedToEntrez?.getTime() ?? 0;
+    if (bt !== at) return bt - at;
+    const ay = a.publication.year ?? 0;
+    const by = b.publication.year ?? 0;
+    if (by !== ay) return by - ay;
+    return Number(b.score) - Number(a.score);
+  });
 
-  scored.sort((a, b) => b.score - a.score);
-
-  if (scored.length < RECENT_HIGHLIGHTS_FLOOR) {
+  if (candidates.length < RECENT_HIGHLIGHTS_FLOOR) {
     logSparseHide(
       "topic_recent_highlights",
-      scored.length,
+      candidates.length,
       RECENT_HIGHLIGHTS_FLOOR,
       topicSlug,
     );
     return null;
   }
 
-  return scored.slice(0, RECENT_HIGHLIGHTS_TARGET).map(({ pub }) => ({
-    pmid: pub.pmid,
-    title: pub.title,
-    journal: pub.journal,
-    year: pub.year,
-    pubmedUrl: pub.pubmedUrl ?? null,
-    doi: pub.doi ?? null,
-    authors: pub.authors.slice(0, 5).map((a) => ({
-      cwid: a.cwid ?? null,
-      slug: a.scholar?.slug ?? null,
-      preferredName:
-        a.scholar?.preferredName ?? a.externalName ?? "—",
-    })),
+  const top = candidates.slice(0, RECENT_HIGHLIGHTS_TARGET);
+  const topPmids = top.map((c) => c.pmid);
+  const authorsByPmid = await fetchWcmAuthorsForPmids(topPmids);
+
+  return top.map((c) => ({
+    pmid: c.pmid,
+    title: c.publication.title ?? "",
+    journal: c.publication.journal ?? null,
+    year: c.publication.year ?? null,
+    pubmedUrl: c.publication.pubmedUrl ?? null,
+    doi: c.publication.doi ?? null,
+    authors: authorsByPmid.get(c.pmid) ?? [],
     // No citation-count field — locked by design spec v1.7.1.
   }));
 }

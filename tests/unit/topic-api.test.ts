@@ -25,10 +25,12 @@ const {
   mockTopicFindUnique,
   mockPublicationTopicFindMany,
   mockPublicationFindMany,
+  mockPublicationAuthorFindMany,
 } = vi.hoisted(() => ({
   mockTopicFindUnique: vi.fn(),
   mockPublicationTopicFindMany: vi.fn(),
   mockPublicationFindMany: vi.fn(),
+  mockPublicationAuthorFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -36,6 +38,7 @@ vi.mock("@/lib/db", () => ({
     topic: { findUnique: mockTopicFindUnique },
     publicationTopic: { findMany: mockPublicationTopicFindMany },
     publication: { findMany: mockPublicationFindMany },
+    publicationAuthor: { findMany: mockPublicationAuthorFindMany },
   },
 }));
 
@@ -393,6 +396,8 @@ describe("getRecentHighlightsForTopic (RANKING-02)", () => {
     mockTopicFindUnique.mockReset();
     mockPublicationTopicFindMany.mockReset();
     mockPublicationFindMany.mockReset();
+    mockPublicationAuthorFindMany.mockReset();
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
   });
 
   it("returns null when the topic does not exist", async () => {
@@ -402,20 +407,21 @@ describe("getRecentHighlightsForTopic (RANKING-02)", () => {
     expect(mockPublicationTopicFindMany).not.toHaveBeenCalled();
   });
 
-  it("does NOT apply first-or-senior filter at the WHERE clause (publication-centric pool, D-13)", async () => {
+  it("applies first-or-senior + FT-faculty + impact>=40 + Academic Article filter (#15)", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
     mockPublicationTopicFindMany.mockResolvedValue([]);
-    mockPublicationFindMany.mockResolvedValue([]);
     await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
 
     const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
-    expect(where.authorPosition).toBeUndefined();
+    expect(where.authorPosition).toEqual({ in: ["first", "last"] });
+    expect(where.score).toEqual({ gte: 40 });
+    expect(where.scholar.roleCategory).toBe("full_time_faculty");
+    expect(where.publication.publicationType).toBe("Academic Article");
   });
 
   it("filters publication_topic to the topic via parentTopicId and applies 2020+ floor", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
     mockPublicationTopicFindMany.mockResolvedValue([]);
-    mockPublicationFindMany.mockResolvedValue([]);
     await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
 
     const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
@@ -426,7 +432,6 @@ describe("getRecentHighlightsForTopic (RANKING-02)", () => {
   it("returns null with sparse-state log when 0 papers qualify (D-12)", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
     mockPublicationTopicFindMany.mockResolvedValue([]);
-    mockPublicationFindMany.mockResolvedValue([]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
     expect(result).toBeNull();
@@ -440,82 +445,54 @@ describe("getRecentHighlightsForTopic (RANKING-02)", () => {
 
   it("returns up to 3 cards; result objects do NOT contain citationCount", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-    // 5 distinct papers all in the recent_highlights peak (6–18mo).
+    // 5 qualifying papers (FT faculty first/last, score >= 40, Academic Article).
     const rows = [];
-    const pubs = [];
     for (let i = 0; i < 5; i++) {
       const pmid = 500 + i;
       rows.push(
         makePtRow({
           cwid: `auth${String(i).padStart(4, "0")}`,
           pmid,
-          authorPosition: "middle", // exercise the no-filter behaviour
-          reciteraiImpact: 1.0 + i * 0.1,
-        }),
-      );
-      pubs.push(
-        makePubRow({
-          pmid,
-          dateAddedToEntrez: new Date("2025-04-01T00:00:00Z"), // ~12mo before NOW
+          authorPosition: i % 2 === 0 ? "first" : "last",
+          score: 50 + i,
+          dateAddedToEntrez: new Date(2025, 5 - i, 1),
         }),
       );
     }
     mockPublicationTopicFindMany.mockResolvedValue(rows);
-    mockPublicationFindMany.mockResolvedValue(pubs);
     const result = await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
     expect(result).not.toBeNull();
     expect(result!.length).toBeLessThanOrEqual(3);
     for (const h of result! as RecentHighlight[]) {
       expect(h).not.toHaveProperty("citationCount");
-      // Required fields per type contract.
       expect(h).toHaveProperty("pmid");
       expect(h).toHaveProperty("title");
       expect(h).toHaveProperty("authors");
     }
   });
 
-  it("excludes Letter / Editorial Article / Erratum publications (hard-excluded)", async () => {
+  it("WHERE excludes non-Academic-Article publication types (#15)", async () => {
+    // The pub-type filter is enforced server-side via the WHERE clause; this
+    // test verifies we pass the right filter to Prisma. Database semantics
+    // (which row gets returned) are exercised by the API integration test.
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-    const rows = [
-      makePtRow({ cwid: "exc00000", pmid: 600, authorPosition: "middle" }),
-      makePtRow({ cwid: "exc11111", pmid: 601, authorPosition: "first" }),
-    ];
-    const pubs = [
-      makePubRow({
-        pmid: 600,
-        publicationType: "Letter",
-        dateAddedToEntrez: new Date("2025-04-01T00:00:00Z"),
-      }),
-      makePubRow({
-        pmid: 601,
-        publicationType: "Editorial Article",
-        dateAddedToEntrez: new Date("2025-04-01T00:00:00Z"),
-      }),
-    ];
-    mockPublicationTopicFindMany.mockResolvedValue(rows);
-    mockPublicationFindMany.mockResolvedValue(pubs);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
-    expect(result).toBeNull(); // all scored 0 → sparse-state hide
-    warn.mockRestore();
+    mockPublicationTopicFindMany.mockResolvedValue([]);
+    await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
+    const where = mockPublicationTopicFindMany.mock.calls[0][0].where;
+    expect(where.publication.publicationType).toBe("Academic Article");
   });
 
   it("dedupes per-pmid (single card per publication even when multiple author rows match)", async () => {
     mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-    // Same pmid appears 3 times with 3 different cwids (per-author rows
-    // in publication_topic).
+    // Same pmid appears with 2 qualifying authors (one first, one last).
+    // Mock returns both rows; the function must dedupe to a single card.
     const rows = [
-      makePtRow({ cwid: "dup00000", pmid: 700, authorPosition: "first" }),
-      makePtRow({ cwid: "dup11111", pmid: 700, authorPosition: "middle" }),
-      makePtRow({ cwid: "dup22222", pmid: 700, authorPosition: "last" }),
-      makePtRow({ cwid: "dst00000", pmid: 701, authorPosition: "first" }),
-      makePtRow({ cwid: "dst11111", pmid: 702, authorPosition: "first" }),
+      makePtRow({ cwid: "dup00000", pmid: 700, authorPosition: "first", score: 60 }),
+      makePtRow({ cwid: "dup22222", pmid: 700, authorPosition: "last", score: 65 }),
+      makePtRow({ cwid: "dst00000", pmid: 701, authorPosition: "first", score: 55 }),
+      makePtRow({ cwid: "dst11111", pmid: 702, authorPosition: "first", score: 50 }),
     ];
-    const pubs = [700, 701, 702].map((pmid) =>
-      makePubRow({ pmid, dateAddedToEntrez: new Date("2025-04-01T00:00:00Z") }),
-    );
     mockPublicationTopicFindMany.mockResolvedValue(rows);
-    mockPublicationFindMany.mockResolvedValue(pubs);
     const result = await getRecentHighlightsForTopic(TOPIC_SLUG, NOW);
     expect(result).not.toBeNull();
     const pmids = (result as RecentHighlight[]).map((h) => h.pmid);

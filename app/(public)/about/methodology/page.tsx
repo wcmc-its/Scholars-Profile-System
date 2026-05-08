@@ -97,17 +97,20 @@ export default function MethodologyPage() {
       <section id={METHODOLOGY_ANCHORS.recentHighlights} className="mt-12">
         <h2 className="text-lg font-semibold">Recent highlights</h2>
         <p className="mt-3 text-base">
-          The Recent highlights surface on a topic page shows three
-          publications with the strongest recent impact in that area. The pool
-          is publication-centric: papers are ranked individually without an
-          authorship-position filter, so middle-author contributions to
-          high-impact work can surface here. Letters, editorials, and errata
-          are excluded entirely. Citation counts are not displayed.
+          The Recent highlights surface on a topic page shows up to three of
+          the most recent academic articles in that area where a WCM
+          full-time faculty member is the first or senior author and the
+          paper&apos;s ReCiterAI impact score is at least 40.
         </p>
         <p className="mt-3 text-base">
-          The recency curve favors papers 6–18 months old (peak), with smaller
-          weights for newer (0–6 months) and older (18 months+) work, capped
-          at 0.4 beyond three years.
+          Letters, editorials, errata, and other non-research publication
+          types are excluded. Citation counts are not displayed. Cards link
+          to the paper on PubMed; author names link to the contributing WCM
+          scholar&apos;s profile.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          Papers must fall within the 2020+ ReCiterAI scoring window. Older
+          landmark publications are not eligible for this surface.
         </p>
       </section>
 
