@@ -239,23 +239,34 @@ export async function searchPeople(opts: {
     ? { terms: { cwid: topicCwidFilter } }
     : null;
 
-  // The filter array used by the main hits query (includes everything).
-  const filter: Record<string, unknown>[] = [];
-  if (deptDivClause) filter.push(deptDivClause);
-  if (personTypeClause) filter.push(personTypeClause);
-  for (const c of activityClauses) filter.push(c);
-  if (sparseClause) filter.push(sparseClause);
-  if (topicClause) filter.push(topicClause);
+  // Filter classification:
+  //   - "Always-on" filters (sparse-profile, topic pre-filter) belong on
+  //     the main query so aggregations respect them — bucket counts for
+  //     hidden profiles or out-of-topic scholars would be misleading.
+  //   - "User-axis" filters (deptDiv, personType, activity) move to
+  //     post_filter so the aggregations see the unfiltered hit set and
+  //     each per-axis agg can re-apply only the OTHER user-axis filters
+  //     to compute correct excluding-self counts. Without this split, a
+  //     filter aggregation operating inside a query that already has
+  //     personType=X applied would only ever see personType=X docs and
+  //     collapse the personType facet to one bucket.
+  const queryFilter: Record<string, unknown>[] = [];
+  if (sparseClause) queryFilter.push(sparseClause);
+  if (topicClause) queryFilter.push(topicClause);
 
-  // Helper: build the "all filters except this one" clause set for a given
-  // facet's excluding-self aggregation.
+  const userAxisFilters: Record<string, unknown>[] = [];
+  if (deptDivClause) userAxisFilters.push(deptDivClause);
+  if (personTypeClause) userAxisFilters.push(personTypeClause);
+  for (const c of activityClauses) userAxisFilters.push(c);
+
+  // Helper: user-axis filters with one axis omitted, for that axis's
+  // excluding-self aggregation. Always-on filters are inherited from the
+  // main query context, so they don't appear here.
   const filtersExcept = (axis: "deptDiv" | "personType" | "activity") => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
     if (axis !== "personType" && personTypeClause) out.push(personTypeClause);
     if (axis !== "activity") for (const c of activityClauses) out.push(c);
-    if (sparseClause) out.push(sparseClause);
-    if (topicClause) out.push(topicClause);
     return out;
   };
 
@@ -319,7 +330,14 @@ export async function searchPeople(opts: {
     // there are 90k. Costs more on truly broad queries but the people
     // index is small (~9k docs) so the impact is negligible.
     track_total_hits: true,
-    query: { bool: { must, filter } },
+    query: { bool: { must, filter: queryFilter } },
+    // User-axis filters live here so aggregations see the unfiltered hit
+    // set and can compute excluding-self counts. Hits returned by the
+    // main response still respect every active filter (post_filter is
+    // applied after aggregation but before hit emission).
+    ...(userAxisFilters.length > 0
+      ? { post_filter: { bool: { filter: userAxisFilters } } }
+      : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs,
     highlight: {
@@ -443,14 +461,16 @@ export async function searchPublications(opts: {
     ? { terms: { wcmAuthorPositions: filters.wcmAuthorRole } }
     : null;
 
-  const filter: Record<string, unknown>[] = [];
-  if (yearClause) filter.push(yearClause);
-  if (publicationTypeClause) filter.push(publicationTypeClause);
-  if (journalClause) filter.push(journalClause);
-  if (wcmRoleClause) filter.push(wcmRoleClause);
+  // Same split as searchPeople: all axes here are user-controlled, so they
+  // all go in post_filter; the main query carries only the multi_match.
+  // This lets each per-facet agg compute excluding-self counts without
+  // being collapsed to the active selection.
+  const userAxisFilters: Record<string, unknown>[] = [];
+  if (yearClause) userAxisFilters.push(yearClause);
+  if (publicationTypeClause) userAxisFilters.push(publicationTypeClause);
+  if (journalClause) userAxisFilters.push(journalClause);
+  if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
 
-  // Helper: rebuild the filter set without a given axis for that axis's
-  // facet aggregation.
   const filtersExcept = (
     axis: "year" | "publicationType" | "journal" | "wcmAuthorRole",
   ) => {
@@ -478,7 +498,13 @@ export async function searchPublications(opts: {
     // counts a few thousand extra docs on broad queries, but it's needed
     // for an accurate count line.
     track_total_hits: true,
-    query: { bool: { must, filter } },
+    query: { bool: { must } },
+    // post_filter applies all user-axis filters to hits AFTER the
+    // aggregations run, so each per-facet agg can compute correct
+    // excluding-self counts (see searchPeople for the rationale).
+    ...(userAxisFilters.length > 0
+      ? { post_filter: { bool: { filter: userAxisFilters } } }
+      : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs: {
       publicationTypes: {
