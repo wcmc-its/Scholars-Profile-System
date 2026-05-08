@@ -3,19 +3,15 @@ import {
   getCenter,
   getCenterMembers,
   getCenterPublicationsList,
-  getCenterGrantsList,
-  getCenterHighlights,
   getCenterTopResearchAreas,
 } from "@/lib/api/centers";
+import { getSpotlightCardsForCenter } from "@/lib/api/spotlight";
 import { CenterMembersClient } from "@/components/center/center-members-client";
 import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
-import { DeptGrantsList } from "@/components/department/dept-grants-list";
-import { HighlightsSection } from "@/components/department/highlights-section";
-import { PublicationCard } from "@/components/department/publication-card";
-import { GrantCard } from "@/components/department/grant-card";
+import { Spotlight } from "@/components/shared/spotlight";
 import { LeaderCard } from "@/components/scholar/leader-card";
-import type { PubSort, GrantSort } from "@/lib/api/dept-lists";
+import type { PubSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -25,7 +21,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications" | "grants";
+type Tab = "scholars" | "publications";
 
 export async function CenterPage({
   centerSlug,
@@ -43,32 +39,18 @@ export async function CenterPage({
 
   const basePath = `/centers/${detail.slug}`;
 
-  // Counts needed for tab labels regardless of active tab. The publications
-  // count comes from a lightweight first-page fetch; grants count from the
-  // grants-list distinct enumeration. Highlights and top research areas only
-  // render on the Scholars (default) tab — but we always compute them so the
-  // hero shows top research areas no matter which tab is active.
-  const [topResearchAreas, highlights] = await Promise.all([
+  // §16: Spotlight + top research areas are page-level. Pubs count is needed
+  // for the Spotlight view-all link and the tab label.
+  const [topResearchAreas, spotlightCards] = await Promise.all([
     getCenterTopResearchAreas(detail.code),
-    getCenterHighlights(detail.code),
+    getSpotlightCardsForCenter(detail.code),
   ]);
-
-  // Tab counts: pull totals up-front for the tab labels.
   const pubsCountResult = await getCenterPublicationsList(detail.code, {
     page: 0,
     sort: "newest",
   });
-  const grantsCountResult = await getCenterGrantsList(detail.code, {
-    page: 0,
-    sort: "most_recent",
-  });
 
-  // Tab-specific paginated data.
   const pubSort = (sort === "most_cited" ? "most_cited" : "newest") as PubSort;
-  const grantSort = (sort === "end_date"
-    ? "end_date"
-    : "most_recent") as GrantSort;
-
   const pubsList =
     tab === "publications"
       ? await getCenterPublicationsList(detail.code, {
@@ -77,18 +59,18 @@ export async function CenterPage({
         })
       : pubsCountResult;
 
-  const grantsList =
-    tab === "grants"
-      ? await getCenterGrantsList(detail.code, {
-          page: Math.max(0, page - 1),
-          sort: grantSort,
-        })
-      : grantsCountResult;
-
   const members =
     tab === "scholars"
       ? await getCenterMembers(detail.code, { page: Math.max(0, page - 1) })
       : null;
+
+  const spotlightData = spotlightCards
+    ? {
+        cards: spotlightCards,
+        totalCount: pubsCountResult.total,
+        viewAllHref: `${basePath}?tab=publications#tab-content`,
+      }
+    : null;
 
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
@@ -161,9 +143,6 @@ export async function CenterPage({
               pubsCountResult.total > 0
                 ? { value: pubsCountResult.total, label: "publications" }
                 : null,
-              grantsCountResult.total > 0
-                ? { value: grantsCountResult.total, label: "active grants" }
-                : null,
             ].filter(Boolean) as Array<{ value: number; label: string }>
           ).map((s, i, all) => (
             <span key={s.label}>
@@ -184,26 +163,7 @@ export async function CenterPage({
         </div>
       </section>
 
-      <HighlightsSection
-        eyebrow="Recent publications"
-        caveatItem="publications"
-        cards={highlights.publications.map((p) => (
-          <PublicationCard key={p.pmid} pub={p} />
-        ))}
-        totalCount={pubsCountResult.total}
-        viewAllHref={`${basePath}?tab=publications#tab-content`}
-        viewAllLabel="publications"
-      />
-      <HighlightsSection
-        eyebrow="Active grants"
-        caveatItem="grants"
-        cards={highlights.grants.map((g, i) => (
-          <GrantCard key={g.externalId ?? `g-${i}`} grant={g} />
-        ))}
-        totalCount={grantsCountResult.total}
-        viewAllHref={`${basePath}?tab=grants#tab-content`}
-        viewAllLabel="active grants"
-      />
+      <Spotlight data={spotlightData} />
 
       <div id="tab-content" className="mt-12 scroll-mt-16">
         <CenterTabs
@@ -211,7 +171,6 @@ export async function CenterPage({
           basePath={basePath}
           scholarsCount={detail.scholarCount}
           publicationsCount={pubsCountResult.total}
-          grantsCount={grantsCountResult.total}
         />
 
         {tab === "scholars" && members && (
@@ -231,17 +190,6 @@ export async function CenterPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={pubSort}
-            basePath={basePath}
-          />
-        )}
-
-        {tab === "grants" && (
-          <DeptGrantsList
-            hits={grantsList.hits}
-            total={grantsList.total}
-            page={grantsList.page + 1}
-            pageSize={grantsList.pageSize}
-            sort={grantSort}
             basePath={basePath}
           />
         )}

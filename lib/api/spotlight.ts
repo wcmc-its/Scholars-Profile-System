@@ -175,11 +175,17 @@ export async function getSpotlightCardsForTopic(
 }
 
 // ---------------------------------------------------------------------------
-// Department page — kicker = parent topic label
+// Department / division / center — kicker = parent topic label
 // ---------------------------------------------------------------------------
 
-export async function getSpotlightCardsForDepartment(
-  deptCode: string,
+/**
+ * Shared backbone for entity-scoped Spotlights (department, division,
+ * center). The scoring filters are identical; only the scholar carve-out
+ * varies. Returns dedupe + impact-sorted top 3 with parent-topic kicker
+ * resolved to a label, or null when zero candidates qualify.
+ */
+async function getSpotlightCardsForEntity(
+  scholarFilter: object,
 ): Promise<SpotlightCard[] | null> {
   const rows = (await prisma.publicationTopic.findMany({
     where: {
@@ -190,7 +196,7 @@ export async function getSpotlightCardsForDepartment(
         deletedAt: null,
         status: "active",
         roleCategory: "full_time_faculty",
-        deptCode,
+        ...scholarFilter,
       },
       publication: { publicationType: "Academic Article" },
     },
@@ -246,4 +252,35 @@ export async function getSpotlightCardsForDepartment(
   });
 
   return cards;
+}
+
+export function getSpotlightCardsForDepartment(
+  deptCode: string,
+): Promise<SpotlightCard[] | null> {
+  return getSpotlightCardsForEntity({ deptCode });
+}
+
+export function getSpotlightCardsForDivision(
+  deptCode: string,
+  divCode: string,
+): Promise<SpotlightCard[] | null> {
+  return getSpotlightCardsForEntity({ deptCode, divCode });
+}
+
+/**
+ * Center scope: pre-resolve CenterMembership cwids and pass them as a
+ * `cwid IN (...)` filter. Schema has no Scholar↔CenterMembership relation,
+ * so we can't do a nested where. Centers without populated membership
+ * return null (the surface omits).
+ */
+export async function getSpotlightCardsForCenter(
+  centerCode: string,
+): Promise<SpotlightCard[] | null> {
+  const memberRows = await prisma.centerMembership.findMany({
+    where: { centerCode },
+    select: { cwid: true },
+  });
+  if (memberRows.length === 0) return null;
+  const memberCwids = memberRows.map((r) => r.cwid);
+  return getSpotlightCardsForEntity({ cwid: { in: memberCwids } });
 }
