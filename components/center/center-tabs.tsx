@@ -1,30 +1,27 @@
 /**
- * Underline-style tabs for the center page. Three tabs — Scholars (default),
- * Publications, Grants. Same visual treatment as DeptTabs so the dept and
- * center pages feel consistent.
+ * Underline-style tabs for the center page. §16: Scholars (default) +
+ * Publications. The Grants tab is removed; the Spotlight surface above
+ * carries the "what's notable here" affordance.
  */
 import Link from "next/link";
 import type { Route } from "next";
 
-type TabKey = "scholars" | "publications" | "grants";
+type TabKey = "scholars" | "publications";
 
 export function CenterTabs({
   active,
   basePath,
   scholarsCount,
   publicationsCount,
-  grantsCount,
 }: {
   active: TabKey;
   basePath: string;
   scholarsCount: number;
   publicationsCount: number;
-  grantsCount: number;
 }) {
   const tabs: { key: TabKey; label: string; count: number }[] = [
     { key: "scholars", label: "Scholars", count: scholarsCount },
     { key: "publications", label: "Publications", count: publicationsCount },
-    { key: "grants", label: "Grants", count: grantsCount },
   ];
 
   return (

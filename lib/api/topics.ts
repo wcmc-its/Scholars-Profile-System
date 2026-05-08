@@ -1,20 +1,20 @@
 /**
  * Topic-page data assembly. Reads `publication_topic` rows attributed to a
- * parent topic and computes Variant B rankings via `lib/ranking.ts`. Three
- * surfaces:
+ * parent topic and computes Variant B rankings via `lib/ranking.ts`. Surfaces:
  *   - getTopScholarsForTopic()           RANKING-03 — D-13 first-or-senior aggregation
  *                                        + D-14 FT-faculty-only carve + compressed
  *                                        top_scholars recency curve.
- *   - getRecentHighlightsForTopic()      RANKING-02 — publication-centric pool
- *                                        (no author-position filter), recent_highlights
- *                                        curve, dedup-per-pmid.
  *   - getTopicPublications()             CSR browsable feed — D-08/D-09 four sort modes,
  *                                        two filter modes, subtopic filter, pagination.
  *   - getSubtopicsForTopic()             D-07 subtopic rail counts for the topic detail page.
  *   - getDistinctScholarCountForTopic()  D-10 — all-roles distinct scholar count for
  *                                        "View all N scholars in this area" affordance.
  *
- * Both surfaces honour:
+ * §16 Spotlight (replaces the prior Recent Highlights surface) lives in
+ * `lib/api/spotlight.ts` and reuses the same scoring filters (impact floor,
+ * first/last author, FT faculty, Academic Article).
+ *
+ * Surfaces honour:
  *   - D-12 sparse-state hide (return null + emit structured warn log).
  *   - D-15 ReCiterAI scoring data floor (year >= 2020).
  *   - design spec v1.7.1: hard-exclude Letter / Editorial Article / Erratum.
@@ -38,11 +38,8 @@ import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
-// Recent highlights: 3 cards, hide if <1.
 const TOP_SCHOLARS_TARGET = 7;
 const TOP_SCHOLARS_FLOOR = 3;
-const RECENT_HIGHLIGHTS_TARGET = 3;
-const RECENT_HIGHLIGHTS_FLOOR = 1;
 
 const RECITERAI_YEAR_FLOOR = 2020; // D-15
 
@@ -58,31 +55,8 @@ export type TopScholarChipData = {
   identityImageEndpoint: string;
 };
 
-export type RecentHighlight = {
-  pmid: string;
-  title: string;
-  journal: string | null;
-  year: number | null;
-  pubmedUrl: string | null;
-  doi: string | null;
-  /**
-   * Up to 5 confirmed WCM coauthors with the chip-row payload (avatar +
-   * first/senior signal). Same shape `AuthorChipRow` consumes elsewhere.
-   * (#15)
-   */
-  authors: Array<{
-    name: string;
-    cwid: string;
-    slug: string;
-    identityImageEndpoint: string;
-    isFirst: boolean;
-    isLast: boolean;
-  }>;
-  // No citation-count field — locked by design spec v1.7.1.
-};
-
 function logSparseHide(
-  surface: "topic_top_scholars" | "topic_recent_highlights",
+  surface: "topic_top_scholars",
   qualifying: number,
   floor: number,
   topic: string,
@@ -221,133 +195,6 @@ export async function getTopScholarsForTopic(
   }));
 }
 
-/**
- * RANKING-02 — Recent highlights.
- *
- * D-13 publication-centric pool: NO author-position filter at the WHERE clause.
- * Any author position contributes a row to the pool. Score each pmid once via
- * the `recent_highlights` curve with scholarCentric=false (so authorshipWeight
- * is 1.0 regardless of position), dedupe per pmid, take top N.
- *
- * D-15: 2020+ year floor.
- * Hard-excluded pub types are filtered at publication.findMany.
- * Sparse-state hide if 0 papers qualify.
- */
-/**
- * #15: Recent Highlights uses a deterministic filter + most-recent sort
- * instead of the previous recency-curve scoring path.
- *
- *   - publicationType = "Academic Article"
- *   - scholar.role_category = "full_time_faculty"
- *   - publication_topic.author_position IN ('first', 'last')
- *   - publication_topic.score >= RECENT_HIGHLIGHTS_IMPACT_FLOOR
- *   - year >= RECITERAI_YEAR_FLOOR (2020+)
- *
- * Sort: publication.dateAddedToEntrez DESC, ties by year DESC, score DESC.
- * Target 3, hide section if 0 qualify (sparse-state floor preserved).
- *
- * `now` retained for signature parity with the previous version (and the
- * existing tests). It's no longer consulted: selection no longer depends
- * on a recency curve.
- */
-const RECENT_HIGHLIGHTS_IMPACT_FLOOR = 40;
-
-export async function getRecentHighlightsForTopic(
-  topicSlug: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _now: Date = new Date(),
-): Promise<RecentHighlight[] | null> {
-  const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
-  if (!topic) return null;
-
-  const rows = await prisma.publicationTopic.findMany({
-    where: {
-      parentTopicId: topicSlug,
-      year: { gte: RECITERAI_YEAR_FLOOR }, // D-15
-      score: { gte: RECENT_HIGHLIGHTS_IMPACT_FLOOR }, // #15: hard impact threshold
-      authorPosition: { in: ["first", "last"] }, // #15: first or senior author
-      scholar: {
-        deletedAt: null,
-        status: "active",
-        roleCategory: "full_time_faculty", // #15: FT faculty only
-      },
-      publication: {
-        publicationType: "Academic Article", // #15
-      },
-    },
-    include: {
-      publication: {
-        select: {
-          pmid: true,
-          title: true,
-          journal: true,
-          year: true,
-          publicationType: true,
-          pubmedUrl: true,
-          doi: true,
-          dateAddedToEntrez: true,
-        },
-      },
-    },
-  });
-
-  if (rows.length === 0) {
-    logSparseHide(
-      "topic_recent_highlights",
-      0,
-      RECENT_HIGHLIGHTS_FLOOR,
-      topicSlug,
-    );
-    return null;
-  }
-
-  // Dedupe per pmid — multiple WCM authors may attribute the same paper.
-  // Keep the row with the highest score so the (impact-floor) tiebreaker
-  // is stable.
-  const bestByPmid = new Map<string, (typeof rows)[number]>();
-  for (const r of rows) {
-    const existing = bestByPmid.get(r.pmid);
-    if (!existing || Number(r.score) > Number(existing.score)) {
-      bestByPmid.set(r.pmid, r);
-    }
-  }
-
-  const candidates = Array.from(bestByPmid.values());
-  candidates.sort((a, b) => {
-    const at = a.publication.dateAddedToEntrez?.getTime() ?? 0;
-    const bt = b.publication.dateAddedToEntrez?.getTime() ?? 0;
-    if (bt !== at) return bt - at;
-    const ay = a.publication.year ?? 0;
-    const by = b.publication.year ?? 0;
-    if (by !== ay) return by - ay;
-    return Number(b.score) - Number(a.score);
-  });
-
-  if (candidates.length < RECENT_HIGHLIGHTS_FLOOR) {
-    logSparseHide(
-      "topic_recent_highlights",
-      candidates.length,
-      RECENT_HIGHLIGHTS_FLOOR,
-      topicSlug,
-    );
-    return null;
-  }
-
-  const top = candidates.slice(0, RECENT_HIGHLIGHTS_TARGET);
-  const topPmids = top.map((c) => c.pmid);
-  const authorsByPmid = await fetchWcmAuthorsForPmids(topPmids);
-
-  return top.map((c) => ({
-    pmid: c.pmid,
-    title: c.publication.title ?? "",
-    journal: c.publication.journal ?? null,
-    year: c.publication.year ?? null,
-    pubmedUrl: c.publication.pubmedUrl ?? null,
-    doi: c.publication.doi ?? null,
-    authors: authorsByPmid.get(c.pmid) ?? [],
-    // No citation-count field — locked by design spec v1.7.1.
-  }));
-}
 
 export type SubtopicWithCount = {
   id: string;

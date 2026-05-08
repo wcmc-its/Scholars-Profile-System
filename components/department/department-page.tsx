@@ -1,20 +1,15 @@
 import { notFound } from "next/navigation";
 import { getDepartment, getDepartmentFaculty } from "@/lib/api/departments";
-import { getDeptHighlights } from "@/lib/api/dept-highlights";
+import { getSpotlightCardsForDepartment } from "@/lib/api/spotlight";
 import {
   getDeptPublicationsList,
-  getDeptGrantsList,
   type PubSort,
-  type GrantSort,
 } from "@/lib/api/dept-lists";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
-import { HighlightsSection } from "@/components/department/highlights-section";
-import { PublicationCard } from "@/components/department/publication-card";
-import { GrantCard } from "@/components/department/grant-card";
+import { Spotlight } from "@/components/shared/spotlight";
 import { DeptTabs } from "@/components/department/dept-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
-import { DeptGrantsList } from "@/components/department/dept-grants-list";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -24,7 +19,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications" | "grants";
+type Tab = "scholars" | "publications";
 
 export async function DepartmentPage({
   deptSlug,
@@ -44,9 +39,16 @@ export async function DepartmentPage({
   // the chip-row in the hero, which links to first-class division pages.
   const basePath = `/departments/${detail.dept.slug}`;
 
-  // Fetch highlights regardless of tab — they render above the tabs on every
-  // tab view per the spec. Each section returns null when its list is empty.
-  const highlights = await getDeptHighlights(detail.dept.code);
+  // §16: Spotlight surface above the tabs. Returns null when the dept
+  // has no qualifying publications under the Highlight selection filters.
+  const spotlightCards = await getSpotlightCardsForDepartment(detail.dept.code);
+  const spotlightData = spotlightCards
+    ? {
+        cards: spotlightCards,
+        totalCount: detail.stats.publications,
+        viewAllHref: `${basePath}?tab=publications#tab-content`,
+      }
+    : null;
 
   // Tab-specific data. Only fetch the heavy list relevant to the active tab.
   const faculty =
@@ -60,13 +62,6 @@ export async function DepartmentPage({
       ? await getDeptPublicationsList(detail.dept.code, {
           page: Math.max(0, page - 1),
           sort: (sort === "most_cited" ? "most_cited" : "newest") as PubSort,
-        })
-      : null;
-  const grantsList =
-    tab === "grants"
-      ? await getDeptGrantsList(detail.dept.code, {
-          page: Math.max(0, page - 1),
-          sort: (sort === "end_date" ? "end_date" : "most_recent") as GrantSort,
         })
       : null;
 
@@ -188,28 +183,10 @@ export async function DepartmentPage({
         </div>
       </section>
 
-      {/* Recent publications + Active grants highlight rows. Each section
-          renders only when its data is non-empty (suppress per spec). */}
-      <HighlightsSection
-        eyebrow="Recent publications"
-        caveatItem="publications"
-        cards={highlights.publications.map((p) => (
-          <PublicationCard key={p.pmid} pub={p} />
-        ))}
-        totalCount={detail.stats.publications}
-        viewAllHref={`${basePath}?tab=publications#tab-content`}
-        viewAllLabel="publications"
-      />
-      <HighlightsSection
-        eyebrow="Active grants"
-        caveatItem="grants"
-        cards={highlights.grants.map((g, i) => (
-          <GrantCard key={g.externalId ?? `g-${i}`} grant={g} />
-        ))}
-        totalCount={detail.stats.activeGrants}
-        viewAllHref={`${basePath}?tab=grants#tab-content`}
-        viewAllLabel="active grants"
-      />
+      {/* §16 Spotlight — replaces the prior Recent publications + Active
+          grants highlight rows. Renders nothing when the dept has no
+          qualifying publications under the Highlight selection filters. */}
+      <Spotlight data={spotlightData} />
 
       <div id="tab-content" className="mt-12 scroll-mt-16">
         <DeptTabs
@@ -217,7 +194,6 @@ export async function DepartmentPage({
           basePath={basePath}
           scholarsCount={detail.stats.scholars}
           publicationsCount={detail.stats.publications}
-          grantsCount={detail.stats.activeGrants}
         />
 
         {tab === "scholars" && faculty && (
@@ -245,17 +221,6 @@ export async function DepartmentPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={(sort === "most_cited" ? "most_cited" : "newest") as PubSort}
-            basePath={basePath}
-          />
-        )}
-
-        {tab === "grants" && grantsList && (
-          <DeptGrantsList
-            hits={grantsList.hits}
-            total={grantsList.total}
-            page={grantsList.page + 1}
-            pageSize={grantsList.pageSize}
-            sort={(sort === "end_date" ? "end_date" : "most_recent") as GrantSort}
             basePath={basePath}
           />
         )}

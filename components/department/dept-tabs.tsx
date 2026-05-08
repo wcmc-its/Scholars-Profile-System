@@ -1,10 +1,14 @@
 /**
- * Underline-style tabs for the dept page. Server Component — renders three
- * <Link>s using the page's `?tab=` searchParam. URL-state means deep links
- * + back-button work without client JS, and SSR is preserved.
+ * Underline-style tabs for the dept / division page. Server Component —
+ * renders <Link>s using the page's `?tab=` searchParam. URL-state means
+ * deep links + back-button work without client JS, and SSR is preserved.
  *
  * Tabs with a count of 0 are visually disabled (tertiary text, cursor
  * not-allowed) and rendered as a non-link <span>.
+ *
+ * §16: the Grants tab is removed from dept pages. Callers omit
+ * `grantsCount` to suppress the tab entirely. Division pages still pass
+ * it (until slice 3 of issue #52).
  */
 import Link from "next/link";
 import type { Route } from "next";
@@ -28,12 +32,15 @@ export function DeptTabs({
   basePath: string;
   scholarsCount: number;
   publicationsCount: number;
-  grantsCount: number;
+  /** Omit to suppress the Grants tab entirely (§16, dept pages). */
+  grantsCount?: number;
 }) {
   const tabs: Tab[] = [
     { key: "scholars", label: "Scholars", count: scholarsCount },
     { key: "publications", label: "Publications", count: publicationsCount },
-    { key: "grants", label: "Grants", count: grantsCount },
+    ...(grantsCount !== undefined
+      ? [{ key: "grants" as const, label: "Grants", count: grantsCount }]
+      : []),
   ];
 
   return (
