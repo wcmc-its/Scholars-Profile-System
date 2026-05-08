@@ -11,11 +11,11 @@ export function BrowseAnchorStrip() {
   const anchorClass =
     "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors hover:bg-accent text-foreground";
   return (
-    <nav
-      aria-label="Browse sections"
-      className="flex items-center justify-between gap-4 bg-muted rounded-lg px-4 py-2 mb-12"
-    >
-      <div className="flex items-center gap-2">
+    <div className="mb-10">
+      <nav
+        aria-label="Browse sections"
+        className="flex items-center gap-2 bg-muted rounded-lg px-4 py-2"
+      >
         <a href="#departments" className={anchorClass}>
           Departments
         </a>
@@ -25,13 +25,15 @@ export function BrowseAnchorStrip() {
         <a href="#az-directory" className={anchorClass}>
           A&ndash;Z Directory
         </a>
+      </nav>
+      <div className="mt-2 text-right">
+        <Link
+          href="/#research-areas"
+          className="text-sm text-[var(--color-accent-slate)] hover:underline"
+        >
+          Or browse by research area &#x2192;
+        </Link>
       </div>
-      <Link
-        href="/#research-areas"
-        className="text-sm text-[var(--color-accent-slate)] hover:underline"
-      >
-        Research areas &#x2192;
-      </Link>
-    </nav>
+    </div>
   );
 }

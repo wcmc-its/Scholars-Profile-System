@@ -1,21 +1,20 @@
 /**
- * Departments section — four-group structure per design spec.
+ * Departments section — compact expandable list.
  *
- * Renders one labeled section per category (Clinical, Basic-science,
- * Basic & Clinical, Administrative) in fixed order. Empty groups are
- * skipped silently.
+ * One row per department, grouped by category (Clinical, Basic-science,
+ * Basic & Clinical, Administrative). Each row collapses to name + chair +
+ * counts; expanding reveals the full set of division and research-area
+ * chips plus a deep link into the department page.
  *
- * Each card shows: name, chair line, division chip-row (if any), and
- * up to two top research-area chips. Administrative cards skip
- * divisions and topics (lean treatment).
+ * Administrative departments are flat (no divisions/topics) and render as
+ * a non-expanding link row.
  */
+import Link from "next/link";
 import type { BrowseDepartment, CategorizedDepartments } from "@/lib/api/browse";
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
 } from "@/lib/department-categories";
-
-const DIV_CHIP_LIMIT = 8;
 
 export function DepartmentsGrid({
   departments,
@@ -67,7 +66,7 @@ function DeptGroupSection({
   const isLean = categoryKey === "administrative";
   return (
     <>
-      <div className="mt-8 mb-3 flex items-baseline gap-3 border-b border-border pb-2">
+      <div className="mt-8 mb-2 flex items-baseline gap-3 border-b border-border pb-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)]">
           {CATEGORY_LABELS[categoryKey]}
         </h3>
@@ -76,66 +75,122 @@ function DeptGroupSection({
           {departments.length === 1 ? " department" : " departments"}
         </span>
       </div>
-      <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <ul className="divide-y divide-border">
         {departments.map((d) => (
           <li key={d.code}>
-            <a
-              href={`/departments/${d.slug}`}
-              className="block rounded-md border border-border bg-white p-4 transition-all hover:border-[var(--color-accent-slate)] hover:shadow-sm hover:no-underline"
-            >
-              <div className="text-base font-semibold text-foreground leading-snug">
-                {d.name}
-              </div>
-              {d.chairName && (
-                <div className="mt-1 text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground/70">Chair:</span>{" "}
-                  {d.chairName}
-                </div>
-              )}
-              {!isLean && d.divisions.length > 0 && (
-                <>
-                  <div className="mt-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    {d.divisions.length}
-                    {d.divisions.length === 1 ? " division" : " divisions"}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {d.divisions.slice(0, DIV_CHIP_LIMIT).map((div) => (
-                      <span
-                        key={div.code}
-                        className="rounded-full border border-[var(--color-accent-slate)] bg-white px-2 py-[2px] text-[11px] text-[var(--color-accent-slate)]"
-                      >
-                        {div.name}
-                      </span>
-                    ))}
-                    {d.divisions.length > DIV_CHIP_LIMIT && (
-                      <span className="rounded-full border border-border bg-background px-2 py-[2px] text-[11px] text-muted-foreground">
-                        …{d.divisions.length - DIV_CHIP_LIMIT} more
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-              {!isLean && d.topResearchAreas.length > 0 && (
-                <>
-                  <div className="mt-3 mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Top research
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {d.topResearchAreas.map((t) => (
-                      <span
-                        key={t.topicSlug}
-                        className="rounded-full bg-[#f6f3ee] px-2 py-[2px] text-[11px] text-foreground"
-                      >
-                        {t.topicLabel}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
-            </a>
+            {isLean ? <DeptRowFlat dept={d} /> : <DeptRowExpandable dept={d} />}
           </li>
         ))}
       </ul>
     </>
+  );
+}
+
+function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
+  return (
+    <Link
+      href={`/departments/${dept.slug}`}
+      className="flex items-center gap-3 py-3 hover:no-underline"
+    >
+      <span className="inline-block w-3" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <div className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]">
+          {dept.name}
+        </div>
+        {dept.chairName && (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground/70">Chair:</span>{" "}
+            {dept.chairName}
+          </div>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
+  const summaryParts: string[] = [];
+  if (dept.divisions.length > 0) {
+    summaryParts.push(
+      `${dept.divisions.length} ${dept.divisions.length === 1 ? "division" : "divisions"}`,
+    );
+  }
+  if (dept.topResearchAreas.length > 0) {
+    summaryParts.push(
+      `${dept.topResearchAreas.length} ${dept.topResearchAreas.length === 1 ? "research area" : "research areas"}`,
+    );
+  }
+
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-3 py-3 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
+        <span className="inline-block w-3 text-[10px] text-muted-foreground transition-transform group-open:rotate-90">
+          ▶
+        </span>
+        <div className="min-w-0 flex-1">
+          <Link
+            href={`/departments/${dept.slug}`}
+            className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
+          >
+            {dept.name}
+          </Link>
+          {dept.chairName && (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground/70">Chair:</span>{" "}
+              {dept.chairName}
+            </div>
+          )}
+        </div>
+        {summaryParts.length > 0 && (
+          <div className="whitespace-nowrap text-sm tabular-nums text-muted-foreground">
+            {summaryParts.join(" · ")}
+          </div>
+        )}
+      </summary>
+      <div className="pb-4 pl-6">
+        {dept.divisions.length > 0 && (
+          <div className="mt-1">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Divisions
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {dept.divisions.map((div) => (
+                <Link
+                  key={div.code}
+                  href={`/departments/${dept.slug}/divisions/${div.slug}`}
+                  className="rounded-full border border-[var(--color-accent-slate)] bg-white px-2 py-[2px] text-[11px] text-[var(--color-accent-slate)] hover:bg-[var(--color-accent-slate)] hover:text-white hover:no-underline"
+                >
+                  {div.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+        {dept.topResearchAreas.length > 0 && (
+          <div className="mt-3">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              Top research
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {dept.topResearchAreas.map((t) => (
+                <Link
+                  key={t.topicSlug}
+                  href={`/topics/${t.topicSlug}`}
+                  className="rounded-full bg-[#f6f3ee] px-2 py-[2px] text-[11px] text-foreground hover:bg-[#ede5d6] hover:no-underline"
+                >
+                  {t.topicLabel}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+        <Link
+          href={`/departments/${dept.slug}`}
+          className="mt-3 inline-block text-sm text-[var(--color-accent-slate)] hover:underline"
+        >
+          View {dept.name} &rarr;
+        </Link>
+      </div>
+    </details>
   );
 }
