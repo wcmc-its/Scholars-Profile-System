@@ -19,7 +19,7 @@ export function TopScholarChip({ scholar }: { scholar: TopScholarChipData }) {
   return (
     <a
       href={`/scholars/${scholar.slug}`}
-      className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3 py-1 hover:border-[1.5px] hover:border-[var(--color-accent-slate)]"
+      className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3 py-1 transition-colors hover:border-[var(--color-accent-slate)]"
     >
       <HeadshotAvatar
         size="sm"
