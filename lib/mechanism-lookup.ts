@@ -102,6 +102,18 @@ export function expandMechanism(code: string | null | undefined): string | null 
   return getMechanism(code)?.full ?? null;
 }
 
+/** Verbose display form for sidebar / chip use: `{code} - {label}` with
+ *  the trailing `(code)` suffix stripped (it would just repeat the code).
+ *  e.g. "R01" → "R01 - Research Project Grant". Falls back to the bare
+ *  code when the mechanism isn't in the lookup. */
+export function mechanismVerbose(code: string | null | undefined): string {
+  if (!code) return "";
+  const m = getMechanism(code);
+  if (!m) return code;
+  const stripped = m.full.replace(/\s*\([^)]+\)\s*$/, "").trim();
+  return `${m.code} - ${stripped}`;
+}
+
 export function listMechanisms(): readonly Mechanism[] {
   return MECHANISMS;
 }

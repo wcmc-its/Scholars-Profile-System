@@ -43,11 +43,9 @@ describe("FundingResultRow — basics", () => {
     ).toBeTruthy();
   });
 
-  it("renders prime sponsor as a tooltipped abbreviation", () => {
+  it("renders prime sponsor in verbose form (full canonical name)", () => {
     render(<FundingResultRow hit={baseHit} />);
-    const abbr = screen.getByText("NCI");
-    expect(abbr.tagName.toLowerCase()).toBe("abbr");
-    expect(abbr.getAttribute("title")).toBe("National Cancer Institute");
+    expect(screen.getByText("National Cancer Institute")).toBeTruthy();
   });
 
   it("renders the start–end year range", () => {

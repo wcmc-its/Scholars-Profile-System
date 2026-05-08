@@ -180,6 +180,14 @@ export function isNihIc(short: string | null | undefined): boolean {
   return getSponsor(short)?.category === "NIH IC";
 }
 
+/** Verbose display form — full canonical name when in the lookup,
+ *  otherwise the bare short label. Used in the Funder facet rows,
+ *  the eyebrow line on result cards, and active-filter chips. */
+export function funderVerbose(short: string | null | undefined): string {
+  if (!short) return "";
+  return getSponsor(short)?.full ?? short;
+}
+
 export function listSponsors(): readonly Sponsor[] {
   return ALL_SPONSORS;
 }
