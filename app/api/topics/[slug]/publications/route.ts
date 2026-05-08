@@ -29,7 +29,6 @@ const SORT_ALLOWLIST: ReadonlySet<TopicPublicationSort> = new Set([
   "newest",
   "most_cited",
   "by_impact",
-  "curated",
 ]);
 const FILTER_ALLOWLIST: ReadonlySet<TopicPublicationFilter> = new Set([
   "research_articles_only",

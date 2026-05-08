@@ -508,7 +508,7 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
     .sort((a, b) => b.pubCount - a.pubCount);
 }
 
-export type TopicPublicationSort = "newest" | "most_cited" | "by_impact" | "curated";
+export type TopicPublicationSort = "newest" | "most_cited" | "by_impact";
 export type TopicPublicationFilter = "research_articles_only" | "all";
 
 export type TopicPublicationHit = {
@@ -550,7 +550,6 @@ const HARD_EXCLUDE_TYPES = ["Letter", "Editorial Article", "Erratum"];
  *   - newest      SQL ORDER BY year DESC, dateAddedToEntrez DESC
  *   - most_cited  SQL ORDER BY citationCount DESC NULLS LAST
  *   - by_impact   In-process Variant B: scorePublication(row, "recent_highlights", false)
- *   - curated     Same Variant B scoring as by_impact (surface alias per D-09)
  *
  * Filter modes:
  *   - research_articles_only (default) excludes Letter / Editorial Article / Erratum
@@ -560,7 +559,7 @@ const HARD_EXCLUDE_TYPES = ["Letter", "Editorial Article", "Erratum"];
  * route handler (app/api/topics/[slug]/publications/route.ts) before calling this
  * function. This function trusts its inputs have already been validated.
  *
- * Pool limit: by_impact/curated use POOL_LIMIT=5000 for DoS mitigation per
+ * Pool limit: by_impact uses POOL_LIMIT=5000 for DoS mitigation per
  * 03-RESEARCH.md threat table. Page clamped to MAX_PAGE=500 in route handler.
  */
 export async function getTopicPublications(
@@ -630,7 +629,7 @@ export async function getTopicPublications(
     };
   }
 
-  // In-process Variant B scoring path (by_impact, curated).
+  // In-process Variant B scoring path (by_impact).
   // Pool size: 5000 covers ≤500 page bound × 20 = 10k ceiling per 03-RESEARCH.md DoS mitigation.
   const POOL_LIMIT = 5000;
   const candidates = await prisma.publicationTopic.findMany({
