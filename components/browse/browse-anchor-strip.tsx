@@ -1,9 +1,9 @@
 /**
- * Browse hub anchor strip — UI-SPEC §6.2.
- * Server Component: three in-page anchors + one cross-link.
- * No JS scroll-spy (UI-SPEC §8.1). "Research areas →" targets
- * /#research-areas because /topics listing does not exist
- * (RESEARCH.md Pitfall 3).
+ * /browse anchor strip — two in-page anchors + one cross-link.
+ * Server Component, no JS scroll-spy. The A–Z anchor used to live here;
+ * surname-finding now lives on /search's empty People tab per
+ * docs/browse-vs-search.md. "Research areas →" targets /#research-areas
+ * because no /topics index page exists yet.
  */
 import Link from "next/link";
 
@@ -21,9 +21,6 @@ export function BrowseAnchorStrip() {
         </a>
         <a href="#centers" className={anchorClass}>
           Centers &amp; Institutes
-        </a>
-        <a href="#az-directory" className={anchorClass}>
-          A&ndash;Z Directory
         </a>
       </nav>
       <div className="mt-2 text-right">

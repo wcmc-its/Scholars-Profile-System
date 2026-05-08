@@ -35,7 +35,7 @@ export function SiteHeader({ showSearch = true }: { showSearch?: boolean }) {
         )}
 
         <nav className="flex shrink-0 items-center gap-6">
-          <Link href="/browse" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
+          <Link href="/search" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
             Browse
           </Link>
           <Link href="/about" className="text-sm font-medium text-white/85 transition-colors hover:text-white">

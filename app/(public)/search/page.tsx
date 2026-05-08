@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { AZDirectory } from "@/components/browse/az-directory";
 import {
   searchPeople,
   searchPublications,
@@ -11,6 +12,7 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
+import { getAZBuckets } from "@/lib/api/browse";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -30,7 +32,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
-  const sort = (Array.isArray(sp.sort) ? sp.sort[0] : sp.sort) ?? "relevance";
+  // Default sort flips to "year" on empty Publications tab — relevance is
+  // meaningless without a query, and most users want recent pubs first.
+  const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
+  const sort = rawSort ?? (q === "" && type === "publications" ? "year" : "relevance");
+
+  const showAZ = q === "" && type === "people";
+  const azBuckets = showAZ ? await getAZBuckets() : null;
 
   const department = (Array.isArray(sp.department) ? sp.department[0] : sp.department) ?? "";
   const personType = (Array.isArray(sp.personType) ? sp.personType[0] : sp.personType) ?? "";
@@ -48,6 +56,19 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         {q ? `Results for "${q}"` : "Browse scholars"}
       </h1>
       <SearchTabs q={q} activeType={type} />
+      {showAZ && azBuckets ? (
+        <div className="mt-8">
+          <AZDirectory buckets={azBuckets} />
+          <div className="mt-2 text-right">
+            <Link
+              href="/browse"
+              className="text-sm text-[var(--color-accent-slate)] hover:underline"
+            >
+              Or browse departments &amp; centers &#x2192;
+            </Link>
+          </div>
+        </div>
+      ) : null}
       <div className="mt-6 grid grid-cols-1 gap-8 md:grid-cols-[220px_1fr]">
         {type === "publications" ? (
           <PublicationsResults
