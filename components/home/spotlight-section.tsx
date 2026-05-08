@@ -97,9 +97,9 @@ export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
       onBlurCapture={() => setPaused(false)}
     >
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-lg font-semibold">Selected research</h2>
+        <h2 className="text-lg font-semibold">Spotlight</h2>
         <a
-          href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.selectedResearch}`}
+          href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.spotlight}`}
           className="text-[var(--color-accent-slate)] text-sm font-medium underline-offset-4 hover:underline"
         >
           How this works
