@@ -655,3 +655,242 @@ export async function getDistinctScholarCountForTopic(topicSlug: string): Promis
   });
   return distinctRows.length;
 }
+
+/**
+ * Spec §13 "All scholars in this area" — comprehensive enumerative list.
+ *
+ * Surface: white, alphabetical by preferredName, role-filterable, name-searchable,
+ * paginated. NO eligibility carve (anyone with at least one publication in this
+ * area, per §13). Role filter is a presentation-only narrowing affordance.
+ */
+export type TopicAllScholarRole =
+  | "all"
+  | "faculty"
+  | "postdocs"
+  | "doctoral_students";
+
+export const TOPIC_ALL_SCHOLARS_PAGE_SIZE = 22;
+
+export type TopicScholarRow = {
+  cwid: string;
+  slug: string;
+  preferredName: string;
+  postnominal: string | null;
+  primaryTitle: string | null;
+  identityImageEndpoint: string;
+  roleCategory: string | null;
+  /** Top subtopics within the parent topic for this scholar, by paper count
+   *  desc. Capped at 3. Empty when the scholar has no primarySubtopicId rows. */
+  subtopics: { id: string; displayName: string }[];
+};
+
+export type TopicScholarsResult = {
+  total: number;
+  roleCounts: {
+    all: number;
+    faculty: number;
+    postdocs: number;
+    doctoralStudents: number;
+  };
+  hits: TopicScholarRow[];
+  page: number;
+  pageSize: number;
+};
+
+const ROLE_FILTER_CATEGORIES: Record<Exclude<TopicAllScholarRole, "all">, string[]> = {
+  faculty: ["full_time_faculty"],
+  postdocs: ["postdoc"],
+  doctoral_students: ["doctoral_student"],
+};
+
+export async function getTopicScholars(
+  topicSlug: string,
+  opts: { page?: number; role?: TopicAllScholarRole; q?: string },
+): Promise<TopicScholarsResult | null> {
+  const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
+  if (!topic) return null;
+
+  const page = Math.max(0, opts.page ?? 0);
+  const role: TopicAllScholarRole = opts.role ?? "all";
+  const q = opts.q?.trim() ?? "";
+
+  // Distinct cwids attributed to this topic, applying name search up-front so
+  // the role-count groupBy reflects the in-filter universe.
+  const baseScholarFilter: Record<string, unknown> = {
+    deletedAt: null,
+    status: "active",
+    publicationTopics: { some: { parentTopicId: topicSlug } },
+  };
+  if (q.length > 0) {
+    baseScholarFilter.preferredName = { contains: q };
+  }
+
+  // Role counts within the name-filtered universe (does NOT apply role filter,
+  // so each chip's badge reflects the size of its own bucket regardless of
+  // which chip is currently selected).
+  const roleGroup = await prisma.scholar.groupBy({
+    by: ["roleCategory"],
+    where: baseScholarFilter,
+    _count: { _all: true },
+  });
+  let allCount = 0;
+  let facultyCount = 0;
+  let postdocsCount = 0;
+  let doctoralCount = 0;
+  for (const r of roleGroup) {
+    const n = r._count._all;
+    allCount += n;
+    if (r.roleCategory === "full_time_faculty") facultyCount += n;
+    else if (r.roleCategory === "postdoc") postdocsCount += n;
+    else if (r.roleCategory === "doctoral_student") doctoralCount += n;
+  }
+
+  const filterWithRole: Record<string, unknown> = { ...baseScholarFilter };
+  if (role !== "all") {
+    filterWithRole.roleCategory = { in: ROLE_FILTER_CATEGORIES[role] };
+  }
+
+  // Fetch the entire matching set (no pagination at SQL layer) so we can sort
+  // by last-name initial — preferredName is "Given Last" format and we need
+  // alphabetical-by-surname for both the list order and the §13 alpha-letter
+  // dividers. Topic universes are small enough (low hundreds at the high end)
+  // that an in-process sort is cheaper than a generated-column migration.
+  const scholarsAll = await prisma.scholar.findMany({
+    where: filterWithRole,
+    select: {
+      cwid: true,
+      slug: true,
+      preferredName: true,
+      postnominal: true,
+      primaryTitle: true,
+      roleCategory: true,
+    },
+  });
+
+  const enriched = scholarsAll.map((s) => ({
+    ...s,
+    lastName: extractLastName(s.preferredName),
+  }));
+  enriched.sort(
+    (a, b) =>
+      a.lastName.localeCompare(b.lastName) ||
+      a.preferredName.localeCompare(b.preferredName) ||
+      a.cwid.localeCompare(b.cwid),
+  );
+
+  const total = enriched.length;
+  const skip = page * TOPIC_ALL_SCHOLARS_PAGE_SIZE;
+  const slice = enriched.slice(skip, skip + TOPIC_ALL_SCHOLARS_PAGE_SIZE);
+
+  const subtopicsByCwid = await fetchTopSubtopicsForScholars(
+    topicSlug,
+    slice.map((s) => s.cwid),
+  );
+
+  return {
+    total,
+    roleCounts: {
+      all: allCount,
+      faculty: facultyCount,
+      postdocs: postdocsCount,
+      doctoralStudents: doctoralCount,
+    },
+    hits: slice.map((s) => ({
+      cwid: s.cwid,
+      slug: s.slug,
+      preferredName: s.preferredName,
+      postnominal: s.postnominal,
+      primaryTitle: s.primaryTitle,
+      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      roleCategory: s.roleCategory,
+      subtopics: subtopicsByCwid.get(s.cwid) ?? [],
+    })),
+    page,
+    pageSize: TOPIC_ALL_SCHOLARS_PAGE_SIZE,
+  };
+}
+
+/**
+ * Extract surname for sort + alpha-divider grouping. preferredName is stored
+ * "Given Last" (e.g. "Jane Smith") — last whitespace-separated token wins.
+ * Hyphenated surnames stay intact ("García-López"). Returns "" for empty input
+ * so blank rows sort to the top deterministically.
+ */
+function extractLastName(preferredName: string): string {
+  const tokens = preferredName.trim().split(/\s+/).filter(Boolean);
+  return tokens.length === 0 ? "" : tokens[tokens.length - 1];
+}
+
+export function topicScholarLastNameInitial(preferredName: string): string {
+  const last = extractLastName(preferredName);
+  const ch = last.charAt(0).toUpperCase();
+  return ch >= "A" && ch <= "Z" ? ch : "#";
+}
+
+/**
+ * For a set of scholars within a parent topic, return up to 3 top subtopics
+ * each by paper count (primarySubtopicId only — matches the rail count rule
+ * in getSubtopicsForTopic). Subtopic display names follow the same fallback
+ * + parent-prefix-strip + acronym normalization rules as the rail.
+ */
+async function fetchTopSubtopicsForScholars(
+  topicSlug: string,
+  cwids: string[],
+): Promise<Map<string, { id: string; displayName: string }[]>> {
+  const out = new Map<string, { id: string; displayName: string }[]>();
+  if (cwids.length === 0) return out;
+
+  const topic = await prisma.topic.findUnique({
+    where: { id: topicSlug },
+    select: { label: true },
+  });
+  if (!topic) return out;
+
+  const rows = await prisma.publicationTopic.groupBy({
+    by: ["cwid", "primarySubtopicId"],
+    where: {
+      parentTopicId: topicSlug,
+      cwid: { in: cwids },
+      primarySubtopicId: { not: null },
+    },
+    _count: { pmid: true },
+  });
+
+  const subtopicIds = Array.from(
+    new Set(
+      rows
+        .map((r) => r.primarySubtopicId)
+        .filter((s): s is string => s !== null),
+    ),
+  );
+  if (subtopicIds.length === 0) return out;
+
+  const catalog = await prisma.subtopic.findMany({
+    where: { id: { in: subtopicIds } },
+    select: { id: true, label: true, displayName: true },
+  });
+  const labelById = new Map<string, string>();
+  for (const s of catalog) {
+    const raw = s.displayName?.trim() || s.label?.trim() || s.id;
+    labelById.set(s.id, normalizeSubtopicLabel(raw, topic.label));
+  }
+
+  const byCwid = new Map<string, { id: string; count: number }[]>();
+  for (const r of rows) {
+    if (!r.primarySubtopicId) continue;
+    const arr = byCwid.get(r.cwid) ?? [];
+    arr.push({ id: r.primarySubtopicId, count: r._count.pmid });
+    byCwid.set(r.cwid, arr);
+  }
+  for (const [cwid, arr] of byCwid) {
+    arr.sort((a, b) => b.count - a.count);
+    out.set(
+      cwid,
+      arr.slice(0, 3).map((e) => ({
+        id: e.id,
+        displayName: labelById.get(e.id) ?? e.id,
+      })),
+    );
+  }
+  return out;
+}

@@ -48,7 +48,7 @@ export function TopScholarsChipRow({
         ))}
         {moreCount > 0 && topicSlug && (
           <a
-            href={`/search?topic=${encodeURIComponent(topicSlug)}&type=people`}
+            href={`/topics/${encodeURIComponent(topicSlug)}/scholars`}
             className="flex shrink-0 items-center rounded-full border border-border bg-background px-3 py-1 text-sm text-[var(--color-accent-slate)] hover:border-[1.5px] hover:border-[var(--color-accent-slate)]"
           >
             + {moreCount.toLocaleString()} more scholars →
