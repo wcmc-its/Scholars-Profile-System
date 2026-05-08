@@ -30,7 +30,7 @@ import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
-import { mechanismVerbose } from "@/lib/mechanism-lookup";
+import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
@@ -433,7 +433,7 @@ async function PeopleResults({
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
 
   // One chip per selected value.
-  const chips: Array<{ label: string; removeHref: string }> = [];
+  const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
   for (const v of personType) {
     chips.push({
       label: formatRoleCategory(v) ?? v,
@@ -602,7 +602,7 @@ async function PublicationsResults({
     middle: "Middle author",
   };
 
-  const chips: Array<{ label: string; removeHref: string }> = [];
+  const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
   if (yearMin !== undefined || yearMax !== undefined) {
     let label: string;
     if (yearMin !== undefined && yearMax !== undefined) {
@@ -839,7 +839,7 @@ async function FundingResults({
   // Funder + mechanism chips render in verbose form (full sponsor name,
   // "{code} - {description}") so the chip is self-explanatory without
   // requiring hover.
-  const chips: Array<{ label: string; removeHref: string }> = [];
+  const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
   for (const v of filters.funder ?? []) {
     chips.push({ label: funderVerbose(v), removeHref: removeHref("funder", v) });
   }
@@ -856,8 +856,17 @@ async function FundingResults({
     });
   }
   for (const v of filters.mechanism ?? []) {
+    const desc = mechanismDescriptor(v);
     chips.push({
-      label: mechanismVerbose(v),
+      label: desc ? (
+        <>
+          <span>{v}</span>
+          <span className="text-[#7a98ad]"> - {desc}</span>
+        </>
+      ) : (
+        v
+      ),
+      ariaLabel: mechanismVerbose(v),
       removeHref: removeHref("mechanism", v),
     });
   }
@@ -1054,16 +1063,28 @@ function FacetSidebarFunding({
         <FacetGroup label="Mechanism (NIH)" collapseAfter={6}>
           {sortActiveFirst(facets.mechanisms, (m) =>
             activeMechanism.includes(m.value),
-          ).map((m) => (
-            <FacetCheckbox
-              key={m.value}
-              label={mechanismVerbose(m.value)}
-              count={m.count}
-              isActive={activeMechanism.includes(m.value)}
-              href={toggleHref("mechanism", m.value)}
-              wrap
-            />
-          ))}
+          ).map((m) => {
+            const desc = mechanismDescriptor(m.value);
+            return (
+              <FacetCheckbox
+                key={m.value}
+                label={
+                  desc ? (
+                    <>
+                      <span>{m.value}</span>
+                      <span className="text-[#8a8a8a]"> - {desc}</span>
+                    </>
+                  ) : (
+                    m.value
+                  )
+                }
+                count={m.count}
+                isActive={activeMechanism.includes(m.value)}
+                href={toggleHref("mechanism", m.value)}
+                wrap
+              />
+            );
+          })}
         </FacetGroup>
       ) : null}
 
@@ -1155,16 +1176,20 @@ function ActiveFilterChips({
   chips,
   clearAllHref,
 }: {
-  chips: Array<{ label: string; removeHref: string }>;
+  chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }>;
   clearAllHref: string;
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      {chips.map((c) => (
+      {chips.map((c, i) => {
+        const aria =
+          c.ariaLabel ??
+          (typeof c.label === "string" ? c.label : "filter");
+        return (
         <Link
-          key={`${c.label}-${c.removeHref}`}
+          key={`${aria}-${c.removeHref}-${i}`}
           href={c.removeHref}
-          aria-label={`Remove filter: ${c.label}`}
+          aria-label={`Remove filter: ${aria}`}
           className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pl-3 pr-1.5 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
         >
           <span>{c.label}</span>
@@ -1175,7 +1200,8 @@ function ActiveFilterChips({
             ×
           </span>
         </Link>
-      ))}
+        );
+      })}
       <Link href={clearAllHref} className="ml-1 text-xs text-[#757575] hover:text-[#2c4f6e]">
         Clear all
       </Link>
