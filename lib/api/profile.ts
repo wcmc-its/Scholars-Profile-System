@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { sanitizeVIVOHtml } from "@/lib/utils";
+import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import {
   rankForSelectedHighlights,
   type ScoredPublication,
@@ -470,6 +471,11 @@ export async function getScholarFullProfileBySlug(
       year: e.year,
       field: e.field,
     })),
+    // Issue #78 — runtime canonicalization fallback. When the stored
+    // canonical short is null but the raw matches the current sponsor
+    // lookup (e.g. due to alias / normalization additions made after the
+    // last ETL run), promote it on the fly. Lets the profile section
+    // reflect canonical-lookup updates without re-ingesting.
     grants: scholar.grants.map((g) => ({
       title: g.title,
       role: g.role,
@@ -479,9 +485,9 @@ export async function getScholarFullProfileBySlug(
       isActive: isFundingActive(g.endDate, now),
       awardNumber: g.awardNumber ?? null,
       programType: g.programType,
-      primeSponsor: g.primeSponsor ?? null,
+      primeSponsor: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw),
       primeSponsorRaw: g.primeSponsorRaw ?? null,
-      directSponsor: g.directSponsor ?? null,
+      directSponsor: g.directSponsor ?? canonicalizeSponsor(g.directSponsorRaw),
       directSponsorRaw: g.directSponsorRaw ?? null,
       mechanism: g.mechanism ?? null,
       nihIc: g.nihIc ?? null,

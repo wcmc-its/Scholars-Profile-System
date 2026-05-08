@@ -793,12 +793,33 @@ async function FundingResults({
     return `/search?${sp.toString()}`;
   };
 
+  const toggleHref = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      if (current.includes(value)) {
+        for (const v of current) if (v !== value) sp.append(axis, v);
+      } else {
+        for (const v of current) sp.append(axis, v);
+        sp.append(axis, value);
+      }
+    });
+
+  const clearAllHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
+  const hasActiveFilters =
+    !!(filters.funder?.length || filters.programType?.length ||
+      filters.mechanism?.length || filters.status?.length ||
+      filters.department?.length || filters.role?.length);
+
   return (
     <>
-      <aside className="hidden md:block">
-        {/* Facet sidebar lands in next commit — placeholder so the grid
-            layout matches People / Publications. */}
-      </aside>
+      <FacetSidebarFunding
+        facets={result.facets}
+        active={filters}
+        toggleHref={toggleHref}
+        clearAllHref={clearAllHref}
+        hasActiveFilters={hasActiveFilters}
+      />
       <section className="min-w-0">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[13px] text-[#757575]">
@@ -841,6 +862,159 @@ async function FundingResults({
         />
       </section>
     </>
+  );
+}
+
+/** Maps F3 status enum to user-facing labels. */
+const STATUS_LABEL: Record<FundingStatus, string> = {
+  active: "Active",
+  ending_soon: "Ending in 12 months",
+  recently_ended: "Recently ended (last 2 years)",
+};
+
+/** Compact labels for the Type checkbox list (mirrors the inline pill
+ *  treatment on result rows). */
+const PROGRAM_TYPE_LABEL: Record<string, string> = {
+  Grant: "Grant",
+  "Contract with funding": "Contract",
+  Fellowship: "Fellowship",
+  Career: "Career",
+  Training: "Training",
+  "BioPharma Alliance Agreement": "BioPharma Alliance",
+  Equipment: "Equipment",
+};
+
+function FacetSidebarFunding({
+  facets,
+  active,
+  toggleHref,
+  clearAllHref,
+  hasActiveFilters,
+}: {
+  facets: FundingResultData["facets"];
+  active: FundingFilters;
+  toggleHref: (axis: string, value: string) => string;
+  clearAllHref: string;
+  hasActiveFilters: boolean;
+}) {
+  const statusItems: Array<{ key: FundingStatus; count: number }> = [
+    { key: "active", count: facets.status.active },
+    { key: "ending_soon", count: facets.status.endingSoon },
+    { key: "recently_ended", count: facets.status.recentlyEnded },
+  ];
+  const roleItems: Array<{ key: FundingRoleBucket; count: number }> = [
+    { key: "PI", count: facets.roles.pi },
+    { key: "Multi-PI", count: facets.roles.multiPi },
+    { key: "Co-I", count: facets.roles.coI },
+  ];
+  const activeFunder = active.funder ?? [];
+  const activeProgramType = active.programType ?? [];
+  const activeMechanism = active.mechanism ?? [];
+  const activeStatus = active.status ?? [];
+  const activeDepartment = active.department ?? [];
+  const activeRole = active.role ?? [];
+
+  return (
+    <aside className="text-[13px]">
+      <div className="mb-4 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+          Filters
+        </span>
+        {hasActiveFilters ? (
+          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+            Clear all
+          </Link>
+        ) : null}
+      </div>
+
+      <FacetGroup label="Status">
+        {sortActiveFirst(statusItems, (s) => activeStatus.includes(s.key)).map((s) => (
+          <FacetCheckbox
+            key={s.key}
+            label={STATUS_LABEL[s.key]}
+            count={s.count}
+            isActive={activeStatus.includes(s.key)}
+            href={toggleHref("status", s.key)}
+          />
+        ))}
+      </FacetGroup>
+
+      {facets.funders.length > 0 ? (
+        <FacetGroup label="Funder" collapseAfter={6}>
+          {sortActiveFirst(facets.funders, (f) => activeFunder.includes(f.value)).map((f) => (
+            <FacetCheckbox
+              key={f.value}
+              label={f.label}
+              count={f.count}
+              isActive={activeFunder.includes(f.value)}
+              href={toggleHref("funder", f.value)}
+              wrap
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      {facets.programTypes.length > 0 ? (
+        <FacetGroup label="Type" collapseAfter={6}>
+          {sortActiveFirst(facets.programTypes, (p) =>
+            activeProgramType.includes(p.value),
+          ).map((p) => (
+            <FacetCheckbox
+              key={p.value}
+              label={PROGRAM_TYPE_LABEL[p.value] ?? p.value}
+              count={p.count}
+              isActive={activeProgramType.includes(p.value)}
+              href={toggleHref("programType", p.value)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      {facets.mechanisms.length > 0 ? (
+        <FacetGroup label="Mechanism (NIH)" collapseAfter={6}>
+          {sortActiveFirst(facets.mechanisms, (m) =>
+            activeMechanism.includes(m.value),
+          ).map((m) => (
+            <FacetCheckbox
+              key={m.value}
+              label={m.value}
+              count={m.count}
+              isActive={activeMechanism.includes(m.value)}
+              href={toggleHref("mechanism", m.value)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      {facets.departments.length > 0 ? (
+        <FacetGroup label="Department" collapseAfter={6}>
+          {sortActiveFirst(facets.departments, (d) =>
+            activeDepartment.includes(d.value),
+          ).map((d) => (
+            <FacetCheckbox
+              key={d.value}
+              label={d.value}
+              count={d.count}
+              isActive={activeDepartment.includes(d.value)}
+              href={toggleHref("department", d.value)}
+              wrap
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      <FacetGroup label="Role">
+        {sortActiveFirst(roleItems, (r) => activeRole.includes(r.key)).map((r) => (
+          <FacetCheckbox
+            key={r.key}
+            label={r.key}
+            count={r.count}
+            isActive={activeRole.includes(r.key)}
+            href={toggleHref("role", r.key)}
+          />
+        ))}
+      </FacetGroup>
+    </aside>
   );
 }
 

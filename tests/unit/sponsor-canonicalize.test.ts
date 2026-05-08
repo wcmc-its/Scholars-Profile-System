@@ -36,6 +36,36 @@ describe("canonicalizeSponsor — full-name and normalized matching", () => {
   });
 });
 
+describe("canonicalizeSponsor — InfoEd quirks (issue #78 follow-up)", () => {
+  it("treats '&' the same as 'and' in full names", () => {
+    expect(canonicalizeSponsor("National Institute of Allergy & Infectious Diseases")).toBe("NIAID");
+    expect(canonicalizeSponsor("National Heart, Lung, & Blood Institute")).toBe("NHLBI");
+    expect(canonicalizeSponsor("National Institute of Neurological Disorders & Stroke")).toBe("NINDS");
+    expect(canonicalizeSponsor("National Institute of Diabetes & Digestive & Kidney Diseases")).toBe("NIDDK");
+    expect(canonicalizeSponsor("National Institute of Child Health & Human Development")).toBe("NICHD");
+    expect(canonicalizeSponsor("National Institute of Biomedical Imaging & Bioengineering")).toBe("NIBIB");
+  });
+
+  it("strips a leading 'United States ' prefix", () => {
+    expect(canonicalizeSponsor("United States Department of Defense")).toBe("DOD");
+  });
+
+  it("strips trailing /NIH/DHHS suffixes", () => {
+    expect(canonicalizeSponsor("National Eye Institute/NIH/DHHS")).toBe("NEI");
+  });
+
+  it("resolves NIH OD with the long-form alias", () => {
+    expect(canonicalizeSponsor("National Institutes of Health, Office of the Director")).toBe("OD");
+  });
+
+  it("resolves the new foundation entries", () => {
+    expect(canonicalizeSponsor("American Italian Cancer Foundation")).toBe("AICF");
+    expect(canonicalizeSponsor("Pershing Square Sohn Cancer Research Alliance, The")).toBe(
+      "Pershing Square Sohn",
+    );
+  });
+});
+
 describe("canonicalizeSponsor — fall-through", () => {
   it("returns null for sponsors not in the canonical lookup", () => {
     expect(canonicalizeSponsor("Some Tiny Family Foundation")).toBeNull();

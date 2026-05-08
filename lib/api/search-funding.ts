@@ -21,6 +21,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { isFundingActive } from "@/lib/api/profile";
+import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { Prisma } from "@/lib/generated/prisma/client";
 
 const PAGE_SIZE = 20;
@@ -122,6 +123,14 @@ function parseExternalId(externalId: string | null): { accountNumber: string; cw
 /** Promote canonical short names; fall back to raw or "(unknown sponsor)". */
 function displaySponsor(canonical: string | null, raw: string | null): string {
   return canonical ?? raw ?? "(unknown sponsor)";
+}
+
+/** Resolve canonical short with a runtime second-pass against the
+ *  current canonicalization rules. Lets sponsor-lookup additions and
+ *  normalization tweaks (issue #78 follow-ups) take effect against
+ *  existing rows without an ETL re-run. */
+function resolveCanonical(stored: string | null, raw: string | null): string | null {
+  return stored ?? canonicalizeSponsor(raw);
 }
 
 /** Normalize a per-row role to one of the F3 facet buckets. The Multi-PI
@@ -345,7 +354,8 @@ export async function searchFunding(opts: {
     coI = 0;
   for (const g of groupArr) {
     const c = g.canonical;
-    const funderKey = c.primeSponsor ?? c.primeSponsorRaw ?? "(unknown sponsor)";
+    const primeCanon = resolveCanonical(c.primeSponsor, c.primeSponsorRaw);
+    const funderKey = primeCanon ?? c.primeSponsorRaw ?? "(unknown sponsor)";
     const f = funderCounts.get(funderKey);
     if (f) f.count += 1;
     else funderCounts.set(funderKey, { label: funderKey, count: 1 });
@@ -387,13 +397,15 @@ export async function searchFunding(opts: {
   const hits: FundingHit[] = slice.map((g) => {
     const c = g.canonical;
     const sortedPeople = sortPeople(g.people);
+    const primeCanon = resolveCanonical(c.primeSponsor, c.primeSponsorRaw);
+    const directCanon = resolveCanonical(c.directSponsor, c.directSponsorRaw);
     return {
       projectId: g.accountNumber,
       title: c.title,
-      primeSponsor: displaySponsor(c.primeSponsor, c.primeSponsorRaw),
+      primeSponsor: displaySponsor(primeCanon, c.primeSponsorRaw),
       primeSponsorRaw: c.primeSponsorRaw,
       directSponsor: c.isSubaward
-        ? c.directSponsor ?? c.directSponsorRaw
+        ? directCanon ?? c.directSponsorRaw
         : null,
       isSubaward: c.isSubaward,
       programType: c.programType,

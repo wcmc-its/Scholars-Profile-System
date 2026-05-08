@@ -35,7 +35,7 @@ const NIH_ICS: Sponsor[] = [
   { short: "NIAID", full: "National Institute of Allergy and Infectious Diseases", category: "NIH IC", url: "https://www.niaid.nih.gov/" },
   { short: "NIAMS", full: "National Institute of Arthritis and Musculoskeletal and Skin Diseases", category: "NIH IC", url: "https://www.niams.nih.gov/" },
   { short: "NIBIB", full: "National Institute of Biomedical Imaging and Bioengineering", category: "NIH IC", url: "https://www.nibib.nih.gov/" },
-  { short: "NICHD", full: "Eunice Kennedy Shriver National Institute of Child Health and Human Development", category: "NIH IC", url: "https://www.nichd.nih.gov/" },
+  { short: "NICHD", full: "Eunice Kennedy Shriver National Institute of Child Health and Human Development", category: "NIH IC", url: "https://www.nichd.nih.gov/", aliases: ["national institute of child health and human development"] },
   { short: "NIDA", full: "National Institute on Drug Abuse", category: "NIH IC", url: "https://nida.nih.gov/" },
   { short: "NIDCD", full: "National Institute on Deafness and Other Communication Disorders", category: "NIH IC", url: "https://www.nidcd.nih.gov/" },
   { short: "NIDCR", full: "National Institute of Dental and Craniofacial Research", category: "NIH IC", url: "https://www.nidcr.nih.gov/" },
@@ -52,7 +52,7 @@ const NIH_ICS: Sponsor[] = [
   { short: "NCATS", full: "National Center for Advancing Translational Sciences", category: "NIH IC", url: "https://ncats.nih.gov/" },
   { short: "NCCIH", full: "National Center for Complementary and Integrative Health", category: "NIH IC", url: "https://www.nccih.nih.gov/" },
   { short: "FIC", full: "Fogarty International Center", category: "NIH IC", url: "https://www.fic.nih.gov/" },
-  { short: "OD", full: "Office of the Director, NIH", category: "NIH IC", url: "https://www.nih.gov/institutes-nih/office-director" },
+  { short: "OD", full: "Office of the Director, NIH", category: "NIH IC", url: "https://www.nih.gov/institutes-nih/office-director", aliases: ["national institutes of health, office of the director"] },
   { short: "NCRR", full: "National Center for Research Resources", category: "NIH IC" },
   { short: "CIT", full: "Center for Information Technology", category: "NIH IC", url: "https://www.cit.nih.gov/" },
 ];
@@ -105,6 +105,16 @@ const FOUNDATIONS: Sponsor[] = [
   { short: "V Foundation", full: "The V Foundation for Cancer Research", category: "Foundation", url: "https://www.v.org/" },
   { short: "Pew", full: "Pew Charitable Trusts", category: "Foundation", url: "https://www.pewtrusts.org/" },
   { short: "Searle Scholars", full: "Searle Scholars Program", category: "Foundation", url: "https://www.searlescholars.net/" },
+  { short: "CCF (ASCO)", full: "Conquer Cancer Foundation of the American Society of Clinical Oncology", category: "Foundation", url: "https://www.conquer.org/", aliases: ["conquer cancer foundation"] },
+  { short: "AICF", full: "American Italian Cancer Foundation", category: "Foundation", url: "https://www.americanitaliancancer.org/" },
+  { short: "Pershing Square Sohn", full: "Pershing Square Sohn Cancer Research Alliance", category: "Foundation", url: "https://pssohn.org/", aliases: ["pershing square sohn cancer research alliance, the"] },
+  { short: "CCFA", full: "Crohn's and Colitis Foundation of America", category: "Foundation", url: "https://www.crohnscolitisfoundation.org/", aliases: ["crohn's and colitis foundation", "crohns and colitis foundation of america"] },
+  { short: "QNRF", full: "Qatar National Research Fund", category: "Foundation", url: "https://www.qnrf.org/" },
+  { short: "GIRF", full: "Gastro-Intestinal Research Foundation", category: "Foundation" },
+  { short: "AIRC", full: "Fondazione AIRC per la Ricerca sul Cancro", category: "Foundation", url: "https://www.airc.it/", aliases: ["fondazione airc"] },
+  { short: "Urology Care Foundation", full: "Urology Care Foundation", category: "Foundation", url: "https://www.urologyhealth.org/", aliases: ["american urological association foundation"] },
+  { short: "CLL Global", full: "CLL Global Research Foundation", category: "Foundation" },
+  { short: "Leukemia Research Foundation", full: "Leukemia Research Foundation", category: "Foundation", url: "https://www.allbloodcancers.org/" },
 ];
 
 const INDUSTRY: Sponsor[] = [
@@ -138,6 +148,8 @@ const INDUSTRY: Sponsor[] = [
   { short: "Astellas", full: "Astellas Pharma Inc.", category: "Industry", url: "https://www.astellas.com/" },
   { short: "Eisai", full: "Eisai Co., Ltd.", category: "Industry", url: "https://www.eisai.com/" },
   { short: "Tempus", full: "Tempus AI, Inc.", category: "Industry", url: "https://www.tempus.com/" },
+  { short: "Atossa", full: "Atossa Therapeutics, Inc.", category: "Industry", url: "https://atossatherapeutics.com/", aliases: ["atossa therapeutics"] },
+  { short: "Cellarcus", full: "Cellarcus Biosciences, Inc.", category: "Industry", aliases: ["cellarcus biosciences"] },
 ];
 
 const ALL_SPONSORS: Sponsor[] = [...NIH_ICS, ...FEDERAL, ...FOUNDATIONS, ...INDUSTRY];

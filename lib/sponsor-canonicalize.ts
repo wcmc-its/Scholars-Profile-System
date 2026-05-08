@@ -18,12 +18,19 @@
 
 import { getSponsor, listSponsors, type Sponsor } from "@/lib/sponsor-lookup";
 
-/** Normalize for fuzzy matching: lowercase, strip leading "the", drop
- *  trailing legal suffixes and punctuation. */
+/** Normalize for fuzzy matching: lowercase, strip leading "The"/"United
+ *  States", normalize ampersands, drop trailing legal suffixes and
+ *  punctuation. */
 function normalize(s: string): string {
   let n = s.trim().toLowerCase();
-  // Remove leading "the "
-  n = n.replace(/^the\s+/i, "");
+  // InfoEd uses "&" and "/" extensively; the canonical lookup uses "and".
+  // Map both to a unified form before structural matching, and drop
+  // multi-name suffixes like "/NIH/DHHS" that indicate the parent agency.
+  n = n.replace(/\s*&\s*/g, " and ");
+  n = n.replace(/\s*\/\s*nih\b.*/g, ""); // "National Eye Institute/NIH/DHHS"
+  n = n.replace(/\s*\/\s*dhhs\b.*/g, "");
+  // Remove leading "the " or "united states "
+  n = n.replace(/^(?:the|united states)\s+/i, "");
   // Strip a trailing legal suffix (one or more, e.g. "AstraZeneca PLC, Inc.")
   // Run the strip a few times since some sources stack suffixes.
   for (let i = 0; i < 3; i++) {
