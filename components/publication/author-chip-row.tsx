@@ -37,10 +37,17 @@ function chipBorderClass(isFirst: boolean, isLast: boolean): string {
   return "border-zinc-300 hover:bg-zinc-50";
 }
 
-function chipRoleLabel(isFirst: boolean, isLast: boolean): string {
+function chipRoleLabel(
+  isFirst: boolean,
+  isLast: boolean,
+  firstCount: number,
+  lastCount: number,
+): string {
+  // Co-first / co-last: when ≥2 authors on the same publication share the
+  // flag, surface "co-first author" / "co-last author" in the tooltip. (#18)
   if (isFirst && isLast) return "First and senior author";
-  if (isFirst) return "First author";
-  if (isLast) return "Senior author";
+  if (isFirst) return firstCount > 1 ? "Co-first author" : "First author";
+  if (isLast) return lastCount > 1 ? "Co-last author" : "Senior author";
   return "Co-author";
 }
 
@@ -48,11 +55,16 @@ export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
   if (authors.length === 0) return null;
   const visible = authors.slice(0, CHIP_CAP);
   const overflow = authors.length - CHIP_CAP;
+  // Counts taken across the full author list (not just the visible slice) so
+  // co-first / co-last labels are accurate even when some co-* authors are
+  // hidden behind the +N overflow chip. (#18)
+  const firstCount = authors.filter((a) => a.isFirst).length;
+  const lastCount = authors.filter((a) => a.isLast).length;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {visible.map((a, i) =>
         a.slug && a.cwid ? (
-          <HoverTooltip key={`${a.cwid}-${i}`} text={chipRoleLabel(a.isFirst, a.isLast)}>
+          <HoverTooltip key={`${a.cwid}-${i}`} text={chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount)}>
             <a
               href={`/scholars/${a.slug}`}
               className={`inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
