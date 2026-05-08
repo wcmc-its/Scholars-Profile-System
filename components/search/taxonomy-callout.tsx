@@ -27,6 +27,7 @@
  */
 import Link from "next/link";
 import { useState } from "react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import type { TaxonomyMatchResult, TaxonomyMatch } from "@/lib/api/search-taxonomy";
 
 const SURFACE =
@@ -47,6 +48,14 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
       <div
         className={`${SURFACE} ${HOVER_GROUP} relative flex flex-wrap items-center gap-3 px-3.5 py-2.5 text-[13.5px] leading-snug`}
       >
+        {/* Small leading icon balances the "View topic page →" affordance
+            on the right and signals "this is a navigation hint, not a
+            search result." */}
+        <Sparkles
+          aria-hidden
+          className="h-4 w-4 shrink-0 text-[var(--color-accent-slate)]"
+          strokeWidth={2}
+        />
         <PrimaryContent match={primary} />
         {hasDisclosure ? (
           <button
@@ -54,15 +63,14 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
             aria-expanded={expanded}
             aria-controls="taxonomy-callout-secondary"
             onClick={() => setExpanded((v) => !v)}
-            className={`shrink-0 rounded px-2.5 py-1.5 text-[12.5px] text-zinc-600 transition-colors hover:text-zinc-900 ${FOCUS_RING}`}
+            className={`inline-flex shrink-0 items-center gap-1 rounded px-2.5 py-1.5 text-[12.5px] text-zinc-600 transition-colors hover:text-zinc-900 ${FOCUS_RING}`}
           >
-            additional matches{" "}
-            <span
-              aria-hidden="true"
-              className={`inline-block transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
-            >
-              ▾
-            </span>
+            additional matches
+            <ChevronDown
+              aria-hidden
+              className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+              strokeWidth={2}
+            />
           </button>
         ) : null}
         <PrimaryCta match={primary} />

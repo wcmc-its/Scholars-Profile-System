@@ -1,5 +1,7 @@
+import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { ChevronDown } from "lucide-react";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { AZDirectory } from "@/components/browse/az-directory";
@@ -149,6 +151,18 @@ function parseOptionalInt(val: string | string[] | undefined): number | undefine
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * Stable sort that pulls active items to the front so they survive the
+ * `collapseAfter` cutoff in FacetGroup. Keeps the original order (count-
+ * desc) inside each partition.
+ */
+function sortActiveFirst<T>(items: T[], isActive: (t: T) => boolean): T[] {
+  const active: T[] = [];
+  const rest: T[] = [];
+  for (const it of items) (isActive(it) ? active : rest).push(it);
+  return [...active, ...rest];
+}
+
 /* ============================================================
  * Search-meta strip — h1 with quoted query span + counts subhead
  * ============================================================ */
@@ -167,7 +181,7 @@ function SearchMeta({
         {q ? (
           <>
             Results for{" "}
-            <span className="font-bold text-[#2c4f6e]">&ldquo;{q}&rdquo;</span>
+            <span className="font-bold text-[#2c4f6e]">{"“"}{q}{"”"}</span>
           </>
         ) : (
           "Browse scholars"
@@ -351,6 +365,7 @@ async function PeopleResults({
           page={result.page}
           pageSize={result.pageSize}
           sort={sort}
+          hasActiveFilters={hasActiveFilters}
           buildSortHref={(value) =>
             buildUrl((sp) => {
               if (value === "relevance") sp.delete("sort");
@@ -485,6 +500,7 @@ async function PublicationsResults({
           page={result.page}
           pageSize={result.pageSize}
           sort={sort}
+          hasActiveFilters={chips.length > 0}
           buildSortHref={(value) =>
             buildUrl((sp) => {
               if (value === "relevance") sp.delete("sort");
@@ -616,6 +632,7 @@ function ResultsToolbar({
   pageSize,
   sort,
   buildSortHref,
+  hasActiveFilters,
 }: {
   tab: "people" | "publications";
   total: number;
@@ -623,11 +640,14 @@ function ResultsToolbar({
   pageSize: number;
   sort: PeopleSort | PublicationsSort;
   buildSortHref: (value: string) => string;
+  hasActiveFilters: boolean;
 }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
+  // "matching filters" only when at least one facet is active. Without
+  // filters, the qualifier reads like the count is filtered when it isn't.
   const noun = tab === "people"
-    ? `${total === 1 ? "person" : "people"} matching filters`
+    ? `${total === 1 ? "person" : "people"}${hasActiveFilters ? " matching filters" : ""}`
     : "publications";
 
   const peopleOpts: Array<{ value: PeopleSort; label: string }> = [
@@ -673,9 +693,9 @@ function SortLinks({
   const activeLabel = options.find((o) => o.value === current)?.label ?? options[0].label;
   return (
     <details className="relative">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] [&::-webkit-details-marker]:hidden">
         {activeLabel}
-        <span aria-hidden className="text-[10px] text-[#757575]">▾</span>
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 text-[#757575]" strokeWidth={2} />
       </summary>
       <ul className="absolute right-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-[#e3e2dd] bg-white py-1 shadow-md">
         {options.map((o) => (
@@ -733,8 +753,8 @@ function FacetSidebar({
       </div>
 
       {personTypes.length > 0 ? (
-        <FacetGroup label="Person type">
-          {personTypes.map((p) => (
+        <FacetGroup label="Person type" collapseAfter={5}>
+          {sortActiveFirst(personTypes, (p) => activePersonType.includes(p.value)).map((p) => (
             <FacetCheckbox
               key={p.value}
               label={formatRoleCategory(p.value) ?? p.value}
@@ -747,8 +767,8 @@ function FacetSidebar({
       ) : null}
 
       {deptDivs.length > 0 ? (
-        <FacetGroup label="Department / division" scrollable>
-          {deptDivs.map((d) => (
+        <FacetGroup label="Department / division" collapseAfter={5}>
+          {sortActiveFirst(deptDivs, (d) => activeDeptDiv.includes(d.value)).map((d) => (
             <FacetCheckbox
               key={d.value}
               label={d.label}
@@ -817,7 +837,7 @@ function FacetSidebarPubs({
         ))}
       </FacetGroup>
       {publicationTypes.length > 0 ? (
-        <FacetGroup label="Publication type" scrollable>
+        <FacetGroup label="Publication type" collapseAfter={5}>
           {publicationTypes.map((p) => (
             <FacetCheckbox
               key={p.value}
@@ -835,25 +855,59 @@ function FacetSidebarPubs({
   );
 }
 
+/**
+ * Sidebar facet group. When `collapseAfter` is set and the group has more
+ * than that many items, the tail is hidden inside a native <details> with
+ * a "Show all N" toggle. We split children into a head and tail server-
+ * side so the cap is consistent regardless of viewport width.
+ *
+ * Two practical notes:
+ *   - The toggle uses native <details>, no client JS, so it stays open
+ *     on the same render. Navigation away (clicking a checkbox) collapses
+ *     it — but the caller is expected to sort buckets so currently-active
+ *     values appear in the head, so the user never has to re-expand to
+ *     see what they ticked.
+ *   - The summary marker is suppressed in favor of a Lucide chevron for
+ *     visual consistency with the rest of the page.
+ */
 function FacetGroup({
   label,
   children,
-  scrollable,
+  collapseAfter,
 }: {
   label: string;
   children: React.ReactNode;
-  scrollable?: boolean;
+  collapseAfter?: number;
 }) {
+  const items = React.Children.toArray(children);
+  const shouldCollapse =
+    collapseAfter !== undefined && items.length > collapseAfter;
+  const head = shouldCollapse ? items.slice(0, collapseAfter!) : items;
+  const tail = shouldCollapse ? items.slice(collapseAfter!) : [];
   return (
     <div className="mb-5">
       <h3 className="mb-2 text-[13px] font-semibold text-[#1a1a1a]">{label}</h3>
-      <ul
-        className={`m-0 flex list-none flex-col p-0 ${
-          scrollable ? "-mr-2 max-h-[220px] overflow-y-auto pr-2" : ""
-        }`}
-      >
-        {children}
-      </ul>
+      <ul className="m-0 flex list-none flex-col p-0">{head}</ul>
+      {tail.length > 0 ? (
+        // Tailwind 4 lacks `group-open:` directly; arbitrary descendant
+        // variants (`[&[open]_.x]:hidden`) compile to
+        // `details[open] .x { display: none }` and let the open/closed
+        // labels swap without any client JS.
+        <details
+          className="mt-1 [&[open]_.fg-show]:hidden [&:not([open])_.fg-hide]:hidden [&[open]_.fg-chevron]:rotate-180"
+        >
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12.5px] font-medium text-[#2c4f6e] hover:underline [&::-webkit-details-marker]:hidden">
+            <ChevronDown
+              aria-hidden
+              className="fg-chevron h-3.5 w-3.5 transition-transform"
+              strokeWidth={2}
+            />
+            <span className="fg-show">Show all {items.length}</span>
+            <span className="fg-hide">Show fewer</span>
+          </summary>
+          <ul className="m-0 mt-1 flex list-none flex-col p-0">{tail}</ul>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -873,6 +927,7 @@ function FacetCheckbox({
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
       <Link
         href={href}
+        title={label}
         className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
       >
         {/* readOnly checkbox: state lives in the URL; the link toggles it. */}
@@ -884,9 +939,14 @@ function FacetCheckbox({
           aria-hidden="true"
           className="cursor-pointer accent-[#2c4f6e]"
         />
-        <span className="flex-1">{label}</span>
+        {/* Truncate keeps the count column straight when names are long
+            ("Pathology and Laboratory Medicine"); the title attribute on
+            the parent surfaces the full label on hover. */}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
         {count !== undefined ? (
-          <span className="text-[12px] tabular-nums text-[#757575]">{count.toLocaleString()}</span>
+          <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+            {count.toLocaleString()}
+          </span>
         ) : null}
       </Link>
     </li>

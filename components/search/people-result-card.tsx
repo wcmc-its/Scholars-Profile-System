@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Banknote } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
@@ -26,9 +27,15 @@ export type PeopleResultCardProps = {
   };
 };
 
+/**
+ * Smaller, lower-contrast version of the role tag — the previous variant
+ * competed visually with the title underneath at the same line. Loses the
+ * border, drops the background, and shrinks the type so the eye reads
+ * name → title → role-affiliation in that order.
+ */
 function RoleTag({ role }: { role: string }) {
   return (
-    <span className="ml-2 inline-flex h-[18px] items-center rounded-sm border border-[#e3e2dd] bg-[#f7f6f3] px-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#757575]">
+    <span className="ml-2 inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#8a8377]">
       {role}
     </span>
   );
@@ -130,11 +137,18 @@ export function PeopleResultCard({
           </span>
         ) : null}
         {hit.grantCount > 0 ? (
-          <span>
-            <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
-              {hit.grantCount.toLocaleString()}
-            </span>{" "}
-            {grantLabel}
+          <span className="inline-flex items-center gap-1">
+            <Banknote
+              aria-hidden
+              className="h-3 w-3 text-[#9aa19a]"
+              strokeWidth={2}
+            />
+            <span>
+              <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
+                {hit.grantCount.toLocaleString()}
+              </span>{" "}
+              {grantLabel}
+            </span>
           </span>
         ) : null}
       </div>
