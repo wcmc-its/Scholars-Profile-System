@@ -66,6 +66,7 @@ async function main() {
     ["InfoEd", "etl/infoed/index.ts"],
     ["COI", "etl/coi/index.ts"],
     ["Hierarchy", "etl/hierarchy/index.ts"],
+    ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],
   ] as const) {
     results.push(await step(source, file));

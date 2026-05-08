@@ -21,6 +21,8 @@
     "seed": "tsx seed/index.ts",
     "search:index": "tsx etl/search-index/index.ts",
     "etl:ed": "tsx etl/ed/index.ts",
+    "etl:ed:probe-chiefs": "tsx etl/ed/probe-chiefs.ts",
+    "etl:ed:probe-divisions": "tsx etl/ed/probe-divisions.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",
@@ -31,6 +33,7 @@
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
+    "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
   },
