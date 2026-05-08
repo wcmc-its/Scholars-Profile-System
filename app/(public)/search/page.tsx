@@ -523,14 +523,31 @@ async function PublicationsResults({
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
 
+  // Pre-compute journal facet items server-side: the JournalFacet client
+  // component can't accept a function prop for toggleHref, so we resolve
+  // each row's URL here and pass plain data. Active values are pulled to
+  // the head so they survive the Show-all cutoff.
+  const journalItems: import("@/components/search/journal-facet").JournalFacetItem[] = (() => {
+    const active: typeof result.facets.journals = [];
+    const rest: typeof result.facets.journals = [];
+    for (const j of result.facets.journals) {
+      (journal.includes(j.value) ? active : rest).push(j);
+    }
+    return [...active, ...rest].map((j) => ({
+      value: j.value,
+      count: j.count,
+      isActive: journal.includes(j.value),
+      toggleHref: toggleHref("journal", j.value),
+    }));
+  })();
+
   return (
     <>
       <FacetSidebarPubs
         yearMin={yearMin}
         activePublicationType={publicationType}
         publicationTypes={result.facets.publicationTypes}
-        journals={result.facets.journals}
-        activeJournals={journal}
+        journalItems={journalItems}
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
         toggleHref={toggleHref}
@@ -855,8 +872,7 @@ function FacetSidebarPubs({
   yearMin,
   activePublicationType,
   publicationTypes,
-  journals,
-  activeJournals,
+  journalItems,
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
   toggleHref,
@@ -867,8 +883,7 @@ function FacetSidebarPubs({
   yearMin?: number;
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
-  journals: SearchFacetBucket[];
-  activeJournals: string[];
+  journalItems: import("@/components/search/journal-facet").JournalFacetItem[];
   wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
   activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
   toggleHref: (axis: string, value: string) => string;
@@ -924,13 +939,7 @@ function FacetSidebarPubs({
         ))}
       </FacetGroup>
 
-      {journals.length > 0 ? (
-        <JournalFacet
-          journals={journals}
-          activeJournals={activeJournals}
-          toggleHref={toggleHref}
-        />
-      ) : null}
+      {journalItems.length > 0 ? <JournalFacet items={journalItems} /> : null}
 
       {publicationTypes.length > 0 ? (
         <FacetGroup label="Publication type" collapseAfter={5}>
