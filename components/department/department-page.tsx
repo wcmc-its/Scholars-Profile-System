@@ -229,6 +229,7 @@ export async function DepartmentPage({
             <DepartmentFacultyClient
               faculty={faculty.hits}
               total={faculty.total}
+              roleCategoryCounts={faculty.roleCategoryCounts}
               page={faculty.page + 1}
               pageSize={faculty.pageSize}
               deptSlug={detail.dept.slug}

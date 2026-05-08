@@ -26,6 +26,7 @@ import type {
   GrantSort,
 } from "@/lib/api/dept-lists";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
+import { formatRoleCategory } from "@/lib/role-display";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -234,6 +235,8 @@ export type DivisionFacultyResult = {
     grantCount: number;
   }>;
   total: number;
+  /** Whole-scope role-category counts for the role-chip-row. (#17) */
+  roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
 };
@@ -251,8 +254,23 @@ export async function getDivisionFaculty(
 
   const total = await prisma.scholar.count({ where });
   if (total === 0) {
-    return { hits: [], total: 0, page, pageSize: FACULTY_PAGE_SIZE };
+    return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
+
+  const roleCategoryCounts = await (async () => {
+    const rows = await prisma.scholar.groupBy({
+      by: ["roleCategory"],
+      where,
+      _count: { _all: true },
+    });
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const label = formatRoleCategory(r.roleCategory);
+      if (label === null) continue;
+      out[label] = (out[label] ?? 0) + r._count._all;
+    }
+    return out;
+  })();
 
   const div = await prisma.division.findFirst({
     where: { code: divCode },
@@ -332,7 +350,7 @@ export async function getDivisionFaculty(
     grantCount: grantByCwid.get(r.cwid) ?? 0,
   }));
 
-  return { hits, total, page, pageSize: FACULTY_PAGE_SIZE };
+  return { hits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
 }
 
 /**

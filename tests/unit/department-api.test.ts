@@ -16,6 +16,7 @@ const {
   mockScholarFindFirst,
   mockScholarFindMany,
   mockScholarCount,
+  mockScholarGroupBy,
   mockAppointmentFindFirst,
   mockPublicationTopicGroupBy,
   mockPublicationTopicCount,
@@ -30,6 +31,7 @@ const {
   mockScholarFindFirst: vi.fn(),
   mockScholarFindMany: vi.fn(),
   mockScholarCount: vi.fn(),
+  mockScholarGroupBy: vi.fn(),
   mockAppointmentFindFirst: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
   mockPublicationTopicCount: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock("@/lib/db", () => ({
       findFirst: mockScholarFindFirst,
       findMany: mockScholarFindMany,
       count: mockScholarCount,
+      groupBy: mockScholarGroupBy,
     },
     appointment: { findFirst: mockAppointmentFindFirst },
     publicationTopic: {
@@ -126,6 +129,7 @@ function mockDefaultDeptSetup() {
   mockDivisionFindMany.mockResolvedValue([DIVISION_A]);
   mockScholarFindMany.mockResolvedValue([CHIEF_SCHOLAR]);
   mockScholarCount.mockResolvedValue(200);
+  mockScholarGroupBy.mockResolvedValue([]);
   mockPublicationTopicCount.mockResolvedValue(1500);
   mockGrantCount.mockResolvedValue(25);
 }

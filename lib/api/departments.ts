@@ -217,6 +217,17 @@ export type DepartmentFacultyHit = {
 export type DepartmentFacultyResult = {
   hits: DepartmentFacultyHit[];
   total: number;
+  /**
+   * Distinct count of scholars per normalized role-category label, computed
+   * over the full dept (+ optional div) scope. Used by the role-chip-row so
+   * the chip counts reflect the entire result set, not just the current
+   * page. (#17)
+   *
+   * Keys are the normalized labels produced by formatRoleCategory
+   * ("Full-time faculty", "Postdoc", "Doctoral student", etc.) — the same
+   * shape that the chip-row's group.matches() inspects.
+   */
+  roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
 };
@@ -251,8 +262,25 @@ export async function getDepartmentFaculty(
 
   const total = await prisma.scholar.count({ where: baseWhere });
   if (total === 0) {
-    return { hits: [], total: 0, page, pageSize: FACULTY_PAGE_SIZE };
+    return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
+
+  // Whole-scope role-category counts so the chip-row reflects the entire
+  // dataset, not just the visible page. (#17)
+  const roleCategoryCounts = await (async () => {
+    const rows = await prisma.scholar.groupBy({
+      by: ["roleCategory"],
+      where: baseWhere,
+      _count: { _all: true },
+    });
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const label = normalizeRoleCategory(r.roleCategory);
+      if (label === null) continue;
+      out[label] = (out[label] ?? 0) + r._count._all;
+    }
+    return out;
+  })();
 
   // Chief-first ordering when divCode is provided.
   let chiefCwid: string | null = null;
@@ -347,5 +375,5 @@ export async function getDepartmentFaculty(
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
 
-  return { hits, total, page, pageSize: FACULTY_PAGE_SIZE };
+  return { hits, total, roleCategoryCounts, page, pageSize: FACULTY_PAGE_SIZE };
 }
