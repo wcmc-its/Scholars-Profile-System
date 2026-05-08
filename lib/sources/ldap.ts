@@ -49,6 +49,11 @@ export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
   "weillCornellEduPrimaryTitle",
   "weillCornellEduMiddleName",
+  // Curated human-readable display name from the directory. Preferred over
+  // the constructed `givenName + sn` form so initials, middle names, and
+  // capitalization conventions ("M. Cary Reid") are honored. Falls back to
+  // the constructed form when absent.
+  "displayName",
   // Multi-valued leaf-class array — the live WCM directory carries the rich
   // taxonomy here ("academic", "academic-faculty", "academic-faculty-weillfulltime",
   // "academic-nonfaculty-postdoc", etc.). Probe 2026-05-04 (debug session
@@ -91,6 +96,11 @@ export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduPrimaryDepartmentCode",    // primary dept code (legacy 10-digit)
   "weillCornellEduDepartmentCode",           // multi-valued legacy 10-digit code
   "weillCornellEduDepartment",               // multi-valued dept name (per-appointment)
+  // Pre-concatenated postnominal degree string (e.g. "MD", "MD, MPH"). Lives
+  // on the person entry — also present on the SOR parent (weillCornellEduSORRecord)
+  // but NOT on the Role subordinates that fetchActiveFacultyAppointments filters
+  // for, so the people branch is the simpler source.
+  "weillCornellEduDegree",
 ] as const;
 
 export type EdFacultyEntry = {
@@ -116,6 +126,9 @@ export type EdFacultyEntry = {
   fte: number | null;
   ou: string;
   degreeCode: string | null;
+  /** Pre-concatenated postnominal degree string from `weillCornellEduDegree`
+   *  on the person entry (e.g. "MD", "MD, MPH"). Null when absent. */
+  degree: string | null;
   // Phase 3 — D-02 org-unit fields. Nullable: not all entries have all three.
   deptCode: string | null;       // primary department code (level1 in org-unit hierarchy)
   divCode: string | null;        // division code (level2 in org-unit hierarchy)
@@ -417,8 +430,16 @@ function projectEntries(
     const givenName = firstString(e.givenName) ?? "";
     const middleName = firstString(e.weillCornellEduMiddleName) ?? "";
     const sn = stripSurnameNoise(firstString(e.sn) ?? "");
-    const preferredName = [givenName, sn].filter(Boolean).join(" ").trim();
-    const fullName = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
+    const displayName = stripTrailingDegree(firstString(e.displayName)?.trim() ?? "");
+    const constructed = [givenName, sn].filter(Boolean).join(" ").trim();
+    // Prefer LDAP-curated displayName so middle names, initials, and stylized
+    // capitalization ("M. Cary Reid") are honored. Concatenation can't reproduce
+    // those conventions and silently drops the curator's middle component.
+    const preferredName = displayName || constructed;
+    // fullName keeps the constructed form when it's richer than displayName
+    // (carries the explicit middle name token for full-text search recall).
+    const constructedFull = [givenName, middleName, sn].filter(Boolean).join(" ").trim();
+    const fullName = constructedFull || preferredName;
 
     const r = e as Record<string, unknown>;
 
@@ -438,6 +459,7 @@ function projectEntries(
       fte: parseFte(e.weillCornellEduFTE),
       ou: firstString(e.ou) ?? fallbackOu,
       degreeCode: firstString(e.weillCornellEduDegreeCode),
+      degree: firstString(e.weillCornellEduDegree),
       // Probe 2026-05-06: org-unit data is exposed via LDAP option subtypes
       // (`;level1` / `;level2`). On the people branch the **primary** subtypes
       // mark the scholar's main appointment unambiguously even when the
@@ -536,4 +558,28 @@ function parseFte(v: unknown): number | null {
  */
 function stripSurnameNoise(sn: string): string {
   return sn.replace(/-\s*M\.?D\.?$/i, "").trim();
+}
+
+/**
+ * Some legacy LDAP `displayName` entries carry a postnominal degree baked in
+ * ("Curtis Cole, MD"). The ETL appends the postnominal at render time from
+ * the SOR `weillCornellEduDegree` attribute, so a duplicate would result.
+ * Strip a trailing `, <DEGREE>` suffix so the rendered name stays clean.
+ */
+function stripTrailingDegree(name: string): string {
+  // Match `, ` followed by a comma-separated list of all-caps tokens / dotted
+  // forms ("MD", "M.D.", "PhD", "Sc.D.", "MD, MPH"). Conservative: requires
+  // each token to look degree-shaped to avoid eating real name suffixes.
+  const tokenRe = /[A-Za-z]\.?(?:[A-Za-z]\.?){0,4}/;
+  const re = new RegExp(`,\\s*(?:${tokenRe.source})(?:\\s*,\\s*${tokenRe.source})*\\s*$`);
+  // Only strip if the matched tail is plausibly a degree (contains an upper-
+  // case letter and avoids common name suffixes like "Jr", "Sr", "II", "III").
+  const m = name.match(re);
+  if (!m) return name.trim();
+  const tail = m[0].replace(/^,\s*/, "").trim();
+  const tokens = tail.split(/\s*,\s*/);
+  const looksLikeDegree = tokens.every(
+    (t) => /[A-Z]/.test(t) && !/^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?$/i.test(t),
+  );
+  return looksLikeDegree ? name.slice(0, m.index).trim() : name.trim();
 }
