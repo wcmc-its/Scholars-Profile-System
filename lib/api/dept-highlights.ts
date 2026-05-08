@@ -386,7 +386,7 @@ async function groupAndPickGrants(
 }
 
 export async function getDeptHighlights(deptCode: string): Promise<DeptHighlights> {
-  let [publications, grants] = await Promise.all([
+  const [publications, grants] = await Promise.all([
     getDeptRecentPublications(deptCode),
     getDeptActiveGrants(deptCode),
   ]);
