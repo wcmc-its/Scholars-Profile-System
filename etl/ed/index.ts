@@ -20,13 +20,19 @@
  *
  * Usage: `npm run etl:ed`
  */
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
 import { prisma } from "../../lib/db";
+import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
 import {
+  collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
   type EdFacultyEntry,
+  fetchActiveEmployeeRecords,
   fetchActiveFaculty,
   fetchActiveFacultyAppointments,
   fetchDoctoralStudents,
@@ -223,6 +229,28 @@ async function main() {
       const arr = appointmentsByCwid.get(a.cwid) ?? [];
       arr.push(a);
       appointmentsByCwid.set(a.cwid, arr);
+    }
+
+    // Phase 4 — employee SOR for the manager graph. Used by:
+    //   - postdoc mentor lookup (issue #5)
+    //   - division-chief detection (issue #16, Path B)
+    // Best-effort: a fetch failure should not abort the whole ETL — chief
+    // detection and the manual override pass still run, the former just
+    // skips Path B and the override file fills in.
+    console.log("Fetching active employee SOR records from ou=employees SOR...");
+    let employeeRecords: Awaited<ReturnType<typeof fetchActiveEmployeeRecords>> = [];
+    try {
+      employeeRecords = await fetchActiveEmployeeRecords(client);
+      console.log(`ED returned ${employeeRecords.length} active employee SOR records.`);
+    } catch (err) {
+      console.warn(
+        `Employee SOR fetch skipped (ou=employees,ou=sors unavailable): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const employeeByCwid = collapseEmployeeRecordsByCwid(employeeRecords);
+    const managerByCwid = new Map<string, string | null>();
+    for (const [cwid, rec] of employeeByCwid) {
+      managerByCwid.set(cwid, rec.managerCwid);
     }
 
     await client.unbind();
@@ -574,13 +602,21 @@ async function main() {
 
     // Phase 3 — D-03 chair identification per department.
     //
-    // Match `Chair of {dept name}` exactly (or with a trailing space/comma
-    // for multi-clause titles like "Chair of X and Y"). Crucially, we do NOT
-    // restrict to scholars whose `deptCode = dept.code`: a scholar's primary
-    // dept is sometimes Medicine while their chair role is in a different
-    // unit (e.g. Crystal — primary Medicine, "Chair of Genetic Medicine").
-    // Title-based matching attributes the role to the right dept regardless
-    // of where LDAP marks the scholar's primary appointment.
+    // Match `Chair of {dept name}` as a standalone phrase anywhere in the
+    // appointment title. Covers:
+    //   - direct:    "Chair of Medicine"
+    //   - prefixed:  "Chair of Medicine, Affiliate Hospital"
+    //   - endowed:   "Sanford I. Weill Chair of Medicine"
+    //   - acting:    "Acting Chair of Cell and Developmental Biology"
+    // Excludes vice / associate / deputy / assistant chairs explicitly —
+    // those carry "Chair of X" too but are not the dept chair.
+    //
+    // Crucially, we do NOT restrict to scholars whose `deptCode = dept.code`:
+    // a scholar's primary dept is sometimes Medicine while their chair role
+    // is in a different unit (e.g. Crystal — primary Medicine, "Chair of
+    // Genetic Medicine"). Title-based matching attributes the role to the
+    // right dept regardless of where LDAP marks the scholar's primary
+    // appointment.
     //
     // Tiebreak on isPrimary DESC then startDate DESC.
     const chairTitleVariants = new Set<string>();
@@ -591,9 +627,19 @@ async function main() {
         where: {
           scholar: { deletedAt: null, status: "active" },
           OR: [
-            { title: expected },
-            { title: { startsWith: `${expected} ` } },
-            { title: { startsWith: `${expected},` } },
+            { title: expected },                              // exact
+            { title: { startsWith: `${expected} ` } },        // "Chair of X ..."
+            { title: { startsWith: `${expected},` } },        // "Chair of X, ..."
+            { title: { endsWith: ` ${expected}` } },          // "... Chair of X" (endowed / acting)
+            { title: { contains: ` ${expected} ` } },         // "... Chair of X ..."
+            { title: { contains: ` ${expected},` } },         // "... Chair of X, ..."
+          ],
+          NOT: [
+            { title: { contains: "Vice Chair" } },
+            { title: { contains: "Vice-Chair" } },
+            { title: { contains: "Associate Chair" } },
+            { title: { contains: "Deputy Chair" } },
+            { title: { contains: "Assistant Chair" } },
           ],
           endDate: null,
         },
@@ -614,6 +660,153 @@ async function main() {
     }
     console.log(`[ED] assigned chairs to ${chairAssignments}/${seenDepts.size} departments`);
     console.log(`[ED] distinct chair-title variants observed:`, [...chairTitleVariants]);
+
+    // Phase 4 — D-04 division chief detection (issue #16).
+    //
+    // Path B (manager-graph): for each division, the chief is the faculty
+    // member whose employee-SOR `manager` equals the parent department's
+    // chair CWID. Disambiguate ties by:
+    //   1. reportee count — # of fellow division members whose manager is
+    //      this candidate. The chief manages the most people in the division.
+    //   2. primary-appointment count in this division — distinguishes a
+    //      genuine in-division chief from a cross-appointed member.
+    //   3. earliest start date in this division — longest tenure as a
+    //      stability proxy.
+    //
+    // Disable with SCHOLARS_DISABLE_CHIEF_DETECTION=true if the probe
+    // (etl/ed/probe-chiefs.ts) shows manager-graph is too noisy at WCM.
+    // Path C (override file) still runs after, so manual entries always win.
+    const chiefDetectionDisabled =
+      process.env.SCHOLARS_DISABLE_CHIEF_DETECTION === "true";
+
+    // Build division → set-of-CWIDs index from active faculty appointments.
+    const divisionMembers = new Map<string, Set<string>>();
+    for (const a of facultyAppointments) {
+      if (!a.divCode) continue;
+      const set = divisionMembers.get(a.divCode) ?? new Set<string>();
+      set.add(a.cwid);
+      divisionMembers.set(a.divCode, set);
+    }
+
+    const divisionsForChief = await prisma.division.findMany({
+      select: { code: true, deptCode: true },
+    });
+    const deptChairs = new Map<string, string | null>();
+    for (const d of await prisma.department.findMany({
+      select: { code: true, chairCwid: true },
+    })) {
+      deptChairs.set(d.code, d.chairCwid);
+    }
+
+    const chiefVerdictTally: Record<ChiefVerdict, number> = {
+      HIGH: 0, MEDIUM: 0, LOW: 0, NONE: 0, GAP: 0,
+    };
+    let chiefAssignments = 0;
+    if (!chiefDetectionDisabled && employeeRecords.length > 0) {
+      for (const div of divisionsForChief) {
+        const parentChair = deptChairs.get(div.deptCode) ?? null;
+        const members = Array.from(divisionMembers.get(div.code) ?? []);
+        const result = detectDivisionChief({
+          divCode: div.code,
+          members,
+          parentChairCwid: parentChair,
+          managerByCwid,
+          appointmentsByCwid,
+        });
+        chiefVerdictTally[result.verdict] += 1;
+        // Threshold gate: only HIGH and MEDIUM auto-write the pick.
+        // LOW/NONE/GAP all clear to null — the override file (Path C) is
+        // the escape hatch for divisions Path B can't decide on.
+        await prisma.division.update({
+          where: { code: div.code },
+          data: { chiefCwid: result.valueToWrite },
+        });
+        if (result.valueToWrite) chiefAssignments += 1;
+      }
+      console.log(
+        `[ED] Path B: assigned chiefs to ${chiefAssignments}/${divisionsForChief.length} divisions ` +
+          `(verdicts — HIGH=${chiefVerdictTally.HIGH} MEDIUM=${chiefVerdictTally.MEDIUM} ` +
+          `LOW=${chiefVerdictTally.LOW} NONE=${chiefVerdictTally.NONE} GAP=${chiefVerdictTally.GAP})`,
+      );
+    } else {
+      console.log(
+        `[ED] Path B chief detection skipped (` +
+          (chiefDetectionDisabled
+            ? "SCHOLARS_DISABLE_CHIEF_DETECTION=true"
+            : "no employee SOR data") +
+          ")",
+      );
+      // Even when Path B is skipped, clear stale chief assignments before
+      // the override pass writes — keeps the table consistent with intent.
+      if (!chiefDetectionDisabled) {
+        await prisma.division.updateMany({ data: { chiefCwid: null } });
+      }
+    }
+
+    // Phase 4 — D-04 division chief manual overrides (Path C, always-on).
+    //
+    // Reads data/division-chiefs.txt (TSV: divCode<TAB>cwid<TAB>notes) and
+    // upserts Division.chiefCwid. A cwid of `-` clears the slot (vacancy).
+    // Overrides always win over Path B — they're the escape hatch for
+    // co-chiefs, vacancies, acting/interim cases, and any ambiguity Path B
+    // can't resolve.
+    const overridePath = path.resolve("data/division-chiefs.txt");
+    const overrideRows: Array<{ divCode: string; cwid: string | null; note: string }> = [];
+    try {
+      const content = await fs.readFile(overridePath, "utf8");
+      for (const rawLine of content.split("\n")) {
+        const line = rawLine.replace(/\r$/, "");
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const parts = line.split("\t");
+        const divCode = parts[0]?.trim();
+        const cwidRaw = parts[1]?.trim();
+        if (!divCode || !cwidRaw) continue;
+        const cwid =
+          cwidRaw === "-" ? null : cwidRaw.toLowerCase();
+        const note = parts.slice(2).join("\t").trim();
+        overrideRows.push({ divCode, cwid, note });
+      }
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException;
+      if (e.code !== "ENOENT") throw err;
+    }
+
+    if (overrideRows.length > 0) {
+      const knownDivCodes = new Set(divisionsForChief.map((d) => d.code));
+      const knownScholarCwids = new Set(
+        (await prisma.scholar.findMany({ select: { cwid: true } })).map(
+          (s) => s.cwid,
+        ),
+      );
+      let overrideApplied = 0;
+      let overrideSkipped = 0;
+      for (const row of overrideRows) {
+        if (!knownDivCodes.has(row.divCode)) {
+          console.warn(
+            `[ED] division-chiefs override skipped — division ${row.divCode} not found`,
+          );
+          overrideSkipped += 1;
+          continue;
+        }
+        if (row.cwid && !knownScholarCwids.has(row.cwid)) {
+          console.warn(
+            `[ED] division-chiefs override skipped — cwid '${row.cwid}' not in scholar table (div ${row.divCode})`,
+          );
+          overrideSkipped += 1;
+          continue;
+        }
+        await prisma.division.update({
+          where: { code: row.divCode },
+          data: { chiefCwid: row.cwid },
+        });
+        overrideApplied += 1;
+      }
+      console.log(
+        `[ED] Path C: applied ${overrideApplied}/${overrideRows.length} division-chiefs overrides ` +
+          `(${overrideSkipped} skipped)`,
+      );
+    }
 
     // Phase 3 — scholarCount refresh.
     //
