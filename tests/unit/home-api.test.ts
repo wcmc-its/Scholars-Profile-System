@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => ({
   topicFindMany: vi.fn(),
   publicationFindMany: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
+  spotlightFindMany: vi.fn(),
+  scholarFindMany: vi.fn(),
+  publicationAuthorFindMany: vi.fn(),
   queryRaw: vi.fn(),
 }));
 const {
@@ -31,6 +34,9 @@ const {
   pubTopicGroupBy: mockPubTopicGroupBy,
   topicFindMany: mockTopicFindMany,
   publicationFindMany: mockPublicationFindMany,
+  spotlightFindMany: mockSpotlightFindMany,
+  scholarFindMany: mockScholarFindMany,
+  publicationAuthorFindMany: mockPublicationAuthorFindMany,
   queryRaw: mockQueryRaw,
 } = mocks;
 
@@ -49,6 +55,15 @@ vi.mock("@/lib/db", () => ({
     publication: {
       findMany: mocks.publicationFindMany,
     },
+    spotlight: {
+      findMany: mocks.spotlightFindMany,
+    },
+    scholar: {
+      findMany: mocks.scholarFindMany,
+    },
+    publicationAuthor: {
+      findMany: mocks.publicationAuthorFindMany,
+    },
     $queryRaw: mocks.queryRaw,
     $queryRawUnsafe: mocks.queryRaw,
   },
@@ -57,6 +72,7 @@ vi.mock("@/lib/db", () => ({
 import {
   getRecentContributions,
   getSelectedResearch,
+  getSpotlights,
   getBrowseAllResearchAreas,
 } from "@/lib/api/home";
 
@@ -145,8 +161,70 @@ beforeEach(() => {
   mockPubTopicGroupBy.mockReset();
   mockTopicFindMany.mockReset();
   mockPublicationFindMany.mockReset();
+  mockSpotlightFindMany.mockReset();
+  mockScholarFindMany.mockReset();
+  mockPublicationAuthorFindMany.mockReset();
   mockQueryRaw.mockReset();
 });
+
+// ---------- helpers for spotlight fixtures ----------
+
+function makeSpotlightRow(over: {
+  subtopicId: string;
+  parentTopicId: string;
+  displayName?: string;
+  shortDescription?: string;
+  lede?: string;
+  pmids: string[];
+}) {
+  return {
+    subtopicId: over.subtopicId,
+    parentTopicId: over.parentTopicId,
+    label: over.subtopicId.replace(/_/g, " "),
+    displayName: over.displayName ?? over.subtopicId.replace(/_/g, " "),
+    shortDescription: over.shortDescription ?? "",
+    lede: over.lede ?? `WCM scholars are advancing ${over.subtopicId}.`,
+    papers: over.pmids.map((pmid) => ({
+      pmid,
+      title: `Paper ${pmid}`,
+      journal: "Nature",
+      year: 2025,
+      // The artifact carries first_author / last_author but the DAL no
+      // longer reads them — see author-resolution policy in lib/api/home.ts.
+      first_author: { personIdentifier: "ignored", displayName: "Ignored", position: "first" },
+      last_author: { personIdentifier: "ignored", displayName: "Ignored", position: "last" },
+    })),
+    artifactVersion: "v2026-05-07",
+    refreshedAt: NOW,
+  };
+}
+
+function makeAuthorRow(over: {
+  pmid: string;
+  cwid: string;
+  position: number;
+  preferredName?: string;
+  slug?: string;
+}) {
+  return {
+    id: `${over.pmid}-${over.cwid}`,
+    pmid: over.pmid,
+    cwid: over.cwid,
+    externalName: null,
+    position: over.position,
+    totalAuthors: 5,
+    isFirst: false,
+    isLast: false,
+    isPenultimate: false,
+    isConfirmed: true,
+    lastRefreshedAt: NOW,
+    scholar: {
+      cwid: over.cwid,
+      slug: over.slug ?? `slug-${over.cwid}`,
+      preferredName: over.preferredName ?? `Name ${over.cwid}`,
+    },
+  };
+}
 
 describe("getRecentContributions (RANKING-01)", () => {
   it("returns null with sparse-state log when fewer than 3 cards qualify", async () => {
@@ -355,6 +433,180 @@ describe("getSelectedResearch (HOME-02)", () => {
     const result = await getSelectedResearch(NOW);
     expect(result).not.toBeNull();
     expect(result!.length).toBeLessThanOrEqual(8);
+  });
+});
+
+describe("getSpotlights (Phase 9 SPOTLIGHT-03)", () => {
+  it("returns null with sparse-state log when no spotlight rows exist", async () => {
+    mockSpotlightFindMany.mockResolvedValue([]);
+    mockTopicFindMany.mockResolvedValue([]);
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    expect(result).toBeNull();
+    const logged = warn.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("home_spotlights"),
+    )?.[0] as string | undefined;
+    expect(logged).toBeTruthy();
+    const parsed = JSON.parse(logged!);
+    expect(parsed.surface).toBe("home_spotlights");
+    expect(parsed.floor).toBe(6);
+    warn.mockRestore();
+  });
+
+  it("includes per-subtopic publication + scholar counts via raw aggregation", async () => {
+    mockSpotlightFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) =>
+        makeSpotlightRow({
+          subtopicId: `sub_${i}`,
+          parentTopicId: `parent_${i}`,
+          pmids: [`${4000 + i}`],
+        }),
+      ),
+    );
+    mockTopicFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({ id: `parent_${i}`, label: `Parent ${i}` })),
+    );
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) =>
+        makeAuthorRow({ pmid: `${4000 + i}`, cwid: `c${i}`, position: 1 }),
+      ),
+    );
+    // Raw count rows — note publication_count / scholar_count keys, BigInt-safe Number coercion expected.
+    mockQueryRaw.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({
+        parent_topic_id: `parent_${i}`,
+        primary_subtopic_id: `sub_${i}`,
+        publication_count: 40 + i,
+        scholar_count: 8 + i,
+      })),
+    );
+    const result = await getSpotlights();
+    expect(result).not.toBeNull();
+    expect(result![0].publicationCount).toBe(40);
+    expect(result![0].scholarCount).toBe(8);
+    expect(result![5].publicationCount).toBe(45);
+    expect(result![5].scholarCount).toBe(13);
+  });
+
+  it("projects spotlights using PublicationAuthor as the WCM-author source (not the artifact's first/last)", async () => {
+    // Six spotlights, each with 2 papers. Half the parents have WCM-author
+    // matches via PublicationAuthor; half have none (those spotlights drop).
+    const parents = [
+      "cell_molecular_biology", "translational_clinical_science",
+      "epidemiology_population_health", "biostatistics_quantitative_sciences",
+      "health_services_policy", "drug_discovery_pharmacology",
+      "genetics_genomics_precision_medicine", "surgery_perioperative_medicine",
+      "immunology_inflammation", "pathology_laboratory_medicine",
+    ];
+    mockSpotlightFindMany.mockResolvedValue(
+      parents.map((p, i) =>
+        makeSpotlightRow({
+          subtopicId: `sub_${i}`,
+          parentTopicId: p,
+          displayName: `Display ${i}`,
+          shortDescription: `Subtitle ${i}`,
+          lede: `WCM scholars are reshaping ${p}.`,
+          pmids: [`${1000 + i * 2}`, `${1001 + i * 2}`],
+        }),
+      ),
+    );
+    mockTopicFindMany.mockResolvedValue(
+      parents.map((p) => ({ id: p, label: p.replace(/_/g, " ") })),
+    );
+    // PublicationAuthor: every PMID gets two distinct WCM authors (positions 1 & 5).
+    const authorRows = parents.flatMap((_, i) => [
+      makeAuthorRow({ pmid: `${1000 + i * 2}`, cwid: `c${i}a`, position: 1, preferredName: `Author A${i}` }),
+      makeAuthorRow({ pmid: `${1000 + i * 2}`, cwid: `c${i}b`, position: 5, preferredName: `Author B${i}` }),
+      makeAuthorRow({ pmid: `${1001 + i * 2}`, cwid: `c${i}a`, position: 2, preferredName: `Author A${i}` }),
+    ]);
+    mockPublicationAuthorFindMany.mockResolvedValue(authorRows);
+
+    const result = await getSpotlights();
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(10);
+
+    // Render order is alphabetical by parentTopicId
+    const orderedParents = [...parents].sort();
+    expect(result!.map((c) => c.parentTopicSlug)).toEqual(orderedParents);
+
+    for (const card of result!) {
+      expect(card.papers.length).toBeGreaterThanOrEqual(1);
+      expect(card.lede).toMatch(/^WCM scholars are reshaping/);
+      // parentTopicLabel comes from Topic.label (not the raw id)
+      expect(card.parentTopicLabel).not.toBe(card.parentTopicSlug);
+      for (const paper of card.papers) {
+        expect(paper.authors.length).toBeGreaterThanOrEqual(1);
+        for (const author of paper.authors) {
+          expect(author.cwid).toBeTruthy();
+          expect(author.profileSlug).toBeTruthy();
+          expect(author.identityImageEndpoint).toContain(author.cwid);
+        }
+      }
+    }
+  });
+
+  it("drops papers with zero WCM-resolved authors and drops spotlights whose papers all dropped", async () => {
+    // Six spotlights, but only the first three have any WCM author rows.
+    // The other three should be filtered out, dropping us below the floor (6).
+    const parents = ["a", "b", "c", "d", "e", "f"];
+    mockSpotlightFindMany.mockResolvedValue(
+      parents.map((p, i) =>
+        makeSpotlightRow({
+          subtopicId: `sub_${p}`,
+          parentTopicId: p,
+          pmids: [`${9000 + i}`],
+        }),
+      ),
+    );
+    mockTopicFindMany.mockResolvedValue(
+      parents.map((p) => ({ id: p, label: p.toUpperCase() })),
+    );
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      makeAuthorRow({ pmid: "9000", cwid: "ca", position: 3 }),
+      makeAuthorRow({ pmid: "9001", cwid: "cb", position: 1 }),
+      makeAuthorRow({ pmid: "9002", cwid: "cc", position: 4 }),
+      // 9003 / 9004 / 9005 — no WCM authors → those spotlights drop
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = await getSpotlights();
+    // 3 surviving cards is below the floor of 6 → null + sparse-hide log.
+    expect(result).toBeNull();
+    const drops = warn.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("home_spotlight_dropped_no_wcm_authors"),
+    );
+    expect(drops.length).toBe(3);
+    const sparse = warn.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes('"surface":"home_spotlights"'),
+    );
+    expect(sparse).toBeTruthy();
+    warn.mockRestore();
+  });
+
+  it("orders authors by byline position (ascending)", async () => {
+    mockSpotlightFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) =>
+        makeSpotlightRow({
+          subtopicId: `sub_${i}`,
+          parentTopicId: `parent_${i}`,
+          pmids: ["7000"],
+        }),
+      ),
+    );
+    mockTopicFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({ id: `parent_${i}`, label: `Parent ${i}` })),
+    );
+    // Mock returns rows already ordered by position asc (mirrors the
+    // Prisma orderBy in the DAL).
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      makeAuthorRow({ pmid: "7000", cwid: "c1", position: 1, preferredName: "Alpha" }),
+      makeAuthorRow({ pmid: "7000", cwid: "c5", position: 5, preferredName: "Echo" }),
+      makeAuthorRow({ pmid: "7000", cwid: "c9", position: 9, preferredName: "Indigo" }),
+    ]);
+    const result = await getSpotlights();
+    expect(result).not.toBeNull();
+    const authors = result![0].papers[0].authors;
+    expect(authors.map((a) => a.displayName)).toEqual(["Alpha", "Echo", "Indigo"]);
   });
 });
 

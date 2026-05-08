@@ -2,9 +2,10 @@
  * Home-page data assembly. Reads scholars, publications, and topic taxonomy and
  * computes Variant B rankings from `lib/ranking.ts`.
  *
- * Three surfaces, three exported functions:
+ * Four surfaces, four exported functions:
  *   - getRecentContributions(): RecentContribution[] | null   (RANKING-01)
- *   - getSelectedResearch():    SubtopicCard[]      | null    (HOME-02)
+ *   - getSelectedResearch():    SubtopicCard[]      | null    (HOME-02; deprecated by getSpotlights, removed in Plan 09-07)
+ *   - getSpotlights():          SpotlightCard[]     | null    (Phase 9 SPOTLIGHT-03)
  *   - getBrowseAllResearchAreas(): ParentTopic[]              (HOME-03; never null)
  *
  * Sparse-state hide returns null + emits a structured log line per
@@ -38,6 +39,11 @@ const RECENT_CONTRIBUTIONS_TARGET = 6;
 const RECENT_CONTRIBUTIONS_FLOOR = 3;
 const SELECTED_RESEARCH_TARGET = 8;
 const SELECTED_RESEARCH_FLOOR = 4;
+// Phase 9 SPOTLIGHT-03 — upstream rotation pipeline targets 10/10 spotlights
+// (one per parent area). Floor is generous: hide the section only if the
+// publish degraded below half-coverage.
+const SPOTLIGHT_TARGET = 10;
+const SPOTLIGHT_FLOOR = 6;
 
 // Hard-excluded publication types (locked by design spec v1.7.1).
 const EXCLUDED_PUB_TYPES = ["Letter", "Editorial Article", "Erratum"] as const;
@@ -85,6 +91,67 @@ export type SubtopicCard = {
     year: number | null;
     firstWcmAuthor: { cwid: string; slug: string; preferredName: string } | null;
   }>;
+};
+
+// Phase 9 SPOTLIGHT-03 — projection of one row from the `spotlight` table,
+// joined to Topic (for the parent-topic display label) and to
+// PublicationAuthor + Scholar (for the WCM-only author list per paper).
+//
+// D-19 LOCKED reminder: `displayName`, `shortDescription`, and `lede` are
+// UI-only. Never pass them to an LLM, retrieval, or embedding path.
+//
+// Author-resolution policy (operator decision 2026-05-07):
+//
+//   The artifact ships first_author + last_author per paper, both labelled
+//   WCM upstream. We DO NOT trust those labels — upstream's WCM-author check
+//   (against ReciterAI's analysis_summary_author) sometimes admits non-WCM
+//   authors (observed: Tammela T at MSK shipping as the "WCM last author"
+//   for PMID 37808711 / 37931288 because cmr2006 / Charles Rudin was a middle
+//   author on the same paper).
+//
+//   SPS-side resolution: read `PublicationAuthor` for each paper's PMID,
+//   keep only rows where `cwid IS NOT NULL` AND the joined Scholar is
+//   non-deleted + active, sort by byline `position`, render with no upper
+//   bound at this layer (the component caps display + adds an ellipsis for
+//   the surplus). Papers with zero WCM-resolved authors are dropped from the
+//   spotlight; spotlights with zero surviving papers are dropped from the
+//   carousel.
+export type SpotlightAuthor = {
+  cwid: string;
+  displayName: string;
+  identityImageEndpoint: string;
+  profileSlug: string;
+};
+
+export type SpotlightPaperCard = {
+  pmid: string;
+  title: string;
+  journal: string;
+  year: number;
+  // 1+ WCM-resolved authors in byline-position order. Component decides
+  // how many to render and where to ellipsize.
+  authors: SpotlightAuthor[];
+};
+
+export type SpotlightCard = {
+  subtopicId: string;
+  parentTopicSlug: string;
+  parentTopicLabel: string;
+  // Artifact's display_name (D-19 UI field). Upstream pipeline guarantees
+  // nonempty via `display_name || label` fallback at ETL time.
+  displayName: string;
+  shortDescription: string;
+  // 25-35 word editorial lede; render verbatim per contract §Voice Contract.
+  lede: string;
+  // Aggregations over PublicationTopic for (parentTopicId, primarySubtopicId)
+  // restricted to D-15 floor + active non-deleted scholars. Used by the
+  // spotlight count line (`N publications · M scholars`) and by the
+  // "Browse all N publications →" link copy. Grants are intentionally
+  // omitted in v1 — Grant has no topic linkage in the current schema.
+  publicationCount: number;
+  scholarCount: number;
+  // 2-3 representative WCM publications.
+  papers: SpotlightPaperCard[];
 };
 
 export type HomeStats = {
@@ -440,6 +507,193 @@ export async function getSelectedResearch(
     } satisfies SubtopicCard;
   });
 }
+
+// ---------------------------------------------------------------------------
+// getSpotlights — Phase 9 SPOTLIGHT-03
+// ---------------------------------------------------------------------------
+
+/**
+ * 10 editorial spotlights from the ReciterAI rotation pipeline (`Spotlight`
+ * table, sole-written by `etl/spotlight/index.ts`). Each card pairs a 25-35
+ * word lede with 2-3 representative WCM publications, with first + last
+ * author photos resolved against the existing Scholar table.
+ *
+ * Sparse-state hide: returns null if fewer than `SPOTLIGHT_FLOOR` rows exist
+ * (publish degraded; section hides rather than render a half-empty layout).
+ * The upstream pipeline targets a steady 10/10; the floor is a defensive
+ * cushion, not the expected case.
+ *
+ * Render-order: deterministic alphabetical by `parentTopicId`. The artifact
+ * does not ship a position field; if editorial-priority ordering is ever
+ * required, add a column in a follow-up phase.
+ *
+ * D-19 LOCKED: `displayName`, `shortDescription`, and `lede` are UI-only.
+ * NEVER pass them to an LLM, retrieval, or embedding path. The
+ * synthesis-canonical fields are `label` (artifact-side) and `description`
+ * (Subtopic-side), neither of which is exposed in this DAL surface.
+ *
+ * D-06 (subtopic ID instability across hierarchy recomputes): each ETL run
+ * fully replaces the spotlight rows; this DAL never persists subtopic IDs
+ * outward.
+ */
+export async function getSpotlights(): Promise<SpotlightCard[] | null> {
+  // Step 1: Read all spotlight rows. Stable alphabetical order by
+  // parentTopicId, re-sorted in JS so the ordering invariant is enforced at
+  // the DAL boundary regardless of how the underlying driver interprets the
+  // orderBy.
+  const rowsRaw = await prisma.spotlight.findMany({
+    orderBy: { parentTopicId: "asc" },
+  });
+  const rows = [...rowsRaw].sort((a, b) =>
+    a.parentTopicId < b.parentTopicId ? -1 : a.parentTopicId > b.parentTopicId ? 1 : 0,
+  );
+
+  if (rows.length === 0) {
+    logSparseHide("home_spotlights", 0, SPOTLIGHT_FLOOR);
+    return null;
+  }
+
+  // Step 2: Resolve parent topic display labels in one batch.
+  const parentIds = Array.from(new Set(rows.map((r) => r.parentTopicId)));
+  const parents = await prisma.topic.findMany({
+    where: { id: { in: parentIds } },
+    select: { id: true, label: true },
+  });
+  const parentLabelById = new Map(parents.map((p) => [p.id, p.label]));
+
+  // Step 3: Collect every PMID across all papers, then batch-resolve WCM
+  // authors. Authoritative source is `publication_author` joined to
+  // `scholar` — NOT the artifact's first_author / last_author payload.
+  type ArtifactPaper = {
+    pmid: string;
+    title: string;
+    journal: string;
+    year: number;
+  };
+  const pmids = Array.from(
+    new Set(
+      rows.flatMap((r) =>
+        (r.papers as unknown as ArtifactPaper[]).map((p) => p.pmid),
+      ),
+    ),
+  );
+  const authorRows =
+    pmids.length > 0
+      ? await prisma.publicationAuthor.findMany({
+          where: {
+            pmid: { in: pmids },
+            cwid: { not: null },
+            scholar: { deletedAt: null, status: "active" },
+          },
+          include: {
+            scholar: { select: { cwid: true, slug: true, preferredName: true } },
+          },
+          orderBy: { position: "asc" },
+        })
+      : [];
+  const authorsByPmid = new Map<string, SpotlightAuthor[]>();
+  for (const row of authorRows) {
+    if (!row.scholar) continue;
+    const list = authorsByPmid.get(row.pmid) ?? [];
+    list.push({
+      cwid: row.scholar.cwid,
+      displayName: row.scholar.preferredName,
+      identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
+      profileSlug: row.scholar.slug,
+    });
+    authorsByPmid.set(row.pmid, list);
+  }
+
+  // Step 4: Aggregate publication + scholar counts per (parent, subtopic).
+  //
+  // Mirrors the pattern in getSelectedResearch — Prisma groupBy can't express
+  // COUNT(DISTINCT cwid), so a single raw query covers both counts in one
+  // round-trip. Restricted to D-15 floor (publication_topic only carries
+  // 2020+ data) and to active non-deleted scholars.
+  const subtopicPairs = rows.map((r) => ({
+    parent: r.parentTopicId,
+    sub: r.subtopicId,
+  }));
+  type CountRow = {
+    parent_topic_id: string;
+    primary_subtopic_id: string;
+    publication_count: number | bigint;
+    scholar_count: number | bigint;
+  };
+  const countRows: CountRow[] =
+    subtopicPairs.length > 0
+      ? ((await prisma.$queryRawUnsafe(
+          `SELECT pt.parent_topic_id, pt.primary_subtopic_id,
+                  COUNT(*) AS publication_count,
+                  COUNT(DISTINCT pt.cwid) AS scholar_count
+             FROM publication_topic pt
+             JOIN scholar s ON s.cwid = pt.cwid
+            WHERE pt.year >= ?
+              AND s.deleted_at IS NULL
+              AND s.status = 'active'
+              AND (${subtopicPairs.map(() => "(pt.parent_topic_id = ? AND pt.primary_subtopic_id = ?)").join(" OR ")})
+            GROUP BY pt.parent_topic_id, pt.primary_subtopic_id`,
+          RECITERAI_YEAR_FLOOR,
+          ...subtopicPairs.flatMap((p) => [p.parent, p.sub]),
+        )) as CountRow[]) ?? []
+      : [];
+  const countByPair = new Map<string, { pubs: number; scholars: number }>();
+  for (const r of countRows) {
+    countByPair.set(`${r.parent_topic_id}::${r.primary_subtopic_id}`, {
+      pubs: Number(r.publication_count),
+      scholars: Number(r.scholar_count),
+    });
+  }
+
+  // Step 5: Project + filter. Drop papers with no WCM-resolved authors;
+  // drop spotlights whose papers all dropped out.
+  const cards: SpotlightCard[] = [];
+  for (const row of rows) {
+    const artifactPapers = row.papers as unknown as ArtifactPaper[];
+    const papers: SpotlightPaperCard[] = [];
+    for (const p of artifactPapers) {
+      const authors = authorsByPmid.get(p.pmid) ?? [];
+      if (authors.length === 0) continue;
+      papers.push({
+        pmid: p.pmid,
+        title: p.title,
+        journal: p.journal,
+        year: p.year,
+        authors,
+      });
+    }
+    if (papers.length === 0) {
+      logSparseHide("home_spotlight_dropped_no_wcm_authors", 0, 1, {
+        subtopicId: row.subtopicId,
+        parentTopicId: row.parentTopicId,
+      });
+      continue;
+    }
+    const counts = countByPair.get(`${row.parentTopicId}::${row.subtopicId}`) ?? {
+      pubs: 0,
+      scholars: 0,
+    };
+    cards.push({
+      subtopicId: row.subtopicId,
+      parentTopicSlug: row.parentTopicId,
+      parentTopicLabel: parentLabelById.get(row.parentTopicId) ?? row.parentTopicId,
+      displayName: row.displayName,
+      shortDescription: row.shortDescription,
+      lede: row.lede,
+      publicationCount: counts.pubs,
+      scholarCount: counts.scholars,
+      papers,
+    });
+  }
+
+  if (cards.length < SPOTLIGHT_FLOOR) {
+    logSparseHide("home_spotlights", cards.length, SPOTLIGHT_FLOOR);
+    return null;
+  }
+  return cards;
+}
+
+void SPOTLIGHT_TARGET; // reserved for upstream consistency assertion in 09-04
 
 // ---------------------------------------------------------------------------
 // getBrowseAllResearchAreas — HOME-03
