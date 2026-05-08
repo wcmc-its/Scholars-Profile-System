@@ -7,7 +7,12 @@
  */
 export const METHODOLOGY_ANCHORS = {
   recentContributions: "recent-contributions",
+  /**
+   * @deprecated Use `spotlight`. Kept so existing inbound links to
+   * `/about/methodology#selected-research` resolve. Drop after one release.
+   */
   selectedResearch: "selected-research",
+  spotlight: "spotlight",
   topScholars: "top-scholars",
   recentHighlights: "recent-highlights",
   // Phase 4 additions — anchor IDs become part of the public URL; must be stable.

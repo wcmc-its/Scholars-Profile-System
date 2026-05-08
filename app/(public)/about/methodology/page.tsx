@@ -43,10 +43,12 @@ export default function MethodologyPage() {
         </p>
       </section>
 
-      <section id={METHODOLOGY_ANCHORS.selectedResearch} className="mt-12">
-        <h2 className="text-lg font-semibold">Selected research</h2>
+      <section id={METHODOLOGY_ANCHORS.spotlight} className="mt-12">
+        {/* Stable redirect anchor for the previous "Selected research" URL. Drop after one release. */}
+        <span id={METHODOLOGY_ANCHORS.selectedResearch} aria-hidden className="sr-only" />
+        <h2 className="text-lg font-semibold">Spotlight</h2>
         <p className="mt-3 text-base">
-          The Selected research carousel shows eight subtopics with the
+          The Spotlight section surfaces a rotating set of subtopics with the
           strongest recent activity at WCM, one per parent area. The score for
           each subtopic sums per-publication scores using the Recent highlights
           recency curve. Refreshes weekly with the ReCiterAI cadence.
@@ -232,7 +234,7 @@ export default function MethodologyPage() {
           Note: the profile most-recent-papers feed reuses the
           <code> recent_contributions </code>
           recency curve (6–18 month sweet spot) because both surfaces are
-          recent scholar-attributed views. The Selected research curve was
+          recent scholar-attributed views. The Spotlight curve was
           considered and rejected — the profile recent feed is year-grouped
           and recency-sorted, so emphasizing the 6–18 month band matches the
           surface&apos;s intent.

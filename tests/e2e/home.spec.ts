@@ -71,11 +71,11 @@ test.describe("home page", () => {
     }
   });
 
-  test("if Selected research carousel renders, has methodology link to /about/methodology#selected-research", async ({
+  test("if Spotlight section renders, has methodology link to /about/methodology#spotlight", async ({
     page,
   }) => {
     await page.goto("/");
-    const heading = page.getByRole("heading", { name: "Selected research" });
+    const heading = page.getByRole("heading", { name: "Spotlight" });
     if (await heading.isVisible().catch(() => false)) {
       const section = page.locator("section").filter({ has: heading });
       const methodologyLink = section
@@ -83,7 +83,7 @@ test.describe("home page", () => {
         .first();
       await expect(methodologyLink).toBeVisible();
       const href = await methodologyLink.getAttribute("href");
-      expect(href).toContain("/about/methodology#selected-research");
+      expect(href).toContain("/about/methodology#spotlight");
     }
   });
 });
