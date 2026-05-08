@@ -455,7 +455,8 @@ export type EntityKind =
   | "subtopic"
   | "department"
   | "division"
-  | "center";
+  | "center"
+  | "institute";
 
 export type EntitySuggestion = {
   kind: EntityKind;
@@ -552,9 +553,27 @@ export async function suggestEntities(
               department: { slug: string; name: string } | null;
             }>,
         ),
-      Promise.resolve(
-        [] as Array<{ slug: string; name: string; scholarCount: number }>,
-      ),
+      prisma.center
+        .findMany({
+          where: { name: { contains: trimmed } },
+          orderBy: { name: "asc" },
+          take: perKind,
+          select: {
+            slug: true,
+            name: true,
+            scholarCount: true,
+            centerType: true,
+          },
+        })
+        .catch(
+          () =>
+            [] as Array<{
+              slug: string;
+              name: string;
+              scholarCount: number;
+              centerType: string;
+            }>,
+        ),
     ]);
 
   const out: EntitySuggestion[] = [];
@@ -626,12 +645,14 @@ export async function suggestEntities(
   }
 
   for (const c of centers) {
+    const isInstitute = c.centerType === "institute";
+    const kindLabel = isInstitute ? "Institute" : "Center";
     out.push({
-      kind: "center",
+      kind: isInstitute ? "institute" : "center",
       title: c.name,
       subtitle: c.scholarCount
-        ? `Center · ${c.scholarCount.toLocaleString()} scholars`
-        : "Center",
+        ? `${kindLabel} · ${c.scholarCount.toLocaleString()} members`
+        : kindLabel,
       href: `/centers/${c.slug}`,
     });
   }

@@ -26,6 +26,7 @@ type Seed = {
   slug: string;
   description: string;
   sortOrder: number;
+  centerType: "center" | "institute";
 };
 
 const CENTERS: Seed[] = [
@@ -36,6 +37,7 @@ const CENTERS: Seed[] = [
     description:
       "Genomic medicine, precision diagnostics, and translational therapeutics across cancer, rare disease, and immunology.",
     sortOrder: 10,
+    centerType: "institute",
   },
   {
     code: "meyer_cancer_center",
@@ -44,6 +46,7 @@ const CENTERS: Seed[] = [
     description:
       "NCI-designated cancer center spanning basic, translational, and clinical oncology research at WCM and NewYork-Presbyterian.",
     sortOrder: 20,
+    centerType: "center",
   },
   {
     code: "cardiovascular_ri",
@@ -52,6 +55,7 @@ const CENTERS: Seed[] = [
     description:
       "Multidisciplinary cardiovascular science from molecular pathways to clinical trials, including the cardio-oncology consortium.",
     sortOrder: 40,
+    centerType: "institute",
   },
   {
     code: "computational_biomed",
@@ -60,6 +64,7 @@ const CENTERS: Seed[] = [
     description:
       "Computational genomics, biomedical informatics, machine learning in medicine, and clinical decision support research.",
     sortOrder: 50,
+    centerType: "institute",
   },
   {
     code: "aging_research",
@@ -68,6 +73,7 @@ const CENTERS: Seed[] = [
     description:
       "Geroscience, late-life cognitive and physical decline, and the clinical care of older adults across WCM and partner sites.",
     sortOrder: 60,
+    centerType: "center",
   },
   {
     code: "iris_cantor_womens_health",
@@ -76,6 +82,7 @@ const CENTERS: Seed[] = [
     description:
       "Sex-specific medicine, reproductive endocrinology, and clinical research focused on women's cardiovascular and metabolic health.",
     sortOrder: 70,
+    centerType: "center",
   },
   {
     code: "inflammation_research",
@@ -84,6 +91,7 @@ const CENTERS: Seed[] = [
     description:
       "Innate and adaptive immunity in chronic disease, autoimmune mechanisms, and immunotherapy development.",
     sortOrder: 80,
+    centerType: "center",
   },
   {
     code: "health_equity",
@@ -92,6 +100,7 @@ const CENTERS: Seed[] = [
     description:
       "Population health, social determinants of health, and disparities research across NYC and national cohorts.",
     sortOrder: 90,
+    centerType: "center",
   },
 ];
 
@@ -108,6 +117,7 @@ async function main() {
         slug: c.slug,
         description: c.description,
         sortOrder: c.sortOrder,
+        centerType: c.centerType,
         source: "seed",
       },
       update: {
@@ -115,6 +125,7 @@ async function main() {
         slug: c.slug,
         description: c.description,
         sortOrder: c.sortOrder,
+        centerType: c.centerType,
       },
     });
     existing ? updated++ : inserted++;

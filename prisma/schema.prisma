@@ -311,6 +311,11 @@ model Center {
   name         String   @db.VarChar(255)
   slug         String   @unique @db.VarChar(255)
   description  String?  @db.Text
+  /// Presentation kind: "center" (default) or "institute". Drives the badge
+  /// color in autocomplete and search results — institutes (typically NCI/NIH-
+  /// designated, larger, more endowed) get their own teal badge; centers get
+  /// purple. Backfilled by name match in 20260508120000_add_center_type.
+  centerType   String   @default("center") @map("center_type") @db.VarChar(16)
   directorCwid String?  @map("director_cwid") @db.VarChar(32)
   scholarCount Int      @default(0) @map("scholar_count")
   sortOrder    Int      @default(0) @map("sort_order")

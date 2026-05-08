@@ -5,13 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type EntityKind =
-  | "person"
-  | "topic"
-  | "subtopic"
-  | "department"
-  | "division"
-  | "center";
+import type { EntityKind } from "@/lib/api/search";
+import { EntityBadge } from "@/components/ui/entity-badge";
 
 type Suggestion = {
   kind: EntityKind;
@@ -19,24 +14,6 @@ type Suggestion = {
   subtitle?: string;
   href: string;
   cwid?: string;
-};
-
-const KIND_LABEL: Record<EntityKind, string> = {
-  person: "Person",
-  topic: "Topic",
-  subtopic: "Subtopic",
-  department: "Department",
-  division: "Division",
-  center: "Center",
-};
-
-const KIND_TAG_CLASS: Record<EntityKind, string> = {
-  person: "bg-[#e8eef4] text-[#2c4f6e]",
-  topic: "bg-[#fde9c8] text-[#8a5500]",
-  subtopic: "bg-[#fff3df] text-[#8a5500]",
-  department: "bg-[#e8eef4] text-[#2c4f6e]",
-  division: "bg-[#eef1f5] text-[#3a5066]",
-  center: "bg-[#f3e9ec] text-[#8a2436]",
 };
 
 type Variant = "header" | "hero";
@@ -165,14 +142,19 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       {open && suggestions.length > 0 ? (
         <ul
           role="listbox"
-          className="border-border absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border bg-background text-left shadow-lg"
+          className="border-border absolute left-0 right-0 top-full z-30 mt-2 max-h-[60vh] overflow-y-auto overflow-x-hidden rounded-md border bg-background text-left shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_6px_rgba(0,0,0,0.08)]"
         >
           {suggestions.map((s, i) => (
-            <li key={`${s.kind}-${s.href}-${i}`} role="option" aria-selected={i === activeIndex}>
+            <li
+              key={`${s.kind}-${s.href}-${i}`}
+              role="option"
+              aria-selected={i === activeIndex}
+              className="border-t border-zinc-100 first:border-t-0 dark:border-zinc-800"
+            >
               <Link
                 href={s.href}
-                className={`flex items-center gap-3 border-t border-zinc-100 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 ${
-                  i === activeIndex ? "bg-zinc-50 dark:bg-zinc-800" : ""
+                className={`flex items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-[#fafaf8] dark:hover:bg-zinc-800 ${
+                  i === activeIndex ? "bg-[#f5f3ee] dark:bg-zinc-800" : ""
                 }`}
                 onClick={() => setOpen(false)}
                 onMouseEnter={() => setActiveIndex(i)}
@@ -185,11 +167,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                     <span className="block truncate text-left text-xs text-zinc-500">{s.subtitle}</span>
                   ) : null}
                 </span>
-                <span
-                  className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider ${KIND_TAG_CLASS[s.kind]}`}
-                >
-                  {KIND_LABEL[s.kind]}
-                </span>
+                <EntityBadge kind={s.kind} />
               </Link>
             </li>
           ))}

@@ -31,7 +31,7 @@
   --text-base: 15px;
   --text-lg: 18px;
   --text-4xl: 44px;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-serif: 'Charter', 'Tiempos', 'Georgia', serif;
   /* Weights (only normal + semibold used in Phase 2 per UI-SPEC checker) */
   --weight-normal: 400;
@@ -116,5 +116,31 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
   }
 }
+
+/* Entity-type badges per design spec §17 (issue #71). Pinned to a dedicated
+   class with explicit pixel values + Inter font-family on the element so the
+   badge renders byte-exact regardless of page-level font fallback. Box fills
+   carry the visual weight; no border. All seven combinations meet WCAG AA at
+   10px size. */
+.entity-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 4px;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.entity-badge--person     { background: #e8eef3; color: #3a4a5c; }
+.entity-badge--topic      { background: #f5edd8; color: #6b5024; }
+.entity-badge--subtopic   { background: #faf2e0; color: #8a6a30; }
+.entity-badge--department { background: #e6efe6; color: #3a553e; }
+.entity-badge--division   { background: #eef4ee; color: #52755a; }
+.entity-badge--center     { background: #ede8f1; color: #4d3d6b; }
+.entity-badge--institute  { background: #e0eded; color: #2c5862; }
