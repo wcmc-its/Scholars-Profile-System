@@ -135,7 +135,7 @@ export default async function ScholarProfilePage({
         {/* ============== Sidebar ============== */}
         <aside className="md:sticky md:top-[calc(var(--header-h,60px)+24px)] md:self-start md:max-h-[calc(100vh-var(--header-h,60px)-32px)] md:overflow-y-auto">
           <div className="mb-5 text-center">
-            <div className="mx-auto mb-3 size-24">
+            <div className="mb-3 flex justify-center">
               <HeadshotAvatar
                 size="lg"
                 cwid={profile.cwid}
