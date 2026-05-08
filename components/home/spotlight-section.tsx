@@ -132,10 +132,14 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
   // Four navigation targets per spec. Visual treatment: no underline at rest,
   // underline on hover. Text reads as content; hover reveals the affordance.
   // Default <a> cursor handles the pointer state.
-  const subtopicHref = `/topics/${card.parentTopicSlug}?subtopic=${card.subtopicId}`;
+  // Land the user on the publication feed for the requested subtopic — not at
+  // the top of the topic page. The topic page exposes a stable
+  // id="publications" anchor on the SubtopicPublicationLayout root (#3).
+  const subtopicBase = `/topics/${card.parentTopicSlug}?subtopic=${card.subtopicId}`;
+  const subtopicHref = `${subtopicBase}#publications`;
   const parentHref = `/topics/${card.parentTopicSlug}`;
-  const pubsHref = `${subtopicHref}#publications`;
-  const scholarsHref = `${subtopicHref}#top-scholars`;
+  const pubsHref = subtopicHref;
+  const scholarsHref = `${subtopicBase}#top-scholars`;
   const noUnderlineHover =
     "no-underline hover:underline underline-offset-4 decoration-1";
 
