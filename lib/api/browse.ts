@@ -5,9 +5,11 @@
  *   - getDepartmentsList():   one BrowseDepartment per dept, with category,
  *                             division chip-row, and top topic chips.
  *   - getCentersList():       one BrowseCenter per row in `center`.
- *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per letter.
- *   - getBrowseData():        composite — calls the three in parallel and
- *                             returns departments grouped by category.
+ *   - getAZBuckets():         A-Z directory buckets, capped at 10 names per
+ *                             letter. Consumed by /search empty-People state
+ *                             (relocated from /browse per docs/browse-vs-search.md).
+ *   - getBrowseData():        composite for /browse — calls departments + centers
+ *                             in parallel and returns departments grouped by category.
  *
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
@@ -75,7 +77,6 @@ export type BrowseData = {
   /** Same data, grouped by category for the Browse hub render. */
   departmentsByCategory: CategorizedDepartments;
   centers: BrowseCenter[];
-  azBuckets: AZBucket[];
 };
 
 type DeptRow = {
@@ -299,10 +300,9 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
 }
 
 export async function getBrowseData(): Promise<BrowseData> {
-  const [departments, centers, azBuckets] = await Promise.all([
+  const [departments, centers] = await Promise.all([
     getDepartmentsList(),
     getCentersList(),
-    getAZBuckets(),
   ]);
 
   const departmentsByCategory: CategorizedDepartments = {
@@ -315,5 +315,5 @@ export async function getBrowseData(): Promise<BrowseData> {
     departmentsByCategory[d.category].push(d);
   }
 
-  return { departments, departmentsByCategory, centers, azBuckets };
+  return { departments, departmentsByCategory, centers };
 }

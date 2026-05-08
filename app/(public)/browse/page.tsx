@@ -12,26 +12,24 @@ import { BrowseHero } from "@/components/browse/browse-hero";
 import { BrowseAnchorStrip } from "@/components/browse/browse-anchor-strip";
 import { DepartmentsGrid } from "@/components/browse/departments-grid";
 import { CentersGrid } from "@/components/browse/centers-grid";
-import { AZDirectory } from "@/components/browse/az-directory";
 
 /**
- * Browse hub — BROWSE-01.
+ * Departments & Centers hub.
  *
- * ISR with on-demand revalidation. The /api/revalidate webhook (Plan 02
- * extension) fires `revalidatePath("/browse")` after each daily ETL
- * completes; in addition, the time-based revalidate of 3600s caps drift
- * for any path not covered by the webhook.
+ * ISR with on-demand revalidation. The /api/revalidate webhook fires
+ * `revalidatePath("/browse")` after each daily ETL completes; the time-based
+ * revalidate of 3600s caps drift for any path not covered by the webhook.
  *
- * Page composes five Server / Client Components consuming a single
- * getBrowseData() call. Centers section is always an empty-state placeholder
- * because no Center model exists in the schema (RESEARCH.md Pitfall 4).
+ * URL retained as /browse (no redirect) per docs/browse-vs-search.md. The
+ * A–Z directory used to live here; it now renders on /search's empty People
+ * tab. Surname-finding belongs with search, not org-structure exploration.
  */
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: "Browse Scholars — Scholars at WCM",
+  title: "Departments & Centers — Scholars at WCM",
   description:
-    "Explore WCM faculty by department, research area, or alphabetically.",
+    "Explore WCM departments, divisions, and centers, and the scholars who lead them.",
   alternates: { canonical: "/browse" },
 };
 
@@ -47,7 +45,7 @@ export default async function BrowsePage() {
           </BreadcrumbItem>
           <BreadcrumbSeparator>›</BreadcrumbSeparator>
           <BreadcrumbItem>
-            <BreadcrumbPage>Browse</BreadcrumbPage>
+            <BreadcrumbPage>Departments &amp; Centers</BreadcrumbPage>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
@@ -59,7 +57,6 @@ export default async function BrowsePage() {
         departmentsByCategory={data.departmentsByCategory}
       />
       <CentersGrid centers={data.centers} />
-      <AZDirectory buckets={data.azBuckets} />
     </main>
   );
 }

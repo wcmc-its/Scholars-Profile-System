@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * A-Z Directory — UI-SPEC §6.5.
+ * A-Z Directory.
  * Client Component. All data is pre-bucketed by getAZBuckets() in
  * lib/api/browse.ts and passed as props at server render time. The only
  * runtime state is `openLetter` — single-letter-open toggle behavior.
  *
- * No fetches, no Prisma calls inside this file (RESEARCH.md anti-pattern
- * "Making the A-Z component server-fetching").
+ * Renders on /search's empty People tab (relocated from /browse per
+ * docs/browse-vs-search.md). Container margin is unset; the parent
+ * decides spacing.
+ *
+ * No fetches, no Prisma calls inside this file.
  */
 import { useState } from "react";
 import {
@@ -31,10 +34,10 @@ export function AZDirectory({ buckets }: { buckets: AZBucket[] }) {
   const openBucket = openLetter ? bucketMap.get(openLetter) : undefined;
 
   return (
-    <section id="az-directory" className="mt-16">
+    <section id="az-directory">
       <h2 className="text-lg font-semibold">A&ndash;Z Directory</h2>
 
-      <div className="bg-muted rounded-lg p-3 mt-6 flex flex-wrap gap-1">
+      <div className="bg-muted rounded-lg p-3 mt-3 flex flex-wrap gap-1">
         {ALL_LETTERS.map((letter) => {
           const b = bucketMap.get(letter);
           const hasScholars = !!b && b.count > 0;
