@@ -48,6 +48,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    let ignore = false;
     const timer = setTimeout(async () => {
       try {
         const resp = await fetch(`/api/search/suggest?q=${encodeURIComponent(value)}`, {
@@ -55,6 +56,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
         });
         if (!resp.ok) return;
         const data = (await resp.json()) as { suggestions: Suggestion[] };
+        if (ignore) return;
         setSuggestions(data.suggestions ?? []);
         setActiveIndex(-1);
         setOpen(true);
@@ -62,7 +64,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
         if ((e as Error).name === "AbortError") return;
       }
     }, 150);
-    return () => clearTimeout(timer);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
   }, [value]);
 
   useEffect(() => {
@@ -77,6 +82,8 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
 
   const submit = () => {
     if (value.trim().length === 0) return;
+    abortRef.current?.abort();
+    setSuggestions([]);
     setOpen(false);
     router.push(`/search?q=${encodeURIComponent(value.trim())}`);
   };
@@ -104,8 +111,10 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               if (activeIndex >= 0 && suggestions[activeIndex]) {
-                router.push(suggestions[activeIndex].href);
+                abortRef.current?.abort();
+                setSuggestions([]);
                 setOpen(false);
+                router.push(suggestions[activeIndex].href);
               } else {
                 submit();
               }
