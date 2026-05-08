@@ -1,6 +1,7 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
 import { htmlToPlainText } from "@/lib/utils";
+import { formatRoleCategory } from "@/lib/role-display";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -44,7 +45,10 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
           >
             {hit.preferredName}
           </a>
-          {hit.roleCategory && <RoleTag role={hit.roleCategory} />}
+          {hit.roleCategory && (() => {
+            const label = formatRoleCategory(hit.roleCategory);
+            return label ? <RoleTag role={label} /> : null;
+          })()}
         </div>
         {hit.primaryTitle && (
           <div className="mb-[2px] text-[13px] text-muted-foreground">

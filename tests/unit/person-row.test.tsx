@@ -18,58 +18,58 @@ const baseHit: DepartmentFacultyHit = {
 };
 
 describe("PersonRow", () => {
-  it("renders all 11 role tag values: Full-time faculty", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Full-time faculty" }} />);
+  it("formats FULL_TIME_FACULTY enum to 'Full-time faculty' label", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "FULL_TIME_FACULTY" }} />);
     expect(screen.getByText("Full-time faculty")).toBeTruthy();
   });
 
-  it("renders Voluntary faculty role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Voluntary faculty" }} />);
+  it("formats VOLUNTARY_FACULTY enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "VOLUNTARY_FACULTY" }} />);
     expect(screen.getByText("Voluntary faculty")).toBeTruthy();
   });
 
-  it("renders Adjunct faculty role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Adjunct faculty" }} />);
+  it("formats ADJUNCT_FACULTY enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "ADJUNCT_FACULTY" }} />);
     expect(screen.getByText("Adjunct faculty")).toBeTruthy();
   });
 
-  it("renders Courtesy faculty role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Courtesy faculty" }} />);
+  it("formats COURTESY_FACULTY enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "COURTESY_FACULTY" }} />);
     expect(screen.getByText("Courtesy faculty")).toBeTruthy();
   });
 
-  it("renders Faculty emeritus role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Faculty emeritus" }} />);
+  it("formats FACULTY_EMERITUS enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "FACULTY_EMERITUS" }} />);
     expect(screen.getByText("Faculty emeritus")).toBeTruthy();
   });
 
-  it("renders Instructor role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Instructor" }} />);
+  it("formats INSTRUCTOR enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "INSTRUCTOR" }} />);
     expect(screen.getByText("Instructor")).toBeTruthy();
   });
 
-  it("renders Lecturer role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Lecturer" }} />);
+  it("formats LECTURER enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "LECTURER" }} />);
     expect(screen.getByText("Lecturer")).toBeTruthy();
   });
 
-  it("renders Postdoc role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Postdoc" }} />);
+  it("formats POSTDOC enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "POSTDOC" }} />);
     expect(screen.getByText("Postdoc")).toBeTruthy();
   });
 
-  it("renders Fellow role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Fellow" }} />);
+  it("formats FELLOW enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "FELLOW" }} />);
     expect(screen.getByText("Fellow")).toBeTruthy();
   });
 
-  it("renders Research staff role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Research staff" }} />);
+  it("formats RESEARCH_STAFF enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "RESEARCH_STAFF" }} />);
     expect(screen.getByText("Research staff")).toBeTruthy();
   });
 
-  it("renders Doctoral student role tag", () => {
-    render(<PersonRow hit={{ ...baseHit, roleCategory: "Doctoral student" }} />);
+  it("formats DOCTORAL_STUDENT enum", () => {
+    render(<PersonRow hit={{ ...baseHit, roleCategory: "DOCTORAL_STUDENT" }} />);
     expect(screen.getByText("Doctoral student")).toBeTruthy();
   });
 
