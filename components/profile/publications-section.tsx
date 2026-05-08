@@ -29,8 +29,14 @@ const BUCKET_ORDER: ReadonlyArray<{ key: Bucket; label: string }> = [
 
 export function PublicationsSection({
   publications,
+  filterActive = false,
 }: {
   publications: ProfilePublication[];
+  /** Set by `<ProfilePubsCluster>` when a topic filter is active. Expands
+   *  every year-group within the last 10 years (per the published max year)
+   *  on top of the default "first group only" behavior, so users browsing a
+   *  filtered set don't have to click open year after year (issue #73). */
+  filterActive?: boolean;
 }) {
   const [bucket, setBucket] = useState<Bucket>("all");
   const [query, setQuery] = useState("");
@@ -67,6 +73,37 @@ export function PublicationsSection({
   const searchActive = query.trim().length > 0;
 
   const pubGroups = useMemo(() => groupPublicationsByYear(filtered), [filtered]);
+
+  // For filterActive: expand every year-group whose latest year is within 10
+  // of the most recent year in the filtered set. Individual-year groups use
+  // their year directly; bucket groups use their `bucketEnd`. Undated groups
+  // never auto-open.
+  const recentGroupKeys = useMemo(() => {
+    if (!filterActive || pubGroups.length === 0) return new Set<string>();
+    let maxYear = 0;
+    for (const g of pubGroups) {
+      const y = g.key.startsWith("y")
+        ? Number(g.key.slice(1))
+        : g.key.startsWith("b")
+          ? Number(g.key.split("-").pop())
+          : NaN;
+      if (Number.isFinite(y) && y > maxYear) maxYear = y;
+    }
+    if (maxYear === 0) return new Set<string>();
+    const threshold = maxYear - 9;
+    const keys = new Set<string>();
+    for (const g of pubGroups) {
+      const latestInGroup = g.key.startsWith("y")
+        ? Number(g.key.slice(1))
+        : g.key.startsWith("b")
+          ? Number(g.key.split("-").pop())
+          : NaN;
+      if (Number.isFinite(latestInGroup) && latestInGroup >= threshold) {
+        keys.add(g.key);
+      }
+    }
+    return keys;
+  }, [pubGroups, filterActive]);
 
   return (
     <>
@@ -109,14 +146,15 @@ export function PublicationsSection({
       ) : (
         <div className="divide-y divide-border">
           {pubGroups.map((g, gi) => {
-            const open = searchActive || gi === 0;
-            // Bake the search-active flag into the React key so toggling it
+            const open = searchActive || gi === 0 || recentGroupKeys.has(g.key);
+            // Bake the controlling flags into the React key so toggling them
             // re-mounts the <details> element, letting the new `open` value
             // win over the user's accumulated click state. Without this,
             // native <details> remains in whatever state the user last set.
+            const controlSig = `${searchActive ? "s" : ""}${filterActive ? "f" : ""}` || "auto";
             return (
               <details
-                key={`${g.key}:${searchActive ? "open" : "auto"}`}
+                key={`${g.key}:${controlSig}`}
                 open={open}
                 className="group"
               >

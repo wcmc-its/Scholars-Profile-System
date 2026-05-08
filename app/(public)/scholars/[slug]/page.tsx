@@ -5,9 +5,11 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
-import { PublicationsSection } from "@/components/profile/publications-section";
+import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
+import { PublicationsSection } from "@/components/profile/publications-section";
 import {
   getActiveScholarSlugs,
   getScholarFullProfileBySlug,
@@ -251,20 +253,6 @@ export default async function ScholarProfilePage({
             </Section>
           ) : null}
 
-          {profile.areasOfInterest.length > 0 ? (
-            <Section title="Areas of interest">
-              <ul className="flex flex-wrap gap-2">
-                {profile.areasOfInterest.map((t) => (
-                  <li key={t.topic}>
-                    <Badge variant="secondary" className="text-sm font-normal">
-                      {t.topic}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          ) : null}
-
           {profile.highlights.length > 0 ? (
             <Section title="Selected highlights" headingLg>
               <ol className="flex flex-col">
@@ -296,7 +284,15 @@ export default async function ScholarProfilePage({
                 </>
               }
             >
-              <PublicationsSection publications={profile.publications} />
+              <Suspense
+                fallback={<PublicationsSection publications={profile.publications} />}
+              >
+                <ProfilePubsCluster
+                  publications={profile.publications}
+                  keywords={profile.keywords.keywords}
+                  totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
+                />
+              </Suspense>
             </Section>
           ) : null}
 
