@@ -85,3 +85,4 @@ scripts/debug-*.ts
 scripts/probe-*.ts
 scripts/query-reciterdb.ts
 scripts/query-scholars.ts
+.screenshots/

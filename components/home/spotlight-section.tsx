@@ -96,17 +96,15 @@ export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-lg font-semibold">Spotlight</h2>
+      <h2 className="text-lg font-semibold">Spotlight</h2>
+      <p className="text-muted-foreground mt-1 text-sm italic">
+        Subtopics with the strongest recent activity at WCM, one per parent area, refreshed monthly.{" "}
         <a
           href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.spotlight}`}
-          className="text-[var(--color-accent-slate)] text-sm font-medium underline-offset-4 hover:underline"
+          className="font-semibold text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
         >
-          How this works
+          How this works →
         </a>
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm italic">
-        Subtopics with the strongest recent activity at WCM, one per parent area, refreshed weekly.
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
