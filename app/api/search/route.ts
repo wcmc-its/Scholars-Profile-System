@@ -41,6 +41,7 @@ export async function GET(request: NextRequest) {
     );
     const filters: FundingFilters = {
       funder: orUndefined(params.getAll("funder")),
+      directFunder: orUndefined(params.getAll("directFunder")),
       programType: orUndefined(params.getAll("programType")),
       mechanism: orUndefined(params.getAll("mechanism")),
       status: status.length > 0 ? status : undefined,

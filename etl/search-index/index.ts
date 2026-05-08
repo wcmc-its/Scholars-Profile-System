@@ -21,12 +21,15 @@
  */
 import { prisma } from "../../lib/db";
 import {
+  FUNDING_INDEX,
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
+  fundingIndexMapping,
   peopleIndexMapping,
   publicationsIndexMapping,
   searchClient,
 } from "@/lib/search";
+import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
 
 const AUTHORSHIP_WEIGHTS = {
   firstOrLast: 10,
@@ -480,10 +483,83 @@ async function indexPublications() {
   return totalIndexed;
 }
 
+async function indexFunding() {
+  const client = searchClient();
+  const rows = await prisma.grant.findMany({
+    where: { scholar: { deletedAt: null, status: "active" } },
+    select: {
+      cwid: true,
+      externalId: true,
+      title: true,
+      role: true,
+      startDate: true,
+      endDate: true,
+      awardNumber: true,
+      programType: true,
+      primeSponsor: true,
+      primeSponsorRaw: true,
+      directSponsor: true,
+      directSponsorRaw: true,
+      mechanism: true,
+      nihIc: true,
+      isSubaward: true,
+      scholar: {
+        select: {
+          slug: true,
+          preferredName: true,
+          primaryDepartment: true,
+        },
+      },
+    },
+  });
+
+  // Group by Account_Number — the project key. All rows for one project
+  // share canonical fields by construction; the per-row variation is who
+  // is on the project (cwid + role + scholar).
+  const byProject = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const ext = parseExternalId(r.externalId);
+    if (!ext) continue;
+    const arr = byProject.get(ext.accountNumber) ?? [];
+    arr.push(r);
+    byProject.set(ext.accountNumber, arr);
+  }
+
+  const docs: Array<{ projectId: string; doc: Record<string, unknown> }> = [];
+  for (const projectRows of byProject.values()) {
+    const doc = projectFromRows(projectRows);
+    if (doc) docs.push({ projectId: doc.projectId, doc: doc as unknown as Record<string, unknown> });
+  }
+
+  if (docs.length === 0) return 0;
+
+  const CHUNK = 500;
+  for (let i = 0; i < docs.length; i += CHUNK) {
+    const chunk = docs.slice(i, i + CHUNK);
+    const body: Record<string, unknown>[] = [];
+    for (const { projectId, doc } of chunk) {
+      body.push({ index: { _index: FUNDING_INDEX, _id: projectId } });
+      body.push(doc);
+    }
+    const resp = await client.bulk({ refresh: true, body });
+    if (resp.body.errors) {
+      const firstError = resp.body.items.find(
+        (it: { index?: { error?: unknown } }) => it.index?.error,
+      );
+      throw new Error(
+        `Funding bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
+      );
+    }
+    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} funding projects`);
+  }
+  return docs.length;
+}
+
 async function main() {
   console.log("Recreating indices...");
   await ensureIndex(PEOPLE_INDEX, peopleIndexMapping);
   await ensureIndex(PUBLICATIONS_INDEX, publicationsIndexMapping);
+  await ensureIndex(FUNDING_INDEX, fundingIndexMapping);
 
   console.log("Indexing people...");
   const peopleCount = await indexPeople();
@@ -491,7 +567,12 @@ async function main() {
   console.log("Indexing publications...");
   const pubCount = await indexPublications();
 
-  console.log(`Indexed ${peopleCount} scholars and ${pubCount} publications.`);
+  console.log("Indexing funding...");
+  const fundingCount = await indexFunding();
+
+  console.log(
+    `Indexed ${peopleCount} scholars, ${pubCount} publications, ${fundingCount} funding projects.`,
+  );
 }
 
 main()

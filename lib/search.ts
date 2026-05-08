@@ -23,6 +23,7 @@ export function searchClient(): Client {
 
 export const PEOPLE_INDEX = "scholars-people";
 export const PUBLICATIONS_INDEX = "scholars-publications";
+export const FUNDING_INDEX = "scholars-funding";
 
 /**
  * Mapping for the people index. Note that authorship-weighted contributions
@@ -179,6 +180,96 @@ export const publicationsIndexMapping = {
     },
   },
 };
+
+/**
+ * Mapping for the funding index (issue #80 items 4 + 5). One document per
+ * *project* — pre-deduped at index time across the per-(scholar,
+ * account_number) Grant rows so the search layer doesn't need a JS-side
+ * group-by. Most facet axes index as keyword arrays so multi-select
+ * filtering with `terms` queries OR within an axis cleanly.
+ *
+ * Status (active / ending_soon / recently_ended) is intentionally NOT a
+ * stored field — the 12-month NCE grace window means the bucket would
+ * drift between re-indexes. Status is computed at query time via date
+ * range filters and range aggregations against `endDate`.
+ */
+export const fundingIndexMapping = {
+  settings: {
+    "index.max_result_window": 100000,
+    analysis: {
+      analyzer: {
+        funding_text: {
+          type: "custom" as const,
+          tokenizer: "standard",
+          filter: ["lowercase", "english_stop", "english_stemmer"],
+        },
+      },
+      filter: {
+        english_stop: { type: "stop", stopwords: "_english_" },
+        english_stemmer: { type: "stemmer", language: "english" },
+      },
+    },
+  },
+  mappings: {
+    properties: {
+      projectId: { type: "keyword" },
+      title: { type: "text", analyzer: "funding_text" },
+      // Concatenated sponsor strings — canonical short, full name, raw
+      // form, and aliases — for both prime and direct. Lets a query like
+      // "AstraZeneca" match a project even when only the alias resolved.
+      sponsorText: { type: "text", analyzer: "funding_text" },
+      // WCM scholar names on the project, joined for full-text match.
+      peopleNames: { type: "text", analyzer: "funding_text" },
+
+      // Facet axes. Multi-valued fields use `keyword` so `terms` filter
+      // does an exact OR-within-axis. (issue #80 multi-select preserved.)
+      primeSponsor: { type: "keyword" },
+      directSponsor: { type: "keyword" },
+      isSubaward: { type: "boolean" },
+      programType: { type: "keyword" },
+      mechanism: { type: "keyword" },
+      nihIc: { type: "keyword" },
+      department: { type: "keyword" },
+      // Role keyword array per project — populated with every bucket the
+      // project belongs to (PI, Multi-PI, Co-I) so a single `terms` filter
+      // matches without post-aggregation logic.
+      roles: { type: "keyword" },
+
+      startDate: { type: "date" },
+      endDate: { type: "date" },
+
+      // Hit-rendering payload — saved with the doc so a result page can
+      // hydrate `FundingHit` without a Prisma round-trip.
+      awardNumber: { type: "keyword" },
+      primeSponsorRaw: { type: "keyword" },
+      directSponsorRaw: { type: "keyword" },
+      isMultiPi: { type: "boolean" },
+      totalPeople: { type: "integer" },
+      // Pre-rendered people chips (already sorted lead-PI first by indexer).
+      people: {
+        type: "nested",
+        properties: {
+          cwid: { type: "keyword" },
+          slug: { type: "keyword" },
+          preferredName: { type: "text" },
+          role: { type: "keyword" },
+        },
+      },
+    },
+  },
+};
+
+/**
+ * Boost weights for the funding-index multi_match query. Title carries
+ * the strongest signal; sponsor text comes next so a query for a sponsor
+ * name surfaces relevant projects; people names are informative but not
+ * dominant (a sloppy people-name match shouldn't outrank a direct title hit).
+ */
+export const FUNDING_FIELD_BOOSTS: ReadonlyArray<string> = [
+  "title^4",
+  "sponsorText^2",
+  "peopleNames^1",
+];
 
 /**
  * Per-field boost weights (spec lines 156, 165). Used by the people-index
