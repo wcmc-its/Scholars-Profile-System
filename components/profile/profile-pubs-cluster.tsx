@@ -4,8 +4,20 @@ import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
+import {
+  deriveAuthorPositionRole,
+  matchesPositionFilter,
+  type PositionFilter,
+} from "@/components/profile/author-position-badge";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
+
+const VALID_POSITIONS: ReadonlySet<PositionFilter> = new Set([
+  "all",
+  "first",
+  "senior",
+  "co_author",
+]);
 
 /**
  * Issue #73 — orchestrates the Topics row, the active-filter banner, and the
@@ -44,11 +56,20 @@ export function ProfilePubsCluster({
     return out;
   }, [searchParams]);
 
+  const position: PositionFilter = useMemo(() => {
+    const raw = searchParams.get("position");
+    return raw && VALID_POSITIONS.has(raw as PositionFilter)
+      ? (raw as PositionFilter)
+      : "all";
+  }, [searchParams]);
+
   const writeUrl = useCallback(
-    (next: string[]) => {
+    (nextMesh: string[], nextPosition: PositionFilter) => {
       const params = new URLSearchParams(Array.from(searchParams.entries()));
-      if (next.length === 0) params.delete("mesh");
-      else params.set("mesh", next.join(","));
+      if (nextMesh.length === 0) params.delete("mesh");
+      else params.set("mesh", nextMesh.join(","));
+      if (nextPosition === "all") params.delete("position");
+      else params.set("position", nextPosition);
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -61,12 +82,18 @@ export function ProfilePubsCluster({
         selectedUis.includes(ui)
           ? selectedUis.filter((x) => x !== ui)
           : [...selectedUis, ui],
+        position,
       );
     },
-    [selectedUis, writeUrl],
+    [selectedUis, position, writeUrl],
   );
 
-  const onClearAll = useCallback(() => writeUrl([]), [writeUrl]);
+  const onClearAll = useCallback(() => writeUrl([], "all"), [writeUrl]);
+
+  const onPositionChange = useCallback(
+    (next: PositionFilter) => writeUrl(selectedUis, next),
+    [selectedUis, writeUrl],
+  );
 
   // Only resolved keywords (descriptorUi !== null) participate in URL state, so
   // selectedSet keys map cleanly to the keyword catalog.
@@ -80,15 +107,26 @@ export function ProfilePubsCluster({
       .filter((k): k is ScholarKeyword => Boolean(k));
   }, [keywords, selectedUis]);
 
-  // Filter publications to those tagged with at least one selected keyword
-  // (OR semantics). Pre-filtering happens here so the existing
+  // Filter publications by topic (any-selected OR semantics, #73) AND
+  // position (#72). Pre-filtering happens here so the existing
   // PublicationsSection and its year-group bucketing get a coherent input
   // and update for free.
   const filteredPublications = useMemo(() => {
-    if (selectedUis.length === 0) return publications;
-    const wanted = new Set(selectedUis);
-    return publications.filter((p) => p.meshTerms.some((t) => t.ui && wanted.has(t.ui)));
-  }, [publications, selectedUis]);
+    let out = publications;
+    if (selectedUis.length > 0) {
+      const wanted = new Set(selectedUis);
+      out = out.filter((p) => p.meshTerms.some((t) => t.ui && wanted.has(t.ui)));
+    }
+    if (position !== "all") {
+      out = out.filter((p) => {
+        const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
+        return matchesPositionFilter(role, position);
+      });
+    }
+    return out;
+  }, [publications, selectedUis, position]);
+
+  const filterActive = selectedUis.length > 0 || position !== "all";
 
   return (
     <>
@@ -105,12 +143,15 @@ export function ProfilePubsCluster({
       <ActiveFilterBanner
         count={filteredPublications.length}
         selected={selectedKeywords}
+        position={position}
         onClearAll={onClearAll}
       />
 
       <PublicationsSection
         publications={filteredPublications}
-        filterActive={selectedUis.length > 0}
+        filterActive={filterActive}
+        position={position}
+        onPositionChange={onPositionChange}
       />
     </>
   );
