@@ -86,12 +86,25 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.overflowCount).toBe(0);
   });
 
-  it("matches a subtopic by displayName, builds parent-aware href", async () => {
+  it("substring-matches a parent topic ('cancer' → 'Breast Cancer')", async () => {
+    mockTopicFindMany.mockResolvedValue([
+      { id: "breast_cancer", label: "Breast Cancer" },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+
+    const r = await matchQueryToTaxonomy("cancer");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.primary.id).toBe("breast_cancer");
+  });
+
+  it("substring-matches a subtopic on displayName, builds parent-aware href", async () => {
     mockTopicFindMany.mockResolvedValue([]);
     mockSubtopicFindMany.mockResolvedValue([
       {
         id: "cardio_oncology",
-        label: "Cardio-oncology",
+        // Long LLM-canonical label is ignored for matching when displayName is set.
+        label: "Conservative management of cardiovascular complications in cancer therapy",
         displayName: "Cardio-oncology",
         parentTopicId: "cardiovascular_disease",
         parentTopic: { label: "Cardiovascular Disease" },
@@ -103,10 +116,49 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.state).toBe("matches");
     if (r.state !== "matches") return;
     expect(r.primary.entityType).toBe("subtopic");
+    expect(r.primary.name).toBe("Cardio-oncology");
     expect(r.primary.href).toBe(
       "/topics/cardiovascular_disease?subtopic=cardio_oncology",
     );
-    expect(r.primary.parentTopicLabel).toBe("Cardiovascular Disease");
+  });
+
+  it("ignores subtopic label content when displayName is set (precision over recall)", async () => {
+    // Common keywords buried in long LLM-canonical labels should NOT trigger the
+    // callout when the displayName doesn't carry them — keeps the surface signal-rich
+    // even when /search/q=cancer would otherwise match hundreds of subtopic labels.
+    mockTopicFindMany.mockResolvedValue([]);
+    mockSubtopicFindMany.mockResolvedValue([
+      {
+        id: "x",
+        label: "Conservative management of localized prostate cancer via active surveillance",
+        displayName: "Active Surveillance & Focal Therapy",
+        parentTopicId: "prostate_cancer",
+        parentTopic: { label: "Prostate Cancer" },
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([]);
+
+    const r = await matchQueryToTaxonomy("cancer");
+    expect(r.state).toBe("none");
+  });
+
+  it("falls back to subtopic label when displayName is null (long-tail)", async () => {
+    mockTopicFindMany.mockResolvedValue([]);
+    mockSubtopicFindMany.mockResolvedValue([
+      {
+        id: "long_tail_sub",
+        label: "Cardio-oncology",
+        displayName: null,
+        parentTopicId: "cv",
+        parentTopic: { label: "CV" },
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([]);
+
+    const r = await matchQueryToTaxonomy("cardio-oncology");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.primary.name).toBe("Cardio-oncology");
   });
 
   it("ranks parent topic above subtopic when both match the same query", async () => {
@@ -172,12 +224,12 @@ describe("matchQueryToTaxonomy", () => {
   });
 
   it("caps secondary at 4 and reports overflowCount for the rest", async () => {
-    // 6 same-name subtopics: 1 primary + 5 secondary; cap = 4 inline, overflow = 1.
+    // 6 substring-matching subtopics: 1 primary + 5 secondary; cap = 4 inline, overflow = 1.
     mockTopicFindMany.mockResolvedValue([]);
     mockSubtopicFindMany.mockResolvedValue(
       Array.from({ length: 6 }, (_, i) => ({
         id: `sub_${i}`,
-        label: "Genomics",
+        label: `Genomics variant ${i}`,
         displayName: null,
         parentTopicId: `parent_${i}`,
         parentTopic: { label: `Parent ${i}` },
