@@ -1,20 +1,32 @@
 "use client";
 
 /**
- * Departments list — flat, type-filterable, sortable.
+ * Departments list — flat, name-filterable, type-filterable, sortable.
  *
- * Single list of all departments with a per-row type badge. Toggleable
- * type filter and a sort toggle (faculty count desc by default, or name).
- * Filter and sort state live in the URL (`?type=clinical,basic&sort=name`)
- * via `router.replace`, so deep-links and back-button restore state.
+ * Single list of all departments (Library inline as a peer, not its own
+ * group) with a per-row type badge and a controls bar:
+ *   - free-text name filter (left, transient — no URL sync)
+ *   - type-toggle chips (right) with unfiltered per-category counts
+ *   - sort toggle (far right): Name (A–Z) default, or Faculty count
  *
- * Client Component so filter/sort can run instantly without a server
- * round-trip and without invalidating the parent /browse page's ISR.
- * The full department list (~24 rows) is passed in once at render time.
+ * Type and sort live in the URL (`?type=clinical,basic&sort=count`) via
+ * `router.replace`, so deep-links and back-button restore those. The
+ * name filter is intentionally not URL-synced — it's a narrow-the-view
+ * affordance, not a shareable selection.
+ *
+ * Client Component so filter/sort run instantly without a server round-
+ * trip and without invalidating the parent /browse page's ISR. The full
+ * department list (~24 rows) ships once at render time and filters in
+ * the browser.
+ *
+ * Row variant is driven by *expandable content*, not category: a row
+ * with at least one division or top research area renders as <details>
+ * with a real caret; otherwise it's a flat row with a hidden-caret
+ * placeholder so the dept-name column stays aligned across the list.
  */
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
 
@@ -27,21 +39,21 @@ const TYPE_FILTER_ORDER: ReadonlyArray<DepartmentCategory> = [
 
 const TYPE_BADGE_LABELS: Record<DepartmentCategory, string> = {
   clinical: "Clinical",
-  basic: "Basic science",
+  basic: "Basic Science",
   mixed: "Basic & Clinical",
   administrative: "Administrative",
 };
 
 const TYPE_BADGE_CLASSES: Record<DepartmentCategory, string> = {
-  clinical: "bg-[#eaf0f5] text-[#2c4f6e] border-[#c5d3df]",
-  basic: "bg-[#e8f1ea] text-[#2e5b3a] border-[#c8d8cc]",
-  mixed: "bg-[#f6eee0] text-[#7a5916] border-[#e3d4ad]",
-  administrative: "bg-zinc-100 text-zinc-700 border-zinc-200",
+  clinical: "bg-[#eef4f9] text-[#2c4f6e]",
+  basic: "bg-[#eaf4ec] text-[#2c5f3a]",
+  mixed: "bg-[#f5edd8] text-[#6b5024]",
+  administrative: "bg-[#f0eded] text-[#5a5854]",
 };
 
 const VALID_TYPE_TOKENS = new Set<string>(TYPE_FILTER_ORDER);
 
-type SortMode = "count" | "name";
+type SortMode = "name" | "count";
 
 function parseTypes(raw: string | null): Set<DepartmentCategory> {
   if (!raw) return new Set();
@@ -53,7 +65,11 @@ function parseTypes(raw: string | null): Set<DepartmentCategory> {
 }
 
 function parseSort(raw: string | null): SortMode {
-  return raw === "name" ? "name" : "count";
+  return raw === "count" ? "count" : "name";
+}
+
+function isExpandable(d: BrowseDepartment): boolean {
+  return d.divisions.length > 0 || d.topResearchAreas.length > 0;
 }
 
 export function DepartmentsGrid({
@@ -70,6 +86,7 @@ export function DepartmentsGrid({
     [searchParams],
   );
   const sortMode = parseSort(searchParams.get("sort"));
+  const [nameFilter, setNameFilter] = useState("");
 
   const categoryCounts = useMemo(() => {
     const counts: Record<DepartmentCategory, number> = {
@@ -83,21 +100,27 @@ export function DepartmentsGrid({
   }, [departments]);
 
   const visible = useMemo(() => {
-    const filtered =
-      activeTypes.size === 0
-        ? departments
-        : departments.filter((d) => activeTypes.has(d.category));
+    let filtered = departments;
+    if (activeTypes.size > 0) {
+      filtered = filtered.filter((d) => activeTypes.has(d.category));
+    }
+    const needle = nameFilter.trim().toLowerCase();
+    if (needle) {
+      filtered = filtered.filter((d) =>
+        d.name.toLowerCase().includes(needle),
+      );
+    }
     const sorted = [...filtered];
-    if (sortMode === "name") {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
-    } else {
+    if (sortMode === "count") {
       sorted.sort(
         (a, b) =>
           b.scholarCount - a.scholarCount || a.name.localeCompare(b.name),
       );
+    } else {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
     }
     return sorted;
-  }, [departments, activeTypes, sortMode]);
+  }, [departments, activeTypes, sortMode, nameFilter]);
 
   function pushState(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -119,7 +142,12 @@ export function DepartmentsGrid({
   }
 
   function setSort(s: SortMode) {
-    pushState({ sort: s === "count" ? null : s });
+    pushState({ sort: s === "name" ? null : s });
+  }
+
+  function clearAll() {
+    pushState({ type: null });
+    setNameFilter("");
   }
 
   if (departments.length === 0) {
@@ -137,6 +165,7 @@ export function DepartmentsGrid({
     visible.length === departments.length
       ? `${departments.length} departments`
       : `${visible.length} of ${departments.length} departments`;
+  const isFiltered = activeTypes.size > 0 || nameFilter.trim().length > 0;
 
   return (
     <section id="departments" className="mt-0">
@@ -150,8 +179,30 @@ export function DepartmentsGrid({
         grants.
       </p>
 
-      <div className="mt-5 flex flex-col gap-2.5 border-b border-border pb-4">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="mt-5 flex flex-wrap items-center gap-3 border-y border-border py-3">
+        <label className="relative shrink-0 grow basis-[260px] sm:grow-0">
+          <span className="sr-only">Filter departments by name</span>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          >
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M10.5 10.5L13 13" />
+          </svg>
+          <input
+            type="search"
+            value={nameFilter}
+            onChange={(e) => setNameFilter(e.target.value)}
+            placeholder="Filter departments..."
+            className="w-full rounded-md border border-border bg-white py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-zinc-400 focus:outline-none"
+          />
+        </label>
+
+        <div className="flex flex-wrap items-center gap-1.5 sm:ml-auto">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
             Type
           </span>
@@ -163,46 +214,38 @@ export function DepartmentsGrid({
                 type="button"
                 onClick={() => toggleType(t)}
                 aria-pressed={isActive}
-                className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
+                className={`rounded-full border px-2.5 py-[3px] text-[12.5px] font-normal transition-colors ${
                   isActive
-                    ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-                    : "border-zinc-300 bg-white text-foreground hover:border-zinc-400"
+                    ? "border-foreground bg-foreground text-white"
+                    : "border-border bg-white text-foreground/80 hover:border-zinc-400"
                 }`}
               >
-                {TYPE_BADGE_LABELS[t]}{" "}
+                {TYPE_BADGE_LABELS[t]}
                 <span
-                  className={
-                    isActive ? "text-white/80" : "text-muted-foreground"
-                  }
+                  className={`ml-1 text-[11.5px] ${
+                    isActive ? "text-white/60" : "text-muted-foreground"
+                  }`}
                 >
                   {categoryCounts[t]}
                 </span>
               </button>
             );
           })}
-          {activeTypes.size > 0 ? (
-            <button
-              type="button"
-              onClick={() => pushState({ type: null })}
-              className="ml-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
-            >
-              Clear
-            </button>
-          ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
             Sort
           </span>
           <SortButton
-            label="Faculty count"
-            isActive={sortMode === "count"}
-            onClick={() => setSort("count")}
-          />
-          <SortButton
             label="Name (A–Z)"
             isActive={sortMode === "name"}
             onClick={() => setSort("name")}
+          />
+          <SortButton
+            label="Faculty count"
+            isActive={sortMode === "count"}
+            onClick={() => setSort("count")}
           />
         </div>
       </div>
@@ -213,22 +256,24 @@ export function DepartmentsGrid({
           <button
             type="button"
             className="text-[var(--color-accent-slate)] hover:underline"
-            onClick={() => pushState({ type: null })}
+            onClick={clearAll}
           >
-            Clear filter
+            {isFiltered ? "Clear filters" : "Reset"}
           </button>
         </div>
       ) : (
         <ul className="divide-y divide-border">
-          {visible.map((d) => (
-            <li key={d.code}>
-              {d.category === "administrative" ? (
-                <DeptRowFlat dept={d} />
-              ) : (
+          {visible.map((d) =>
+            isExpandable(d) ? (
+              <li key={d.code}>
                 <DeptRowExpandable dept={d} />
-              )}
-            </li>
-          ))}
+              </li>
+            ) : (
+              <li key={d.code}>
+                <DeptRowFlat dept={d} />
+              </li>
+            ),
+          )}
         </ul>
       )}
     </section>
@@ -249,10 +294,10 @@ function SortButton({
       type="button"
       onClick={onClick}
       aria-pressed={isActive}
-      className={`rounded-full border px-2.5 py-[3px] text-xs font-medium transition-colors ${
+      className={`rounded-full border px-2.5 py-[3px] text-[12.5px] font-normal transition-colors ${
         isActive
-          ? "border-[var(--color-accent-slate)] bg-[var(--color-accent-slate)] text-white"
-          : "border-zinc-300 bg-white text-foreground hover:border-zinc-400"
+          ? "border-foreground bg-foreground text-white"
+          : "border-border bg-white text-foreground/80 hover:border-zinc-400"
       }`}
     >
       {label}
@@ -263,52 +308,54 @@ function SortButton({
 function TypeBadge({ category }: { category: DepartmentCategory }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded-full border px-2 py-[1px] text-[10px] font-medium uppercase tracking-[0.04em] ${TYPE_BADGE_CLASSES[category]}`}
+      className={`inline-flex shrink-0 items-center rounded-full px-2 py-[3px] text-[10px] font-medium uppercase tracking-[0.06em] ${TYPE_BADGE_CLASSES[category]}`}
     >
       {TYPE_BADGE_LABELS[category]}
     </span>
   );
 }
 
+function HeadLine({ dept }: { dept: BrowseDepartment }) {
+  if (!dept.chairName) return null;
+  const label = dept.category === "administrative" ? "Director" : "Chair";
+  return (
+    <div className="mt-0.5 text-xs text-muted-foreground">
+      <span className="font-medium text-foreground/70">{label}:</span>{" "}
+      {dept.chairName}
+    </div>
+  );
+}
+
 function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
   return (
-    <Link
-      href={`/departments/${dept.slug}`}
-      className="flex items-center gap-3 py-3 hover:no-underline"
-    >
-      <span className="inline-block w-3" aria-hidden="true" />
+    <div className="flex items-center gap-3 py-3">
+      <span
+        className="inline-block w-3 text-[10px] text-transparent"
+        aria-hidden="true"
+      >
+        ▶
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]">
+        <Link
+          href={`/departments/${dept.slug}`}
+          className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
+        >
           {dept.name}
-        </div>
-        {dept.chairName ? (
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/70">Chair:</span>{" "}
-            {dept.chairName}
-          </div>
-        ) : null}
+        </Link>
+        <HeadLine dept={dept} />
       </div>
       <TypeBadge category={dept.category} />
-    </Link>
+    </div>
   );
 }
 
 function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
-  const summaryParts: string[] = [];
-  if (dept.divisions.length > 0) {
-    summaryParts.push(
-      `${dept.divisions.length} ${
-        dept.divisions.length === 1 ? "division" : "divisions"
-      }`,
-    );
-  }
-  if (dept.topResearchAreas.length > 0) {
-    summaryParts.push(
-      `${dept.topResearchAreas.length} ${
-        dept.topResearchAreas.length === 1 ? "research area" : "research areas"
-      }`,
-    );
-  }
+  const divisionCount =
+    dept.divisions.length > 0
+      ? `${dept.divisions.length} ${
+          dept.divisions.length === 1 ? "division" : "divisions"
+        }`
+      : null;
 
   return (
     <details className="group">
@@ -323,16 +370,11 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           >
             {dept.name}
           </Link>
-          {dept.chairName ? (
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground/70">Chair:</span>{" "}
-              {dept.chairName}
-            </div>
-          ) : null}
+          <HeadLine dept={dept} />
         </div>
-        {summaryParts.length > 0 ? (
+        {divisionCount ? (
           <div className="hidden whitespace-nowrap text-sm tabular-nums text-muted-foreground sm:block">
-            {summaryParts.join(" · ")}
+            {divisionCount}
           </div>
         ) : null}
         <TypeBadge category={dept.category} />
