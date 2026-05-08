@@ -110,8 +110,18 @@ export function mechanismVerbose(code: string | null | undefined): string {
   if (!code) return "";
   const m = getMechanism(code);
   if (!m) return code;
+  const desc = mechanismDescriptor(code);
+  return desc ? `${m.code} - ${desc}` : m.code;
+}
+
+/** Just the descriptor (no code prefix, no trailing `(code)` suffix).
+ *  Returns null when the mechanism isn't in the lookup so callers can
+ *  decide whether to render the dash + descriptor at all. */
+export function mechanismDescriptor(code: string | null | undefined): string | null {
+  const m = getMechanism(code);
+  if (!m) return null;
   const stripped = m.full.replace(/\s*\([^)]+\)\s*$/, "").trim();
-  return `${m.code} - ${stripped}`;
+  return stripped.length > 0 ? stripped : null;
 }
 
 export function listMechanisms(): readonly Mechanism[] {
