@@ -12,6 +12,7 @@ import {
   type SearchFacetBucket,
 } from "@/lib/api/search";
 import { formatRoleCategory } from "@/lib/role-display";
+import { sanitizePubTitle } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -249,7 +250,9 @@ async function PublicationsResults({
           />
         ) : (
           <ul className="mt-4 flex flex-col gap-1 divide-y divide-zinc-200 dark:divide-zinc-800">
-            {result.hits.map((h) => (
+            {result.hits.map((h) => {
+              const titleHtml = sanitizePubTitle(h.title);
+              return (
               <li key={h.pmid} className="py-4">
                 <div className="font-medium leading-snug">
                   {h.pubmedUrl ? (
@@ -258,11 +261,10 @@ async function PublicationsResults({
                       target="_blank"
                       rel="noopener noreferrer"
                       className="hover:underline"
-                    >
-                      {h.title}
-                    </a>
+                      dangerouslySetInnerHTML={{ __html: titleHtml }}
+                    />
                   ) : (
-                    h.title
+                    <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
                   )}
                 </div>
                 <AuthorChipRow authors={h.wcmAuthors} />
@@ -272,7 +274,8 @@ async function PublicationsResults({
                   {h.citationCount > 0 ? ` · ${h.citationCount} citations` : ""}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
         <Pagination

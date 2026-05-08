@@ -20,6 +20,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { CuratedTag } from "@/components/topic/curated-tag";
+import { sanitizePubTitle } from "@/lib/utils";
 
 type Sort = "newest" | "most_cited" | "by_impact" | "curated";
 type Filter = "research_articles_only" | "all";
@@ -177,7 +178,9 @@ export function PublicationFeed({
             )}
           </div>
           <ul className="divide-y divide-border">
-            {data.hits.map((h) => (
+            {data.hits.map((h) => {
+              const titleHtml = sanitizePubTitle(h.title);
+              return (
               <li key={h.pmid} className="py-4">
                 <div className="line-clamp-2 font-semibold leading-snug">
                   {h.pubmedUrl ? (
@@ -186,11 +189,10 @@ export function PublicationFeed({
                       target="_blank"
                       rel="noopener noreferrer"
                       className="hover:underline"
-                    >
-                      {h.title}
-                    </a>
+                      dangerouslySetInnerHTML={{ __html: titleHtml }}
+                    />
                   ) : (
-                    h.title
+                    <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
                   )}
                 </div>
                 <AuthorChipRow authors={h.authors} />
@@ -224,7 +226,8 @@ export function PublicationFeed({
                   )}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           <PaginationRow
