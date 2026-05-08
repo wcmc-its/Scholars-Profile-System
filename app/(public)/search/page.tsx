@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/search";
 import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -267,6 +268,36 @@ function ModeTab({
 type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
 type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 
+// One-shot label resolver for the dept/div/center facet. Cheap because
+// the three tables are small; called once per page render. Centers and
+// departments key on `code`, divisions key on `${deptCode}--${divCode}`,
+// and the long-tail free-text fallback uses the bare name.
+async function resolveDeptDivLabels(): Promise<Map<string, string>> {
+  const [depts, divs, centers] = await Promise.all([
+    prisma.department.findMany({ select: { code: true, name: true } }),
+    prisma.division.findMany({
+      select: { code: true, name: true, deptCode: true },
+    }),
+    prisma.center.findMany({ select: { code: true, name: true } }),
+  ]);
+  const deptByCode = new Map(depts.map((d) => [d.code, d.name]));
+  const out = new Map<string, string>();
+  for (const d of depts) out.set(d.code, d.name);
+  for (const div of divs) {
+    const dn = deptByCode.get(div.deptCode);
+    out.set(`${div.deptCode}--${div.code}`, dn ? `${div.name} — ${dn}` : div.name);
+  }
+  for (const c of centers) out.set(`center:${c.code}`, c.name);
+  return out;
+}
+
+function deptDivLabel(key: string, map: Map<string, string>): string {
+  const direct = map.get(key);
+  if (direct) return direct;
+  if (key.startsWith("name:")) return key.slice(5);
+  return key;
+}
+
 async function PeopleResults({
   q,
   page,
@@ -284,6 +315,7 @@ async function PeopleResults({
   activity: ActivityFilter[];
   result: PeopleResultData;
 }) {
+  const deptDivLabelMap = await resolveDeptDivLabels();
   // Two URL builders share one base. `resetPage` is true for any link that
   // changes the result set (toggle a facet, change sort, swap tab) — those
   // should land on page 0. Pagination links pass `resetPage: false` so the
@@ -325,11 +357,7 @@ async function PeopleResults({
 
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
 
-  // One chip per selected value. Labels resolved from the facet buckets
-  // when available (deptDiv keys are opaque codes), else humanized.
-  const labelByDeptDiv = new Map(
-    result.facets.deptDivs.map((b) => [b.value, b.label]),
-  );
+  // One chip per selected value.
   const chips: Array<{ label: string; removeHref: string }> = [];
   for (const v of personType) {
     chips.push({
@@ -339,7 +367,7 @@ async function PeopleResults({
   }
   for (const v of deptDiv) {
     chips.push({
-      label: labelByDeptDiv.get(v) ?? v,
+      label: deptDivLabel(v, deptDivLabelMap),
       removeHref: removeHref("deptDiv", v),
     });
   }
@@ -352,10 +380,17 @@ async function PeopleResults({
 
   const hasActiveFilters = chips.length > 0;
 
+  // Inject resolved labels onto each dept/div/center bucket so the
+  // sidebar can render human strings without a second Prisma round-trip.
+  const deptDivBuckets = result.facets.deptDivs.map((b) => ({
+    ...b,
+    label: deptDivLabel(b.value, deptDivLabelMap),
+  }));
+
   return (
     <>
       <FacetSidebar
-        deptDivs={result.facets.deptDivs}
+        deptDivs={deptDivBuckets}
         personTypes={result.facets.personTypes}
         activity={result.facets.activity}
         activeDeptDiv={deptDiv}
@@ -837,7 +872,7 @@ function FacetSidebar({
       ) : null}
 
       {deptDivs.length > 0 ? (
-        <FacetGroup label="Department / division" collapseAfter={5}>
+        <FacetGroup label="Department / division / center" collapseAfter={5}>
           {sortActiveFirst(deptDivs, (d) => activeDeptDiv.includes(d.value)).map((d) => (
             <FacetCheckbox
               key={d.value}
@@ -845,6 +880,7 @@ function FacetSidebar({
               count={d.count}
               isActive={activeDeptDiv.includes(d.value)}
               href={toggleHref("deptDiv", d.value)}
+              wrap
             />
           ))}
         </FacetGroup>
@@ -1022,12 +1058,42 @@ function FacetCheckbox({
   count,
   isActive,
   href,
+  wrap,
 }: {
   label: string;
   count?: number;
   isActive?: boolean;
   href: string;
+  /** When true, allow the label to wrap to multiple lines (matches the
+   *  Journal facet treatment) and pin the input + count to the first
+   *  line via items-start. Default behavior truncates with ellipsis. */
+  wrap?: boolean;
 }) {
+  if (wrap) {
+    return (
+      <li className="py-1 leading-[1.4]">
+        <Link
+          href={href}
+          className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+        >
+          <input
+            type="checkbox"
+            readOnly
+            checked={!!isActive}
+            tabIndex={-1}
+            aria-hidden="true"
+            className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
+          />
+          <span className="min-w-0 flex-1 break-words">{label}</span>
+          {count !== undefined ? (
+            <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+              {count.toLocaleString()}
+            </span>
+          ) : null}
+        </Link>
+      </li>
+    );
+  }
   return (
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
       <Link
@@ -1044,9 +1110,9 @@ function FacetCheckbox({
           aria-hidden="true"
           className="cursor-pointer accent-[#2c4f6e]"
         />
-        {/* Truncate keeps the count column straight when names are long
-            ("Pathology and Laboratory Medicine"); the title attribute on
-            the parent surfaces the full label on hover. */}
+        {/* Truncate keeps the count column straight when names are short
+            and predictable. The title attribute surfaces the full label
+            on hover for the rare overflow. */}
         <span className="min-w-0 flex-1 truncate">{label}</span>
         {count !== undefined ? (
           <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">

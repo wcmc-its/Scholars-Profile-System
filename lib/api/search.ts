@@ -287,12 +287,11 @@ export async function searchPeople(opts: {
   const aggs: Record<string, unknown> = {
     deptDivs: {
       filter: { bool: { must, filter: filtersExcept("deptDiv") } },
-      aggs: {
-        keys: {
-          terms: { field: "deptDivKey", size: 50 },
-          aggs: { label: { terms: { field: "deptDivLabel", size: 1 } } },
-        },
-      },
+      // 200 covers the long tail comfortably — ~30 departments × handful
+      // of divisions + ~20 centers + free-text fallbacks. Labels are
+      // resolved server-side in the page (see PeopleResults) so the
+      // bucket key is the only thing OpenSearch needs to return.
+      aggs: { keys: { terms: { field: "deptDivKey", size: 200 } } },
     },
     personTypes: {
       filter: { bool: { must, filter: filtersExcept("personType") } },
@@ -370,11 +369,10 @@ export async function searchPeople(opts: {
     highlight?: Record<string, string[]>;
   };
   type Bucket = { key: string; doc_count: number };
-  type DeptDivBucketRaw = Bucket & { label?: { buckets: Array<{ key: string }> } };
   const r = resp.body as unknown as {
     hits: { hits: Hit[]; total: { value: number } };
     aggregations?: {
-      deptDivs?: { keys: { buckets: DeptDivBucketRaw[] } };
+      deptDivs?: { keys: { buckets: Bucket[] } };
       personTypes?: { keys: { buckets: Bucket[] } };
       activityHasGrants?: { doc_count: number };
       activityRecentPub?: { doc_count: number };
@@ -403,7 +401,11 @@ export async function searchPeople(opts: {
     facets: {
       deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? []).map((b) => ({
         value: b.key,
-        label: b.label?.buckets?.[0]?.key ?? b.key,
+        // Label is resolved server-side in the page (PeopleResults) by
+        // joining b.value against Department / Division / Center via
+        // Prisma. Returning the raw key as a fallback keeps callers that
+        // don't resolve labels (e.g. the analytics log) intelligible.
+        label: b.key,
         count: b.doc_count,
       })),
       personTypes: (r.aggregations?.personTypes?.keys.buckets ?? []).map((b) => ({

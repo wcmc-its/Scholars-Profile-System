@@ -139,6 +139,20 @@ async function indexPeople() {
     },
   });
 
+  // Center memberships per cwid (Center has no back-relation on Scholar,
+  // so this is a separate batched query). Folded into deptDivKey so the
+  // sidebar's dept/div/center facet matches scholars whose center
+  // membership the user clicks.
+  const centerRows = await prisma.centerMembership.findMany({
+    select: { cwid: true, centerCode: true },
+  });
+  const centerCodesByCwid = new Map<string, string[]>();
+  for (const m of centerRows) {
+    const arr = centerCodesByCwid.get(m.cwid) ?? [];
+    arr.push(m.centerCode);
+    centerCodesByCwid.set(m.cwid, arr);
+  }
+
   const docs: Array<{ cwid: string; doc: Record<string, unknown> }> = [];
 
   for (const s of scholars) {
@@ -261,26 +275,27 @@ async function indexPeople() {
       });
     }
 
-    // Issue #8 item 4 — composite dept/div facet key. Use FK-resolved names
-    // when present; fall back to the free-text primaryDepartment for the
-    // long-tail of scholars whose ED FK hasn't been backfilled yet so the
-    // bucket isn't dropped from the facet entirely.
+    // Combined dept/division/center facet keys. The field is multi-valued
+    // so a scholar with a primary appointment AND center memberships
+    // contributes one bucket per affiliation. Labels are resolved
+    // server-side in the page (see PeopleResults) — the keys here are
+    // stable identifiers, the display strings come from Prisma.
     const deptName = s.department?.name ?? s.primaryDepartment ?? null;
     const divisionName = s.division?.name ?? null;
-    let deptDivKey: string | null = null;
-    let deptDivLabel: string | null = null;
+    const deptDivKeys: string[] = [];
     if (s.deptCode && s.divCode) {
-      deptDivKey = `${s.deptCode}--${s.divCode}`;
-      deptDivLabel = divisionName && deptName ? `${divisionName} — ${deptName}` : null;
+      deptDivKeys.push(`${s.deptCode}--${s.divCode}`);
     } else if (s.deptCode) {
-      deptDivKey = s.deptCode;
-      deptDivLabel = deptName;
+      deptDivKeys.push(s.deptCode);
     } else if (deptName) {
-      // Long-tail: no FK code, but a free-text dept name. Use the name itself
+      // Long-tail: no FK code, free-text dept name. Use the name itself
       // as the key so the facet stays useful during the ED-backfill window.
-      deptDivKey = `name:${deptName}`;
-      deptDivLabel = deptName;
+      deptDivKeys.push(`name:${deptName}`);
     }
+    for (const code of centerCodesByCwid.get(s.cwid) ?? []) {
+      deptDivKeys.push(`center:${code}`);
+    }
+    void divisionName; // retained for potential future enrichment
 
     docs.push({
       cwid: s.cwid,
@@ -298,9 +313,8 @@ async function indexPeople() {
         deptCode: s.deptCode,
         divCode: s.divCode,
         deptName,
-        divisionName,
-        deptDivKey,
-        deptDivLabel,
+        divisionName: s.division?.name ?? null,
+        deptDivKey: deptDivKeys,
         nameSuggest: nameSuggestInputs,
         areasOfInterest: aoi,
         overview: s.overview,
