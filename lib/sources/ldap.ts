@@ -34,6 +34,16 @@ export const DEFAULT_DOCTORAL_STUDENT_FILTER =
 export const DEFAULT_FACULTY_SOR_FILTER =
   "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduStatus=faculty:active))";
 
+/** WOOFA-sourced System-of-Record for employee records. Carries the
+ *  `manager` attribute (full DN of the reporting manager) used for the
+ *  postdoc-mentor lookup (issue #5) and the division-chief manager-graph
+ *  detection (issue #16, Path B). */
+export const DEFAULT_EMPLOYEE_SOR_BASE =
+  "ou=employees,ou=sors,dc=weill,dc=cornell,dc=edu";
+/** Employee SOR search: only currently-active employee records. */
+export const DEFAULT_EMPLOYEE_SOR_FILTER =
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=employee:active))";
+
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
@@ -250,6 +260,106 @@ export async function fetchActiveFacultyAppointments(
       divCode,
       divName,
     });
+  }
+  return out;
+}
+
+/** Employee SOR record. One LDAP entry per active employee row in
+ *  `ou=employees,ou=sors`. A scholar may have multiple rows (concurrent
+ *  appointments); callers collapse by CWID before consuming.
+ *
+ *  `managerCwid` is parsed from the `manager` attribute, which carries a
+ *  full DN like `uid=par9082,ou=people,dc=weill,dc=cornell,dc=edu`. The
+ *  CWID is the value of the first `uid=` RDN (lowercased). Returns null
+ *  on missing/malformed DNs. */
+export type EdEmployeeRecord = {
+  cwid: string;
+  managerCwid: string | null;
+  sorId: string;
+  isPrimary: boolean;
+};
+
+const EMPLOYEE_SOR_ATTRS = [
+  "weillCornellEduCWID",
+  "manager",
+  "weillCornellEduStatus",
+  "weillCornellEduSORID",
+  "weillCornellEduPrimaryEntry",
+] as const;
+
+/** Fetch all currently-active employee SOR records in one paginated search.
+ *  One row per appointment (a scholar may appear multiple times). Caller
+ *  should collapse rows per CWID — see `collapseEmployeeRecordsByCwid`. */
+export async function fetchActiveEmployeeRecords(
+  client: Client,
+): Promise<EdEmployeeRecord[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_EMPLOYEE_SOR_BASE ?? DEFAULT_EMPLOYEE_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_EMPLOYEE_SOR_FILTER ?? DEFAULT_EMPLOYEE_SOR_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...EMPLOYEE_SOR_ATTRS],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdEmployeeRecord[] = [];
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const sorId = firstString(e.weillCornellEduSORID);
+    if (!cwid || !sorId) continue;
+    const managerDn = firstString(e.manager);
+    out.push({
+      cwid: cwid.toLowerCase(),
+      managerCwid: parseManagerCwid(managerDn),
+      sorId,
+      isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+    });
+  }
+  return out;
+}
+
+/** Parse a manager DN of the form `uid=<cwid>,ou=people,...` to its CWID.
+ *  Returns null on null/malformed input. */
+export function parseManagerCwid(dn: string | null | undefined): string | null {
+  if (!dn) return null;
+  const m = dn.match(/^uid=([^,]+)/i);
+  if (!m) return null;
+  const cwid = m[1].trim().toLowerCase();
+  return cwid.length > 0 ? cwid : null;
+}
+
+/** Collapse multiple employee SOR rows per CWID into a single best-row map.
+ *  Selection rule: the row marked `weillCornellEduPrimaryEntry=TRUE` with a
+ *  non-null managerCwid wins; failing that, the first row with any non-null
+ *  managerCwid; failing that, the first row at all. Logs a warning if the
+ *  candidate rows disagree on managerCwid (different DNs across concurrent
+ *  appointments — caller can decide to surface or ignore). */
+export function collapseEmployeeRecordsByCwid(
+  records: EdEmployeeRecord[],
+): Map<string, EdEmployeeRecord> {
+  const byCwid = new Map<string, EdEmployeeRecord[]>();
+  for (const r of records) {
+    const arr = byCwid.get(r.cwid) ?? [];
+    arr.push(r);
+    byCwid.set(r.cwid, arr);
+  }
+  const out = new Map<string, EdEmployeeRecord>();
+  for (const [cwid, rows] of byCwid) {
+    const primaryWithMgr = rows.find((r) => r.isPrimary && r.managerCwid);
+    const anyWithMgr = rows.find((r) => r.managerCwid);
+    const chosen = primaryWithMgr ?? anyWithMgr ?? rows[0];
+    out.set(cwid, chosen);
+
+    const distinctManagers = new Set(
+      rows.map((r) => r.managerCwid).filter((x): x is string => !!x),
+    );
+    if (distinctManagers.size > 1) {
+      console.warn(
+        `[ldap] CWID ${cwid} has ${distinctManagers.size} distinct manager CWIDs across ${rows.length} employee SOR rows; using ${chosen.managerCwid ?? "null"}`,
+      );
+    }
   }
   return out;
 }
