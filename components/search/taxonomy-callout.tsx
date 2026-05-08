@@ -72,28 +72,34 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
         <div
           id="taxonomy-callout-secondary"
           aria-hidden={!expanded}
-          className={`grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out ${
+          className={`grid transition-[grid-template-rows] duration-200 ease-out ${
             expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
           }`}
         >
-          <ul className="mt-1 flex min-h-0 flex-col gap-0.5 rounded-lg border border-[#d6e2ec] bg-[#eef4f9] px-3.5 py-2">
-            {secondary.map((m) => (
-              <li key={`${m.entityType}:${m.id}`}>
-                <SecondaryRow match={m} />
-              </li>
-            ))}
-            {overflowCount > 0 ? (
-              <li>
-                <Link
-                  href={`/search?q=${encodeURIComponent(query)}`}
-                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[12.5px] italic text-zinc-600 transition-colors hover:text-[var(--color-primary-cornell-red)] hover:no-underline ${FOCUS_RING}`}
-                >
-                  and {overflowCount} more matching research area
-                  {overflowCount === 1 ? "" : "s"} in Browse &rarr;
-                </Link>
-              </li>
-            ) : null}
-          </ul>
+          {/* Inner clipper. The grid wrapper transitions row height
+              0fr↔1fr; this div has overflow:hidden so the styled <ul>
+              (with its own padding, border, and bg) is clipped to the
+              grid row's allotted height instead of bleeding past it. */}
+          <div className="overflow-hidden">
+            <ul className="mt-1 flex flex-col gap-0.5 rounded-lg border border-[#d6e2ec] bg-[#eef4f9] px-3.5 py-2">
+              {secondary.map((m) => (
+                <li key={`${m.entityType}:${m.id}`}>
+                  <SecondaryRow match={m} />
+                </li>
+              ))}
+              {overflowCount > 0 ? (
+                <li>
+                  <Link
+                    href={`/search?q=${encodeURIComponent(query)}`}
+                    className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[12.5px] italic text-zinc-600 transition-colors hover:text-[var(--color-primary-cornell-red)] hover:no-underline ${FOCUS_RING}`}
+                  >
+                    and {overflowCount} more matching research area
+                    {overflowCount === 1 ? "" : "s"} in Browse &rarr;
+                  </Link>
+                </li>
+              ) : null}
+            </ul>
+          </div>
         </div>
       ) : null}
     </div>
