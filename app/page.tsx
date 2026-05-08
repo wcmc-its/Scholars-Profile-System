@@ -20,6 +20,7 @@ import { TrySuggestionsChips } from "@/components/home/try-suggestions-chips";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
+import Link from "next/link";
 
 export const revalidate = 21600; // 6 hours
 export const dynamicParams = true;
@@ -58,16 +59,36 @@ export default async function HomePage() {
         {stats ? (
           <div className="border-border border-b">
             <div className="mx-auto flex max-w-[1100px] flex-wrap justify-center gap-8 px-6 py-5 text-sm text-zinc-500">
-              <span><strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars</span>
-              <span><strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications</span>
-              <span><strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas</span>
+              <Link
+                href="/search?type=people"
+                aria-label={`Browse ${stats.scholarCount.toLocaleString()} scholars`}
+                className="no-underline hover:underline underline-offset-4 decoration-1"
+              >
+                <strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars
+              </Link>
+              <Link
+                href="/search?type=publications"
+                aria-label={`Browse ${stats.publicationCount.toLocaleString()} publications`}
+                className="no-underline hover:underline underline-offset-4 decoration-1"
+              >
+                <strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications
+              </Link>
+              <a
+                href="#browse-all-research-areas"
+                aria-label={`Browse ${stats.researchAreaCount} research areas`}
+                className="no-underline hover:underline underline-offset-4 decoration-1"
+              >
+                <strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas
+              </a>
             </div>
           </div>
         ) : null}
 
         <div className="mx-auto max-w-[1100px] px-6 py-12">
           {spotlights ? <SpotlightSection items={spotlights} /> : null}
-          <BrowseAllResearchAreasGrid items={browse ?? []} />
+          <div id="browse-all-research-areas" className="scroll-mt-16">
+            <BrowseAllResearchAreasGrid items={browse ?? []} />
+          </div>
         </div>
       </main>
       <SiteFooter />
