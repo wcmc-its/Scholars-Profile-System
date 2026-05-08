@@ -536,6 +536,14 @@ export type TopicPublicationHit = {
 export type TopicPublicationsResult = {
   hits: TopicPublicationHit[];
   total: number;
+  /**
+   * Counts in the same scope (topic + optional subtopic) under each filter.
+   * Lets the client decide whether the type-filter toggle would actually
+   * change the result set in either direction, and surface a "+N more"
+   * delta when it would. (#30)
+   */
+  totalAllTypes: number;
+  totalResearchOnly: number;
   page: number;
   pageSize: number;
 };
@@ -581,6 +589,16 @@ export async function getTopicPublications(
     baseWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
   }
 
+  // Same scope as `baseWhere` but with publicationType filters fixed to
+  // each side — used to populate the totals for the toggle-visibility
+  // decision (#30) regardless of which filter is currently active.
+  const baseWhereAllTypes: Record<string, unknown> = { parentTopicId: topicSlug };
+  if (subtopicFilter) baseWhereAllTypes.primarySubtopicId = subtopicFilter;
+  const baseWhereResearchOnly: Record<string, unknown> = {
+    ...baseWhereAllTypes,
+    publication: { publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+  };
+
   // SQL-direct sort path (newest, most_cited) — do NOT call scorePublication here.
   if (opts.sort === "newest" || opts.sort === "most_cited") {
     // most_cited: sort DESC. MySQL/MariaDB do not support NULLS LAST natively in
@@ -605,7 +623,7 @@ export async function getTopicPublications(
       doi: true,
       dateAddedToEntrez: true,
     } as const;
-    const [rows, total] = await prisma.$transaction([
+    const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
       prisma.publicationTopic.findMany({
         where: baseWhere,
         skip,
@@ -616,6 +634,8 @@ export async function getTopicPublications(
         include: { publication: { select: pubSelectFields } },
       }),
       prisma.publicationTopic.count({ where: baseWhere }),
+      prisma.publicationTopic.count({ where: baseWhereAllTypes }),
+      prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
     ]);
     const pmids = rows.map((r) => r.pmid);
     const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
@@ -625,6 +645,8 @@ export async function getTopicPublications(
         mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid)),
       ),
       total,
+      totalAllTypes,
+      totalResearchOnly,
       page,
       pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
     };
@@ -676,13 +698,19 @@ export async function getTopicPublications(
   const total = scored.length;
   const slice = scored.slice(page * TOPIC_PUBLICATIONS_PAGE_SIZE, (page + 1) * TOPIC_PUBLICATIONS_PAGE_SIZE);
   const slicePmids = slice.map((s) => s.row.pmid);
-  const authorsByPmid = await fetchWcmAuthorsForPmids(slicePmids);
+  const [authorsByPmid, totalAllTypes, totalResearchOnly] = await Promise.all([
+    fetchWcmAuthorsForPmids(slicePmids),
+    prisma.publicationTopic.count({ where: baseWhereAllTypes }),
+    prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
+  ]);
   return {
     hits: slice.map((s) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mapToTopicPublicationHit(s.row as any, authorsByPmid.get(s.row.pmid)),
     ),
     total,
+    totalAllTypes,
+    totalResearchOnly,
     page,
     pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
   };

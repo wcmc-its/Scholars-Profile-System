@@ -43,7 +43,14 @@ type Hit = {
   }>;
 };
 
-type FeedResponse = { hits: Hit[]; total: number; page: number; pageSize: number };
+type FeedResponse = {
+  hits: Hit[];
+  total: number;
+  totalAllTypes: number;
+  totalResearchOnly: number;
+  page: number;
+  pageSize: number;
+};
 
 export function PublicationFeed({
   topicSlug,
@@ -158,15 +165,15 @@ export function PublicationFeed({
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
             <span>{data.total.toLocaleString()} results</span>
-            {filter === "research_articles_only" ? (
+            {filter === "research_articles_only" && data.totalAllTypes > data.totalResearchOnly ? (
               <button
                 type="button"
                 onClick={() => setFilter("all")}
                 className="text-xs text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
               >
-                Show all publication types →
+                Show all publication types ({(data.totalAllTypes - data.totalResearchOnly).toLocaleString()} more) →
               </button>
-            ) : (
+            ) : filter === "all" && data.totalAllTypes > data.totalResearchOnly ? (
               <button
                 type="button"
                 onClick={() => setFilter("research_articles_only")}
@@ -174,7 +181,7 @@ export function PublicationFeed({
               >
                 Hide non-research types →
               </button>
-            )}
+            ) : null}
           </div>
           <ul className="divide-y divide-border">
             {data.hits.map((h) => (
