@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
-import { isNihAwardNumber } from "@/lib/award-number";
+import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -96,42 +96,9 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
   const activeGrants = useMemo(() => filtered.filter((g) => g.isActive), [filtered]);
   const completedGrants = useMemo(() => filtered.filter((g) => !g.isActive), [filtered]);
 
-  // Lookup table from awardNumber → NIH RePORTER applId. Populated after first
-  // paint via /api/nih-resolve so the user never waits on the upstream API.
-  // Uses a single batched POST per profile render.
-  const [applIdByAward, setApplIdByAward] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    const nihAwards = Array.from(
-      new Set(
-        grants
-          .map((g) => g.awardNumber)
-          .filter((x): x is string => !!x && isNihAwardNumber(x)),
-      ),
-    );
-    if (nihAwards.length === 0) return;
-
-    const ctrl = new AbortController();
-    fetch("/api/nih-resolve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nums: nihAwards }),
-      signal: ctrl.signal,
-    })
-      .then((r) => (r.ok ? r.json() : { results: [] }))
-      .then((data: { results: Array<{ award: string; applId: number | null }> }) => {
-        const next: Record<string, number> = {};
-        for (const { award, applId } of data.results) {
-          if (applId) next[award] = applId;
-        }
-        setApplIdByAward(next);
-      })
-      .catch(() => {
-        /* silently fall back to plain-text award numbers */
-      });
-
-    return () => ctrl.abort();
-  }, [grants]);
+  // applId map covering every NIH award on the page — single batched
+  // POST to /api/nih-resolve, fired after first paint.
+  const applIdByAward = useNihApplIdMap(grants.map((g) => g.awardNumber));
 
   return (
     <>

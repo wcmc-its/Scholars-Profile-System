@@ -23,7 +23,7 @@ import {
   type FundingSort,
   type FundingStatus,
 } from "@/lib/api/search-funding";
-import { FundingResultRow } from "@/components/search/funding-result-row";
+import { FundingResultsList } from "@/components/search/funding-results-list";
 import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
@@ -910,19 +910,14 @@ async function FundingResults({
         {result.hits.length === 0 ? (
           <EmptyState query={q} tip="Try broadening the query or removing facet filters." />
         ) : (
-          <ul>
-            {result.hits.map((hit, i) => (
-              <li key={hit.projectId}>
-                <FundingResultRow
-                  hit={hit}
-                  q={q}
-                  position={page * result.pageSize + i}
-                  total={result.total}
-                  filters={filters}
-                />
-              </li>
-            ))}
-          </ul>
+          <FundingResultsList
+            hits={result.hits}
+            q={q}
+            page={page}
+            pageSize={result.pageSize}
+            total={result.total}
+            filters={filters}
+          />
         )}
         <Pagination
           page={result.page}
