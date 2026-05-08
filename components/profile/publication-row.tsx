@@ -14,12 +14,20 @@ export function PublicationRow({
   pub: ProfilePublication;
   compact?: boolean;
 }) {
+  // Co-first / co-last detection uses the full author list on the pub —
+  // when ≥2 authors share isFirst (or isLast), surface the co- variant. (#18)
+  const firstCount = pub.wcmAuthors.filter((a) => a.isFirst).length;
+  const lastCount = pub.wcmAuthors.filter((a) => a.isLast).length;
   const role = pub.authorship.isFirst && pub.authorship.isLast
     ? "First and senior author"
     : pub.authorship.isLast
-    ? "Senior author"
+    ? lastCount > 1
+      ? "Co-last author"
+      : "Senior author"
     : pub.authorship.isFirst
-    ? "First author"
+    ? firstCount > 1
+      ? "Co-first author"
+      : "First author"
     : null;
   const titleHtml = sanitizePubTitle(pub.title);
   return (

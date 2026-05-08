@@ -280,7 +280,10 @@ export async function getRecentHighlightsForTopic(
           isConfirmed: true,
           scholar: { deletedAt: null, status: "active" },
         },
-        orderBy: [{ isFirst: "desc" }, { isLast: "desc" }, { position: "asc" }],
+        // Standard citation order: first → middle → last, by listed position.
+        // Co-first / co-last detection (UI-side) runs off the isFirst/isLast
+        // booleans on the row. (#18)
+        orderBy: [{ position: "asc" }],
         include: {
           scholar: {
             select: {
@@ -738,7 +741,8 @@ export async function fetchWcmAuthorsForPmids(
       cwid: { not: null },
       scholar: { deletedAt: null, status: "active" },
     },
-    orderBy: [{ isFirst: "desc" }, { isLast: "desc" }, { position: "asc" }],
+    // Standard citation order: first → middle → last, by listed position. (#18)
+    orderBy: [{ position: "asc" }],
     select: {
       pmid: true,
       isFirst: true,
