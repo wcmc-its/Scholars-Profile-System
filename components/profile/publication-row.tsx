@@ -46,7 +46,12 @@ export function PublicationRow({
       </div>
       {pub.journal || pub.year ? (
         <div className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">
-          {pub.journal ? <em className="italic">{pub.journal}</em> : null}
+          {pub.journal ? (
+            <em
+              className="italic"
+              dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.journal) }}
+            />
+          ) : null}
           {pub.year ? ` · ${pub.year}` : ""}
         </div>
       ) : null}

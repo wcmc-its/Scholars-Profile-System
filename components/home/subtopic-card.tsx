@@ -8,6 +8,7 @@
  */
 import { Card, CardContent } from "@/components/ui/card";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
+import { sanitizePubmedHtml } from "@/lib/utils";
 import type { SubtopicCard as SubtopicCardData } from "@/lib/api/home";
 
 export function SubtopicCard({ item }: { item: SubtopicCardData }) {
@@ -33,7 +34,10 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
           <ul className="mt-3 flex flex-col gap-3">
             {item.publications.map((p) => (
               <li key={p.pmid}>
-                <div className="line-clamp-2 text-sm font-semibold">{p.title}</div>
+                <div
+                  className="line-clamp-2 text-sm font-semibold"
+                  dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(p.title) }}
+                />
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                   {p.firstWcmAuthor ? (
                     <a
@@ -45,7 +49,15 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
                   ) : null}
                   {(p.journal || p.year) ? (
                     <span className="text-muted-foreground text-xs italic">
-                      {[p.journal, p.year].filter(Boolean).join(" · ")}
+                      {p.journal ? (
+                        <span
+                          dangerouslySetInnerHTML={{
+                            __html: sanitizePubmedHtml(p.journal),
+                          }}
+                        />
+                      ) : null}
+                      {p.journal && p.year ? " · " : null}
+                      {p.year ? <span>{p.year}</span> : null}
                     </span>
                   ) : null}
                 </div>

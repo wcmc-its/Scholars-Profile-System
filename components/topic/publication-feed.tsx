@@ -207,7 +207,12 @@ export function PublicationFeed({
                 </div>
                 <AuthorChipRow authors={h.authors} />
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                  {h.journal && <span className="italic">{h.journal}</span>}
+                  {h.journal && (
+                    <span
+                      className="italic"
+                      dangerouslySetInnerHTML={{ __html: sanitizePubTitle(h.journal) }}
+                    />
+                  )}
                   {h.year ? <span>· {h.year}</span> : null}
                   {h.citationCount !== null && h.citationCount > 0 && (
                     <span className="font-medium text-[var(--color-accent-slate)]">

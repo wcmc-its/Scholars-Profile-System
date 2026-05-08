@@ -44,7 +44,10 @@ export function PublicationCard({ pub }: { pub: DeptPublicationCard }) {
       {meta.length > 0 && (
         <div className="mt-2 text-[11px] text-[var(--color-text-secondary)]">
           {pub.journal && (
-            <span className="italic">{pub.journal}</span>
+            <span
+              className="italic"
+              dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.journal) }}
+            />
           )}
           {pub.journal && (pub.year || pub.citationCount > 0) && " · "}
           {pub.year && <span>{pub.year}</span>}

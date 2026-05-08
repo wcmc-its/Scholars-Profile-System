@@ -30,6 +30,7 @@
 import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
+import { sanitizePubmedHtml } from "@/lib/utils";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
 const AUTO_ADVANCE_MS = 10_000;
@@ -232,9 +233,8 @@ function PaperRow({
         target="_blank"
         rel="noopener noreferrer"
         className="font-medium text-zinc-900 hover:underline"
-      >
-        {title}
-      </a>
+        dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(title) }}
+      />
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-500">
         {visible.map((a) => (
           <AuthorChip key={a.cwid} author={a} />
@@ -242,7 +242,8 @@ function PaperRow({
         {overflow > 0 ? <span className="text-zinc-500">+{overflow} more</span> : null}
         <span aria-hidden="true">·</span>
         <span className="italic">
-          {journal}, {year}
+          <span dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
+          {`, ${year}`}
         </span>
       </div>
     </div>

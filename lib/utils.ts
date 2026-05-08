@@ -40,19 +40,23 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
 }
 
 /**
- * Sanitize a PubMed-style publication title for safe HTML rendering.
+ * Whitelist-strip PubMed-style inline HTML for safe rendering. Use for any
+ * user-visible PubMed string — title, journal, abstract.
  *
- * PubMed titles commonly carry inline markup for italicized Latin/foreign
+ * PubMed strings commonly carry inline markup for italicized Latin/foreign
  * terms (`<i>Primum Non Nocere:</i>`), gene/protein names (`<i>BRCA1</i>`),
  * and chemical formulae (`H<sub>2</sub>O`, `CO<sup>2</sup>`). Honor those
  * but strip anything else — no attributes, no scripts, no other tags. The
  * tag set is intentionally narrow because PubMed never emits anything else.
  */
-export function sanitizePubTitle(title: string): string {
-  return title.replace(/<\/?[a-z][^>]*>/gi, (m) =>
+export function sanitizePubmedHtml(input: string): string {
+  return input.replace(/<\/?[a-z][^>]*>/gi, (m) =>
     /^<\/?(?:i|em|b|strong|sup|sub)>$/i.test(m) ? m : "",
   );
 }
+
+/** @deprecated Renamed to {@link sanitizePubmedHtml} — kept for back-compat. */
+export const sanitizePubTitle = sanitizePubmedHtml;
 
 export function initials(name: string): string {
   return name

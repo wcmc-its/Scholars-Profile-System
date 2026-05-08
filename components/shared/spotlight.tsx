@@ -115,9 +115,13 @@ function SpotlightPubCard({
       </h3>
       <AuthorChipRow authors={card.authors} />
       <div className="mt-auto text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]">
-        {[card.journal, card.year !== null ? String(card.year) : null]
-          .filter(Boolean)
-          .join(" · ")}
+        {card.journal ? (
+          <span
+            dangerouslySetInnerHTML={{ __html: sanitizePubTitle(card.journal) }}
+          />
+        ) : null}
+        {card.journal && card.year !== null ? " · " : null}
+        {card.year !== null ? String(card.year) : null}
       </div>
     </article>
   );

@@ -9,6 +9,7 @@
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import { sanitizePubmedHtml } from "@/lib/utils";
 import type { RecentContribution } from "@/lib/api/home";
 
 export function RecentContributionCard({ item }: { item: RecentContribution }) {
@@ -42,13 +43,20 @@ export function RecentContributionCard({ item }: { item: RecentContribution }) {
           target="_blank"
           rel="noopener noreferrer"
           className="mt-3 line-clamp-2 block text-base font-semibold leading-snug hover:underline"
-        >
-          {item.paper.title}
-        </a>
+          dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(item.paper.title) }}
+        />
         <div className="text-muted-foreground mt-1 text-sm">
-          {[item.paper.journal, item.paper.year, item.authorshipRole]
-            .filter((s) => s !== null && s !== undefined && s !== "")
-            .join(" · ")}
+          {item.paper.journal ? (
+            <span
+              dangerouslySetInnerHTML={{
+                __html: sanitizePubmedHtml(item.paper.journal),
+              }}
+            />
+          ) : null}
+          {item.paper.journal && (item.paper.year || item.authorshipRole) ? " · " : null}
+          {item.paper.year ? <span>{item.paper.year}</span> : null}
+          {item.paper.year && item.authorshipRole ? " · " : null}
+          {item.authorshipRole ? <span>{item.authorshipRole}</span> : null}
         </div>
       </CardContent>
     </Card>
