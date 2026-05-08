@@ -3,12 +3,12 @@ import type { Metadata } from "next";
 import {
   getTopic,
   getTopScholarsForTopic,
-  getRecentHighlightsForTopic,
   getSubtopicsForTopic,
   getDistinctScholarCountForTopic,
 } from "@/lib/api/topics";
+import { getSpotlightCardsForTopic } from "@/lib/api/spotlight";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
-import { RecentHighlights } from "@/components/topic/recent-highlights";
+import { Spotlight } from "@/components/shared/spotlight";
 import { SubtopicPublicationLayout } from "@/components/topic/subtopic-publication-layout";
 import {
   Breadcrumb,
@@ -48,9 +48,9 @@ export default async function TopicPage({
   const topic = await getTopic(slug);
   if (!topic) notFound();
 
-  const [topScholars, recentHighlights, subtopics, scholarCount] = await Promise.all([
+  const [topScholars, spotlightCards, subtopics, scholarCount] = await Promise.all([
     getTopScholarsForTopic(slug).catch(() => null),
-    getRecentHighlightsForTopic(slug).catch(() => null),
+    getSpotlightCardsForTopic(slug).catch(() => null),
     getSubtopicsForTopic(slug).catch(() => null),
     getDistinctScholarCountForTopic(slug).catch(() => 0),
   ]);
@@ -58,6 +58,13 @@ export default async function TopicPage({
   const subtopicList = subtopics ?? [];
   const subtopicCount = subtopicList.length;
   const totalPubsForStats = subtopicList.reduce((sum, s) => sum + s.pubCount, 0);
+  const spotlightData = spotlightCards
+    ? {
+        cards: spotlightCards,
+        totalCount: totalPubsForStats,
+        viewAllHref: "#publications",
+      }
+    : null;
 
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
@@ -119,8 +126,8 @@ export default async function TopicPage({
         )}
       </section>
 
-      {/* Recent highlights (Phase 2 reuse) */}
-      {recentHighlights && <RecentHighlights papers={recentHighlights} />}
+      {/* Spotlight (§16) — replaces the prior Recent Highlights surface. */}
+      <Spotlight data={spotlightData} />
 
       {/* Layout B: sticky subtopic rail + CSR publication feed.
           id="publications" anchors deep-links from the home page spotlight

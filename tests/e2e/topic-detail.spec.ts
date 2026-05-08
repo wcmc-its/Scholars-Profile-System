@@ -11,15 +11,15 @@ test.describe("Topic detail page Layout B", () => {
     }
     await expect(page.getByText("RESEARCH AREA", { exact: true })).toBeVisible();
     await expect(page.locator("h1")).toBeVisible();
-    // TopScholarsChipRow and RecentHighlights are conditionally rendered (sparse-state policy).
+    // TopScholarsChipRow and Spotlight are conditionally rendered (sparse-state policy).
     // If they render, assert their structure; otherwise pass silently.
     const topScholarsHeading = page.getByRole("heading", { name: "Top scholars in this area" });
     if (await topScholarsHeading.isVisible().catch(() => false)) {
       await expect(topScholarsHeading).toBeVisible();
     }
-    const recentHeading = page.getByRole("heading", { name: "Recent highlights" });
-    if (await recentHeading.isVisible().catch(() => false)) {
-      await expect(recentHeading).toBeVisible();
+    const spotlightHeading = page.getByRole("heading", { name: "Spotlight", exact: true });
+    if (await spotlightHeading.isVisible().catch(() => false)) {
+      await expect(spotlightHeading).toBeVisible();
     }
     await expect(page.getByText("Research articles in this area")).toBeVisible();
     await expect(page.locator("aside[aria-label='Subtopics']")).toBeVisible();
