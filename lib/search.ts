@@ -34,9 +34,19 @@ export const peopleIndexMapping = {
   settings: {
     analysis: {
       analyzer: {
+        // Custom analyzer that strips English stopwords and applies stemming
+        // so queries like "psychiatric comorbidities IN serious illness" do
+        // not flood with profiles whose only commonality is the word "in",
+        // and "comorbidity" / "comorbidities" are interchangeable. (#20)
         scholar_text: {
-          type: "standard" as const,
+          type: "custom" as const,
+          tokenizer: "standard",
+          filter: ["lowercase", "english_stop", "english_stemmer"],
         },
+      },
+      filter: {
+        english_stop: { type: "stop", stopwords: "_english_" },
+        english_stemmer: { type: "stemmer", language: "english" },
       },
     },
   },
@@ -84,10 +94,25 @@ export const peopleIndexMapping = {
  * an array of {cwid, slug, preferredName} objects for chip rendering.
  */
 export const publicationsIndexMapping = {
+  settings: {
+    analysis: {
+      analyzer: {
+        pub_text: {
+          type: "custom" as const,
+          tokenizer: "standard",
+          filter: ["lowercase", "english_stop", "english_stemmer"],
+        },
+      },
+      filter: {
+        english_stop: { type: "stop", stopwords: "_english_" },
+        english_stemmer: { type: "stemmer", language: "english" },
+      },
+    },
+  },
   mappings: {
     properties: {
       pmid: { type: "keyword" },
-      title: { type: "text", analyzer: "standard" },
+      title: { type: "text", analyzer: "pub_text" },
       journal: { type: "text", fields: { keyword: { type: "keyword" } } },
       year: { type: "integer" },
       publicationType: { type: "keyword" },
@@ -96,7 +121,7 @@ export const publicationsIndexMapping = {
       doi: { type: "keyword" },
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
-      authorNames: { type: "text", analyzer: "standard" },
+      authorNames: { type: "text", analyzer: "pub_text" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",
