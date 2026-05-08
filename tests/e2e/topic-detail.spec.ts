@@ -21,7 +21,7 @@ test.describe("Topic detail page Layout B", () => {
     if (await recentHeading.isVisible().catch(() => false)) {
       await expect(recentHeading).toBeVisible();
     }
-    await expect(page.getByText("All publications in this area")).toBeVisible();
+    await expect(page.getByText("Research articles in this area")).toBeVisible();
     await expect(page.locator("aside[aria-label='Subtopics']")).toBeVisible();
   });
 
