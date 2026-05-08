@@ -66,7 +66,11 @@ export function PublicationFeed({
 
   const isCuratedSort = sort === "by_impact" || sort === "curated";
   const heading =
-    activeSubtopic && subtopicLabel ? subtopicLabel : "All publications in this area";
+    activeSubtopic && subtopicLabel
+      ? subtopicLabel
+      : filter === "research_articles_only"
+        ? "Research articles in this area"
+        : "All publications in this area";
 
   // Reset to page 1 on sort/subtopic/filter change.
   useEffect(() => {
