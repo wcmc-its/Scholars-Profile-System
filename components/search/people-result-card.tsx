@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { Banknote } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
@@ -137,18 +136,11 @@ export function PeopleResultCard({
           </span>
         ) : null}
         {hit.grantCount > 0 ? (
-          <span className="inline-flex items-center gap-1">
-            <Banknote
-              aria-hidden
-              className="h-3 w-3 text-[#9aa19a]"
-              strokeWidth={2}
-            />
-            <span>
-              <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
-                {hit.grantCount.toLocaleString()}
-              </span>{" "}
-              {grantLabel}
-            </span>
+          <span>
+            <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
+              {hit.grantCount.toLocaleString()}
+            </span>{" "}
+            {grantLabel}
           </span>
         ) : null}
       </div>
