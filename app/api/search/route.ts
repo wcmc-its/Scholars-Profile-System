@@ -5,6 +5,13 @@ import {
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
+import {
+  searchFunding,
+  type FundingFilters,
+  type FundingRoleBucket,
+  type FundingSort,
+  type FundingStatus,
+} from "@/lib/api/search-funding";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +25,41 @@ export async function GET(request: NextRequest) {
   const type = params.get("type") ?? "people";
   const rawPage = parseInt(params.get("page") ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
+
+  // Issue #78 — Funding tab. Multi-select facets are repeated params,
+  // OR within group, AND across groups. Mirrors the people/publications
+  // pattern.
+  if (type === "funding") {
+    const sort = (params.get("sort") ?? "relevance") as FundingSort;
+    const status = params.getAll("status").filter(
+      (s): s is FundingStatus =>
+        s === "active" || s === "ending_soon" || s === "recently_ended",
+    );
+    const role = params.getAll("role").filter(
+      (r): r is FundingRoleBucket =>
+        r === "PI" || r === "Multi-PI" || r === "Co-I",
+    );
+    const filters: FundingFilters = {
+      funder: orUndefined(params.getAll("funder")),
+      programType: orUndefined(params.getAll("programType")),
+      mechanism: orUndefined(params.getAll("mechanism")),
+      status: status.length > 0 ? status : undefined,
+      department: orUndefined(params.getAll("department")),
+      role: role.length > 0 ? role : undefined,
+    };
+    const result = await searchFunding({ q, page, sort, filters });
+    console.log(
+      JSON.stringify({
+        event: "search_query",
+        q,
+        type: "funding",
+        resultCount: result.total,
+        filters,
+        ts: new Date().toISOString(),
+      }),
+    );
+    return NextResponse.json(result);
+  }
 
   if (type === "publications") {
     const sort = (params.get("sort") ?? "relevance") as PublicationsSort;
@@ -100,4 +142,8 @@ export async function GET(request: NextRequest) {
     }),
   );
   return NextResponse.json(result);
+}
+
+function orUndefined<T>(arr: T[]): T[] | undefined {
+  return arr.length > 0 ? arr : undefined;
 }

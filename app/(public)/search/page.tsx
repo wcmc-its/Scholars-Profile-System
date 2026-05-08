@@ -16,6 +16,14 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
+import {
+  searchFunding,
+  type FundingFilters,
+  type FundingRoleBucket,
+  type FundingSort,
+  type FundingStatus,
+} from "@/lib/api/search-funding";
+import { FundingResultRow } from "@/components/search/funding-result-row";
 import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
@@ -62,6 +70,31 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (a): a is ActivityFilter => a === "has_grants" || a === "recent_pub",
   );
 
+  // Funding filters (issue #78 Wave D — multi-select repeated params).
+  const fundingFilters: FundingFilters = {
+    funder: parseList(sp.funder).length > 0 ? parseList(sp.funder) : undefined,
+    programType:
+      parseList(sp.programType).length > 0 ? parseList(sp.programType) : undefined,
+    mechanism:
+      parseList(sp.mechanism).length > 0 ? parseList(sp.mechanism) : undefined,
+    status: (parseList(sp.status).filter(
+      (s): s is FundingStatus =>
+        s === "active" || s === "ending_soon" || s === "recently_ended",
+    ) as FundingStatus[]) as FundingStatus[],
+    department:
+      parseList(sp.department).length > 0 ? parseList(sp.department) : undefined,
+    role: parseList(sp.role).filter(
+      (r): r is FundingRoleBucket =>
+        r === "PI" || r === "Multi-PI" || r === "Co-I",
+    ) as FundingRoleBucket[],
+  };
+  // Empty arrays should collapse to undefined so the API treats them as
+  // "no filter" rather than "match nothing".
+  if (fundingFilters.status && fundingFilters.status.length === 0)
+    fundingFilters.status = undefined;
+  if (fundingFilters.role && fundingFilters.role.length === 0)
+    fundingFilters.role = undefined;
+
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
   const yearMax = parseOptionalInt(sp.yearMax);
@@ -73,10 +106,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       r === "first" || r === "senior" || r === "middle",
   );
 
-  // Issue #8 item 1: the subhead "{n} people · {n} publications" needs both
-  // counts regardless of which tab is active. Run a lightweight count for
-  // the inactive tab in parallel (size: 0 — facet aggs / pagination skipped).
-  const [peopleResult, pubsResult] = await Promise.all([
+  // Issue #8 item 1: the subhead "{n} people · {n} publications · {n} funding"
+  // needs all counts regardless of which tab is active. Run lightweight
+  // counts for the inactive tabs in parallel.
+  const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
       q,
       page: type === "people" ? page : 0,
@@ -99,11 +132,22 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
       },
     }),
+    searchFunding({
+      q,
+      page: type === "funding" ? page : 0,
+      sort: type === "funding" ? (sort as FundingSort) : "relevance",
+      filters: fundingFilters,
+    }),
   ]);
 
   return (
     <main>
-      <SearchMeta q={q} peopleCount={peopleResult.total} pubCount={pubsResult.total} />
+      <SearchMeta
+        q={q}
+        peopleCount={peopleResult.total}
+        pubCount={pubsResult.total}
+        fundingCount={fundingResult.total}
+      />
       <div className="mx-auto max-w-[1280px] px-6">
         <TaxonomyCallout result={taxonomyMatch} />
       </div>
@@ -112,6 +156,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         activeType={type}
         peopleCount={peopleResult.total}
         pubCount={pubsResult.total}
+        fundingCount={fundingResult.total}
       />
       {showAZ && azBuckets ? (
         <div className="mx-auto max-w-[1280px] px-6 pt-6">
@@ -138,6 +183,14 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             journal={journal}
             wcmAuthorRole={wcmAuthorRole}
             result={pubsResult}
+          />
+        ) : type === "funding" ? (
+          <FundingResults
+            q={q}
+            page={page}
+            sort={sort as FundingSort}
+            filters={fundingFilters}
+            result={fundingResult}
           />
         ) : (
           <PeopleResults
@@ -181,10 +234,12 @@ function SearchMeta({
   q,
   peopleCount,
   pubCount,
+  fundingCount,
 }: {
   q: string;
   peopleCount: number;
   pubCount: number;
+  fundingCount: number;
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
@@ -200,7 +255,8 @@ function SearchMeta({
       </h1>
       <div className="text-[13px] text-[#757575]">
         {peopleCount.toLocaleString()} {peopleCount === 1 ? "person" : "people"} ·{" "}
-        {pubCount.toLocaleString()} publications
+        {pubCount.toLocaleString()} publications ·{" "}
+        {fundingCount.toLocaleString()} funding
       </div>
     </div>
   );
@@ -214,18 +270,22 @@ function ModeTabs({
   activeType,
   peopleCount,
   pubCount,
+  fundingCount,
 }: {
   q: string;
   activeType: string;
   peopleCount: number;
   pubCount: number;
+  fundingCount: number;
 }) {
   const peopleHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
   const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
+  const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   return (
     <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
       <ModeTab href={peopleHref} label="People" count={peopleCount} active={activeType === "people"} />
       <ModeTab href={pubHref} label="Publications" count={pubCount} active={activeType === "publications"} />
+      <ModeTab href={fundingHref} label="Funding" count={fundingCount} active={activeType === "funding"} />
     </nav>
   );
 }
@@ -689,6 +749,146 @@ async function PublicationsResults({
         />
       </section>
     </>
+  );
+}
+
+/* ============================================================
+ * Funding tab content — issue #78 Wave D
+ *
+ * v1 ships sort + paginated result list. Facet sidebar lands in the
+ * follow-up commit (FunderFacet with type-ahead + Type + Mechanism +
+ * Status + Department + Role).
+ * ============================================================ */
+type FundingResultData = Awaited<ReturnType<typeof searchFunding>>;
+
+async function FundingResults({
+  q,
+  page,
+  sort,
+  filters,
+  result,
+}: {
+  q: string;
+  page: number;
+  sort: FundingSort;
+  filters: FundingFilters;
+  result: FundingResultData;
+}) {
+  const buildUrl = (
+    mut: (sp: URLSearchParams) => void,
+    { resetPage = true }: { resetPage?: boolean } = {},
+  ) => {
+    const sp = new URLSearchParams();
+    sp.set("q", q);
+    sp.set("type", "funding");
+    if (sort !== "relevance") sp.set("sort", sort);
+    for (const v of filters.funder ?? []) sp.append("funder", v);
+    for (const v of filters.programType ?? []) sp.append("programType", v);
+    for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
+    for (const v of filters.status ?? []) sp.append("status", v);
+    for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.role ?? []) sp.append("role", v);
+    if (resetPage) sp.delete("page");
+    mut(sp);
+    return `/search?${sp.toString()}`;
+  };
+
+  return (
+    <>
+      <aside className="hidden md:block">
+        {/* Facet sidebar lands in next commit — placeholder so the grid
+            layout matches People / Publications. */}
+      </aside>
+      <section className="min-w-0">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[13px] text-[#757575]">
+            {result.total === 0
+              ? "No results"
+              : `Showing ${result.page * result.pageSize + 1}–${Math.min(
+                  (result.page + 1) * result.pageSize,
+                  result.total,
+                )} of ${result.total.toLocaleString()}`}
+          </span>
+          <div className="flex items-center gap-2 text-[13px] text-[#5a5a5a]">
+            <span>Sort:</span>
+            <FundingSortLinks q={q} filters={filters} sort={sort} />
+          </div>
+        </div>
+        {result.hits.length === 0 ? (
+          <EmptyState query={q} tip="Try broadening the query or removing facet filters." />
+        ) : (
+          <ul>
+            {result.hits.map((hit) => (
+              <li key={hit.projectId}>
+                <FundingResultRow hit={hit} />
+              </li>
+            ))}
+          </ul>
+        )}
+        <Pagination
+          page={result.page}
+          total={result.total}
+          pageSize={result.pageSize}
+          buildHref={(p) =>
+            buildUrl(
+              (sp) => {
+                if (p > 0) sp.set("page", String(p));
+                else sp.delete("page");
+              },
+              { resetPage: false },
+            )
+          }
+        />
+      </section>
+    </>
+  );
+}
+
+function FundingSortLinks({
+  q,
+  filters,
+  sort,
+}: {
+  q: string;
+  filters: FundingFilters;
+  sort: FundingSort;
+}) {
+  const opts: Array<{ value: FundingSort; label: string }> = [
+    { value: "relevance", label: "Relevance" },
+    { value: "endDate", label: "End date (soonest)" },
+    { value: "startDate", label: "Start date (newest)" },
+  ];
+  const buildHref = (s: FundingSort) => {
+    const sp = new URLSearchParams();
+    sp.set("q", q);
+    sp.set("type", "funding");
+    if (s !== "relevance") sp.set("sort", s);
+    for (const v of filters.funder ?? []) sp.append("funder", v);
+    for (const v of filters.programType ?? []) sp.append("programType", v);
+    for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
+    for (const v of filters.status ?? []) sp.append("status", v);
+    for (const v of filters.department ?? []) sp.append("department", v);
+    for (const v of filters.role ?? []) sp.append("role", v);
+    return `/search?${sp.toString()}`;
+  };
+  return (
+    <div className="inline-flex items-center gap-2">
+      {opts.map((opt, i) => (
+        <span key={opt.value}>
+          {i > 0 ? <span className="text-[#bbb]"> · </span> : null}
+          <Link
+            href={buildHref(opt.value)}
+            className={
+              sort === opt.value
+                ? "font-semibold text-[#1a1a1a]"
+                : "text-[#5a5a5a] hover:text-[#1a1a1a]"
+            }
+          >
+            {opt.label}
+          </Link>
+        </span>
+      ))}
+    </div>
   );
 }
 

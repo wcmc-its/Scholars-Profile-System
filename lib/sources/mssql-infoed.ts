@@ -47,7 +47,7 @@ export async function getInfoedPool(): Promise<sql.ConnectionPool> {
     user,
     password,
     database,
-    requestTimeout: 600_000, // 10 min — the consolidated query joins 30+ tables across DBs
+    requestTimeout: 2_400_000, // 40 min — the consolidated query joins 30+ tables across DBs and can run long when InfoEd is slow
     connectionTimeout: 30_000,
     pool: { max: 4, min: 0, idleTimeoutMillis: 30_000 },
     options: {
