@@ -29,6 +29,10 @@ import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
+import { isNihIc, expandSponsor, getSponsor } from "@/lib/sponsor-lookup";
+import { expandMechanism } from "@/lib/mechanism-lookup";
+import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
+import { FunderFacet } from "@/components/search/funder-facet";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +77,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // Funding filters (issue #78 Wave D — multi-select repeated params).
   const fundingFilters: FundingFilters = {
     funder: parseList(sp.funder).length > 0 ? parseList(sp.funder) : undefined,
+    directFunder:
+      parseList(sp.directFunder).length > 0 ? parseList(sp.directFunder) : undefined,
     programType:
       parseList(sp.programType).length > 0 ? parseList(sp.programType) : undefined,
     mechanism:
@@ -225,6 +231,15 @@ function sortActiveFirst<T>(items: T[], isActive: (t: T) => boolean): T[] {
   const rest: T[] = [];
   for (const it of items) (isActive(it) ? active : rest).push(it);
   return [...active, ...rest];
+}
+
+/** Lookup aliases for a canonical sponsor short — used by the Funder
+ *  type-ahead so users can search by alternate names. Returns lowercased
+ *  strings for case-insensitive matching. */
+function collectAliases(short: string): string[] {
+  const s = getSponsor(short);
+  if (!s?.aliases) return [];
+  return s.aliases.map((a) => a.toLowerCase());
 }
 
 /* ============================================================
@@ -783,6 +798,7 @@ async function FundingResults({
     sp.set("type", "funding");
     if (sort !== "relevance") sp.set("sort", sort);
     for (const v of filters.funder ?? []) sp.append("funder", v);
+    for (const v of filters.directFunder ?? []) sp.append("directFunder", v);
     for (const v of filters.programType ?? []) sp.append("programType", v);
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
@@ -805,11 +821,53 @@ async function FundingResults({
       }
     });
 
+  const removeHref = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      for (const v of current) if (v !== value) sp.append(axis, v);
+    });
+
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   const hasActiveFilters =
-    !!(filters.funder?.length || filters.programType?.length ||
+    !!(filters.funder?.length || filters.directFunder?.length ||
+      filters.programType?.length ||
       filters.mechanism?.length || filters.status?.length ||
       filters.department?.length || filters.role?.length);
+
+  // Issue #80 item 3 — chip strip mirrors the People + Publications tabs.
+  // Sponsor labels prefix NIH ICs with `NIH/`; mechanism codes expand to
+  // their full name; statuses and roles use the shared label maps.
+  const chips: Array<{ label: string; removeHref: string }> = [];
+  for (const v of filters.funder ?? []) {
+    const label = isNihIc(v) ? `NIH/${v}` : v;
+    chips.push({ label, removeHref: removeHref("funder", v) });
+  }
+  for (const v of filters.directFunder ?? []) {
+    chips.push({ label: `via ${v}`, removeHref: removeHref("directFunder", v) });
+  }
+  for (const v of filters.programType ?? []) {
+    chips.push({
+      label: PROGRAM_TYPE_LABEL[v] ?? v,
+      removeHref: removeHref("programType", v),
+    });
+  }
+  for (const v of filters.mechanism ?? []) {
+    const expand = expandMechanism(v);
+    chips.push({
+      label: expand ? `${v} — ${expand}` : v,
+      removeHref: removeHref("mechanism", v),
+    });
+  }
+  for (const v of filters.status ?? []) {
+    chips.push({ label: STATUS_LABEL[v], removeHref: removeHref("status", v) });
+  }
+  for (const v of filters.department ?? []) {
+    chips.push({ label: v, removeHref: removeHref("department", v) });
+  }
+  for (const v of filters.role ?? []) {
+    chips.push({ label: v, removeHref: removeHref("role", v) });
+  }
 
   return (
     <>
@@ -821,6 +879,9 @@ async function FundingResults({
         hasActiveFilters={hasActiveFilters}
       />
       <section className="min-w-0">
+        {chips.length > 0 ? (
+          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
+        ) : null}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[13px] text-[#757575]">
             {result.total === 0
@@ -839,9 +900,15 @@ async function FundingResults({
           <EmptyState query={q} tip="Try broadening the query or removing facet filters." />
         ) : (
           <ul>
-            {result.hits.map((hit) => (
+            {result.hits.map((hit, i) => (
               <li key={hit.projectId}>
-                <FundingResultRow hit={hit} />
+                <FundingResultRow
+                  hit={hit}
+                  q={q}
+                  position={page * result.pageSize + i}
+                  total={result.total}
+                  filters={filters}
+                />
               </li>
             ))}
           </ul>
@@ -908,6 +975,7 @@ function FacetSidebarFunding({
     { key: "Co-I", count: facets.roles.coI },
   ];
   const activeFunder = active.funder ?? [];
+  const activeDirectFunder = active.directFunder ?? [];
   const activeProgramType = active.programType ?? [];
   const activeMechanism = active.mechanism ?? [];
   const activeStatus = active.status ?? [];
@@ -939,19 +1007,31 @@ function FacetSidebarFunding({
         ))}
       </FacetGroup>
 
-      {facets.funders.length > 0 ? (
-        <FacetGroup label="Funder" collapseAfter={6}>
-          {sortActiveFirst(facets.funders, (f) => activeFunder.includes(f.value)).map((f) => (
-            <FacetCheckbox
-              key={f.value}
-              label={f.label}
-              count={f.count}
-              isActive={activeFunder.includes(f.value)}
-              href={toggleHref("funder", f.value)}
-              wrap
-            />
-          ))}
-        </FacetGroup>
+      {facets.funders.length > 0 || facets.directFunders.length > 0 ? (
+        <FunderFacet
+          items={sortActiveFirst(facets.funders, (f) =>
+            activeFunder.includes(f.value),
+          ).map((f) => ({
+            value: f.value,
+            short: f.label,
+            full: expandSponsor(f.value),
+            aliases: collectAliases(f.value),
+            nihIc: isNihIc(f.value),
+            count: f.count,
+            isActive: activeFunder.includes(f.value),
+            href: toggleHref("funder", f.value),
+          }))}
+          directItems={facets.directFunders.map((f) => ({
+            value: f.value,
+            short: f.label,
+            full: expandSponsor(f.value),
+            aliases: collectAliases(f.value),
+            nihIc: isNihIc(f.value),
+            count: f.count,
+            isActive: activeDirectFunder.includes(f.value),
+            href: toggleHref("directFunder", f.value),
+          }))}
+        />
       ) : null}
 
       {facets.programTypes.length > 0 ? (
@@ -974,15 +1054,19 @@ function FacetSidebarFunding({
         <FacetGroup label="Mechanism (NIH)" collapseAfter={6}>
           {sortActiveFirst(facets.mechanisms, (m) =>
             activeMechanism.includes(m.value),
-          ).map((m) => (
-            <FacetCheckbox
-              key={m.value}
-              label={m.value}
-              count={m.count}
-              isActive={activeMechanism.includes(m.value)}
-              href={toggleHref("mechanism", m.value)}
-            />
-          ))}
+          ).map((m) => {
+            const expand = expandMechanism(m.value);
+            return (
+              <FacetCheckbox
+                key={m.value}
+                label={<MechanismAbbr code={m.value} />}
+                titleText={expand ? `${m.value} — ${expand}` : m.value}
+                count={m.count}
+                isActive={activeMechanism.includes(m.value)}
+                href={toggleHref("mechanism", m.value)}
+              />
+            );
+          })}
         </FacetGroup>
       ) : null}
 
@@ -1038,6 +1122,7 @@ function FundingSortLinks({
     sp.set("type", "funding");
     if (s !== "relevance") sp.set("sort", s);
     for (const v of filters.funder ?? []) sp.append("funder", v);
+    for (const v of filters.directFunder ?? []) sp.append("directFunder", v);
     for (const v of filters.programType ?? []) sp.append("programType", v);
     for (const v of filters.mechanism ?? []) sp.append("mechanism", v);
     for (const v of filters.status ?? []) sp.append("status", v);
@@ -1429,12 +1514,17 @@ function FacetGroup({
 
 function FacetCheckbox({
   label,
+  /** Plain-text equivalent for the `title` attribute (and for any consumer
+   *  that needs to compute layout off the string form). Defaults to `label`
+   *  when label is a string. */
+  titleText,
   count,
   isActive,
   href,
   wrap,
 }: {
-  label: string;
+  label: React.ReactNode;
+  titleText?: string;
   count?: number;
   isActive?: boolean;
   href: string;
@@ -1443,6 +1533,8 @@ function FacetCheckbox({
    *  line via items-start. Default behavior truncates with ellipsis. */
   wrap?: boolean;
 }) {
+  const titleAttr =
+    titleText ?? (typeof label === "string" ? label : undefined);
   if (wrap) {
     return (
       <li className="py-1 leading-[1.4]">
@@ -1472,7 +1564,7 @@ function FacetCheckbox({
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
       <Link
         href={href}
-        title={label}
+        title={titleAttr}
         className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
       >
         {/* readOnly checkbox: state lives in the URL; the link toggles it. */}

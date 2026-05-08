@@ -42,6 +42,10 @@ export type FundingFilters = {
   /** Canonical sponsor short names (e.g. "NCI"). Filters on PRIME sponsor
    *  per F6. Multi-select OR within the group. */
   funder?: string[];
+  /** Issue #80 item 7 — canonical short names that should match on the
+   *  DIRECT sponsor (subaward issuer) rather than the prime. Surfaced via
+   *  the Funder facet's type-ahead with a "via" annotation. */
+  directFunder?: string[];
   /** programType values from InfoEd. */
   programType?: string[];
   /** NIH activity codes. Selecting a mechanism implicitly excludes
@@ -101,6 +105,10 @@ export type FundingSearchResult = {
   facets: {
     /** Top-N prime sponsors with display labels (canonical short or raw). */
     funders: Array<{ value: string; label: string; count: number }>;
+    /** Direct sponsors (subaward issuers) with their per-project counts.
+     *  Used by the Funder type-ahead's "via" surface (issue #80 item 7).
+     *  Only includes rows where direct ≠ prime. */
+    directFunders: Array<{ value: string; label: string; count: number }>;
     programTypes: SearchFacetBucket[];
     mechanisms: SearchFacetBucket[];
     status: { active: number; endingSoon: number; recentlyEnded: number };
@@ -192,6 +200,9 @@ export async function searchFunding(opts: {
   if (filters.funder?.length) where.primeSponsor = { in: filters.funder };
   if (filters.programType?.length) where.programType = { in: filters.programType };
   if (filters.mechanism?.length) where.mechanism = { in: filters.mechanism };
+  // Direct-funder filter is applied post-aggregate — the canonical/raw
+  // fallback chain runs in resolveCanonical() below, and the same
+  // canonicalization should apply when matching the filter values.
 
   // Status filter: applied per-row via endDate range. Multi-select OR
   // resolves into a UNION of date ranges.
@@ -327,6 +338,18 @@ export async function searchFunding(opts: {
     );
   }
 
+  // Direct-funder filter (post-aggregate). Match against canonicalized
+  // direct sponsor; only subaward projects are eligible candidates.
+  if (filters.directFunder?.length) {
+    const wanted = new Set(filters.directFunder);
+    groupArr = groupArr.filter((g) => {
+      if (!g.canonical.isSubaward) return false;
+      const dc = resolveCanonical(g.canonical.directSponsor, g.canonical.directSponsorRaw);
+      const key = dc ?? g.canonical.directSponsorRaw ?? null;
+      return key !== null && wanted.has(key);
+    });
+  }
+
   // Apply text query: matches title or any person's preferredName. Naive
   // substring match; replace with OpenSearch when ranking matters.
   if (trimmed.length > 0) {
@@ -343,6 +366,7 @@ export async function searchFunding(opts: {
   // Compute facets from the post-filter group set. v1 uses simple counts
   // (no excluding-self aggregation); upgrade later when OpenSearch lands.
   const funderCounts = new Map<string, { label: string; count: number }>();
+  const directFunderCounts = new Map<string, { label: string; count: number }>();
   const programTypeCounts = new Map<string, number>();
   const mechanismCounts = new Map<string, number>();
   const departmentCounts = new Map<string, number>();
@@ -359,6 +383,16 @@ export async function searchFunding(opts: {
     const f = funderCounts.get(funderKey);
     if (f) f.count += 1;
     else funderCounts.set(funderKey, { label: funderKey, count: 1 });
+
+    if (c.isSubaward) {
+      const directCanon = resolveCanonical(c.directSponsor, c.directSponsorRaw);
+      const directKey = directCanon ?? c.directSponsorRaw;
+      if (directKey && directKey !== funderKey) {
+        const d = directFunderCounts.get(directKey);
+        if (d) d.count += 1;
+        else directFunderCounts.set(directKey, { label: directKey, count: 1 });
+      }
+    }
 
     programTypeCounts.set(c.programType, (programTypeCounts.get(c.programType) ?? 0) + 1);
     if (c.mechanism)
@@ -430,6 +464,10 @@ export async function searchFunding(opts: {
     pageSize: PAGE_SIZE,
     facets: {
       funders: Array.from(funderCounts.entries())
+        .map(([value, v]) => ({ value, label: v.label, count: v.count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 50),
+      directFunders: Array.from(directFunderCounts.entries())
         .map(([value, v]) => ({ value, label: v.label, count: v.count }))
         .sort((a, b) => b.count - a.count)
         .slice(0, 50),

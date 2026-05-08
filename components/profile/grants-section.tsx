@@ -5,6 +5,7 @@ import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
+import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { isNihAwardNumber } from "@/lib/award-number";
 
@@ -245,7 +246,7 @@ function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined 
         />
         <div className="text-muted-foreground mt-0.5 text-sm">
           {primeShort ? (
-            <SponsorAbbr short={primeShort} />
+            <FunderEyebrow short={primeShort} />
           ) : (
             <span>{grant.funder}</span>
           )}

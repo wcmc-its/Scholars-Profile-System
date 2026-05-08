@@ -174,6 +174,12 @@ export function expandSponsor(short: string | null | undefined): string | null {
   return getSponsor(short)?.full ?? null;
 }
 
+/** Returns true when the canonical short is an NIH Institute or Center.
+ *  Drives the "NIH/{IC}" eyebrow rendering (issue #80 item 1). */
+export function isNihIc(short: string | null | undefined): boolean {
+  return getSponsor(short)?.category === "NIH IC";
+}
+
 export function listSponsors(): readonly Sponsor[] {
   return ALL_SPONSORS;
 }
