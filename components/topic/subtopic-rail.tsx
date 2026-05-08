@@ -95,7 +95,7 @@ export function SubtopicRail({
                   <button
                     type="button"
                     onClick={() => handleClick(s.id)}
-                    className={`flex w-full items-start justify-between gap-2 rounded px-3 py-2 text-left ${
+                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left ${
                       isActive
                         ? "bg-[var(--color-accent-slate)] text-white"
                         : `hover:bg-accent${isLessCommon ? " opacity-60" : ""}`
