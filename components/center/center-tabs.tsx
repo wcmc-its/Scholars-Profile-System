@@ -68,8 +68,8 @@ export function CenterTabs({
         }
         const href =
           t.key === "scholars"
-            ? (basePath as Route)
-            : (`${basePath}?tab=${t.key}` as Route);
+            ? (`${basePath}#tab-content` as Route)
+            : (`${basePath}?tab=${t.key}#tab-content` as Route);
         return (
           <Link
             key={t.key}
