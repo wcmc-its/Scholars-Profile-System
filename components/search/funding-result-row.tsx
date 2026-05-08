@@ -48,6 +48,7 @@ export function FundingResultRow({
   position,
   total,
   filters,
+  applId,
 }: {
   hit: FundingHit;
   /** Optional analytics context. Issue #80 item 9 — when present, clicks
@@ -57,6 +58,10 @@ export function FundingResultRow({
   position?: number;
   total?: number;
   filters?: FundingFilters;
+  /** NIH RePORTER applId resolved by the parent list — when present, the
+   *  award serial in the right column links out to RePORTER. Mirrors the
+   *  profile Grants section's NIH-link behavior (issue #80 follow-up). */
+  applId?: number;
 }) {
   const startYear = hit.startDate.slice(0, 4);
   const endYear = hit.endDate.slice(0, 4);
@@ -146,7 +151,7 @@ export function FundingResultRow({
 
       {/* Right column: award identifier. */}
       <div className="text-right">
-        <AwardId hit={hit} />
+        <AwardId hit={hit} applId={applId} />
         {hit.status === "active" ? (
           <div className="mt-1.5 inline-flex items-center rounded-full bg-[#eaf3de] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#27500a]">
             Active
@@ -165,18 +170,43 @@ export function FundingResultRow({
   );
 }
 
-function AwardId({ hit }: { hit: FundingHit }) {
+function AwardId({ hit, applId }: { hit: FundingHit; applId?: number }) {
   if (!hit.awardNumber) return <span />;
+  const reporterUrl = applId
+    ? `https://reporter.nih.gov/project-details/${applId}`
+    : null;
   if (hit.mechanism) {
     const serial = awardSerial(hit.awardNumber, hit.mechanism);
     return (
       <span className="inline-flex items-baseline gap-1 whitespace-nowrap font-mono text-xs text-[#5a5a5a]">
         <MechanismAbbr code={hit.mechanism} className="font-mono" />
-        <span>{serial}</span>
+        {reporterUrl ? (
+          <a
+            href={reporterUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View on NIH RePORTER"
+            className="text-[#2c4f6e] underline-offset-4 hover:underline"
+          >
+            {serial}
+          </a>
+        ) : (
+          <span>{serial}</span>
+        )}
       </span>
     );
   }
-  return (
+  return reporterUrl ? (
+    <a
+      href={reporterUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View on NIH RePORTER"
+      className="whitespace-nowrap font-mono text-xs text-[#2c4f6e] underline-offset-4 hover:underline"
+    >
+      {hit.awardNumber}
+    </a>
+  ) : (
     <span className="whitespace-nowrap font-mono text-xs text-[#5a5a5a]">
       {hit.awardNumber}
     </span>
