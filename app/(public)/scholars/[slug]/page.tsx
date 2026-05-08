@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { GrantsSection } from "@/components/profile/grants-section";
@@ -315,15 +316,15 @@ export default async function ScholarProfilePage({
           ) : null}
 
           {profile.disclosures.length > 0 ? (
-            <Section title="External relationships" headingLg>
-              <p className="mb-6 max-w-[60em] text-sm italic leading-relaxed text-zinc-700 dark:text-zinc-300">
-                Relationships and collaborations with for-profit and not-for-profit organizations
-                are of vital importance to our faculty because these exchanges of scientific
-                information foster innovation. As experts in their fields, WCM physicians and
-                scientists are sought after by many organizations to consult and educate. WCM and
-                its faculty make this information available to the public, thus creating a
-                transparent environment.
-              </p>
+            <Section
+              title={
+                <>
+                  External relationships
+                  <DisclosureInfoTooltip />
+                </>
+              }
+              headingLg
+            >
               {(() => {
                 const grouped = new Map<string, Set<string>>();
                 for (const d of profile.disclosures) {
@@ -395,15 +396,15 @@ function Section({
   headingLg = false,
   count,
 }: {
-  title: string;
+  title: React.ReactNode;
   children: React.ReactNode;
   headingLg?: boolean;
   count?: React.ReactNode;
 }) {
   return (
-    <section className="border-t border-border py-8 first:border-t-0 first:pt-0">
+    <section className="pt-12 first:pt-0">
       {headingLg ? (
-        <h2 className="mb-4 flex items-baseline gap-3 text-lg font-bold tracking-tight">
+        <h2 className="mb-5 flex items-baseline gap-3 text-2xl font-bold tracking-tight">
           {title}
           {count ? (
             <span className="text-muted-foreground text-sm font-normal tracking-normal">
