@@ -1,35 +1,59 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  deriveAuthorPositionRole,
+  matchesPositionFilter,
+  type PositionFilter,
+} from "@/components/profile/author-position-badge";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import type { ProfilePublication } from "@/lib/api/profile";
 
 /**
  * Map publicationType strings (verbatim from PubMed via ReciterDB) to filter
- * chip buckets. Mirrors the mockup chip set; the long-tail types (case reports,
- * preprints, letters, errata) reach the "All" view but don't get their own
- * chip — too small a slice and the chip set stays readable.
+ * chip buckets. Issue #72 trims this to a binary axis: "everything" vs
+ * "research articles only." Reviews, editorials, and the long-tail types
+ * still surface under All; they're just not isolatable on their own.
  */
-type Bucket = "all" | "article" | "review" | "editorial";
+type Bucket = "all" | "article";
 
 function bucketOf(publicationType: string | null): Bucket | null {
   if (publicationType === "Academic Article") return "article";
-  if (publicationType === "Review") return "review";
-  if (publicationType === "Editorial Article") return "editorial";
   return null;
 }
 
 const BUCKET_ORDER: ReadonlyArray<{ key: Bucket; label: string }> = [
   { key: "all", label: "All" },
   { key: "article", label: "Research Articles" },
-  { key: "review", label: "Reviews" },
-  { key: "editorial", label: "Editorials" },
 ];
+
+const POSITION_OPTIONS: ReadonlyArray<{ key: PositionFilter; label: string }> = [
+  { key: "all", label: "All positions" },
+  { key: "first", label: "First author" },
+  { key: "senior", label: "Senior author" },
+  { key: "co_author", label: "Co-author" },
+];
+
+const POSITION_SHORT_LABEL: Record<PositionFilter, string> = {
+  all: "All",
+  first: "First author",
+  senior: "Senior author",
+  co_author: "Co-author",
+};
 
 export function PublicationsSection({
   publications,
   filterActive = false,
+  position = "all",
+  onPositionChange,
 }: {
   publications: ProfilePublication[];
   /** Set by `<ProfilePubsCluster>` when a topic filter is active. Expands
@@ -37,16 +61,33 @@ export function PublicationsSection({
    *  on top of the default "first group only" behavior, so users browsing a
    *  filtered set don't have to click open year after year (issue #73). */
   filterActive?: boolean;
+  /** Author-position filter (#72) — controlled by the cluster wrapper so the
+   *  active-filter banner can compose position with topic. */
+  position?: PositionFilter;
+  onPositionChange?: (next: PositionFilter) => void;
 }) {
   const [bucket, setBucket] = useState<Bucket>("all");
   const [query, setQuery] = useState("");
+
+  // Per-position counts over the full input set — they don't shift as the
+  // user toggles the type chip or the search box. Same stability principle
+  // as the keyword pill counts (#73): the dropdown reflects "what would
+  // match if I picked this position alone", not the post-intersection size.
+  const positionCounts = useMemo(() => {
+    const c: Record<PositionFilter, number> = { all: publications.length, first: 0, senior: 0, co_author: 0 };
+    for (const p of publications) {
+      const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
+      if (matchesPositionFilter(role, "first")) c.first += 1;
+      if (matchesPositionFilter(role, "senior")) c.senior += 1;
+      if (matchesPositionFilter(role, "co_author")) c.co_author += 1;
+    }
+    return c;
+  }, [publications]);
 
   const counts = useMemo(() => {
     const c: Record<Bucket, number> = {
       all: publications.length,
       article: 0,
-      review: 0,
-      editorial: 0,
     };
     for (const p of publications) {
       const b = bucketOf(p.publicationType);
@@ -59,6 +100,10 @@ export function PublicationsSection({
     const q = query.trim().toLowerCase();
     return publications.filter((p) => {
       if (bucket !== "all" && bucketOf(p.publicationType) !== bucket) return false;
+      if (position !== "all") {
+        const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
+        if (!matchesPositionFilter(role, position)) return false;
+      }
       if (q.length === 0) return true;
       const hay =
         (p.title ?? "") +
@@ -68,7 +113,7 @@ export function PublicationsSection({
         (p.authorsString ?? "");
       return hay.toLowerCase().includes(q);
     });
-  }, [publications, bucket, query]);
+  }, [publications, bucket, position, query]);
 
   const searchActive = query.trim().length > 0;
 
@@ -130,13 +175,38 @@ export function PublicationsSection({
             </button>
           );
         })}
-        <input
-          type="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search this list…"
-          className="border-border-strong ml-auto h-7 w-[220px] rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
-        />
+        <div className="ml-auto flex items-center gap-2">
+          <Select
+            value={position}
+            onValueChange={(v) => onPositionChange?.(v as PositionFilter)}
+          >
+            <SelectTrigger
+              size="sm"
+              aria-label="Position filter"
+              className="h-7 gap-1 rounded-full border-border-strong bg-background px-3 text-sm hover:border-[var(--color-accent-slate)]"
+            >
+              <span className="text-muted-foreground">Position:</span>
+              <SelectValue>{POSITION_SHORT_LABEL[position]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {POSITION_OPTIONS.map(({ key, label }) => (
+                <SelectItem key={key} value={key} className="text-sm">
+                  <span>{label}</span>
+                  <span className="ml-2 text-xs tabular-nums text-muted-foreground">
+                    {positionCounts[key]}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search this list…"
+            className="border-border-strong h-7 w-[220px] rounded-full border bg-muted px-3 text-sm focus:border-[var(--color-accent-slate)] focus:bg-background focus:outline-none"
+          />
+        </div>
       </div>
 
       {pubGroups.length === 0 ? (
