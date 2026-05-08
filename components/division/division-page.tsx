@@ -218,7 +218,7 @@ export async function DivisionPage({
           <PublicationCard key={p.pmid} pub={p} />
         ))}
         totalCount={detail.stats.publications}
-        viewAllHref={`${basePath}?tab=publications`}
+        viewAllHref={`${basePath}?tab=publications#tab-content`}
         viewAllLabel="publications"
       />
       <HighlightsSection
@@ -228,11 +228,11 @@ export async function DivisionPage({
           <GrantCard key={g.externalId ?? `g-${i}`} grant={g} />
         ))}
         totalCount={detail.stats.activeGrants}
-        viewAllHref={`${basePath}?tab=grants`}
+        viewAllHref={`${basePath}?tab=grants#tab-content`}
         viewAllLabel="active grants"
       />
 
-      <div className="mt-12">
+      <div id="tab-content" className="mt-12 scroll-mt-16">
         <DeptTabs
           active={tab}
           basePath={basePath}
