@@ -939,8 +939,6 @@ function FacetSidebarPubs({
         ))}
       </FacetGroup>
 
-      {journalItems.length > 0 ? <JournalFacet items={journalItems} /> : null}
-
       {publicationTypes.length > 0 ? (
         <FacetGroup label="Publication type" collapseAfter={5}>
           {publicationTypes.map((p) => (
@@ -956,6 +954,8 @@ function FacetSidebarPubs({
           ))}
         </FacetGroup>
       ) : null}
+
+      {journalItems.length > 0 ? <JournalFacet items={journalItems} /> : null}
     </aside>
   );
 }
