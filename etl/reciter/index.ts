@@ -31,6 +31,7 @@
  *
  * Usage: `npm run etl:reciter`
  */
+import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
@@ -53,6 +54,9 @@ type ArticleRow = {
 };
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
+
+type KeywordRow = { pmid: number; keyword: string; ui: string | null };
+type MeshKeyword = { ui: string | null; label: string };
 
 const IN_BATCH = 500; // batch size for IN (...) clauses
 const INSERT_BATCH = 1000;
@@ -169,6 +173,33 @@ async function main() {
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
 
+    // Issue #73 — pull MeSH keywords for the same pmid set so the profile
+    // loader can derive the Topics section without a runtime join. Keywords
+    // are per-PMID, not per-(person, pmid) — verified that all persons
+    // sharing a pmid have identical keyword sets — so we drop the
+    // personIdentifier dimension here. Join `mesh.Label` to attach the
+    // descriptor UI; ~1 in 1000 labels don't resolve and are stored with
+    // ui = null.
+    const keywordsByPmid = new Map<number, MeshKeyword[]>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      await withReciterConnection(async (conn) => {
+        const rows = (await conn.query(
+          `SELECT DISTINCT k.pmid, k.keyword, m.DescriptorUI AS ui
+             FROM person_article_keyword k
+             LEFT JOIN mesh m ON m.Label = k.keyword
+            WHERE k.pmid IN (?)`,
+          [batch],
+        )) as KeywordRow[];
+        for (const r of rows) {
+          const key = Number(r.pmid);
+          const list = keywordsByPmid.get(key) ?? [];
+          list.push({ ui: r.ui ?? null, label: r.keyword });
+          keywordsByPmid.set(key, list);
+        }
+      });
+    }
+    console.log(`Got keywords for ${keywordsByPmid.size} pmids.`);
+
     // First-seen authors string per pmid (denormalized, same per row).
     const authorsStringByPmid = new Map<number, string>();
     for (const r of authorRows) {
@@ -199,6 +230,7 @@ async function main() {
         doi: a.doi,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
         abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
+        meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,
         source: "ReciterDB",
       };
     });

@@ -152,7 +152,13 @@ model Publication {
   dateAddedToEntrez DateTime? @map("date_added_to_entrez") @db.Date
   doi               String?   @db.VarChar(255)
   pubmedUrl         String?   @map("pubmed_url") @db.VarChar(512)
-  meshTerms         Json?     @map("mesh_terms") // array of MeSH descriptor strings
+  /// MeSH keywords from accepted publications, used by the profile Topics
+  /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
+  /// `ui` is null for the rare label that doesn't resolve to a `mesh.DescriptorUI`
+  /// in reciterdb. Source: `reciterdb.person_article_keyword` joined to
+  /// `reciterdb.mesh`. Keyword sets are per-PMID, not per-(person, pmid) —
+  /// verified during ETL design.
+  meshTerms         Json?     @map("mesh_terms")
   /// Plain-text article abstract from ReciterDB.reporting_abstracts.abstractVarchar
   /// (capped at 15000 chars at the source). Used by the search-index ETL to
   /// emit `publicationAbstracts` on the people document for thematic-query
