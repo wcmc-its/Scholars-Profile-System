@@ -14,6 +14,15 @@ import {
   type ScoredPublication,
 } from "@/lib/ranking";
 
+/** Funding "Active" definition (issue #78, decision Q6).
+ *  A grant is considered active through its end date plus a 12-month
+ *  no-cost-extension grace window. NCE status isn't reliably present in
+ *  InfoEd, so we use the most common NIH NCE window as a proxy. */
+const NCE_GRACE_MS = 365 * 24 * 60 * 60 * 1000;
+export function isFundingActive(endDate: Date, now: Date): boolean {
+  return endDate.getTime() + NCE_GRACE_MS > now.getTime();
+}
+
 export type CoauthorChip = {
   cwid: string;
   slug: string;
@@ -451,7 +460,7 @@ export async function getScholarFullProfileBySlug(
       funder: g.funder,
       startDate: g.startDate.toISOString().slice(0, 10),
       endDate: g.endDate.toISOString().slice(0, 10),
-      isActive: g.endDate.getTime() > now.getTime(),
+      isActive: isFundingActive(g.endDate, now),
       awardNumber: g.awardNumber ?? null,
     })),
     keywords,

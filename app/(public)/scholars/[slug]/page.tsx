@@ -298,7 +298,7 @@ export default async function ScholarProfilePage({
 
           {profile.grants.length > 0 ? (
             <Section
-              title="Grants"
+              title="Funding"
               headingLg
               count={
                 <>
