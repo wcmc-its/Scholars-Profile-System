@@ -397,6 +397,10 @@ const BIOMEDICAL_ACRONYMS: Record<string, string> = {
   tdp43: "TDP-43", tdp: "TDP", fus: "FUS", sod1: "SOD1",
   ipsc: "iPSC", bbb: "BBB", tnf: "TNF", ace: "ACE", ms: "MS",
   tbi: "TBI", ptsd: "PTSD", ocd: "OCD", snp: "SNP", mrna: "mRNA",
+  // Ophthalmology / vision (#25)
+  ccm: "CCM", cnv: "CNV", amd: "AMD", rpe: "RPE", pvd: "PVD",
+  vegf: "VEGF", iop: "IOP", aion: "AION", gca: "GCA", oct: "OCT",
+  lasik: "LASIK", erg: "ERG", rop: "ROP", dr: "DR",
 };
 
 /**
