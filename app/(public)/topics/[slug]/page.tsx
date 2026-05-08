@@ -92,13 +92,16 @@ export default async function TopicPage({
           </p>
         )}
 
-        {/* Top scholars chip row — inside hero, D-10 */}
+        {/* Top scholars chip row — inside hero, D-10. id="top-scholars"
+            anchors deep-links from the home page spotlight section. */}
         {topScholars && (
-          <TopScholarsChipRow
-            scholars={topScholars}
-            scholarCount={scholarCount}
-            topicSlug={slug}
-          />
+          <div id="top-scholars" className="scroll-mt-20">
+            <TopScholarsChipRow
+              scholars={topScholars}
+              scholarCount={scholarCount}
+              topicSlug={slug}
+            />
+          </div>
         )}
 
         {/* Stats — dashed border under scholars row */}
@@ -119,8 +122,12 @@ export default async function TopicPage({
       {/* Recent highlights (Phase 2 reuse) */}
       {recentHighlights && <RecentHighlights papers={recentHighlights} />}
 
-      {/* Layout B: sticky subtopic rail + CSR publication feed */}
-      <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />
+      {/* Layout B: sticky subtopic rail + CSR publication feed.
+          id="publications" anchors deep-links from the home page spotlight
+          section. */}
+      <section id="publications" className="scroll-mt-20">
+        <SubtopicPublicationLayout topicSlug={slug} subtopics={subtopicList} />
+      </section>
     </main>
   );
 }

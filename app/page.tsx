@@ -10,13 +10,11 @@
  * each ETL completion via /api/revalidate?path=/ (Plan 09).
  */
 import {
-  getRecentContributions,
-  getSelectedResearch,
+  getSpotlights,
   getBrowseAllResearchAreas,
   getHomeStats,
 } from "@/lib/api/home";
-import { RecentContributionsGrid } from "@/components/home/recent-contributions-grid";
-import { SelectedResearchCarousel } from "@/components/home/selected-research-carousel";
+import { SpotlightSection } from "@/components/home/spotlight-section";
 import { BrowseAllResearchAreasGrid } from "@/components/home/browse-all-research-areas-grid";
 import { TrySuggestionsChips } from "@/components/home/try-suggestions-chips";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
@@ -27,11 +25,13 @@ export const revalidate = 21600; // 6 hours
 export const dynamicParams = true;
 
 export default async function HomePage() {
-  // Four independent fetches; .catch defense-in-depth so a transient DB blip
-  // on one surface does not 5xx the whole page.
-  const [recent, selected, browse, stats] = await Promise.all([
-    getRecentContributions().catch(() => null),
-    getSelectedResearch().catch(() => null),
+  // Three independent fetches; .catch defense-in-depth so a transient DB blip
+  // on one surface does not 5xx the whole page. Phase 9 SPOTLIGHT-04: the new
+  // spotlight section replaces both Selected research and Recent contributions
+  // (the latter is suppressed; existing files are kept until Plan 09-07
+  // cleanup removes them).
+  const [spotlights, browse, stats] = await Promise.all([
+    getSpotlights().catch(() => null),
     getBrowseAllResearchAreas().catch(() => [] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>),
     getHomeStats().catch(() => null),
   ]);
@@ -66,8 +66,7 @@ export default async function HomePage() {
         ) : null}
 
         <div className="mx-auto max-w-[1100px] px-6 py-12">
-          {selected ? <SelectedResearchCarousel items={selected} /> : null}
-          {recent ? <RecentContributionsGrid items={recent} /> : null}
+          {spotlights ? <SpotlightSection items={spotlights} /> : null}
           <BrowseAllResearchAreasGrid items={browse ?? []} />
         </div>
       </main>
