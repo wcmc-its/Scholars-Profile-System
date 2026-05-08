@@ -31,8 +31,8 @@ import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isNihIc, expandSponsor, getSponsor } from "@/lib/sponsor-lookup";
 import { expandMechanism } from "@/lib/mechanism-lookup";
-import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { FunderFacet } from "@/components/search/funder-facet";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 export const dynamic = "force-dynamic";
 
@@ -1059,8 +1059,8 @@ function FacetSidebarFunding({
             return (
               <FacetCheckbox
                 key={m.value}
-                label={<MechanismAbbr code={m.value} />}
-                titleText={expand ? `${m.value} — ${expand}` : m.value}
+                label={m.value}
+                tooltip={expand ?? undefined}
                 count={m.count}
                 isActive={activeMechanism.includes(m.value)}
                 href={toggleHref("mechanism", m.value)}
@@ -1514,17 +1514,18 @@ function FacetGroup({
 
 function FacetCheckbox({
   label,
-  /** Plain-text equivalent for the `title` attribute (and for any consumer
-   *  that needs to compute layout off the string form). Defaults to `label`
-   *  when label is a string. */
-  titleText,
+  /** Optional expansion shown in a styled hover/focus tooltip wrapping the
+   *  whole row. Mirrors the author-chip-row treatment so a user hovering a
+   *  mechanism code or NIH-IC facet sees the long form without overlapping
+   *  with the row's click target. */
+  tooltip,
   count,
   isActive,
   href,
   wrap,
 }: {
   label: React.ReactNode;
-  titleText?: string;
+  tooltip?: string;
   count?: number;
   isActive?: boolean;
   href: string;
@@ -1533,38 +1534,44 @@ function FacetCheckbox({
    *  line via items-start. Default behavior truncates with ellipsis. */
   wrap?: boolean;
 }) {
-  const titleAttr =
-    titleText ?? (typeof label === "string" ? label : undefined);
+  const fallbackTitle =
+    tooltip ?? (typeof label === "string" ? label : undefined);
+  const wrapInTooltip = (children: React.ReactNode) =>
+    tooltip ? <HoverTooltip text={tooltip}>{children}</HoverTooltip> : children;
   if (wrap) {
     return (
       <li className="py-1 leading-[1.4]">
-        <Link
-          href={href}
-          className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
-        >
-          <input
-            type="checkbox"
-            readOnly
-            checked={!!isActive}
-            tabIndex={-1}
-            aria-hidden="true"
-            className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
-          />
-          <span className="min-w-0 flex-1 break-words">{label}</span>
-          {count !== undefined ? (
-            <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
-              {count.toLocaleString()}
-            </span>
-          ) : null}
-        </Link>
+        {wrapInTooltip(
+          <Link
+            href={href}
+            title={tooltip ? undefined : fallbackTitle}
+            className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+          >
+            <input
+              type="checkbox"
+              readOnly
+              checked={!!isActive}
+              tabIndex={-1}
+              aria-hidden="true"
+              className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
+            />
+            <span className="min-w-0 flex-1 break-words">{label}</span>
+            {count !== undefined ? (
+              <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+                {count.toLocaleString()}
+              </span>
+            ) : null}
+          </Link>,
+        )}
       </li>
     );
   }
   return (
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
+      {wrapInTooltip(
       <Link
         href={href}
-        title={titleAttr}
+        title={tooltip ? undefined : fallbackTitle}
         className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
       >
         {/* readOnly checkbox: state lives in the URL; the link toggles it. */}
@@ -1585,7 +1592,8 @@ function FacetCheckbox({
             {count.toLocaleString()}
           </span>
         ) : null}
-      </Link>
+      </Link>,
+      )}
     </li>
   );
 }
