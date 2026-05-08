@@ -465,3 +465,38 @@ model CompletenessSnapshot {
   @@index([snapshotAt(sort: Desc)])
   @@map("completeness_snapshot")
 }
+
+/// Phase 9 SPOTLIGHT-01 — projection of the ReciterAI spotlight artifact.
+/// Sole writer is `etl/spotlight/index.ts` (Plan 09-02), which fetches
+/// s3://wcmc-reciterai-artifacts/spotlight/latest/spotlight.json and treats
+/// each publish as a full replacement.
+///
+/// `subtopicId` is the artifact's `subtopic_id`. NOT a Prisma FK to
+/// `Subtopic.id`: the spotlight publish cycle is independent of the hierarchy
+/// publish cycle, and a transient mismatch during a hierarchy recompute /
+/// dual-publish window must not break inserts. D-06 (subtopic ID instability
+/// across recomputes) carries through — never persist `subtopicId` as a FK in
+/// other tables that outlive a single publish cycle.
+///
+/// `papers` stores the artifact's per-paper payload verbatim (PMID, title,
+/// journal, year, first_author + last_author each shaped
+/// `{personIdentifier, displayName, position}`). The DAL resolves
+/// `personIdentifier` → Scholar headshot at read time.
+///
+/// D-19 LOCKED: `displayName`, `shortDescription`, and `lede` are UI-facing
+/// only. NEVER pass them to an LLM, retrieval, or embedding path. The
+/// LLM-canonical fields are `label` (here) and `description` (on `Subtopic`).
+model Spotlight {
+  subtopicId       String   @id @map("subtopic_id") @db.VarChar(128)
+  parentTopicId    String   @map("parent_topic_id") @db.VarChar(128)
+  label            String   @db.VarChar(255)
+  displayName      String   @map("display_name") @db.VarChar(255)
+  shortDescription String   @map("short_description") @db.Text
+  lede             String   @db.Text
+  papers           Json     @map("papers")
+  artifactVersion  String   @map("artifact_version") @db.VarChar(32)
+  refreshedAt      DateTime @map("refreshed_at")
+
+  @@index([parentTopicId])
+  @@map("spotlight")
+}
