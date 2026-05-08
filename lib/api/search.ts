@@ -272,7 +272,11 @@ export async function searchPeople(opts: {
 
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "lastname") {
-    sortClause.push({ "preferredName.keyword": "asc" });
+    // Issue #82 — preferredName is "Given Last", so its keyword sort is
+    // by first name. The dedicated lastNameSort keyword on each doc
+    // carries the lowercased surname (suffix-stripped) for true A–Z
+    // ordering by last name.
+    sortClause.push({ lastNameSort: "asc" });
   } else if (sort === "recentPub") {
     sortClause.push({ mostRecentPubDate: "desc" });
   }

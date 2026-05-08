@@ -66,6 +66,22 @@ function trailingNameSlices(name: string): string[] {
 }
 
 /**
+ * Extract the surname token from a "Given Last" preferredName. Strips
+ * trailing generational suffixes ("Jr", "II", etc.) so "Smith Jr" yields
+ * "Smith". Returns "" for empty input. Used to populate the keyword
+ * `lastNameSort` field on each people doc — see issue #82.
+ */
+function extractLastNameSort(name: string): string {
+  if (!name) return "";
+  const raw = name.trim().split(/\s+/).filter(Boolean);
+  if (raw.length === 0) return "";
+  const SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
+  let end = raw.length;
+  while (end > 1 && SUFFIXES.test(raw[end - 1])) end -= 1;
+  return raw[end - 1].toLowerCase();
+}
+
+/**
  * Build a "first + last" slice that drops middle tokens, so users typing
  * "Ronald Crystal" find "Ronald G. Crystal". Returns null for names that
  * don't have at least one middle token, and for names whose first/last is
@@ -306,6 +322,7 @@ async function indexPeople() {
         cwid: s.cwid,
         slug: s.slug,
         preferredName: displayName,
+        lastNameSort: extractLastNameSort(s.preferredName),
         // Append postnominal to fullName for search recall ("Curtis Cole MD"
         // matching), keep the constructed full form as a fallback.
         fullName: s.postnominal

@@ -75,6 +75,12 @@ export const peopleIndexMapping = {
         analyzer: "scholar_text",
         fields: { keyword: { type: "keyword" } },
       },
+      // Lowercased surname for the People "Last name (A–Z)" sort. The
+      // preferredName.keyword field is "Given Last" so it sorts by first
+      // name; this dedicated field carries just the last token (with
+      // generational suffixes stripped) so Sort=lastname returns the
+      // expected alphabetical order. Issue #82.
+      lastNameSort: { type: "keyword" },
       fullName: { type: "text", analyzer: "scholar_text" },
       // Autocomplete suggester (spec line 184: fires on 2 chars).
       // Suggests "name + primary title" (Stanford-style; FunReq Figure C).
