@@ -36,6 +36,32 @@ const AUTHORSHIP_WEIGHTS = {
 
 type AuthorshipKind = keyof typeof AUTHORSHIP_WEIGHTS;
 
+/**
+ * Build trailing-token slices of a name so the OpenSearch completion
+ * suggester resolves arbitrary middle-token prefixes. For "M. Cary Reid"
+ * returns ["Cary Reid", "Reid"] — these get added as suggestion inputs
+ * alongside the canonical full name, so typing "Cary" or "Reid" matches.
+ *
+ * Drops trailing generational suffixes ("Jr", "Sr", "II", "III", "IV") so
+ * "Smith Jr" still surfaces a "Smith" slice. Empty for single-token names.
+ */
+function trailingNameSlices(name: string): string[] {
+  if (!name) return [];
+  const raw = name.trim().split(/\s+/).filter(Boolean);
+  if (raw.length <= 1) return [];
+  const SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
+  // Drop trailing suffix tokens so the "last name" slice anchors on the
+  // surname, not "Jr".
+  let end = raw.length;
+  while (end > 1 && SUFFIXES.test(raw[end - 1])) end -= 1;
+  const tokens = raw.slice(0, end);
+  const slices: string[] = [];
+  for (let i = 1; i < tokens.length; i++) {
+    slices.push(tokens.slice(i).join(" "));
+  }
+  return slices;
+}
+
 function classifyAuthorship(a: {
   isFirst: boolean;
   isLast: boolean;
@@ -64,6 +90,7 @@ async function indexPeople() {
       slug: true,
       preferredName: true,
       fullName: true,
+      postnominal: true,
       primaryTitle: true,
       primaryDepartment: true,
       overview: true,
@@ -145,25 +172,49 @@ async function indexPeople() {
       .filter((d): d is Date => d !== null)
       .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
-    const nameSuggestInputs = [
-      { input: s.preferredName, weight: 100 },
-      ...(s.primaryTitle
-        ? [
-            {
-              input: `${s.preferredName} — ${s.primaryTitle}`,
-              weight: 80,
-            },
-          ]
-        : []),
+    // OpenSearch's `completion` suggester matches a PREFIX of the input
+    // string (not tokens within it), so feeding only `preferredName` ("M.
+    // Cary Reid") means queries like "Cary" or "Reid" never resolve. Add a
+    // suggestion input for every trailing-token slice ("Cary Reid", "Reid")
+    // plus a "Last, First" variant so middle-name and last-name search both
+    // work without changing the mapping. The suggest API resolves matched
+    // docs back to preferredName via mget, so the dropdown still shows the
+    // canonical full name regardless of which slice matched.
+    const displayName = s.postnominal
+      ? `${s.preferredName}, ${s.postnominal}`
+      : s.preferredName;
+    const nameSuggestInputs: Array<{ input: string; weight: number }> = [
+      { input: displayName, weight: 100 },
     ];
+    const slices = trailingNameSlices(s.preferredName);
+    for (const slice of slices) {
+      nameSuggestInputs.push({ input: slice, weight: 95 });
+    }
+    const lastName = slices[slices.length - 1];
+    if (lastName) {
+      nameSuggestInputs.push({
+        input: `${lastName}, ${s.preferredName}`,
+        weight: 90,
+      });
+    }
+    if (s.primaryTitle) {
+      nameSuggestInputs.push({
+        input: `${displayName} — ${s.primaryTitle}`,
+        weight: 80,
+      });
+    }
 
     docs.push({
       cwid: s.cwid,
       doc: {
         cwid: s.cwid,
         slug: s.slug,
-        preferredName: s.preferredName,
-        fullName: s.fullName,
+        preferredName: displayName,
+        // Append postnominal to fullName for search recall ("Curtis Cole MD"
+        // matching), keep the constructed full form as a fallback.
+        fullName: s.postnominal
+          ? `${s.fullName}, ${s.postnominal}`
+          : s.fullName,
         primaryTitle: s.primaryTitle,
         primaryDepartment: s.primaryDepartment,
         nameSuggest: nameSuggestInputs,

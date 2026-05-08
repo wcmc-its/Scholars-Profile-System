@@ -19,6 +19,11 @@ model Scholar {
   cwid              String    @id @db.VarChar(32)
   preferredName     String    @map("preferred_name") @db.VarChar(255)
   fullName          String    @map("full_name") @db.VarChar(255)
+  /// Pre-concatenated degree string from `weillCornellEduDegree` on the WOOFA
+  /// faculty SOR (e.g. "MD", "MD, MPH"). Appended after preferredName as a
+  /// postnominal credential at render time. Null for scholars with no SOR
+  /// row (postdocs, doctoral students, non-faculty).
+  postnominal       String?   @db.VarChar(64)
   primaryTitle      String?   @map("primary_title") @db.VarChar(255)
   primaryDepartment String?   @map("primary_department") @db.VarChar(255)
   email             String?   @db.VarChar(255)

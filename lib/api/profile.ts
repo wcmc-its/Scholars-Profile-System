@@ -54,6 +54,14 @@ export type ProfilePayload = {
   cwid: string;
   slug: string;
   preferredName: string;
+  /** Postnominal degree string from LDAP `weillCornellEduDegree`, e.g. "MD".
+   *  Null when absent. Combine with preferredName via `publishedName` for
+   *  display surfaces. */
+  postnominal: string | null;
+  /** preferredName with postnominal appended ("Curtis Cole, MD") when present.
+   *  Single source of truth for any UI that renders a scholar's published
+   *  name (profile H1, author chips, search results, etc.). */
+  publishedName: string;
   fullName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
@@ -315,6 +323,10 @@ export async function getScholarFullProfileBySlug(
     cwid: scholar.cwid,
     slug: scholar.slug,
     preferredName: scholar.preferredName,
+    postnominal: scholar.postnominal,
+    publishedName: scholar.postnominal
+      ? `${scholar.preferredName}, ${scholar.postnominal}`
+      : scholar.preferredName,
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,

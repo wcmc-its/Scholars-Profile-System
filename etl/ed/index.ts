@@ -231,6 +231,7 @@ async function main() {
       appointmentsByCwid.set(a.cwid, arr);
     }
 
+
     // Phase 4 — employee SOR for the manager graph. Used by:
     //   - postdoc mentor lookup (issue #5)
     //   - division-chief detection (issue #16, Path B)
@@ -336,6 +337,17 @@ async function main() {
       "Hospital for Special Surgery": "Orthopaedic Surgery",
     };
 
+    /** Level2 org-unit names that LDAP returns under academic depts but which
+     *  are admin/operational slices, not research divisions. Scholars whose
+     *  primary appointment has level2 == one of these get null divCode/divName
+     *  (they roll up to the parent dept directly), and no Division row is
+     *  created. Mirrors the EXCLUDED_DEPT_NAMES pattern at the dept level —
+     *  name-based, no regex, fail-closed: missing one name is one PR; an
+     *  overzealous filter silently hides real divisions. */
+    const EXCLUDED_DIV_NAMES = new Set<string>([
+      "Administration",
+    ]);
+
     /** Resolve the (deptCode, divCode, deptName, divName) tuple a single
      *  scholar should land at — same logic the scholar loop uses below. */
     function resolveOrgUnit(f: EdFacultyEntry): {
@@ -346,14 +358,27 @@ async function main() {
     } {
       const appts = appointmentsByCwid.get(f.cwid) ?? [];
       const primary = pickPrimaryActiveAppt(appts);
+      // `f.primaryDepartment` (the person-entry weillCornellEduPrimaryDepartment)
+      // mirrors the employee SOR's org assignment, which can be a lab/center
+      // (e.g. "Jedd Wolchok Lab"). When the WOOFA faculty SOR has no active
+      // primary row we render `f.orgUnit` (the level1 academic dept on the
+      // person entry) or null, NOT the employee-side label.
       const rawDeptName =
-        primary?.organization ?? f.primaryDepartment ?? f.orgUnit ?? null;
+        primary?.organization ?? f.orgUnit ?? null;
       const rawDivName = primary?.divName ?? null;
       const rawDivCode = primary?.divCode ?? null;
 
+      // Strip excluded admin-style level2 units (e.g. "Administration") so no
+      // Division row is created and the scholar rolls up to the parent dept.
+      const isExcludedDiv = !!(rawDivName && EXCLUDED_DIV_NAMES.has(rawDivName));
+      const effectiveDivName = isExcludedDiv ? null : rawDivName;
+      const effectiveDivCode = isExcludedDiv ? null : rawDivCode;
+
       // Promote level2 → dept when LDAP nests an academic unit (Library)
       // under a non-academic level1 (ITS). The level2 code becomes the
-      // scholar's dept_code; no division on this scholar.
+      // scholar's dept_code; no division on this scholar. Promotion uses
+      // the RAW level2 name so an academic unit isn't dropped by the
+      // excluded-div filter.
       if (rawDivName && PROMOTE_LEVEL2_TO_DEPT.has(rawDivName) && rawDivCode) {
         return {
           deptCode: rawDivCode,
@@ -373,9 +398,9 @@ async function main() {
 
       return {
         deptCode: primary?.deptCode ?? f.deptCode ?? null,
-        divCode: rawDivCode,
+        divCode: effectiveDivCode,
         deptName,
-        divName: rawDivName,
+        divName: effectiveDivName,
       };
     }
 
@@ -523,6 +548,12 @@ async function main() {
       const resolved = resolveOrgUnit(f);
       const effectiveDeptCode = canonicalDeptCode(resolved.deptCode);
       const effectiveDivCode = resolved.divCode;
+      // The legacy `Scholar.primaryDepartment` text column drives the profile
+      // sidebar's third line and search-result subtitles. Without this, the
+      // unresolved person-entry value (e.g. "Jedd Wolchok Lab" — the employee
+      // SOR org assignment) leaks through. Use the same resolved deptName the
+      // FK uses, falling back to null when no academic dept is identifiable.
+      const primaryDepartmentDisplay = resolved.deptName ?? null;
 
       if (existingScholar) {
         // Update in place; reactivate if soft-deleted.
@@ -532,8 +563,9 @@ async function main() {
           data: {
             preferredName: f.preferredName,
             fullName: f.fullName,
+            postnominal: f.degree?.trim() || null,
             primaryTitle: f.primaryTitle,
-            primaryDepartment: f.primaryDepartment,
+            primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
             roleCategory,
             // Slug is NOT regenerated on update if the name is unchanged. If it
@@ -561,8 +593,9 @@ async function main() {
             cwid: f.cwid,
             preferredName: f.preferredName,
             fullName: f.fullName,
+            postnominal: f.degree?.trim() || null,
             primaryTitle: f.primaryTitle,
-            primaryDepartment: f.primaryDepartment,
+            primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
             slug,
             roleCategory,

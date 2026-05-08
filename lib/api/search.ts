@@ -422,6 +422,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
     _id: string;
     _source?: {
       slug?: string;
+      preferredName?: string;
       primaryTitle?: string | null;
       primaryDepartment?: string | null;
     };
@@ -433,8 +434,13 @@ export async function suggestNames(prefix: string, size = 5): Promise<
 
   return suggestPayload.map((o) => {
     const src = sourceByCwid.get(o._id);
+    // The completion suggester returns whichever input string matched the
+    // prefix — for the last-name variant ("Wolchok") that's the bare last
+    // token, which renders awkwardly in the dropdown. Prefer the doc's
+    // canonical preferredName (which already includes any postnominal); fall
+    // back to the matched text when the doc isn't in mget.
     return {
-      text: o.text,
+      text: src?.preferredName ?? o.text,
       cwid: o._id,
       slug: src?.slug ?? "",
       primaryTitle: src?.primaryTitle ?? null,

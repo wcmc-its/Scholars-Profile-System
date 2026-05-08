@@ -47,7 +47,7 @@ export async function generateMetadata({
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) return { title: "Scholar not found" };
 
-  const titleParts = [profile.preferredName];
+  const titleParts = [profile.publishedName];
   if (profile.primaryTitle) titleParts.push(profile.primaryTitle);
   const description = [profile.primaryTitle, profile.primaryDepartment].filter(Boolean).join(" — ");
 
@@ -57,21 +57,21 @@ export async function generateMetadata({
 
   return {
     title: titleParts.join(" — "),
-    description: description || `Scholar profile for ${profile.preferredName}`,
+    description: description || `Scholar profile for ${profile.publishedName}`,
     alternates: { canonical: `/scholars/${profile.slug}` },
     openGraph: {
       type: "profile",
       firstName,
       lastName,
-      title: profile.preferredName,
-      description: description || `Scholar profile for ${profile.preferredName}`,
+      title: profile.publishedName,
+      description: description || `Scholar profile for ${profile.publishedName}`,
       url: `/scholars/${profile.slug}`,
       images: [
         {
           url: `/og/scholars/${profile.slug}`,
           width: 1200,
           height: 630,
-          alt: `${profile.preferredName}${profile.primaryTitle ? `, ${profile.primaryTitle}` : ""} at Weill Cornell Medicine`,
+          alt: `${profile.publishedName}${profile.primaryTitle ? ` — ${profile.primaryTitle}` : ""} at Weill Cornell Medicine`,
         },
       ],
     },
@@ -108,7 +108,7 @@ export default async function ScholarProfilePage({
 
   const jsonLd = buildPersonJsonLd({
     slug: profile.slug,
-    preferredName: profile.preferredName,
+    preferredName: profile.publishedName,
     primaryTitle: profile.primaryTitle ?? null,
   });
 
@@ -144,7 +144,7 @@ export default async function ScholarProfilePage({
                 identityImageEndpoint={profile.identityImageEndpoint}
               />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">{profile.preferredName}</h1>
+            <h1 className="text-xl font-bold tracking-tight">{profile.publishedName}</h1>
             {profile.primaryTitle ? (
               <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
                 {profile.primaryTitle}
