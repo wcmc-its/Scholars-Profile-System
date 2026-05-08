@@ -26,8 +26,7 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
 
   if (result.state === "none") return null;
   const { primary, secondary, overflowCount, query } = result;
-  const totalSecondary = secondary.length + overflowCount;
-  const hasDisclosure = totalSecondary > 0;
+  const hasDisclosure = secondary.length + overflowCount > 0;
 
   return (
     <div className="my-3">
@@ -43,7 +42,7 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
             onClick={() => setExpanded((v) => !v)}
             className="shrink-0 rounded px-1.5 py-0.5 text-[12.5px] text-zinc-500 transition-colors hover:text-zinc-700"
           >
-            also matches {totalSecondary}{" "}
+            additional matches{" "}
             <span
               aria-hidden="true"
               className={`inline-block transition-transform ${expanded ? "rotate-180" : ""}`}

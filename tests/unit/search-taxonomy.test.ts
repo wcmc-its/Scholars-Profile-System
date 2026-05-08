@@ -184,43 +184,59 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.secondary[0].entityType).toBe("subtopic");
   });
 
-  it("among same-tier matches, ranks by scholar count desc then alpha", async () => {
+  it("among same-tier matches, ranks by similarity desc, then scholar count, then alpha", async () => {
     mockTopicFindMany.mockResolvedValue([]);
     mockSubtopicFindMany.mockResolvedValue([
+      // displayName length 12 → similarity = 12/12 = 1.0 (highest)
       {
         id: "a_inflammation",
         label: "Inflammation",
-        displayName: null,
+        displayName: "Inflammation",
         parentTopicId: "cancer",
         parentTopic: { label: "Cancer" },
       },
+      // displayName length 21 → similarity = 12/21 ≈ 0.57
       {
-        id: "b_inflammation",
-        label: "Inflammation",
-        displayName: null,
+        id: "b_chronic_inflammation",
+        label: "Chronic Inflammation",
+        displayName: "Chronic Inflammation",
         parentTopicId: "cardiovascular_disease",
         parentTopic: { label: "Cardiovascular Disease" },
       },
     ]);
-    // First scholar count call returns 2, second 5.
-    mockPubTopicGroupBy
-      .mockResolvedValueOnce([{ cwid: "a1" }, { cwid: "a2" }]) // a scholars
-      .mockResolvedValueOnce([{ pmid: "p1" }]) // a pubs
-      .mockResolvedValueOnce([
-        { cwid: "b1" },
-        { cwid: "b2" },
-        { cwid: "b3" },
-        { cwid: "b4" },
-        { cwid: "b5" },
-      ]) // b scholars
-      .mockResolvedValueOnce([{ pmid: "p1" }]); // b pubs
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "x" }]);
 
     const r = await matchQueryToTaxonomy("inflammation");
     expect(r.state).toBe("matches");
     if (r.state !== "matches") return;
-    expect(r.primary.id).toBe("b_inflammation"); // higher scholar count wins
+    // Higher similarity wins primary regardless of scholar count.
+    expect(r.primary.id).toBe("a_inflammation");
     expect(r.secondary).toHaveLength(1);
-    expect(r.secondary[0].id).toBe("a_inflammation");
+    expect(r.secondary[0].id).toBe("b_chronic_inflammation");
+  });
+
+  it("topics outrank subtopics even when subtopic similarity is higher", async () => {
+    mockTopicFindMany.mockResolvedValue([
+      // similarity = 6/22 ≈ 0.27
+      { id: "cancer_biology_general", label: "Cancer Biology (General)" },
+    ]);
+    mockSubtopicFindMany.mockResolvedValue([
+      // similarity = 6/6 = 1.0 — but topics still win primary by type priority.
+      {
+        id: "cancer_sub",
+        label: "Cancer",
+        displayName: "Cancer",
+        parentTopicId: "cancer_biology_general",
+        parentTopic: { label: "Cancer Biology (General)" },
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "x" }]);
+
+    const r = await matchQueryToTaxonomy("cancer");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.primary.entityType).toBe("parentTopic");
+    expect(r.secondary[0].entityType).toBe("subtopic");
   });
 
   it("caps secondary at 4 and reports overflowCount for the rest", async () => {

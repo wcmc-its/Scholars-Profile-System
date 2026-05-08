@@ -20,8 +20,12 @@
  *
  * Ranking (primary + secondary order):
  *   1. Entity type: parentTopic before subtopic.
- *   2. Within entity type: scholarCount descending.
- *   3. Tiebreaker: name ascending (locale-aware).
+ *   2. String similarity: query length / label length (higher = the
+ *      query is a larger fraction of the label, so shorter labels with
+ *      the query win). For "cancer", this puts "Breast Cancer" ahead of
+ *      "Cancer Biology (General)" within the topic tier.
+ *   3. scholarCount descending (tiebreak when similarity is identical).
+ *   4. Name ascending (locale-aware) as final tiebreaker.
  *
  * The first ranked match is the "primary" — the row that always renders.
  * Subsequent matches are "secondary," surfaced behind the disclosure
@@ -50,6 +54,8 @@ export type TaxonomyMatch = {
   href: string;
   scholarCount: number;
   publicationCount: number;
+  /** Length-normalized substring overlap, in [0, 1]. */
+  similarity: number;
 };
 
 export type TaxonomyMatchResult =
@@ -175,6 +181,8 @@ function rank(matches: TaxonomyMatch[]): TaxonomyMatch[] {
   return matches.slice().sort((a, b) => {
     const t = typePriority(a.entityType) - typePriority(b.entityType);
     if (t !== 0) return t;
+    const sim = b.similarity - a.similarity;
+    if (sim !== 0) return sim;
     const c = b.scholarCount - a.scholarCount;
     if (c !== 0) return c;
     return a.name.localeCompare(b.name);
@@ -189,11 +197,27 @@ export async function matchQueryToTaxonomy(
   if (normalized.length < MIN_QUERY_LEN) return { state: "none" };
 
   const all = await loadEntityCandidates();
-  const matched = all.filter((c) => c.matchKey.includes(normalized));
+  const matched = all
+    .filter((c) => c.matchKey.includes(normalized))
+    .map((c) => ({
+      ...c,
+      similarity: normalized.length / c.matchKey.length,
+    }));
   if (matched.length === 0) return { state: "none" };
 
-  // Cap candidates before count enrichment. Excess rolls into overflow so the
-  // user still sees "and N more →" without us paying for N count queries.
+  // Pre-rank by [type priority, similarity desc] before the hard cap so the
+  // best candidates make it through to count enrichment regardless of how
+  // many low-similarity matches the query produced.
+  const typePriority = (t: EntityCandidate["entityType"]) =>
+    t === "parentTopic" ? 0 : 1;
+  matched.sort((a, b) => {
+    const t = typePriority(a.entityType) - typePriority(b.entityType);
+    if (t !== 0) return t;
+    return b.similarity - a.similarity;
+  });
+
+  // Cap candidates before count enrichment. Excess rolls into overflow so
+  // we don't pay for N count queries on common substring matches.
   const considered = matched.slice(0, MATCH_HARD_CAP);
   const cappedExtra = matched.length - considered.length;
 
@@ -209,6 +233,7 @@ export async function matchQueryToTaxonomy(
         href: buildHref(c),
         scholarCount: counts.scholarCount,
         publicationCount: counts.publicationCount,
+        similarity: c.similarity,
       };
       return match;
     }),
