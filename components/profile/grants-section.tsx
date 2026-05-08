@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
+import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
+import { isNihAwardNumber } from "@/lib/award-number";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -34,12 +37,28 @@ const GRANT_ROLE_TITLE: Record<string, string> = {
   "Key Personnel": "Key Personnel",
 };
 
-/** NIH grants carry the IC + 6/7-digit serial pattern (R01 HL144718, UG3
- *  AG098024, P01 HL114501, S10 OD030447). Match on IC+serial which is more
- *  reliable than parsing the full activity-code variants (R01/K23/UG3/D43/T32). */
-function isNihAward(awardNumber: string | null): boolean {
-  if (!awardNumber) return false;
-  return /\b[A-Z][A-Z0-9]?\d{1,2}\s+[A-Z]{2}\d{6,7}\b/.test(awardNumber);
+/** Issue #78 — short labels for the inline Type pill that appears next to
+ *  the eyebrow when programType isn't a plain Grant. */
+const TYPE_PILL_LABEL: Record<string, string> = {
+  "Contract with funding": "Contract",
+  Fellowship: "Fellowship",
+  Career: "Career",
+  Training: "Training",
+  "BioPharma Alliance Agreement": "BioPharma Alliance",
+  Equipment: "Equipment",
+};
+
+function programTypeLabel(programType: string): string | null {
+  if (!programType || programType === "Grant") return null;
+  return TYPE_PILL_LABEL[programType] ?? programType;
+}
+
+/** Strip the optional NIH support-type flag + mechanism prefix from an
+ *  award number so the MechanismAbbr renders separately from the
+ *  IC+serial. e.g. "1R01CA245678-01A1" with mechanism "R01" → "CA245678-01A1". */
+function awardSerial(awardNumber: string, mechanism: string): string {
+  const re = new RegExp(`^\\s*[1-9]?\\s*${mechanism}\\s*`, "i");
+  return awardNumber.replace(re, "").trim();
 }
 
 type Grant = ProfilePayload["grants"][number];
@@ -86,7 +105,7 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
       new Set(
         grants
           .map((g) => g.awardNumber)
-          .filter((x): x is string => !!x && isNihAward(x)),
+          .filter((x): x is string => !!x && isNihAwardNumber(x)),
       ),
     );
     if (nihAwards.length === 0) return;
@@ -195,6 +214,17 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
 function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined }) {
   const label = GRANT_ROLE_LABEL[grant.role] ?? grant.role;
   const title = GRANT_ROLE_TITLE[grant.role] ?? grant.role;
+  const startYear = grant.startDate.slice(0, 4);
+  const endYear = grant.endDate.slice(0, 4);
+
+  // Issue #78 F2/F6 — prefer canonical short, fall back to raw, fall back
+  // again to legacy `funder` for rows where the new ETL hasn't run yet.
+  const primeShort = grant.primeSponsor ?? grant.primeSponsorRaw;
+  const directShort = grant.directSponsor ?? grant.directSponsorRaw;
+  const showVia =
+    grant.isSubaward && !!directShort && directShort !== primeShort;
+  const typeLabel = programTypeLabel(grant.programType);
+
   return (
     <div className="grid grid-cols-[64px_1fr_auto] items-baseline gap-3 border-t border-border py-3 first:border-t-0">
       <HoverTooltip text={title}>
@@ -214,28 +244,86 @@ function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined 
           dangerouslySetInnerHTML={{ __html: sanitizePubTitle(grant.title) }}
         />
         <div className="text-muted-foreground mt-0.5 text-sm">
-          {grant.funder} · {grant.startDate.slice(0, 4)}–{grant.endDate.slice(0, 4)}
+          {primeShort ? (
+            <SponsorAbbr short={primeShort} />
+          ) : (
+            <span>{grant.funder}</span>
+          )}
+          {" · "}
+          {startYear}
+          {"–"}
+          {endYear}
+          {showVia ? (
+            <>
+              {" · via "}
+              <SponsorAbbr short={directShort!} />
+            </>
+          ) : null}
+          {typeLabel ? (
+            <span className="border-border-strong text-muted-foreground ml-2 inline-flex h-4 items-center rounded-sm border px-1.5 text-[10px] font-medium uppercase tracking-wide">
+              {typeLabel}
+            </span>
+          ) : null}
         </div>
       </div>
-      {grant.awardNumber ? (
-        applId ? (
+      <AwardNumberDisplay grant={grant} applId={applId} />
+    </div>
+  );
+}
+
+/** Right column rendering for award number. NIH awards split the
+ *  mechanism prefix into a tooltipped MechanismAbbr (e.g. "R01" with
+ *  hover-expansion to "Research Project Grant (R01)") followed by the
+ *  IC+serial portion linked to NIH RePORTER when an applId is known.
+ *  Non-NIH awards render the unmodified award number, linked when an
+ *  applId resolved. */
+function AwardNumberDisplay({
+  grant,
+  applId,
+}: {
+  grant: Grant;
+  applId: number | undefined;
+}) {
+  if (!grant.awardNumber) return <span />;
+  const reporterUrl = applId
+    ? `https://reporter.nih.gov/project-details/${applId}`
+    : null;
+
+  if (grant.mechanism) {
+    const serial = awardSerial(grant.awardNumber, grant.mechanism);
+    return (
+      <span className="text-muted-foreground inline-flex items-baseline gap-1 whitespace-nowrap font-mono text-xs">
+        <MechanismAbbr code={grant.mechanism} className="font-mono" />
+        {reporterUrl ? (
           <a
-            href={`https://reporter.nih.gov/project-details/${applId}`}
+            href={reporterUrl}
             target="_blank"
             rel="noopener noreferrer"
             title="View on NIH RePORTER"
-            className="text-[var(--color-accent-slate)] whitespace-nowrap font-mono text-xs underline-offset-4 hover:underline"
+            className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
           >
-            {grant.awardNumber}
+            {serial}
           </a>
         ) : (
-          <span className="text-muted-foreground whitespace-nowrap font-mono text-xs">
-            {grant.awardNumber}
-          </span>
-        )
-      ) : (
-        <span />
-      )}
-    </div>
+          <span>{serial}</span>
+        )}
+      </span>
+    );
+  }
+
+  return reporterUrl ? (
+    <a
+      href={reporterUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View on NIH RePORTER"
+      className="text-[var(--color-accent-slate)] whitespace-nowrap font-mono text-xs underline-offset-4 hover:underline"
+    >
+      {grant.awardNumber}
+    </a>
+  ) : (
+    <span className="text-muted-foreground whitespace-nowrap font-mono text-xs">
+      {grant.awardNumber}
+    </span>
   );
 }

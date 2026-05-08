@@ -191,6 +191,22 @@ export type ProfilePayload = {
     isActive: boolean;
     /** Sponsor-issued award number (e.g. "R01 AG067497"); null when not provided. */
     awardNumber: string | null;
+    /** Issue #78 — InfoEd `program_type` (Grant, Contract with funding,
+     *  Fellowship, Career, Training, BioPharma Alliance Agreement, Equipment). */
+    programType: string;
+    /** Issue #78 F6 — original source of funds. Canonical short name when
+     *  the raw sponsor maps to lib/sponsor-lookup; raw form populated on
+     *  primeSponsorRaw. */
+    primeSponsor: string | null;
+    primeSponsorRaw: string | null;
+    /** Issue #78 F6 — institution that issued the subaward to WCM. */
+    directSponsor: string | null;
+    directSponsorRaw: string | null;
+    /** Issue #78 F2 — derived from award number (NIH only; null otherwise). */
+    mechanism: string | null;
+    nihIc: string | null;
+    /** Issue #78 F6 — true when direct sponsor differs from prime. */
+    isSubaward: boolean;
   }>;
   keywords: ProfileKeywords;
   disclosures: Array<{
@@ -462,6 +478,14 @@ export async function getScholarFullProfileBySlug(
       endDate: g.endDate.toISOString().slice(0, 10),
       isActive: isFundingActive(g.endDate, now),
       awardNumber: g.awardNumber ?? null,
+      programType: g.programType,
+      primeSponsor: g.primeSponsor ?? null,
+      primeSponsorRaw: g.primeSponsorRaw ?? null,
+      directSponsor: g.directSponsor ?? null,
+      directSponsorRaw: g.directSponsorRaw ?? null,
+      mechanism: g.mechanism ?? null,
+      nihIc: g.nihIc ?? null,
+      isSubaward: g.isSubaward,
     })),
     keywords,
     disclosures: scholar.coiActivities.map((c) => ({
