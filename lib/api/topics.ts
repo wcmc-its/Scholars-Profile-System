@@ -433,6 +433,10 @@ function normalizeSubtopicLabel(subtopicLabel: string, parentTopicLabel: string)
     .map((w, i) => {
       const key = w.toLowerCase().replace(/[^a-z0-9]/g, "");
       if (BIOMEDICAL_ACRONYMS[key]) return BIOMEDICAL_ACRONYMS[key];
+      // Preserve words that arrived with uppercase letters past position 0
+      // (e.g. "COVID-19", "iPSC", "mRNA", "TDP-43", "BRCA1"). Editorial intent
+      // signal — sentence-casing would destroy them.
+      if (/[A-Z]/.test(w.slice(1))) return w;
       return i === 0
         ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
         : w.toLowerCase();
