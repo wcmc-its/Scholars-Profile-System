@@ -306,6 +306,11 @@ export async function searchPeople(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // OpenSearch's default cap of 10000 short-circuits the total counter
+    // and would make the subhead read "10,000 publications" even when
+    // there are 90k. Costs more on truly broad queries but the people
+    // index is small (~9k docs) so the impact is negligible.
+    track_total_hits: true,
     query: { bool: { must, filter } },
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs,
@@ -432,6 +437,12 @@ export async function searchPublications(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // OpenSearch's default cap of 10000 short-circuits the total counter
+    // and would make the subhead read "10,000 publications" even when
+    // there are 90k+. Larger publications index (~90k docs) so this
+    // counts a few thousand extra docs on broad queries, but it's needed
+    // for an accurate count line.
+    track_total_hits: true,
     query: { bool: { must, filter } },
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs: {

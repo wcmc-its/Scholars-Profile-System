@@ -32,6 +32,10 @@ export const PUBLICATIONS_INDEX = "scholars-publications";
  */
 export const peopleIndexMapping = {
   settings: {
+    // Default `index.max_result_window` is 10000 — clicking page 501+
+    // (with PAGE_SIZE 20) hits a 500 response. People index is small
+    // (~9k docs) so 100k is fine; cheap insurance against future growth.
+    "index.max_result_window": 100000,
     analysis: {
       analyzer: {
         // Custom analyzer that strips English stopwords and applies stemming
@@ -125,6 +129,10 @@ export const peopleIndexMapping = {
  */
 export const publicationsIndexMapping = {
   settings: {
+    // Publications index has ~90k docs and broad queries return 10k+ hits;
+    // raising past the OpenSearch default of 10000 so deep pagination
+    // doesn't 500.
+    "index.max_result_window": 100000,
     analysis: {
       analyzer: {
         pub_text: {

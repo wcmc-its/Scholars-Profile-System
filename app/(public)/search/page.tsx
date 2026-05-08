@@ -93,7 +93,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   return (
     <main>
       <SearchMeta q={q} peopleCount={peopleResult.total} pubCount={pubsResult.total} />
-      <TaxonomyCallout result={taxonomyMatch} />
+      <div className="mx-auto max-w-[1280px] px-6">
+        <TaxonomyCallout result={taxonomyMatch} />
+      </div>
       <ModeTabs
         q={q}
         activeType={type}
@@ -258,9 +260,14 @@ async function PeopleResults({
   activity: ActivityFilter[];
   result: PeopleResultData;
 }) {
-  // URL builder used by every facet checkbox + chip-removal link. Mutating
-  // a URLSearchParams via append/delete preserves repeated keys for arrays.
-  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+  // Two URL builders share one base. `resetPage` is true for any link that
+  // changes the result set (toggle a facet, change sort, swap tab) — those
+  // should land on page 0. Pagination links pass `resetPage: false` so the
+  // mutator's `sp.set("page", N)` actually survives.
+  const buildUrl = (
+    mut: (sp: URLSearchParams) => void,
+    { resetPage = true }: { resetPage?: boolean } = {},
+  ) => {
     const sp = new URLSearchParams();
     sp.set("q", q);
     sp.set("type", "people");
@@ -268,8 +275,8 @@ async function PeopleResults({
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
     for (const v of activity) sp.append("activity", v);
+    if (resetPage) sp.delete("page");
     mut(sp);
-    sp.delete("page");
     return `/search?${sp.toString()}`;
   };
 
@@ -375,9 +382,15 @@ async function PeopleResults({
           page={result.page}
           total={result.total}
           pageSize={result.pageSize}
-          buildHref={(p) => buildUrl((sp) => {
-            if (p > 0) sp.set("page", String(p));
-          })}
+          buildHref={(p) =>
+            buildUrl(
+              (sp) => {
+                if (p > 0) sp.set("page", String(p));
+                else sp.delete("page");
+              },
+              { resetPage: false },
+            )
+          }
         />
       </section>
     </>
@@ -404,7 +417,10 @@ async function PublicationsResults({
   publicationType?: string;
   result: PubsResultData;
 }) {
-  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+  const buildUrl = (
+    mut: (sp: URLSearchParams) => void,
+    { resetPage = true }: { resetPage?: boolean } = {},
+  ) => {
     const sp = new URLSearchParams();
     sp.set("q", q);
     sp.set("type", "publications");
@@ -412,8 +428,8 @@ async function PublicationsResults({
     if (yearMin !== undefined) sp.set("yearMin", String(yearMin));
     if (yearMax !== undefined) sp.set("yearMax", String(yearMax));
     if (publicationType) sp.set("publicationType", publicationType);
+    if (resetPage) sp.delete("page");
     mut(sp);
-    sp.delete("page");
     return `/search?${sp.toString()}`;
   };
 
@@ -540,9 +556,15 @@ async function PublicationsResults({
           page={result.page}
           total={result.total}
           pageSize={result.pageSize}
-          buildHref={(p) => buildUrl((sp) => {
-            if (p > 0) sp.set("page", String(p));
-          })}
+          buildHref={(p) =>
+            buildUrl(
+              (sp) => {
+                if (p > 0) sp.set("page", String(p));
+                else sp.delete("page");
+              },
+              { resetPage: false },
+            )
+          }
         />
       </section>
     </>
