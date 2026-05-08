@@ -8,7 +8,7 @@
  *   - sort=newest orders by year DESC then dateAddedToEntrez DESC
  *   - sort=most_cited orders by citationCount DESC NULLs LAST
  *   - sort=by_impact uses recent_highlights curve, scholarCentric=false
- *   - sort=curated returns same ordering as by_impact
+ *   - sort=by_impact uses recent_highlights curve
  *   - filter=research_articles_only excludes Letter, Editorial Article, Erratum
  *   - filter=all includes all publication types
  *   - subtopic param filters by primarySubtopicId
@@ -51,7 +51,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// Also mock scorePublication so by_impact / curated tests can verify call args.
+// Also mock scorePublication so by_impact tests can verify call args.
 const { mockScorePublication } = vi.hoisted(() => ({
   mockScorePublication: vi.fn(),
 }));
@@ -205,13 +205,13 @@ describe("getTopicPublications", () => {
     });
   });
 
-  describe("sort=curated returns same ordering as by_impact", () => {
+  describe("sort=by_impact uses recent_highlights curve", () => {
     it("calls scorePublication with curve=recent_highlights and scholarCentric=false", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "20" }), makePtRow({ pmid: "21" })];
       mockPublicationTopicFindMany.mockResolvedValue(rows);
       mockScorePublication.mockReturnValue(0.9);
-      await getTopicPublications(TOPIC_SLUG, { sort: "curated" }, NOW);
+      await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
       expect(mockScorePublication).toHaveBeenCalled();
       for (const call of mockScorePublication.mock.calls) {
         expect(call[1]).toBe("recent_highlights");

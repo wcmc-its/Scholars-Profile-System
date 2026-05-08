@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/pagination";
 import { CuratedTag } from "@/components/topic/curated-tag";
 
-type Sort = "newest" | "most_cited" | "by_impact" | "curated";
+type Sort = "newest" | "most_cited" | "by_impact";
 type Filter = "research_articles_only" | "all";
 
 type Hit = {
@@ -56,14 +56,14 @@ export function PublicationFeed({
   subtopicLabel: string | null;
   subtopicShortDescription: string | null;
 }) {
-  const [sort, setSort] = useState<Sort>("newest");
+  const [sort, setSort] = useState<Sort>("by_impact");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isCuratedSort = sort === "by_impact" || sort === "curated";
+  const isCuratedSort = sort === "by_impact";
   const heading =
     activeSubtopic && subtopicLabel ? subtopicLabel : "All publications in this area";
 
@@ -128,10 +128,9 @@ export function PublicationFeed({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
               <SelectItem value="newest">Newest</SelectItem>
               <SelectItem value="most_cited">Most cited</SelectItem>
-              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
-              <SelectItem value="curated">Curated by ReCiterAI</SelectItem>
             </SelectContent>
           </Select>
         </div>

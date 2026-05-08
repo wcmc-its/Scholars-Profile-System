@@ -106,9 +106,9 @@ describe("/api/topics/[slug]/publications route", () => {
     expect(body.page).toBe(1);
   });
 
-  it("accepts valid sort values: newest, most_cited, by_impact, curated", async () => {
+  it("accepts valid sort values: newest, most_cited, by_impact", async () => {
     mockGetTopicPublications.mockResolvedValue({ hits: [], total: 0, page: 0, pageSize: 20 });
-    for (const sort of ["newest", "most_cited", "by_impact", "curated"]) {
+    for (const sort of ["newest", "most_cited", "by_impact"]) {
       const res = await GET(
         makeReq(`http://localhost/api/topics/test_topic/publications?sort=${sort}`),
         { params: Promise.resolve({ slug: "test_topic" }) },
