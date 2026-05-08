@@ -20,6 +20,87 @@ export type CoauthorChip = {
   preferredName: string;
 };
 
+/** Issue #73 — back-end naming. UI maps these to "Topics" at the component
+ *  boundary (heading, banner copy, help text). Source: MeSH keywords on the
+ *  scholar's accepted publications, aggregated across `Publication.meshTerms`.
+ *  `descriptorUi` is null for the rare label that didn't resolve to a
+ *  `mesh.DescriptorUI` in reciterdb.
+ */
+export type ScholarKeyword = {
+  descriptorUi: string | null;
+  displayLabel: string;
+  pubCount: number;
+};
+
+export type ProfileKeywords = {
+  totalAcceptedPubs: number;
+  keywords: ScholarKeyword[];
+};
+
+/** Publication types excluded from the Topics section's per-keyword counts.
+ *  Issue #63 will eventually exclude these from the publications list as well;
+ *  exclude them here unconditionally so the count rule doesn't drift. */
+const TOPIC_EXCLUDED_PUBLICATION_TYPES = new Set(["Retraction", "Erratum"]);
+
+type RawMeshTerm = { ui?: string | null; label?: string | null };
+
+/** @internal Exported for unit tests. */
+export function normalizeMeshTerms(raw: unknown): Array<{ ui: string | null; label: string }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ ui: string | null; label: string }> = [];
+  for (const term of raw as RawMeshTerm[]) {
+    if (!term || typeof term !== "object") continue;
+    const label = typeof term.label === "string" ? term.label : null;
+    if (!label) continue;
+    const ui = typeof term.ui === "string" && term.ui.length > 0 ? term.ui : null;
+    out.push({ ui, label });
+  }
+  return out;
+}
+
+/** @internal Exported for unit tests. */
+export function aggregateKeywords(
+  publications: ReadonlyArray<{
+    publicationType: string | null;
+    publication: { meshTerms: unknown };
+  }>,
+): ProfileKeywords {
+  type Bucket = { descriptorUi: string | null; displayLabel: string; pubCount: number };
+  const byKey = new Map<string, Bucket>();
+  let totalAcceptedPubs = 0;
+
+  for (const p of publications) {
+    if (p.publicationType && TOPIC_EXCLUDED_PUBLICATION_TYPES.has(p.publicationType)) continue;
+    totalAcceptedPubs += 1;
+    const raw = p.publication.meshTerms;
+    if (!Array.isArray(raw)) continue;
+    // Dedupe terms within a single pub so a malformed double-entry doesn't
+    // double-count toward pubCount.
+    const seenKeysOnThisPub = new Set<string>();
+    for (const term of raw as RawMeshTerm[]) {
+      if (!term || typeof term !== "object") continue;
+      const ui = typeof term.ui === "string" && term.ui.length > 0 ? term.ui : null;
+      const label = typeof term.label === "string" ? term.label : null;
+      if (!label) continue;
+      const key = ui ?? `__nolabel:${label}`;
+      if (seenKeysOnThisPub.has(key)) continue;
+      seenKeysOnThisPub.add(key);
+      const bucket = byKey.get(key);
+      if (bucket) {
+        bucket.pubCount += 1;
+      } else {
+        byKey.set(key, { descriptorUi: ui, displayLabel: label, pubCount: 1 });
+      }
+    }
+  }
+
+  const keywords = Array.from(byKey.values()).sort((a, b) => {
+    if (b.pubCount !== a.pubCount) return b.pubCount - a.pubCount;
+    return a.displayLabel.localeCompare(b.displayLabel);
+  });
+  return { totalAcceptedPubs, keywords };
+}
+
 export type ProfilePublication = ScoredPublication<{
   pmid: string;
   title: string;
@@ -37,6 +118,11 @@ export type ProfilePublication = ScoredPublication<{
   pubmedUrl: string | null;
   authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
   isConfirmed: boolean;
+  /** MeSH keywords on this publication, used by the profile Topics filter
+   *  (#73). Same `{ui, label}` shape as `Publication.meshTerms`; empty when
+   *  the row had no keywords in reciterdb. `ui` is null for the rare
+   *  unresolved label. */
+  meshTerms: Array<{ ui: string | null; label: string }>;
   /** Active WCM scholars (incl. the profile owner) who are confirmed authors
    *  on this publication. Chip-row shape matching the topic/search surfaces. */
   wcmAuthors: Array<{
@@ -97,7 +183,7 @@ export type ProfilePayload = {
     /** Sponsor-issued award number (e.g. "R01 AG067497"); null when not provided. */
     awardNumber: string | null;
   }>;
-  areasOfInterest: Array<{ topic: string; score: number }>;
+  keywords: ProfileKeywords;
   disclosures: Array<{
     entity: string | null;
     activityType: string | null;
@@ -190,9 +276,6 @@ export async function getScholarFullProfileBySlug(
       grants: {
         orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
       },
-      topicAssignments: {
-        orderBy: [{ score: "desc" }],
-      },
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
       },
@@ -275,6 +358,7 @@ export async function getScholarFullProfileBySlug(
       isPenultimate: a.isPenultimate,
     },
     isConfirmed: a.isConfirmed,
+    meshTerms: normalizeMeshTerms(a.publication.meshTerms),
     // All confirmed WCM authors on this publication, including the profile
     // owner. Same chip-row shape as topic/search; the page renders chips and
     // omits the plain authorsString to avoid duplicating WCM author names.
@@ -297,6 +381,18 @@ export async function getScholarFullProfileBySlug(
   }));
 
   const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
+
+  // Issue #73 — aggregate keywords from this scholar's accepted publications.
+  // Operates over `authorships` (which includes `publication.meshTerms` via the
+  // earlier include) so we don't re-query. Excludes Retraction/Erratum types
+  // from per-keyword counts unconditionally, ahead of issue #63 fully landing
+  // the same exclusion in the publications list.
+  const keywords: ProfileKeywords = aggregateKeywords(
+    authorships.map((a) => ({
+      publicationType: a.publication.publicationType,
+      publication: { meshTerms: a.publication.meshTerms },
+    })),
+  );
 
   // Full publications record: every confirmed authorship, no scholar-centric
   // filter. The year-grouped Publications list is the canonical "papers by
@@ -358,10 +454,7 @@ export async function getScholarFullProfileBySlug(
       isActive: g.endDate.getTime() > now.getTime(),
       awardNumber: g.awardNumber ?? null,
     })),
-    areasOfInterest: scholar.topicAssignments.map((t) => ({
-      topic: t.topic,
-      score: t.score,
-    })),
+    keywords,
     disclosures: scholar.coiActivities.map((c) => ({
       entity: c.entity,
       activityType: c.activityType,

@@ -48,7 +48,7 @@ vi.mock("@/lib/api/profile", () => ({
       "https://directory.weill.cornell.edu/api/v1/person/profile/abc1234.png?returnGenericOn404=false",
     appointments: [],
     educations: [],
-    areasOfInterest: [],
+    keywords: { totalAcceptedPubs: 0, keywords: [] },
     highlights: [],
     publications: [],
     grants: [],
