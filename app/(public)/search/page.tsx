@@ -1448,6 +1448,7 @@ function FacetSidebarPubs({
             label={`${y}–present`}
             isActive={yearMin === y}
             href={buildHref({ yearMin: yearMin === y ? "" : String(y) })}
+            radio
           />
         ))}
       </FacetGroup>
@@ -1541,6 +1542,7 @@ function FacetCheckbox({
   isActive,
   href,
   wrap,
+  radio,
 }: {
   label: React.ReactNode;
   tooltip?: string;
@@ -1551,7 +1553,12 @@ function FacetCheckbox({
    *  Journal facet treatment) and pin the input + count to the first
    *  line via items-start. Default behavior truncates with ellipsis. */
   wrap?: boolean;
+  /** When true, render the input as a single-select radio rather than a
+   *  multi-select checkbox. Used by mutually-exclusive facets like the
+   *  year-since range. Toggling the active option still clears it. */
+  radio?: boolean;
 }) {
+  const inputType = radio ? "radio" : "checkbox";
   const fallbackTitle =
     tooltip ?? (typeof label === "string" ? label : undefined);
   const wrapInTooltip = (children: React.ReactNode) =>
@@ -1566,7 +1573,7 @@ function FacetCheckbox({
             className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
           >
             <input
-              type="checkbox"
+              type={inputType}
               readOnly
               checked={!!isActive}
               tabIndex={-1}
@@ -1592,9 +1599,9 @@ function FacetCheckbox({
         title={tooltip ? undefined : fallbackTitle}
         className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
       >
-        {/* readOnly checkbox: state lives in the URL; the link toggles it. */}
+        {/* readOnly input: state lives in the URL; the link toggles it. */}
         <input
-          type="checkbox"
+          type={inputType}
           readOnly
           checked={!!isActive}
           tabIndex={-1}
