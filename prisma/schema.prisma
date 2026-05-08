@@ -119,6 +119,9 @@ model Grant {
   scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   title           String   @db.Text
   role            String   @db.VarChar(64) // PI | PI-Subaward | Co-PI | Co-I | Key Personnel
+  /// Pre-rendered display string (e.g. "NCI" or "NCI via Duke University").
+  /// Retained for transition; UI is migrating to the structured fields below
+  /// (issue #78 Wave C). Will be removed once all surfaces migrate.
   funder          String   @db.VarChar(255)
   startDate       DateTime @map("start_date") @db.Date
   endDate         DateTime @map("end_date") @db.Date
@@ -130,8 +133,40 @@ model Grant {
   source          String   @default("InfoEd") @db.VarChar(32)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
+  /// Issue #78 — InfoEd `program_type`. Possible values: Grant, Contract
+  /// with funding, Fellowship, Career, Training, BioPharma Alliance
+  /// Agreement, Equipment. Contract without funding is excluded at the
+  /// ETL filter stage (issue #78 decision Q3).
+  programType String @default("Grant") @map("program_type") @db.VarChar(64)
+
+  /// Issue #78 F6 — original source of funds. Canonical short name
+  /// (resolved via lib/sponsor-lookup) when matched; null when the raw
+  /// sponsor isn't in the canonical lookup. Raw form is always populated
+  /// in `primeSponsorRaw`.
+  primeSponsor    String? @map("prime_sponsor") @db.VarChar(64)
+  primeSponsorRaw String? @map("prime_sponsor_raw") @db.VarChar(255)
+
+  /// Issue #78 F6 — institution that issued the subaward to WCM. Equal
+  /// to prime when WCM holds the prime directly. Canonical short name
+  /// when matched; raw form in `directSponsorRaw`.
+  directSponsor    String? @map("direct_sponsor") @db.VarChar(64)
+  directSponsorRaw String? @map("direct_sponsor_raw") @db.VarChar(255)
+
+  /// Issue #78 F2 — derived from award-number prefix. NIH-funded only;
+  /// null otherwise. e.g. "R01", "K23", "U01".
+  mechanism String? @db.VarChar(16)
+
+  /// Issue #78 F2 — derived from award-number IC infix. NIH-funded only;
+  /// null otherwise. e.g. "NCI", "NHLBI".
+  nihIc String? @map("nih_ic") @db.VarChar(8)
+
+  /// Issue #78 F6 — true when the direct sponsor differs from the prime.
+  isSubaward Boolean @default(false) @map("is_subaward")
+
   @@index([cwid])
   @@index([cwid, endDate]) // active-first ordering
+  @@index([primeSponsor])
+  @@index([programType])
   @@map("grant")
 }
 

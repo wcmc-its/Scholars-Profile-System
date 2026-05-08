@@ -14,34 +14,7 @@
  * institute can't be parsed, falls back to "NIH · {awardNumber}".
  */
 
-const NIH_INSTITUTE_BY_PREFIX: Record<string, string> = {
-  AA: "NIAAA",
-  AG: "NIA",
-  AI: "NIAID",
-  AR: "NIAMS",
-  AT: "NCCIH",
-  CA: "NCI",
-  DA: "NIDA",
-  DC: "NIDCD",
-  DE: "NIDCR",
-  DK: "NIDDK",
-  EB: "NIBIB",
-  ES: "NIEHS",
-  EY: "NEI",
-  GM: "NIGMS",
-  HD: "NICHD",
-  HG: "NHGRI",
-  HL: "NHLBI",
-  LM: "NLM",
-  MD: "NIMHD",
-  MH: "NIMH",
-  NR: "NINR",
-  NS: "NINDS",
-  OD: "OD",
-  RR: "NCRR",
-  TR: "NCATS",
-  TW: "FIC",
-};
+import { NIH_INSTITUTE_BY_PREFIX } from "@/lib/nih-ic-prefixes";
 
 export function parseFunderEyebrow(
   funder: string | null | undefined,

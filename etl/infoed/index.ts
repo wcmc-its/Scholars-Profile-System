@@ -24,6 +24,8 @@
  */
 import { prisma } from "../../lib/db";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
+import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+import { parseNihAward } from "@/lib/award-number";
 
 type GrantRow = {
   CWID: string | null;
@@ -204,8 +206,24 @@ async function main() {
 
     const inserts = filtered.map((r) => {
       const role = ROLE_MAP[r.Role] ?? "Key Personnel";
-      const funderParts = [r.Orig_Sponsor ?? "(unknown sponsor)"];
+
+      // Issue #78 F6 — prime is Orig_Sponsor (always populated when this row
+      // exists; defensive-fallback to "(unknown sponsor)" matches the prior
+      // funder-string contract). Direct equals prime when WCM holds the
+      // award directly; Subward_Sponsor is set by the query when WCM is the
+      // sub-recipient.
+      const primeRaw = r.Orig_Sponsor?.trim() || null;
+      const directRaw = (r.Subward_Sponsor?.trim() || primeRaw) ?? null;
+      const isSubaward =
+        !!primeRaw && !!directRaw && primeRaw !== directRaw;
+
+      const funderParts = [primeRaw ?? "(unknown sponsor)"];
       if (r.Subward_Sponsor) funderParts.push(`via ${r.Subward_Sponsor}`);
+
+      // Issue #78 F2 — derive mechanism + IC from the award number for NIH
+      // grants. Returns nulls for non-NIH formats.
+      const award = parseNihAward(r.Award_Number);
+
       return {
         cwid: r.CWID!,
         title: r.proj_title?.trim() || `(untitled grant ${r.Account_Number})`,
@@ -216,6 +234,14 @@ async function main() {
         externalId: `INFOED-${r.Account_Number}-${r.CWID}`,
         awardNumber: r.Award_Number?.trim() || null,
         source: "InfoEd",
+        programType: r.program_type?.trim() || "Grant",
+        primeSponsor: canonicalizeSponsor(primeRaw),
+        primeSponsorRaw: primeRaw,
+        directSponsor: canonicalizeSponsor(directRaw),
+        directSponsorRaw: directRaw,
+        mechanism: award.mechanism,
+        nihIc: award.nihIc,
+        isSubaward,
       };
     });
 
