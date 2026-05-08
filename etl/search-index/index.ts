@@ -129,7 +129,10 @@ async function indexPeople() {
         where: { isConfirmed: true },
         include: {
           publication: {
-            select: { title: true, meshTerms: true },
+            // Issue #21 — `abstract` joins via the existing publication FK;
+            // we de-dup at the field level (one copy per pmid) rather than
+            // repeating by authorship position the way titles/mesh do.
+            select: { title: true, meshTerms: true, abstract: true },
           },
         },
       },
@@ -146,6 +149,11 @@ async function indexPeople() {
       string,
       { distinctPubs: number; hasFirstOrLast: boolean; weightedCount: number }
     >();
+    // Issue #21 — collect each scholar's abstract texts (one copy per pmid;
+    // duplicates can occur if the same publication shows up twice in a
+    // listing, so dedupe).
+    const abstractParts: string[] = [];
+    const seenAbstractPmids = new Set<string>();
 
     for (const a of s.authorships) {
       const kind = classifyAuthorship(a);
@@ -153,6 +161,14 @@ async function indexPeople() {
 
       // Repeat the title `weight` times.
       for (let i = 0; i < weight; i++) titleParts.push(a.publication.title);
+
+      // Issue #21 — abstract: one copy per distinct pmid, no weight
+      // repetition. Skip empty abstracts (many older pubs and editorials
+      // have none).
+      if (a.publication.abstract && !seenAbstractPmids.has(a.pmid)) {
+        seenAbstractPmids.add(a.pmid);
+        abstractParts.push(a.publication.abstract);
+      }
 
       const mesh = Array.isArray(a.publication.meshTerms)
         ? (a.publication.meshTerms as unknown[]).filter((x): x is string => typeof x === "string")
@@ -290,6 +306,7 @@ async function indexPeople() {
         overview: s.overview,
         publicationTitles: titleParts.join(" "),
         publicationMesh: meshParts.join(" "),
+        publicationAbstracts: abstractParts.join(" "),
         hasActiveGrants,
         isComplete,
         personType,

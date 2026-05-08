@@ -52,6 +52,8 @@ type ArticleRow = {
   doi: string | null;
 };
 
+type AbstractRow = { pmid: number; abstractVarchar: string | null };
+
 const IN_BATCH = 500; // batch size for IN (...) clauses
 const INSERT_BATCH = 1000;
 
@@ -147,6 +149,26 @@ async function main() {
     }
     console.log(`Got ${articleByPmid.size} article rows.`);
 
+    // Issue #21 — pull abstracts for the same pmid set so the search-index
+    // ETL can emit a `publicationAbstracts` field on each people document.
+    // We use `abstractVarchar` (already capped at 15000 chars at the
+    // source) rather than the unbounded `abstract` blob.
+    const abstractByPmid = new Map<number, string>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      await withReciterConnection(async (conn) => {
+        const rows = (await conn.query(
+          `SELECT pmid, abstractVarchar
+           FROM reporting_abstracts
+           WHERE pmid IN (?) AND abstractVarchar IS NOT NULL AND abstractVarchar <> ''`,
+          [batch],
+        )) as AbstractRow[];
+        for (const a of rows) {
+          if (a.abstractVarchar) abstractByPmid.set(Number(a.pmid), a.abstractVarchar);
+        }
+      });
+    }
+    console.log(`Got ${abstractByPmid.size} abstracts.`);
+
     // First-seen authors string per pmid (denormalized, same per row).
     const authorsStringByPmid = new Map<number, string>();
     for (const r of authorRows) {
@@ -176,6 +198,7 @@ async function main() {
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
+        abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
         source: "ReciterDB",
       };
     });

@@ -98,6 +98,12 @@ export const peopleIndexMapping = {
       overview: { type: "text", analyzer: "scholar_text" },
       publicationTitles: { type: "text", analyzer: "scholar_text" },
       publicationMesh: { type: "text", analyzer: "scholar_text" },
+      // Issue #21 — concatenated abstract text from each scholar's
+      // confirmed publications. ONE copy per paper (no authorship-position
+      // repetition); abstracts are 50-200x longer than titles, so the
+      // weighting signal is captured by titles + mesh and we don't pay the
+      // index-size cost of repeating the body text.
+      publicationAbstracts: { type: "text", analyzer: "scholar_text" },
       // Filter facets.
       hasActiveGrants: { type: "boolean" },
       isComplete: { type: "boolean" }, // sparse-profile filter (spec line 196)
@@ -173,6 +179,12 @@ export const PEOPLE_FIELD_BOOSTS: ReadonlyArray<string> = [
   "overview^2",
   "publicationTitles^1",
   "publicationMesh^0.5",
+  // Issue #21 — abstract text contributes to thematic-query relevance
+  // (e.g. "psychiatric comorbidities in serious illness") but at a low
+  // boost so a single passing mention can't displace name/title/dept hits.
+  // best_fields scoring (the multi_match default) keeps the strongest
+  // single-field match dominant, so this is informative without being noisy.
+  "publicationAbstracts^0.3",
 ];
 
 /**
