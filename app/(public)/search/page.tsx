@@ -29,8 +29,8 @@ import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
-import { isNihIc, expandSponsor, getSponsor } from "@/lib/sponsor-lookup";
-import { expandMechanism } from "@/lib/mechanism-lookup";
+import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
+import { mechanismVerbose } from "@/lib/mechanism-lookup";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
@@ -836,15 +836,18 @@ async function FundingResults({
       filters.department?.length || filters.role?.length);
 
   // Issue #80 item 3 — chip strip mirrors the People + Publications tabs.
-  // Sponsor labels prefix NIH ICs with `NIH/`; mechanism codes expand to
-  // their full name; statuses and roles use the shared label maps.
+  // Funder + mechanism chips render in verbose form (full sponsor name,
+  // "{code} - {description}") so the chip is self-explanatory without
+  // requiring hover.
   const chips: Array<{ label: string; removeHref: string }> = [];
   for (const v of filters.funder ?? []) {
-    const label = isNihIc(v) ? `NIH/${v}` : v;
-    chips.push({ label, removeHref: removeHref("funder", v) });
+    chips.push({ label: funderVerbose(v), removeHref: removeHref("funder", v) });
   }
   for (const v of filters.directFunder ?? []) {
-    chips.push({ label: `via ${v}`, removeHref: removeHref("directFunder", v) });
+    chips.push({
+      label: `via ${funderVerbose(v)}`,
+      removeHref: removeHref("directFunder", v),
+    });
   }
   for (const v of filters.programType ?? []) {
     chips.push({
@@ -853,9 +856,8 @@ async function FundingResults({
     });
   }
   for (const v of filters.mechanism ?? []) {
-    const expand = expandMechanism(v);
     chips.push({
-      label: expand ? `${v} — ${expand}` : v,
+      label: mechanismVerbose(v),
       removeHref: removeHref("mechanism", v),
     });
   }
@@ -1016,7 +1018,6 @@ function FacetSidebarFunding({
             short: f.label,
             full: expandSponsor(f.value),
             aliases: collectAliases(f.value),
-            nihIc: isNihIc(f.value),
             count: f.count,
             isActive: activeFunder.includes(f.value),
             href: toggleHref("funder", f.value),
@@ -1026,7 +1027,6 @@ function FacetSidebarFunding({
             short: f.label,
             full: expandSponsor(f.value),
             aliases: collectAliases(f.value),
-            nihIc: isNihIc(f.value),
             count: f.count,
             isActive: activeDirectFunder.includes(f.value),
             href: toggleHref("directFunder", f.value),
@@ -1054,19 +1054,16 @@ function FacetSidebarFunding({
         <FacetGroup label="Mechanism (NIH)" collapseAfter={6}>
           {sortActiveFirst(facets.mechanisms, (m) =>
             activeMechanism.includes(m.value),
-          ).map((m) => {
-            const expand = expandMechanism(m.value);
-            return (
-              <FacetCheckbox
-                key={m.value}
-                label={m.value}
-                tooltip={expand ?? undefined}
-                count={m.count}
-                isActive={activeMechanism.includes(m.value)}
-                href={toggleHref("mechanism", m.value)}
-              />
-            );
-          })}
+          ).map((m) => (
+            <FacetCheckbox
+              key={m.value}
+              label={mechanismVerbose(m.value)}
+              count={m.count}
+              isActive={activeMechanism.includes(m.value)}
+              href={toggleHref("mechanism", m.value)}
+              wrap
+            />
+          ))}
         </FacetGroup>
       ) : null}
 

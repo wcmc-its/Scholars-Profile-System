@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
-import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 /**
  * Funder facet with type-ahead (issue #80 items 6 + 7).
@@ -20,16 +19,15 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 export type FunderFacetItem = {
   value: string;
-  /** Canonical short or raw fallback. Plain text — render NIH IC parent
-   *  prefix (`NIH/`) at the parent level via `nihIc`. */
+  /** Canonical short — used for type-ahead matching; falls back into the
+   *  display label when no full name is available. */
   short: string;
-  /** Full name from the canonical lookup. Used for type-ahead matching;
-   *  null when the sponsor isn't in the lookup. */
+  /** Full name from the canonical lookup. Drives both the verbose
+   *  display and type-ahead matching; null when the sponsor isn't in
+   *  the lookup. */
   full: string | null;
   /** Lowercased alias strings for type-ahead matching. */
   aliases: string[];
-  /** True when the canonical short is an NIH IC — drives the "NIH/" prefix. */
-  nihIc: boolean;
   count: number;
   isActive: boolean;
   href: string;
@@ -127,41 +125,33 @@ export function FunderFacet({ items, directItems, collapseAfter = 6 }: Props) {
 }
 
 function FunderRow({ item, via }: { item: FunderFacetItem; via?: boolean }) {
-  const display = item.nihIc ? `NIH/${item.short}` : item.short;
-  // Tooltip text — full name when present in the canonical lookup;
-  // otherwise the bare short label so the styled tooltip still appears
-  // on hover for visual consistency across rows. Mirrors the
-  // author-chip-row treatment (HoverTooltip wrapping the click target).
-  const tooltipText = item.full
-    ? via
-      ? `via ${item.full}`
-      : item.full
-    : null;
-  const row = (
-    <Link
-      href={item.href}
-      className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
-    >
-      <input
-        type="checkbox"
-        readOnly
-        checked={item.isActive}
-        tabIndex={-1}
-        aria-hidden="true"
-        className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
-      />
-      <span className="min-w-0 flex-1 break-words">
-        {via ? <span className="text-[#757575]">via </span> : null}
-        {display}
-      </span>
-      <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
-        {item.count.toLocaleString()}
-      </span>
-    </Link>
-  );
+  // Verbose label — full canonical name when known, otherwise fall back
+  // to the short. NIH ICs render their full institute name (no "NIH/"
+  // prefix in verbose mode — the "National X Institute" form already
+  // signals the parent agency).
+  const display = item.full ?? item.short;
   return (
     <li className="py-1 leading-[1.4]">
-      {tooltipText ? <HoverTooltip text={tooltipText}>{row}</HoverTooltip> : row}
+      <Link
+        href={item.href}
+        className="flex w-full items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+      >
+        <input
+          type="checkbox"
+          readOnly
+          checked={item.isActive}
+          tabIndex={-1}
+          aria-hidden="true"
+          className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
+        />
+        <span className="min-w-0 flex-1 break-words">
+          {via ? <span className="text-[#757575]">via </span> : null}
+          {display}
+        </span>
+        <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+          {item.count.toLocaleString()}
+        </span>
+      </Link>
     </li>
   );
 }
