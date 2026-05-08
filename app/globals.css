@@ -144,3 +144,23 @@
 .entity-badge--division   { background: #eef4ee; color: #52755a; }
 .entity-badge--center     { background: #ede8f1; color: #4d3d6b; }
 .entity-badge--institute  { background: #e0eded; color: #2c5862; }
+
+/* Author-position badges per issue #72. Reuses the same sizing/typography
+   conventions as `.entity-badge` (#71), and the same blue (Person) and green
+   (Department) palettes so the profile-row roles read consistently with the
+   rest of the platform's badge family. Sentence case rather than uppercase
+   because role text varies in length and "CO-FIRST AUTHOR" reads heavier
+   than the rest of the stats line at 10px tracking. */
+.author-position-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border-radius: 4px;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+.author-position-badge--senior     { background: #e8eef3; color: #3a4a5c; }
+.author-position-badge--first      { background: #e6efe6; color: #3a553e; }

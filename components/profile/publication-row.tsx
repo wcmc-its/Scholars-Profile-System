@@ -1,4 +1,8 @@
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import {
+  AuthorPositionBadge,
+  deriveAuthorPositionRole,
+} from "@/components/profile/author-position-badge";
 import type { ProfilePublication } from "@/lib/api/profile";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -14,21 +18,10 @@ export function PublicationRow({
   pub: ProfilePublication;
   compact?: boolean;
 }) {
-  // Co-first / co-last detection uses the full author list on the pub —
-  // when ≥2 authors share isFirst (or isLast), surface the co- variant. (#18)
-  const firstCount = pub.wcmAuthors.filter((a) => a.isFirst).length;
-  const lastCount = pub.wcmAuthors.filter((a) => a.isLast).length;
-  const role = pub.authorship.isFirst && pub.authorship.isLast
-    ? "First and senior author"
-    : pub.authorship.isLast
-    ? lastCount > 1
-      ? "Co-last author"
-      : "Senior author"
-    : pub.authorship.isFirst
-    ? firstCount > 1
-      ? "Co-first author"
-      : "First author"
-    : null;
+  // Role derivation lives in `author-position-badge.tsx` so the Position
+  // filter (#72) and the per-row badge agree. Co-first / co-last detection
+  // (#18) compares the full WCM author list against authorship flags.
+  const role = deriveAuthorPositionRole(pub.authorship, pub.wcmAuthors);
   const titleHtml = sanitizePubTitle(pub.title);
   return (
     <div>
@@ -64,7 +57,7 @@ export function PublicationRow({
             {pub.citationCount.toLocaleString()} citations
           </span>
         ) : null}
-        {role ? <span>{role}</span> : null}
+        <AuthorPositionBadge role={role} />
         {pub.doi ? (
           <a
             href={`https://doi.org/${pub.doi}`}
