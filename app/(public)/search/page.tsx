@@ -5,6 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { AZDirectory } from "@/components/browse/az-directory";
+import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import {
   searchPeople,
   searchPublications,
@@ -13,6 +14,7 @@ import {
   type SearchFacetBucket,
 } from "@/lib/api/search";
 import { getAZBuckets } from "@/lib/api/browse";
+import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -38,7 +40,12 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const sort = rawSort ?? (q === "" && type === "publications" ? "year" : "relevance");
 
   const showAZ = q === "" && type === "people";
-  const azBuckets = showAZ ? await getAZBuckets() : null;
+  const [azBuckets, taxonomyMatch] = await Promise.all([
+    showAZ ? getAZBuckets() : Promise.resolve(null),
+    q.trim().length >= 3
+      ? matchQueryToTaxonomy(q)
+      : Promise.resolve({ state: "none" as const }),
+  ]);
 
   const department = (Array.isArray(sp.department) ? sp.department[0] : sp.department) ?? "";
   const personType = (Array.isArray(sp.personType) ? sp.personType[0] : sp.personType) ?? "";
@@ -55,6 +62,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       <h1 className="mb-2 text-2xl font-semibold">
         {q ? `Results for "${q}"` : "Browse scholars"}
       </h1>
+      <TaxonomyCallout result={taxonomyMatch} />
       <SearchTabs q={q} activeType={type} />
       {showAZ && azBuckets ? (
         <div className="mt-8">
