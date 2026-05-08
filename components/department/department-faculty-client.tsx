@@ -28,6 +28,7 @@ import type { DepartmentFacultyHit } from "@/lib/api/departments";
 export function DepartmentFacultyClient({
   faculty,
   total,
+  roleCategoryCounts,
   page,
   pageSize,
   deptSlug,
@@ -35,6 +36,7 @@ export function DepartmentFacultyClient({
 }: {
   faculty: DepartmentFacultyHit[];
   total: number;
+  roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
   deptSlug: string;
@@ -96,6 +98,8 @@ export function DepartmentFacultyClient({
       <div className="mb-6">
         <RoleChipRow
           faculty={faculty}
+          roleCategoryCounts={roleCategoryCounts}
+          totalCount={total}
           active={activeCategory}
           onChange={setActiveCategory}
         />

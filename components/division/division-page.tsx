@@ -245,6 +245,7 @@ export async function DivisionPage({
           <DepartmentFacultyClient
             faculty={faculty.hits}
             total={faculty.total}
+            roleCategoryCounts={faculty.roleCategoryCounts}
             page={faculty.page + 1}
             pageSize={faculty.pageSize}
             deptSlug={detail.parentDept.slug}
