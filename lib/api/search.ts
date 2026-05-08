@@ -485,12 +485,15 @@ export async function searchPublications(opts: {
         filter: { bool: { must, filter: filtersExcept("publicationType") } },
         aggs: { keys: { terms: { field: "publicationType", size: 15 } } },
       },
-      // Top journals by count. 50 is generous — Show all N with
-      // search-within in the UI lets the user reach the long tail
-      // without us paying for a much larger agg.
+      // Top journals by count. 500 covers the mid-tail of any plausibly
+      // broad query (e.g. ~1,300 distinct journals for q=cancer; the top
+      // 500 by count own ≥99% of the result mass), while keeping the
+      // payload trivially small. The client-side search-within in
+      // JournalFacet narrows this list as the user types — beyond 500
+      // they should sharpen the main query rather than scroll a facet.
       journals: {
         filter: { bool: { must, filter: filtersExcept("journal") } },
-        aggs: { keys: { terms: { field: "journal.keyword", size: 50 } } },
+        aggs: { keys: { terms: { field: "journal.keyword", size: 500 } } },
       },
       wcmRoleFirst: {
         filter: {

@@ -48,22 +48,24 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
       </label>
       <ul className="m-0 flex list-none flex-col p-0">
         {visible.map((j) => (
-          <li key={j.value} className="flex items-center gap-2 py-1 leading-[1.4]">
+          <li key={j.value} className="py-1 leading-[1.4]">
             <Link
               href={j.toggleHref}
-              title={j.value}
-              className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+              className="flex items-start gap-2 text-[#1a1a1a] no-underline hover:no-underline"
             >
+              {/* Top-align so input + count sit on the first line of a
+                  wrapping label rather than floating to the vertical
+                  center; the offset matches the input's vertical inset. */}
               <input
                 type="checkbox"
                 readOnly
                 checked={j.isActive}
                 tabIndex={-1}
                 aria-hidden="true"
-                className="cursor-pointer accent-[#2c4f6e]"
+                className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
               />
-              <span className="min-w-0 flex-1 truncate">{j.value}</span>
-              <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+              <span className="min-w-0 flex-1 break-words">{j.value}</span>
+              <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
                 {j.count.toLocaleString()}
               </span>
             </Link>
