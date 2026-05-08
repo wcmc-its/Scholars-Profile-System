@@ -115,6 +115,14 @@ async function indexPeople() {
       // Phase 2 — replaces the Phase-1 hard-coded "Faculty" placeholder.
       // Sourced from ED ETL deriveRoleCategory (see etl/ed/index.ts).
       roleCategory: true,
+      // Issue #8 item 4 — combined "Department / division" facet:
+      // pull the FK-resolved names so we can render "Cardiology — Medicine"
+      // bucket labels and "Cardiology · Department of Medicine" person rows
+      // without an extra DB hit at query time.
+      deptCode: true,
+      divCode: true,
+      department: { select: { name: true } },
+      division: { select: { name: true } },
       topicAssignments: { orderBy: { score: "desc" } },
       grants: true,
       authorships: {
@@ -237,6 +245,27 @@ async function indexPeople() {
       });
     }
 
+    // Issue #8 item 4 — composite dept/div facet key. Use FK-resolved names
+    // when present; fall back to the free-text primaryDepartment for the
+    // long-tail of scholars whose ED FK hasn't been backfilled yet so the
+    // bucket isn't dropped from the facet entirely.
+    const deptName = s.department?.name ?? s.primaryDepartment ?? null;
+    const divisionName = s.division?.name ?? null;
+    let deptDivKey: string | null = null;
+    let deptDivLabel: string | null = null;
+    if (s.deptCode && s.divCode) {
+      deptDivKey = `${s.deptCode}--${s.divCode}`;
+      deptDivLabel = divisionName && deptName ? `${divisionName} — ${deptName}` : null;
+    } else if (s.deptCode) {
+      deptDivKey = s.deptCode;
+      deptDivLabel = deptName;
+    } else if (deptName) {
+      // Long-tail: no FK code, but a free-text dept name. Use the name itself
+      // as the key so the facet stays useful during the ED-backfill window.
+      deptDivKey = `name:${deptName}`;
+      deptDivLabel = deptName;
+    }
+
     docs.push({
       cwid: s.cwid,
       doc: {
@@ -250,6 +279,12 @@ async function indexPeople() {
           : s.fullName,
         primaryTitle: s.primaryTitle,
         primaryDepartment: s.primaryDepartment,
+        deptCode: s.deptCode,
+        divCode: s.divCode,
+        deptName,
+        divisionName,
+        deptDivKey,
+        deptDivLabel,
         nameSuggest: nameSuggestInputs,
         areasOfInterest: aoi,
         overview: s.overview,

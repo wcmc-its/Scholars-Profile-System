@@ -26,7 +26,11 @@ vi.mock("@/lib/api/search", () => ({
     total: 42,
     page: 0,
     pageSize: 20,
-    facets: { departments: [], personTypes: [] },
+    facets: {
+      deptDivs: [],
+      personTypes: [],
+      activity: { hasGrants: 0, recentPub: 0 },
+    },
   })),
   searchPublications: vi.fn(async () => ({
     hits: [],
@@ -52,7 +56,7 @@ describe("ANALYTICS-02 (server) — search_query structured log (people branch)"
     const { GET } = await import("@/app/api/search/route");
 
     const req = new NextRequest(
-      new URL("http://localhost/api/search?q=cancer&department=Pathology&type=people"),
+      new URL("http://localhost/api/search?q=cancer&deptDiv=N1280&type=people"),
     );
     await GET(req);
 
@@ -79,7 +83,7 @@ describe("ANALYTICS-02 (server) — search_query structured log (people branch)"
     // "resultCount" field must be present and equal to the mock total
     expect(parsed["resultCount"]).toBe(42);
     expect(parsed.filters).toBeDefined();
-    expect(parsed.filters.department).toBe("Pathology");
+    expect(parsed.filters.deptDiv).toEqual(["N1280"]);
     expect(parsed.ts).toBeDefined();
     expect(typeof parsed.ts).toBe("string");
     expect(parsed.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
@@ -90,7 +94,7 @@ describe("ANALYTICS-02 (server) — search_query structured log (people branch)"
 
     const req = new NextRequest(
       new URL(
-        "http://localhost/api/search?q=cancer&type=people&personType=Faculty&hasActiveGrants=true",
+        "http://localhost/api/search?q=cancer&type=people&personType=full_time_faculty&activity=has_grants",
       ),
     );
     await GET(req);

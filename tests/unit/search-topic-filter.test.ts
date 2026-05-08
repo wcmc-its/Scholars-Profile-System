@@ -45,10 +45,17 @@ vi.mock("@/lib/search", () => ({
 
 import { searchPeople } from "@/lib/api/search";
 
+const EMPTY_AGGS = {
+  deptDivs: { keys: { buckets: [] } },
+  personTypes: { keys: { buckets: [] } },
+  activityHasGrants: { doc_count: 0 },
+  activityRecentPub: { doc_count: 0 },
+};
+
 const EMPTY_OS_RESPONSE = {
   body: {
     hits: { hits: [], total: { value: 0 } },
-    aggregations: { departments: { buckets: [] }, personTypes: { buckets: [] } },
+    aggregations: EMPTY_AGGS,
   },
 };
 
@@ -63,13 +70,17 @@ const OS_HIT_RESPONSE = (cwids: string[]) => ({
           preferredName: `Scholar ${cwid}`,
           primaryTitle: "Professor",
           primaryDepartment: "Medicine",
+          deptName: "Medicine",
+          divisionName: null,
+          personType: "full_time_faculty",
           publicationCount: 5,
+          grantCount: 0,
           hasActiveGrants: false,
         },
         highlight: undefined,
       })),
     },
-    aggregations: { departments: { buckets: [] }, personTypes: { buckets: [] } },
+    aggregations: EMPTY_AGGS,
   },
 });
 

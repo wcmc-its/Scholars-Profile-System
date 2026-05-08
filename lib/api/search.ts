@@ -33,10 +33,26 @@ const PAGE_SIZE = 20;
 export type PeopleSort = "relevance" | "lastname" | "recentPub";
 export type PublicationsSort = "relevance" | "year" | "citations";
 
+/**
+ * Issue #8 / #9 — multi-select facets. All filter axes are now arrays so a
+ * single URL can carry e.g. `personType=full_time_faculty&personType=affiliated_faculty`,
+ * which is OR'd within the group and AND'd across groups in OpenSearch.
+ *
+ * `deptDiv` values are the composite key emitted by the ETL: a bare
+ * `${deptCode}` for dept-only rows, `${deptCode}--${divCode}` for division
+ * rows, or `name:${deptName}` for the long-tail of scholars without an FK.
+ *
+ * `activity` is a small enum: `has_grants` filters `hasActiveGrants:true`,
+ * `recent_pub` filters `mostRecentPubDate >= now-2y`. Multi-select within
+ * the group is OR (matches the mockup checkboxes).
+ */
+export type ActivityFilter = "has_grants" | "recent_pub";
+
 export type PeopleFilters = {
-  department?: string;
-  hasActiveGrants?: boolean;
-  personType?: string;
+  /** Composite dept/division keys. */
+  deptDiv?: string[];
+  personType?: string[];
+  activity?: ActivityFilter[];
   /** When true, INCLUDE sparse profiles in results. Default: false (filter out). */
   includeIncomplete?: boolean;
 };
@@ -53,7 +69,12 @@ export type PeopleHit = {
   preferredName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
-  publicationCount: number;
+  /** FK-resolved department name (preferred) or free-text fallback. */
+  deptName: string | null;
+  divisionName: string | null;
+  roleCategory: string | null;
+  pubCount: number;
+  grantCount: number;
   hasActiveGrants: boolean;
   identityImageEndpoint: string;
   highlight?: string[];
@@ -82,14 +103,19 @@ export type PublicationHit = {
 
 export type SearchFacetBucket = { value: string; count: number };
 
+/** Dept/division facet bucket — keyed by the ETL-emitted composite key,
+ * carries a pre-rendered display label (e.g. "Cardiology — Medicine"). */
+export type DeptDivBucket = { value: string; label: string; count: number };
+
 export type PeopleSearchResult = {
   hits: PeopleHit[];
   total: number;
   page: number;
   pageSize: number;
   facets: {
-    departments: SearchFacetBucket[];
+    deptDivs: DeptDivBucket[];
     personTypes: SearchFacetBucket[];
+    activity: { hasGrants: number; recentPub: number };
   };
 };
 
@@ -137,7 +163,11 @@ export async function searchPeople(opts: {
         total: 0,
         page,
         pageSize: PAGE_SIZE,
-        facets: { departments: [], personTypes: [] },
+        facets: {
+          deptDivs: [],
+          personTypes: [],
+          activity: { hasGrants: 0, recentPub: 0 },
+        },
       };
     }
     topicCwidFilter = topicCwids;
@@ -147,6 +177,9 @@ export async function searchPeople(opts: {
   // query), hide sparse profiles unless explicitly opted in.
   const applySparseFilter =
     !filters.includeIncomplete && trimmed.length < 3;
+  // "Published in last 2 years" cutoff (issue #8 item 15).
+  const recentPubCutoff = new Date();
+  recentPubCutoff.setFullYear(recentPubCutoff.getFullYear() - 2);
 
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
@@ -172,23 +205,51 @@ export async function searchPeople(opts: {
     must.push({ match_all: {} });
   }
 
+  // Build named filter clauses so we can rebuild per-facet aggregations that
+  // EXCLUDE the facet's own selection (mockup behaviour: ticking
+  // "Full-time faculty" should not collapse the Person-type list to just
+  // that one bucket — the other type rows still need accurate counts).
+  const deptDivClause = filters.deptDiv && filters.deptDiv.length > 0
+    ? { terms: { deptDivKey: filters.deptDiv } }
+    : null;
+  const personTypeClause = filters.personType && filters.personType.length > 0
+    ? { terms: { personType: filters.personType } }
+    : null;
+  const activityClauses: Record<string, unknown>[] = [];
+  if (filters.activity && filters.activity.length > 0) {
+    const should: Record<string, unknown>[] = [];
+    if (filters.activity.includes("has_grants")) {
+      should.push({ term: { hasActiveGrants: true } });
+    }
+    if (filters.activity.includes("recent_pub")) {
+      should.push({ range: { mostRecentPubDate: { gte: recentPubCutoff.toISOString() } } });
+    }
+    activityClauses.push({ bool: { should, minimum_should_match: 1 } });
+  }
+  const sparseClause = applySparseFilter ? { term: { isComplete: true } } : null;
+  const topicClause = topicCwidFilter && topicCwidFilter.length > 0
+    ? { terms: { cwid: topicCwidFilter } }
+    : null;
+
+  // The filter array used by the main hits query (includes everything).
   const filter: Record<string, unknown>[] = [];
-  if (filters.department) {
-    filter.push({ term: { "primaryDepartment.keyword": filters.department } });
-  }
-  if (filters.personType) {
-    filter.push({ term: { personType: filters.personType } });
-  }
-  if (typeof filters.hasActiveGrants === "boolean") {
-    filter.push({ term: { hasActiveGrants: filters.hasActiveGrants } });
-  }
-  if (applySparseFilter) {
-    filter.push({ term: { isComplete: true } });
-  }
-  // D-10 topic scope: restrict to the pre-resolved cwid set.
-  if (topicCwidFilter && topicCwidFilter.length > 0) {
-    filter.push({ terms: { cwid: topicCwidFilter } });
-  }
+  if (deptDivClause) filter.push(deptDivClause);
+  if (personTypeClause) filter.push(personTypeClause);
+  for (const c of activityClauses) filter.push(c);
+  if (sparseClause) filter.push(sparseClause);
+  if (topicClause) filter.push(topicClause);
+
+  // Helper: build the "all filters except this one" clause set for a given
+  // facet's excluding-self aggregation.
+  const filtersExcept = (axis: "deptDiv" | "personType" | "activity") => {
+    const out: Record<string, unknown>[] = [];
+    if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
+    if (axis !== "personType" && personTypeClause) out.push(personTypeClause);
+    if (axis !== "activity") for (const c of activityClauses) out.push(c);
+    if (sparseClause) out.push(sparseClause);
+    if (topicClause) out.push(topicClause);
+    return out;
+  };
 
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "lastname") {
@@ -198,19 +259,56 @@ export async function searchPeople(opts: {
   }
   // 'relevance' uses default _score sort.
 
+  // Per-facet "filter aggregation" pattern: each agg re-applies all filters
+  // EXCEPT its own axis, so the bucket counts you see on the unticked rows
+  // reflect what would happen if you ticked them in addition to the current
+  // selection. Ticking another row in the same group OR's within that
+  // group; ticking a row in another group AND's. Implementation lives
+  // entirely in the request body — no separate round-trip per facet.
+  const aggs: Record<string, unknown> = {
+    deptDivs: {
+      filter: { bool: { must, filter: filtersExcept("deptDiv") } },
+      aggs: {
+        keys: {
+          terms: { field: "deptDivKey", size: 50 },
+          aggs: { label: { terms: { field: "deptDivLabel", size: 1 } } },
+        },
+      },
+    },
+    personTypes: {
+      filter: { bool: { must, filter: filtersExcept("personType") } },
+      aggs: { keys: { terms: { field: "personType", size: 10 } } },
+    },
+    activityHasGrants: {
+      filter: {
+        bool: {
+          must,
+          filter: [
+            ...filtersExcept("activity"),
+            { term: { hasActiveGrants: true } },
+          ],
+        },
+      },
+    },
+    activityRecentPub: {
+      filter: {
+        bool: {
+          must,
+          filter: [
+            ...filtersExcept("activity"),
+            { range: { mostRecentPubDate: { gte: recentPubCutoff.toISOString() } } },
+          ],
+        },
+      },
+    },
+  };
+
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
     query: { bool: { must, filter } },
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
-    aggs: {
-      departments: {
-        terms: { field: "primaryDepartment.keyword", size: 25 },
-      },
-      personTypes: {
-        terms: { field: "personType", size: 10 },
-      },
-    },
+    aggs,
     highlight: {
       fields: {
         preferredName: {},
@@ -222,7 +320,7 @@ export async function searchPeople(opts: {
     },
   };
 
-  const resp = await searchClient().search({ index: PEOPLE_INDEX, body });
+  const resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
 
   type Hit = {
     _source: {
@@ -231,17 +329,24 @@ export async function searchPeople(opts: {
       preferredName: string;
       primaryTitle: string | null;
       primaryDepartment: string | null;
+      deptName: string | null;
+      divisionName: string | null;
+      personType: string | null;
       publicationCount: number;
+      grantCount: number;
       hasActiveGrants: boolean;
     };
     highlight?: Record<string, string[]>;
   };
   type Bucket = { key: string; doc_count: number };
+  type DeptDivBucketRaw = Bucket & { label?: { buckets: Array<{ key: string }> } };
   const r = resp.body as unknown as {
     hits: { hits: Hit[]; total: { value: number } };
     aggregations?: {
-      departments?: { buckets: Bucket[] };
-      personTypes?: { buckets: Bucket[] };
+      deptDivs?: { keys: { buckets: DeptDivBucketRaw[] } };
+      personTypes?: { keys: { buckets: Bucket[] } };
+      activityHasGrants?: { doc_count: number };
+      activityRecentPub?: { doc_count: number };
     };
   };
 
@@ -252,7 +357,11 @@ export async function searchPeople(opts: {
       preferredName: h._source.preferredName,
       primaryTitle: h._source.primaryTitle,
       primaryDepartment: h._source.primaryDepartment,
-      publicationCount: h._source.publicationCount,
+      deptName: h._source.deptName ?? h._source.primaryDepartment,
+      divisionName: h._source.divisionName,
+      roleCategory: h._source.personType,
+      pubCount: h._source.publicationCount,
+      grantCount: h._source.grantCount,
       hasActiveGrants: h._source.hasActiveGrants,
       identityImageEndpoint: identityImageEndpoint(h._source.cwid),
       highlight: h.highlight ? Object.values(h.highlight).flat() : undefined,
@@ -261,14 +370,19 @@ export async function searchPeople(opts: {
     page,
     pageSize: PAGE_SIZE,
     facets: {
-      departments: (r.aggregations?.departments?.buckets ?? []).map((b) => ({
+      deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        label: b.label?.buckets?.[0]?.key ?? b.key,
+        count: b.doc_count,
+      })),
+      personTypes: (r.aggregations?.personTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
       })),
-      personTypes: (r.aggregations?.personTypes?.buckets ?? []).map((b) => ({
-        value: b.key,
-        count: b.doc_count,
-      })),
+      activity: {
+        hasGrants: r.aggregations?.activityHasGrants?.doc_count ?? 0,
+        recentPub: r.aggregations?.activityRecentPub?.doc_count ?? 0,
+      },
     },
   };
 }

@@ -84,6 +84,16 @@ export const peopleIndexMapping = {
         analyzer: "scholar_text",
         fields: { keyword: { type: "keyword" } },
       },
+      // FK-resolved department/division (issue #8 item 4): used for the
+      // combined "Department / division" facet. The composite key is
+      // `deptCode` for dept-only rows and `deptCode--divCode` for division
+      // rows so a single `terms` aggregation produces both kinds of buckets.
+      deptCode: { type: "keyword" },
+      divCode: { type: "keyword" },
+      deptName: { type: "keyword" },
+      divisionName: { type: "keyword" },
+      deptDivKey: { type: "keyword" },
+      deptDivLabel: { type: "keyword" },
       areasOfInterest: { type: "text", analyzer: "scholar_text" },
       overview: { type: "text", analyzer: "scholar_text" },
       publicationTitles: { type: "text", analyzer: "scholar_text" },
@@ -95,7 +105,8 @@ export const peopleIndexMapping = {
       // Counters used in result snippets.
       publicationCount: { type: "integer" },
       grantCount: { type: "integer" },
-      // For "most recent publication" sort (spec line 194).
+      // For "most recent publication" sort (spec line 194) and the
+      // "Published in last 2 years" activity filter (issue #8 item 15).
       mostRecentPubDate: { type: "date" },
     },
   },

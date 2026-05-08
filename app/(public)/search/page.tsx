@@ -1,7 +1,5 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { AZDirectory } from "@/components/browse/az-directory";
@@ -9,6 +7,8 @@ import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import {
   searchPeople,
   searchPublications,
+  type ActivityFilter,
+  type DeptDivBucket,
   type PeopleSort,
   type PublicationsSort,
   type SearchFacetBucket,
@@ -22,11 +22,17 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   // D-13: noindex but follow — preserves link equity through to profile pages.
-  // No canonical tag (page is intentionally non-canonical).
   robots: { index: false, follow: true },
 };
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
+
+// Per-group OR'd repeated params (#9). Always returns an array; preserves
+// order from the URL so chip-rendering matches what the user clicked.
+function parseList(val: string | string[] | undefined): string[] {
+  if (val === undefined) return [];
+  return Array.isArray(val) ? val : [val];
+}
 
 export default async function SearchPage({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
@@ -34,8 +40,6 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
-  // Default sort flips to "year" on empty Publications tab — relevance is
-  // meaningless without a query, and most users want recent pubs first.
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
   const sort = rawSort ?? (q === "" && type === "publications" ? "year" : "relevance");
 
@@ -47,25 +51,57 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       : Promise.resolve({ state: "none" as const }),
   ]);
 
-  const department = (Array.isArray(sp.department) ? sp.department[0] : sp.department) ?? "";
-  const personType = (Array.isArray(sp.personType) ? sp.personType[0] : sp.personType) ?? "";
-  const hasGrantsParam = Array.isArray(sp.hasActiveGrants) ? sp.hasActiveGrants[0] : sp.hasActiveGrants;
-  const hasActiveGrants = hasGrantsParam === undefined ? undefined : hasGrantsParam === "true";
+  // People filters (multi-select).
+  const deptDiv = parseList(sp.deptDiv);
+  const personType = parseList(sp.personType);
+  const activity = parseList(sp.activity).filter(
+    (a): a is ActivityFilter => a === "has_grants" || a === "recent_pub",
+  );
 
+  // Pub filters (single-select today).
   const yearMin = parseOptionalInt(sp.yearMin);
   const yearMax = parseOptionalInt(sp.yearMax);
   const publicationType =
     (Array.isArray(sp.publicationType) ? sp.publicationType[0] : sp.publicationType) ?? "";
 
+  // Issue #8 item 1: the subhead "{n} people · {n} publications" needs both
+  // counts regardless of which tab is active. Run a lightweight count for
+  // the inactive tab in parallel (size: 0 — facet aggs / pagination skipped).
+  const [peopleResult, pubsResult] = await Promise.all([
+    searchPeople({
+      q,
+      page: type === "people" ? page : 0,
+      sort: type === "people" ? (sort as PeopleSort) : "relevance",
+      filters: {
+        deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+        personType: personType.length > 0 ? personType : undefined,
+        activity: activity.length > 0 ? activity : undefined,
+      },
+    }),
+    searchPublications({
+      q,
+      page: type === "publications" ? page : 0,
+      sort: type === "publications" ? (sort as PublicationsSort) : "relevance",
+      filters: {
+        yearMin,
+        yearMax,
+        publicationType: publicationType || undefined,
+      },
+    }),
+  ]);
+
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
-      <h1 className="mb-2 text-2xl font-semibold">
-        {q ? `Results for "${q}"` : "Browse scholars"}
-      </h1>
+    <main>
+      <SearchMeta q={q} peopleCount={peopleResult.total} pubCount={pubsResult.total} />
       <TaxonomyCallout result={taxonomyMatch} />
-      <SearchTabs q={q} activeType={type} />
+      <ModeTabs
+        q={q}
+        activeType={type}
+        peopleCount={peopleResult.total}
+        pubCount={pubsResult.total}
+      />
       {showAZ && azBuckets ? (
-        <div className="mt-8">
+        <div className="mx-auto max-w-[1280px] px-6 pt-6">
           <AZDirectory buckets={azBuckets} />
           <div className="mt-2 text-right">
             <Link
@@ -77,7 +113,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           </div>
         </div>
       ) : null}
-      <div className="mt-6 grid grid-cols-1 gap-8 md:grid-cols-[220px_1fr]">
+      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
         {type === "publications" ? (
           <PublicationsResults
             q={q}
@@ -86,15 +122,17 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             yearMin={yearMin}
             yearMax={yearMax}
             publicationType={publicationType || undefined}
+            result={pubsResult}
           />
         ) : (
           <PeopleResults
             q={q}
             page={page}
             sort={sort as PeopleSort}
-            department={department || undefined}
-            personType={personType || undefined}
-            hasActiveGrants={hasActiveGrants}
+            deptDiv={deptDiv}
+            personType={personType}
+            activity={activity}
+            result={peopleResult}
           />
         )}
       </div>
@@ -109,88 +147,217 @@ function parseOptionalInt(val: string | string[] | undefined): number | undefine
   return Number.isFinite(n) ? n : undefined;
 }
 
-function SearchTabs({ q, activeType }: { q: string; activeType: string }) {
-  const peopleHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
-  const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
-  const baseClass =
-    "px-4 py-2 text-sm font-medium border-b-2 transition-colors";
-  const activeClass = "border-primary text-foreground";
-  const inactiveClass = "border-transparent text-muted-foreground hover:text-foreground";
+/* ============================================================
+ * Search-meta strip — h1 with quoted query span + counts subhead
+ * ============================================================ */
+function SearchMeta({
+  q,
+  peopleCount,
+  pubCount,
+}: {
+  q: string;
+  peopleCount: number;
+  pubCount: number;
+}) {
   return (
-    <div className="border-border flex gap-2 border-b">
-      <Link
-        href={peopleHref}
-        className={`${baseClass} ${activeType === "people" ? activeClass : inactiveClass}`}
-      >
-        People
-      </Link>
-      <Link
-        href={pubHref}
-        className={`${baseClass} ${activeType === "publications" ? activeClass : inactiveClass}`}
-      >
-        Publications
-      </Link>
+    <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
+      <h1 className="mb-1 text-[28px] font-bold leading-tight tracking-[-0.01em]">
+        {q ? (
+          <>
+            Results for{" "}
+            <span className="font-bold text-[#2c4f6e]">&ldquo;{q}&rdquo;</span>
+          </>
+        ) : (
+          "Browse scholars"
+        )}
+      </h1>
+      <div className="text-[13px] text-[#757575]">
+        {peopleCount.toLocaleString()} {peopleCount === 1 ? "person" : "people"} ·{" "}
+        {pubCount.toLocaleString()} publications
+      </div>
     </div>
   );
 }
+
+/* ============================================================
+ * Mode tabs — slate accent with count pills
+ * ============================================================ */
+function ModeTabs({
+  q,
+  activeType,
+  peopleCount,
+  pubCount,
+}: {
+  q: string;
+  activeType: string;
+  peopleCount: number;
+  pubCount: number;
+}) {
+  const peopleHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
+  const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
+  return (
+    <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+      <ModeTab href={peopleHref} label="People" count={peopleCount} active={activeType === "people"} />
+      <ModeTab href={pubHref} label="Publications" count={pubCount} active={activeType === "publications"} />
+    </nav>
+  );
+}
+
+function ModeTab({
+  href,
+  label,
+  count,
+  active,
+}: {
+  href: string;
+  label: string;
+  count: number;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
+        active
+          ? "border-[#2c4f6e] font-semibold text-[#2c4f6e]"
+          : "border-transparent font-medium text-[#4a4a4a] hover:text-[#1a1a1a]"
+      }`}
+    >
+      {label}
+      <span
+        className={`inline-flex h-5 min-w-[28px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium ${
+          active ? "bg-[#eaf0f5] text-[#2c4f6e]" : "bg-[#f7f6f3] text-[#757575]"
+        }`}
+      >
+        {count.toLocaleString()}
+      </span>
+    </Link>
+  );
+}
+
+/* ============================================================
+ * People tab content
+ * ============================================================ */
+type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
+type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 
 async function PeopleResults({
   q,
   page,
   sort,
-  department,
+  deptDiv,
   personType,
-  hasActiveGrants,
+  activity,
+  result,
 }: {
   q: string;
   page: number;
   sort: PeopleSort;
-  department?: string;
-  personType?: string;
-  hasActiveGrants?: boolean;
+  deptDiv: string[];
+  personType: string[];
+  activity: ActivityFilter[];
+  result: PeopleResultData;
 }) {
-  const result = await searchPeople({
-    q,
-    page,
-    sort,
-    filters: { department, personType, hasActiveGrants },
-  });
+  // URL builder used by every facet checkbox + chip-removal link. Mutating
+  // a URLSearchParams via append/delete preserves repeated keys for arrays.
+  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+    const sp = new URLSearchParams();
+    sp.set("q", q);
+    sp.set("type", "people");
+    if (sort !== "relevance") sp.set("sort", sort);
+    for (const v of deptDiv) sp.append("deptDiv", v);
+    for (const v of personType) sp.append("personType", v);
+    for (const v of activity) sp.append("activity", v);
+    mut(sp);
+    sp.delete("page");
+    return `/search?${sp.toString()}`;
+  };
+
+  const toggleHref = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      if (current.includes(value)) {
+        for (const v of current) if (v !== value) sp.append(axis, v);
+      } else {
+        for (const v of current) sp.append(axis, v);
+        sp.append(axis, value);
+      }
+    });
+
+  const removeHref = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      for (const v of current) if (v !== value) sp.append(axis, v);
+    });
+
+  const clearAllHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
+
+  // One chip per selected value. Labels resolved from the facet buckets
+  // when available (deptDiv keys are opaque codes), else humanized.
+  const labelByDeptDiv = new Map(
+    result.facets.deptDivs.map((b) => [b.value, b.label]),
+  );
+  const chips: Array<{ label: string; removeHref: string }> = [];
+  for (const v of personType) {
+    chips.push({
+      label: formatRoleCategory(v) ?? v,
+      removeHref: removeHref("personType", v),
+    });
+  }
+  for (const v of deptDiv) {
+    chips.push({
+      label: labelByDeptDiv.get(v) ?? v,
+      removeHref: removeHref("deptDiv", v),
+    });
+  }
+  for (const v of activity) {
+    chips.push({
+      label: v === "has_grants" ? "Has active grants" : "Published in last 2 years",
+      removeHref: removeHref("activity", v),
+    });
+  }
+
+  const hasActiveFilters = chips.length > 0;
 
   return (
     <>
-      <aside>
-        <FacetSidebar
-          query={q}
-          activeType="people"
-          activeSort={sort}
-          activeDepartment={department}
-          activePersonType={personType}
-          activeHasGrants={hasActiveGrants}
-          departments={result.facets.departments}
-          personTypes={result.facets.personTypes}
-        />
-      </aside>
+      <FacetSidebar
+        deptDivs={result.facets.deptDivs}
+        personTypes={result.facets.personTypes}
+        activity={result.facets.activity}
+        activeDeptDiv={deptDiv}
+        activePersonType={personType}
+        activeActivity={activity}
+        toggleHref={toggleHref}
+        clearAllHref={clearAllHref}
+        hasActiveFilters={hasActiveFilters}
+      />
       <section>
-        <ActiveFilterChips
-          chips={buildPeopleChips({ q, sort, department, personType, hasActiveGrants })}
-          clearAllHref={`/search?${new URLSearchParams({ q, type: "people" }).toString()}`}
-        />
-        <ResultsHeader
+        {chips.length > 0 ? (
+          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
+        ) : null}
+        <ResultsToolbar
+          tab="people"
           total={result.total}
           page={result.page}
           pageSize={result.pageSize}
+          sort={sort}
+          buildSortHref={(value) =>
+            buildUrl((sp) => {
+              if (value === "relevance") sp.delete("sort");
+              else sp.set("sort", value);
+            })
+          }
         />
         {result.hits.length === 0 ? (
           <EmptyState
             query={q}
-            tip={
-              department || personType || hasActiveGrants !== undefined
-                ? "Try clearing filters."
-                : "Try a broader search term, or browse by department."
-            }
+            tip={hasActiveFilters ? "Try clearing filters." : "Try a broader search term, or browse by department."}
           />
         ) : (
-          <ul className="mt-4 flex flex-col gap-1 divide-y divide-zinc-200 dark:divide-zinc-800">
+          <ul className="flex flex-col">
             {result.hits.map((h, i) => (
               <li key={h.cwid}>
                 <PeopleResultCard
@@ -198,36 +365,28 @@ async function PeopleResults({
                   position={page * result.pageSize + i}
                   q={q}
                   total={result.total}
-                  filters={{
-                    department: department || undefined,
-                    personType: personType || undefined,
-                    hasActiveGrants,
-                  }}
+                  filters={{ deptDiv, personType, activity }}
                 />
               </li>
             ))}
           </ul>
         )}
         <Pagination
-          q={q}
-          type="people"
           page={result.page}
           total={result.total}
           pageSize={result.pageSize}
-          extra={{
-            sort,
-            ...(department ? { department } : {}),
-            ...(personType ? { personType } : {}),
-            ...(hasActiveGrants !== undefined
-              ? { hasActiveGrants: String(hasActiveGrants) }
-              : {}),
-          }}
+          buildHref={(p) => buildUrl((sp) => {
+            if (p > 0) sp.set("page", String(p));
+          })}
         />
       </section>
     </>
   );
 }
 
+/* ============================================================
+ * Publications tab — single-select today (no facet rewrite)
+ * ============================================================ */
 async function PublicationsResults({
   q,
   page,
@@ -235,6 +394,7 @@ async function PublicationsResults({
   yearMin,
   yearMax,
   publicationType,
+  result,
 }: {
   q: string;
   page: number;
@@ -242,35 +402,79 @@ async function PublicationsResults({
   yearMin?: number;
   yearMax?: number;
   publicationType?: string;
+  result: PubsResultData;
 }) {
-  const result = await searchPublications({
-    q,
-    page,
-    sort,
-    filters: { yearMin, yearMax, publicationType },
-  });
+  const buildUrl = (mut: (sp: URLSearchParams) => void) => {
+    const sp = new URLSearchParams();
+    sp.set("q", q);
+    sp.set("type", "publications");
+    if (sort !== "relevance") sp.set("sort", sort);
+    if (yearMin !== undefined) sp.set("yearMin", String(yearMin));
+    if (yearMax !== undefined) sp.set("yearMax", String(yearMax));
+    if (publicationType) sp.set("publicationType", publicationType);
+    mut(sp);
+    sp.delete("page");
+    return `/search?${sp.toString()}`;
+  };
+
+  const clearAllHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
+
+  const chips: Array<{ label: string; removeHref: string }> = [];
+  if (yearMin !== undefined || yearMax !== undefined) {
+    let label: string;
+    if (yearMin !== undefined && yearMax !== undefined) {
+      label = yearMin === yearMax ? `${yearMin}` : `${yearMin}–${yearMax}`;
+    } else if (yearMin !== undefined) {
+      label = `Since ${yearMin}`;
+    } else {
+      label = `Through ${yearMax}`;
+    }
+    chips.push({
+      label,
+      removeHref: buildUrl((sp) => {
+        sp.delete("yearMin");
+        sp.delete("yearMax");
+      }),
+    });
+  }
+  if (publicationType) {
+    chips.push({
+      label: publicationType,
+      removeHref: buildUrl((sp) => sp.delete("publicationType")),
+    });
+  }
 
   return (
     <>
-      <aside>
-        <FacetSidebarPubs
-          query={q}
-          activeSort={sort}
-          yearMin={yearMin}
-          yearMax={yearMax}
-          activePublicationType={publicationType}
-          publicationTypes={result.facets.publicationTypes}
-        />
-      </aside>
+      <FacetSidebarPubs
+        yearMin={yearMin}
+        activePublicationType={publicationType}
+        publicationTypes={result.facets.publicationTypes}
+        buildHref={(overrides) => buildUrl((sp) => {
+          for (const [k, v] of Object.entries(overrides)) {
+            if (v === "") sp.delete(k);
+            else sp.set(k, v);
+          }
+        })}
+        hasActiveFilters={chips.length > 0}
+        clearAllHref={clearAllHref}
+      />
       <section>
-        <ActiveFilterChips
-          chips={buildPublicationsChips({ q, sort, yearMin, yearMax, publicationType })}
-          clearAllHref={`/search?${new URLSearchParams({ q, type: "publications" }).toString()}`}
-        />
-        <ResultsHeader
+        {chips.length > 0 ? (
+          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
+        ) : null}
+        <ResultsToolbar
+          tab="publications"
           total={result.total}
           page={result.page}
           pageSize={result.pageSize}
+          sort={sort}
+          buildSortHref={(value) =>
+            buildUrl((sp) => {
+              if (value === "relevance") sp.delete("sort");
+              else sp.set("sort", value);
+            })
+          }
         />
         {result.hits.length === 0 ? (
           <EmptyState
@@ -278,68 +482,88 @@ async function PublicationsResults({
             tip="Try removing the year filter, or search a different phrase."
           />
         ) : (
-          <ul className="mt-4 flex flex-col gap-1 divide-y divide-zinc-200 dark:divide-zinc-800">
+          <ul>
             {result.hits.map((h) => {
               const titleHtml = sanitizePubTitle(h.title);
               return (
-              <li key={h.pmid} className="py-4">
-                <div className="font-medium leading-snug">
-                  {h.pubmedUrl ? (
-                    <a
-                      href={h.pubmedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                      dangerouslySetInnerHTML={{ __html: titleHtml }}
-                    />
-                  ) : (
-                    <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
-                  )}
-                </div>
-                <AuthorChipRow authors={h.wcmAuthors} />
-                <div className="text-muted-foreground mt-1 text-xs">
-                  {h.journal} · {h.year}
-                  {h.publicationType ? ` · ${h.publicationType}` : ""}
-                  {h.citationCount > 0 ? ` · ${h.citationCount} citations` : ""}
-                </div>
-              </li>
+                <li key={h.pmid} className="border-b border-[#e3e2dd] py-5">
+                  <div className="mb-2 text-[16px] font-semibold leading-snug">
+                    {h.pubmedUrl ? (
+                      <a
+                        href={h.pubmedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#1a1a1a] hover:text-[#2c4f6e] hover:no-underline"
+                        dangerouslySetInnerHTML={{ __html: titleHtml }}
+                      />
+                    ) : (
+                      <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
+                    )}
+                  </div>
+                  <div className="mb-2 text-[13px] leading-snug text-[#4a4a4a]">
+                    {h.journal ? <em className="not-italic">{h.journal}</em> : null}
+                    {h.journal && h.year ? ". " : null}
+                    {h.year ?? null}.
+                  </div>
+                  <AuthorChipRow authors={h.wcmAuthors} />
+                  <div className="mt-2 flex gap-3 text-xs text-[#757575]">
+                    {h.citationCount > 0 ? (
+                      <span className="font-medium text-[#4a4a4a]">{h.citationCount} citations</span>
+                    ) : null}
+                    {h.doi ? (
+                      <a
+                        href={`https://doi.org/${h.doi}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-dotted underline-offset-2 hover:text-[#2c4f6e]"
+                      >
+                        DOI
+                      </a>
+                    ) : null}
+                    {h.pubmedUrl ? (
+                      <a
+                        href={h.pubmedUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-dotted underline-offset-2 hover:text-[#2c4f6e]"
+                      >
+                        PubMed
+                      </a>
+                    ) : null}
+                  </div>
+                </li>
               );
             })}
           </ul>
         )}
         <Pagination
-          q={q}
-          type="publications"
           page={result.page}
           total={result.total}
           pageSize={result.pageSize}
-          extra={{
-            sort,
-            ...(yearMin !== undefined ? { yearMin: String(yearMin) } : {}),
-            ...(yearMax !== undefined ? { yearMax: String(yearMax) } : {}),
-            ...(publicationType ? { publicationType } : {}),
-          }}
+          buildHref={(p) => buildUrl((sp) => {
+            if (p > 0) sp.set("page", String(p));
+          })}
         />
       </section>
     </>
   );
 }
 
-type ChipSpec = { label: string; removeHref: string };
-
+/* ============================================================
+ * Active filter chips — one chip per selected value
+ * ============================================================ */
 function ActiveFilterChips({
   chips,
   clearAllHref,
 }: {
-  chips: ChipSpec[];
+  chips: Array<{ label: string; removeHref: string }>;
   clearAllHref: string;
 }) {
-  if (chips.length === 0) return null;
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       {chips.map((c) => (
         <Link
-          key={c.label}
+          key={`${c.label}-${c.removeHref}`}
           href={c.removeHref}
           aria-label={`Remove filter: ${c.label}`}
           className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pl-3 pr-1.5 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
@@ -353,312 +577,266 @@ function ActiveFilterChips({
           </span>
         </Link>
       ))}
-      {chips.length > 1 ? (
-        <Link
-          href={clearAllHref}
-          className="ml-1 text-xs text-zinc-500 hover:text-[#2c4f6e]"
-        >
-          Clear all
-        </Link>
-      ) : null}
+      <Link href={clearAllHref} className="ml-1 text-xs text-[#757575] hover:text-[#2c4f6e]">
+        Clear all
+      </Link>
     </div>
   );
 }
 
-function buildPeopleChips({
-  q,
-  sort,
-  department,
-  personType,
-  hasActiveGrants,
-}: {
-  q: string;
-  sort: PeopleSort;
-  department?: string;
-  personType?: string;
-  hasActiveGrants?: boolean;
-}): ChipSpec[] {
-  const baseEntries = (omit: string): Array<[string, string]> => {
-    const entries: Array<[string, string]> = [["q", q], ["type", "people"]];
-    if (sort !== "relevance") entries.push(["sort", sort]);
-    if (department && omit !== "department") entries.push(["department", department]);
-    if (personType && omit !== "personType") entries.push(["personType", personType]);
-    if (hasActiveGrants !== undefined && omit !== "hasActiveGrants") {
-      entries.push(["hasActiveGrants", String(hasActiveGrants)]);
-    }
-    return entries;
-  };
-  const hrefWithout = (key: string) =>
-    `/search?${new URLSearchParams(baseEntries(key)).toString()}`;
-
-  const chips: ChipSpec[] = [];
-  if (personType) {
-    chips.push({
-      label: formatRoleCategory(personType) ?? personType,
-      removeHref: hrefWithout("personType"),
-    });
-  }
-  if (department) {
-    chips.push({ label: department, removeHref: hrefWithout("department") });
-  }
-  if (hasActiveGrants === true) {
-    chips.push({ label: "Has active grants", removeHref: hrefWithout("hasActiveGrants") });
-  }
-  return chips;
-}
-
-function buildPublicationsChips({
-  q,
-  sort,
-  yearMin,
-  yearMax,
-  publicationType,
-}: {
-  q: string;
-  sort: PublicationsSort;
-  yearMin?: number;
-  yearMax?: number;
-  publicationType?: string;
-}): ChipSpec[] {
-  const baseEntries = (omit: Array<"yearMin" | "yearMax" | "publicationType">): Array<[string, string]> => {
-    const entries: Array<[string, string]> = [["q", q], ["type", "publications"]];
-    if (sort !== "relevance") entries.push(["sort", sort]);
-    if (yearMin !== undefined && !omit.includes("yearMin")) entries.push(["yearMin", String(yearMin)]);
-    if (yearMax !== undefined && !omit.includes("yearMax")) entries.push(["yearMax", String(yearMax)]);
-    if (publicationType && !omit.includes("publicationType")) entries.push(["publicationType", publicationType]);
-    return entries;
-  };
-  const hrefWithout = (keys: Array<"yearMin" | "yearMax" | "publicationType">) =>
-    `/search?${new URLSearchParams(baseEntries(keys)).toString()}`;
-
-  const chips: ChipSpec[] = [];
-  if (yearMin !== undefined || yearMax !== undefined) {
-    let label: string;
-    if (yearMin !== undefined && yearMax !== undefined) {
-      label = yearMin === yearMax ? `${yearMin}` : `${yearMin}–${yearMax}`;
-    } else if (yearMin !== undefined) {
-      label = `Since ${yearMin}`;
-    } else {
-      label = `Through ${yearMax}`;
-    }
-    chips.push({ label, removeHref: hrefWithout(["yearMin", "yearMax"]) });
-  }
-  if (publicationType) {
-    chips.push({ label: publicationType, removeHref: hrefWithout(["publicationType"]) });
-  }
-  return chips;
-}
-
-function ResultsHeader({
+/* ============================================================
+ * Results toolbar — left: count line; right: sort dropdown
+ * ============================================================ */
+function ResultsToolbar({
+  tab,
   total,
   page,
   pageSize,
+  sort,
+  buildSortHref,
 }: {
+  tab: "people" | "publications";
   total: number;
   page: number;
   pageSize: number;
+  sort: PeopleSort | PublicationsSort;
+  buildSortHref: (value: string) => string;
 }) {
-  if (total === 0) return null;
-  const start = page * pageSize + 1;
+  const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
-  return (
-    <div className="text-muted-foreground text-sm">
-      Showing {start}–{end} of {total}
-    </div>
-  );
-}
+  const noun = tab === "people"
+    ? `${total === 1 ? "person" : "people"} matching filters`
+    : "publications";
 
-function EmptyState({ query, tip }: { query: string; tip: string }) {
-  return (
-    <div className="mt-12 flex flex-col items-center text-center">
-      <div className="text-lg font-medium">No results{query ? ` for "${query}"` : ""}</div>
-      <div className="text-muted-foreground mt-1 text-sm">{tip}</div>
-    </div>
-  );
-}
-
-function FacetSidebar({
-  query,
-  activeType,
-  activeSort,
-  activeDepartment,
-  activePersonType,
-  activeHasGrants,
-  departments,
-  personTypes,
-}: {
-  query: string;
-  activeType: "people";
-  activeSort: PeopleSort;
-  activeDepartment?: string;
-  activePersonType?: string;
-  activeHasGrants?: boolean;
-  departments: SearchFacetBucket[];
-  personTypes: SearchFacetBucket[];
-}) {
-  const baseParams = (overrides: Record<string, string>) => {
-    const p = new URLSearchParams({ q: query, type: activeType });
-    if (activeSort !== "relevance") p.set("sort", activeSort);
-    if (activeDepartment) p.set("department", activeDepartment);
-    if (activePersonType) p.set("personType", activePersonType);
-    if (activeHasGrants !== undefined) p.set("hasActiveGrants", String(activeHasGrants));
-    for (const [k, v] of Object.entries(overrides)) {
-      if (v === "") p.delete(k);
-      else p.set(k, v);
-    }
-    return p.toString();
-  };
+  const peopleOpts: Array<{ value: PeopleSort; label: string }> = [
+    { value: "relevance", label: "Relevance" },
+    { value: "lastname", label: "Last name (A–Z)" },
+    { value: "recentPub", label: "Most recent publication" },
+  ];
+  const pubOpts: Array<{ value: PublicationsSort; label: string }> = [
+    { value: "relevance", label: "Relevance" },
+    { value: "year", label: "Year (newest)" },
+    { value: "citations", label: "Citation count" },
+  ];
+  const opts = tab === "people" ? peopleOpts : pubOpts;
 
   return (
-    <div className="flex flex-col gap-6 text-sm">
-      <FacetGroup label="Sort">
-        <SortLink label="Relevance" current={activeSort} value="relevance" hrefBuilder={baseParams} />
-        <SortLink label="Last name (A–Z)" current={activeSort} value="lastname" hrefBuilder={baseParams} />
-        <SortLink label="Most recent publication" current={activeSort} value="recentPub" hrefBuilder={baseParams} />
-      </FacetGroup>
-
-      {departments.length > 0 ? (
-        <FacetGroup label="Department">
-          {activeDepartment ? (
-            <Link
-              href={`/search?${baseParams({ department: "" })}`}
-              className="text-muted-foreground hover:text-foreground text-xs"
-            >
-              ← All departments
-            </Link>
-          ) : null}
-          {departments.map((d) => (
-            <FacetLink
-              key={d.value}
-              label={d.value}
-              count={d.count}
-              isActive={d.value === activeDepartment}
-              href={`/search?${baseParams({ department: d.value })}`}
-            />
-          ))}
-        </FacetGroup>
+    <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-[#757575]">
+      {total > 0 ? (
+        <span>
+          Showing {start}–{end} of{" "}
+          <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong> {noun}
+        </span>
       ) : null}
+      <span className="ml-auto inline-flex items-center gap-2 text-[#4a4a4a]">
+        Sort:
+        <SortLinks current={sort} options={opts} buildSortHref={buildSortHref} />
+      </span>
+    </div>
+  );
+}
+
+// Server-rendered sort selector — render the active option as the visible
+// label, the rest as a small dropdown of links via <details>. Native
+// behavior, no client JS, accessible by keyboard.
+function SortLinks({
+  current,
+  options,
+  buildSortHref,
+}: {
+  current: string;
+  options: Array<{ value: string; label: string }>;
+  buildSortHref: (value: string) => string;
+}) {
+  const activeLabel = options.find((o) => o.value === current)?.label ?? options[0].label;
+  return (
+    <details className="relative">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] [&::-webkit-details-marker]:hidden">
+        {activeLabel}
+        <span aria-hidden className="text-[10px] text-[#757575]">▾</span>
+      </summary>
+      <ul className="absolute right-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-[#e3e2dd] bg-white py-1 shadow-md">
+        {options.map((o) => (
+          <li key={o.value}>
+            <Link
+              href={buildSortHref(o.value)}
+              className={`block px-3 py-1.5 text-[13px] hover:bg-[#fafaf8] ${
+                o.value === current ? "font-semibold text-[#2c4f6e]" : "text-[#1a1a1a]"
+              }`}
+            >
+              {o.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/* ============================================================
+ * Sidebar — checkbox-style facet lists
+ * ============================================================ */
+function FacetSidebar({
+  deptDivs,
+  personTypes,
+  activity,
+  activeDeptDiv,
+  activePersonType,
+  activeActivity,
+  toggleHref,
+  clearAllHref,
+  hasActiveFilters,
+}: {
+  deptDivs: DeptDivBucket[];
+  personTypes: SearchFacetBucket[];
+  activity: { hasGrants: number; recentPub: number };
+  activeDeptDiv: string[];
+  activePersonType: string[];
+  activeActivity: ActivityFilter[];
+  toggleHref: (axis: string, value: string) => string;
+  clearAllHref: string;
+  hasActiveFilters: boolean;
+}) {
+  return (
+    <aside className="text-[13px]">
+      <div className="mb-4 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+          Filters
+        </span>
+        {hasActiveFilters ? (
+          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+            Clear all
+          </Link>
+        ) : null}
+      </div>
 
       {personTypes.length > 0 ? (
         <FacetGroup label="Person type">
-          {activePersonType ? (
-            <Link
-              href={`/search?${baseParams({ personType: "" })}`}
-              className="text-muted-foreground hover:text-foreground text-xs"
-            >
-              ← All person types
-            </Link>
-          ) : null}
           {personTypes.map((p) => (
-            <FacetLink
+            <FacetCheckbox
               key={p.value}
               label={formatRoleCategory(p.value) ?? p.value}
               count={p.count}
-              isActive={p.value === activePersonType}
-              href={`/search?${baseParams({ personType: p.value })}`}
+              isActive={activePersonType.includes(p.value)}
+              href={toggleHref("personType", p.value)}
             />
           ))}
         </FacetGroup>
       ) : null}
 
-      <FacetGroup label="Grants">
-        <FacetLink
+      {deptDivs.length > 0 ? (
+        <FacetGroup label="Department / division" scrollable>
+          {deptDivs.map((d) => (
+            <FacetCheckbox
+              key={d.value}
+              label={d.label}
+              count={d.count}
+              isActive={activeDeptDiv.includes(d.value)}
+              href={toggleHref("deptDiv", d.value)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+
+      <FacetGroup label="Activity">
+        <FacetCheckbox
           label="Has active grants"
-          isActive={activeHasGrants === true}
-          href={`/search?${baseParams({
-            hasActiveGrants: activeHasGrants === true ? "" : "true",
-          })}`}
+          count={activity.hasGrants}
+          isActive={activeActivity.includes("has_grants")}
+          href={toggleHref("activity", "has_grants")}
+        />
+        <FacetCheckbox
+          label="Published in last 2 years"
+          count={activity.recentPub}
+          isActive={activeActivity.includes("recent_pub")}
+          href={toggleHref("activity", "recent_pub")}
         />
       </FacetGroup>
-    </div>
+    </aside>
   );
 }
 
 function FacetSidebarPubs({
-  query,
-  activeSort,
   yearMin,
-  yearMax,
   activePublicationType,
   publicationTypes,
+  buildHref,
+  hasActiveFilters,
+  clearAllHref,
 }: {
-  query: string;
-  activeSort: PublicationsSort;
   yearMin?: number;
-  yearMax?: number;
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
+  buildHref: (overrides: Record<string, string>) => string;
+  hasActiveFilters: boolean;
+  clearAllHref: string;
 }) {
-  const baseParams = (overrides: Record<string, string>) => {
-    const p = new URLSearchParams({ q: query, type: "publications" });
-    if (activeSort !== "relevance") p.set("sort", activeSort);
-    if (yearMin !== undefined) p.set("yearMin", String(yearMin));
-    if (yearMax !== undefined) p.set("yearMax", String(yearMax));
-    if (activePublicationType) p.set("publicationType", activePublicationType);
-    for (const [k, v] of Object.entries(overrides)) {
-      if (v === "") p.delete(k);
-      else p.set(k, v);
-    }
-    return p.toString();
-  };
-
   const yearChoices = [2024, 2020, 2015, 2010];
   return (
-    <div className="flex flex-col gap-6 text-sm">
-      <FacetGroup label="Sort">
-        <SortLink label="Relevance" current={activeSort} value="relevance" hrefBuilder={baseParams} />
-        <SortLink label="Year (newest)" current={activeSort} value="year" hrefBuilder={baseParams} />
-        <SortLink label="Citations" current={activeSort} value="citations" hrefBuilder={baseParams} />
-      </FacetGroup>
-
+    <aside className="text-[13px]">
+      <div className="mb-4 flex items-baseline justify-between">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+          Filters
+        </span>
+        {hasActiveFilters ? (
+          <Link href={clearAllHref} className="text-xs font-medium text-[#2c4f6e] hover:underline">
+            Clear all
+          </Link>
+        ) : null}
+      </div>
       <FacetGroup label="Year (since)">
         {yearChoices.map((y) => (
-          <FacetLink
+          <FacetCheckbox
             key={y}
             label={`${y}–present`}
             isActive={yearMin === y}
-            href={`/search?${baseParams({ yearMin: yearMin === y ? "" : String(y) })}`}
+            href={buildHref({ yearMin: yearMin === y ? "" : String(y) })}
           />
         ))}
       </FacetGroup>
-
       {publicationTypes.length > 0 ? (
-        <FacetGroup label="Publication type">
-          {activePublicationType ? (
-            <Link
-              href={`/search?${baseParams({ publicationType: "" })}`}
-              className="text-muted-foreground hover:text-foreground text-xs"
-            >
-              ← All types
-            </Link>
-          ) : null}
+        <FacetGroup label="Publication type" scrollable>
           {publicationTypes.map((p) => (
-            <FacetLink
+            <FacetCheckbox
               key={p.value}
               label={p.value}
               count={p.count}
               isActive={p.value === activePublicationType}
-              href={`/search?${baseParams({ publicationType: p.value })}`}
+              href={buildHref({
+                publicationType: p.value === activePublicationType ? "" : p.value,
+              })}
             />
           ))}
         </FacetGroup>
       ) : null}
-    </div>
+    </aside>
   );
 }
 
-function FacetGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function FacetGroup({
+  label,
+  children,
+  scrollable,
+}: {
+  label: string;
+  children: React.ReactNode;
+  scrollable?: boolean;
+}) {
   return (
-    <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        {label}
-      </div>
-      <div className="flex flex-col gap-1">{children}</div>
+    <div className="mb-5">
+      <h3 className="mb-2 text-[13px] font-semibold text-[#1a1a1a]">{label}</h3>
+      <ul
+        className={`m-0 flex list-none flex-col p-0 ${
+          scrollable ? "-mr-2 max-h-[220px] overflow-y-auto pr-2" : ""
+        }`}
+      >
+        {children}
+      </ul>
     </div>
   );
 }
 
-function FacetLink({
+function FacetCheckbox({
   label,
   count,
   isActive,
@@ -670,100 +848,105 @@ function FacetLink({
   href: string;
 }) {
   return (
-    <Link
-      href={href}
-      className={`flex items-center justify-between rounded px-1.5 py-1 ${
-        isActive
-          ? "bg-zinc-100 font-medium dark:bg-zinc-800"
-          : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
-      }`}
-    >
-      <span>{label}</span>
-      {count !== undefined ? (
-        <span className="text-muted-foreground text-xs">{count}</span>
-      ) : null}
-    </Link>
+    <li className="flex items-center gap-2 py-1 leading-[1.4]">
+      <Link
+        href={href}
+        className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+      >
+        {/* readOnly checkbox: state lives in the URL; the link toggles it. */}
+        <input
+          type="checkbox"
+          readOnly
+          checked={!!isActive}
+          tabIndex={-1}
+          aria-hidden="true"
+          className="cursor-pointer accent-[#2c4f6e]"
+        />
+        <span className="flex-1">{label}</span>
+        {count !== undefined ? (
+          <span className="text-[12px] tabular-nums text-[#757575]">{count.toLocaleString()}</span>
+        ) : null}
+      </Link>
+    </li>
   );
 }
 
-function SortLink<T extends string>({
-  label,
-  current,
-  value,
-  hrefBuilder,
-}: {
-  label: string;
-  current: T;
-  value: T;
-  hrefBuilder: (overrides: Record<string, string>) => string;
-}) {
-  const href = `/search?${hrefBuilder({ sort: value === "relevance" ? "" : value })}`;
+/* ============================================================
+ * Empty state + Pagination (with ellipsis)
+ * ============================================================ */
+function EmptyState({ query, tip }: { query: string; tip: string }) {
   return (
-    <Link
-      href={href}
-      className={`rounded px-1.5 py-1 ${
-        current === value
-          ? "bg-zinc-100 font-medium dark:bg-zinc-800"
-          : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
-      }`}
-    >
-      {label}
-    </Link>
+    <div className="mt-12 flex flex-col items-center text-center">
+      <div className="text-lg font-medium">No results{query ? ` for "${query}"` : ""}</div>
+      <div className="mt-1 text-sm text-[#757575]">{tip}</div>
+    </div>
   );
 }
 
 function Pagination({
-  q,
-  type,
   page,
   total,
   pageSize,
-  extra,
+  buildHref,
 }: {
-  q: string;
-  type: string;
   page: number;
   total: number;
   pageSize: number;
-  extra: Record<string, string>;
+  buildHref: (p: number) => string;
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if (totalPages <= 1) return null;
 
-  const buildHref = (p: number) => {
-    const params = new URLSearchParams({ q, type, ...extra });
-    if (p > 0) params.set("page", String(p));
-    return `/search?${params.toString()}`;
-  };
+  // Always include first + last; ellipsis when the window doesn't reach them.
+  const window = new Set<number>();
+  window.add(0);
+  window.add(totalPages - 1);
+  for (let p = page - 1; p <= page + 1; p++) {
+    if (p >= 0 && p < totalPages) window.add(p);
+  }
+  // Fill so the first 5 pages (or last 5) render densely without ellipsis.
+  for (let p = 0; p < Math.min(5, totalPages); p++) window.add(p);
+  for (let p = Math.max(0, totalPages - 5); p < totalPages; p++) window.add(p);
 
-  // Simple windowed page numbers: prev, 1..N within ±2 of current, next.
-  const windowStart = Math.max(0, page - 2);
-  const windowEnd = Math.min(totalPages - 1, page + 2);
-  const pageNumbers = [];
-  for (let p = windowStart; p <= windowEnd; p++) pageNumbers.push(p);
+  const sorted = [...window].sort((a, b) => a - b);
+
+  type Cell = { kind: "page"; n: number } | { kind: "ellipsis"; key: string };
+  const cells: Cell[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] !== sorted[i - 1] + 1) {
+      cells.push({ kind: "ellipsis", key: `e-${sorted[i - 1]}-${sorted[i]}` });
+    }
+    cells.push({ kind: "page", n: sorted[i] });
+  }
 
   return (
-    <>
-      <Separator className="mt-8" />
-      <nav className="mt-6 flex items-center justify-center gap-1" aria-label="Pagination">
-        <PaginationButton
-          href={page > 0 ? buildHref(page - 1) : null}
-          label="Previous"
-        />
-        {pageNumbers.map((p) => (
+    <nav
+      className="mt-8 flex items-center justify-center gap-1 pt-6"
+      aria-label="Pagination"
+    >
+      <PaginationButton
+        href={page > 0 ? buildHref(page - 1) : null}
+        label="‹ Prev"
+      />
+      {cells.map((c) =>
+        c.kind === "ellipsis" ? (
+          <span key={c.key} className="px-1 text-[13px] text-[#757575]">
+            …
+          </span>
+        ) : (
           <PaginationButton
-            key={p}
-            href={buildHref(p)}
-            label={String(p + 1)}
-            active={p === page}
+            key={c.n}
+            href={buildHref(c.n)}
+            label={String(c.n + 1)}
+            active={c.n === page}
           />
-        ))}
-        <PaginationButton
-          href={page < totalPages - 1 ? buildHref(page + 1) : null}
-          label="Next"
-        />
-      </nav>
-    </>
+        ),
+      )}
+      <PaginationButton
+        href={page < totalPages - 1 ? buildHref(page + 1) : null}
+        label="Next ›"
+      />
+    </nav>
   );
 }
 
@@ -776,17 +959,25 @@ function PaginationButton({
   label: string;
   active?: boolean;
 }) {
+  const base =
+    "inline-flex h-8 min-w-[32px] items-center justify-center rounded-sm border px-2 text-[13px] no-underline transition-colors";
   if (!href) {
     return (
-      <Button variant="ghost" size="sm" disabled>
+      <span className={`${base} cursor-not-allowed border-[#e3e2dd] bg-white text-[#c8c6be]`}>
         {label}
-      </Button>
+      </span>
     );
   }
   return (
-    <Button asChild variant={active ? "default" : "ghost"} size="sm">
-      <Link href={href}>{label}</Link>
-    </Button>
+    <Link
+      href={href}
+      className={
+        active
+          ? `${base} border-[#2c4f6e] bg-[#2c4f6e] font-medium text-white`
+          : `${base} border-[#c8c6be] bg-white text-[#4a4a4a] hover:border-[#2c4f6e] hover:text-[#2c4f6e]`
+      }
+    >
+      {label}
+    </Link>
   );
 }
-

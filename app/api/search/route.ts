@@ -45,11 +45,13 @@ export async function GET(request: NextRequest) {
   }
 
   const sort = (params.get("sort") ?? "relevance") as PeopleSort;
-  const department = params.get("department") ?? undefined;
-  const personType = params.get("personType") ?? undefined;
-  const hasActiveGrantsParam = params.get("hasActiveGrants");
-  const hasActiveGrants =
-    hasActiveGrantsParam === null ? undefined : hasActiveGrantsParam === "true";
+  // Issue #8/#9: facets are repeated params, OR'd within a group.
+  const deptDiv = params.getAll("deptDiv");
+  const personType = params.getAll("personType");
+  const activityRaw = params.getAll("activity");
+  const activity = activityRaw.filter(
+    (a): a is "has_grants" | "recent_pub" => a === "has_grants" || a === "recent_pub",
+  );
   const includeIncomplete = params.get("includeIncomplete") === "true";
 
   // D-10 topic filter: validate slug shape before passing to searchPeople.
@@ -66,7 +68,12 @@ export async function GET(request: NextRequest) {
     q,
     page,
     sort,
-    filters: { department, personType, hasActiveGrants, includeIncomplete },
+    filters: {
+      deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+      personType: personType.length > 0 ? personType : undefined,
+      activity: activity.length > 0 ? activity : undefined,
+      includeIncomplete,
+    },
     topic,
   });
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
@@ -76,7 +83,7 @@ export async function GET(request: NextRequest) {
       q,
       type: "people",
       resultCount: result.total,
-      filters: { department, personType, hasActiveGrants, includeIncomplete },
+      filters: { deptDiv, personType, activity, includeIncomplete },
       ts: new Date().toISOString(),
     }),
   );
