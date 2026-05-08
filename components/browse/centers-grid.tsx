@@ -2,9 +2,8 @@
  * Centers & institutes section — peer of Departments on the Browse hub.
  *
  * Renders a 2-col card grid of cross-disciplinary research centers. Each
- * card carries name, description, and director (when present). Membership
- * counts are intentionally omitted on the card per the design spec —
- * centers are flat-listed without grouping.
+ * card carries name, description, member count, and director (when
+ * present). Centers are flat-listed without grouping.
  */
 import type { BrowseCenter } from "@/lib/api/browse";
 
@@ -42,12 +41,25 @@ export function CentersGrid({ centers }: { centers: BrowseCenter[] }) {
                     {c.description}
                   </p>
                 )}
-                {c.directorName && (
-                  <div className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground/70">
-                      Director:
-                    </span>{" "}
-                    {c.directorName}
+                {(c.scholarCount > 0 || c.directorName) && (
+                  <div className="mt-3 flex flex-wrap gap-x-2 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+                    {c.scholarCount > 0 && (
+                      <span>
+                        <span className="font-medium text-foreground/70">
+                          {c.scholarCount.toLocaleString()}
+                        </span>{" "}
+                        {c.scholarCount === 1 ? "member" : "members"}
+                      </span>
+                    )}
+                    {c.scholarCount > 0 && c.directorName && <span>·</span>}
+                    {c.directorName && (
+                      <span>
+                        <span className="font-medium text-foreground/70">
+                          Director:
+                        </span>{" "}
+                        {c.directorName}
+                      </span>
+                    )}
                   </div>
                 )}
               </a>
