@@ -383,19 +383,36 @@ async function indexPublications() {
       .filter(Boolean)
       .join(", ");
 
-    const wcmAuthors = p.authors
-      .filter(
-        (a) =>
-          a.scholar &&
-          !a.scholar.deletedAt &&
-          a.scholar.status === "active",
-      )
-      .map((a) => ({
-        cwid: a.scholar!.cwid,
-        slug: a.scholar!.slug,
-        preferredName: a.scholar!.preferredName,
-        position: a.position,
-      }));
+    const wcmAuthorRows = p.authors.filter(
+      (a) =>
+        a.scholar &&
+        !a.scholar.deletedAt &&
+        a.scholar.status === "active",
+    );
+    const wcmAuthors = wcmAuthorRows.map((a) => ({
+      cwid: a.scholar!.cwid,
+      slug: a.scholar!.slug,
+      preferredName: a.scholar!.preferredName,
+      position: a.position,
+    }));
+
+    // WCM author position roles (issue #8 follow-up). For each WCM author
+    // on the paper, classify their position into {first, senior, middle}
+    // and union the results so a paper with one WCM first-author and one
+    // WCM middle-author shows up under both filters. Single-author papers
+    // count as both first AND senior — matches CV / promotion-committee
+    // convention (sole authorship = highest possible authorship signal).
+    const wcmAuthorPositions = new Set<string>();
+    for (const a of wcmAuthorRows) {
+      if (a.totalAuthors === 1) {
+        wcmAuthorPositions.add("first");
+        wcmAuthorPositions.add("senior");
+        continue;
+      }
+      if (a.isFirst) wcmAuthorPositions.add("first");
+      if (a.isLast) wcmAuthorPositions.add("senior");
+      if (!a.isFirst && !a.isLast) wcmAuthorPositions.add("middle");
+    }
 
     const mesh = Array.isArray(p.meshTerms)
       ? (p.meshTerms as unknown[]).filter((x): x is string => typeof x === "string")
@@ -416,6 +433,7 @@ async function indexPublications() {
         meshTerms: mesh.join(" "),
         authorNames,
         wcmAuthors,
+        wcmAuthorPositions: Array.from(wcmAuthorPositions),
       },
     });
   }

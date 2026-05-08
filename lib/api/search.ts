@@ -57,10 +57,16 @@ export type PeopleFilters = {
   includeIncomplete?: boolean;
 };
 
+export type WcmAuthorRole = "first" | "senior" | "middle";
+
 export type PublicationsFilters = {
   yearMin?: number;
   yearMax?: number;
   publicationType?: string;
+  /** Multi-select journal title (verbose form, exact match). */
+  journal?: string[];
+  /** Multi-select WCM author position role. OR within group. */
+  wcmAuthorRole?: WcmAuthorRole[];
 };
 
 export type PeopleHit = {
@@ -126,6 +132,8 @@ export type PublicationsSearchResult = {
   pageSize: number;
   facets: {
     publicationTypes: SearchFacetBucket[];
+    journals: SearchFacetBucket[];
+    wcmAuthorRoles: { first: number; senior: number; middle: number };
   };
 };
 
@@ -416,16 +424,43 @@ export async function searchPublications(opts: {
     must.push({ match_all: {} });
   }
 
-  const filter: Record<string, unknown>[] = [];
-  if (filters.yearMin !== undefined || filters.yearMax !== undefined) {
+  // Build named filter clauses so per-facet aggs can re-apply every OTHER
+  // axis (same excluding-self pattern as searchPeople).
+  const yearClause = (() => {
+    if (filters.yearMin === undefined && filters.yearMax === undefined) return null;
     const range: Record<string, number> = {};
     if (filters.yearMin !== undefined) range.gte = filters.yearMin;
     if (filters.yearMax !== undefined) range.lte = filters.yearMax;
-    filter.push({ range: { year: range } });
-  }
-  if (filters.publicationType) {
-    filter.push({ term: { publicationType: filters.publicationType } });
-  }
+    return { range: { year: range } };
+  })();
+  const publicationTypeClause = filters.publicationType
+    ? { term: { publicationType: filters.publicationType } }
+    : null;
+  const journalClause = filters.journal && filters.journal.length > 0
+    ? { terms: { "journal.keyword": filters.journal } }
+    : null;
+  const wcmRoleClause = filters.wcmAuthorRole && filters.wcmAuthorRole.length > 0
+    ? { terms: { wcmAuthorPositions: filters.wcmAuthorRole } }
+    : null;
+
+  const filter: Record<string, unknown>[] = [];
+  if (yearClause) filter.push(yearClause);
+  if (publicationTypeClause) filter.push(publicationTypeClause);
+  if (journalClause) filter.push(journalClause);
+  if (wcmRoleClause) filter.push(wcmRoleClause);
+
+  // Helper: rebuild the filter set without a given axis for that axis's
+  // facet aggregation.
+  const filtersExcept = (
+    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole",
+  ) => {
+    const out: Record<string, unknown>[] = [];
+    if (axis !== "year" && yearClause) out.push(yearClause);
+    if (axis !== "publicationType" && publicationTypeClause) out.push(publicationTypeClause);
+    if (axis !== "journal" && journalClause) out.push(journalClause);
+    if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
+    return out;
+  };
 
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "year") {
@@ -447,12 +482,44 @@ export async function searchPublications(opts: {
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs: {
       publicationTypes: {
-        terms: { field: "publicationType", size: 15 },
+        filter: { bool: { must, filter: filtersExcept("publicationType") } },
+        aggs: { keys: { terms: { field: "publicationType", size: 15 } } },
+      },
+      // Top journals by count. 50 is generous — Show all N with
+      // search-within in the UI lets the user reach the long tail
+      // without us paying for a much larger agg.
+      journals: {
+        filter: { bool: { must, filter: filtersExcept("journal") } },
+        aggs: { keys: { terms: { field: "journal.keyword", size: 50 } } },
+      },
+      wcmRoleFirst: {
+        filter: {
+          bool: {
+            must,
+            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "first" } }],
+          },
+        },
+      },
+      wcmRoleSenior: {
+        filter: {
+          bool: {
+            must,
+            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "senior" } }],
+          },
+        },
+      },
+      wcmRoleMiddle: {
+        filter: {
+          bool: {
+            must,
+            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "middle" } }],
+          },
+        },
       },
     },
   };
 
-  const resp = await searchClient().search({ index: PUBLICATIONS_INDEX, body });
+  const resp = await searchClient().search({ index: PUBLICATIONS_INDEX, body: body as object });
 
   type Hit = {
     _source: {
@@ -470,7 +537,11 @@ export async function searchPublications(opts: {
   const r = resp.body as unknown as {
     hits: { hits: Hit[]; total: { value: number } };
     aggregations?: {
-      publicationTypes?: { buckets: Bucket[] };
+      publicationTypes?: { keys: { buckets: Bucket[] } };
+      journals?: { keys: { buckets: Bucket[] } };
+      wcmRoleFirst?: { doc_count: number };
+      wcmRoleSenior?: { doc_count: number };
+      wcmRoleMiddle?: { doc_count: number };
     };
   };
 
@@ -511,10 +582,19 @@ export async function searchPublications(opts: {
     page,
     pageSize: PAGE_SIZE,
     facets: {
-      publicationTypes: (r.aggregations?.publicationTypes?.buckets ?? []).map((b) => ({
+      publicationTypes: (r.aggregations?.publicationTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
         count: b.doc_count,
       })),
+      journals: (r.aggregations?.journals?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
+      wcmAuthorRoles: {
+        first: r.aggregations?.wcmRoleFirst?.doc_count ?? 0,
+        senior: r.aggregations?.wcmRoleSenior?.doc_count ?? 0,
+        middle: r.aggregations?.wcmRoleMiddle?.doc_count ?? 0,
+      },
     },
   };
 }

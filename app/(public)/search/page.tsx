@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ChevronDown } from "lucide-react";
+import { JournalFacet } from "@/components/search/journal-facet";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { AZDirectory } from "@/components/browse/az-directory";
@@ -60,11 +61,16 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (a): a is ActivityFilter => a === "has_grants" || a === "recent_pub",
   );
 
-  // Pub filters (single-select today).
+  // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
   const yearMax = parseOptionalInt(sp.yearMax);
   const publicationType =
     (Array.isArray(sp.publicationType) ? sp.publicationType[0] : sp.publicationType) ?? "";
+  const journal = parseList(sp.journal);
+  const wcmAuthorRole = parseList(sp.wcmAuthorRole).filter(
+    (r): r is "first" | "senior" | "middle" =>
+      r === "first" || r === "senior" || r === "middle",
+  );
 
   // Issue #8 item 1: the subhead "{n} people · {n} publications" needs both
   // counts regardless of which tab is active. Run a lightweight count for
@@ -88,6 +94,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         yearMin,
         yearMax,
         publicationType: publicationType || undefined,
+        journal: journal.length > 0 ? journal : undefined,
+        wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
       },
     }),
   ]);
@@ -126,6 +134,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             yearMin={yearMin}
             yearMax={yearMax}
             publicationType={publicationType || undefined}
+            journal={journal}
+            wcmAuthorRole={wcmAuthorRole}
             result={pubsResult}
           />
         ) : (
@@ -422,6 +432,8 @@ async function PublicationsResults({
   yearMin,
   yearMax,
   publicationType,
+  journal,
+  wcmAuthorRole,
   result,
 }: {
   q: string;
@@ -430,6 +442,8 @@ async function PublicationsResults({
   yearMin?: number;
   yearMax?: number;
   publicationType?: string;
+  journal: string[];
+  wcmAuthorRole: Array<"first" | "senior" | "middle">;
   result: PubsResultData;
 }) {
   const buildUrl = (
@@ -443,12 +457,40 @@ async function PublicationsResults({
     if (yearMin !== undefined) sp.set("yearMin", String(yearMin));
     if (yearMax !== undefined) sp.set("yearMax", String(yearMax));
     if (publicationType) sp.set("publicationType", publicationType);
+    for (const v of journal) sp.append("journal", v);
+    for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
   };
 
+  // Toggle a value in/out of a multi-value group, preserving repeated keys.
+  const toggleHref = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      if (current.includes(value)) {
+        for (const v of current) if (v !== value) sp.append(axis, v);
+      } else {
+        for (const v of current) sp.append(axis, v);
+        sp.append(axis, value);
+      }
+    });
+
+  const removeMulti = (axis: string, value: string) =>
+    buildUrl((sp) => {
+      const current = sp.getAll(axis);
+      sp.delete(axis);
+      for (const v of current) if (v !== value) sp.append(axis, v);
+    });
+
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
+
+  const ROLE_LABEL: Record<"first" | "senior" | "middle", string> = {
+    first: "First author",
+    senior: "Senior author",
+    middle: "Middle author",
+  };
 
   const chips: Array<{ label: string; removeHref: string }> = [];
   if (yearMin !== undefined || yearMax !== undefined) {
@@ -474,6 +516,12 @@ async function PublicationsResults({
       removeHref: buildUrl((sp) => sp.delete("publicationType")),
     });
   }
+  for (const v of wcmAuthorRole) {
+    chips.push({ label: ROLE_LABEL[v], removeHref: removeMulti("wcmAuthorRole", v) });
+  }
+  for (const v of journal) {
+    chips.push({ label: v, removeHref: removeMulti("journal", v) });
+  }
 
   return (
     <>
@@ -481,6 +529,11 @@ async function PublicationsResults({
         yearMin={yearMin}
         activePublicationType={publicationType}
         publicationTypes={result.facets.publicationTypes}
+        journals={result.facets.journals}
+        activeJournals={journal}
+        wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
+        activeWcmAuthorRole={wcmAuthorRole}
+        toggleHref={toggleHref}
         buildHref={(overrides) => buildUrl((sp) => {
           for (const [k, v] of Object.entries(overrides)) {
             if (v === "") sp.delete(k);
@@ -802,6 +855,11 @@ function FacetSidebarPubs({
   yearMin,
   activePublicationType,
   publicationTypes,
+  journals,
+  activeJournals,
+  wcmAuthorRoleCounts,
+  activeWcmAuthorRole,
+  toggleHref,
   buildHref,
   hasActiveFilters,
   clearAllHref,
@@ -809,6 +867,11 @@ function FacetSidebarPubs({
   yearMin?: number;
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
+  journals: SearchFacetBucket[];
+  activeJournals: string[];
+  wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
+  activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
+  toggleHref: (axis: string, value: string) => string;
   buildHref: (overrides: Record<string, string>) => string;
   hasActiveFilters: boolean;
   clearAllHref: string;
@@ -826,6 +889,30 @@ function FacetSidebarPubs({
           </Link>
         ) : null}
       </div>
+
+      {/* WCM author role first — it's the highest-signal pub filter
+          for promotion/recruiting use cases. */}
+      <FacetGroup label="WCM author role">
+        <FacetCheckbox
+          label="First author"
+          count={wcmAuthorRoleCounts.first}
+          isActive={activeWcmAuthorRole.includes("first")}
+          href={toggleHref("wcmAuthorRole", "first")}
+        />
+        <FacetCheckbox
+          label="Senior author"
+          count={wcmAuthorRoleCounts.senior}
+          isActive={activeWcmAuthorRole.includes("senior")}
+          href={toggleHref("wcmAuthorRole", "senior")}
+        />
+        <FacetCheckbox
+          label="Middle author"
+          count={wcmAuthorRoleCounts.middle}
+          isActive={activeWcmAuthorRole.includes("middle")}
+          href={toggleHref("wcmAuthorRole", "middle")}
+        />
+      </FacetGroup>
+
       <FacetGroup label="Year (since)">
         {yearChoices.map((y) => (
           <FacetCheckbox
@@ -836,6 +923,15 @@ function FacetSidebarPubs({
           />
         ))}
       </FacetGroup>
+
+      {journals.length > 0 ? (
+        <JournalFacet
+          journals={journals}
+          activeJournals={activeJournals}
+          toggleHref={toggleHref}
+        />
+      ) : null}
+
       {publicationTypes.length > 0 ? (
         <FacetGroup label="Publication type" collapseAfter={5}>
           {publicationTypes.map((p) => (

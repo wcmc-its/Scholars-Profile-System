@@ -24,11 +24,23 @@ export async function GET(request: NextRequest) {
     const yearMin = params.get("yearMin") ? parseInt(params.get("yearMin")!, 10) : undefined;
     const yearMax = params.get("yearMax") ? parseInt(params.get("yearMax")!, 10) : undefined;
     const publicationType = params.get("publicationType") ?? undefined;
+    const journal = params.getAll("journal");
+    const wcmAuthorRoleRaw = params.getAll("wcmAuthorRole");
+    const wcmAuthorRole = wcmAuthorRoleRaw.filter(
+      (r): r is "first" | "senior" | "middle" =>
+        r === "first" || r === "senior" || r === "middle",
+    );
     const result = await searchPublications({
       q,
       page,
       sort,
-      filters: { yearMin, yearMax, publicationType },
+      filters: {
+        yearMin,
+        yearMax,
+        publicationType,
+        journal: journal.length > 0 ? journal : undefined,
+        wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+      },
     });
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     console.log(
@@ -37,7 +49,7 @@ export async function GET(request: NextRequest) {
         q,
         type: "publications",
         resultCount: result.total,
-        filters: { yearMin, yearMax, publicationType },
+        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
         ts: new Date().toISOString(),
       }),
     );

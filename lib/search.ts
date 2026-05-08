@@ -160,6 +160,12 @@ export const publicationsIndexMapping = {
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
       authorNames: { type: "text", analyzer: "pub_text" },
+      // WCM author position roles for the Publications-tab facet
+      // (issue #8 follow-up). Keyword array of {first, senior, middle};
+      // single-author papers get [first, senior]; co-first → first;
+      // a paper appears in multiple buckets when distinct WCM authors
+      // hold different positions.
+      wcmAuthorPositions: { type: "keyword" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",
