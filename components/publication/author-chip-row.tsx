@@ -15,8 +15,8 @@
  *   - components/topic/publication-feed.tsx (topic page paginated feed)
  *   - app/(public)/search/page.tsx (publication search results)
  */
-import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 export type AuthorChip = {
   name: string;
@@ -44,65 +44,6 @@ function chipRoleLabel(isFirst: boolean, isLast: boolean): string {
   return "Co-author";
 }
 
-function ChipWithTooltip({
-  text,
-  children,
-}: {
-  text: string;
-  children: React.ReactNode;
-}) {
-  const [visible, setVisible] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showDelayed = () => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setVisible(true), 200);
-  };
-  const showNow = () => {
-    if (timer.current) clearTimeout(timer.current);
-    setVisible(true);
-  };
-  const hide = () => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-    setVisible(false);
-  };
-
-  useEffect(
-    () => () => {
-      if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  return (
-    <div
-      className="relative"
-      onMouseEnter={showDelayed}
-      onMouseLeave={hide}
-      onFocus={showNow}
-      onBlur={hide}
-    >
-      {children}
-      {visible && (
-        <div
-          role="tooltip"
-          className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded bg-zinc-900 px-2.5 py-1 text-[11px] font-medium text-white shadow"
-        >
-          {text}
-          <span
-            aria-hidden="true"
-            className="absolute left-1/2 top-full -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-zinc-900"
-            style={{ width: 0, height: 0 }}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
   if (authors.length === 0) return null;
   const visible = authors.slice(0, CHIP_CAP);
@@ -111,7 +52,7 @@ export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {visible.map((a, i) =>
         a.slug && a.cwid ? (
-          <ChipWithTooltip key={`${a.cwid}-${i}`} text={chipRoleLabel(a.isFirst, a.isLast)}>
+          <HoverTooltip key={`${a.cwid}-${i}`} text={chipRoleLabel(a.isFirst, a.isLast)}>
             <a
               href={`/scholars/${a.slug}`}
               className={`inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
@@ -127,7 +68,7 @@ export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
               />
               <span>{a.name}</span>
             </a>
-          </ChipWithTooltip>
+          </HoverTooltip>
         ) : null,
       )}
       {overflow > 0 && (

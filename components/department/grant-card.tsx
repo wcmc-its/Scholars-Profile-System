@@ -10,6 +10,7 @@ import type { DeptGrantCard } from "@/lib/api/dept-highlights";
 import { parseFunderEyebrow } from "@/lib/grant-meta";
 import { sanitizePubTitle } from "@/lib/utils";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 export function GrantCard({ grant }: { grant: DeptGrantCard }) {
   const eyebrow = parseFunderEyebrow(grant.funder, grant.awardNumber);
@@ -43,23 +44,26 @@ export function GrantCard({ grant }: { grant: DeptGrantCard }) {
       {grant.pis.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {grant.pis.map((p) => (
-            <a
+            <HoverTooltip
               key={p.cwid ?? p.name}
-              href={p.slug ? `/scholars/${p.slug}` : undefined}
-              title={grant.isMultiPi ? "Multi-PI" : "Principal investigator"}
-              className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
-              style={{ textDecoration: "none" }}
+              text={grant.isMultiPi ? "Multi-PI" : "Principal investigator"}
             >
-              {p.identityImageEndpoint && p.cwid ? (
-                <HeadshotAvatar
-                  size="sm"
-                  cwid={p.cwid}
-                  preferredName={p.name}
-                  identityImageEndpoint={p.identityImageEndpoint}
-                />
-              ) : null}
-              {p.name}
-            </a>
+              <a
+                href={p.slug ? `/scholars/${p.slug}` : undefined}
+                className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
+                style={{ textDecoration: "none" }}
+              >
+                {p.identityImageEndpoint && p.cwid ? (
+                  <HeadshotAvatar
+                    size="sm"
+                    cwid={p.cwid}
+                    preferredName={p.name}
+                    identityImageEndpoint={p.identityImageEndpoint}
+                  />
+                ) : null}
+                {p.name}
+              </a>
+            </HoverTooltip>
           ))}
         </div>
       )}

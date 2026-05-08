@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { ProfilePayload } from "@/lib/api/profile";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -196,16 +197,17 @@ function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined 
   const title = GRANT_ROLE_TITLE[grant.role] ?? grant.role;
   return (
     <div className="grid grid-cols-[64px_1fr_auto] items-baseline gap-3 border-t border-border py-3 first:border-t-0">
-      <span
-        title={title}
-        className={
-          grant.isActive
-            ? "inline-flex h-5 items-center justify-center rounded-sm bg-green-50 px-2 text-[10px] font-semibold uppercase tracking-wider text-green-700 dark:bg-green-950 dark:text-green-300"
-            : "bg-muted text-muted-foreground inline-flex h-5 items-center justify-center rounded-sm px-2 text-[10px] font-semibold uppercase tracking-wider"
-        }
-      >
-        {label}
-      </span>
+      <HoverTooltip text={title}>
+        <span
+          className={
+            grant.isActive
+              ? "inline-flex h-5 items-center justify-center rounded-sm bg-green-50 px-2 text-[10px] font-semibold uppercase tracking-wider text-green-700 dark:bg-green-950 dark:text-green-300"
+              : "bg-muted text-muted-foreground inline-flex h-5 items-center justify-center rounded-sm px-2 text-[10px] font-semibold uppercase tracking-wider"
+          }
+        >
+          {label}
+        </span>
+      </HoverTooltip>
       <div>
         <div
           className="text-base font-medium leading-snug"
