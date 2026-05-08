@@ -1,6 +1,6 @@
 /**
  * Hand-curated category for each WCM department, used by the Browse hub
- * to group dept cards into sections.
+ * to render a per-row type badge and to drive the type filter.
  *
  *   "clinical"       — patient-facing clinical depts
  *   "basic"          — basic-science depts (no patient care)
@@ -62,22 +62,3 @@ export const DEPARTMENT_CATEGORIES: Record<string, DepartmentCategory> = {
   N1932: "administrative", // Library
 };
 
-/**
- * Display label for the four buckets, used by the Browse hub group headers.
- */
-export const CATEGORY_LABELS: Record<DepartmentCategory, string> = {
-  clinical: "Clinical departments",
-  basic: "Basic-science departments",
-  mixed: "Basic & Clinical departments",
-  administrative: "Administrative",
-};
-
-/**
- * Fixed iteration order for rendering Browse hub groups.
- */
-export const CATEGORY_ORDER: ReadonlyArray<DepartmentCategory> = [
-  "clinical",
-  "basic",
-  "mixed",
-  "administrative",
-];

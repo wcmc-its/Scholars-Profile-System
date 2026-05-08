@@ -156,13 +156,13 @@ describe("getBrowseData", () => {
     mockQueryRawUnsafe.mockReset().mockResolvedValue([]);
   });
 
-  it("returns composite { departments, departmentsByCategory, centers }", async () => {
+  it("returns composite { departments, centers }", async () => {
     mockDepartmentFindMany.mockResolvedValue([]);
     mockScholarFindMany.mockResolvedValue([]);
     const data = await getBrowseData();
     expect(data).toHaveProperty("departments");
-    expect(data).toHaveProperty("departmentsByCategory");
     expect(data).toHaveProperty("centers");
+    expect(data).not.toHaveProperty("departmentsByCategory");
     expect(data).not.toHaveProperty("azBuckets");
     expect(data.centers).toEqual([]);
     expect(Array.isArray(data.departments)).toBe(true);

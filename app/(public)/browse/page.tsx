@@ -52,10 +52,7 @@ export default async function BrowsePage() {
 
       <BrowseHero />
       <BrowseAnchorStrip />
-      <DepartmentsGrid
-        departments={data.departments}
-        departmentsByCategory={data.departmentsByCategory}
-      />
+      <DepartmentsGrid departments={data.departments} />
       <CentersGrid centers={data.centers} />
     </main>
   );
