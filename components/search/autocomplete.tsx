@@ -39,15 +39,6 @@ const KIND_TAG_CLASS: Record<EntityKind, string> = {
   center: "bg-[#f3e9ec] text-[#8a2436]",
 };
 
-const KIND_ICON: Record<EntityKind, string> = {
-  person: "👤",
-  topic: "📚",
-  subtopic: "📖",
-  department: "🏛",
-  division: "🏷",
-  center: "✦",
-};
-
 type Variant = "header" | "hero";
 
 /**
@@ -174,30 +165,24 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
       {open && suggestions.length > 0 ? (
         <ul
           role="listbox"
-          className="border-border absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border bg-background shadow-lg"
+          className="border-border absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-md border bg-background text-left shadow-lg"
         >
           {suggestions.map((s, i) => (
             <li key={`${s.kind}-${s.href}-${i}`} role="option" aria-selected={i === activeIndex}>
               <Link
                 href={s.href}
-                className={`flex items-center gap-3 border-t border-zinc-100 px-3 py-2 text-sm first:border-t-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 ${
+                className={`flex items-center gap-3 border-t border-zinc-100 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800 ${
                   i === activeIndex ? "bg-zinc-50 dark:bg-zinc-800" : ""
                 }`}
                 onClick={() => setOpen(false)}
                 onMouseEnter={() => setActiveIndex(i)}
               >
-                <span
-                  aria-hidden="true"
-                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm text-zinc-500"
-                >
-                  {KIND_ICON[s.kind]}
-                </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-zinc-900 dark:text-zinc-100">
+                  <span className="block truncate text-left font-medium text-zinc-900 dark:text-zinc-100">
                     {s.title}
                   </span>
                   {s.subtitle ? (
-                    <span className="block truncate text-xs text-zinc-500">{s.subtitle}</span>
+                    <span className="block truncate text-left text-xs text-zinc-500">{s.subtitle}</span>
                   ) : null}
                 </span>
                 <span

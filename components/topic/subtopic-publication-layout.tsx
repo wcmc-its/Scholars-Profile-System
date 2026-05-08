@@ -33,7 +33,7 @@ export function SubtopicPublicationLayout({
   const subtopicShortDescription = activeSubtopicData?.shortDescription ?? null;
 
   return (
-    <div className="mt-16">
+    <div id="publications" className="mt-16 scroll-mt-16">
       <hr className="mb-10 border-border" />
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">

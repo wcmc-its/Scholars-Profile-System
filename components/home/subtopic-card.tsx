@@ -16,7 +16,7 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
       <CardContent className="flex h-full flex-col px-4 py-4">
         <div className="text-muted-foreground text-xs font-semibold uppercase tracking-wider">{item.parentTopicName}</div>
         <a
-          href={`/topics/${item.subtopicSlug}`}
+          href={`/topics/${item.parentTopicSlug}?subtopic=${encodeURIComponent(item.subtopicSlug)}#publications`}
           className="mt-2 block text-base font-semibold leading-snug text-zinc-900 hover:underline group-hover:text-[var(--color-accent-slate)]"
         >
           {item.subtopicName}
