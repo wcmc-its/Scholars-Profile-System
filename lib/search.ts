@@ -293,6 +293,11 @@ export const fundingIndexMapping = {
           role: { type: "keyword" },
         },
       },
+      // Issue #94 — flat keyword array of WCM investigator CWIDs on each
+      // project. Denormalized from `people[].cwid` so the Investigator
+      // facet runs a cheap top-level terms aggregation, mirroring the
+      // `wcmAuthorCwids` pattern on the Publications index.
+      wcmInvestigatorCwids: { type: "keyword" },
     },
   },
 };

@@ -8,6 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * structurally rather than coupling to byte-for-byte output.
  */
 
+// Issue #94 — the Investigator facet hydration looks up scholar names
+// by CWID. Mock prisma so tests that exercise the hydration path don't
+// require a live DB connection.
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    scholar: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+  },
+}));
+
 let lastRequest: { index: string; body: Record<string, unknown> } | null = null;
 
 vi.mock("@/lib/search", () => ({
@@ -118,6 +129,42 @@ describe("searchFunding (OpenSearch)", () => {
     }).bool.filter;
     expect(postFilter).toContainEqual({
       terms: { primeSponsor: ["NCI", "NHLBI"] },
+    });
+  });
+
+  it("preserves multi-select on investigator via terms filter on wcmInvestigatorCwids (issue #94)", async () => {
+    await runSearch({
+      q: "",
+      filters: { investigator: ["alice", "bob"] },
+    });
+    const postFilter = (lastRequest!.body.post_filter as {
+      bool: { filter: unknown[] };
+    }).bool.filter;
+    expect(postFilter).toContainEqual({
+      terms: { wcmInvestigatorCwids: ["alice", "bob"] },
+    });
+  });
+
+  it("emits an investigators agg with terms + cardinality, excluding-self (issue #94)", async () => {
+    await runSearch({ q: "", filters: { investigator: ["alice"], funder: ["NCI"] } });
+    const aggs = lastRequest!.body.aggs as Record<string, unknown>;
+    expect(aggs.investigators).toBeDefined();
+    const inv = aggs.investigators as {
+      filter: { bool: { filter: unknown[] } };
+      aggs: { keys: unknown; total: unknown };
+    };
+    // investigator axis is excluded from its own agg; funder IS included.
+    expect(inv.filter.bool.filter).not.toContainEqual({
+      terms: { wcmInvestigatorCwids: ["alice"] },
+    });
+    expect(inv.filter.bool.filter).toContainEqual({
+      terms: { primeSponsor: ["NCI"] },
+    });
+    expect(inv.aggs.keys).toEqual({
+      terms: { field: "wcmInvestigatorCwids", size: 500 },
+    });
+    expect(inv.aggs.total).toEqual({
+      cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 4000 },
     });
   });
 

@@ -27,6 +27,7 @@ import {
   type FundingStatus,
 } from "@/lib/api/search-funding";
 import { FundingResultsList } from "@/components/search/funding-results-list";
+import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
@@ -96,6 +97,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       (r): r is FundingRoleBucket =>
         r === "PI" || r === "Multi-PI" || r === "Co-I",
     ) as FundingRoleBucket[],
+    investigator:
+      parseList(sp.investigator).length > 0 ? parseList(sp.investigator) : undefined,
   };
   // Empty arrays should collapse to undefined so the API treats them as
   // "no filter" rather than "match nothing".
@@ -840,6 +843,7 @@ async function FundingResults({
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
     for (const v of filters.role ?? []) sp.append("role", v);
+    for (const v of filters.investigator ?? []) sp.append("investigator", v);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -869,7 +873,8 @@ async function FundingResults({
     !!(filters.funder?.length || filters.directFunder?.length ||
       filters.programType?.length ||
       filters.mechanism?.length || filters.status?.length ||
-      filters.department?.length || filters.role?.length);
+      filters.department?.length || filters.role?.length ||
+      filters.investigator?.length);
 
   // Issue #80 item 3 — chip strip mirrors the People + Publications tabs.
   // Funder + mechanism chips render in verbose form (full sponsor name,
@@ -915,6 +920,33 @@ async function FundingResults({
   for (const v of filters.role ?? []) {
     chips.push({ label: v, removeHref: removeHref("role", v) });
   }
+  // Issue #94 — investigator chips. Names come from the hydrated facet
+  // buckets (active selections always surface there even with zero
+  // count); fall back to the bare CWID if a scholar was suppressed
+  // since the index was built.
+  const investigatorNameByCwid = new Map(
+    result.facets.investigators.map((b) => [b.cwid, b.displayName]),
+  );
+  for (const v of filters.investigator ?? []) {
+    chips.push({
+      label: investigatorNameByCwid.get(v) ?? v,
+      removeHref: removeHref("investigator", v),
+    });
+  }
+
+  // Issue #94 — Investigator facet rail items. Server hydrates display
+  // name + slug + avatar; client component handles typeahead, sort
+  // toggle, pinning.
+  const investigatorItems: import("@/components/search/investigator-facet").InvestigatorFacetItem[] =
+    result.facets.investigators.map((a) => ({
+      cwid: a.cwid,
+      displayName: a.displayName,
+      slug: a.slug,
+      identityImageEndpoint: a.identityImageEndpoint,
+      count: a.count,
+      isActive: (filters.investigator ?? []).includes(a.cwid),
+      toggleHref: toggleHref("investigator", a.cwid),
+    }));
 
   return (
     <>
@@ -924,6 +956,8 @@ async function FundingResults({
         toggleHref={toggleHref}
         clearAllHref={clearAllHref}
         hasActiveFilters={hasActiveFilters}
+        investigatorItems={investigatorItems}
+        investigatorTotalDistinct={result.facets.investigatorsTotal}
       />
       <section className="min-w-0">
         {chips.length > 0 ? (
@@ -999,12 +1033,16 @@ function FacetSidebarFunding({
   toggleHref,
   clearAllHref,
   hasActiveFilters,
+  investigatorItems,
+  investigatorTotalDistinct,
 }: {
   facets: FundingResultData["facets"];
   active: FundingFilters;
   toggleHref: (axis: string, value: string) => string;
   clearAllHref: string;
   hasActiveFilters: boolean;
+  investigatorItems: import("@/components/search/investigator-facet").InvestigatorFacetItem[];
+  investigatorTotalDistinct: number;
 }) {
   const statusItems: Array<{ key: FundingStatus; count: number }> = [
     { key: "active", count: facets.status.active },
@@ -1048,6 +1086,17 @@ function FacetSidebarFunding({
           />
         ))}
       </FacetGroup>
+
+      {/* Issue #94 — Investigator facet. Highest-signal people axis on the
+          Funding tab (department admins and reviewers commonly start a
+          search with a known PI), so it sits at the top of the rail
+          right after Status. */}
+      {investigatorItems.length > 0 ? (
+        <InvestigatorFacet
+          items={investigatorItems}
+          totalDistinct={investigatorTotalDistinct}
+        />
+      ) : null}
 
       {facets.funders.length > 0 || facets.directFunders.length > 0 ? (
         <FunderFacet
@@ -1178,6 +1227,7 @@ function FundingSortLinks({
     for (const v of filters.status ?? []) sp.append("status", v);
     for (const v of filters.department ?? []) sp.append("department", v);
     for (const v of filters.role ?? []) sp.append("role", v);
+    for (const v of filters.investigator ?? []) sp.append("investigator", v);
     return `/search?${sp.toString()}`;
   };
   return (

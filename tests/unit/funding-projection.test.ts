@@ -151,6 +151,17 @@ describe("projectFromRows", () => {
     expect(doc.peopleNames).toContain("Bob Baker");
   });
 
+  it("populates wcmInvestigatorCwids with every WCM scholar's CWID (issue #94)", () => {
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+      makeRow({ cwid: "bob", role: "Co-I", scholar: SCHOLAR_B }),
+    ])!;
+    expect(doc.wcmInvestigatorCwids).toEqual(
+      expect.arrayContaining(["alice", "bob"]),
+    );
+    expect(doc.wcmInvestigatorCwids).toHaveLength(2);
+  });
+
   it("returns Co-I in roles when only Co-I rows exist (no PI on the project)", () => {
     const doc = projectFromRows([
       makeRow({ cwid: "carol", role: "Co-I", scholar: SCHOLAR_C }),

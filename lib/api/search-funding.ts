@@ -21,6 +21,7 @@
  *   F3 — facets: Funder, Type, Mechanism, Status, Department, Role
  *   F6 — prime/direct sponsor + isSubaward
  */
+import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
   FUNDING_INDEX,
@@ -59,6 +60,21 @@ export type FundingFilters = {
   department?: string[];
   /** Role buckets — multi-select OR. */
   role?: FundingRoleBucket[];
+  /** Issue #94 — WCM investigator CWIDs. Multi-select OR within the
+   *  axis; matches the wcmAuthor filter pattern on the Publications
+   *  search. */
+  investigator?: string[];
+};
+
+/** Issue #94 — Investigator facet bucket, hydrated server-side with
+ *  display name, slug, and avatar endpoint so the client component just
+ *  renders. Mirrors WcmAuthorFacetBucket on the Publications search. */
+export type WcmInvestigatorFacetBucket = {
+  cwid: string;
+  displayName: string;
+  slug: string;
+  identityImageEndpoint: string;
+  count: number;
 };
 
 export type FundingPersonChip = {
@@ -134,6 +150,13 @@ export type FundingSearchResult = {
     status: { active: number; endingSoon: number; recentlyEnded: number };
     departments: SearchFacetBucket[];
     roles: { pi: number; multiPi: number; coI: number };
+    /** Issue #94 — top WCM investigators in the current result set,
+     *  hydrated server-side. */
+    investigators: WcmInvestigatorFacetBucket[];
+    /** Total distinct WCM investigators across the current result set
+     *  (header count). May exceed `investigators.length` when the agg
+     *  cap is hit; mirrors `wcmAuthorsTotal` on the Publications search. */
+    investigatorsTotal: number;
   };
 };
 
@@ -250,6 +273,10 @@ export async function searchFunding(opts: {
     filters.role && filters.role.length > 0
       ? { terms: { roles: filters.role } }
       : null;
+  const investigatorClause =
+    filters.investigator && filters.investigator.length > 0
+      ? { terms: { wcmInvestigatorCwids: filters.investigator } }
+      : null;
 
   const userAxisFilters: Record<string, unknown>[] = [];
   if (funderClause) userAxisFilters.push(funderClause);
@@ -259,6 +286,7 @@ export async function searchFunding(opts: {
   if (statusClause) userAxisFilters.push(statusClause);
   if (departmentClause) userAxisFilters.push(departmentClause);
   if (roleClause) userAxisFilters.push(roleClause);
+  if (investigatorClause) userAxisFilters.push(investigatorClause);
 
   type Axis =
     | "funder"
@@ -267,7 +295,8 @@ export async function searchFunding(opts: {
     | "mechanism"
     | "status"
     | "department"
-    | "role";
+    | "role"
+    | "investigator";
 
   const filtersExcept = (axis: Axis): Record<string, unknown>[] => {
     const out: Record<string, unknown>[] = [];
@@ -278,6 +307,7 @@ export async function searchFunding(opts: {
     if (axis !== "status" && statusClause) out.push(statusClause);
     if (axis !== "department" && departmentClause) out.push(departmentClause);
     if (axis !== "role" && roleClause) out.push(roleClause);
+    if (axis !== "investigator" && investigatorClause) out.push(investigatorClause);
     return out;
   };
 
@@ -361,6 +391,19 @@ export async function searchFunding(opts: {
       filter: { bool: { must, filter: filtersExcept("role") } },
       aggs: { keys: { terms: { field: "roles", size: 5 } } },
     },
+    // Issue #94 — Investigator facet. Top 500 mirrors the Author facet
+    // on the Publications search; client-side typeahead narrows further.
+    // Cardinality sub-agg surfaces the true distinct count for the rail
+    // header so the user sees the full scope of the facet.
+    investigators: {
+      filter: { bool: { must, filter: filtersExcept("investigator") } },
+      aggs: {
+        keys: { terms: { field: "wcmInvestigatorCwids", size: 500 } },
+        total: {
+          cardinality: { field: "wcmInvestigatorCwids", precision_threshold: 4000 },
+        },
+      },
+    },
     statusActive: {
       filter: { bool: { must, filter: [...statusBaseFilters, activeRange] } },
     },
@@ -439,6 +482,10 @@ export async function searchFunding(opts: {
       statusActive?: { doc_count: number };
       statusEndingSoon?: { doc_count: number };
       statusRecentlyEnded?: { doc_count: number };
+      investigators?: {
+        keys: { buckets: Bucket[] };
+        total: { value: number };
+      };
     };
   };
 
@@ -483,6 +530,51 @@ export async function searchFunding(opts: {
     (r.aggregations?.roleBuckets?.keys.buckets ?? []).map((b) => [b.key, b.doc_count]),
   );
 
+  // Issue #94 — hydrate Investigator facet buckets with display name +
+  // slug + avatar in a single Prisma round trip. Active selections may
+  // not appear in the top-500 result set, so include them in the lookup
+  // so the rail can pin them with a real label rather than the bare CWID.
+  const investigatorBuckets = r.aggregations?.investigators?.keys.buckets ?? [];
+  const facetCwids = new Set(investigatorBuckets.map((b) => b.key));
+  if (filters.investigator) for (const c of filters.investigator) facetCwids.add(c);
+  const facetCwidList = Array.from(facetCwids);
+  const scholarRows = facetCwidList.length === 0
+    ? []
+    : await prisma.scholar.findMany({
+        where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
+        select: { cwid: true, preferredName: true, slug: true },
+      });
+  const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
+  const investigators: WcmInvestigatorFacetBucket[] = investigatorBuckets.flatMap((b) => {
+    const s = scholarByCwid.get(b.key);
+    if (!s) return []; // scholar deleted/suppressed since the index was built
+    return [{
+      cwid: s.cwid,
+      displayName: s.preferredName,
+      slug: s.slug,
+      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      count: b.doc_count,
+    }];
+  });
+  // Surface active selections even with zero count so the rail can pin
+  // them in the selected section after other filters knock their count
+  // to zero (or below the top-500 cutoff).
+  if (filters.investigator) {
+    const present = new Set(investigators.map((b) => b.cwid));
+    for (const cwid of filters.investigator) {
+      if (present.has(cwid)) continue;
+      const s = scholarByCwid.get(cwid);
+      if (!s) continue;
+      investigators.push({
+        cwid: s.cwid,
+        displayName: s.preferredName,
+        slug: s.slug,
+        identityImageEndpoint: identityImageEndpoint(s.cwid),
+        count: 0,
+      });
+    }
+  }
+
   return {
     hits,
     total: r.hits.total.value,
@@ -519,6 +611,8 @@ export async function searchFunding(opts: {
         multiPi: roleBucketMap.get("Multi-PI") ?? 0,
         coI: roleBucketMap.get("Co-I") ?? 0,
       },
+      investigators,
+      investigatorsTotal: r.aggregations?.investigators?.total.value ?? 0,
     },
   };
 }

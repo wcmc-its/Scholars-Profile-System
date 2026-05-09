@@ -89,6 +89,11 @@ export type FundingDoc = {
     preferredName: string;
     role: string;
   }>;
+  /** Issue #94 — flat keyword array of WCM investigator CWIDs.
+   *  Denormalized from `people[].cwid` so the Investigator facet can run
+   *  a cheap top-level terms aggregation, mirroring `wcmAuthorCwids` on
+   *  the Publications index. */
+  wcmInvestigatorCwids: string[];
   /** Issue #86 — RePORTER abstract for the project, indexed for full-text
    *  search relevance and shown as a snippet in result rows. Picked from
    *  the first row whose abstract is non-null (all rows for one project
@@ -363,6 +368,7 @@ export function projectFromRows(
     isMultiPi,
     totalPeople: people.length,
     people,
+    wcmInvestigatorCwids: people.map((p) => p.cwid),
     abstract,
     pubCount: pubsByPmid.size,
     applId,
