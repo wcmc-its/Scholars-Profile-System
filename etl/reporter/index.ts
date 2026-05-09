@@ -98,7 +98,7 @@ async function step1_GrantAbstracts() {
   console.log(`${grants.length} grants with non-null awardNumber.`);
 
   let matched = 0;
-  let toUpdate: Array<{ id: string; applId: number; abstract: string | null }> = [];
+  const toUpdate: Array<{ id: string; applId: number; abstract: string | null }> = [];
   let unparsable = 0;
   let unmatched = 0;
 

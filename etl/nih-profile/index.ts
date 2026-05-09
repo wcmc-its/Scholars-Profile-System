@@ -161,15 +161,19 @@ async function main() {
   }
 
   for (const [cwid, rows] of byCwid.entries()) {
-    await prisma.$transaction([
+    // Function-form transaction. Prisma 7's array-form `$transaction([...])`
+    // validates raw queries against the composite-PK model schema and
+    // rejects them, even though they're literal SQL. Function form runs
+    // statements sequentially against a held connection without that
+    // validation pass.
+    await prisma.$transaction(async (tx) => {
       // Clear is_preferred on every existing row for this scholar; the
       // upserts below set the new winner. Avoids a unique-violation
       // hazard if we ever convert is_preferred to a per-cwid unique
-      // constraint. Raw SQL because Prisma 7's updateMany rejects a
-      // partial WHERE on a composite-PK model.
-      prisma.$executeRaw`UPDATE person_nih_profile SET is_preferred = FALSE WHERE cwid = ${cwid} AND is_preferred = TRUE`,
-      ...rows.map((r) =>
-        prisma.personNihProfile.upsert({
+      // constraint.
+      await tx.$executeRaw`UPDATE person_nih_profile SET is_preferred = FALSE WHERE cwid = ${cwid} AND is_preferred = TRUE`;
+      for (const r of rows) {
+        await tx.personNihProfile.upsert({
           where: {
             cwid_nihProfileId: { cwid: r.cwid, nihProfileId: r.profileId },
           },
@@ -185,9 +189,9 @@ async function main() {
             resolutionSource: r.resolutionSource,
             lastVerified: verifiedAt,
           },
-        }),
-      ),
-    ]);
+        });
+      }
+    });
     upserted += rows.length;
   }
 

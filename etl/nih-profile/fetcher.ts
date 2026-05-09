@@ -82,7 +82,12 @@ async function fetchOnePage(
     appl_id: r.appl_id,
     core_project_num: r.core_project_num,
     project_end_date: r.project_end_date,
-    principal_investigators: r.principal_investigators ?? [],
+    // RePORTER occasionally returns PIs without a profile_id (legacy
+    // entries, placeholder rows). Drop them at the boundary so the
+    // resolver never has to think about null IDs.
+    principal_investigators: (r.principal_investigators ?? []).filter(
+      (pi) => typeof pi.profile_id === "number" && pi.profile_id > 0,
+    ),
   }));
   return { results, total: data.meta?.total ?? 0 };
 }
