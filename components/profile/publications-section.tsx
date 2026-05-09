@@ -1,17 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   deriveAuthorPositionRole,
+  matchesAnyPosition,
   matchesPositionFilter,
   type PositionFilter,
+  type SelectedPositions,
 } from "@/components/profile/author-position-badge";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
@@ -35,15 +31,15 @@ const BUCKET_ORDER: ReadonlyArray<{ key: Bucket; label: string }> = [
   { key: "article", label: "Research Articles" },
 ];
 
-const POSITION_OPTIONS: ReadonlyArray<{ key: PositionFilter; label: string }> = [
-  { key: "all", label: "All positions" },
+type NonAllPosition = Exclude<PositionFilter, "all">;
+
+const POSITION_OPTIONS: ReadonlyArray<{ key: NonAllPosition; label: string }> = [
   { key: "first", label: "First author" },
   { key: "senior", label: "Senior author" },
   { key: "co_author", label: "Co-author" },
 ];
 
-const POSITION_SHORT_LABEL: Record<PositionFilter, string> = {
-  all: "All",
+const POSITION_SHORT_LABEL: Record<NonAllPosition, string> = {
   first: "First author",
   senior: "Senior author",
   co_author: "Co-author",
@@ -52,8 +48,8 @@ const POSITION_SHORT_LABEL: Record<PositionFilter, string> = {
 export function PublicationsSection({
   publications,
   filterActive = false,
-  position = "all",
-  onPositionChange,
+  positions = [],
+  onPositionsChange,
 }: {
   publications: ProfilePublication[];
   /** Set by `<ProfilePubsCluster>` when a topic filter is active. Expands
@@ -61,10 +57,11 @@ export function PublicationsSection({
    *  on top of the default "first group only" behavior, so users browsing a
    *  filtered set don't have to click open year after year (issue #73). */
   filterActive?: boolean;
-  /** Author-position filter (#72) — controlled by the cluster wrapper so the
-   *  active-filter banner can compose position with topic. */
-  position?: PositionFilter;
-  onPositionChange?: (next: PositionFilter) => void;
+  /** Author-position filter (#72, multi-select via #77) — controlled by the
+   *  cluster wrapper so the active-filter banner can compose position with
+   *  topic. Empty array = no position filter. */
+  positions?: SelectedPositions;
+  onPositionsChange?: (next: SelectedPositions) => void;
 }) {
   const [bucket, setBucket] = useState<Bucket>("all");
   const [query, setQuery] = useState("");
@@ -74,7 +71,7 @@ export function PublicationsSection({
   // as the keyword pill counts (#73): the dropdown reflects "what would
   // match if I picked this position alone", not the post-intersection size.
   const positionCounts = useMemo(() => {
-    const c: Record<PositionFilter, number> = { all: publications.length, first: 0, senior: 0, co_author: 0 };
+    const c: Record<NonAllPosition, number> = { first: 0, senior: 0, co_author: 0 };
     for (const p of publications) {
       const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
       if (matchesPositionFilter(role, "first")) c.first += 1;
@@ -100,9 +97,9 @@ export function PublicationsSection({
     const q = query.trim().toLowerCase();
     return publications.filter((p) => {
       if (bucket !== "all" && bucketOf(p.publicationType) !== bucket) return false;
-      if (position !== "all") {
+      if (positions.length > 0) {
         const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
-        if (!matchesPositionFilter(role, position)) return false;
+        if (!matchesAnyPosition(role, positions)) return false;
       }
       if (q.length === 0) return true;
       const hay =
@@ -113,7 +110,7 @@ export function PublicationsSection({
         (p.authorsString ?? "");
       return hay.toLowerCase().includes(q);
     });
-  }, [publications, bucket, position, query]);
+  }, [publications, bucket, positions, query]);
 
   const searchActive = query.trim().length > 0;
 
@@ -176,29 +173,11 @@ export function PublicationsSection({
           );
         })}
         <div className="ml-auto flex items-center gap-2">
-          <Select
-            value={position}
-            onValueChange={(v) => onPositionChange?.(v as PositionFilter)}
-          >
-            <SelectTrigger
-              size="sm"
-              aria-label="Position filter"
-              className="h-7 gap-1 rounded-full border-border-strong bg-background px-3 text-sm hover:border-[var(--color-accent-slate)]"
-            >
-              <span className="text-muted-foreground">Position:</span>
-              <SelectValue>{POSITION_SHORT_LABEL[position]}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {POSITION_OPTIONS.map(({ key, label }) => (
-                <SelectItem key={key} value={key} className="text-sm">
-                  <span>{label}</span>
-                  <span className="ml-2 text-xs tabular-nums text-muted-foreground">
-                    {positionCounts[key]}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <PositionMultiSelect
+            positions={positions}
+            counts={positionCounts}
+            onChange={(next) => onPositionsChange?.(next)}
+          />
           <input
             type="search"
             value={query}
@@ -253,5 +232,116 @@ export function PublicationsSection({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Multi-select dropdown for the Position filter (issue #77). Trigger displays
+ * a short summary ("All", "First author", "2 selected"); panel shows a
+ * checkbox list with per-bucket counts. Click outside closes; Escape closes
+ * and returns focus to the trigger.
+ */
+function PositionMultiSelect({
+  positions,
+  counts,
+  onChange,
+}: {
+  positions: SelectedPositions;
+  counts: Record<NonAllPosition, number>;
+  onChange: (next: SelectedPositions) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const summary =
+    positions.length === 0
+      ? "All"
+      : positions.length === 1
+        ? POSITION_SHORT_LABEL[positions[0]]
+        : `${positions.length} selected`;
+
+  const toggle = (key: NonAllPosition) => {
+    const next: SelectedPositions = positions.includes(key)
+      ? positions.filter((p) => p !== key)
+      : [...positions, key];
+    onChange(next);
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Position filter"
+        onClick={() => setOpen((v) => !v)}
+        className="border-border-strong inline-flex h-7 items-center gap-1 rounded-full border bg-background px-3 text-sm hover:border-[var(--color-accent-slate)]"
+      >
+        <span className="text-muted-foreground">Position:</span>
+        <span>{summary}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-multiselectable="true"
+          className="absolute right-0 z-20 mt-1 w-[200px] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+        >
+          {POSITION_OPTIONS.map(({ key, label }) => {
+            const checked = positions.includes(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                role="option"
+                aria-selected={checked}
+                onClick={() => toggle(key)}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent"
+              >
+                <span className="flex size-4 shrink-0 items-center justify-center">
+                  {checked ? (
+                    <Check className="size-3.5 text-[var(--color-accent-slate)]" aria-hidden="true" />
+                  ) : null}
+                </span>
+                <span className="flex-1">{label}</span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {counts[key]}
+                </span>
+              </button>
+            );
+          })}
+          {positions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="mt-1 flex w-full items-center justify-center rounded border-t border-border px-2 py-1.5 text-xs font-medium text-[var(--color-accent-slate)] hover:bg-accent"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

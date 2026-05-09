@@ -91,7 +91,7 @@ describe("ActiveFilterBanner", () => {
       <ActiveFilterBanner
         count={138}
         selected={[]}
-        position="senior"
+        positions={["senior"]}
         onClearAll={() => {}}
       />,
     );
@@ -107,7 +107,7 @@ describe("ActiveFilterBanner", () => {
       <ActiveFilterBanner
         count={119}
         selected={[k("D015316", "Genetic Therapy")]}
-        position="senior"
+        positions={["senior"]}
         onClearAll={() => {}}
       />,
     );
@@ -122,7 +122,7 @@ describe("ActiveFilterBanner", () => {
       <ActiveFilterBanner
         count={50}
         selected={[k("D1", "Alpha"), k("D2", "Beta")]}
-        position="first"
+        positions={["first"]}
         onClearAll={() => {}}
       />,
     );
@@ -132,7 +132,7 @@ describe("ActiveFilterBanner", () => {
 
   it("renders nothing when neither topic nor position filter is active", () => {
     const { container } = render(
-      <ActiveFilterBanner count={140} selected={[]} position="all" onClearAll={() => {}} />,
+      <ActiveFilterBanner count={140} selected={[]} positions={[]} onClearAll={() => {}} />,
     );
     expect(container.firstChild).toBeNull();
   });

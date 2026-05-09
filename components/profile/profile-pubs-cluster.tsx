@@ -6,14 +6,14 @@ import type { ProfilePublication, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
 import {
   deriveAuthorPositionRole,
-  matchesPositionFilter,
+  matchesAnyPosition,
   type PositionFilter,
+  type SelectedPositions,
 } from "@/components/profile/author-position-badge";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
 
-const VALID_POSITIONS: ReadonlySet<PositionFilter> = new Set([
-  "all",
+const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new Set([
   "first",
   "senior",
   "co_author",
@@ -56,20 +56,36 @@ export function ProfilePubsCluster({
     return out;
   }, [searchParams]);
 
-  const position: PositionFilter = useMemo(() => {
+  // Issue #77 — Position is multi-select. Serialize as a comma-separated
+  // list (`?position=first,senior`); empty/missing param means "no filter".
+  // Legacy single-value URLs ("?position=first") parse fine since they have
+  // no comma. Order is preserved so the active-filter banner reads back the
+  // chips in the order the user toggled them.
+  const positions: SelectedPositions = useMemo(() => {
     const raw = searchParams.get("position");
-    return raw && VALID_POSITIONS.has(raw as PositionFilter)
-      ? (raw as PositionFilter)
-      : "all";
+    if (!raw) return [];
+    const seen = new Set<Exclude<PositionFilter, "all">>();
+    const out: Array<Exclude<PositionFilter, "all">> = [];
+    for (const part of raw.split(",")) {
+      const v = part.trim();
+      if (
+        VALID_NON_ALL_POSITIONS.has(v as Exclude<PositionFilter, "all">) &&
+        !seen.has(v as Exclude<PositionFilter, "all">)
+      ) {
+        seen.add(v as Exclude<PositionFilter, "all">);
+        out.push(v as Exclude<PositionFilter, "all">);
+      }
+    }
+    return out;
   }, [searchParams]);
 
   const writeUrl = useCallback(
-    (nextMesh: string[], nextPosition: PositionFilter) => {
+    (nextMesh: string[], nextPositions: SelectedPositions) => {
       const params = new URLSearchParams(Array.from(searchParams.entries()));
       if (nextMesh.length === 0) params.delete("mesh");
       else params.set("mesh", nextMesh.join(","));
-      if (nextPosition === "all") params.delete("position");
-      else params.set("position", nextPosition);
+      if (nextPositions.length === 0) params.delete("position");
+      else params.set("position", nextPositions.join(","));
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -82,16 +98,16 @@ export function ProfilePubsCluster({
         selectedUis.includes(ui)
           ? selectedUis.filter((x) => x !== ui)
           : [...selectedUis, ui],
-        position,
+        positions,
       );
     },
-    [selectedUis, position, writeUrl],
+    [selectedUis, positions, writeUrl],
   );
 
-  const onClearAll = useCallback(() => writeUrl([], "all"), [writeUrl]);
+  const onClearAll = useCallback(() => writeUrl([], []), [writeUrl]);
 
-  const onPositionChange = useCallback(
-    (next: PositionFilter) => writeUrl(selectedUis, next),
+  const onPositionsChange = useCallback(
+    (next: SelectedPositions) => writeUrl(selectedUis, next),
     [selectedUis, writeUrl],
   );
 
@@ -108,25 +124,25 @@ export function ProfilePubsCluster({
   }, [keywords, selectedUis]);
 
   // Filter publications by topic (any-selected OR semantics, #73) AND
-  // position (#72). Pre-filtering happens here so the existing
-  // PublicationsSection and its year-group bucketing get a coherent input
-  // and update for free.
+  // position (#72, #77 — now OR within the position axis as well).
+  // Pre-filtering happens here so the existing PublicationsSection and
+  // its year-group bucketing get a coherent input and update for free.
   const filteredPublications = useMemo(() => {
     let out = publications;
     if (selectedUis.length > 0) {
       const wanted = new Set(selectedUis);
       out = out.filter((p) => p.meshTerms.some((t) => t.ui && wanted.has(t.ui)));
     }
-    if (position !== "all") {
+    if (positions.length > 0) {
       out = out.filter((p) => {
         const role = deriveAuthorPositionRole(p.authorship, p.wcmAuthors);
-        return matchesPositionFilter(role, position);
+        return matchesAnyPosition(role, positions);
       });
     }
     return out;
-  }, [publications, selectedUis, position]);
+  }, [publications, selectedUis, positions]);
 
-  const filterActive = selectedUis.length > 0 || position !== "all";
+  const filterActive = selectedUis.length > 0 || positions.length > 0;
 
   return (
     <>
@@ -143,15 +159,15 @@ export function ProfilePubsCluster({
       <ActiveFilterBanner
         count={filteredPublications.length}
         selected={selectedKeywords}
-        position={position}
+        positions={positions}
         onClearAll={onClearAll}
       />
 
       <PublicationsSection
         publications={filteredPublications}
         filterActive={filterActive}
-        position={position}
-        onPositionChange={onPositionChange}
+        positions={positions}
+        onPositionsChange={onPositionsChange}
       />
     </>
   );

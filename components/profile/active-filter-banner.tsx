@@ -1,7 +1,10 @@
 "use client";
 
 import type { ScholarKeyword } from "@/lib/api/profile";
-import type { PositionFilter } from "@/components/profile/author-position-badge";
+import type {
+  PositionFilter,
+  SelectedPositions,
+} from "@/components/profile/author-position-badge";
 
 const POSITION_BANNER_LABEL: Record<Exclude<PositionFilter, "all">, string> = {
   first: "First author",
@@ -11,27 +14,42 @@ const POSITION_BANNER_LABEL: Record<Exclude<PositionFilter, "all">, string> = {
 
 /**
  * Active-filter banner for the profile publications surface (#73, extended by
- * #72). Composes the topic segment (`using <kw1> or <kw2>` / `using any of:
- * …`) with the position segment (` · Senior author`). Renders nothing when no
- * filter is active.
+ * #72/#77). Composes the topic segment (`using <kw1> or <kw2>` / `using any of:
+ * …`) with the position segment (` · Senior author` / ` · First or Senior
+ * author`). Renders nothing when no filter is active.
  */
 export function ActiveFilterBanner({
   count,
   selected,
-  position = "all",
+  positions = [],
   onClearAll,
 }: {
   count: number;
   selected: ScholarKeyword[];
-  position?: PositionFilter;
+  positions?: SelectedPositions;
   onClearAll: () => void;
 }) {
-  const positionActive = position !== "all";
+  const positionActive = positions.length > 0;
   if (selected.length === 0 && !positionActive) return null;
 
   const labels = selected.map((s) => s.displayLabel);
-  const filterCount = selected.length + (positionActive ? 1 : 0);
+  const filterCount = selected.length + positions.length;
   const buttonLabel = filterCount === 1 ? "Clear filter" : "Clear all";
+
+  const positionPhrase =
+    positions.length === 0
+      ? null
+      : positions.length === 1
+        ? POSITION_BANNER_LABEL[positions[0]]
+        : positions.length === 2
+          ? `${POSITION_BANNER_LABEL[positions[0]]} or ${POSITION_BANNER_LABEL[positions[1]]}`
+          : positions
+              .map((p, i) =>
+                i === positions.length - 1
+                  ? `or ${POSITION_BANNER_LABEL[p]}`
+                  : POSITION_BANNER_LABEL[p],
+              )
+              .join(", ");
 
   return (
     <div
@@ -74,9 +92,7 @@ export function ActiveFilterBanner({
           <>
             {" "}
             <span aria-hidden="true">·</span>{" "}
-            <strong className="font-semibold">
-              {POSITION_BANNER_LABEL[position as Exclude<PositionFilter, "all">]}
-            </strong>
+            <strong className="font-semibold">{positionPhrase}</strong>
           </>
         ) : null}
       </span>

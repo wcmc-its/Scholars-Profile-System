@@ -81,6 +81,24 @@ export function matchesPositionFilter(
   return positionBucketForRole(role) === filter;
 }
 
+/** Multi-select position bucket — non-"all" filters only. Empty array = no
+ *  filter (match-all). Issue #77 makes the profile Position dropdown
+ *  multi-select; the URL serializes this as a comma-separated list. */
+export type SelectedPositions = ReadonlyArray<Exclude<PositionFilter, "all">>;
+
+/** Test whether a derived role matches *any* of the selected position
+ *  filters. Empty selection means no filter is applied. */
+export function matchesAnyPosition(
+  role: AuthorPositionRole | null,
+  filters: SelectedPositions,
+): boolean {
+  if (filters.length === 0) return true;
+  for (const f of filters) {
+    if (matchesPositionFilter(role, f)) return true;
+  }
+  return false;
+}
+
 export function AuthorPositionBadge({
   role,
   className,
