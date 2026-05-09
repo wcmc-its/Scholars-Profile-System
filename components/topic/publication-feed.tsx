@@ -64,7 +64,7 @@ export function PublicationFeed({
   subtopicLabel: string | null;
   subtopicShortDescription: string | null;
 }) {
-  const [sort, setSort] = useState<Sort>("by_impact");
+  const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   const [page, setPage] = useState(1);
   const [data, setData] = useState<FeedResponse | null>(null);
@@ -140,8 +140,8 @@ export function PublicationFeed({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
               <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="by_impact">By impact (ReCiterAI)</SelectItem>
               <SelectItem value="most_cited">Most cited</SelectItem>
             </SelectContent>
           </Select>
