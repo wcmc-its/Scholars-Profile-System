@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   rankForSelectedHighlights,
   type ScoredPublication,
@@ -48,9 +49,9 @@ export type ProfileKeywords = {
 };
 
 /** Publication types excluded from the Topics section's per-keyword counts.
- *  Issue #63 will eventually exclude these from the publications list as well;
- *  exclude them here unconditionally so the count rule doesn't drift. */
-const TOPIC_EXCLUDED_PUBLICATION_TYPES = new Set(["Retraction", "Erratum"]);
+ *  Issue #63 — same set is now also the read-path filter on the authorships
+ *  query, so the keyword-count guard is belt-and-braces. */
+const TOPIC_EXCLUDED_PUBLICATION_TYPES = new Set<string>(NEVER_DISPLAY_TYPES);
 
 type RawMeshTerm = { ui?: string | null; label?: string | null };
 
@@ -310,9 +311,15 @@ export async function getScholarFullProfileBySlug(
   if (!scholar) return null;
 
   // Authorships for this scholar — drives the publications list. Pull author rows
-  // for every publication so coauthor chips can be rendered.
+  // for every publication so coauthor chips can be rendered. Issue #63: drop
+  // Retraction / Erratum rows at fetch time so the list, header counts, and
+  // keyword aggregation all see the same filtered set.
   const authorships = await prisma.publicationAuthor.findMany({
-    where: { cwid: scholar.cwid, isConfirmed: true },
+    where: {
+      cwid: scholar.cwid,
+      isConfirmed: true,
+      publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+    },
     include: {
       publication: {
         include: {

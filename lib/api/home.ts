@@ -31,6 +31,7 @@ import {
   type RankablePublication,
 } from "@/lib/ranking";
 import { ELIGIBLE_ROLES } from "@/lib/eligibility";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 
 // ---------------------------------------------------------------------------
 // Per-surface floors per UI-SPEC §States and CONTEXT.md D-12
@@ -45,8 +46,9 @@ const SELECTED_RESEARCH_FLOOR = 4;
 const SPOTLIGHT_TARGET = 10;
 const SPOTLIGHT_FLOOR = 6;
 
-// Hard-excluded publication types (locked by design spec v1.7.1).
-const EXCLUDED_PUB_TYPES = ["Letter", "Editorial Article", "Erratum"] as const;
+// Hard-excluded publication types — see lib/publication-types.ts.
+// FEED_EXCLUDED_TYPES adds Retraction (issue #63) on top of the spec v1.7.1
+// list so retraction notices stay out of home / topic feeds.
 
 // ReCiterAI scoring data floor (D-15) — publication_score / publication_topic
 // rows only cover 2020+ publications.
@@ -216,7 +218,7 @@ export async function getRecentContributions(
         status: "active",
         roleCategory: { in: [...ELIGIBLE_ROLES] },
       },
-      publication: { publicationType: { notIn: [...EXCLUDED_PUB_TYPES] } },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
     include: {
       scholar: {
@@ -452,7 +454,7 @@ export async function getSelectedResearch(
         primarySubtopicId: t.primarySubtopicId,
       })),
       year: { gte: RECITERAI_YEAR_FLOOR },
-      publication: { publicationType: { notIn: [...EXCLUDED_PUB_TYPES] } },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
     include: {
       scholar: { select: { cwid: true, slug: true, preferredName: true } },

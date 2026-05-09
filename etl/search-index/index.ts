@@ -30,6 +30,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
+import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 
 const AUTHORSHIP_WEIGHTS = {
   firstOrLast: 10,
@@ -145,7 +146,14 @@ async function indexPeople() {
       topicAssignments: { orderBy: { score: "desc" } },
       grants: true,
       authorships: {
-        where: { isConfirmed: true },
+        // Issue #63 — drop Retraction / Erratum so retracted-paper titles
+        // and MeSH don't pull a person into search results for unrelated
+        // queries. Filtering on the related publication keeps the rollup
+        // shape unchanged for everything else.
+        where: {
+          isConfirmed: true,
+          publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+        },
         include: {
           publication: {
             // Issue #21 — `abstract` joins via the existing publication FK;
@@ -389,6 +397,11 @@ async function indexPublications() {
       take: PUB_PAGE,
       ...(cursor ? { skip: 1, cursor: { pmid: cursor } } : {}),
       orderBy: { pmid: "asc" },
+      // Issue #63 — never index Retraction notices or Errata. Filtering at
+      // index-build time keeps the publications index clean without any
+      // query-time gymnastics; a future search hit by PMID for a retracted
+      // paper simply returns zero hits.
+      where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
       include: {
         authors: {
           orderBy: { position: "asc" },

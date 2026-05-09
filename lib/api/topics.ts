@@ -35,6 +35,7 @@ import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
+import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -105,7 +106,7 @@ export async function getTopScholarsForTopic(
         status: "active",
         roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] }, // D-14 narrowed (FT only)
       },
-      publication: { publicationType: { notIn: ["Letter", "Editorial Article", "Erratum"] } },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
     include: {
       scholar: {
@@ -395,7 +396,9 @@ export type TopicPublicationsResult = {
 };
 
 const TOPIC_PUBLICATIONS_PAGE_SIZE = 20;
-const HARD_EXCLUDE_TYPES = ["Letter", "Editorial Article", "Erratum"];
+// Same exclusion list used by every feed (issue #63). Spread once into a
+// plain array so Prisma's `notIn` accepts it without the readonly tuple.
+const HARD_EXCLUDE_TYPES = [...FEED_EXCLUDED_TYPES];
 
 /**
  * CSR browsable publication feed for a topic detail page.
