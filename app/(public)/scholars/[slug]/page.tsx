@@ -347,7 +347,7 @@ export default async function ScholarProfilePage({
               headerAction={
                 profile.nihReporterProfileId !== null ? (
                   <a
-                    href={nihReporterPiUrl(profile.nihReporterProfileId)}
+                    href={nihReporterPiUrl({ cwid: profile.cwid })}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Opens NIH RePORTER (NIH funding only)"
