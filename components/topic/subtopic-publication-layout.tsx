@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SubtopicRail, type SubtopicRailItem } from "@/components/topic/subtopic-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
+import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
 
 export function SubtopicPublicationLayout({
   topicSlug,
@@ -44,6 +45,13 @@ export function SubtopicPublicationLayout({
         />
       </div>
       <div className="min-w-0 flex-1">
+        {activeSubtopic && (
+          <SubtopicScholarsRow
+            topicSlug={topicSlug}
+            subtopicId={activeSubtopic}
+            subtopicLabel={subtopicLabel}
+          />
+        )}
         <PublicationFeed
           topicSlug={topicSlug}
           activeSubtopic={activeSubtopic}

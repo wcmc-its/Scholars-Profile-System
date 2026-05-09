@@ -196,6 +196,105 @@ export async function getTopScholarsForTopic(
   }));
 }
 
+const SUBTOPIC_SCHOLARS_TARGET = 7;
+const SUBTOPIC_SCHOLARS_FLOOR = 1;
+
+/**
+ * Top scholars for a single subtopic, filtered to publication_topic rows whose
+ * primarySubtopicId matches. Mirrors getTopScholarsForTopic's D-13/D-14 carve
+ * (FT faculty, first/last only, year >= floor, type allow-list, top_scholars
+ * compressed curve) so the chip-row component can render the result without
+ * branching. Floor is 1 because subtopic scope is narrow by design and a user
+ * who selected a subtopic expects to see whatever WCM scholars contribute to
+ * it; sparse-state hide on subtopic scope would be confusing.
+ */
+export async function getSubtopicScholars(
+  topicSlug: string,
+  subtopicId: string,
+  now: Date = new Date(),
+): Promise<TopScholarChipData[] | null> {
+  const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
+  if (!topic) return null;
+
+  const rows = await prisma.publicationTopic.findMany({
+    where: {
+      parentTopicId: topicSlug,
+      primarySubtopicId: subtopicId,
+      authorPosition: { in: ["first", "last"] },
+      year: { gte: RECITERAI_YEAR_FLOOR },
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
+      },
+      publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
+    },
+    include: {
+      scholar: {
+        select: {
+          cwid: true,
+          slug: true,
+          preferredName: true,
+          primaryTitle: true,
+          roleCategory: true,
+        },
+      },
+      publication: {
+        select: { pmid: true, publicationType: true, dateAddedToEntrez: true },
+      },
+    },
+  });
+
+  if (rows.length === 0) return null;
+
+  type AggEntry = {
+    scholar: {
+      cwid: string;
+      slug: string;
+      preferredName: string;
+      primaryTitle: string | null;
+    };
+    total: number;
+  };
+  const byCwid = new Map<string, AggEntry>();
+
+  for (const r of rows) {
+    if (!r.scholar) continue;
+    const pub = r.publication;
+    const rankable: RankablePublication = {
+      pmid: r.pmid,
+      publicationType: pub.publicationType,
+      reciteraiImpact: Number(r.score),
+      dateAddedToEntrez: pub.dateAddedToEntrez,
+      authorship: {
+        isFirst: r.authorPosition === "first",
+        isLast: r.authorPosition === "last",
+        isPenultimate: r.authorPosition === "penultimate",
+      },
+      isConfirmed: true,
+    };
+    const score = scorePublication(rankable, "top_scholars", true, now);
+    if (score === 0) continue;
+
+    const entry =
+      byCwid.get(r.cwid) ??
+      ({ scholar: r.scholar, total: 0 } as AggEntry);
+    entry.total += score;
+    byCwid.set(r.cwid, entry);
+  }
+
+  const sorted = Array.from(byCwid.values()).sort((a, b) => b.total - a.total);
+  if (sorted.length < SUBTOPIC_SCHOLARS_FLOOR) return null;
+
+  return sorted.slice(0, SUBTOPIC_SCHOLARS_TARGET).map((e) => ({
+    cwid: e.scholar.cwid,
+    slug: e.scholar.slug,
+    preferredName: e.scholar.preferredName,
+    primaryTitle: e.scholar.primaryTitle,
+    identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+  }));
+}
+
 
 export type SubtopicWithCount = {
   id: string;
