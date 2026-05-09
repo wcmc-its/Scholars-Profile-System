@@ -78,6 +78,7 @@ Thumbs.db
 .claude/
 CLAUDE.md
 docs/superpowers/
+docs/PRODUCTION.md
 
 # Ad-hoc debug/probe scripts (kept locally, never committed)
 scripts/_apply-fix.cjs
