@@ -26,7 +26,7 @@
  */
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
 
@@ -72,7 +72,18 @@ function isExpandable(d: BrowseDepartment): boolean {
   return d.divisions.length > 0 || d.topResearchAreas.length > 0;
 }
 
-export function DepartmentsGrid({
+export function DepartmentsGrid(props: { departments: BrowseDepartment[] }) {
+  // useSearchParams() forces client-side rendering bailout during prerender
+  // (Next.js 15 strict mode). Wrap in Suspense so the static prerender emits
+  // the empty fallback and the full UI hydrates at request time.
+  return (
+    <Suspense fallback={null}>
+      <DepartmentsGridInner {...props} />
+    </Suspense>
+  );
+}
+
+function DepartmentsGridInner({
   departments,
 }: {
   departments: BrowseDepartment[];
