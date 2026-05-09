@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { ChevronDown } from "lucide-react";
 import { JournalFacet } from "@/components/search/journal-facet";
+import { AuthorFacet } from "@/components/search/author-facet";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
@@ -112,6 +113,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (r): r is "first" | "senior" | "middle" =>
       r === "first" || r === "senior" || r === "middle",
   );
+  const wcmAuthor = parseList(sp.wcmAuthor);
 
   // Issue #8 item 1: the subhead "{n} people · {n} publications · {n} funding"
   // needs all counts regardless of which tab is active. Run lightweight
@@ -137,6 +139,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         publicationType: publicationType || undefined,
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+        wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
       },
     }),
     searchFunding({
@@ -189,6 +192,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             publicationType={publicationType || undefined}
             journal={journal}
             wcmAuthorRole={wcmAuthorRole}
+            wcmAuthor={wcmAuthor}
             result={pubsResult}
           />
         ) : type === "funding" ? (
@@ -545,6 +549,7 @@ async function PublicationsResults({
   publicationType,
   journal,
   wcmAuthorRole,
+  wcmAuthor,
   result,
 }: {
   q: string;
@@ -555,6 +560,7 @@ async function PublicationsResults({
   publicationType?: string;
   journal: string[];
   wcmAuthorRole: Array<"first" | "senior" | "middle">;
+  wcmAuthor: string[];
   result: PubsResultData;
 }) {
   const buildUrl = (
@@ -570,6 +576,7 @@ async function PublicationsResults({
     if (publicationType) sp.set("publicationType", publicationType);
     for (const v of journal) sp.append("journal", v);
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
+    for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -630,6 +637,19 @@ async function PublicationsResults({
   for (const v of wcmAuthorRole) {
     chips.push({ label: ROLE_LABEL[v], removeHref: removeMulti("wcmAuthorRole", v) });
   }
+  // Issue #88 — Author chips. Display names come from the hydrated facet
+  // bucket list (which always includes active selections, even when
+  // their count dropped to 0). Falls back to the bare CWID if a selected
+  // author is missing from the result set entirely (e.g. soft-deleted).
+  const authorNameByCwid = new Map(
+    result.facets.wcmAuthors.map((a) => [a.cwid, a.displayName]),
+  );
+  for (const v of wcmAuthor) {
+    chips.push({
+      label: authorNameByCwid.get(v) ?? v,
+      removeHref: removeMulti("wcmAuthor", v),
+    });
+  }
   for (const v of journal) {
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
@@ -652,6 +672,21 @@ async function PublicationsResults({
     }));
   })();
 
+  // Issue #88 — same precompute pattern for the Author facet. Buckets
+  // already arrive count-desc with active selections appended; we just
+  // resolve toggleHref + isActive per row. The client component handles
+  // pinning, sort toggle, and typeahead — server only ships data.
+  const authorItems: import("@/components/search/author-facet").AuthorFacetItem[] =
+    result.facets.wcmAuthors.map((a) => ({
+      cwid: a.cwid,
+      displayName: a.displayName,
+      slug: a.slug,
+      identityImageEndpoint: a.identityImageEndpoint,
+      count: a.count,
+      isActive: wcmAuthor.includes(a.cwid),
+      toggleHref: toggleHref("wcmAuthor", a.cwid),
+    }));
+
   return (
     <>
       <FacetSidebarPubs
@@ -659,6 +694,8 @@ async function PublicationsResults({
         activePublicationType={publicationType}
         publicationTypes={result.facets.publicationTypes}
         journalItems={journalItems}
+        authorItems={authorItems}
+        authorTotalDistinct={result.facets.wcmAuthorsTotal}
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
         toggleHref={toggleHref}
@@ -1370,6 +1407,8 @@ function FacetSidebarPubs({
   activePublicationType,
   publicationTypes,
   journalItems,
+  authorItems,
+  authorTotalDistinct,
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
   toggleHref,
@@ -1381,6 +1420,8 @@ function FacetSidebarPubs({
   activePublicationType?: string;
   publicationTypes: SearchFacetBucket[];
   journalItems: import("@/components/search/journal-facet").JournalFacetItem[];
+  authorItems: import("@/components/search/author-facet").AuthorFacetItem[];
+  authorTotalDistinct: number;
   wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
   activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
   toggleHref: (axis: string, value: string) => string;
@@ -1424,6 +1465,13 @@ function FacetSidebarPubs({
           href={toggleHref("wcmAuthorRole", "middle")}
         />
       </FacetGroup>
+
+      {/* Issue #88 — Author facet sits between WCM author role and Year
+          per spec: the two authorship axes are conceptually paired and
+          users combine them ("first-author papers by Wolf"). */}
+      {authorItems.length > 0 ? (
+        <AuthorFacet items={authorItems} totalDistinct={authorTotalDistinct} />
+      ) : null}
 
       <FacetGroup label="Year (since)">
         {yearChoices.map((y) => (

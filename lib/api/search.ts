@@ -67,6 +67,8 @@ export type PublicationsFilters = {
   journal?: string[];
   /** Multi-select WCM author position role. OR within group. */
   wcmAuthorRole?: WcmAuthorRole[];
+  /** Issue #88 — multi-select WCM author CWID. OR within group. */
+  wcmAuthor?: string[];
 };
 
 export type PeopleHit = {
@@ -110,6 +112,16 @@ export type PublicationHit = {
 
 export type SearchFacetBucket = { value: string; count: number };
 
+/** Issue #88 — Author facet bucket, hydrated server-side with display
+ *  name, slug, and avatar endpoint so the client component just renders. */
+export type WcmAuthorFacetBucket = {
+  cwid: string;
+  displayName: string;
+  slug: string;
+  identityImageEndpoint: string;
+  count: number;
+};
+
 /** Dept/division facet bucket — keyed by the ETL-emitted composite key,
  * carries a pre-rendered display label (e.g. "Cardiology — Medicine"). */
 export type DeptDivBucket = { value: string; label: string; count: number };
@@ -135,6 +147,12 @@ export type PublicationsSearchResult = {
     publicationTypes: SearchFacetBucket[];
     journals: SearchFacetBucket[];
     wcmAuthorRoles: { first: number; senior: number; middle: number };
+    /** Issue #88 — top WCM authors in the current result set, hydrated. */
+    wcmAuthors: WcmAuthorFacetBucket[];
+    /** Total distinct WCM authors across the current result set (header
+     *  count). May be larger than `wcmAuthors.length` when the agg cap is
+     *  hit; surface the true cardinality so the rail can render `Author 1,619`. */
+    wcmAuthorsTotal: number;
   };
 };
 
@@ -467,6 +485,9 @@ export async function searchPublications(opts: {
   const wcmRoleClause = filters.wcmAuthorRole && filters.wcmAuthorRole.length > 0
     ? { terms: { wcmAuthorPositions: filters.wcmAuthorRole } }
     : null;
+  const wcmAuthorClause = filters.wcmAuthor && filters.wcmAuthor.length > 0
+    ? { terms: { wcmAuthorCwids: filters.wcmAuthor } }
+    : null;
 
   // Same split as searchPeople: all axes here are user-controlled, so they
   // all go in post_filter; the main query carries only the multi_match.
@@ -477,15 +498,17 @@ export async function searchPublications(opts: {
   if (publicationTypeClause) userAxisFilters.push(publicationTypeClause);
   if (journalClause) userAxisFilters.push(journalClause);
   if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
+  if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
 
   const filtersExcept = (
-    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole",
+    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole" | "wcmAuthor",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "year" && yearClause) out.push(yearClause);
     if (axis !== "publicationType" && publicationTypeClause) out.push(publicationTypeClause);
     if (axis !== "journal" && journalClause) out.push(journalClause);
     if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
+    if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
     return out;
   };
 
@@ -552,6 +575,17 @@ export async function searchPublications(opts: {
           },
         },
       },
+      // Issue #88 — Author facet. Top 500 mirrors the journal cap;
+      // typeahead in the client narrows further. Cardinality sub-agg
+      // surfaces the true distinct author count for the rail header
+      // (`Author 1,619`) so users see the full scope of the facet.
+      wcmAuthors: {
+        filter: { bool: { must, filter: filtersExcept("wcmAuthor") } },
+        aggs: {
+          keys: { terms: { field: "wcmAuthorCwids", size: 500 } },
+          total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
+        },
+      },
     },
   };
 
@@ -579,8 +613,57 @@ export async function searchPublications(opts: {
       wcmRoleFirst?: { doc_count: number };
       wcmRoleSenior?: { doc_count: number };
       wcmRoleMiddle?: { doc_count: number };
+      wcmAuthors?: {
+        keys: { buckets: Bucket[] };
+        total: { value: number };
+      };
     };
   };
+
+  // Issue #88 — hydrate Author facet buckets with display name + slug +
+  // avatar in a single Prisma round trip. Active selections may not
+  // appear in the top-500 result set, so include them in the lookup so
+  // the rail can pin them with a real label rather than the bare CWID.
+  const authorBuckets = r.aggregations?.wcmAuthors?.keys.buckets ?? [];
+  const facetCwids = new Set(authorBuckets.map((b) => b.key));
+  if (filters.wcmAuthor) for (const c of filters.wcmAuthor) facetCwids.add(c);
+  const facetCwidList = Array.from(facetCwids);
+  const scholarRows = facetCwidList.length === 0
+    ? []
+    : await prisma.scholar.findMany({
+        where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
+        select: { cwid: true, preferredName: true, slug: true },
+      });
+  const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
+  const wcmAuthorBuckets: WcmAuthorFacetBucket[] = authorBuckets.flatMap((b) => {
+    const s = scholarByCwid.get(b.key);
+    if (!s) return []; // scholar deleted/suppressed since the index was built
+    return [{
+      cwid: s.cwid,
+      displayName: s.preferredName,
+      slug: s.slug,
+      identityImageEndpoint: identityImageEndpoint(s.cwid),
+      count: b.doc_count,
+    }];
+  });
+  // Always surface active selections in the bucket list so the rail can
+  // render them in the pinned section even when other filters knocked
+  // their count to zero (or to a value below the top-500 cutoff).
+  if (filters.wcmAuthor) {
+    const present = new Set(wcmAuthorBuckets.map((b) => b.cwid));
+    for (const cwid of filters.wcmAuthor) {
+      if (present.has(cwid)) continue;
+      const s = scholarByCwid.get(cwid);
+      if (!s) continue;
+      wcmAuthorBuckets.push({
+        cwid: s.cwid,
+        displayName: s.preferredName,
+        slug: s.slug,
+        identityImageEndpoint: identityImageEndpoint(s.cwid),
+        count: 0,
+      });
+    }
+  }
 
   // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
   // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
@@ -633,6 +716,8 @@ export async function searchPublications(opts: {
         senior: r.aggregations?.wcmRoleSenior?.doc_count ?? 0,
         middle: r.aggregations?.wcmRoleMiddle?.doc_count ?? 0,
       },
+      wcmAuthors: wcmAuthorBuckets,
+      wcmAuthorsTotal: r.aggregations?.wcmAuthors?.total.value ?? 0,
     },
   };
 }

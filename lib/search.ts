@@ -180,6 +180,12 @@ export const publicationsIndexMapping = {
       // a paper appears in multiple buckets when distinct WCM authors
       // hold different positions.
       wcmAuthorPositions: { type: "keyword" },
+      // Issue #88 — flat keyword array of WCM author CWIDs on each pub.
+      // Denormalized from `wcmAuthors[].cwid` so the Author facet can run
+      // a cheap top-level terms aggregation with exclude-self filter
+      // semantics, identical to the wcmAuthorPositions pattern. The nested
+      // `wcmAuthors` field stays for chip rendering on result rows.
+      wcmAuthorCwids: { type: "keyword" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",

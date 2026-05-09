@@ -488,6 +488,8 @@ async function indexPublications() {
         authorNames,
         wcmAuthors,
         wcmAuthorPositions: Array.from(wcmAuthorPositions),
+        // Issue #88 — flat CWID array for the Author facet aggregation.
+        wcmAuthorCwids: wcmAuthors.map((a) => a.cwid),
       },
     });
   }
