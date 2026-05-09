@@ -16,46 +16,46 @@ datasource db {
 /// One row per actively-affiliated WCM scholar. PK is CWID.
 /// deleted_at != NULL marks a soft-deleted scholar; cleanup job hard-deletes after 60 days.
 model Scholar {
-  cwid              String    @id @db.VarChar(32)
-  preferredName     String    @map("preferred_name") @db.VarChar(255)
-  fullName          String    @map("full_name") @db.VarChar(255)
+  cwid                   String    @id @db.VarChar(32)
+  preferredName          String    @map("preferred_name") @db.VarChar(255)
+  fullName               String    @map("full_name") @db.VarChar(255)
   /// Pre-concatenated degree string from `weillCornellEduDegree` on the WOOFA
   /// faculty SOR (e.g. "MD", "MD, MPH"). Appended after preferredName as a
   /// postnominal credential at render time. Null for scholars with no SOR
   /// row (postdocs, doctoral students, non-faculty).
-  postnominal       String?   @db.VarChar(64)
-  primaryTitle      String?   @map("primary_title") @db.VarChar(255)
-  primaryDepartment String?   @map("primary_department") @db.VarChar(255)
-  email             String?   @db.VarChar(255)
-  headshotUrl       String?   @map("headshot_url") @db.VarChar(512)
-  overview          String?   @db.Text
-  overviewUpdatedAt DateTime? @map("overview_updated_at")
-  slug              String    @unique @db.VarChar(255)
-  status            String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
+  postnominal            String?   @db.VarChar(64)
+  primaryTitle           String?   @map("primary_title") @db.VarChar(255)
+  primaryDepartment      String?   @map("primary_department") @db.VarChar(255)
+  email                  String?   @db.VarChar(255)
+  headshotUrl            String?   @map("headshot_url") @db.VarChar(512)
+  overview               String?   @db.Text
+  overviewUpdatedAt      DateTime? @map("overview_updated_at")
+  slug                   String    @unique @db.VarChar(255)
+  status                 String    @default("active") @db.VarChar(32) // 'active' | 'suppressed'
   // Phase 2: derived in ED ETL per design-spec-v1.7.1.md:352-356.
   // Drives the algorithmic-surface eligibility carve (lib/eligibility.ts).
   // Nullable so the additive migration applies cleanly to existing rows;
   // ED ETL backfills on next refresh.
-  roleCategory      String?   @map("role_category") @db.VarChar(32)
+  roleCategory           String?   @map("role_category") @db.VarChar(32)
   // Phase 3: org-unit FKs from ED LDAP. Nullable so additive migration applies cleanly;
   // backfilled on next ED ETL run. Joins on codes only per LOCKED constraint.
-  deptCode          String?   @map("dept_code") @db.VarChar(64)
-  divCode           String?   @map("div_code") @db.VarChar(64)
+  deptCode               String?   @map("dept_code") @db.VarChar(64)
+  divCode                String?   @map("div_code") @db.VarChar(64)
   /// Derived from LDAP personTypeCodes — true when the scholar carries a
   /// clinical or NYP-credentialed signal, indicating they likely have a
   /// public physician profile at weillcornell.org. Drives whether the
   /// "Clinical profile →" link appears in the profile sidebar (absence-as-
   /// default per design spec v1.7.1). Backfilled on next ED ETL run.
-  hasClinicalProfile Boolean  @default(false) @map("has_clinical_profile")
+  hasClinicalProfile     Boolean   @default(false) @map("has_clinical_profile")
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).
   /// Self-referential nullable FK with onDelete: SetNull so removing the
   /// mentor scholar doesn't cascade-delete the postdoc.
-  postdoctoralMentorCwid String? @map("postdoctoral_mentor_cwid") @db.VarChar(32)
-  deletedAt         DateTime? @map("deleted_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  postdoctoralMentorCwid String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
+  deletedAt              DateTime? @map("deleted_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   appointments         Appointment[]
   educations           Education[]
@@ -183,8 +183,10 @@ model Grant {
   /// reciterdb.grant_reporter_project row. Surfaced inline in the Funding
   /// section's expanded grant view; also indexed in OpenSearch for
   /// `/search?type=funding` topic matches.
-  abstract           String?   @db.Text
-  abstractFetchedAt  DateTime? @map("abstract_fetched_at")
+  abstract          String?   @db.Text
+  abstractFetchedAt DateTime? @map("abstract_fetched_at")
+
+  publications GrantPublication[]
 
   @@index([cwid])
   @@index([cwid, endDate]) // active-first ordering
@@ -230,10 +232,43 @@ model Publication {
   authors           PublicationAuthor[]
   publicationScores PublicationScore[]
   publicationTopics PublicationTopic[]
+  grants            GrantPublication[]
 
   @@index([year])
   @@index([dateAddedToEntrez])
   @@map("publication")
+}
+
+/// Issue #85/#86 — materialized join between Grant and Publication.
+/// Bridges reciterdb.grant_provenance (where pub-grant linkages live, keyed
+/// by (personIdentifier, pmid, core_project_num)) into Postgres so the
+/// Funding API can serve pub counts and pub lists per grant without a
+/// runtime cross-DB query. Refreshed nightly by etl/reporter/index.ts.
+///
+/// sourceReporter / sourceReciterdb mirror the provenance flags:
+///   - both true     → high confidence (RePORTER + PubMed agree)
+///   - reporter only → high (RePORTER curated by grantee)
+///   - reciter only  → unconfirmed by RePORTER; UI shows "Lower confidence"
+///                     badge if reciterdbFirstSeen is older than 12 months
+///
+/// The unique key is (grantId, pmid). A pub may appear under many grants;
+/// a grant may have many pubs.
+model GrantPublication {
+  id                 String      @id @default(uuid()) @db.VarChar(64)
+  grantId            String      @map("grant_id") @db.VarChar(64)
+  grant              Grant       @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  pmid               String      @db.VarChar(32)
+  publication        Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  sourceReporter     Boolean     @default(false) @map("source_reporter")
+  sourceReciterdb    Boolean     @default(false) @map("source_reciterdb")
+  reporterFirstSeen  DateTime?   @map("reporter_first_seen")
+  reciterdbFirstSeen DateTime?   @map("reciterdb_first_seen")
+  lastRefreshedAt    DateTime    @default(now()) @map("last_refreshed_at")
+
+  @@unique([grantId, pmid])
+  @@index([grantId])
+  @@index([pmid])
+  @@map("grant_publication")
 }
 
 /// Join between scholars and publications. cwid is NULLABLE for non-WCM authors
@@ -413,7 +448,7 @@ model CenterMembership {
   source          String   @default("manual") @db.VarChar(64)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
-  center  Center  @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  center Center @relation(fields: [centerCode], references: [code], onDelete: Cascade)
 
   @@id([centerCode, cwid])
   @@index([cwid])
