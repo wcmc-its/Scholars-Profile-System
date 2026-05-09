@@ -30,6 +30,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
+import { coreProjectNum } from "@/lib/award-number";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 
 const AUTHORSHIP_WEIGHTS = {
@@ -569,22 +570,30 @@ async function indexFunding() {
     },
   });
 
-  // Group by Account_Number — the project key. All rows for one project
-  // share canonical fields by construction; the per-row variation is who
-  // is on the project (cwid + role + scholar).
+  // Group key: coreProjectNum when available, else Account_Number.
+  // InfoEd sometimes splits one NIH award across multiple Account_Numbers
+  // (rebookings, supplements, administrative continuations); coreProjectNum
+  // collapses those into one search result. Non-NIH grants fall back to
+  // Account_Number since they have no coreProjectNum.
   const byProject = new Map<string, typeof rows>();
   for (const r of rows) {
     const ext = parseExternalId(r.externalId);
     if (!ext) continue;
-    const arr = byProject.get(ext.accountNumber) ?? [];
+    const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;
+    const arr = byProject.get(key) ?? [];
     arr.push(r);
-    byProject.set(ext.accountNumber, arr);
+    byProject.set(key, arr);
   }
 
   const docs: Array<{ projectId: string; doc: Record<string, unknown> }> = [];
-  for (const projectRows of byProject.values()) {
+  for (const [key, projectRows] of byProject.entries()) {
     const doc = projectFromRows(projectRows);
-    if (doc) docs.push({ projectId: doc.projectId, doc: doc as unknown as Record<string, unknown> });
+    if (!doc) continue;
+    // Override projectId to the grouping key so the OpenSearch _id stays
+    // stable across re-indexes even when the order of merged
+    // Account_Numbers under one coreProjectNum changes.
+    doc.projectId = key;
+    docs.push({ projectId: key, doc: doc as unknown as Record<string, unknown> });
   }
 
   if (docs.length === 0) return 0;

@@ -326,6 +326,17 @@ export function projectFromRows(
   const abstract = rows.find((r) => r.abstract)?.abstract ?? null;
   const applId = rows.find((r) => r.applId)?.applId ?? null;
 
+  // Date range: union across the group. With coreProjectNum-based
+  // grouping (etl/search-index/index.ts), one project may cover
+  // multiple InfoEd Account_Numbers for renewals, no-cost extensions,
+  // and supplements — each with its own dates.
+  let earliestStart = head.startDate;
+  let latestEnd = head.endDate;
+  for (const r of rows) {
+    if (r.startDate < earliestStart) earliestStart = r.startDate;
+    if (r.endDate > latestEnd) latestEnd = r.endDate;
+  }
+
   return {
     projectId: ext.accountNumber,
     title: head.title,
@@ -344,8 +355,8 @@ export function projectFromRows(
     nihIc: head.nihIc,
     department,
     roles: Array.from(roles),
-    startDate: head.startDate.toISOString(),
-    endDate: head.endDate.toISOString(),
+    startDate: earliestStart.toISOString(),
+    endDate: latestEnd.toISOString(),
     awardNumber: head.awardNumber,
     primeSponsorRaw: head.primeSponsorRaw,
     directSponsorRaw: head.directSponsorRaw,
