@@ -172,10 +172,25 @@ model Grant {
   /// Issue #78 F6 — true when the direct sponsor differs from the prime.
   isSubaward Boolean @default(false) @map("is_subaward")
 
+  /// Issue #85/#86 — RePORTER application ID for this grant. Most recent
+  /// appl_id matching the core_project_num parsed from `awardNumber`.
+  /// Null for non-NIH grants and for NIH grants RePORTER doesn't have yet.
+  /// Use for outbound RePORTER deep-links (reporter.nih.gov/project-details/<applId>).
+  applId Int? @map("appl_id")
+
+  /// Issue #85/#86 — RePORTER project abstract. Populated for NIH grants
+  /// where the core_project_num parsed from `awardNumber` matches a
+  /// reciterdb.grant_reporter_project row. Surfaced inline in the Funding
+  /// section's expanded grant view; also indexed in OpenSearch for
+  /// `/search?type=funding` topic matches.
+  abstract           String?   @db.Text
+  abstractFetchedAt  DateTime? @map("abstract_fetched_at")
+
   @@index([cwid])
   @@index([cwid, endDate]) // active-first ordering
   @@index([primeSponsor])
   @@index([programType])
+  @@index([applId])
   @@map("grant")
 }
 

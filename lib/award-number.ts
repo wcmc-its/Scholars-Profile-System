@@ -53,3 +53,15 @@ export function parseNihAward(awardNumber: string | null | undefined): ParsedAwa
 export function isNihAwardNumber(awardNumber: string | null | undefined): boolean {
   return parseNihAward(awardNumber).mechanism !== null;
 }
+
+/** Reconstruct NIH RePORTER's `core_project_num` form from a raw NIH award
+ *  number string. RePORTER uses no spaces, no support-flag prefix, no year
+ *  suffix: e.g. "1R01 CA245678-01A1" → "R01CA245678". Returns null for
+ *  non-NIH or unparsable inputs. Used by etl/reporter/* to join Postgres
+ *  Grant rows to reciterdb.grant_reporter_project. */
+export function coreProjectNum(awardNumber: string | null | undefined): string | null {
+  if (!awardNumber) return null;
+  const m = awardNumber.trim().match(NIH_AWARD_RE);
+  if (!m) return null;
+  return `${m[1].toUpperCase()}${m[2].toUpperCase()}${m[3]}`;
+}
