@@ -364,7 +364,10 @@ function GrantRow({
                 ? `${pubCount} ${pubCount === 1 ? "publication" : "publications"}`
                 : "Show abstract"}
             </button>
-          ) : pubCount === 0 && !group.abstract ? (
+          ) : grant.coreProjectNum && pubCount === 0 && !group.abstract ? (
+            // Only NIH-funded grants get the "No publications yet" affordance —
+            // for non-NIH (industry, foundation, internal) we have no source
+            // for pub-grant linkages, so absence isn't informative.
             <div className="text-muted-foreground mt-1.5 text-xs">No publications yet</div>
           ) : null}
         </div>
