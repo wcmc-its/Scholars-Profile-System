@@ -47,14 +47,30 @@ function RoleTag({ role }: { role: string }) {
 // renderer rewrites them as <strong> with the design's typographic weight.
 // (Issue #20 — earlier code split on <em> and let <mark> tags fall through
 // as literal text.) The `overview` field can contain raw HTML (<p>, <br>,
-// etc.) from the source bios; strip all non-mark tags so they don't render
-// as literal text in the snippet.
+// &nbsp;, &amp;, etc.) from the source bios; strip non-mark tags and
+// decode the common named/numeric entities so they don't render as literal
+// text in the snippet.
 function stripHtmlTags(s: string): string {
   return s.replace(/<(?!\/?mark\b)[^>]*>/gi, "");
 }
 
+function decodeEntities(s: string): string {
+  const named: Record<string, string> = {
+    nbsp: " ",
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+  };
+  return s
+    .replace(/&(nbsp|amp|lt|gt|quot|apos);/gi, (_, n) => named[n.toLowerCase()] ?? "")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)));
+}
+
 function HighlightedSnippet({ html }: { html: string }) {
-  const cleaned = stripHtmlTags(html);
+  const cleaned = decodeEntities(stripHtmlTags(html));
   return (
     <>
       {cleaned.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
