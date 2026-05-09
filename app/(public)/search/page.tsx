@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { ChevronDown } from "lucide-react";
 import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
+import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
@@ -725,6 +726,21 @@ async function PublicationsResults({
               else sp.set("sort", value);
             })
           }
+          extraControls={
+            <ExportButton
+              q={q}
+              filters={{
+                yearMin,
+                yearMax,
+                publicationType: publicationType || undefined,
+                journal: journal.length > 0 ? journal : undefined,
+                wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+                wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+              }}
+              sort={sort}
+              total={result.total}
+            />
+          }
         />
         {result.hits.length === 0 ? (
           <EmptyState
@@ -1236,6 +1252,7 @@ function ResultsToolbar({
   sort,
   buildSortHref,
   hasActiveFilters,
+  extraControls,
 }: {
   tab: "people" | "publications";
   total: number;
@@ -1244,6 +1261,8 @@ function ResultsToolbar({
   sort: PeopleSort | PublicationsSort;
   buildSortHref: (value: string) => string;
   hasActiveFilters: boolean;
+  /** Optional trailing controls rendered before the Sort group (#89 — Export). */
+  extraControls?: React.ReactNode;
 }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
@@ -1273,9 +1292,12 @@ function ResultsToolbar({
           <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong> {noun}
         </span>
       ) : null}
-      <span className="ml-auto inline-flex items-center gap-2 text-[#4a4a4a]">
-        Sort:
-        <SortLinks current={sort} options={opts} buildSortHref={buildSortHref} />
+      <span className="ml-auto inline-flex items-center gap-3 text-[#4a4a4a]">
+        {extraControls}
+        <span className="inline-flex items-center gap-2">
+          Sort:
+          <SortLinks current={sort} options={opts} buildSortHref={buildSortHref} />
+        </span>
       </span>
     </div>
   );

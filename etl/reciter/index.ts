@@ -52,12 +52,60 @@ type ArticleRow = {
   datePublicationAddedToEntrez: string | null;
   doi: string | null;
   pmcid: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+};
+
+type AuthorListRow = {
+  pmid: number;
+  rank: number;
+  authorLastName: string | null;
+  authorFirstName: string | null;
+};
+
+type JournalAbbrevRow = {
+  pmid: number;
+  journalTitleISOabbreviation: string | null;
 };
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
 
 type KeywordRow = { pmid: number; keyword: string; ui: string | null };
 type MeshKeyword = { ui: string | null; label: string };
+
+/**
+ * Issue #89 — derive PubMed-style initials ("GA", "JWF") from a full
+ * first-name string ("G A", "James W F", "Jean-Marc"). Drops dots and
+ * splits on whitespace + hyphens so compound names get one initial per
+ * part. Empty input → empty string.
+ */
+function deriveInitials(firstName: string | null | undefined): string {
+  if (!firstName) return "";
+  return firstName
+    .replace(/\./g, "")
+    .split(/[\s\-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+/**
+ * Compose PubMed-style author list from per-rank rows. Output:
+ * `Lastname I, Lastname IJ, Lastname I` — the format Vancouver expects.
+ */
+function composeAuthorString(rows: AuthorListRow[]): string | null {
+  if (rows.length === 0) return null;
+  const sorted = [...rows].sort((a, b) => a.rank - b.rank);
+  const tokens: string[] = [];
+  for (const r of sorted) {
+    const last = (r.authorLastName ?? "").trim();
+    const initials = deriveInitials(r.authorFirstName);
+    if (!last) continue;
+    tokens.push(initials ? `${last} ${initials}` : last);
+  }
+  return tokens.length > 0 ? tokens.join(", ") : null;
+}
 
 const IN_BATCH = 500; // batch size for IN (...) clauses
 const INSERT_BATCH = 1000;
@@ -144,7 +192,8 @@ async function main() {
         const rows = (await conn.query(
           `SELECT pmid, articleTitle, journalTitleVerbose, articleYear,
                   publicationTypeCanonical, citationCountScopus,
-                  datePublicationAddedToEntrez, doi, pmcid
+                  datePublicationAddedToEntrez, doi, pmcid,
+                  volume, issue, pages
            FROM analysis_summary_article
            WHERE pmid IN (?)`,
           [batch],
@@ -173,6 +222,60 @@ async function main() {
       });
     }
     console.log(`Got ${abstractByPmid.size} abstracts.`);
+
+    // Issue #89 — full author list for the Word bibliography. We pull
+    // structured per-rank rows from analysis_summary_author_list (which
+    // has full first names like "Gregory A") so we can derive proper
+    // PubMed initials ("GA") rather than relying on the truncated
+    // single-letter form in analysis_summary_author_all.
+    const authorRowsByPmid = new Map<number, AuthorListRow[]>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      await withReciterConnection(async (conn) => {
+        const rows = (await conn.query(
+          `SELECT pmid, rank, authorLastName, authorFirstName
+             FROM analysis_summary_author_list
+            WHERE pmid IN (?)`,
+          [batch],
+        )) as AuthorListRow[];
+        for (const r of rows) {
+          const key = Number(r.pmid);
+          const list = authorRowsByPmid.get(key) ?? [];
+          list.push(r);
+          authorRowsByPmid.set(key, list);
+        }
+      });
+    }
+    const fullAuthorsByPmid = new Map<number, string>();
+    for (const [pmid, rows] of authorRowsByPmid) {
+      const composed = composeAuthorString(rows);
+      if (composed) fullAuthorsByPmid.set(pmid, composed);
+    }
+    console.log(`Got ${fullAuthorsByPmid.size} full-author strings.`);
+
+    // Issue #89 — NLM journal abbreviation. person_article carries the
+    // ISO abbreviation per pmid (despite the name, it's the NLM-style
+    // form: "Proc Natl Acad Sci U S A"). Distinct per pmid; pick first
+    // non-null sighting.
+    const journalAbbrevByPmid = new Map<number, string>();
+    for (const batch of chunks(distinctPmids, IN_BATCH)) {
+      await withReciterConnection(async (conn) => {
+        const rows = (await conn.query(
+          `SELECT DISTINCT pmid, journalTitleISOabbreviation
+             FROM person_article
+            WHERE pmid IN (?) AND journalTitleISOabbreviation IS NOT NULL
+                  AND journalTitleISOabbreviation <> ''`,
+          [batch],
+        )) as JournalAbbrevRow[];
+        for (const r of rows) {
+          const key = Number(r.pmid);
+          if (journalAbbrevByPmid.has(key)) continue;
+          if (r.journalTitleISOabbreviation) {
+            journalAbbrevByPmid.set(key, r.journalTitleISOabbreviation);
+          }
+        }
+      });
+    }
+    console.log(`Got ${journalAbbrevByPmid.size} journal abbreviations.`);
 
     // Issue #73 — pull MeSH keywords for the same pmid set so the profile
     // loader can derive the Topics section without a runtime join. Keywords
@@ -223,6 +326,7 @@ async function main() {
         pmid: String(a.pmid),
         title: a.articleTitle ?? `(untitled, pmid ${a.pmid})`,
         authorsString,
+        fullAuthorsString: fullAuthorsByPmid.get(Number(a.pmid)) ?? null,
         journal: a.journalTitleVerbose,
         year: a.articleYear,
         publicationType: a.publicationTypeCanonical,
@@ -230,6 +334,10 @@ async function main() {
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
         pmcid: a.pmcid,
+        volume: a.volume,
+        issue: a.issue,
+        pages: a.pages,
+        journalAbbrev: journalAbbrevByPmid.get(Number(a.pmid)) ?? null,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
         abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
         meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,

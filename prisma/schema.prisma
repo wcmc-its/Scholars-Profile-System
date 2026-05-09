@@ -206,6 +206,13 @@ model Publication {
   pmid              String    @id @db.VarChar(32)
   title             String    @db.Text
   authorsString     String?   @map("authors_string") @db.VarChar(2000)
+  /// Full author list (no truncation) sourced from
+  /// `reciterdb.analysis_summary_author_all.authors` and reformatted
+  /// from pipe-separated `Lastname, Initials` to comma-separated
+  /// `Lastname Initials`. Used by the Word bibliography export (#89)
+  /// where citations need every author present, including middle
+  /// authors that the truncated `authorsString` drops.
+  fullAuthorsString String?   @map("full_authors_string") @db.Text
   journal           String?   @db.VarChar(512)
   year              Int?
   publicationType   String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
@@ -216,6 +223,18 @@ model Publication {
   /// Sourced from `analysis_summary_article.pmcid`. Surfaced on publication
   /// cards alongside DOI/PMID; signals NIH public-access compliance.
   pmcid             String?   @db.VarChar(32)
+  /// Issue #89 — Vancouver-style citation fields. Sourced from
+  /// `analysis_summary_article.{volume,issue,pages}`. Stored as varchar
+  /// since they're free-form ("12", "Suppl 1", "S5", "538-40").
+  volume            String?   @db.VarChar(64)
+  issue             String?   @db.VarChar(128)
+  pages             String?   @db.VarChar(128)
+  /// NLM/Index Medicus journal abbreviation (e.g., "Proc Natl Acad Sci U S A").
+  /// Sourced from `reciterdb.person_article.journalTitleISOabbreviation` —
+  /// despite the field name, the values are the standard NLM abbreviation
+  /// form (no periods between abbreviated words). Used by the Word
+  /// bibliography export; falls back to `journal` (full title) when null.
+  journalAbbrev     String?   @map("journal_abbrev") @db.VarChar(200)
   pubmedUrl         String?   @map("pubmed_url") @db.VarChar(512)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
