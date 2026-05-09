@@ -12,10 +12,17 @@
  *        - Fallback: fuzzy name match against the global pool of
  *          scholars with at least one NIH grant.
  *
- *   3. For each (profile_id, cwid) pair, pick `is_preferred` per cwid
+ *   3. PI-name query (subaward path). For NIH-grant-having scholars
+ *      still unmapped after passes 1+2 — typically because their WCM
+ *      grants are subawards on someone else's prime — query
+ *      `pi_names: [{first_name, last_name}]` against /projects/search.
+ *      Scan returned projects' `principal_investigators[]` for the
+ *      matching name and pull the dominant profile_id.
+ *
+ *   4. For each (profile_id, cwid) pair, pick `is_preferred` per cwid
  *      using the most-recent project_end_date as tiebreaker.
  *
- *   4. Upsert into `person_nih_profile`. Updates `last_verified` on
+ *   5. Upsert into `person_nih_profile`. Updates `last_verified` on
  *      every run; preserves `first_seen` on existing rows.
  *
  * Modes:
@@ -27,10 +34,17 @@
  */
 import { prisma } from "../../lib/db";
 import { coreProjectNum } from "@/lib/award-number";
-import { iterateWcmProjects, type ReporterPI, type ReporterProject } from "./fetcher";
+import {
+  iterateWcmProjects,
+  searchProjectsByPiName,
+  sleepBetweenRequests,
+  type ReporterPI,
+  type ReporterProject,
+} from "./fetcher";
 import {
   aggregatePreferred,
   resolveByNameFallback,
+  resolveByPiNameQuery,
   resolveProjectGrantJoin,
   type GrantRowForResolution,
   type ResolvedObservation,
@@ -41,6 +55,20 @@ function currentFiscalYear(): number {
   const now = new Date();
   const y = now.getUTCFullYear();
   return now.getUTCMonth() >= 9 ? y + 1 : y;
+}
+
+/** Split Scholar.fullName into the (first_name, last_name) pair NIH
+ *  RePORTER's `pi_names` filter expects. Strips postnominal segments
+ *  after the first comma ("Smith, MD" → "Smith"); takes first
+ *  whitespace-token as first_name and last token as last_name (so
+ *  "Maria T. Diaz-Meco" → first="Maria", last="Diaz-Meco"). The rare
+ *  multi-word particle surnames ("van der Berg") slip through with
+ *  last="Berg"; acceptable long-tail miss. */
+function parseFirstLast(fullName: string): { firstName: string; lastName: string } {
+  const noPostnom = fullName.split(/,\s*/)[0] ?? fullName;
+  const tokens = noPostnom.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length < 2) return { firstName: "", lastName: "" };
+  return { firstName: tokens[0]!, lastName: tokens[tokens.length - 1]! };
 }
 
 async function loadGrantsByCoreProjectNum(): Promise<Map<string, GrantRowForResolution[]>> {
@@ -145,7 +173,57 @@ async function main() {
   console.log(`  ${nameMatched} resolved via name-match fallback.`);
   console.log(`  ${unresolvedPis.length - nameMatched} unresolvable (no grant-join, no unique name match).\n`);
 
-  // Pass 3: aggregate per (cwid, profile_id), pick is_preferred.
+  // Pass 3: PI-name query for NIH-grant scholars still unmapped after
+  // passes 1+2. Catches subaward holders whose prime grants live under
+  // another institution's org. Skipped for non-NIH-grant scholars to
+  // keep API load proportional — RePORTER returns nothing useful for
+  // names with no NIH funding history.
+  console.log("Pass 3 (subaward path): querying RePORTER by PI name for unmapped NIH-grant scholars...");
+  const mappedCwids = new Set(observations.map((o) => o.cwid));
+  const unmappedNihScholars = nihPool.filter((s) => !mappedCwids.has(s.cwid));
+  console.log(`  ${unmappedNihScholars.length} unmapped NIH-grant scholars to probe.`);
+
+  let nameQueryResolved = 0;
+  let nameQuerySkipped = 0;
+  let processed = 0;
+  for (const scholar of unmappedNihScholars) {
+    const { firstName, lastName } = parseFirstLast(scholar.fullName);
+    if (!firstName || !lastName) {
+      nameQuerySkipped++;
+      continue;
+    }
+    let results: ReporterProject[];
+    try {
+      results = await searchProjectsByPiName({ firstName, lastName });
+    } catch (err) {
+      console.warn(`  pi_names query failed for ${scholar.cwid} (${scholar.fullName}):`, err);
+      await sleepBetweenRequests();
+      continue;
+    }
+    const resolved = resolveByPiNameQuery(scholar.fullName, results);
+    if (resolved) {
+      nameQueryResolved++;
+      observations.push({
+        profileId: resolved.profileId,
+        cwid: scholar.cwid,
+        fullName: scholar.fullName,
+        projectEndDate: resolved.latestEndDate,
+        resolutionSource: "name_query",
+      });
+    }
+    processed++;
+    if (processed % 50 === 0) {
+      console.log(`  ...probed ${processed}/${unmappedNihScholars.length} (${nameQueryResolved} resolved so far)`);
+    }
+    await sleepBetweenRequests();
+  }
+  console.log(`  ${nameQueryResolved} resolved via pi_names query.`);
+  if (nameQuerySkipped > 0) {
+    console.log(`  ${nameQuerySkipped} skipped (could not parse first/last from fullName).`);
+  }
+  console.log(`  ${unmappedNihScholars.length - nameQueryResolved - nameQuerySkipped} still unmapped.\n`);
+
+  // Pass 4: aggregate per (cwid, profile_id), pick is_preferred.
   const aggregated = aggregatePreferred(observations);
   console.log(`Writing ${aggregated.length} (cwid, profile_id) rows to person_nih_profile...`);
 

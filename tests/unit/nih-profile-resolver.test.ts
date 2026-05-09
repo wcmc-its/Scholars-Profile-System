@@ -3,6 +3,7 @@ import {
   aggregatePreferred,
   namesMatch,
   resolveByNameFallback,
+  resolveByPiNameQuery,
   resolveProjectGrantJoin,
   type GrantRowForResolution,
   type ResolvedObservation,
@@ -211,5 +212,74 @@ describe("aggregatePreferred", () => {
         resolutionSource: "grant_join_contact",
       },
     ]);
+  });
+});
+
+describe("resolveByPiNameQuery", () => {
+  it("returns the dominant profile_id from name-matched entries across results", () => {
+    const results: ReporterProject[] = [
+      project({
+        core_project_num: "R01CA001",
+        project_end_date: "2024-06-30",
+        principal_investigators: [
+          pi({ profile_id: 555, full_name: "Stephen M Kanne", is_contact_pi: true }),
+        ],
+      }),
+      project({
+        core_project_num: "P50HD002",
+        project_end_date: "2027-06-30",
+        principal_investigators: [
+          pi({ profile_id: 555, full_name: "Stephen M Kanne", is_contact_pi: true }),
+        ],
+      }),
+    ];
+    const out = resolveByPiNameQuery("Stephen Kanne", results);
+    expect(out).toEqual({ profileId: 555, latestEndDate: "2027-06-30" });
+  });
+
+  it("returns null when no PI in any result name-matches the scholar", () => {
+    const results: ReporterProject[] = [
+      project({
+        core_project_num: "R01CA999",
+        principal_investigators: [
+          pi({ profile_id: 999, full_name: "Different Person", is_contact_pi: true }),
+        ],
+      }),
+    ];
+    expect(resolveByPiNameQuery("Stephen Kanne", results)).toBeNull();
+  });
+
+  it("returns null on a genuine tie between two distinct profile_ids", () => {
+    // Two profile_ids each matching once with the same end_date — ambiguous.
+    const results: ReporterProject[] = [
+      project({
+        core_project_num: "R01A",
+        project_end_date: "2025-01-01",
+        principal_investigators: [pi({ profile_id: 100, full_name: "John Smith", is_contact_pi: true })],
+      }),
+      project({
+        core_project_num: "R01B",
+        project_end_date: "2025-01-01",
+        principal_investigators: [pi({ profile_id: 200, full_name: "John Smith", is_contact_pi: true })],
+      }),
+    ];
+    expect(resolveByPiNameQuery("John Smith", results)).toBeNull();
+  });
+
+  it("breaks frequency ties using the most-recent project_end_date", () => {
+    const results: ReporterProject[] = [
+      project({
+        core_project_num: "R01A",
+        project_end_date: "2020-01-01",
+        principal_investigators: [pi({ profile_id: 100, full_name: "Jane Doe", is_contact_pi: true })],
+      }),
+      project({
+        core_project_num: "R01B",
+        project_end_date: "2027-01-01",
+        principal_investigators: [pi({ profile_id: 200, full_name: "Jane Doe", is_contact_pi: true })],
+      }),
+    ];
+    const out = resolveByPiNameQuery("Jane Doe", results);
+    expect(out?.profileId).toBe(200);
   });
 });

@@ -1,7 +1,7 @@
 /**
  * Issue #90 — resolve NIH RePORTER `profile_id` to a WCM `cwid`.
  *
- * Two-tier resolution:
+ * Three-tier resolution:
  *
  *   1. Grant-join (primary, high confidence). For each NIH RePORTER
  *      project we know the core_project_num. We have Grant rows in our
@@ -9,11 +9,19 @@
  *      attributed to the project. Pair the project's PIs with those
  *      grant rows: the Grant row's `cwid` is the answer.
  *
- *   2. Name-match fallback (lower confidence). For PIs that don't pair
- *      cleanly via grant-join — typically because the awardNumber on the
- *      WCM Grant row didn't parse to the project's core_project_num —
+ *   2. Name-match fallback (lower confidence). For PIs in the WCM-org
+ *      walk that don't pair cleanly via grant-join — typically because
+ *      the awardNumber didn't parse to the project's core_project_num —
  *      fuzzy-match the RePORTER `full_name` against scholars who have at
  *      least one NIH grant in our DB.
+ *
+ *   3. PI-name query (subaward path). For unmapped scholars after passes
+ *      1+2, query RePORTER's `pi_names` filter directly. Catches WCM
+ *      researchers who hold subawards on someone else's prime grant —
+ *      the prime project's `principal_investigators[]` doesn't list
+ *      sub-PIs, but a name query indexes them and surfaces projects
+ *      where they were contact PI elsewhere (previous institution, prior
+ *      R01). The profile_id on those entries is what we need.
  *
  * Resolution source is recorded on each row of `person_nih_profile` so
  * the curator review queue can surface low-confidence matches without
@@ -21,7 +29,11 @@
  */
 import type { ReporterPI, ReporterProject } from "./fetcher";
 
-export type ResolutionSource = "grant_join_contact" | "grant_join_pi" | "name_match";
+export type ResolutionSource =
+  | "grant_join_contact"
+  | "grant_join_pi"
+  | "name_match"
+  | "name_query";
 
 export type ResolvedObservation = {
   profileId: number;
@@ -178,6 +190,64 @@ export function resolveByNameFallback(
   return null;
 }
 
+/** Pick a profile_id for a single scholar from a batch of pi_names
+ *  search results. Scans each project's `principal_investigators[]` for
+ *  PIs whose full_name matches the scholar's full_name. Returns the
+ *  most-frequent profile_id (with most-recent end_date as tiebreaker)
+ *  along with the matching project's end_date for is_preferred sort.
+ *
+ *  Returns null on:
+ *    - No PI in the result set name-matches the scholar
+ *    - Multiple distinct profile_ids tie for both frequency and end_date
+ *      (genuine ambiguity — better unmapped than wrongly mapped) */
+export function resolveByPiNameQuery(
+  scholarFullName: string,
+  results: ReporterProject[],
+): { profileId: number; latestEndDate: string | null } | null {
+  type Stat = { count: number; latestEnd: string };
+  const byProfileId = new Map<number, Stat>();
+  for (const project of results) {
+    for (const pi of project.principal_investigators) {
+      const piName = reporterPiName(pi);
+      if (!piName || !namesMatch(piName, scholarFullName)) continue;
+      const cur = byProfileId.get(pi.profile_id);
+      const end = project.project_end_date ?? "0000-00-00";
+      if (!cur) {
+        byProfileId.set(pi.profile_id, { count: 1, latestEnd: end });
+      } else {
+        cur.count += 1;
+        if (end > cur.latestEnd) cur.latestEnd = end;
+      }
+    }
+  }
+  if (byProfileId.size === 0) return null;
+  // Pick winner: most-frequent profile_id; tiebreak by latest end_date.
+  let winner: { profileId: number; count: number; latestEnd: string } | null = null;
+  let tiedAtTop = false;
+  for (const [profileId, stat] of byProfileId.entries()) {
+    if (!winner) {
+      winner = { profileId, ...stat };
+      continue;
+    }
+    if (stat.count > winner.count) {
+      winner = { profileId, ...stat };
+      tiedAtTop = false;
+    } else if (stat.count === winner.count) {
+      if (stat.latestEnd > winner.latestEnd) {
+        winner = { profileId, ...stat };
+        tiedAtTop = false;
+      } else if (stat.latestEnd === winner.latestEnd) {
+        tiedAtTop = true; // genuinely ambiguous
+      }
+    }
+  }
+  if (tiedAtTop || !winner) return null;
+  return {
+    profileId: winner.profileId,
+    latestEndDate: winner.latestEnd === "0000-00-00" ? null : winner.latestEnd,
+  };
+}
+
 /** Given a stream of (profile_id, cwid) observations, pick the
  *  preferred mapping for each cwid. When a scholar has more than one
  *  profile_id (rare), the one tied to the most recent project end-date
@@ -195,6 +265,7 @@ export function aggregatePreferred(observations: ResolvedObservation[]): Array<{
     grant_join_contact: 0,
     grant_join_pi: 1,
     name_match: 2,
+    name_query: 3,
   };
   const byPair = new Map<
     string,

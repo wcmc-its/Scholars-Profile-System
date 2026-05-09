@@ -132,3 +132,67 @@ export async function* iterateWcmProjects(opts: {
     await sleep(REQ_DELAY_MS);
   }
 }
+
+/**
+ * Issue #90 (subaward path) — search RePORTER by PI name. Recovers
+ * scholars who hold WCM subawards on someone else's prime grant: the
+ * sub-PI doesn't appear in the prime project's `principal_investigators[]`,
+ * but RePORTER's `pi_names` filter indexes them. The matched results
+ * carry `principal_investigators[]` from projects where the scholar was
+ * the contact PI elsewhere (previous institution, prior R01, etc.) — and
+ * those entries carry the same profile_id we need.
+ *
+ * Caller passes one (firstName, lastName) per call. Single-page only —
+ * if a scholar has more than 500 NIH projects we'd hit edge cases worth
+ * investigating manually anyway.
+ */
+export async function searchProjectsByPiName(opts: {
+  firstName: string;
+  lastName: string;
+}): Promise<ReporterProject[]> {
+  const resp = await fetch(NIH_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      criteria: {
+        pi_names: [{ first_name: opts.firstName, last_name: opts.lastName }],
+      },
+      include_fields: [
+        "ApplId",
+        "CoreProjectNum",
+        "ProjectEndDate",
+        "PrincipalInvestigators",
+      ],
+      limit: PAGE_LIMIT,
+      offset: 0,
+    }),
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    throw new Error(
+      `NIH RePORTER pi_names search failed: HTTP ${resp.status} (${opts.firstName} ${opts.lastName})`,
+    );
+  }
+  const data = (await resp.json()) as {
+    results?: Array<{
+      appl_id: number;
+      core_project_num: string | null;
+      project_end_date: string | null;
+      principal_investigators?: ReporterPI[];
+    }>;
+  };
+  return (data.results ?? []).map((r) => ({
+    appl_id: r.appl_id,
+    core_project_num: r.core_project_num,
+    project_end_date: r.project_end_date,
+    principal_investigators: (r.principal_investigators ?? []).filter(
+      (pi) => typeof pi.profile_id === "number" && pi.profile_id > 0,
+    ),
+  }));
+}
+
+/** Sleep helper — exposed so the orchestrator can throttle batch loops
+ *  without re-importing setTimeout. */
+export function sleepBetweenRequests(): Promise<void> {
+  return sleep(REQ_DELAY_MS);
+}
