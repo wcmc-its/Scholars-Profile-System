@@ -46,11 +46,18 @@ function RoleTag({ role }: { role: string }) {
 // The OpenSearch query in lib/api/search.ts wraps matches in <mark>; this
 // renderer rewrites them as <strong> with the design's typographic weight.
 // (Issue #20 — earlier code split on <em> and let <mark> tags fall through
-// as literal text.)
+// as literal text.) The `overview` field can contain raw HTML (<p>, <br>,
+// etc.) from the source bios; strip all non-mark tags so they don't render
+// as literal text in the snippet.
+function stripHtmlTags(s: string): string {
+  return s.replace(/<(?!\/?mark\b)[^>]*>/gi, "");
+}
+
 function HighlightedSnippet({ html }: { html: string }) {
+  const cleaned = stripHtmlTags(html);
   return (
     <>
-      {html.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
+      {cleaned.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
         part.startsWith("<mark>") ? (
           <strong key={i} className="font-semibold text-[#1a1a1a]">
             {part.replace(/<\/?mark>/g, "")}
