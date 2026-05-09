@@ -147,6 +147,26 @@ export function PublicationsSection({
     return keys;
   }, [pubGroups, filterActive]);
 
+  // Issue #83 — when no filter is active, expand year groups from most
+  // recent down until at least DEFAULT_OPEN_TARGET publications are
+  // visible. If the most recent group already meets the target, only it
+  // opens; sparse-recent profiles get a couple of years opened so the
+  // page never lands with fewer than five pubs visible. Filter-active
+  // (incl. search) paths are handled by `recentGroupKeys` and
+  // `searchActive` above and take precedence over this default.
+  const DEFAULT_OPEN_TARGET = 5;
+  const defaultOpenKeys = useMemo(() => {
+    if (filterActive || pubGroups.length === 0) return new Set<string>();
+    const keys = new Set<string>();
+    let visible = 0;
+    for (const g of pubGroups) {
+      keys.add(g.key);
+      visible += g.count;
+      if (visible >= DEFAULT_OPEN_TARGET) break;
+    }
+    return keys;
+  }, [pubGroups, filterActive]);
+
   return (
     <>
       {/* Toolbar: type chips + search */}
@@ -194,8 +214,11 @@ export function PublicationsSection({
         </div>
       ) : (
         <div className="divide-y divide-border">
-          {pubGroups.map((g, gi) => {
-            const open = searchActive || gi === 0 || recentGroupKeys.has(g.key);
+          {pubGroups.map((g) => {
+            const open =
+              searchActive ||
+              recentGroupKeys.has(g.key) ||
+              defaultOpenKeys.has(g.key);
             // Bake the controlling flags into the React key so toggling them
             // re-mounts the <details> element, letting the new `open` value
             // win over the user's accumulated click state. Without this,
