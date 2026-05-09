@@ -7,7 +7,7 @@ import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { sanitizePubTitle } from "@/lib/utils";
-import { ExpandedGrant } from "@/components/funding/expanded-grant";
+import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
 /**
@@ -161,7 +161,7 @@ export function FundingResultRow({
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
-            className="mt-1.5 inline-flex items-center gap-1 text-[13px] text-[var(--color-accent-slate)] hover:underline"
+            className="group mt-1.5 inline-flex items-center gap-1 text-[13px] text-[var(--color-accent-slate)]"
             aria-expanded={expanded}
           >
             <span
@@ -171,9 +171,9 @@ export function FundingResultRow({
             >
               ▶
             </span>
-            {hit.pubCount > 0
-              ? `${hit.pubCount} ${hit.pubCount === 1 ? "publication" : "publications"}`
-              : "Show abstract"}
+            <span className="group-hover:underline">
+              {expandLabel(hit.pubCount, !!hit.abstract)}
+            </span>
           </button>
         ) : null}
 

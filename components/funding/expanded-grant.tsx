@@ -21,6 +21,16 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
 const PUBS_INITIAL = 5;
 const ABSTRACT_TRUNCATE_LINES = 3;
 
+/** Label for the chevron-prefixed expand button. Single source of truth
+ *  used by both the profile grant rows and the funding search rows so
+ *  the wording stays consistent across surfaces. */
+export function expandLabel(pubCount: number, hasAbstract: boolean): string {
+  const pubs = `${pubCount} ${pubCount === 1 ? "publication" : "publications"}`;
+  if (pubCount > 0 && hasAbstract) return `Abstract & ${pubs}`;
+  if (pubCount > 0) return pubs;
+  return "Abstract";
+}
+
 export type GrantPubItem = {
   pmid: string;
   title: string;

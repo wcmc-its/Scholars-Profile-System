@@ -8,7 +8,7 @@ import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
-import { ExpandedGrant } from "@/components/funding/expanded-grant";
+import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -348,7 +348,7 @@ function GrantRow({
             <button
               type="button"
               onClick={() => setExpanded((e) => !e)}
-              className="mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+              className="group mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)]"
               aria-expanded={expanded}
             >
               <span
@@ -358,9 +358,9 @@ function GrantRow({
               >
                 ▶
               </span>
-              {pubCount > 0
-                ? `${pubCount} ${pubCount === 1 ? "publication" : "publications"}`
-                : "Show abstract"}
+              <span className="group-hover:underline">
+                {expandLabel(pubCount, !!group.abstract)}
+              </span>
             </button>
           ) : grant.coreProjectNum && pubCount === 0 && !group.abstract ? (
             // Only NIH-funded grants get the "No publications yet" affordance —
