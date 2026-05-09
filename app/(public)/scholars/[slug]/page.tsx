@@ -191,6 +191,34 @@ export default async function ScholarProfilePage({
             </SidebarCard>
           ) : null}
 
+          {profile.postdoctoralMentor ? (
+            <SidebarCard title="Postdoctoral Mentor">
+              <a
+                href={`/scholars/${profile.postdoctoralMentor.slug}`}
+                className="flex items-center gap-3 rounded-md bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/60"
+              >
+                <HeadshotAvatar
+                  size="sm"
+                  cwid={profile.postdoctoralMentor.cwid}
+                  preferredName={profile.postdoctoralMentor.publishedName}
+                  identityImageEndpoint={
+                    profile.postdoctoralMentor.identityImageEndpoint
+                  }
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">
+                    {profile.postdoctoralMentor.publishedName}
+                  </div>
+                  {profile.postdoctoralMentor.primaryTitle ? (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {profile.postdoctoralMentor.primaryTitle}
+                    </div>
+                  ) : null}
+                </div>
+              </a>
+            </SidebarCard>
+          ) : null}
+
           {activeAppointments.length > 0 ? (
             <SidebarCard title="Appointments">
               <ul className="flex flex-col gap-3">

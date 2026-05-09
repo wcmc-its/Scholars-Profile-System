@@ -221,6 +221,16 @@ export type ProfilePayload = {
   }>;
   highlights: ProfilePublication[]; // top-3 first/senior, ranked by selected_highlights curve
   publications: ProfilePublication[]; // every confirmed authorship, year desc → dateAddedToEntrez desc
+  /** Issue #5 — postdoctoral mentor, populated only for scholars whose
+   *  roleCategory is 'postdoc' AND whose mentor resolves to an active
+   *  scholar. Drives the sidebar "Postdoctoral Mentor" card. */
+  postdoctoralMentor: {
+    cwid: string;
+    slug: string;
+    publishedName: string;
+    primaryTitle: string | null;
+    identityImageEndpoint: string;
+  } | null;
 };
 
 /**
@@ -305,6 +315,20 @@ export async function getScholarFullProfileBySlug(
       },
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+      },
+      // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
+      // soft-deleted / suppressed mentors at the API layer so the card
+      // never points at a hidden profile.
+      postdoctoralMentor: {
+        select: {
+          cwid: true,
+          slug: true,
+          preferredName: true,
+          postnominal: true,
+          primaryTitle: true,
+          deletedAt: true,
+          status: true,
+        },
       },
     },
   });
@@ -511,6 +535,22 @@ export async function getScholarFullProfileBySlug(
     })),
     highlights,
     publications,
+    postdoctoralMentor:
+      scholar.postdoctoralMentor &&
+      scholar.postdoctoralMentor.deletedAt === null &&
+      scholar.postdoctoralMentor.status === "active"
+        ? {
+            cwid: scholar.postdoctoralMentor.cwid,
+            slug: scholar.postdoctoralMentor.slug,
+            publishedName: scholar.postdoctoralMentor.postnominal
+              ? `${scholar.postdoctoralMentor.preferredName}, ${scholar.postdoctoralMentor.postnominal}`
+              : scholar.postdoctoralMentor.preferredName,
+            primaryTitle: scholar.postdoctoralMentor.primaryTitle ?? null,
+            identityImageEndpoint: identityImageEndpoint(
+              scholar.postdoctoralMentor.cwid,
+            ),
+          }
+        : null,
   };
 }
 

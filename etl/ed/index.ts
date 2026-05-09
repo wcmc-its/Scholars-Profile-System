@@ -755,6 +755,57 @@ async function main() {
       });
       adminOverridesApplied += 1;
     }
+    // Issue #5 — postdoctoral mentor pass. For every active postdoc whose
+    // employee-SOR record carries a manager DN, record the manager's CWID on
+    // Scholar.postdoctoralMentorCwid — but only if the mentor is also in the
+    // scholar table (the self-FK requires it). Run after the main upsert
+    // loop so faculty mentors are guaranteed present. Always write — even
+    // when the value is null — so a postdoc whose mentor changes (or
+    // graduates out) gets the field cleared on the next run.
+    {
+      const postdocs = await prisma.scholar.findMany({
+        where: { roleCategory: "postdoc", deletedAt: null, status: "active" },
+        select: { cwid: true },
+      });
+      const knownCwids = new Set(
+        (
+          await prisma.scholar.findMany({
+            where: { deletedAt: null, status: "active" },
+            select: { cwid: true },
+          })
+        ).map((s) => s.cwid),
+      );
+      let mentorAssignments = 0;
+      let mentorOrphans = 0;
+      for (const p of postdocs) {
+        const managerCwid = managerByCwid.get(p.cwid) ?? null;
+        let nextMentorCwid: string | null = null;
+        if (managerCwid && knownCwids.has(managerCwid)) {
+          nextMentorCwid = managerCwid;
+        } else if (managerCwid) {
+          mentorOrphans += 1;
+        }
+        await prisma.scholar.update({
+          where: { cwid: p.cwid },
+          data: { postdoctoralMentorCwid: nextMentorCwid },
+        });
+        if (nextMentorCwid) mentorAssignments += 1;
+      }
+      // Clear stale mentor pointers on non-postdocs in case roleCategory
+      // flipped postdoc → faculty between runs.
+      const cleared = await prisma.scholar.updateMany({
+        where: {
+          NOT: { roleCategory: "postdoc" },
+          postdoctoralMentorCwid: { not: null },
+        },
+        data: { postdoctoralMentorCwid: null },
+      });
+      console.log(
+        `[ED] postdoctoral mentor: ${mentorAssignments} assigned across ${postdocs.length} active postdocs (` +
+          `${mentorOrphans} manager DNs not in scholar table; ${cleared.count} stale pointers cleared)`,
+      );
+    }
+
     if (adminOverridesApplied > 0) {
       console.log(
         `[ED] applied ${adminOverridesApplied} admin-dept leader override(s) (issue #58)`,

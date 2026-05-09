@@ -47,6 +47,12 @@ model Scholar {
   /// "Clinical profile →" link appears in the profile sidebar (absence-as-
   /// default per design spec v1.7.1). Backfilled on next ED ETL run.
   hasClinicalProfile Boolean  @default(false) @map("has_clinical_profile")
+  /// Issue #5 — postdoc mentor (manager) CWID, populated only when
+  /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
+  /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).
+  /// Self-referential nullable FK with onDelete: SetNull so removing the
+  /// mentor scholar doesn't cascade-delete the postdoc.
+  postdoctoralMentorCwid String? @map("postdoctoral_mentor_cwid") @db.VarChar(32)
   deletedAt         DateTime? @map("deleted_at")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
@@ -63,12 +69,15 @@ model Scholar {
   coiActivities        CoiActivity[]
   department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
+  postdoctoralMentor   Scholar?            @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
+  postdocMentees       Scholar[]           @relation("PostdocMentor")
 
   @@index([deletedAt])
   @@index([status])
   @@index([roleCategory])
   @@index([deptCode])
   @@index([divCode])
+  @@index([postdoctoralMentorCwid])
   @@map("scholar")
 }
 
