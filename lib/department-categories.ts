@@ -30,13 +30,13 @@ export const DEPARTMENT_CATEGORIES: Record<string, DepartmentCategory> = {
   N1180: "clinical", // Reproductive Medicine
   N1220: "clinical", // Dermatology
   N1240: "clinical", // Emergency Medicine
-  N1280: "clinical", // Medicine
+  N1280: "mixed", // Medicine — clinical service + large research enterprise (issue #69)
   N1300: "clinical", // Neurology
   N1320: "clinical", // Neurological Surgery
   N1340: "clinical", // Obstetrics and Gynecology
   N1360: "clinical", // Ophthalmology
   N1400: "clinical", // Otolaryngology Head and Neck Surgery
-  N1420: "clinical", // Pathology and Laboratory Medicine
+  N1420: "mixed", // Pathology and Laboratory Medicine — diagnostic + research (issue #69)
   N1440: "clinical", // Pediatrics
   N1500: "clinical", // Psychiatry
   N1520: "clinical", // Radiology
@@ -54,7 +54,7 @@ export const DEPARTMENT_CATEGORIES: Record<string, DepartmentCategory> = {
 
   // Mixed / Basic & Clinical
   N1480: "mixed", // Population Health Sciences
-  N1720: "mixed", // Genetic Medicine — gene therapy is clinical-translational
+  N1720: "basic", // Genetic Medicine — research-first per curator review (issue #69)
   N1740: "mixed", // Systems and Computational Biomedicine — spans basic + clinical
   N1760: "mixed", // Brain and Mind Research — basic neuroscience + translation
 
