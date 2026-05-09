@@ -1087,6 +1087,17 @@ function FacetSidebarFunding({
         ))}
       </FacetGroup>
 
+      {/* Issue #94 — Investigator facet. Highest-signal people axis on the
+          Funding tab (department admins and reviewers commonly start a
+          search with a known PI), so it sits at the top of the rail
+          right after Status. */}
+      {investigatorItems.length > 0 ? (
+        <InvestigatorFacet
+          items={investigatorItems}
+          totalDistinct={investigatorTotalDistinct}
+        />
+      ) : null}
+
       {facets.funders.length > 0 || facets.directFunders.length > 0 ? (
         <FunderFacet
           items={sortActiveFirst(facets.funders, (f) =>
@@ -1185,16 +1196,6 @@ function FacetSidebarFunding({
           />
         ))}
       </FacetGroup>
-
-      {/* Issue #94 — Investigator facet. Sits next to Role per spec:
-          both axes filter the people on a project, and users combine
-          them ("PI grants by Wolf"). */}
-      {investigatorItems.length > 0 ? (
-        <InvestigatorFacet
-          items={investigatorItems}
-          totalDistinct={investigatorTotalDistinct}
-        />
-      ) : null}
     </aside>
   );
 }
