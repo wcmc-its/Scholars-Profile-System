@@ -478,6 +478,11 @@ async function indexPublications() {
         doi: p.doi,
         pubmedUrl: p.pubmedUrl,
         meshTerms: mesh.join(" "),
+        // Issue #32 — index abstract text on the publications doc so
+        // thematic queries (e.g. "psychiatric comorbidities") can match
+        // the paper itself, not just the scholar. Empty/missing abstracts
+        // are stored as empty string; OpenSearch indexes nothing for them.
+        abstract: p.abstract ?? "",
         authorNames,
         wcmAuthors,
         wcmAuthorPositions: Array.from(wcmAuthorPositions),

@@ -166,6 +166,12 @@ export const publicationsIndexMapping = {
       doi: { type: "keyword" },
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
+      // Issue #32 — abstract text on the publications index lets thematic
+      // queries find the right paper, not just the right scholar (issue #21
+      // already covers that on the people index). One abstract per doc, no
+      // weight repetition; analyzed with the same `pub_text` analyzer as
+      // title/authorNames so stemming and stopwords are consistent.
+      abstract: { type: "text", analyzer: "pub_text" },
       authorNames: { type: "text", analyzer: "pub_text" },
       // WCM author position roles for the Publications-tab facet
       // (issue #8 follow-up). Keyword array of {first, senior, middle};
@@ -305,6 +311,11 @@ export const PEOPLE_FIELD_BOOSTS: ReadonlyArray<string> = [
 export const PUBLICATION_FIELD_BOOSTS: ReadonlyArray<string> = [
   "title^4",
   "meshTerms^2",
-  "journal^1",
   "authorNames^2",
+  "journal^1",
+  // Issue #32 — abstract text contributes to thematic-query relevance on
+  // the publications tab. Low boost so a passing mention can't outrank a
+  // direct title hit; best_fields scoring keeps the strongest single-field
+  // match dominant.
+  "abstract^0.5",
 ];
