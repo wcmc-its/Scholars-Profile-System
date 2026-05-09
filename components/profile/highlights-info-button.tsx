@@ -1,0 +1,77 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { Info } from "lucide-react";
+import { methodologyHref } from "@/lib/methodology-anchors";
+
+/**
+ * Small (i) info button next to the Highlights section heading on a scholar
+ * profile (issue #76). Click toggles a popover with a brief explanation of
+ * how the highlight set is selected and a link to the full methodology
+ * write-up.
+ *
+ * Tooltip primitives don't host interactive content reliably, so we use a
+ * click-toggled popover — same pattern as the position multi-select on the
+ * profile pubs surface. Click outside or Escape closes; Escape returns
+ * focus to the trigger.
+ */
+export function HighlightsInfoButton() {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <span ref={wrapperRef} className="relative inline-flex">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="About Highlights selection"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex size-5 items-center justify-center self-center rounded-full text-muted-foreground hover:text-foreground"
+      >
+        <Info className="size-4" aria-hidden="true" />
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          aria-label="About Highlights selection"
+          className="absolute left-0 top-full z-20 mt-1 w-[320px] rounded-md border border-border bg-popover p-3 text-sm leading-relaxed text-popover-foreground shadow-md"
+        >
+          <p className="m-0 text-[13px]">
+            Highlights are selected by ReCiterAI from the scholar&apos;s
+            first- or senior-author publications, weighted by impact and
+            recency.{" "}
+            <Link
+              href={methodologyHref("selectedHighlights")}
+              className="font-medium text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+            >
+              Read the methodology &rarr;
+            </Link>
+          </p>
+        </div>
+      )}
+    </span>
+  );
+}

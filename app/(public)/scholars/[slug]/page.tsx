@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
+import { HighlightsInfoButton } from "@/components/profile/highlights-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { PublicationsSection } from "@/components/profile/publications-section";
@@ -254,7 +255,15 @@ export default async function ScholarProfilePage({
           ) : null}
 
           {profile.highlights.length > 0 ? (
-            <Section title="Selected highlights" headingLg>
+            <Section
+              title={
+                <span className="inline-flex items-center gap-2">
+                  Highlights
+                  <HighlightsInfoButton />
+                </span>
+              }
+              headingLg
+            >
               <ol className="flex flex-col">
                 {profile.highlights.map((p, i) => (
                   <li
