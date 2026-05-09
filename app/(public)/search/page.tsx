@@ -1128,6 +1128,7 @@ function FundingSortLinks({
     { value: "relevance", label: "Relevance" },
     { value: "endDate", label: "End date (soonest)" },
     { value: "startDate", label: "Start date (newest)" },
+    { value: "pubCount", label: "Most publications" },
   ];
   const buildHref = (s: FundingSort) => {
     const sp = new URLSearchParams();

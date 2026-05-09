@@ -249,6 +249,15 @@ export const fundingIndexMapping = {
 
       startDate: { type: "date" },
       endDate: { type: "date" },
+      // Issue #86 — pub count per project, used for sort and as an
+      // inline metric on result rows. Integer so OpenSearch can sort
+      // doc-values without scripts.
+      pubCount: { type: "integer" },
+      // Issue #86 — RePORTER abstract for the project. Indexed for
+      // full-text relevance so searching a topic word that appears only
+      // in an abstract returns the project. Stored so the result row
+      // can render a snippet.
+      abstract: { type: "text", analyzer: "funding_text" },
 
       // Hit-rendering payload — saved with the doc so a result page can
       // hydrate `FundingHit` without a Prisma round-trip.
@@ -281,6 +290,9 @@ export const FUNDING_FIELD_BOOSTS: ReadonlyArray<string> = [
   "title^4",
   "sponsorText^2",
   "peopleNames^1",
+  // Issue #86 — abstract-only matches are valuable but lower-signal than
+  // a title hit. Boost 1 keeps it in the multi_match without dominating.
+  "abstract^1",
 ];
 
 /**

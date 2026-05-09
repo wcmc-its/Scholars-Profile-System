@@ -538,6 +538,10 @@ async function indexFunding() {
       mechanism: true,
       nihIc: true,
       isSubaward: true,
+      // Issue #86 — pulled into the OpenSearch funding doc for sort
+      // (pubCount) and full-text relevance (abstract).
+      abstract: true,
+      publications: { select: { pmid: true } },
       scholar: {
         select: {
           slug: true,

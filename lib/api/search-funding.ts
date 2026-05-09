@@ -35,7 +35,7 @@ const NCE_GRACE_MS = 365 * 24 * 60 * 60 * 1000;
 const ENDING_SOON_MS = 365 * 24 * 60 * 60 * 1000;
 const RECENTLY_ENDED_WINDOW_MS = 2 * 365 * 24 * 60 * 60 * 1000;
 
-export type FundingSort = "relevance" | "endDate" | "startDate";
+export type FundingSort = "relevance" | "endDate" | "startDate" | "pubCount";
 
 export type FundingStatus = "active" | "ending_soon" | "recently_ended";
 
@@ -94,6 +94,10 @@ export type FundingHit = {
   totalPeople: number;
   /** Department of record — typically lead PI's primary appointment. */
   department: string | null;
+  /** Issue #86 — count of distinct PMIDs attributed to this project across
+   *  its scholar rows. Drives the pubCount sort and is rendered on the
+   *  result row. */
+  pubCount: number;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -281,6 +285,11 @@ export async function searchFunding(opts: {
     sortClause.push({ endDate: "asc" });
   } else if (sort === "startDate") {
     sortClause.push({ startDate: "desc" });
+  } else if (sort === "pubCount") {
+    // Most-publications first. Ties broken by endDate desc so an active
+    // grant with the same count surfaces above a completed one.
+    sortClause.push({ pubCount: "desc" });
+    sortClause.push({ endDate: "desc" });
   }
 
   // Status agg — three separate filter aggs since each "bucket" is a
@@ -385,6 +394,7 @@ export async function searchFunding(opts: {
       department: string | null;
       totalPeople: number;
       people: StoredPerson[];
+      pubCount: number;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -424,6 +434,7 @@ export async function searchFunding(opts: {
       isMultiPi: src.isMultiPi,
       department: src.department,
       totalPeople: src.totalPeople,
+      pubCount: src.pubCount ?? 0,
       people: (src.people ?? []).map((p) => ({
         cwid: p.cwid,
         slug: p.slug,

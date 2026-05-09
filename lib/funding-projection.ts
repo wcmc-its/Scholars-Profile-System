@@ -38,6 +38,14 @@ export type GrantRowForIndex = {
     preferredName: string;
     primaryDepartment: string | null;
   };
+  /** Pub-grant linkages from grant_publication. Optional so test fixtures
+   *  and any caller that doesn't need pub counts can omit it. The
+   *  projection collects DISTINCT pmids across the project's rows into
+   *  FundingDoc.pubCount. */
+  publications?: Array<{ pmid: string }>;
+  /** RePORTER abstract for this grant (Phase 2 ETL). Optional. The
+   *  projection picks the first non-null value across the project's rows. */
+  abstract?: string | null;
 };
 
 export type FundingDoc = {
@@ -66,6 +74,15 @@ export type FundingDoc = {
     preferredName: string;
     role: string;
   }>;
+  /** Issue #86 — RePORTER abstract for the project, indexed for full-text
+   *  search relevance and shown as a snippet in result rows. Picked from
+   *  the first row whose abstract is non-null (all rows for one project
+   *  share the same coreProjectNum and therefore the same abstract). */
+  abstract: string | null;
+  /** Issue #86 — count of DISTINCT pmids attributed to the project across
+   *  all its scholar rows. Drives the pubCount sort and the inline pub
+   *  count on the result row. */
+  pubCount: number;
 };
 
 /** Parse `INFOED-{accountNumber}-{cwid}` external ID. */
@@ -192,6 +209,21 @@ export function projectFromRows(rows: GrantRowForIndex[]): FundingDoc | null {
     ? directShort ?? head.directSponsorRaw ?? null
     : null;
 
+  // Pub count: union of pmids across every grant row in the project.
+  // All rows for one Account_Number normally share the same
+  // coreProjectNum and therefore the same pub set, but unioning is safe
+  // (and correct for the rare project where rows diverge).
+  const pmids = new Set<string>();
+  for (const r of rows) {
+    if (!r.publications) continue;
+    for (const p of r.publications) pmids.add(p.pmid);
+  }
+
+  // Abstract: take the first non-null one. All rows for one
+  // coreProjectNum share an abstract via the Phase 2 ETL, so first-wins
+  // is deterministic in practice.
+  const abstract = rows.find((r) => r.abstract)?.abstract ?? null;
+
   return {
     projectId: ext.accountNumber,
     title: head.title,
@@ -218,5 +250,7 @@ export function projectFromRows(rows: GrantRowForIndex[]): FundingDoc | null {
     isMultiPi,
     totalPeople: people.length,
     people,
+    abstract,
+    pubCount: pmids.size,
   };
 }
