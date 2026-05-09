@@ -53,6 +53,11 @@ type CandidateRow = {
   parentTopicId: string;
   primarySubtopicId: string | null;
   impactScore: number;
+  /** Issue #68 — author position on this paper for the entity scholar.
+   *  null for tier-1 (first/last) rows where position isn't decisive;
+   *  populated for tier-2 (middle-author) rows so the per-tier sort can
+   *  break ties on "earlier author = stronger contribution". */
+  position: number | null;
   publication: {
     pmid: string;
     title: string | null;
@@ -90,6 +95,152 @@ function sortForSpotlight(rows: CandidateRow[]): CandidateRow[] {
     if (by !== ay) return by - ay;
     return b.impactScore - a.impactScore;
   });
+}
+
+/**
+ * Issue #68 — middle-author top-up for sparse entities (Library is the
+ * canonical case). Tier-2 sort is impact-led with author-position as a
+ * tiebreaker (earlier = better), so a 2nd-of-7 middle author outranks a
+ * 5th-of-7 on the same paper.
+ */
+function sortTier2(rows: CandidateRow[]): CandidateRow[] {
+  return [...rows].sort((a, b) => {
+    if (b.impactScore !== a.impactScore) return b.impactScore - a.impactScore;
+    const ap = a.position ?? Number.POSITIVE_INFINITY;
+    const bp = b.position ?? Number.POSITIVE_INFINITY;
+    if (ap !== bp) return ap - bp;
+    const ay = a.publication.year ?? 0;
+    const by = b.publication.year ?? 0;
+    if (by !== ay) return by - ay;
+    const at = a.publication.dateAddedToEntrez?.getTime() ?? 0;
+    const bt = b.publication.dateAddedToEntrez?.getTime() ?? 0;
+    return bt - at;
+  });
+}
+
+const PUB_SELECT_FIELDS = {
+  pmid: true,
+  title: true,
+  journal: true,
+  year: true,
+  pubmedUrl: true,
+  doi: true,
+  dateAddedToEntrez: true,
+} as const;
+
+/**
+ * Run the tier-2 (middle-author) fill for a scholar-scoped entity. Returns
+ * up to `need` extra candidates already deduped against `seenPmids` and
+ * sorted by the tier-2 rule. Each candidate carries the publication-level
+ * max impactScore (across all publication_topic rows for the pmid) and the
+ * parent_topic / primary_subtopic from the highest-impact topic row, so the
+ * caller can resolve the kicker via the same lookup table as tier 1.
+ *
+ * Implementation: two queries + a JS merge. We can't reuse publicationTopic
+ * for the author query because middle-author rows aren't materialized
+ * there; we go through publicationAuthor for position + scholar filtering,
+ * then re-attach impact + topic via a separate publicationTopic group.
+ */
+async function fillTier2(
+  scholarFilter: object,
+  seenPmids: Set<string>,
+  need: number,
+  /** When set, restrict to publications tagged to this parent topic — used
+   *  by `getSpotlightCardsForTopic`. The dept/division/center callers leave
+   *  this null because their scoping comes from `scholarFilter` alone. */
+  topicSlug: string | null = null,
+): Promise<CandidateRow[]> {
+  if (need <= 0) return [];
+  const authorRows = await prisma.publicationAuthor.findMany({
+    where: {
+      isFirst: false,
+      isLast: false,
+      position: { gt: 0 },
+      scholar: {
+        deletedAt: null,
+        status: "active",
+        roleCategory: "full_time_faculty",
+        ...scholarFilter,
+      },
+      publication: {
+        publicationType: "Academic Article",
+        year: { gte: RECITERAI_YEAR_FLOOR },
+        ...(seenPmids.size > 0 ? { pmid: { notIn: Array.from(seenPmids) } } : {}),
+        ...(topicSlug
+          ? {
+              // Tagged to this parent topic via at least one publication_topic
+              // row. The author of that row may be a different scholar than
+              // the middle-author we surface — that's fine; topic membership
+              // is a pmid-level fact regardless of which scholar's authorship
+              // entered it into the projection.
+              publicationTopics: { some: { parentTopicId: topicSlug } },
+            }
+          : {}),
+      },
+    },
+    select: {
+      pmid: true,
+      cwid: true,
+      position: true,
+      publication: { select: PUB_SELECT_FIELDS },
+    },
+  });
+  if (authorRows.length === 0) return [];
+
+  // Pick the strongest entity-scholar row per pmid: lowest position wins.
+  const bestAuthorRowByPmid = new Map<string, (typeof authorRows)[number]>();
+  for (const r of authorRows) {
+    const cur = bestAuthorRowByPmid.get(r.pmid);
+    if (!cur || r.position < cur.position) bestAuthorRowByPmid.set(r.pmid, r);
+  }
+
+  const pmids = Array.from(bestAuthorRowByPmid.keys());
+  const topicRows = await prisma.publicationTopic.findMany({
+    where: {
+      pmid: { in: pmids },
+      impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
+    },
+    select: {
+      pmid: true,
+      impactScore: true,
+      parentTopicId: true,
+      primarySubtopicId: true,
+    },
+  });
+  type Best = {
+    parentTopicId: string;
+    primarySubtopicId: string | null;
+    impactScore: number;
+  };
+  const bestTopicByPmid = new Map<string, Best>();
+  for (const t of topicRows) {
+    const score = Number(t.impactScore);
+    const cur = bestTopicByPmid.get(t.pmid);
+    if (!cur || score > cur.impactScore) {
+      bestTopicByPmid.set(t.pmid, {
+        parentTopicId: t.parentTopicId,
+        primarySubtopicId: t.primarySubtopicId,
+        impactScore: score,
+      });
+    }
+  }
+
+  const candidates: CandidateRow[] = [];
+  for (const [pmid, authorRow] of bestAuthorRowByPmid) {
+    const topic = bestTopicByPmid.get(pmid);
+    if (!topic) continue; // no impact signal — skip per issue acceptance
+    candidates.push({
+      pmid,
+      cwid: authorRow.cwid ?? "",
+      parentTopicId: topic.parentTopicId,
+      primarySubtopicId: topic.primarySubtopicId,
+      impactScore: topic.impactScore,
+      position: authorRow.position,
+      publication: authorRow.publication,
+    });
+  }
+
+  return sortTier2(candidates).slice(0, need);
 }
 
 // ---------------------------------------------------------------------------
@@ -133,13 +284,34 @@ export async function getSpotlightCardsForTopic(
         },
       },
     },
-  })) as unknown as Array<Omit<CandidateRow, "impactScore"> & { impactScore: unknown }>;
+  })) as unknown as Array<
+    Omit<CandidateRow, "impactScore" | "position"> & { impactScore: unknown }
+  >;
 
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
     impactScore: Number(r.impactScore),
+    position: null,
   }));
-  const top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+  let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+
+  // Issue #68 — top up sparse topic surfaces with middle-author publications.
+  if (top.length < SPOTLIGHT_TARGET) {
+    const seenPmids = new Set(top.map((r) => r.pmid));
+    const tier2 = await fillTier2(
+      {}, // no scholar carve-out beyond active FT faculty — topic membership
+      //  comes from the publication being tagged to this topic.
+      seenPmids,
+      SPOTLIGHT_TARGET - top.length,
+      topicSlug,
+    );
+    // Tier-2 candidates inherit the topic via publication_topic, so their
+    // primarySubtopicId may differ from a strict topic-page kicker. We
+    // keep whatever the highest-impact topic row reported; if the parent
+    // topic is the topic-page slug itself, the kicker falls back to topic.label.
+    top = [...top, ...tier2];
+  }
+
   if (top.length === 0) return null;
 
   const subtopicIds = Array.from(
@@ -224,13 +396,30 @@ async function getSpotlightCardsForEntity(
         },
       },
     },
-  })) as unknown as Array<Omit<CandidateRow, "impactScore"> & { impactScore: unknown }>;
+  })) as unknown as Array<
+    Omit<CandidateRow, "impactScore" | "position"> & { impactScore: unknown }
+  >;
 
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
     impactScore: Number(r.impactScore),
+    position: null,
   }));
-  const top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+  let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+
+  // Issue #68 — top up sparse entity Spotlights (Library is the canonical
+  // case) with middle-author publications. The tier-2 sort favors high
+  // impact, then earlier author position, so a 2nd-of-7 outranks a 5th-of-7.
+  if (top.length < SPOTLIGHT_TARGET) {
+    const seenPmids = new Set(top.map((r) => r.pmid));
+    const tier2 = await fillTier2(
+      scholarFilter,
+      seenPmids,
+      SPOTLIGHT_TARGET - top.length,
+    );
+    top = [...top, ...tier2];
+  }
+
   if (top.length === 0) return null;
 
   const topicIds = Array.from(new Set(top.map((r) => r.parentTopicId)));
