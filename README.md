@@ -61,6 +61,64 @@ npm run test:e2e     # Playwright E2E (requires dev server)
 npm run format       # Prettier
 npm run db:up        # Start MySQL + OpenSearch via docker compose
 npm run db:down      # Stop the local containers
+npm run db:migrate   # Apply Prisma migrations (dev)
+npm run db:reset     # Drop + recreate local DB and re-run migrations
+npm run seed         # Load synthetic seed data
+```
+
+## ETL & indexing
+
+ETL pipelines live in `etl/` and run in-process via `tsx`. Connection details for source systems (ReciterDB, ASMS, InfoEd, etc.) come from `SCHOLARS_*` env vars in `.env.local`; the local app DB uses `DATABASE_URL` from `.env`. See `.env.example` for the full list with naming conventions.
+
+**Source-system env var practice:**
+
+- All credentials live in `~/.zshrc` under generic names (e.g. `DB_HOST`, `DB_PASSWORD`). Never hardcode in `.env*` files committed to git.
+- `.env.local` re-exports them under the `SCHOLARS_*` namespace the code actually reads (e.g. `SCHOLARS_RECITERDB_HOST="$DB_HOST"`). The namespace prevents collisions with other tools that grab generic `DB_*` vars.
+- We do not maintain separate dev instances of source systems (ReciterDB, ASMS, InfoEd). Local ETL development reads from production. The `etl/reciter/*` scripts in particular only `SELECT`; treat the connection as read-only by convention even when the credentials permit writes.
+- The Next.js web app at runtime does not connect to source systems — only the local app DB and OpenSearch. ETL scripts are the sole readers.
+
+### Orchestrated daily run
+
+```bash
+npm run etl:daily             # Full chain: ED → all sources → search reindex → completeness → ISR revalidate
+```
+
+ED runs first as the chain head (failure aborts the rest). Other sources run sequentially with isolated failures. The search reindex always runs at the end against whatever succeeded.
+
+### Per-source ETLs
+
+```bash
+npm run etl:ed                # Enterprise Directory (people, appointments) — chain head
+npm run etl:reciter           # Publications + WCM authorships from ReciterDB
+npm run etl:asms              # Academic & Scientific Memberships
+npm run etl:infoed            # Grants and awards from InfoEd
+npm run etl:coi               # Conflict-of-interest disclosures
+npm run etl:hierarchy         # Org hierarchy (departments, divisions, centers)
+npm run etl:spotlight         # Spotlight research signals
+npm run etl:dynamodb          # ReCiter DynamoDB analysis pulls
+```
+
+### Probes (read-only diagnostics)
+
+```bash
+npm run etl:reciter:probe         # Inspect ReciterDB table layout
+npm run etl:ed:probe-chiefs       # ED division chiefs probe
+npm run etl:ed:probe-divisions    # ED divisions probe
+npm run etl:asms:probe            # ASMS source probe
+npm run etl:infoed:probe          # InfoEd source probe
+```
+
+### Search index
+
+```bash
+npm run search:index          # Rebuild OpenSearch indices from the local DB
+```
+
+### Other
+
+```bash
+npm run etl:completeness      # Completeness/coverage snapshot (best-effort, non-fatal in chain)
+npm run etl:vivo-redirect     # Generate the legacy VIVO → Scholars redirect map
 ```
 
 ## Project layout
