@@ -165,11 +165,9 @@ async function main() {
       // Clear is_preferred on every existing row for this scholar; the
       // upserts below set the new winner. Avoids a unique-violation
       // hazard if we ever convert is_preferred to a per-cwid unique
-      // constraint.
-      prisma.personNihProfile.updateMany({
-        where: { cwid, isPreferred: true },
-        data: { isPreferred: false },
-      }),
+      // constraint. Raw SQL because Prisma 7's updateMany rejects a
+      // partial WHERE on a composite-PK model.
+      prisma.$executeRaw`UPDATE person_nih_profile SET is_preferred = FALSE WHERE cwid = ${cwid} AND is_preferred = TRUE`,
       ...rows.map((r) =>
         prisma.personNihProfile.upsert({
           where: {
