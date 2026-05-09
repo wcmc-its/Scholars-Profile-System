@@ -93,9 +93,9 @@ npm run etl:reciter           # Publications + WCM authorships from ReciterDB
 npm run etl:asms              # Academic & Scientific Memberships
 npm run etl:infoed            # Grants and awards from InfoEd
 npm run etl:coi               # Conflict-of-interest disclosures
-npm run etl:hierarchy         # Org hierarchy (departments, divisions, centers)
+npm run etl:hierarchy         # ReCiterAI subtopic catalog (writes `subtopic` from S3 hierarchy artifact)
 npm run etl:spotlight         # Spotlight research signals
-npm run etl:dynamodb          # ReCiter DynamoDB analysis pulls
+npm run etl:dynamodb          # ReCiterAI topic projections (writes `topic`, `publication_topic`, `topic_assignment` from DynamoDB)
 ```
 
 ### Probes (read-only diagnostics)
