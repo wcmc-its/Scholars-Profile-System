@@ -117,6 +117,8 @@ export type FundingHit = {
   pubCount: number;
   /** Issue #86 — RePORTER abstract for inline expansion on the result row. */
   abstract: string | null;
+  /** Issue #92 — origin of `abstract`: 'reporter' | 'nsf' | 'pcori' | 'cdmrp' | 'gates'. */
+  abstractSource: string | null;
   /** Issue #86 — RePORTER application ID; outbound deep-link target. */
   applId: number | null;
   /** Issue #86 — pub list for the inline expand affordance. Capped at
@@ -458,6 +460,7 @@ export async function searchFunding(opts: {
       people: StoredPerson[];
       pubCount: number;
       abstract: string | null;
+      abstractSource: string | null;
       applId: number | null;
       publications: Array<{
         pmid: string;
@@ -512,6 +515,7 @@ export async function searchFunding(opts: {
       totalPeople: src.totalPeople,
       pubCount: src.pubCount ?? 0,
       abstract: src.abstract ?? null,
+      abstractSource: src.abstractSource ?? null,
       applId: src.applId ?? null,
       publications: src.publications ?? [],
       coreProjectNum: coreProjectNum(src.awardNumber),

@@ -35,6 +35,7 @@ const baseHit: FundingHit = {
   department: "Medicine",
   pubCount: 0,
   abstract: null,
+  abstractSource: null,
   applId: null,
   publications: [],
   coreProjectNum: null,

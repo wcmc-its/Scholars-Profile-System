@@ -546,6 +546,7 @@ async function indexFunding() {
       // (pubCount), full-text relevance (abstract), and the inline
       // publications-expand UX on result rows.
       abstract: true,
+      abstractSource: true,
       applId: true,
       publications: {
         select: {

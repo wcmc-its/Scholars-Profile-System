@@ -44,6 +44,7 @@ const baseGrant: Grant = {
   coreProjectNum: "R01CA245678",
   applId: null,
   abstract: null,
+  abstractSource: null,
   publications: [],
 };
 

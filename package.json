@@ -32,6 +32,8 @@
     "etl:reporter": "tsx etl/reporter/index.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",
+    "etl:gates:probe": "tsx etl/gates/probe.ts",
+    "etl:gates": "tsx etl/gates/index.ts",
     "etl:nih-profile": "tsx etl/nih-profile/index.ts",
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",

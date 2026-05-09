@@ -100,3 +100,36 @@ export function nsfAwardId(awardNumber: string | null | undefined): string | nul
   const m = trimmed.match(NSF_AWARD_RE);
   return m ? m[1] : null;
 }
+
+/**
+ * Issue #92 — extract the Gates Foundation grant ID from a raw
+ * `awardNumber`. Gates IDs come in two stable forms:
+ *
+ *   "INV-NNNNNN"   — current naming (post-2019), 6-digit numeric tail
+ *   "OPP-NNNNNN"   — legacy naming, same shape
+ *
+ * Some institutional systems prepend "Gates" / "BMGF" / no prefix. The
+ * matcher accepts any common prefix and returns the canonical "INV-…"
+ * or "OPP-…" form for joining against the published CSV.
+ *
+ *   "INV-003934"        → "INV-003934"
+ *   "OPP-1234567"       → "OPP-1234567"   (7-digit tails exist on legacy)
+ *   "Gates INV-003934"  → "INV-003934"
+ *   "BMGF-INV-003934"   → "INV-003934"
+ *   "INV3934"           → "INV-003934"     (zero-padded normalization)
+ *
+ * Returns null when the string doesn't contain a Gates-shaped ID.
+ */
+const GATES_AWARD_RE = /\b(INV|OPP)[-\s]?(\d{1,7})\b/i;
+
+export function gatesGrantId(awardNumber: string | null | undefined): string | null {
+  if (!awardNumber) return null;
+  const m = awardNumber.match(GATES_AWARD_RE);
+  if (!m) return null;
+  const prefix = m[1].toUpperCase();
+  // Pad to 6 digits for INV (the modern canonical form). OPP IDs vary
+  // 6-7 digits historically; preserve the original digit count there.
+  const digits = m[2];
+  const tail = prefix === "INV" && digits.length < 6 ? digits.padStart(6, "0") : digits;
+  return `${prefix}-${tail}`;
+}

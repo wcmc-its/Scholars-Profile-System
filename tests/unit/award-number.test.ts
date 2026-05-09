@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNihAwardNumber, nsfAwardId, parseNihAward } from "@/lib/award-number";
+import { gatesGrantId, isNihAwardNumber, nsfAwardId, parseNihAward } from "@/lib/award-number";
 
 describe("parseNihAward", () => {
   it("parses a standard R01 with whitespace separator", () => {
@@ -122,5 +122,32 @@ describe("nsfAwardId", () => {
     expect(nsfAwardId("")).toBeNull();
     expect(nsfAwardId("12345")).toBeNull();
     expect(nsfAwardId("foo")).toBeNull();
+  });
+});
+
+describe("gatesGrantId", () => {
+  it("returns INV-form unchanged when already canonical", () => {
+    expect(gatesGrantId("INV-003934")).toBe("INV-003934");
+  });
+
+  it("preserves OPP-form (legacy)", () => {
+    expect(gatesGrantId("OPP-1234567")).toBe("OPP-1234567");
+  });
+
+  it("strips common institutional prefixes", () => {
+    expect(gatesGrantId("Gates INV-003934")).toBe("INV-003934");
+    expect(gatesGrantId("BMGF-INV-003934")).toBe("INV-003934");
+  });
+
+  it("normalizes missing dash and pads INV ids to 6 digits", () => {
+    expect(gatesGrantId("INV3934")).toBe("INV-003934");
+    expect(gatesGrantId("INV 3934")).toBe("INV-003934");
+  });
+
+  it("returns null for non-Gates inputs", () => {
+    expect(gatesGrantId("R01 CA245678")).toBeNull();
+    expect(gatesGrantId("2138052")).toBeNull();
+    expect(gatesGrantId(null)).toBeNull();
+    expect(gatesGrantId("")).toBeNull();
   });
 });
