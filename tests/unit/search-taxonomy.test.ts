@@ -184,10 +184,11 @@ describe("matchQueryToTaxonomy", () => {
     expect(r.secondary[0].entityType).toBe("subtopic");
   });
 
-  it("among same-tier matches, ranks by similarity desc, then scholar count, then alpha", async () => {
+  it("among same-tier matches, ranks by scholar count desc, then similarity, then alpha", async () => {
     mockTopicFindMany.mockResolvedValue([]);
     mockSubtopicFindMany.mockResolvedValue([
-      // displayName length 12 → similarity = 12/12 = 1.0 (highest)
+      // Equal scholar counts → tie-break on similarity. The exact-name
+      // match (similarity 1.0) wins over the longer label (≈0.57).
       {
         id: "a_inflammation",
         label: "Inflammation",
@@ -195,7 +196,6 @@ describe("matchQueryToTaxonomy", () => {
         parentTopicId: "cancer",
         parentTopic: { label: "Cancer" },
       },
-      // displayName length 21 → similarity = 12/21 ≈ 0.57
       {
         id: "b_chronic_inflammation",
         label: "Chronic Inflammation",
@@ -209,10 +209,38 @@ describe("matchQueryToTaxonomy", () => {
     const r = await matchQueryToTaxonomy("inflammation");
     expect(r.state).toBe("matches");
     if (r.state !== "matches") return;
-    // Higher similarity wins primary regardless of scholar count.
     expect(r.primary.id).toBe("a_inflammation");
     expect(r.secondary).toHaveLength(1);
     expect(r.secondary[0].id).toBe("b_chronic_inflammation");
+  });
+
+  it("issue #74: prefers the umbrella parent topic over a more-specific sibling for broad queries", async () => {
+    // Both topics substring-match "cancer". The umbrella ("Cancer Biology
+    // (General)") has more scholars and should win — even though the
+    // narrower sibling has higher similarity.
+    mockTopicFindMany.mockResolvedValue([
+      { id: "lung_cancer", label: "Lung Cancer" },
+      { id: "cancer_biology_general", label: "Cancer Biology (General)" },
+    ]);
+    mockSubtopicFindMany.mockResolvedValue([]);
+    // Return many cwids for the umbrella, few for the specific topic. The
+    // mock is keyed by the where clause's parentTopicId.
+    mockPubTopicGroupBy.mockImplementation(
+      ({ where }: { where: { parentTopicId?: string } }) => {
+        if (where.parentTopicId === "cancer_biology_general") {
+          return Promise.resolve(
+            Array.from({ length: 500 }, (_, i) => ({ cwid: `c${i}` })),
+          );
+        }
+        return Promise.resolve([{ cwid: "c1" }, { cwid: "c2" }]);
+      },
+    );
+
+    const r = await matchQueryToTaxonomy("cancer");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.primary.id).toBe("cancer_biology_general");
+    expect(r.secondary[0]?.id).toBe("lung_cancer");
   });
 
   it("topics outrank subtopics even when subtopic similarity is higher", async () => {

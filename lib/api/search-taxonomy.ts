@@ -20,11 +20,12 @@
  *
  * Ranking (primary + secondary order):
  *   1. Entity type: parentTopic before subtopic.
- *   2. String similarity: query length / label length (higher = the
- *      query is a larger fraction of the label, so shorter labels with
- *      the query win). For "cancer", this puts "Breast Cancer" ahead of
- *      "Cancer Biology (General)" within the topic tier.
- *   3. scholarCount descending (tiebreak when similarity is identical).
+ *   2. scholarCount descending. Within a tier this favors the umbrella
+ *      topic when several siblings substring-match a broad query — for
+ *      "cancer" the user wants "Cancer Biology (General)" first, not
+ *      the highest-similarity sibling like "Lung Cancer". (Issue #74.)
+ *   3. String similarity descending (query length / label length) as
+ *      a tiebreaker when scholar counts are equal.
  *   4. Name ascending (locale-aware) as final tiebreaker.
  *
  * The first ranked match is the "primary" — the row that always renders.
@@ -181,10 +182,17 @@ function rank(matches: TaxonomyMatch[]): TaxonomyMatch[] {
   return matches.slice().sort((a, b) => {
     const t = typePriority(a.entityType) - typePriority(b.entityType);
     if (t !== 0) return t;
-    const sim = b.similarity - a.similarity;
-    if (sim !== 0) return sim;
+    // Issue #74 — within a tier, prefer the broader topic when several
+    // sibling labels substring-match a broad query. scholarCount is the
+    // best available proxy for "umbrella vs. specific subtype": for
+    // "cancer", "Cancer Biology (General)" carries more scholars than
+    // "Lung Cancer" or "Breast Cancer" and lands first. Narrow queries
+    // ("lung cancer") only substring-match a single parent so the
+    // tie-break never fires.
     const c = b.scholarCount - a.scholarCount;
     if (c !== 0) return c;
+    const sim = b.similarity - a.similarity;
+    if (sim !== 0) return sim;
     return a.name.localeCompare(b.name);
   });
 }
