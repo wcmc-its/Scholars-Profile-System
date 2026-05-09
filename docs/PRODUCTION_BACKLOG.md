@@ -1,6 +1,41 @@
 # Production-readiness backlog
 
-Companion to [`PRODUCTION.md`](./PRODUCTION.md) and [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md). This file is the **work-tracking** artifact: a tiered list of self-contained issues, each ready to be cut into a GitHub issue with `gh issue create`. The reference docs describe what production looks like; this doc tracks what's left to build to get there.
+Companion to [`PRODUCTION.md`](./PRODUCTION.md) and [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md). The reference docs describe what production looks like; this doc records the planning that became sub-issues of [#99 Production readiness](https://github.com/wcmc-its/Scholars-Profile-System/issues/99).
+
+## Status: filed
+
+All 26 sub-issues filed against tracking parent **#99** on 2026-05-09. Live state lives in GitHub; this doc is the source for scope and acceptance criteria as originally drafted. Edits after filing belong on the GitHub issue, not in this doc.
+
+| ID  | Issue | Tier | Title |
+|-----|-------|------|-------|
+| B01 | [#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100) | P0 | SSO on `/api/edit` |
+| B02 | [#101](https://github.com/wcmc-its/Scholars-Profile-System/issues/101) | P0 | `/api/edit` authorization predicate + 403 telemetry |
+| B03 | [#102](https://github.com/wcmc-its/Scholars-Profile-System/issues/102) | P0 | Append-only audit log with structured before/after diff |
+| B04 | [#103](https://github.com/wcmc-its/Scholars-Profile-System/issues/103) | P0 | `/api/revalidate` bearer auth + dual-token rotation |
+| B05 | [#104](https://github.com/wcmc-its/Scholars-Profile-System/issues/104) | P0 | `/api/revalidate` internal-only ALB listener + SG-to-SG ingress |
+| B06 | [#105](https://github.com/wcmc-its/Scholars-Profile-System/issues/105) | P0 | Secrets Manager + ECS task-execution-role / task-role split |
+| B07 | [#106](https://github.com/wcmc-its/Scholars-Profile-System/issues/106) | P0 | CloudFront cache-behavior split |
+| B08 | [#107](https://github.com/wcmc-its/Scholars-Profile-System/issues/107) | P0 | Step Functions state machines |
+| B09 | [#108](https://github.com/wcmc-its/Scholars-Profile-System/issues/108) | P0 | Migration pipeline (one-shot ECS task + PR checklist) |
+| B10 | [#109](https://github.com/wcmc-its/Scholars-Profile-System/issues/109) | P0 | Aurora PITR + manual snapshot + cross-region copy |
+| B11 | [#110](https://github.com/wcmc-its/Scholars-Profile-System/issues/110) | P0 | ALB `/healthz` shallow health check |
+| B12 | [#111](https://github.com/wcmc-its/Scholars-Profile-System/issues/111) | P0 | Deploy strategy + rollback runbook |
+| B13 | [#112](https://github.com/wcmc-its/Scholars-Profile-System/issues/112) | P0 | Staging environment that mirrors prod |
+| B14 | [#113](https://github.com/wcmc-its/Scholars-Profile-System/issues/113) | P0* | VIVO legacy `/vivo/*` 301 redirect map |
+| B15 | [#114](https://github.com/wcmc-its/Scholars-Profile-System/issues/114) | P0 | `next/image` runtime cost decision |
+| B16 | [#115](https://github.com/wcmc-its/Scholars-Profile-System/issues/115) | P1 | Prisma reader/writer split |
+| B17 | [#116](https://github.com/wcmc-its/Scholars-Profile-System/issues/116) | P1 | VPC endpoints for Secrets Manager / S3 / OpenSearch |
+| B18 | [#117](https://github.com/wcmc-its/Scholars-Profile-System/issues/117) | P1 | OpenSearch alias-swap pattern |
+| B19 | [#118](https://github.com/wcmc-its/Scholars-Profile-System/issues/118) | P1 | Reciter → DynamoDB consistency-window UI placeholder |
+| B20 | [#119](https://github.com/wcmc-its/Scholars-Profile-System/issues/119) | P1 | `etl_run` checkpoint table + cadence/status alarms |
+| B21 | [#120](https://github.com/wcmc-its/Scholars-Profile-System/issues/120) | P1 | Security headers at edge |
+| B22 | [#121](https://github.com/wcmc-its/Scholars-Profile-System/issues/121) | P1 | SLOs + log retention + cost alarms |
+| B23 | [#122](https://github.com/wcmc-its/Scholars-Profile-System/issues/122) | P1 | On-call routing |
+| B24 | [#123](https://github.com/wcmc-its/Scholars-Profile-System/issues/123) | P1 | Distributed tracing |
+| B25 | [#124](https://github.com/wcmc-its/Scholars-Profile-System/issues/124) | P2 | Sitemap-index split |
+| B26 | [#125](https://github.com/wcmc-its/Scholars-Profile-System/issues/125) | P2 | WAF verified-bot allowlist |
+
+\* B14 is conditionally P0 — confirm inbound `/vivo/*` traffic in Search Console; if none, drop or move to P2.
 
 ## Conventions
 
