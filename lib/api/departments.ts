@@ -21,16 +21,21 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
+import type { LeaderRole } from "@/components/scholar/leader-card";
 
 export type DepartmentChair = {
   cwid: string;
   preferredName: string;
   slug: string;
-  /** From appointment.title, e.g. "Chairman and Stephen and Suzanne Weiss Professor" */
+  /** From appointment.title, e.g. "Chairman and Stephen and Suzanne Weiss Professor"
+   *  or "Director of Library" for administrative depts (issue #58). */
   chairTitle: string;
   /** Scholar's primary academic title, e.g. "Professor of Medicine" */
   primaryTitle: string | null;
   identityImageEndpoint: string;
+  /** Display label for the leader card. Administrative depts (Library) use
+   *  "Director"; everything else uses "Chair". Issue #58. */
+  role: LeaderRole;
 };
 
 export type DepartmentTopicArea = {
@@ -70,7 +75,13 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   const dept = await prisma.department.findUnique({ where: { slug } });
   if (!dept) return null;
 
-  // --- Chair ---
+  // --- Leader (Chair for non-admin depts, Director for admin depts) ---
+  // Issue #58 — administrative departments (Library) are led by a Director,
+  // not a Chair. Derive the role from category at read time so we don't need
+  // a Department.leaderRole column; the appointment-title query also widens
+  // to "Director" when the category is administrative.
+  const leaderRole: LeaderRole =
+    dept.category === "administrative" ? "Director" : "Chair";
   let chair: DepartmentChair | null = null;
   if (dept.chairCwid) {
     const chairScholar = await prisma.scholar.findUnique({
@@ -78,15 +89,21 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chairScholar) {
-      // Find the chair's most-recent active appointment with a title starting "Chair" or "Chairman".
+      // Find the leader's most-recent active appointment with a title starting
+      // "Chair" / "Chairman" / "Professor and Chair", or "Director" when the
+      // dept is administrative (issue #58).
+      const titleStartsWith =
+        leaderRole === "Director"
+          ? [{ title: { startsWith: "Director" } }]
+          : [
+              { title: { startsWith: "Chair" } },
+              { title: { startsWith: "Professor and Chair" } },
+            ];
       const chairAppt = await prisma.appointment.findFirst({
         where: {
           cwid: dept.chairCwid,
           endDate: null,
-          OR: [
-            { title: { startsWith: "Chair" } },
-            { title: { startsWith: "Professor and Chair" } },
-          ],
+          OR: titleStartsWith,
         },
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
         select: { title: true },
@@ -95,9 +112,10 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         cwid: chairScholar.cwid,
         preferredName: chairScholar.preferredName,
         slug: chairScholar.slug,
-        chairTitle: chairAppt?.title ?? "Chair",
+        chairTitle: chairAppt?.title ?? leaderRole,
         primaryTitle: chairScholar.primaryTitle ?? null,
         identityImageEndpoint: identityImageEndpoint(chairScholar.cwid),
+        role: leaderRole,
       };
     }
   }

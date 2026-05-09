@@ -644,6 +644,12 @@ async function main() {
     // Excludes vice / associate / deputy / assistant chairs explicitly —
     // those carry "Chair of X" too but are not the dept chair.
     //
+    // Issue #58 — administrative depts (Library) are led by a Director, not
+    // a Chair. For dept.category === "administrative" we additionally match
+    // "Director of {name}" with the same shape. Restricting the director
+    // path to admin depts avoids accidentally picking up center directors
+    // as dept leaders for clinical / basic / mixed departments.
+    //
     // Crucially, we do NOT restrict to scholars whose `deptCode = dept.code`:
     // a scholar's primary dept is sometimes Medicine while their chair role
     // is in a different unit (e.g. Crystal — primary Medicine, "Chair of
@@ -655,25 +661,47 @@ async function main() {
     const chairTitleVariants = new Set<string>();
     let chairAssignments = 0;
     for (const dept of seenDepts.values()) {
-      const expected = `Chair of ${dept.name}`;
+      // Look up category so we know whether to match "Chair of X" or
+      // "Director of X". Falls back to "clinical" for depts the seed file
+      // doesn't know about; same default the upsert step uses.
+      const persisted = await prisma.department.findUnique({
+        where: { code: dept.code },
+        select: { category: true },
+      });
+      const category = persisted?.category ?? "clinical";
+      const leaderWord = category === "administrative" ? "Director" : "Chair";
+      const expected = `${leaderWord} of ${dept.name}`;
+      const exclusions: { title: { contains: string } }[] = [];
+      if (leaderWord === "Chair") {
+        exclusions.push(
+          { title: { contains: "Vice Chair" } },
+          { title: { contains: "Vice-Chair" } },
+          { title: { contains: "Associate Chair" } },
+          { title: { contains: "Deputy Chair" } },
+          { title: { contains: "Assistant Chair" } },
+        );
+      } else {
+        // Director path — same shape; exclude vice/deputy/etc directors so
+        // we land on the principal Director appointment.
+        exclusions.push(
+          { title: { contains: "Vice Director" } },
+          { title: { contains: "Associate Director" } },
+          { title: { contains: "Deputy Director" } },
+          { title: { contains: "Assistant Director" } },
+        );
+      }
       const candidate = await prisma.appointment.findFirst({
         where: {
           scholar: { deletedAt: null, status: "active" },
           OR: [
             { title: expected },                              // exact
-            { title: { startsWith: `${expected} ` } },        // "Chair of X ..."
-            { title: { startsWith: `${expected},` } },        // "Chair of X, ..."
-            { title: { endsWith: ` ${expected}` } },          // "... Chair of X" (endowed / acting)
-            { title: { contains: ` ${expected} ` } },         // "... Chair of X ..."
-            { title: { contains: ` ${expected},` } },         // "... Chair of X, ..."
+            { title: { startsWith: `${expected} ` } },        // "<L> of X ..."
+            { title: { startsWith: `${expected},` } },        // "<L> of X, ..."
+            { title: { endsWith: ` ${expected}` } },          // "... <L> of X" (endowed / acting)
+            { title: { contains: ` ${expected} ` } },         // "... <L> of X ..."
+            { title: { contains: ` ${expected},` } },         // "... <L> of X, ..."
           ],
-          NOT: [
-            { title: { contains: "Vice Chair" } },
-            { title: { contains: "Vice-Chair" } },
-            { title: { contains: "Associate Chair" } },
-            { title: { contains: "Deputy Chair" } },
-            { title: { contains: "Assistant Chair" } },
-          ],
+          NOT: exclusions,
           endDate: null,
         },
         orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
@@ -691,8 +719,47 @@ async function main() {
         chairAssignments += 1;
       }
     }
-    console.log(`[ED] assigned chairs to ${chairAssignments}/${seenDepts.size} departments`);
-    console.log(`[ED] distinct chair-title variants observed:`, [...chairTitleVariants]);
+    console.log(`[ED] assigned leaders to ${chairAssignments}/${seenDepts.size} departments`);
+    console.log(`[ED] distinct leader-title variants observed:`, [...chairTitleVariants]);
+
+    // Issue #58 — admin-dept leader overrides. The chair/director regex above
+    // only fires when the SOR appointment title carries "Director of {dept}".
+    // For admin depts where the SOR title is something else (e.g. "Librarian"
+    // for tew2004 in Library), apply a hand-curated CWID. The override only
+    // runs for depts whose detection pass returned null, so once the upstream
+    // SOR title is corrected the override quietly drops out.
+    const ADMIN_DEPT_LEADER_OVERRIDES: Record<string, string> = {
+      N1932: "tew2004", // Library — Terrie Rose Wheeler, "Director of Library"
+    };
+    let adminOverridesApplied = 0;
+    for (const [code, cwid] of Object.entries(ADMIN_DEPT_LEADER_OVERRIDES)) {
+      const dept = await prisma.department.findUnique({
+        where: { code },
+        select: { code: true, category: true, chairCwid: true },
+      });
+      if (!dept || dept.category !== "administrative") continue;
+      if (dept.chairCwid) continue;
+      const scholar = await prisma.scholar.findUnique({
+        where: { cwid },
+        select: { cwid: true, deletedAt: true, status: true },
+      });
+      if (!scholar || scholar.deletedAt || scholar.status !== "active") {
+        console.warn(
+          `[ED] admin-dept leader override skipped — cwid '${cwid}' not active in scholar table (dept ${code})`,
+        );
+        continue;
+      }
+      await prisma.department.update({
+        where: { code },
+        data: { chairCwid: cwid },
+      });
+      adminOverridesApplied += 1;
+    }
+    if (adminOverridesApplied > 0) {
+      console.log(
+        `[ED] applied ${adminOverridesApplied} admin-dept leader override(s) (issue #58)`,
+      );
+    }
 
     // Phase 4 — D-04 division chief detection (issue #16).
     //

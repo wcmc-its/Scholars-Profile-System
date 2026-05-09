@@ -105,7 +105,7 @@ export async function DepartmentPage({
           </p>
         )}
 
-        {detail.chair && <LeaderCard leader={detail.chair} role="Chair" />}
+        {detail.chair && <LeaderCard leader={detail.chair} role={detail.chair.role} />}
 
         {detail.topResearchAreas.length > 0 && (
           <div className="mt-6">
