@@ -82,6 +82,10 @@ export function SubtopicRail({
               const isActive = activeSubtopic === s.id;
               const isLessCommon = s.pubCount <= LESS_COMMON_THRESHOLD;
               const showDivider = i === lessCommonIndex && lessCommonIndex > 0;
+              // Hairline divider above every row except the first AND the
+              // row that already carries the "Less common" separator (which
+              // brings its own visual rule).
+              const showHairline = i > 0 && !showDivider;
               return (
                 <li key={s.id}>
                   {showDivider && (
@@ -95,17 +99,25 @@ export function SubtopicRail({
                   <button
                     type="button"
                     onClick={() => handleClick(s.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2 text-left ${
+                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2.5 text-left ${
+                      showHairline ? "border-t border-[#f0f1f3]" : ""
+                    } ${
                       isActive
-                        ? "bg-[var(--color-accent-slate)] text-white"
-                        : `hover:bg-accent${isLessCommon ? " opacity-60" : ""}`
+                        ? "bg-[#eff6ff] text-[var(--color-accent-slate)]"
+                        : `hover:bg-[#f5f6f8]${isLessCommon ? " opacity-60" : ""}`
                     }`}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="text-base break-words">{s.displayName}</div>
+                      <div className="text-base break-words leading-snug">
+                        {s.displayName}
+                      </div>
                     </div>
                     <span
-                      className={`shrink-0 text-sm tabular-nums ${isActive ? "text-white" : "text-muted-foreground"}`}
+                      className={`shrink-0 self-center text-sm tabular-nums ${
+                        isActive
+                          ? "text-[var(--color-accent-slate)]"
+                          : "text-muted-foreground"
+                      }`}
                     >
                       {s.pubCount}
                     </span>
