@@ -225,6 +225,11 @@ model Grant {
   /// `/search?type=funding` topic matches.
   abstract          String?   @db.Text
   abstractFetchedAt DateTime? @map("abstract_fetched_at")
+  /// Issue #92 — origin of the current `abstract`. One of 'reporter',
+  /// 'nsf', 'pcori', 'cdmrp', 'gates'. Null when no abstract has been
+  /// fetched. Surfaces as small "Source: NSF" attribution in the
+  /// expanded grant view.
+  abstractSource String? @map("abstract_source") @db.VarChar(32)
 
   publications GrantPublication[]
 

@@ -144,6 +144,7 @@ async function step1_GrantAbstracts() {
             applId: u.applId,
             abstract: u.abstract,
             abstractFetchedAt: fetchedAt,
+            abstractSource: u.abstract == null ? null : "reporter",
           },
         })
       )

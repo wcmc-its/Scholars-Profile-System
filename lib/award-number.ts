@@ -65,3 +65,38 @@ export function coreProjectNum(awardNumber: string | null | undefined): string |
   if (!m) return null;
   return `${m[1].toUpperCase()}${m[2].toUpperCase()}${m[3]}`;
 }
+
+/**
+ * Issue #92 — extract the 7-digit NSF award ID from a raw `awardNumber`.
+ *
+ * NSF assigns each award a 7-digit numeric identifier (e.g. "2138052").
+ * Institutional systems store this in many shapes:
+ *
+ *   "2138052"          → 2138052
+ *   "NSF-2138052"      → 2138052
+ *   "NSF 2138052"      → 2138052
+ *   "PHY-2138052"      → 2138052       (directorate prefix)
+ *   "DMS 2138052"      → 2138052
+ *   "ABI-1234567-01"   → 1234567       (with renewal suffix)
+ *
+ * Be permissive: accept the bare 7-digit form too, since some InfoEd rows
+ * drop the prefix entirely. CALLERS must gate this by sponsor (NSF) — a
+ * standalone 7-digit string is ambiguous and could be e.g. an ACS or
+ * foundation reference. NIH award numbers are filtered out first because
+ * the leading 1-9 followed by an activity code can collide with NSF
+ * directorate prefixes in rare cases.
+ *
+ * Returns null when no 7-digit code is present.
+ */
+const NSF_AWARD_RE =
+  /(?:^|[^0-9])(\d{7})(?:[-\s][\w]+)?\s*$/;
+
+export function nsfAwardId(awardNumber: string | null | undefined): string | null {
+  if (!awardNumber) return null;
+  const trimmed = awardNumber.trim();
+  if (!trimmed) return null;
+  // Don't mistake an NIH award (e.g. "1R01CA245678-01") for an NSF ID.
+  if (isNihAwardNumber(trimmed)) return null;
+  const m = trimmed.match(NSF_AWARD_RE);
+  return m ? m[1] : null;
+}

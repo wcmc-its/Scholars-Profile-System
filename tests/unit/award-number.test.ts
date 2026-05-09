@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNihAwardNumber, parseNihAward } from "@/lib/award-number";
+import { isNihAwardNumber, nsfAwardId, parseNihAward } from "@/lib/award-number";
 
 describe("parseNihAward", () => {
   it("parses a standard R01 with whitespace separator", () => {
@@ -88,5 +88,39 @@ describe("isNihAwardNumber", () => {
     expect(isNihAwardNumber("OCRA-2024-091")).toBe(false);
     expect(isNihAwardNumber("IIS-2123456")).toBe(false);
     expect(isNihAwardNumber(null)).toBe(false);
+  });
+});
+
+describe("nsfAwardId", () => {
+  it("returns the bare 7-digit form unchanged", () => {
+    expect(nsfAwardId("2138052")).toBe("2138052");
+  });
+
+  it("strips the NSF prefix variants", () => {
+    expect(nsfAwardId("NSF-2138052")).toBe("2138052");
+    expect(nsfAwardId("NSF 2138052")).toBe("2138052");
+  });
+
+  it("strips directorate prefixes (PHY, DMS, IIS, etc.)", () => {
+    expect(nsfAwardId("PHY-2138052")).toBe("2138052");
+    expect(nsfAwardId("DMS 1234567")).toBe("1234567");
+    expect(nsfAwardId("IIS-2123456")).toBe("2123456");
+  });
+
+  it("ignores trailing renewal suffix", () => {
+    expect(nsfAwardId("ABI-1234567-01")).toBe("1234567");
+  });
+
+  it("rejects NIH award numbers (would otherwise match the 7-digit serial)", () => {
+    expect(nsfAwardId("R01 CA1234567")).toBeNull();
+    expect(nsfAwardId("1R01CA245678-01A1")).toBeNull();
+  });
+
+  it("returns null for empty / null / undefined / non-7-digit input", () => {
+    expect(nsfAwardId(null)).toBeNull();
+    expect(nsfAwardId(undefined)).toBeNull();
+    expect(nsfAwardId("")).toBeNull();
+    expect(nsfAwardId("12345")).toBeNull();
+    expect(nsfAwardId("foo")).toBeNull();
   });
 });
