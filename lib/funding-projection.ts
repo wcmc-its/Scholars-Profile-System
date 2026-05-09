@@ -41,11 +41,26 @@ export type GrantRowForIndex = {
   /** Pub-grant linkages from grant_publication. Optional so test fixtures
    *  and any caller that doesn't need pub counts can omit it. The
    *  projection collects DISTINCT pmids across the project's rows into
-   *  FundingDoc.pubCount. */
-  publications?: Array<{ pmid: string }>;
+   *  FundingDoc.pubCount and the rendered pub list into FundingDoc.publications. */
+  publications?: Array<{
+    pmid: string;
+    sourceReporter: boolean;
+    sourceReciterdb: boolean;
+    reciterdbFirstSeen: Date | null;
+    publication: {
+      title: string;
+      journal: string | null;
+      year: number | null;
+      citationCount: number;
+    };
+  }>;
   /** RePORTER abstract for this grant (Phase 2 ETL). Optional. The
    *  projection picks the first non-null value across the project's rows. */
   abstract?: string | null;
+  /** RePORTER application ID (Phase 2 ETL). Optional. The projection
+   *  picks the first non-null value across the project's rows; for a
+   *  given coreProjectNum all rows share the same applId. */
+  applId?: number | null;
 };
 
 export type FundingDoc = {
@@ -83,7 +98,29 @@ export type FundingDoc = {
    *  all its scholar rows. Drives the pubCount sort and the inline pub
    *  count on the result row. */
   pubCount: number;
+  /** Issue #86 — RePORTER application ID for outbound deep-links from the
+   *  expanded result row to reporter.nih.gov/project-details/<applId>. */
+  applId: number | null;
+  /** Issue #86 — pub list for the inline expand affordance on the result
+   *  row. Deduped by pmid, sorted year-desc → citationCount-desc. The
+   *  isLowerConfidence flag is computed at projection time (against the
+   *  ETL run's `now`) so the row doesn't need a fresh date join.
+   *  Capped at PUB_LIST_CAP entries to keep doc size bounded. */
+  publications: Array<{
+    pmid: string;
+    title: string;
+    journal: string | null;
+    year: number | null;
+    citationCount: number;
+    isLowerConfidence: boolean;
+  }>;
 };
+
+/** Hard cap on the per-project publications list stored in the funding
+ *  index. Covers Reid's largest grant (233 pubs) at a reasonable index
+ *  size; for the rare project beyond this cap, the full list lives on
+ *  the scholar's profile. */
+export const PUB_LIST_CAP = 250;
 
 /** Parse `INFOED-{accountNumber}-{cwid}` external ID. */
 export function parseExternalId(
@@ -161,10 +198,17 @@ function buildSponsorText(args: {
  * document. Rows must all share the same Account_Number (this is the
  * caller's invariant — usually a `groupBy` upstream).
  *
+ * `now` drives the isLowerConfidence cutoff for the per-pub flag (12
+ * months from now). Default is `new Date()` so callers without an
+ * explicit reference get current behavior.
+ *
  * Returns null when the row set is empty or the externalId can't be
  * parsed (no project key — the v1 implementation also drops these).
  */
-export function projectFromRows(rows: GrantRowForIndex[]): FundingDoc | null {
+export function projectFromRows(
+  rows: GrantRowForIndex[],
+  now: Date = new Date(),
+): FundingDoc | null {
   if (rows.length === 0) return null;
   const ext = parseExternalId(rows[0].externalId);
   if (!ext) return null;
@@ -209,20 +253,78 @@ export function projectFromRows(rows: GrantRowForIndex[]): FundingDoc | null {
     ? directShort ?? head.directSponsorRaw ?? null
     : null;
 
-  // Pub count: union of pmids across every grant row in the project.
-  // All rows for one Account_Number normally share the same
-  // coreProjectNum and therefore the same pub set, but unioning is safe
-  // (and correct for the rare project where rows diverge).
-  const pmids = new Set<string>();
+  // Pubs: union by pmid across every grant row in the project. All rows
+  // for one Account_Number normally share the same coreProjectNum and
+  // therefore the same pub set, but unioning is safe (and correct for
+  // the rare project where rows diverge). Provenance flags are OR'd:
+  // a pub seen in either source on any row is credited to that source.
+  type PubAccum = {
+    pmid: string;
+    title: string;
+    journal: string | null;
+    year: number | null;
+    citationCount: number;
+    sourceReporter: boolean;
+    sourceReciterdb: boolean;
+    /** Earliest reciterdbFirstSeen across rows — most conservative for
+     *  the 12-month cutoff (oldest sighting wins). */
+    earliestReciterdbFirstSeen: Date | null;
+  };
+  const pubsByPmid = new Map<string, PubAccum>();
   for (const r of rows) {
     if (!r.publications) continue;
-    for (const p of r.publications) pmids.add(p.pmid);
+    for (const p of r.publications) {
+      const existing = pubsByPmid.get(p.pmid);
+      if (existing) {
+        existing.sourceReporter ||= p.sourceReporter;
+        existing.sourceReciterdb ||= p.sourceReciterdb;
+        if (p.reciterdbFirstSeen) {
+          if (!existing.earliestReciterdbFirstSeen || p.reciterdbFirstSeen < existing.earliestReciterdbFirstSeen) {
+            existing.earliestReciterdbFirstSeen = p.reciterdbFirstSeen;
+          }
+        }
+      } else {
+        pubsByPmid.set(p.pmid, {
+          pmid: p.pmid,
+          title: p.publication.title,
+          journal: p.publication.journal,
+          year: p.publication.year,
+          citationCount: p.publication.citationCount,
+          sourceReporter: p.sourceReporter,
+          sourceReciterdb: p.sourceReciterdb,
+          earliestReciterdbFirstSeen: p.reciterdbFirstSeen,
+        });
+      }
+    }
   }
 
-  // Abstract: take the first non-null one. All rows for one
-  // coreProjectNum share an abstract via the Phase 2 ETL, so first-wins
-  // is deterministic in practice.
+  const lowerConfidenceCutoff = new Date(now);
+  lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
+  const publicationsList = Array.from(pubsByPmid.values())
+    .sort((a, b) => {
+      if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
+      if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
+      return a.pmid.localeCompare(b.pmid);
+    })
+    .slice(0, PUB_LIST_CAP)
+    .map((p) => ({
+      pmid: p.pmid,
+      title: p.title,
+      journal: p.journal,
+      year: p.year,
+      citationCount: p.citationCount,
+      isLowerConfidence:
+        p.sourceReciterdb &&
+        !p.sourceReporter &&
+        p.earliestReciterdbFirstSeen !== null &&
+        p.earliestReciterdbFirstSeen < lowerConfidenceCutoff,
+    }));
+
+  // Abstract + applId: take the first non-null one. All rows for one
+  // coreProjectNum share both via the Phase 2 ETL, so first-wins is
+  // deterministic in practice.
   const abstract = rows.find((r) => r.abstract)?.abstract ?? null;
+  const applId = rows.find((r) => r.applId)?.applId ?? null;
 
   return {
     projectId: ext.accountNumber,
@@ -251,6 +353,8 @@ export function projectFromRows(rows: GrantRowForIndex[]): FundingDoc | null {
     totalPeople: people.length,
     people,
     abstract,
-    pubCount: pmids.size,
+    pubCount: pubsByPmid.size,
+    applId,
+    publications: publicationsList,
   };
 }

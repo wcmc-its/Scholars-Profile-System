@@ -258,6 +258,16 @@ export const fundingIndexMapping = {
       // in an abstract returns the project. Stored so the result row
       // can render a snippet.
       abstract: { type: "text", analyzer: "funding_text" },
+      // Issue #86 — RePORTER application ID; outbound deep-link target
+      // from the expanded result row.
+      applId: { type: "integer" },
+      // Issue #86 — top PUB_LIST_CAP pubs attributed to the project.
+      // Stored (not indexed for search) so the row's expanded view can
+      // render without an extra round-trip.
+      publications: {
+        type: "object",
+        enabled: false,
+      },
 
       // Hit-rendering payload — saved with the doc so a result page can
       // hydrate `FundingHit` without a Prisma round-trip.

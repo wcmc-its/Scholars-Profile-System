@@ -539,9 +539,26 @@ async function indexFunding() {
       nihIc: true,
       isSubaward: true,
       // Issue #86 — pulled into the OpenSearch funding doc for sort
-      // (pubCount) and full-text relevance (abstract).
+      // (pubCount), full-text relevance (abstract), and the inline
+      // publications-expand UX on result rows.
       abstract: true,
-      publications: { select: { pmid: true } },
+      applId: true,
+      publications: {
+        select: {
+          pmid: true,
+          sourceReporter: true,
+          sourceReciterdb: true,
+          reciterdbFirstSeen: true,
+          publication: {
+            select: {
+              title: true,
+              journal: true,
+              year: true,
+              citationCount: true,
+            },
+          },
+        },
+      },
       scholar: {
         select: {
           slug: true,

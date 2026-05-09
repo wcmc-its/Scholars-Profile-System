@@ -34,6 +34,10 @@ const baseHit: FundingHit = {
   totalPeople: 1,
   department: "Medicine",
   pubCount: 0,
+  abstract: null,
+  applId: null,
+  publications: [],
+  coreProjectNum: null,
 };
 
 describe("FundingResultRow — basics", () => {

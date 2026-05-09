@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { sanitizePubTitle } from "@/lib/utils";
+import { ExpandedGrant } from "@/components/funding/expanded-grant";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
 /**
@@ -68,6 +70,13 @@ export function FundingResultRow({
   const typeLabel = programTypeLabel(hit.programType);
   const visiblePeople = hit.people.slice(0, VISIBLE_COI_CAP);
   const remainder = hit.totalPeople - visiblePeople.length;
+
+  // Issue #86 — inline expand affordance, mirroring the profile Funding
+  // section. Prefer the indexed applId; fall back to the parent-resolved
+  // applId for projects where the Phase 2 ETL hasn't run yet.
+  const [expanded, setExpanded] = useState(false);
+  const effectiveApplId = hit.applId ?? applId ?? null;
+  const canExpand = hit.pubCount > 0 || !!hit.abstract;
 
   function trackClick(cwid: string) {
     if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
@@ -147,6 +156,37 @@ export function FundingResultRow({
             </>
           ) : null}
         </div>
+
+        {canExpand ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-1.5 inline-flex items-center gap-1 text-[13px] text-[var(--color-accent-slate)] hover:underline"
+            aria-expanded={expanded}
+          >
+            <span
+              className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${
+                expanded ? "rotate-90" : ""
+              }`}
+            >
+              ▶
+            </span>
+            {hit.pubCount > 0
+              ? `${hit.pubCount} ${hit.pubCount === 1 ? "publication" : "publications"}`
+              : "Show abstract"}
+          </button>
+        ) : null}
+
+        {expanded ? (
+          <div className="mt-3">
+            <ExpandedGrant
+              abstract={hit.abstract}
+              applId={effectiveApplId}
+              coreProjectNum={hit.coreProjectNum}
+              publications={hit.publications}
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Right column: award identifier. */}

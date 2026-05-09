@@ -27,6 +27,7 @@ import {
   FUNDING_FIELD_BOOSTS,
   searchClient,
 } from "@/lib/search";
+import { coreProjectNum } from "@/lib/award-number";
 
 const PAGE_SIZE = 20;
 
@@ -98,6 +99,24 @@ export type FundingHit = {
    *  its scholar rows. Drives the pubCount sort and is rendered on the
    *  result row. */
   pubCount: number;
+  /** Issue #86 — RePORTER abstract for inline expansion on the result row. */
+  abstract: string | null;
+  /** Issue #86 — RePORTER application ID; outbound deep-link target. */
+  applId: number | null;
+  /** Issue #86 — pub list for the inline expand affordance. Capped at
+   *  PUB_LIST_CAP entries during indexing. */
+  publications: Array<{
+    pmid: string;
+    title: string;
+    journal: string | null;
+    year: number | null;
+    citationCount: number;
+    isLowerConfidence: boolean;
+  }>;
+  /** Issue #86 — RePORTER core_project_num parsed from the awardNumber.
+   *  Used by the expanded view to build the PubMed grant-search outbound
+   *  link. Null for non-NIH grants. */
+  coreProjectNum: string | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -395,6 +414,16 @@ export async function searchFunding(opts: {
       totalPeople: number;
       people: StoredPerson[];
       pubCount: number;
+      abstract: string | null;
+      applId: number | null;
+      publications: Array<{
+        pmid: string;
+        title: string;
+        journal: string | null;
+        year: number | null;
+        citationCount: number;
+        isLowerConfidence: boolean;
+      }>;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -435,6 +464,10 @@ export async function searchFunding(opts: {
       department: src.department,
       totalPeople: src.totalPeople,
       pubCount: src.pubCount ?? 0,
+      abstract: src.abstract ?? null,
+      applId: src.applId ?? null,
+      publications: src.publications ?? [],
+      coreProjectNum: coreProjectNum(src.awardNumber),
       people: (src.people ?? []).map((p) => ({
         cwid: p.cwid,
         slug: p.slug,

@@ -8,9 +8,7 @@ import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
-
-const PUBS_INITIAL = 5;
-const ABSTRACT_TRUNCATE_LINES = 3;
+import { ExpandedGrant } from "@/components/funding/expanded-grant";
 
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
@@ -374,132 +372,16 @@ function GrantRow({
         <AwardNumberDisplay grant={grant} applId={applId} />
       </div>
 
-      {expanded ? <ExpandedGrant group={group} applId={applId} /> : null}
-    </div>
-  );
-}
-
-function ExpandedGrant({
-  group,
-  applId,
-}: {
-  group: GrantGroup;
-  applId: number | undefined;
-}) {
-  const [showAbstract, setShowAbstract] = useState(false);
-  const [showAllPubs, setShowAllPubs] = useState(false);
-  const pubs = showAllPubs ? group.publications : group.publications.slice(0, PUBS_INITIAL);
-  const hiddenCount = group.publications.length - PUBS_INITIAL;
-
-  const reporterUrl = applId ? `https://reporter.nih.gov/project-details/${applId}` : null;
-  // PubMed query for any pub citing this grant. Uses the core_project_num
-  // form which PubMed accepts for grant searches across all renewal years.
-  const pubmedUrl = group.primary.coreProjectNum
-    ? `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(group.primary.coreProjectNum)}%5BGrants+and+Funding%5D`
-    : null;
-
-  return (
-    <div className="ml-[76px] mb-3 border-l-2 border-border pl-3">
-      {group.abstract ? (
-        <div className="mb-3">
-          <p
-            className={`text-sm leading-relaxed text-foreground/90 ${
-              showAbstract ? "" : `line-clamp-${ABSTRACT_TRUNCATE_LINES}`
-            }`}
-          >
-            {group.abstract}
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowAbstract((s) => !s)}
-            className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
-          >
-            {showAbstract ? "Show less" : "Show more"}
-          </button>
-        </div>
-      ) : null}
-
-      {pubs.length > 0 ? (
-        <ul className="flex flex-col gap-2.5">
-          {pubs.map((p) => (
-            <li key={p.pmid}>
-              <div className="text-sm leading-snug">
-                <a
-                  href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[var(--color-accent-slate)] hover:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(p.title) }}
-                />
-                {p.isLowerConfidence ? <LowerConfidenceBadge /> : null}
-              </div>
-              <div className="text-muted-foreground mt-0.5 text-xs">
-                {p.journal ? <em>{p.journal}</em> : null}
-                {p.year ? <> · {p.year}</> : null}
-                {" · PMID "}
-                {p.pmid}
-                {p.citationCount > 0 ? (
-                  <>
-                    {" · "}
-                    {p.citationCount} {p.citationCount === 1 ? "citation" : "citations"}
-                  </>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {(hiddenCount > 0 || pubmedUrl || reporterUrl) ? (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 text-xs">
-          {hiddenCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => setShowAllPubs((s) => !s)}
-              className="text-[var(--color-accent-slate)] hover:underline"
-            >
-              {showAllPubs ? "Show fewer" : `Show ${hiddenCount} more`}
-            </button>
-          ) : null}
-          {hiddenCount > 0 && (pubmedUrl || reporterUrl) ? (
-            <span className="text-muted-foreground">·</span>
-          ) : null}
-          {pubmedUrl ? (
-            <a
-              href={pubmedUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--color-accent-slate)] hover:underline"
-            >
-              PubMed
-            </a>
-          ) : null}
-          {pubmedUrl && reporterUrl ? (
-            <span className="text-muted-foreground">·</span>
-          ) : null}
-          {reporterUrl ? (
-            <a
-              href={reporterUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--color-accent-slate)] hover:underline"
-            >
-              RePORTER
-            </a>
-          ) : null}
-        </div>
+      {expanded ? (
+        <ExpandedGrant
+          abstract={group.abstract}
+          applId={applId ?? null}
+          coreProjectNum={group.primary.coreProjectNum}
+          publications={group.publications}
+          indentClass="ml-[76px]"
+        />
       ) : null}
     </div>
-  );
-}
-
-function LowerConfidenceBadge() {
-  return (
-    <HoverTooltip text="Found via PubMed grant indexing only; not yet confirmed by NIH RePORTER. Attribution may need review.">
-      <span className="ml-2 inline-flex h-4 items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-        Lower confidence
-      </span>
-    </HoverTooltip>
   );
 }
 
