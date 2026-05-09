@@ -9,6 +9,9 @@ import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { useNihApplIdMap } from "@/lib/use-nih-resolve";
 
+const PUBS_INITIAL = 5;
+const ABSTRACT_TRUNCATE_LINES = 3;
+
 type RoleBucket = "all" | "PI" | "Co-PI" | "Co-I" | "PI-Subaward" | "Key Personnel";
 
 const ROLE_BUCKET_ORDER: ReadonlyArray<{ key: RoleBucket; label: string }> = [
@@ -63,6 +66,84 @@ function awardSerial(awardNumber: string, mechanism: string): string {
 }
 
 type Grant = ProfilePayload["grants"][number];
+type GrantPublication = Grant["publications"][number];
+
+/** A group of grant rows that share a coreProjectNum (NIH renewal years
+ *  of the same award) collapsed into one displayed row. Non-NIH grants
+ *  form a singleton group. The "primary" grant is the most recently
+ *  ending one — its title, role, awardNumber, and applId represent the
+ *  group. The publication list is shared (same coreProjectNum → same
+ *  linkages in grant_provenance for this scholar).
+ */
+type GrantGroup = {
+  primary: Grant;
+  /** All grants in the group, sorted endDate desc. Used to render the
+   *  combined year range and the renewal years inline. */
+  members: Grant[];
+  /** Earliest startDate across the group. */
+  startDate: string;
+  /** Latest endDate across the group. */
+  endDate: string;
+  isActive: boolean;
+  /** Union of publications across the group, deduped by pmid. In practice
+   *  all members share the same pmids; dedupe is defensive. */
+  publications: GrantPublication[];
+  /** Latest non-null abstract, or null if none populated. */
+  abstract: string | null;
+  /** Most recent non-null applId. */
+  applId: number | null;
+};
+
+function groupGrants(grants: Grant[]): GrantGroup[] {
+  const buckets = new Map<string, Grant[]>();
+  for (const g of grants) {
+    // Singleton key for non-NIH grants (no coreProjectNum) so they don't
+    // collapse with each other or with NIH grants.
+    const key = g.coreProjectNum ?? `__singleton__${grants.indexOf(g)}`;
+    const list = buckets.get(key);
+    if (list) list.push(g);
+    else buckets.set(key, [g]);
+  }
+  const groups: GrantGroup[] = [];
+  for (const members of buckets.values()) {
+    const sorted = [...members].sort((a, b) => b.endDate.localeCompare(a.endDate));
+    const primary = sorted[0];
+    const startDate = sorted.reduce((acc, g) => (g.startDate < acc ? g.startDate : acc), primary.startDate);
+    const endDate = sorted.reduce((acc, g) => (g.endDate > acc ? g.endDate : acc), primary.endDate);
+    const seen = new Set<string>();
+    const publications: GrantPublication[] = [];
+    for (const m of sorted) {
+      for (const p of m.publications) {
+        if (seen.has(p.pmid)) continue;
+        seen.add(p.pmid);
+        publications.push(p);
+      }
+    }
+    publications.sort((a, b) => {
+      if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
+      if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
+      return a.pmid.localeCompare(b.pmid);
+    });
+    const abstract = sorted.find((g) => g.abstract)?.abstract ?? null;
+    const applId = sorted.find((g) => g.applId)?.applId ?? null;
+    groups.push({
+      primary,
+      members: sorted,
+      startDate,
+      endDate,
+      isActive: sorted.some((g) => g.isActive),
+      publications,
+      abstract,
+      applId,
+    });
+  }
+  // Order: active first by latest endDate, then completed by latest endDate.
+  groups.sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    return b.endDate.localeCompare(a.endDate);
+  });
+  return groups;
+}
 
 export function GrantsSection({ grants }: { grants: Grant[] }) {
   const [roleBucket, setRoleBucket] = useState<RoleBucket>("all");
@@ -93,11 +174,13 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
     });
   }, [grants, roleBucket, query]);
 
-  const activeGrants = useMemo(() => filtered.filter((g) => g.isActive), [filtered]);
-  const completedGrants = useMemo(() => filtered.filter((g) => !g.isActive), [filtered]);
+  const grouped = useMemo(() => groupGrants(filtered), [filtered]);
+  const activeGroups = useMemo(() => grouped.filter((g) => g.isActive), [grouped]);
+  const completedGroups = useMemo(() => grouped.filter((g) => !g.isActive), [grouped]);
 
   // applId map covering every NIH award on the page — single batched
-  // POST to /api/nih-resolve, fired after first paint.
+  // POST to /api/nih-resolve, fired after first paint. Used as the
+  // fallback when grant.applId from RePORTER ETL hasn't populated yet.
   const applIdByAward = useNihApplIdMap(grants.map((g) => g.awardNumber));
 
   return (
@@ -140,36 +223,46 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
         </div>
       ) : null}
 
-      {activeGrants.length > 0 ? (
+      {activeGroups.length > 0 ? (
         <>
           <div className="mt-2 mb-3 flex items-baseline gap-3">
             <h3 className="text-base font-semibold">Active</h3>
             <span className="text-muted-foreground text-sm">
-              {activeGrants.length} {activeGrants.length === 1 ? "grant" : "grants"}
+              {activeGroups.length} {activeGroups.length === 1 ? "grant" : "grants"}
             </span>
           </div>
           <ul>
-            {activeGrants.map((g, i) => (
+            {activeGroups.map((group, i) => (
               <li key={`a${i}`}>
-                <GrantRow grant={g} applId={g.awardNumber ? applIdByAward[g.awardNumber] : undefined} />
+                <GrantRow
+                  group={group}
+                  applIdFallback={
+                    group.primary.awardNumber ? applIdByAward[group.primary.awardNumber] : undefined
+                  }
+                />
               </li>
             ))}
           </ul>
         </>
       ) : null}
 
-      {completedGrants.length > 0 ? (
+      {completedGroups.length > 0 ? (
         <details className="group mt-4 border-t border-border">
           <summary className="flex cursor-pointer list-none items-center gap-2 py-3 text-sm font-medium text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
             <span className="text-muted-foreground inline-block w-3 text-[10px] transition-transform group-open:rotate-90">
               ▶
             </span>
-            Completed grants ({completedGrants.length})
+            Completed grants ({completedGroups.length})
           </summary>
           <ul className="pb-3">
-            {completedGrants.map((g, i) => (
+            {completedGroups.map((group, i) => (
               <li key={`c${i}`}>
-                <GrantRow grant={g} applId={g.awardNumber ? applIdByAward[g.awardNumber] : undefined} />
+                <GrantRow
+                  group={group}
+                  applIdFallback={
+                    group.primary.awardNumber ? applIdByAward[group.primary.awardNumber] : undefined
+                  }
+                />
               </li>
             ))}
           </ul>
@@ -179,11 +272,25 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
   );
 }
 
-function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined }) {
+function GrantRow({
+  group,
+  applIdFallback,
+}: {
+  group: GrantGroup;
+  applIdFallback: number | undefined;
+}) {
+  const grant = group.primary;
   const label = GRANT_ROLE_LABEL[grant.role] ?? grant.role;
   const title = GRANT_ROLE_TITLE[grant.role] ?? grant.role;
-  const startYear = grant.startDate.slice(0, 4);
-  const endYear = grant.endDate.slice(0, 4);
+  const startYear = group.startDate.slice(0, 4);
+  const endYear = group.endDate.slice(0, 4);
+  const [expanded, setExpanded] = useState(false);
+
+  // Prefer the RePORTER-ETL applId; fall back to the resolver's lookup
+  // for grants that haven't been reconciled yet.
+  const applId = group.applId ?? applIdFallback;
+  const pubCount = group.publications.length;
+  const canExpand = pubCount > 0 || !!group.abstract;
 
   // Issue #78 F2/F6 — prefer canonical short, fall back to raw, fall back
   // again to legacy `funder` for rows where the new ETL hasn't run yet.
@@ -194,48 +301,202 @@ function GrantRow({ grant, applId }: { grant: Grant; applId: number | undefined 
   const typeLabel = programTypeLabel(grant.programType);
 
   return (
-    <div className="grid grid-cols-[64px_1fr_auto] items-baseline gap-3 border-t border-border py-3 first:border-t-0">
-      <HoverTooltip text={title}>
-        <span
-          className={
-            grant.isActive
-              ? "inline-flex h-5 items-center justify-center rounded-sm bg-green-50 px-2 text-[10px] font-semibold uppercase tracking-wider text-green-700 dark:bg-green-950 dark:text-green-300"
-              : "bg-muted text-muted-foreground inline-flex h-5 items-center justify-center rounded-sm px-2 text-[10px] font-semibold uppercase tracking-wider"
-          }
-        >
-          {label}
-        </span>
-      </HoverTooltip>
-      <div>
-        <div
-          className="text-base font-medium leading-snug"
-          dangerouslySetInnerHTML={{ __html: sanitizePubTitle(grant.title) }}
-        />
-        <div className="text-muted-foreground mt-0.5 text-sm">
-          {primeShort ? (
-            <FunderEyebrow short={primeShort} />
-          ) : (
-            <span>{grant.funder}</span>
-          )}
-          {" · "}
-          {startYear}
-          {"–"}
-          {endYear}
-          {showVia ? (
-            <>
-              {" · via "}
-              <SponsorAbbr short={directShort!} />
-            </>
-          ) : null}
-          {typeLabel ? (
-            <span className="border-border-strong text-muted-foreground ml-2 inline-flex h-4 items-center rounded-sm border px-1.5 text-[10px] font-medium uppercase tracking-wide">
-              {typeLabel}
-            </span>
+    <div className="border-t border-border first:border-t-0">
+      <div className="grid grid-cols-[64px_1fr_auto] items-baseline gap-3 py-3">
+        <HoverTooltip text={title}>
+          <span
+            className={
+              group.isActive
+                ? "inline-flex h-5 items-center justify-center rounded-sm bg-green-50 px-2 text-[10px] font-semibold uppercase tracking-wider text-green-700 dark:bg-green-950 dark:text-green-300"
+                : "bg-muted text-muted-foreground inline-flex h-5 items-center justify-center rounded-sm px-2 text-[10px] font-semibold uppercase tracking-wider"
+            }
+          >
+            {label}
+          </span>
+        </HoverTooltip>
+        <div>
+          <div
+            className="text-base font-medium leading-snug"
+            dangerouslySetInnerHTML={{ __html: sanitizePubTitle(grant.title) }}
+          />
+          <div className="text-muted-foreground mt-0.5 text-sm">
+            {primeShort ? (
+              <FunderEyebrow short={primeShort} />
+            ) : (
+              <span>{grant.funder}</span>
+            )}
+            {" · "}
+            {startYear}
+            {"–"}
+            {endYear}
+            {showVia ? (
+              <>
+                {" · via "}
+                <SponsorAbbr short={directShort!} />
+              </>
+            ) : null}
+            {typeLabel ? (
+              <span className="border-border-strong text-muted-foreground ml-2 inline-flex h-4 items-center rounded-sm border px-1.5 text-[10px] font-medium uppercase tracking-wide">
+                {typeLabel}
+              </span>
+            ) : null}
+            {group.members.length > 1 ? (
+              <span className="text-muted-foreground ml-2 text-xs">
+                · {group.members.length} renewals
+              </span>
+            ) : null}
+          </div>
+          {canExpand ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((e) => !e)}
+              className="mt-1.5 inline-flex items-center gap-1 text-sm text-[var(--color-accent-slate)] hover:underline"
+              aria-expanded={expanded}
+            >
+              <span
+                className={`text-muted-foreground inline-block w-3 text-[10px] transition-transform ${
+                  expanded ? "rotate-90" : ""
+                }`}
+              >
+                ▶
+              </span>
+              {pubCount > 0
+                ? `${pubCount} ${pubCount === 1 ? "publication" : "publications"}`
+                : "Show abstract"}
+            </button>
+          ) : pubCount === 0 && !group.abstract ? (
+            <div className="text-muted-foreground mt-1.5 text-xs">No publications yet</div>
           ) : null}
         </div>
+        <AwardNumberDisplay grant={grant} applId={applId} />
       </div>
-      <AwardNumberDisplay grant={grant} applId={applId} />
+
+      {expanded ? <ExpandedGrant group={group} applId={applId} /> : null}
     </div>
+  );
+}
+
+function ExpandedGrant({
+  group,
+  applId,
+}: {
+  group: GrantGroup;
+  applId: number | undefined;
+}) {
+  const [showAbstract, setShowAbstract] = useState(false);
+  const [showAllPubs, setShowAllPubs] = useState(false);
+  const pubs = showAllPubs ? group.publications : group.publications.slice(0, PUBS_INITIAL);
+  const hiddenCount = group.publications.length - PUBS_INITIAL;
+
+  const reporterUrl = applId ? `https://reporter.nih.gov/project-details/${applId}` : null;
+  // PubMed query for any pub citing this grant. Uses the core_project_num
+  // form which PubMed accepts for grant searches across all renewal years.
+  const pubmedUrl = group.primary.coreProjectNum
+    ? `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(group.primary.coreProjectNum)}%5BGrants+and+Funding%5D`
+    : null;
+
+  return (
+    <div className="ml-[76px] mb-3 border-l-2 border-border pl-3">
+      {group.abstract ? (
+        <div className="mb-3">
+          <p
+            className={`text-sm leading-relaxed text-foreground/90 ${
+              showAbstract ? "" : `line-clamp-${ABSTRACT_TRUNCATE_LINES}`
+            }`}
+          >
+            {group.abstract}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAbstract((s) => !s)}
+            className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+          >
+            {showAbstract ? "Show less" : "Show more"}
+          </button>
+        </div>
+      ) : null}
+
+      {pubs.length > 0 ? (
+        <ul className="flex flex-col gap-2.5">
+          {pubs.map((p) => (
+            <li key={p.pmid}>
+              <div className="text-sm leading-snug">
+                <a
+                  href={`https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-accent-slate)] hover:underline"
+                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(p.title) }}
+                />
+                {p.isLowerConfidence ? <LowerConfidenceBadge /> : null}
+              </div>
+              <div className="text-muted-foreground mt-0.5 text-xs">
+                {p.journal ? <em>{p.journal}</em> : null}
+                {p.year ? <> · {p.year}</> : null}
+                {" · PMID "}
+                {p.pmid}
+                {p.citationCount > 0 ? (
+                  <>
+                    {" · "}
+                    {p.citationCount} {p.citationCount === 1 ? "citation" : "citations"}
+                  </>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {(hiddenCount > 0 || pubmedUrl || reporterUrl) ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 text-xs">
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowAllPubs((s) => !s)}
+              className="text-[var(--color-accent-slate)] hover:underline"
+            >
+              {showAllPubs ? "Show fewer" : `Show ${hiddenCount} more`}
+            </button>
+          ) : null}
+          {hiddenCount > 0 && (pubmedUrl || reporterUrl) ? (
+            <span className="text-muted-foreground">·</span>
+          ) : null}
+          {pubmedUrl ? (
+            <a
+              href={pubmedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--color-accent-slate)] hover:underline"
+            >
+              PubMed
+            </a>
+          ) : null}
+          {pubmedUrl && reporterUrl ? (
+            <span className="text-muted-foreground">·</span>
+          ) : null}
+          {reporterUrl ? (
+            <a
+              href={reporterUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--color-accent-slate)] hover:underline"
+            >
+              RePORTER
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LowerConfidenceBadge() {
+  return (
+    <HoverTooltip text="Found via PubMed grant indexing only; not yet confirmed by NIH RePORTER. Attribution may need review.">
+      <span className="ml-2 inline-flex h-4 items-center rounded-sm border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-medium text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+        Lower confidence
+      </span>
+    </HoverTooltip>
   );
 }
 

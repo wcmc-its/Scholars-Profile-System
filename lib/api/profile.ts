@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+import { coreProjectNum } from "@/lib/award-number";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   rankForSelectedHighlights,
@@ -209,6 +210,33 @@ export type ProfilePayload = {
     nihIc: string | null;
     /** Issue #78 F6 — true when direct sponsor differs from prime. */
     isSubaward: boolean;
+    /** Issue #85/#86 — RePORTER core_project_num parsed from awardNumber.
+     *  Used by the UI to group renewal-year rows of the same core grant
+     *  into a single displayed entry. Null for non-NIH grants. */
+    coreProjectNum: string | null;
+    /** Issue #85/#86 — RePORTER application ID (most recent FY's award).
+     *  Drives outbound RePORTER deep links. Null for non-NIH or unmatched. */
+    applId: number | null;
+    /** Issue #85/#86 — RePORTER project abstract. Null for non-NIH or
+     *  unmatched grants. */
+    abstract: string | null;
+    /** Issue #85/#86 — pub-grant linkages for this grant from
+     *  reciterdb.grant_provenance via the grant_publication bridge.
+     *  Sorted by year desc → citation count desc. */
+    publications: Array<{
+      pmid: string;
+      title: string;
+      journal: string | null;
+      year: number | null;
+      citationCount: number;
+      /** True when RePORTER confirmed this linkage. */
+      sourceReporter: boolean;
+      /** True when reciterdb (PubMed grant indexing) had this linkage. */
+      sourceReciterdb: boolean;
+      /** True when reciterdb-only AND reciterdbFirstSeen is older than 12
+       *  months — the UI shows a "Lower confidence" badge in this case. */
+      isLowerConfidence: boolean;
+    }>;
   }>;
   keywords: ProfileKeywords;
   disclosures: Array<{
@@ -312,6 +340,21 @@ export async function getScholarFullProfileBySlug(
       },
       grants: {
         orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+        include: {
+          publications: {
+            include: {
+              publication: {
+                select: {
+                  pmid: true,
+                  title: true,
+                  journal: true,
+                  year: true,
+                  citationCount: true,
+                },
+              },
+            },
+          },
+        },
       },
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
@@ -507,23 +550,54 @@ export async function getScholarFullProfileBySlug(
     // lookup (e.g. due to alias / normalization additions made after the
     // last ETL run), promote it on the fly. Lets the profile section
     // reflect canonical-lookup updates without re-ingesting.
-    grants: scholar.grants.map((g) => ({
-      title: g.title,
-      role: g.role,
-      funder: g.funder,
-      startDate: g.startDate.toISOString().slice(0, 10),
-      endDate: g.endDate.toISOString().slice(0, 10),
-      isActive: isFundingActive(g.endDate, now),
-      awardNumber: g.awardNumber ?? null,
-      programType: g.programType,
-      primeSponsor: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw),
-      primeSponsorRaw: g.primeSponsorRaw ?? null,
-      directSponsor: g.directSponsor ?? canonicalizeSponsor(g.directSponsorRaw),
-      directSponsorRaw: g.directSponsorRaw ?? null,
-      mechanism: g.mechanism ?? null,
-      nihIc: g.nihIc ?? null,
-      isSubaward: g.isSubaward,
-    })),
+    grants: scholar.grants.map((g) => {
+      const lowerConfidenceCutoff = new Date(now);
+      lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
+      const pubs = g.publications
+        .map((gp) => ({
+          pmid: gp.publication.pmid,
+          title: gp.publication.title,
+          journal: gp.publication.journal,
+          year: gp.publication.year,
+          citationCount: gp.publication.citationCount,
+          sourceReporter: gp.sourceReporter,
+          sourceReciterdb: gp.sourceReciterdb,
+          // "Lower confidence" trigger per #85/#86: reciterdb has had this
+          // linkage for 12+ months but RePORTER still hasn't confirmed it.
+          isLowerConfidence:
+            gp.sourceReciterdb &&
+            !gp.sourceReporter &&
+            gp.reciterdbFirstSeen !== null &&
+            gp.reciterdbFirstSeen < lowerConfidenceCutoff,
+        }))
+        .sort((a, b) => {
+          // Year desc, then citation count desc, then pmid asc for stability.
+          if ((b.year ?? 0) !== (a.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
+          if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
+          return a.pmid.localeCompare(b.pmid);
+        });
+      return {
+        title: g.title,
+        role: g.role,
+        funder: g.funder,
+        startDate: g.startDate.toISOString().slice(0, 10),
+        endDate: g.endDate.toISOString().slice(0, 10),
+        isActive: isFundingActive(g.endDate, now),
+        awardNumber: g.awardNumber ?? null,
+        programType: g.programType,
+        primeSponsor: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw),
+        primeSponsorRaw: g.primeSponsorRaw ?? null,
+        directSponsor: g.directSponsor ?? canonicalizeSponsor(g.directSponsorRaw),
+        directSponsorRaw: g.directSponsorRaw ?? null,
+        mechanism: g.mechanism ?? null,
+        nihIc: g.nihIc ?? null,
+        isSubaward: g.isSubaward,
+        coreProjectNum: coreProjectNum(g.awardNumber),
+        applId: g.applId ?? null,
+        abstract: g.abstract ?? null,
+        publications: pubs,
+      };
+    }),
     keywords,
     disclosures: scholar.coiActivities.map((c) => ({
       entity: c.entity,

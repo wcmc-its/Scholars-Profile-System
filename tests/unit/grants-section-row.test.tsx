@@ -41,6 +41,10 @@ const baseGrant: Grant = {
   mechanism: "R01",
   nihIc: "NCI",
   isSubaward: false,
+  coreProjectNum: "R01CA245678",
+  applId: null,
+  abstract: null,
+  publications: [],
 };
 
 describe("GrantsSection row — eyebrow rendering", () => {
