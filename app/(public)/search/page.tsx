@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { JournalFacet } from "@/components/search/journal-facet";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { PublicationMeta } from "@/components/publication/publication-meta";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import {
@@ -718,31 +719,13 @@ async function PublicationsResults({
                     {h.year ?? null}.
                   </div>
                   <AuthorChipRow authors={h.wcmAuthors} />
-                  <div className="mt-2 flex gap-3 text-xs text-[#757575]">
-                    {h.citationCount > 0 ? (
-                      <span className="font-medium text-[#4a4a4a]">{h.citationCount} citations</span>
-                    ) : null}
-                    {h.doi ? (
-                      <a
-                        href={`https://doi.org/${h.doi}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline decoration-dotted underline-offset-2 hover:text-[#2c4f6e]"
-                      >
-                        DOI
-                      </a>
-                    ) : null}
-                    {h.pubmedUrl ? (
-                      <a
-                        href={h.pubmedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline decoration-dotted underline-offset-2 hover:text-[#2c4f6e]"
-                      >
-                        PubMed
-                      </a>
-                    ) : null}
-                  </div>
+                  <PublicationMeta
+                    citationCount={h.citationCount}
+                    pmid={h.pmid}
+                    pmcid={h.pmcid}
+                    doi={h.doi}
+                    className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
+                  />
                 </li>
               );
             })}

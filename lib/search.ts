@@ -164,6 +164,7 @@ export const publicationsIndexMapping = {
       citationCount: { type: "integer" },
       dateAddedToEntrez: { type: "date" },
       doi: { type: "keyword" },
+      pmcid: { type: "keyword" },
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
       // Issue #32 — abstract text on the publications index lets thematic

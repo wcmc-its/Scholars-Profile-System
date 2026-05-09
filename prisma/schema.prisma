@@ -212,6 +212,10 @@ model Publication {
   citationCount     Int       @default(0) @map("citation_count")
   dateAddedToEntrez DateTime? @map("date_added_to_entrez") @db.Date
   doi               String?   @db.VarChar(255)
+  /// PubMed Central identifier including the `PMC` prefix (e.g. "PMC11098699").
+  /// Sourced from `analysis_summary_article.pmcid`. Surfaced on publication
+  /// cards alongside DOI/PMID; signals NIH public-access compliance.
+  pmcid             String?   @db.VarChar(32)
   pubmedUrl         String?   @map("pubmed_url") @db.VarChar(512)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.

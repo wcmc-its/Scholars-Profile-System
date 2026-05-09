@@ -1,4 +1,5 @@
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { PublicationMeta } from "@/components/publication/publication-meta";
 import {
   AuthorPositionBadge,
   deriveAuthorPositionRole,
@@ -56,24 +57,13 @@ export function PublicationRow({
         </div>
       ) : null}
       <AuthorChipRow authors={pub.wcmAuthors} />
-      <div className="text-muted-foreground mt-1.5 flex flex-wrap gap-x-3 text-xs">
-        {pub.citationCount > 0 ? (
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">
-            {pub.citationCount.toLocaleString()} citations
-          </span>
-        ) : null}
-        <AuthorPositionBadge role={role} />
-        {pub.doi ? (
-          <a
-            href={`https://doi.org/${pub.doi}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-dotted hover:text-[var(--color-accent-slate)]"
-          >
-            DOI
-          </a>
-        ) : null}
-      </div>
+      <PublicationMeta
+        citationCount={pub.citationCount}
+        role={role ? <AuthorPositionBadge role={role} /> : null}
+        pmid={pub.pmid}
+        pmcid={pub.pmcid}
+        doi={pub.doi}
+      />
     </div>
   );
 }

@@ -94,6 +94,7 @@ export type PublicationHit = {
   publicationType: string | null;
   citationCount: number;
   doi: string | null;
+  pmcid: string | null;
   pubmedUrl: string | null;
   /** Chip-ready WCM author list with first/senior flags + headshot endpoint,
    *  matching the topic page's TopicPublicationHit.authors shape. */
@@ -565,6 +566,7 @@ export async function searchPublications(opts: {
       publicationType: string | null;
       citationCount: number;
       doi: string | null;
+      pmcid: string | null;
       pubmedUrl: string | null;
     };
   };
@@ -596,6 +598,7 @@ export async function searchPublications(opts: {
         publicationType: h._source.publicationType,
         citationCount: h._source.citationCount,
         doi: h._source.doi,
+        pmcid: h._source.pmcid,
         pubmedUrl: h._source.pubmedUrl,
         wcmAuthors: enriched.flatMap((a) =>
           a.cwid && a.slug && a.identityImageEndpoint

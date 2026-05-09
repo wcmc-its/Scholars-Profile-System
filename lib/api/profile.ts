@@ -127,6 +127,7 @@ export type ProfilePublication = ScoredPublication<{
   reciteraiImpact: number;
   dateAddedToEntrez: Date | null;
   doi: string | null;
+  pmcid: string | null;
   pubmedUrl: string | null;
   authorship: { isFirst: boolean; isLast: boolean; isPenultimate: boolean };
   isConfirmed: boolean;
@@ -451,6 +452,7 @@ export async function getScholarFullProfileBySlug(
         ?? 0,
     dateAddedToEntrez: a.publication.dateAddedToEntrez,
     doi: a.publication.doi,
+    pmcid: a.publication.pmcid,
     pubmedUrl: a.publication.pubmedUrl,
     authorship: {
       isFirst: a.isFirst,

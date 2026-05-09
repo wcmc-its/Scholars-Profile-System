@@ -477,6 +477,7 @@ async function indexPublications() {
         citationCount: p.citationCount,
         dateAddedToEntrez: p.dateAddedToEntrez,
         doi: p.doi,
+        pmcid: p.pmcid,
         pubmedUrl: p.pubmedUrl,
         meshTerms: mesh.join(" "),
         // Issue #32 — index abstract text on the publications doc so

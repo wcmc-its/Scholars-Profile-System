@@ -51,6 +51,7 @@ type ArticleRow = {
   citationCountScopus: number | null;
   datePublicationAddedToEntrez: string | null;
   doi: string | null;
+  pmcid: string | null;
 };
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
@@ -143,7 +144,7 @@ async function main() {
         const rows = (await conn.query(
           `SELECT pmid, articleTitle, journalTitleVerbose, articleYear,
                   publicationTypeCanonical, citationCountScopus,
-                  datePublicationAddedToEntrez, doi
+                  datePublicationAddedToEntrez, doi, pmcid
            FROM analysis_summary_article
            WHERE pmid IN (?)`,
           [batch],
@@ -228,6 +229,7 @@ async function main() {
         citationCount: a.citationCountScopus ?? 0,
         dateAddedToEntrez: parseDate(a.datePublicationAddedToEntrez),
         doi: a.doi,
+        pmcid: a.pmcid,
         pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${a.pmid}/`,
         abstract: abstractByPmid.get(Number(a.pmid)) ?? null,
         meshTerms: keywordsByPmid.get(Number(a.pmid)) ?? Prisma.DbNull,

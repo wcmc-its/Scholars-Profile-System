@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { PublicationMeta } from "@/components/publication/publication-meta";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -34,6 +35,7 @@ type Hit = {
   citationCount: number | null;
   pubmedUrl: string | null;
   doi: string | null;
+  pmcid: string | null;
   authors: Array<{
     name: string;
     cwid: string;
@@ -205,41 +207,25 @@ export function PublicationFeed({
                     <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
                   )}
                 </div>
+                {(h.journal || h.year) && (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                    {h.journal && (
+                      <span
+                        className="italic"
+                        dangerouslySetInnerHTML={{ __html: sanitizePubTitle(h.journal) }}
+                      />
+                    )}
+                    {h.journal && h.year ? <span aria-hidden="true">·</span> : null}
+                    {h.year ? <span>{h.year}</span> : null}
+                  </div>
+                )}
                 <AuthorChipRow authors={h.authors} />
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                  {h.journal && (
-                    <span
-                      className="italic"
-                      dangerouslySetInnerHTML={{ __html: sanitizePubTitle(h.journal) }}
-                    />
-                  )}
-                  {h.year ? <span>· {h.year}</span> : null}
-                  {h.citationCount !== null && h.citationCount > 0 && (
-                    <span className="font-medium text-[var(--color-accent-slate)]">
-                      · {h.citationCount.toLocaleString()} citations
-                    </span>
-                  )}
-                  {h.doi && (
-                    <a
-                      href={`https://doi.org/${h.doi}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
-                      · DOI
-                    </a>
-                  )}
-                  {h.pubmedUrl && (
-                    <a
-                      href={h.pubmedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                    >
-                      · PubMed
-                    </a>
-                  )}
-                </div>
+                <PublicationMeta
+                  citationCount={h.citationCount}
+                  pmid={h.pmid}
+                  pmcid={h.pmcid}
+                  doi={h.doi}
+                />
               </li>
               );
             })}

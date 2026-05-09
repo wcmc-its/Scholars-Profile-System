@@ -466,6 +466,7 @@ export type TopicPublicationHit = {
   citationCount: number | null;
   pubmedUrl: string | null;
   doi: string | null;
+  pmcid: string | null;
   /** WCM-confirmed coauthors with chip-render data (headshot + first/last role
    *  flags). Empty array when the publication has no confirmed WCM authors;
    *  publication-feed UI suppresses the chip row in that case. */
@@ -683,6 +684,7 @@ function mapToTopicPublicationHit(
     citationCount: r.publication.citationCount ?? null,
     pubmedUrl: r.publication.pubmedUrl ?? null,
     doi: r.publication.doi ?? null,
+    pmcid: r.publication.pmcid ?? null,
     authors: wcmAuthors ?? [],
   };
 }
