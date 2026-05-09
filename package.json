@@ -30,6 +30,7 @@
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
     "etl:infoed": "tsx etl/infoed/index.ts",
     "etl:reporter": "tsx etl/reporter/index.ts",
+    "etl:nih-profile": "tsx etl/nih-profile/index.ts",
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",

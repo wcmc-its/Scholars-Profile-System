@@ -49,6 +49,9 @@ vi.mock("@/lib/db", () => ({
     publicationAuthor: {
       findMany: vi.fn(async () => []),
     },
+    personNihProfile: {
+      findFirst: vi.fn(async () => null),
+    },
     $queryRawUnsafe: vi.fn(async () => []),
   },
 }));

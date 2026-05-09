@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/profile";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { resolveBySlugOrHistory } from "@/lib/url-resolver";
+import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { redirect } from "next/navigation";
 
 // ISR: regenerate every 24 hours by default; on-demand revalidation fires from
@@ -343,6 +344,19 @@ export default async function ScholarProfilePage({
                   {activeGrantCount > 0 ? ` · ${activeGrantCount} active` : ""}
                 </>
               }
+              headerAction={
+                profile.nihReporterProfileId !== null ? (
+                  <a
+                    href={nihReporterPiUrl(profile.nihReporterProfileId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Opens NIH RePORTER (NIH funding only)"
+                    className="text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline whitespace-nowrap"
+                  >
+                    View NIH portfolio on RePORTER ↗
+                  </a>
+                ) : null
+              }
             >
               <GrantsSection grants={profile.grants} />
             </Section>
@@ -428,23 +442,30 @@ function Section({
   children,
   headingLg = false,
   count,
+  headerAction,
 }: {
   title: React.ReactNode;
   children: React.ReactNode;
   headingLg?: boolean;
   count?: React.ReactNode;
+  /** Optional right-aligned action (e.g., outbound link). Issue #90 —
+   *  Funding section uses this for the RePORTER PI portfolio link. */
+  headerAction?: React.ReactNode;
 }) {
   return (
     <section className="pt-12 first:pt-0">
       {headingLg ? (
-        <h2 className="mb-5 flex items-baseline gap-3 text-2xl font-bold tracking-tight">
-          {title}
-          {count ? (
-            <span className="text-muted-foreground text-sm font-normal tracking-normal">
-              {count}
-            </span>
-          ) : null}
-        </h2>
+        <div className="mb-5 flex items-baseline justify-between gap-3">
+          <h2 className="flex items-baseline gap-3 text-2xl font-bold tracking-tight">
+            {title}
+            {count ? (
+              <span className="text-muted-foreground text-sm font-normal tracking-normal">
+                {count}
+              </span>
+            ) : null}
+          </h2>
+          {headerAction}
+        </div>
       ) : (
         <h2 className="text-muted-foreground mb-4 text-xs font-semibold uppercase tracking-wider">
           {title}
