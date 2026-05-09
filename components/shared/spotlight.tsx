@@ -114,7 +114,7 @@ function SpotlightPubCard({
         />
       </h3>
       <AuthorChipRow authors={card.authors} />
-      <div className="mt-auto text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]">
+      <div className="text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]">
         {card.journal ? (
           <span
             dangerouslySetInnerHTML={{ __html: sanitizePubTitle(card.journal) }}

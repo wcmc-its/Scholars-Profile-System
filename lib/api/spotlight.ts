@@ -161,7 +161,13 @@ export async function getSpotlightCardsForTopic(
     return {
       pmid: r.pmid,
       kicker,
-      kickerHref: null, // subtopic anchors are scoped to the topic page rail; no link target by default
+      // Issue #61 — subtopic kickers are now linkable on the topic page,
+      // mirroring the home-page Spotlight target shape so users land on the
+      // subtopic-filtered publication feed. Falls back to a non-link when
+      // the card has no primarySubtopicId (kicker = topic.label).
+      kickerHref: r.primarySubtopicId
+        ? `/topics/${topicSlug}?subtopic=${r.primarySubtopicId}#publications`
+        : null,
       title: r.publication.title ?? "",
       journal: r.publication.journal,
       year: r.publication.year,
