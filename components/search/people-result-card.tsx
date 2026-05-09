@@ -42,13 +42,18 @@ function RoleTag({ role }: { role: string }) {
 
 // Inline match highlight rendered as bold text — never the post-it-yellow
 // background style the mockup explicitly calls out as an anti-pattern.
+//
+// The OpenSearch query in lib/api/search.ts wraps matches in <mark>; this
+// renderer rewrites them as <strong> with the design's typographic weight.
+// (Issue #20 — earlier code split on <em> and let <mark> tags fall through
+// as literal text.)
 function HighlightedSnippet({ html }: { html: string }) {
   return (
     <>
-      {html.split(/(<em>.*?<\/em>)/g).map((part, i) =>
-        part.startsWith("<em>") ? (
+      {html.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
+        part.startsWith("<mark>") ? (
           <strong key={i} className="font-semibold text-[#1a1a1a]">
-            {part.replace(/<\/?em>/g, "")}
+            {part.replace(/<\/?mark>/g, "")}
           </strong>
         ) : (
           <span key={i}>{part}</span>

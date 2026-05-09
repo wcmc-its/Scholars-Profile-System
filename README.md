@@ -19,6 +19,8 @@ Local prototype under active development. See the planning artifacts in `~/Dropb
 | Testing | Vitest + Playwright | Same |
 | CI | GitHub Actions | Same |
 
+For the production deployment shape, caching strategy, and the runbook for "pages are slow," see [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+
 ## Prerequisites
 
 - Node.js 22+
