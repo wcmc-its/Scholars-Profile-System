@@ -260,6 +260,11 @@ export type ProfilePayload = {
     primaryTitle: string | null;
     identityImageEndpoint: string;
   } | null;
+  /** Issue #90 — preferred NIH RePORTER PI profile_id, when the scholar
+   *  has appeared on at least one NIH grant we could resolve. Drives the
+   *  outbound "View NIH portfolio on RePORTER ↗" link in the Funding
+   *  section header. Null when no mapping exists. */
+  nihReporterProfileId: number | null;
 };
 
 /**
@@ -517,6 +522,15 @@ export async function getScholarFullProfileBySlug(
 
   const annotatedAppointments = annotateAppointments(scholar.appointments, now);
 
+  // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
+  // to render the outbound "View NIH portfolio on RePORTER" link in the
+  // Funding section header. Null when no mapping was found by the
+  // etl:nih-profile resolver.
+  const nihProfileRow = await prisma.personNihProfile.findFirst({
+    where: { cwid: scholar.cwid, isPreferred: true },
+    select: { nihProfileId: true },
+  });
+
   return {
     cwid: scholar.cwid,
     slug: scholar.slug,
@@ -627,6 +641,7 @@ export async function getScholarFullProfileBySlug(
             ),
           }
         : null,
+    nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
   };
 }
 

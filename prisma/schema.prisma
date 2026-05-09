@@ -67,6 +67,7 @@ model Scholar {
   cwidAliasesAsCurrent CwidAlias[]         @relation("AliasCurrent")
   slugHistoryAsCurrent SlugHistory[]       @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
+  nihProfiles          PersonNihProfile[]
   department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?            @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -118,6 +119,45 @@ model Education {
 
   @@index([cwid])
   @@map("education")
+}
+
+/// Issue #90 — mapping from a WCM scholar to their NIH RePORTER PI
+/// profile_id, for the outbound "View NIH portfolio on RePORTER" link
+/// in the Funding section header.
+///
+/// A small fraction of researchers carry more than one profile_id (legacy
+/// duplicate eRA Commons accounts), so the natural key is composite —
+/// (cwid, nihProfileId). Exactly one row per scholar carries
+/// `isPreferred = true` and is what the UI link uses; non-preferred rows
+/// surface to a curator review queue for upstream cleanup.
+///
+/// Populated by `npm run etl:nih-profile`, which reads
+/// `principal_investigators[]` from NIH RePORTER's /projects/search and
+/// resolves each profile_id back to a WCM cwid via grant-join (primary)
+/// + fuzzy name match against scholars with NIH grants (fallback).
+model PersonNihProfile {
+  cwid            String   @db.VarChar(32)
+  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  /// NIH eRA Commons profile_id — stable across institutions, so it
+  /// captures pre-WCM funding history too. UI tooltip warns the user
+  /// that the linked view is NIH-funding-only.
+  nihProfileId    Int      @map("nih_profile_id")
+  /// Exactly one row per cwid carries this. When a scholar has a single
+  /// profile_id this is trivially true; when multiple, the resolver
+  /// picks the one with the most recent project activity.
+  isPreferred     Boolean  @default(false) @map("is_preferred")
+  firstSeen       DateTime @default(now()) @map("first_seen")
+  lastVerified    DateTime @default(now()) @map("last_verified")
+  source          String   @default("RePORTER") @db.VarChar(32)
+  /// 'grant_join' (project core_project_num matched a WCM Grant row) or
+  /// 'name_match' (fallback fuzzy match against scholars-with-NIH-grants
+  /// pool). Tracked so the curator review queue can surface low-confidence
+  /// matches without re-running the resolver.
+  resolutionSource String  @map("resolution_source") @db.VarChar(32)
+
+  @@id([cwid, nihProfileId])
+  @@index([cwid, isPreferred])
+  @@map("person_nih_profile")
 }
 
 /// Grants from InfoEd, filtered per spec line 125 (Confidential != 'Y',
