@@ -5,6 +5,12 @@ import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export type SubtopicRailItem = {
   id: string;
@@ -47,6 +53,7 @@ export function SubtopicRail({
   );
 
   return (
+    <TooltipProvider delayDuration={500}>
     <aside className="w-full" aria-label="Subtopics">
       <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         SUBTOPICS ({subtopics.length})
@@ -86,6 +93,35 @@ export function SubtopicRail({
               // row that already carries the "Less common" separator (which
               // brings its own visual rule).
               const showHairline = i > 0 && !showDivider;
+              const tooltipText = s.shortDescription?.trim() || s.description?.trim() || null;
+              const button = (
+                <button
+                  type="button"
+                  onClick={() => handleClick(s.id)}
+                  className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2.5 text-left ${
+                    showHairline ? "border-t border-[#f0f1f3]" : ""
+                  } ${
+                    isActive
+                      ? "bg-[#eff6ff] text-[var(--color-accent-slate)]"
+                      : `hover:bg-[#f5f6f8]${isLessCommon ? " opacity-60" : ""}`
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-base break-words leading-snug">
+                      {s.displayName}
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 self-center text-sm tabular-nums ${
+                      isActive
+                        ? "text-[var(--color-accent-slate)]"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {s.pubCount}
+                  </span>
+                </button>
+              );
               return (
                 <li key={s.id}>
                   {showDivider && (
@@ -96,32 +132,20 @@ export function SubtopicRail({
                       </span>
                     </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => handleClick(s.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2.5 text-left ${
-                      showHairline ? "border-t border-[#f0f1f3]" : ""
-                    } ${
-                      isActive
-                        ? "bg-[#eff6ff] text-[var(--color-accent-slate)]"
-                        : `hover:bg-[#f5f6f8]${isLessCommon ? " opacity-60" : ""}`
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-base break-words leading-snug">
-                        {s.displayName}
-                      </div>
-                    </div>
-                    <span
-                      className={`shrink-0 self-center text-sm tabular-nums ${
-                        isActive
-                          ? "text-[var(--color-accent-slate)]"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      {s.pubCount}
-                    </span>
-                  </button>
+                  {tooltipText ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>{button}</TooltipTrigger>
+                      <TooltipContent
+                        side="right"
+                        align="start"
+                        className="max-w-xs text-sm"
+                      >
+                        {tooltipText}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    button
+                  )}
                 </li>
               );
             })}
@@ -129,5 +153,6 @@ export function SubtopicRail({
         </ScrollArea>
       )}
     </aside>
+    </TooltipProvider>
   );
 }
