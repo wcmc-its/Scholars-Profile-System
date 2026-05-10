@@ -345,6 +345,35 @@ function collapseToSingleVisiblePrimary<
   );
 }
 
+/**
+ * Issue #169 — guarantee the profile owner appears in `AuthorChipRow`'s
+ * visible window. The component slices the list to the first
+ * CHIP_CAP_VISIBLE entries; when upstream author-position data is sparse
+ * (e.g. PMID 34741892, where 8 of 9 confirmed WCM authors carry
+ * position=0), Prisma's `orderBy: { position: "asc" }` lands a real
+ * position-N author at the end of the list and CHIP_CAP_VISIBLE drops
+ * them.
+ *
+ * If the owner is already in the visible window we leave the order
+ * untouched. Otherwise we move them into the last visible slot,
+ * preserving their first/last role styling. This is a rendering guard,
+ * not a fix for the upstream data issue — the underlying position rows
+ * still need to be corrected during the ETL.
+ */
+const CHIP_CAP_VISIBLE = 5;
+function ensureOwnerInChipWindow<T extends { cwid: string }>(
+  authors: T[],
+  ownerCwid: string,
+): T[] {
+  const idx = authors.findIndex((a) => a.cwid === ownerCwid);
+  if (idx < 0 || idx < CHIP_CAP_VISIBLE) return authors;
+  const owner = authors[idx];
+  const next = authors.slice();
+  next.splice(idx, 1);
+  next.splice(CHIP_CAP_VISIBLE - 1, 0, owner);
+  return next;
+}
+
 export async function getScholarFullProfileBySlug(
   slug: string,
   now: Date = new Date(),
@@ -487,22 +516,25 @@ export async function getScholarFullProfileBySlug(
     // All confirmed WCM authors on this publication, including the profile
     // owner. Same chip-row shape as topic/search; the page renders chips and
     // omits the plain authorsString to avoid duplicating WCM author names.
-    wcmAuthors: a.publication.authors
-      .filter(
-        (au) =>
-          au.scholar &&
-          !au.scholar.deletedAt &&
-          au.scholar.status === "active",
-      )
-      .map((au) => ({
-        name: au.scholar!.preferredName,
-        cwid: au.scholar!.cwid,
-        slug: au.scholar!.slug,
-        identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
-        isFirst: au.isFirst,
-        isLast: au.isLast,
-        position: au.position,
-      })),
+    wcmAuthors: ensureOwnerInChipWindow(
+      a.publication.authors
+        .filter(
+          (au) =>
+            au.scholar &&
+            !au.scholar.deletedAt &&
+            au.scholar.status === "active",
+        )
+        .map((au) => ({
+          name: au.scholar!.preferredName,
+          cwid: au.scholar!.cwid,
+          slug: au.scholar!.slug,
+          identityImageEndpoint: identityImageEndpoint(au.scholar!.cwid),
+          isFirst: au.isFirst,
+          isLast: au.isLast,
+          position: au.position,
+        })),
+      scholar.cwid,
+    ),
   }));
 
   const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
