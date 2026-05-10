@@ -62,6 +62,7 @@ type AuthorListRow = {
   rank: number;
   authorLastName: string | null;
   authorFirstName: string | null;
+  personIdentifier: string | null;
 };
 
 type JournalAbbrevRow = {
@@ -232,7 +233,7 @@ async function main() {
     for (const batch of chunks(distinctPmids, IN_BATCH)) {
       await withReciterConnection(async (conn) => {
         const rows = (await conn.query(
-          `SELECT pmid, rank, authorLastName, authorFirstName
+          `SELECT pmid, rank, authorLastName, authorFirstName, personIdentifier
              FROM analysis_summary_author_list
             WHERE pmid IN (?)`,
           [batch],
@@ -244,6 +245,27 @@ async function main() {
           authorRowsByPmid.set(key, list);
         }
       });
+    }
+    // Issue #132 — analysis_summary_author only carries a categorical
+    // authorPosition ('first' / 'last' / 'penultimate' / NULL), so middle
+    // authors all collapse to position=0 and chip rows can't be ordered by
+    // PubMed rank. analysis_summary_author_list carries the real numeric
+    // rank (1..N) plus personIdentifier for matched WCM authors, so we
+    // build a (pmid, cwid) → rank map and a totalAuthors-per-pmid count
+    // to drive PublicationAuthor.position downstream.
+    const rankByPmidCwid = new Map<string, number>();
+    const totalAuthorsByPmidFromList = new Map<number, number>();
+    for (const [pmid, rows] of authorRowsByPmid) {
+      totalAuthorsByPmidFromList.set(pmid, rows.length);
+      for (const r of rows) {
+        const cwid = (r.personIdentifier ?? "").trim();
+        if (!cwid) continue;
+        const key = `${pmid}|${cwid}`;
+        const prior = rankByPmidCwid.get(key);
+        if (prior === undefined || (typeof r.rank === "number" && r.rank < prior)) {
+          rankByPmidCwid.set(key, r.rank);
+        }
+      }
     }
     const fullAuthorsByPmid = new Map<number, string>();
     for (const [pmid, rows] of authorRowsByPmid) {
@@ -373,17 +395,28 @@ async function main() {
       if (!ourCwidSet.has(cwid)) continue;
 
       const flags = classifyPosition(r.authorPosition);
-      const total = countAuthors(r.authors) || 1;
-      const position = flags.isFirst ? 1 : flags.isLast ? total : flags.isPenultimate ? Math.max(1, total - 1) : 0;
+      // Issue #132 — prefer the per-pmid rank from analysis_summary_author_list
+      // (1..N, matches PubMed author position). Fall back to the categorical
+      // authorPosition in analysis_summary_author when no list row is matched
+      // (very rare; produces middle-author position=0 like the old code path).
+      const totalFromList = totalAuthorsByPmidFromList.get(Number(r.pmid));
+      const total = totalFromList ?? (countAuthors(r.authors) || 1);
+      const rank = rankByPmidCwid.get(`${r.pmid}|${cwid}`);
+      const position = rank
+        ?? (flags.isFirst ? 1 : flags.isLast ? total : flags.isPenultimate ? Math.max(1, total - 1) : 0);
+      const isFirst = rank !== undefined ? rank === 1 : flags.isFirst;
+      const isLast = rank !== undefined ? rank === total : flags.isLast;
+      const isPenultimate =
+        rank !== undefined ? total >= 2 && rank === total - 1 : flags.isPenultimate;
 
       authorshipRows.push({
         pmid: String(r.pmid),
         cwid,
         position,
         totalAuthors: total,
-        isFirst: flags.isFirst,
-        isLast: flags.isLast,
-        isPenultimate: flags.isPenultimate,
+        isFirst,
+        isLast,
+        isPenultimate,
         isConfirmed: true,
       });
     }

@@ -274,7 +274,7 @@ function SearchMeta({
             <span className="font-bold text-[#2c4f6e]">{"“"}{q}{"”"}</span>
           </>
         ) : (
-          "Browse scholars"
+          "Browse"
         )}
       </h1>
       <div className="text-[13px] text-[#757575]">
