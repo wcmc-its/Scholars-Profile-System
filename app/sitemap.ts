@@ -9,18 +9,29 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const BASE =
     process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
 
-  const [scholars, topics, departments] = await Promise.all([
-    prisma.scholar.findMany({
-      where: { deletedAt: null, status: "active" },
-      select: { slug: true, updatedAt: true },
-    }),
-    prisma.topic.findMany({
-      select: { id: true, refreshedAt: true },
-    }),
-    prisma.department.findMany({
-      select: { slug: true, updatedAt: true },
-    }),
-  ]);
+  // Pre-render dynamic entries at build when the DB is reachable. In build
+  // environments without a DB (CI on a fresh checkout), gracefully fall back
+  // to the static entries — ISR will populate the full sitemap on first hit
+  // in production. Mirrors the pattern in app/(public)/scholars/[slug]/page.tsx.
+  let scholars: Array<{ slug: string; updatedAt: Date | null }> = [];
+  let topics: Array<{ id: string; refreshedAt: Date | null }> = [];
+  let departments: Array<{ slug: string; updatedAt: Date | null }> = [];
+  try {
+    [scholars, topics, departments] = await Promise.all([
+      prisma.scholar.findMany({
+        where: { deletedAt: null, status: "active" },
+        select: { slug: true, updatedAt: true },
+      }),
+      prisma.topic.findMany({
+        select: { id: true, refreshedAt: true },
+      }),
+      prisma.department.findMany({
+        select: { slug: true, updatedAt: true },
+      }),
+    ]);
+  } catch (err) {
+    console.warn("[sitemap] Skipping dynamic entries (no DB):", err);
+  }
 
   const now = new Date();
 
