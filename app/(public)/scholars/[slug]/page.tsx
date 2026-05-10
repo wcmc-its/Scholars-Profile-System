@@ -175,11 +175,16 @@ export default async function ScholarProfilePage({
                 {profile.hasClinicalProfile ? (
                   <li>
                     <a
-                      href={`https://weillcornell.org/doctors-directory?searchVal=${encodeURIComponent(
-                        // Prefer the (likely) surname for a tighter directory hit;
-                        // fall back to full preferred name if the split fails.
-                        profile.preferredName.split(/\s+/).pop() || profile.preferredName,
-                      )}`}
+                      // Issue #165 — prefer the exact ED-sourced URL when
+                      // present; fall back to a surname search so scholars
+                      // whose ED record is missing labeledURI;pops still
+                      // get a working link.
+                      href={
+                        profile.clinicalProfileUrl ??
+                        `https://weillcornell.org/doctors-directory?searchVal=${encodeURIComponent(
+                          profile.preferredName.split(/\s+/).pop() || profile.preferredName,
+                        )}`
+                      }
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
