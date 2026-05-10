@@ -21,12 +21,14 @@ import type { DepartmentFacultyHit } from "@/lib/api/departments";
 export function CenterMembersClient({
   members,
   total,
+  roleCategoryCounts,
   page,
   pageSize,
   centerSlug,
 }: {
   members: DepartmentFacultyHit[];
   total: number;
+  roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
   centerSlug: string;
@@ -67,6 +69,8 @@ export function CenterMembersClient({
       <div className="mb-6">
         <RoleChipRow
           faculty={members}
+          roleCategoryCounts={roleCategoryCounts}
+          totalCount={total}
           active={activeCategory}
           onChange={setActiveCategory}
         />

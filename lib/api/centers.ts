@@ -45,6 +45,14 @@ export type CenterDetail = {
 export type CenterMembersResult = {
   hits: DepartmentFacultyHit[];
   total: number;
+  /**
+   * Whole-scope role-category counts so the chip-row reflects the entire
+   * member list, not just the visible page (#145). Keys are the normalized
+   * labels produced by formatRoleCategory ("Full-time faculty",
+   * "Affiliated faculty", "Postdoc", "Doctoral student", etc.) — the same
+   * shape that the chip-row's group.matches() inspects.
+   */
+  roleCategoryCounts: Record<string, number>;
   page: number;
   pageSize: number;
 };
@@ -127,8 +135,25 @@ export async function getCenterMembers(
   };
   const total = await prisma.scholar.count({ where: baseWhere });
   if (total === 0) {
-    return { hits: [], total: 0, page, pageSize: MEMBERS_PAGE_SIZE };
+    return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: MEMBERS_PAGE_SIZE };
   }
+
+  // Whole-scope role-category counts so the chip-row reflects the entire
+  // dataset, not just the visible page. (#145) — mirrors the dept pattern.
+  const roleCategoryCounts = await (async () => {
+    const groupRows = await prisma.scholar.groupBy({
+      by: ["roleCategory"],
+      where: baseWhere,
+      _count: { _all: true },
+    });
+    const out: Record<string, number> = {};
+    for (const r of groupRows) {
+      const label = formatRoleCategory(r.roleCategory);
+      if (label === null) continue;
+      out[label] = (out[label] ?? 0) + r._count._all;
+    }
+    return out;
+  })();
 
   const rows = await prisma.scholar.findMany({
     where: baseWhere,
@@ -182,7 +207,7 @@ export async function getCenterMembers(
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
 
-  return { hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
+  return { hits, total, roleCategoryCounts, page, pageSize: MEMBERS_PAGE_SIZE };
 }
 
 const PUB_PAGE_SIZE = 20;

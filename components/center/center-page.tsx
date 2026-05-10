@@ -177,6 +177,7 @@ export async function CenterPage({
           <CenterMembersClient
             members={members.hits}
             total={members.total}
+            roleCategoryCounts={members.roleCategoryCounts}
             page={members.page + 1}
             pageSize={members.pageSize}
             centerSlug={detail.slug}
