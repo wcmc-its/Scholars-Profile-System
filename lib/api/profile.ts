@@ -164,12 +164,23 @@ export type ProfilePayload = {
   fullName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** Issue #167 — division name when the scholar has a populated divCode
+   *  AND the joined division name is not "Administration" (an admin-style
+   *  level2 unit that should not be surfaced as a research/clinical
+   *  division). Used by the sidebar to render "<Division> (<Department>)"
+   *  when present, falling back to department-only when null. */
+  division: string | null;
   email: string | null;
   identityImageEndpoint: string;
   /** Derived in ED ETL — true when LDAP carries a clinical or NYP-credentialed
    *  signal. Drives whether the "Clinical profile →" link renders in the
    *  Contact card (absence-as-default per design spec v1.7.1). */
   hasClinicalProfile: boolean;
+  /** Issue #165 — canonical per-scholar weillcornell.org URL from the ED
+   *  `labeledURI;pops` attribute (e.g. "https://weillcornell.org/matthewfink").
+   *  When present, the sidebar links here directly; when null and
+   *  `hasClinicalProfile` is true, falls back to a surname-search URL. */
+  clinicalProfileUrl: string | null;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -368,6 +379,10 @@ export async function getScholarFullProfileBySlug(
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
       },
+      // Issue #167 — surface the division name so the sidebar can render
+      // "<Division> (<Department>)". Department display still comes from
+      // the existing `primaryDepartment` text column.
+      division: { select: { name: true } },
       // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
       // soft-deleted / suppressed mentors at the API layer so the card
       // never points at a hidden profile.
@@ -523,7 +538,16 @@ export async function getScholarFullProfileBySlug(
       return bd - ad;
     });
 
-  const annotatedAppointments = annotateAppointments(scholar.appointments, now);
+  // Issue #162 — NYP affiliate titles (source = "ED-NYP") render at the
+  // bottom of the active appointments list, beneath all WCM appointments.
+  // The Prisma query orders by isPrimary/startDate; a stable secondary pass
+  // pulls ED-NYP rows to the end while preserving the within-group order.
+  const sortedAppointments = [...scholar.appointments].sort((a, b) => {
+    const aNyp = a.source === "ED-NYP" ? 1 : 0;
+    const bNyp = b.source === "ED-NYP" ? 1 : 0;
+    return aNyp - bNyp;
+  });
+  const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
   // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
   // to render the outbound "View NIH portfolio on RePORTER" link in the
@@ -545,9 +569,19 @@ export async function getScholarFullProfileBySlug(
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    // Issue #167 — belt-and-suspenders filter for the "Administration"
+    // division label. The ED ETL drops Administration at the divCode level
+    // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
+    // exists but the joined Division row's name is "Administration" (e.g.
+    // a row that pre-dates the ETL filter).
+    division:
+      scholar.division && scholar.division.name !== "Administration"
+        ? scholar.division.name
+        : null,
     email: scholar.email,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
+    clinicalProfileUrl: scholar.clinicalProfileUrl,
     overview: scholar.overview ? sanitizeVIVOHtml(scholar.overview) : null,
     appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
       title: a.title,

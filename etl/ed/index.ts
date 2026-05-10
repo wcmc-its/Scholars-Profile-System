@@ -32,9 +32,11 @@ import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
   type EdFacultyEntry,
+  type EdNypAffiliateTitle,
   fetchActiveEmployeeRecords,
   fetchActiveFaculty,
   fetchActiveFacultyAppointments,
+  fetchActiveNypAffiliates,
   fetchDoctoralStudents,
   openLdap,
 } from "@/lib/sources/ldap";
@@ -193,6 +195,75 @@ async function refreshEdAppointments(
   });
 }
 
+/** NYP affiliate organization label shown on the profile sidebar. The title
+ *  on these rows is the normalized role only ("Associate Physician"); the
+ *  hospital name is carried on the Appointment.organization column so the
+ *  existing renderer (title bold, organization muted) prints the two lines
+ *  without bespoke layout code. */
+const NYP_ORG_DISPLAY = "NewYork-Presbyterian Hospital";
+
+/** Source tag for NYP affiliate appointments. Distinct from "ED" so the
+ *  WCM faculty refresh (refreshEdAppointments) does NOT delete these rows,
+ *  and so the read layer can pull them to the bottom of the appointments
+ *  list (lib/api/profile.ts). */
+const NYP_APPOINTMENT_SOURCE = "ED-NYP";
+
+/** Rebuild every NYP affiliate appointment in one pass. The NYP SOR fetch
+ *  returns the full active set, so a global delete + insert is correct and
+ *  cheaper than per-scholar deletes. Filters out rows whose CWID is not in
+ *  the scholar table (the NYP SOR carries people the WCM faculty/student
+ *  branches don't pull in — we only attach NYP titles to existing scholars).
+ *  Dedupes (cwid, normalizedTitle) so a scholar with two NYP rows of the
+ *  same normalized role gets a single sidebar entry. */
+async function refreshNypAffiliateAppointments(
+  rows: EdNypAffiliateTitle[],
+  knownCwids: Set<string>,
+): Promise<{ written: number; skippedUnknownCwid: number }> {
+  await prisma.appointment.deleteMany({
+    where: { source: NYP_APPOINTMENT_SOURCE },
+  });
+  if (rows.length === 0) return { written: 0, skippedUnknownCwid: 0 };
+
+  let skippedUnknownCwid = 0;
+  const seen = new Set<string>();
+  const toCreate: {
+    cwid: string;
+    title: string;
+    organization: string;
+    startDate: null;
+    endDate: null;
+    isPrimary: false;
+    isInterim: false;
+    externalId: string;
+    source: string;
+  }[] = [];
+  for (const r of rows) {
+    if (!knownCwids.has(r.cwid)) {
+      skippedUnknownCwid += 1;
+      continue;
+    }
+    const key = `${r.cwid}|${r.title.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    toCreate.push({
+      cwid: r.cwid,
+      title: r.title,
+      organization: NYP_ORG_DISPLAY,
+      startDate: null,
+      endDate: null,
+      isPrimary: false,
+      isInterim: false,
+      // Stable, recomputable ID — same input produces the same row across runs.
+      externalId: `ED-NYP-${r.cwid}-${r.title.replace(/[^A-Za-z0-9]+/g, "_")}`,
+      source: NYP_APPOINTMENT_SOURCE,
+    });
+  }
+  if (toCreate.length > 0) {
+    await prisma.appointment.createMany({ data: toCreate });
+  }
+  return { written: toCreate.length, skippedUnknownCwid };
+}
+
 async function main() {
   const start = new Date();
   const run = await prisma.etlRun.create({
@@ -252,6 +323,26 @@ async function main() {
     const managerByCwid = new Map<string, string | null>();
     for (const [cwid, rec] of employeeByCwid) {
       managerByCwid.set(cwid, rec.managerCwid);
+    }
+
+    // Issue #162 — NYP affiliate titles. Best-effort: a missing base DN
+    // (e.g. staging environments without the NYP branch) shouldn't fail
+    // the whole ETL. Persisted after the soft-delete pass below so the
+    // known-cwid filter sees the final active scholar set. We track whether
+    // the fetch actually ran so a connection failure doesn't wipe the table
+    // on the next refresh (an empty result from a failed fetch is NOT the
+    // same as "no NYP affiliates exist").
+    console.log("Fetching active NYP affiliate titles from ou=nyp affiliates SOR...");
+    let nypAffiliateRows: Awaited<ReturnType<typeof fetchActiveNypAffiliates>> = [];
+    let nypFetchSucceeded = false;
+    try {
+      nypAffiliateRows = await fetchActiveNypAffiliates(client);
+      nypFetchSucceeded = true;
+      console.log(`ED returned ${nypAffiliateRows.length} active NYP affiliate title rows.`);
+    } catch (err) {
+      console.warn(
+        `NYP affiliates fetch skipped (ou=nyp affiliates,ou=sors unavailable): ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
 
     await client.unbind();
@@ -577,6 +668,10 @@ async function main() {
             deptCode: effectiveDeptCode,
             divCode: effectiveDivCode,
             hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
+            // Issue #165 — canonical weillcornell.org clinical profile URL.
+            // Always written (even when null) so a scholar whose attribute
+            // disappears between runs gets the stale URL cleared.
+            clinicalProfileUrl: f.clinicalProfileUrl,
           },
         });
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
@@ -603,6 +698,8 @@ async function main() {
             deptCode: effectiveDeptCode,
             divCode: effectiveDivCode,
             hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
+            // Issue #165 — canonical weillcornell.org clinical profile URL.
+            clinicalProfileUrl: f.clinicalProfileUrl,
             // Appointments are populated by refreshEdAppointments below — one
             // row per LDAP `title` value. ED LDAP only returns current-state
             // titles (no historical appointments), so every row written here
@@ -627,6 +724,32 @@ async function main() {
         data: { deletedAt: new Date() },
       });
       softDeleted += 1;
+    }
+
+    // Issue #162 — NYP affiliate titles. Run after soft-delete so the
+    // known-cwid filter reflects the post-run active scholar set; this
+    // way we don't attach NYP rows to soft-deleted scholars. Skip the
+    // refresh entirely if the fetch failed — otherwise we'd wipe the
+    // existing NYP rows when LDAP is transiently unreachable.
+    if (nypFetchSucceeded) {
+      const activeCwids = new Set(
+        (
+          await prisma.scholar.findMany({
+            where: { deletedAt: null, status: "active" },
+            select: { cwid: true },
+          })
+        ).map((s) => s.cwid.toLowerCase()),
+      );
+      const nypResult = await refreshNypAffiliateAppointments(
+        nypAffiliateRows,
+        activeCwids,
+      );
+      console.log(
+        `[ED] NYP affiliate titles: wrote ${nypResult.written} appointment row(s) ` +
+          `(skipped ${nypResult.skippedUnknownCwid} for unknown CWID)`,
+      );
+    } else {
+      console.log(`[ED] NYP affiliate titles: refresh skipped (fetch failed)`);
     }
 
     console.log(

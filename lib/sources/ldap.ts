@@ -44,6 +44,16 @@ export const DEFAULT_EMPLOYEE_SOR_BASE =
 export const DEFAULT_EMPLOYEE_SOR_FILTER =
   "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=employee:active))";
 
+/** NYP affiliates SOR — `ou=nyp affiliates,ou=sors`. One LDAP entry per active
+ *  NYP role record. Used to surface NewYork-Presbyterian Hospital titles on
+ *  the scholar profile as a secondary appointment below the WCM appointments
+ *  (issue #162). */
+export const DEFAULT_NYP_AFFILIATES_SOR_BASE =
+  "ou=nyp affiliates,ou=sors,dc=weill,dc=cornell,dc=edu";
+/** NYP affiliates filter: only currently-active affiliate records. */
+export const DEFAULT_NYP_AFFILIATES_FILTER =
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=affiliate:active))";
+
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
@@ -101,6 +111,13 @@ export const ED_FACULTY_ATTRIBUTES = [
   // but NOT on the Role subordinates that fetchActiveFacultyAppointments filters
   // for, so the people branch is the simpler source.
   "weillCornellEduDegree",
+  // Issue #165 — canonical clinical profile URL on weillcornell.org. The
+  // attribute is option-tagged (`labeledURI;pops`); ldapts surfaces it
+  // under the same tagged key when requested explicitly. The bare
+  // `labeledURI` is requested too as a defensive fallback in case the
+  // tag isn't carried on every entry.
+  "labeledURI",
+  "labeledURI;pops",
 ] as const;
 
 export type EdFacultyEntry = {
@@ -133,6 +150,10 @@ export type EdFacultyEntry = {
   deptCode: string | null;       // primary department code (level1 in org-unit hierarchy)
   divCode: string | null;        // division code (level2 in org-unit hierarchy)
   orgUnit: string | null;        // human-readable "level2 · level1" string for display fallback
+  /** Issue #165 — canonical clinical profile URL from `labeledURI;pops`
+   *  (e.g. "https://weillcornell.org/matthewfink"). Already normalized to
+   *  https:// at projection time. Null when the attribute is absent. */
+  clinicalProfileUrl: string | null;
 };
 
 /**
@@ -333,6 +354,66 @@ export async function fetchActiveEmployeeRecords(
   return out;
 }
 
+/** NYP affiliate title row — one per active NYP role record. The title is
+ *  normalized by `normalizeNypTitle()` before write so sub-specialty suffixes
+ *  ("Physician - Neurology") collapse to the role only ("Physician"). */
+export type EdNypAffiliateTitle = {
+  cwid: string;
+  /** Already-normalized role string (sub-specialty stripped). */
+  title: string;
+};
+
+const NYP_AFFILIATES_ATTRS = [
+  "weillCornellEduCWID",
+  "title",
+  "weillCornellEduStatus",
+] as const;
+
+/** Strip a `" - <specialty>"` suffix from a raw NYP title. Preserves casing.
+ *  Examples:
+ *    "Physician"               → "Physician"
+ *    "Physician - Neurology"   → "Physician"
+ *    "Attending - Cardiology"  → "Attending"
+ *  Rule: split on the first occurrence of " - " (space-dash-space) and keep
+ *  the left side. Trailing whitespace trimmed. Bare hyphens inside a word
+ *  (e.g. "Co-Director") are preserved. */
+export function normalizeNypTitle(raw: string): string {
+  const idx = raw.indexOf(" - ");
+  const left = idx >= 0 ? raw.slice(0, idx) : raw;
+  return left.trim();
+}
+
+/** Fetch all currently-active NYP affiliate title records in one paginated
+ *  search. Caller filters to known CWIDs and dedupes (cwid, normalizedTitle)
+ *  before insert. */
+export async function fetchActiveNypAffiliates(
+  client: Client,
+): Promise<EdNypAffiliateTitle[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_NYP_AFFILIATES_BASE ??
+    DEFAULT_NYP_AFFILIATES_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_NYP_AFFILIATES_FILTER ??
+    DEFAULT_NYP_AFFILIATES_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...NYP_AFFILIATES_ATTRS],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdNypAffiliateTitle[] = [];
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const rawTitle = firstString(e.title);
+    if (!cwid || !rawTitle) continue;
+    const title = normalizeNypTitle(rawTitle);
+    if (!title) continue;
+    out.push({ cwid: cwid.toLowerCase(), title });
+  }
+  return out;
+}
+
 /** Parse a manager DN of the form `uid=<cwid>,ou=people,...` to its CWID.
  *  Returns null on null/malformed input. */
 export function parseManagerCwid(dn: string | null | undefined): string | null {
@@ -480,9 +561,34 @@ function projectEntries(
       orgUnit:
         firstString(r["weillCornellEduPrimaryOrgUnit;level1"]) ??
         firstString(r["weillCornellEduOrgUnit;level1"]),
+      // Issue #165 — canonical weillcornell.org clinical profile URL. Prefer
+      // the option-tagged `labeledURI;pops` (POPS = the directory schema's
+      // own tag) and fall back to the bare attribute if the tag is missing.
+      clinicalProfileUrl: normalizeClinicalProfileUrl(
+        firstString(r["labeledURI;pops"]) ?? firstString(r["labeledURI"]),
+      ),
     });
   }
   return out;
+}
+
+/** Normalize an LDAP `labeledURI` value to a usable HTTPS URL.
+ *  - Trims surrounding whitespace.
+ *  - Rewrites `http://` → `https://` so the link doesn't trigger a
+ *    redirect / mixed-content warning when clicked from the HTTPS site.
+ *  - Returns null for empty / non-http(s) values (e.g. relative paths or
+ *    `mailto:` links accidentally stored on the attribute).
+ *  - LDAP `labeledURI` syntax allows a space-separated label after the URI
+ *    (RFC 2079); strip anything after the first whitespace so a curated
+ *    label doesn't end up in the href. */
+export function normalizeClinicalProfileUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const uri = trimmed.split(/\s+/, 1)[0];
+  if (/^http:\/\//i.test(uri)) return "https://" + uri.slice(7);
+  if (/^https:\/\//i.test(uri)) return uri;
+  return null;
 }
 
 /**
