@@ -57,12 +57,23 @@ function SubtopicPublicationLayoutInner({
       <hr className="mb-10 border-border" />
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       {hasSubtopics && (
-        <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
-          <SubtopicRail
-            subtopics={subtopics}
-            activeSubtopic={activeSubtopic}
-            onSelect={setActiveSubtopic}
-          />
+        <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px]">
+          <div className="relative lg:max-h-[calc(100vh-84px)]">
+            <div className="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
+              <SubtopicRail
+                subtopics={subtopics}
+                activeSubtopic={activeSubtopic}
+                onSelect={setActiveSubtopic}
+              />
+            </div>
+            {/* Bottom fade signals that the rail is scrollable when content
+                exceeds the sticky viewport. lg-only — on stacked mobile the
+                rail isn't clipped. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-12 bg-gradient-to-t from-background to-transparent lg:block"
+            />
+          </div>
         </div>
       )}
       <div className="min-w-0 flex-1">
