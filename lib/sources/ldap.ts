@@ -44,6 +44,16 @@ export const DEFAULT_EMPLOYEE_SOR_BASE =
 export const DEFAULT_EMPLOYEE_SOR_FILTER =
   "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=employee:active))";
 
+/** NYP affiliates SOR — `ou=nyp affiliates,ou=sors`. One LDAP entry per active
+ *  NYP role record. Used to surface NewYork-Presbyterian Hospital titles on
+ *  the scholar profile as a secondary appointment below the WCM appointments
+ *  (issue #162). */
+export const DEFAULT_NYP_AFFILIATES_SOR_BASE =
+  "ou=nyp affiliates,ou=sors,dc=weill,dc=cornell,dc=edu";
+/** NYP affiliates filter: only currently-active affiliate records. */
+export const DEFAULT_NYP_AFFILIATES_FILTER =
+  "(&(objectClass=weillCornellEduSORRecord)(weillCornellEduStatus=affiliate:active))";
+
 /** Attributes we pull on the active-faculty search. */
 export const ED_FACULTY_ATTRIBUTES = [
   "weillCornellEduCWID",
@@ -329,6 +339,66 @@ export async function fetchActiveEmployeeRecords(
       sorId,
       isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
     });
+  }
+  return out;
+}
+
+/** NYP affiliate title row — one per active NYP role record. The title is
+ *  normalized by `normalizeNypTitle()` before write so sub-specialty suffixes
+ *  ("Physician - Neurology") collapse to the role only ("Physician"). */
+export type EdNypAffiliateTitle = {
+  cwid: string;
+  /** Already-normalized role string (sub-specialty stripped). */
+  title: string;
+};
+
+const NYP_AFFILIATES_ATTRS = [
+  "weillCornellEduCWID",
+  "title",
+  "weillCornellEduStatus",
+] as const;
+
+/** Strip a `" - <specialty>"` suffix from a raw NYP title. Preserves casing.
+ *  Examples:
+ *    "Physician"               → "Physician"
+ *    "Physician - Neurology"   → "Physician"
+ *    "Attending - Cardiology"  → "Attending"
+ *  Rule: split on the first occurrence of " - " (space-dash-space) and keep
+ *  the left side. Trailing whitespace trimmed. Bare hyphens inside a word
+ *  (e.g. "Co-Director") are preserved. */
+export function normalizeNypTitle(raw: string): string {
+  const idx = raw.indexOf(" - ");
+  const left = idx >= 0 ? raw.slice(0, idx) : raw;
+  return left.trim();
+}
+
+/** Fetch all currently-active NYP affiliate title records in one paginated
+ *  search. Caller filters to known CWIDs and dedupes (cwid, normalizedTitle)
+ *  before insert. */
+export async function fetchActiveNypAffiliates(
+  client: Client,
+): Promise<EdNypAffiliateTitle[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_NYP_AFFILIATES_BASE ??
+    DEFAULT_NYP_AFFILIATES_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_NYP_AFFILIATES_FILTER ??
+    DEFAULT_NYP_AFFILIATES_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...NYP_AFFILIATES_ATTRS],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdNypAffiliateTitle[] = [];
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const rawTitle = firstString(e.title);
+    if (!cwid || !rawTitle) continue;
+    const title = normalizeNypTitle(rawTitle);
+    if (!title) continue;
+    out.push({ cwid: cwid.toLowerCase(), title });
   }
   return out;
 }

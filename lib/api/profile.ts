@@ -523,7 +523,16 @@ export async function getScholarFullProfileBySlug(
       return bd - ad;
     });
 
-  const annotatedAppointments = annotateAppointments(scholar.appointments, now);
+  // Issue #162 — NYP affiliate titles (source = "ED-NYP") render at the
+  // bottom of the active appointments list, beneath all WCM appointments.
+  // The Prisma query orders by isPrimary/startDate; a stable secondary pass
+  // pulls ED-NYP rows to the end while preserving the within-group order.
+  const sortedAppointments = [...scholar.appointments].sort((a, b) => {
+    const aNyp = a.source === "ED-NYP" ? 1 : 0;
+    const bNyp = b.source === "ED-NYP" ? 1 : 0;
+    return aNyp - bNyp;
+  });
+  const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
   // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
   // to render the outbound "View NIH portfolio on RePORTER" link in the
