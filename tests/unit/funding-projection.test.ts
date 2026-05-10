@@ -170,4 +170,96 @@ describe("projectFromRows", () => {
     expect(doc.isMultiPi).toBe(false);
     expect(doc.department).toBeNull(); // department comes from lead PI; no PI here
   });
+
+  // Regression — InfoEd often emits two Account_Numbers for the same scholar
+  // on one project (Equipment supplement + main Grant, renewals, etc.).
+  // Both rows share coreProjectNum and group together upstream. Without
+  // dedupe, the chip list duplicates the person, isMultiPi turns true on a
+  // single-PI grant, and the search row's hover tooltip breaks because
+  // React sees duplicate keys.
+  it("dedupes a scholar with multiple Account_Numbers into one chip", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+        programType: "Grant",
+      }),
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-002-alice",
+        programType: "Equipment",
+      }),
+    ])!;
+    expect(doc.totalPeople).toBe(1);
+    expect(doc.people).toHaveLength(1);
+    expect(doc.people[0].cwid).toBe("alice");
+    expect(doc.isMultiPi).toBe(false);
+    expect(doc.roles).toEqual(["PI"]);
+    expect(doc.wcmInvestigatorCwids).toEqual(["alice"]);
+  });
+
+  it("keeps the highest-priority role when one scholar has different roles across rows", () => {
+    // Pathological but possible: same scholar listed PI on one Account_Number
+    // and Co-I on another. Pick the most senior role for chip display.
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "Co-I",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+      }),
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-002-alice",
+      }),
+    ])!;
+    expect(doc.people).toHaveLength(1);
+    expect(doc.people[0].role).toBe("PI");
+  });
+
+  it("does not flag Multi-PI when the only PI rows are duplicates of one scholar", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+      }),
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-002-alice",
+      }),
+    ])!;
+    expect(doc.isMultiPi).toBe(false);
+    expect(doc.roles).not.toContain("Multi-PI");
+  });
+
+  it("still flags Multi-PI when ≥2 distinct scholars have PI role across renewal rows", () => {
+    // Distinguish "two account numbers, one PI each" (genuine multi-PI) from
+    // "one PI with two account numbers" (false multi-PI fixed above).
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+      }),
+      makeRow({
+        cwid: "bob",
+        role: "PI",
+        scholar: SCHOLAR_B,
+        externalId: "INFOED-ACC-002-bob",
+      }),
+    ])!;
+    expect(doc.isMultiPi).toBe(true);
+    expect(doc.roles).toContain("Multi-PI");
+  });
 });

@@ -230,7 +230,30 @@ export function projectFromRows(
   // single account number share these by construction.
   const head = rows[0];
 
-  const peopleRaw = rows.map((r) => ({
+  // Dedupe rows by cwid before producing chips. InfoEd often emits two
+  // Account_Numbers for the same scholar on one project (an Equipment
+  // supplement plus the main Grant, a no-cost extension, a renewal, etc.)
+  // — both rows share coreProjectNum and would otherwise produce duplicate
+  // person chips, miscount Multi-PI, and break tooltip state via duplicate
+  // React keys. Keep the highest-priority role per scholar.
+  const ROLE_PRIORITY: Record<string, number> = {
+    PI: 0,
+    "PI-Subaward": 0,
+    "Co-PI": 1,
+    "Co-I": 2,
+    "Sub-PI": 3,
+    KP: 4,
+  };
+  const bestByCwid = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    const prior = bestByCwid.get(r.cwid);
+    const newRank = ROLE_PRIORITY[r.role] ?? 99;
+    const priorRank = prior ? (ROLE_PRIORITY[prior.role] ?? 99) : Infinity;
+    if (newRank < priorRank) bestByCwid.set(r.cwid, r);
+  }
+  const dedupedRows = Array.from(bestByCwid.values());
+
+  const peopleRaw = dedupedRows.map((r) => ({
     cwid: r.cwid,
     slug: r.scholar.slug,
     preferredName: r.scholar.preferredName,
@@ -239,15 +262,17 @@ export function projectFromRows(
   const people = sortPeople(peopleRaw);
 
   // Role buckets — every bucket the project belongs to. Multi-PI is set
-  // when the project has ≥2 PI rows.
+  // when the project has ≥2 DISTINCT scholars in PI role. Counting raw
+  // rows would over-flag false-Multi-PI on grants where one PI has
+  // multiple Account_Numbers (cf. dedupe block above).
   const roles = new Set<string>();
-  let piCount = 0;
-  for (const r of rows) {
+  const piCwids = new Set<string>();
+  for (const r of dedupedRows) {
     const bucket = rowRoleBucket(r.role);
     if (bucket) roles.add(bucket);
-    if (r.role === "PI" || r.role === "PI-Subaward") piCount += 1;
+    if (r.role === "PI" || r.role === "PI-Subaward") piCwids.add(r.cwid);
   }
-  const isMultiPi = piCount >= 2;
+  const isMultiPi = piCwids.size >= 2;
   if (isMultiPi) roles.add("Multi-PI");
 
   // Lead PI's primary department drives the Department facet.
