@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Select,
@@ -21,21 +22,33 @@ import { GrantCard } from "@/components/department/grant-card";
 import type { DeptGrantCard } from "@/lib/api/dept-highlights";
 import type { GrantSort } from "@/lib/api/dept-lists";
 
-export function DeptGrantsList({
-  hits,
-  total,
-  page,
-  pageSize,
-  sort,
-  basePath,
-}: {
+type DeptGrantsListProps = {
   hits: DeptGrantCard[];
   total: number;
   page: number;
   pageSize: number;
   sort: GrantSort;
   basePath: string;
-}) {
+};
+
+export function DeptGrantsList(props: DeptGrantsListProps) {
+  // useSearchParams() forces a CSR bailout during prerender (Next.js 15
+  // strict mode). Suspense lets the static build emit the fallback.
+  return (
+    <Suspense fallback={null}>
+      <DeptGrantsListInner {...props} />
+    </Suspense>
+  );
+}
+
+function DeptGrantsListInner({
+  hits,
+  total,
+  page,
+  pageSize,
+  sort,
+  basePath,
+}: DeptGrantsListProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
