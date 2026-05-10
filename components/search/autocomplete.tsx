@@ -166,7 +166,6 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                   i === activeIndex ? "bg-[#f5f3ee] dark:bg-zinc-800" : ""
                 }`}
                 onClick={() => setOpen(false)}
-                onMouseEnter={() => setActiveIndex(i)}
               >
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-left font-medium text-zinc-900 dark:text-zinc-100">
