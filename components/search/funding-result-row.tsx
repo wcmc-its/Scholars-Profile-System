@@ -200,6 +200,7 @@ export function FundingResultRow({
           <div className="mt-3">
             <ExpandedGrant
               abstract={hit.abstract}
+              abstractSource={hit.abstractSource}
               applId={effectiveApplId}
               coreProjectNum={hit.coreProjectNum}
               publications={hit.publications}

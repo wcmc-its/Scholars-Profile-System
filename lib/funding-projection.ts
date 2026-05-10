@@ -57,6 +57,10 @@ export type GrantRowForIndex = {
   /** RePORTER abstract for this grant (Phase 2 ETL). Optional. The
    *  projection picks the first non-null value across the project's rows. */
   abstract?: string | null;
+  /** Issue #92 — origin slug of the current abstract: `reporter`, `nsf`,
+   *  `pcori`, `cdmrp`, `gates`. Mirrors the abstract field's first-non-null
+   *  selection rule. */
+  abstractSource?: string | null;
   /** RePORTER application ID (Phase 2 ETL). Optional. The projection
    *  picks the first non-null value across the project's rows; for a
    *  given coreProjectNum all rows share the same applId. */
@@ -99,6 +103,10 @@ export type FundingDoc = {
    *  the first row whose abstract is non-null (all rows for one project
    *  share the same coreProjectNum and therefore the same abstract). */
   abstract: string | null;
+  /** Issue #92 — origin slug of the abstract: 'reporter', 'nsf', 'pcori',
+   *  'cdmrp', 'gates'. Drives the small "Source: …" attribution shown
+   *  beneath the abstract in expanded grant rows. Null when no abstract. */
+  abstractSource: string | null;
   /** Issue #86 — count of DISTINCT pmids attributed to the project across
    *  all its scholar rows. Drives the pubCount sort and the inline pub
    *  count on the result row. */
@@ -328,7 +336,9 @@ export function projectFromRows(
   // Abstract + applId: take the first non-null one. All rows for one
   // coreProjectNum share both via the Phase 2 ETL, so first-wins is
   // deterministic in practice.
-  const abstract = rows.find((r) => r.abstract)?.abstract ?? null;
+  const abstractRow = rows.find((r) => r.abstract);
+  const abstract = abstractRow?.abstract ?? null;
+  const abstractSource = abstractRow?.abstractSource ?? null;
   const applId = rows.find((r) => r.applId)?.applId ?? null;
 
   // Date range: union across the group. With coreProjectNum-based
@@ -370,6 +380,7 @@ export function projectFromRows(
     people,
     wcmInvestigatorCwids: people.map((p) => p.cwid),
     abstract,
+    abstractSource,
     pubCount: pubsByPmid.size,
     applId,
     publications: publicationsList,

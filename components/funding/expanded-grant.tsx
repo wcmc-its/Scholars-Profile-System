@@ -40,8 +40,22 @@ export type GrantPubItem = {
   isLowerConfidence: boolean;
 };
 
+/**
+ * Issue #92 — display label for the abstract source. Slugs map to
+ * publishable agency/funder names; unknown slugs fall through verbatim
+ * (defensive: future sources won't break the UI).
+ */
+const ABSTRACT_SOURCE_LABEL: Record<string, string> = {
+  reporter: "NIH RePORTER",
+  nsf: "NSF",
+  pcori: "PCORI",
+  cdmrp: "DOD CDMRP",
+  gates: "Gates Foundation",
+};
+
 export function ExpandedGrant({
   abstract,
+  abstractSource,
   applId,
   coreProjectNum,
   publications,
@@ -51,6 +65,10 @@ export function ExpandedGrant({
   indentClass = "",
 }: {
   abstract: string | null;
+  /** Issue #92 — origin slug for the abstract; renders as small
+   *  attribution under the abstract block. Optional for backwards
+   *  compatibility — older callers that don't pass it just hide the line. */
+  abstractSource?: string | null;
   applId: number | null;
   coreProjectNum: string | null;
   publications: GrantPubItem[];
@@ -79,13 +97,23 @@ export function ExpandedGrant({
           >
             {abstract}
           </p>
-          <button
-            type="button"
-            onClick={() => setShowAbstract((s) => !s)}
-            className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
-          >
-            {showAbstract ? "Show less" : "Show more"}
-          </button>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowAbstract((s) => !s)}
+              className="text-[var(--color-accent-slate)] hover:underline"
+            >
+              {showAbstract ? "Show less" : "Show more"}
+            </button>
+            {abstractSource ? (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-muted-foreground">
+                  Source: {ABSTRACT_SOURCE_LABEL[abstractSource] ?? abstractSource}
+                </span>
+              </>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

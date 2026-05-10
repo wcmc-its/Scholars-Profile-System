@@ -265,6 +265,10 @@ export const fundingIndexMapping = {
       // in an abstract returns the project. Stored so the result row
       // can render a snippet.
       abstract: { type: "text", analyzer: "funding_text" },
+      // Issue #92 — origin of the current `abstract`. Keyword for cheap
+      // facet/eq lookups; surfaced as small "Source: NSF" attribution
+      // under the expanded abstract.
+      abstractSource: { type: "keyword" },
       // Issue #86 — RePORTER application ID; outbound deep-link target
       // from the expanded result row.
       applId: { type: "integer" },

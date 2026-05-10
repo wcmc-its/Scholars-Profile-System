@@ -88,6 +88,8 @@ type GrantGroup = {
   publications: GrantPublication[];
   /** Latest non-null abstract, or null if none populated. */
   abstract: string | null;
+  /** Issue #92 — source slug attached to that abstract. */
+  abstractSource: string | null;
   /** Most recent non-null applId. */
   applId: number | null;
 };
@@ -122,7 +124,9 @@ function groupGrants(grants: Grant[]): GrantGroup[] {
       if (b.citationCount !== a.citationCount) return b.citationCount - a.citationCount;
       return a.pmid.localeCompare(b.pmid);
     });
-    const abstract = sorted.find((g) => g.abstract)?.abstract ?? null;
+    const abstractGrant = sorted.find((g) => g.abstract);
+    const abstract = abstractGrant?.abstract ?? null;
+    const abstractSource = abstractGrant?.abstractSource ?? null;
     const applId = sorted.find((g) => g.applId)?.applId ?? null;
     groups.push({
       primary,
@@ -132,6 +136,7 @@ function groupGrants(grants: Grant[]): GrantGroup[] {
       isActive: sorted.some((g) => g.isActive),
       publications,
       abstract,
+      abstractSource,
       applId,
     });
   }
@@ -375,6 +380,7 @@ function GrantRow({
       {expanded ? (
         <ExpandedGrant
           abstract={group.abstract}
+          abstractSource={group.abstractSource}
           applId={applId ?? null}
           coreProjectNum={group.primary.coreProjectNum}
           publications={group.publications}

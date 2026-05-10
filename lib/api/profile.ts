@@ -221,6 +221,9 @@ export type ProfilePayload = {
     /** Issue #85/#86 — RePORTER project abstract. Null for non-NIH or
      *  unmatched grants. */
     abstract: string | null;
+    /** Issue #92 — origin of the abstract: 'reporter' | 'nsf' | 'pcori'
+     *  | 'cdmrp' | 'gates'. Null when no abstract is populated. */
+    abstractSource: string | null;
     /** Issue #85/#86 — pub-grant linkages for this grant from
      *  reciterdb.grant_provenance via the grant_publication bridge.
      *  Sorted by year desc → citation count desc. */
@@ -611,6 +614,7 @@ export async function getScholarFullProfileBySlug(
         coreProjectNum: coreProjectNum(g.awardNumber),
         applId: g.applId ?? null,
         abstract: g.abstract ?? null,
+        abstractSource: g.abstractSource ?? null,
         publications: pubs,
       };
     }),
