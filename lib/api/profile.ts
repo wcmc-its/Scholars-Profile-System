@@ -164,6 +164,12 @@ export type ProfilePayload = {
   fullName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** Issue #167 — division name when the scholar has a populated divCode
+   *  AND the joined division name is not "Administration" (an admin-style
+   *  level2 unit that should not be surfaced as a research/clinical
+   *  division). Used by the sidebar to render "<Division> (<Department>)"
+   *  when present, falling back to department-only when null. */
+  division: string | null;
   email: string | null;
   identityImageEndpoint: string;
   /** Derived in ED ETL — true when LDAP carries a clinical or NYP-credentialed
@@ -373,6 +379,10 @@ export async function getScholarFullProfileBySlug(
       coiActivities: {
         orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
       },
+      // Issue #167 — surface the division name so the sidebar can render
+      // "<Division> (<Department>)". Department display still comes from
+      // the existing `primaryDepartment` text column.
+      division: { select: { name: true } },
       // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
       // soft-deleted / suppressed mentors at the API layer so the card
       // never points at a hidden profile.
@@ -559,6 +569,15 @@ export async function getScholarFullProfileBySlug(
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    // Issue #167 — belt-and-suspenders filter for the "Administration"
+    // division label. The ED ETL drops Administration at the divCode level
+    // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
+    // exists but the joined Division row's name is "Administration" (e.g.
+    // a row that pre-dates the ETL filter).
+    division:
+      scholar.division && scholar.division.name !== "Administration"
+        ? scholar.division.name
+        : null,
     email: scholar.email,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,

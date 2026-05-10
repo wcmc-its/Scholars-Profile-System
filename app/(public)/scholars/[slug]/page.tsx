@@ -155,7 +155,13 @@ export default async function ScholarProfilePage({
               </div>
             ) : null}
             {profile.primaryDepartment ? (
-              <div className="text-muted-foreground mt-2 text-sm">{profile.primaryDepartment}</div>
+              <div className="text-muted-foreground mt-2 text-sm">
+                {/* Issue #167 — render "<Division> (<Department>)" when the
+                    scholar has a division; otherwise dept-only. */}
+                {profile.division
+                  ? `${profile.division} (${profile.primaryDepartment})`
+                  : profile.primaryDepartment}
+              </div>
             ) : null}
           </div>
 
