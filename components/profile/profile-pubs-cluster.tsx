@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
@@ -27,15 +27,27 @@ const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new
  * The Selected highlights surface is unfiltered and stays outside this cluster
  * (curated 3-item list, not a feed).
  */
-export function ProfilePubsCluster({
-  publications,
-  keywords,
-  totalAcceptedPubs,
-}: {
+type ProfilePubsClusterProps = {
   publications: ProfilePublication[];
   keywords: ScholarKeyword[];
   totalAcceptedPubs: number;
-}) {
+};
+
+export function ProfilePubsCluster(props: ProfilePubsClusterProps) {
+  // useSearchParams() forces a CSR bailout during prerender (Next.js 15
+  // strict mode). Suspense lets the static build emit the fallback.
+  return (
+    <Suspense fallback={null}>
+      <ProfilePubsClusterInner {...props} />
+    </Suspense>
+  );
+}
+
+function ProfilePubsClusterInner({
+  publications,
+  keywords,
+  totalAcceptedPubs,
+}: ProfilePubsClusterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

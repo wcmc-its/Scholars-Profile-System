@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SubtopicRail, type SubtopicRailItem } from "@/components/topic/subtopic-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
 
-export function SubtopicPublicationLayout({
+export function SubtopicPublicationLayout(props: {
+  topicSlug: string;
+  subtopics: SubtopicRailItem[];
+}) {
+  // useSearchParams() forces a CSR bailout during prerender (Next.js 15
+  // strict mode). Suspense lets the static build emit the fallback and
+  // hydrate the full UI at request time.
+  return (
+    <Suspense fallback={null}>
+      <SubtopicPublicationLayoutInner {...props} />
+    </Suspense>
+  );
+}
+
+function SubtopicPublicationLayoutInner({
   topicSlug,
   subtopics,
 }: {

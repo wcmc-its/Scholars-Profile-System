@@ -9,6 +9,26 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: scholars
+          MYSQL_USER: scholars
+          MYSQL_PASSWORD: scholars
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DATABASE_URL: mysql://scholars:scholars@127.0.0.1:3306/scholars
+
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +51,9 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+      - name: Apply Prisma migrations
+        run: npx prisma migrate deploy
 
       - name: Build
         run: npm run build
