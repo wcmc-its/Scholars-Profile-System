@@ -311,10 +311,17 @@ async function indexPeople() {
     const deptName = s.department?.name ?? s.primaryDepartment ?? null;
     const divisionName = s.division?.name ?? null;
     const deptDivKeys: string[] = [];
-    if (s.deptCode && s.divCode) {
-      deptDivKeys.push(`${s.deptCode}--${s.divCode}`);
-    } else if (s.deptCode) {
+    if (s.deptCode) {
+      // Always emit the bare department key so the facet rail surfaces a
+      // department roll-up bucket (e.g. "Medicine 682") alongside the
+      // per-division detail buckets (#154 follow-up). Without this, scholars
+      // who have a division (Cardiology, GI, etc.) only contribute to the
+      // composite "Cardiology — Medicine" bucket and the umbrella department
+      // disappears from the list when other facets narrow the result set.
       deptDivKeys.push(s.deptCode);
+      if (s.divCode) {
+        deptDivKeys.push(`${s.deptCode}--${s.divCode}`);
+      }
     } else if (deptName) {
       // Long-tail: no FK code, free-text dept name. Use the name itself
       // as the key so the facet stays useful during the ED-backfill window.
