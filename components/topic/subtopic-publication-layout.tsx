@@ -47,17 +47,24 @@ function SubtopicPublicationLayoutInner({
   const subtopicLabel = activeSubtopicData?.displayName ?? activeSubtopicData?.label ?? null;
   const subtopicShortDescription = activeSubtopicData?.shortDescription ?? null;
 
+  // Some topics have no subtopics in the hierarchy (e.g. implementation_science,
+  // oral_craniofacial_health). Render the publication feed full-width instead of
+  // an empty rail so the page reads as intentional rather than broken.
+  const hasSubtopics = subtopics.length > 0;
+
   return (
     <div id="publications" className="mt-16 scroll-mt-16">
       <hr className="mb-10 border-border" />
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
-      <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
-        <SubtopicRail
-          subtopics={subtopics}
-          activeSubtopic={activeSubtopic}
-          onSelect={setActiveSubtopic}
-        />
-      </div>
+      {hasSubtopics && (
+        <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
+          <SubtopicRail
+            subtopics={subtopics}
+            activeSubtopic={activeSubtopic}
+            onSelect={setActiveSubtopic}
+          />
+        </div>
+      )}
       <div className="min-w-0 flex-1">
         {activeSubtopic && (
           <SubtopicScholarsRow
