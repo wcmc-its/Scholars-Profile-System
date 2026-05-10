@@ -47,6 +47,14 @@ model Scholar {
   /// "Clinical profile →" link appears in the profile sidebar (absence-as-
   /// default per design spec v1.7.1). Backfilled on next ED ETL run.
   hasClinicalProfile     Boolean   @default(false) @map("has_clinical_profile")
+  /// Issue #165 — canonical per-scholar weillcornell.org clinical profile
+  /// URL, sourced from the ED `labeledURI;pops` attribute on the ou=people
+  /// entry (e.g. https://weillcornell.org/matthewfink). When present, the
+  /// profile sidebar uses this URL directly; when null and
+  /// hasClinicalProfile is true, the sidebar falls back to a surname-search
+  /// URL on weillcornell.org/doctors-directory. Normalized to https:// at
+  /// ETL time even when LDAP returns http://.
+  clinicalProfileUrl     String?   @map("clinical_profile_url") @db.VarChar(512)
   /// Issue #5 — postdoc mentor (manager) CWID, populated only when
   /// roleCategory === 'postdoc'. Sourced from the `manager` attribute on
   /// the scholar's ou=employees,ou=sors entry (parsed by parseManagerCwid).

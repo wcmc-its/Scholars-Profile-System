@@ -170,6 +170,11 @@ export type ProfilePayload = {
    *  signal. Drives whether the "Clinical profile →" link renders in the
    *  Contact card (absence-as-default per design spec v1.7.1). */
   hasClinicalProfile: boolean;
+  /** Issue #165 — canonical per-scholar weillcornell.org URL from the ED
+   *  `labeledURI;pops` attribute (e.g. "https://weillcornell.org/matthewfink").
+   *  When present, the sidebar links here directly; when null and
+   *  `hasClinicalProfile` is true, falls back to a surname-search URL. */
+  clinicalProfileUrl: string | null;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -557,6 +562,7 @@ export async function getScholarFullProfileBySlug(
     email: scholar.email,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
+    clinicalProfileUrl: scholar.clinicalProfileUrl,
     overview: scholar.overview ? sanitizeVIVOHtml(scholar.overview) : null,
     appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
       title: a.title,

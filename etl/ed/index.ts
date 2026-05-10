@@ -668,6 +668,10 @@ async function main() {
             deptCode: effectiveDeptCode,
             divCode: effectiveDivCode,
             hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
+            // Issue #165 — canonical weillcornell.org clinical profile URL.
+            // Always written (even when null) so a scholar whose attribute
+            // disappears between runs gets the stale URL cleared.
+            clinicalProfileUrl: f.clinicalProfileUrl,
           },
         });
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
@@ -694,6 +698,8 @@ async function main() {
             deptCode: effectiveDeptCode,
             divCode: effectiveDivCode,
             hasClinicalProfile: inferHasClinicalProfile(f.personTypeCodes),
+            // Issue #165 — canonical weillcornell.org clinical profile URL.
+            clinicalProfileUrl: f.clinicalProfileUrl,
             // Appointments are populated by refreshEdAppointments below — one
             // row per LDAP `title` value. ED LDAP only returns current-state
             // titles (no historical appointments), so every row written here
