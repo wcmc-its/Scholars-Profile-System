@@ -12,10 +12,11 @@
  *   People:       person type, department, hasActiveGrants
  *   Publications: year range
  *
- * Default-result filtering (spec line 196): incomplete profiles drop out of
- * default browse-style queries. The query layer applies an `isComplete: true`
- * filter when the user hasn't typed a name-anchored query (heuristic: query
- * length < 3 OR no quotes).
+ * Default-result filtering: every active scholar is included by default so
+ * the directory headline count (#152) matches the real population. Callers
+ * can opt back into the `isComplete: true` cull by passing
+ * `filters.includeIncomplete = false` explicitly; current callers (the /search
+ * page and /api/search) leave it unset.
  */
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
@@ -53,7 +54,11 @@ export type PeopleFilters = {
   deptDiv?: string[];
   personType?: string[];
   activity?: ActivityFilter[];
-  /** When true, INCLUDE sparse profiles in results. Default: false (filter out). */
+  /**
+   * Sparse-profile cull. Default (undefined) includes every active scholar
+   * — the directory baseline (#152). Pass `false` to opt back into the old
+   * "isComplete only" behaviour (overview + ≥3 pubs + active grant).
+   */
   includeIncomplete?: boolean;
 };
 
@@ -200,10 +205,13 @@ export async function searchPeople(opts: {
     topicCwidFilter = topicCwids;
   }
 
-  // Default-result filter: when the user is browsing (empty or very short
-  // query), hide sparse profiles unless explicitly opted in.
-  const applySparseFilter =
-    !filters.includeIncomplete && trimmed.length < 3;
+  // Sparse-profile filter (#152): the indexer flags scholars as
+  // `isComplete` only when they have an overview, ≥3 publications, AND an
+  // active grant. That collapsed the default browse view to ~190 of ~8.9k
+  // active scholars, which read as a directory bug. Apply the filter only
+  // when a caller explicitly opts in via `includeIncomplete: false`; the
+  // default browse experience now shows the full active scholar set.
+  const applySparseFilter = filters.includeIncomplete === false;
   // "Published in last 2 years" cutoff (issue #8 item 15).
   const recentPubCutoff = new Date();
   recentPubCutoff.setFullYear(recentPubCutoff.getFullYear() - 2);
