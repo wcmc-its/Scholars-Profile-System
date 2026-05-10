@@ -98,7 +98,7 @@ export default async function TopicScholarsPage({
           </BreadcrumbItem>
           <BreadcrumbSeparator>›</BreadcrumbSeparator>
           <BreadcrumbItem>
-            <BreadcrumbLink href="/browse">Research areas</BreadcrumbLink>
+            <BreadcrumbLink href="/#browse-all-research-areas">Research areas</BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator>›</BreadcrumbSeparator>
           <BreadcrumbItem>

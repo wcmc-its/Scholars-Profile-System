@@ -2,8 +2,8 @@
  * /browse anchor strip — two in-page anchors + one cross-link.
  * Server Component, no JS scroll-spy. The A–Z anchor used to live here;
  * surname-finding now lives on /search's empty People tab per
- * docs/browse-vs-search.md. "Research areas →" targets /#research-areas
- * because no /topics index page exists yet.
+ * docs/browse-vs-search.md. "Research areas →" targets the home-page section
+ * #browse-all-research-areas because no /topics index page exists yet.
  */
 import Link from "next/link";
 
@@ -25,7 +25,7 @@ export function BrowseAnchorStrip() {
       </nav>
       <div className="mt-2 text-right">
         <Link
-          href="/#research-areas"
+          href="/#browse-all-research-areas"
           className="text-sm text-[var(--color-accent-slate)] hover:underline"
         >
           Or browse by research area &#x2192;
