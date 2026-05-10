@@ -701,8 +701,9 @@ export type WcmAuthorChip = {
 /**
  * Batch-fetch WCM-affiliated confirmed authors for a list of pmids.
  * Returns a Map keyed by pmid; each value is the publication's confirmed
- * authors ordered first → last → middle. Used by the publication search
- * route to render author chips with headshots.
+ * authors in ascending PubMed author position (first author first, senior
+ * (last) author last, middle authors in between). Used by the publication
+ * search and topic feed surfaces to render author chips with headshots.
  */
 export async function fetchWcmAuthorsForPmids(
   pmids: string[],
