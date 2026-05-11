@@ -78,7 +78,7 @@ export function SectionInfoButton({
           id={dialogId}
           role="dialog"
           aria-label={ariaLabel}
-          className="absolute left-0 top-full z-20 mt-1 w-[320px] rounded-md border border-border bg-popover p-3 text-[13px] font-normal leading-[1.55] tracking-normal text-popover-foreground shadow-md"
+          className="absolute left-0 top-full z-20 mt-1 w-[320px] rounded-md border border-border bg-popover p-3 text-left text-[13px] font-normal not-italic normal-case leading-[1.55] tracking-normal text-popover-foreground shadow-md"
         >
           <p className="m-0">
             {children}{" "}

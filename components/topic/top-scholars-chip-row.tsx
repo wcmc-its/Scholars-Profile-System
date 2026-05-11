@@ -9,10 +9,6 @@
  * Data contract: TopScholarChipData[] from lib/api/topics.ts.
  */
 import { TopScholarChip } from "./top-scholar-chip";
-import {
-  METHODOLOGY_BASE,
-  METHODOLOGY_ANCHORS,
-} from "@/lib/methodology-anchors";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
@@ -29,7 +25,7 @@ export function TopScholarsChipRow({
 
   return (
     <div className="mt-6">
-      <div className="mb-2 flex items-baseline justify-between">
+      <div className="mb-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Top scholars in this area
           <SectionInfoButton label="Top scholars in this area" anchor="topScholars">
@@ -37,15 +33,6 @@ export function TopScholarsChipRow({
             senior-author publications in this research area. Curators do not
             handpick this list; the order updates weekly as new work appears.
           </SectionInfoButton>
-        </span>
-        <span className="text-xs italic text-muted-foreground">
-          Ranked by ReCiterAI ·{" "}
-          <a
-            href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.topScholars}`}
-            className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-          >
-            how this works
-          </a>
         </span>
       </div>
       <div className="flex flex-wrap gap-2 py-1">
