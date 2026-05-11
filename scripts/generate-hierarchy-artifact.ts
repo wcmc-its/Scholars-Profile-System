@@ -28,7 +28,7 @@ import { createHash } from "crypto";
 import Ajv from "ajv/dist/2020";
 
 const INTEGRATION_REPO =
-  "/Users/paulalbert/Dropbox/GitHub/ReciterAI -ReCiter-Integration";
+  "/Users/paulalbert/Dropbox/GitHub/ReciterAI";
 const AUGMENTED_DIR = resolve(
   INTEGRATION_REPO,
   ".planning/phases/04-subtopic-system",

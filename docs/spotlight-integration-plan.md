@@ -4,11 +4,11 @@
 
 Consume the ReciterAI spotlight artifact and replace the home page **Selected research** carousel with the new 2-column interactive spotlight component. Suppress **Recent contributions**.
 
-**Authoritative upstream contract:** `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-contract.md`
-**SPS coding-agent brief:** `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-spotlight-handoff.md`
-**Reference ETL script:** `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-spotlight-etl-reference.ts`
+**Authoritative upstream contract:** `~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md`
+**SPS coding-agent brief:** `~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md`
+**Reference ETL script:** `~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-etl-reference.ts`
 **Mockup:** `~/Downloads/home-spotlight-interactive.html` (operator's laptop, not in repo)
-**Launch handoff (what's live upstream):** `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-launch-handoff.md`
+**Launch handoff (what's live upstream):** `~/Dropbox/GitHub/ReciterAI/docs/spotlight-launch-handoff.md`
 
 ## Goal
 

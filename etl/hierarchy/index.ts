@@ -8,8 +8,8 @@
  * additive-fields tolerant), and upserts ~2,010 subtopic rows including the
  * D-19 display_name + short_description fields.
  *
- * Source-of-truth contract: ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/hierarchy-contract.md
- * Reference script:        ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-etl-reference.ts
+ * Source-of-truth contract: ~/Dropbox/GitHub/ReciterAI/docs/hierarchy-contract.md
+ * Reference script:        ~/Dropbox/GitHub/ReciterAI/docs/sps-etl-reference.ts
  *
  * D-19 LOCKED reminder: display_name and short_description are UI-only.
  * NEVER pass them to an LLM, retrieval, or embedding path. label and
@@ -214,7 +214,7 @@ async function main(): Promise<void> {
         ts: Date.now(),
         prior_taxonomy_version: lastRun.manifestTaxonomyVersion,
         new_taxonomy_version: manifest.taxonomy_version,
-        note: "PublicationTopic FK remediation may be required; see contract Changelog at ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/hierarchy-contract.md",
+        note: "PublicationTopic FK remediation may be required; see contract Changelog at ~/Dropbox/GitHub/ReciterAI/docs/hierarchy-contract.md",
       })}`
     );
   }

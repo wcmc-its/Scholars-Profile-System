@@ -8,9 +8,9 @@
  * additive-fields tolerant), upserts the 10 spotlight rows, and deletes any
  * stale rows from prior publishes (full-replacement semantics).
  *
- * Source-of-truth contract: ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-contract.md
- * SPS coding-agent brief:   ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-spotlight-handoff.md
- * Reference script:         ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-spotlight-etl-reference.ts
+ * Source-of-truth contract: ~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md
+ * SPS coding-agent brief:   ~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md
+ * Reference script:         ~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-etl-reference.ts
  *
  * D-19 LOCKED reminder: display_name, short_description, and lede are
  * UI-facing only. NEVER pass them to an LLM, retrieval, or embedding path.
