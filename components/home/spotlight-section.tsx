@@ -29,6 +29,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
@@ -97,7 +98,14 @@ export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      <h2 className="text-lg font-semibold">Spotlight</h2>
+      <h2 className="inline-flex items-center gap-2 text-lg font-semibold">
+        Spotlight
+        <SectionInfoButton label="Spotlight" anchor="spotlight">
+          Spotlight rotates subtopics with the strongest recent activity at
+          WCM. Subtopics are scored from ReCiterAI publication scores on
+          PubMed records; the order updates weekly.
+        </SectionInfoButton>
+      </h2>
       <p className="text-muted-foreground mt-1 text-sm italic">
         Subtopics with the strongest recent activity at WCM, one per parent area, refreshed monthly.{" "}
         <a

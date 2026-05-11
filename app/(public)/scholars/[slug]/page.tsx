@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
-import { HighlightsInfoButton } from "@/components/profile/highlights-info-button";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { PublicationsSection } from "@/components/profile/publications-section";
@@ -305,7 +305,14 @@ export default async function ScholarProfilePage({
               title={
                 <span className="inline-flex items-center gap-2">
                   Highlights
-                  <HighlightsInfoButton />
+                  <SectionInfoButton
+                    label="Highlights selection"
+                    anchor="selectedHighlights"
+                  >
+                    Highlights are selected by ReCiterAI from the
+                    scholar&apos;s first- or senior-author publications,
+                    weighted by impact and recency.
+                  </SectionInfoButton>
                 </span>
               }
               headingLg

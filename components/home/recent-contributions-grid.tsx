@@ -12,6 +12,7 @@
  */
 import { RecentContributionCard } from "./recent-contribution-card";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { RecentContribution } from "@/lib/api/home";
 
 export function RecentContributionsGrid({
@@ -21,7 +22,15 @@ export function RecentContributionsGrid({
 }) {
   return (
     <section className="mt-12">
-      <h2 className="text-lg font-semibold">Recent contributions</h2>
+      <h2 className="inline-flex items-center gap-2 text-lg font-semibold">
+        Recent contributions
+        <SectionInfoButton label="Recent contributions" anchor="recentContributions">
+          A rotating snapshot of recent first- or senior-author papers by WCM
+          faculty, postdocs, fellows, and doctoral students. ReCiterAI ranks
+          publications from PubMed metadata; we do not generate the papers or
+          rewrite citations.
+        </SectionInfoButton>
+      </h2>
       <p className="text-muted-foreground mt-1 text-sm italic">
         Faculty contributions ranked by ReCiterAI ·{" "}
         <a

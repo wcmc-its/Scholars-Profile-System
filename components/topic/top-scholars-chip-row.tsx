@@ -13,6 +13,7 @@ import {
   METHODOLOGY_BASE,
   METHODOLOGY_ANCHORS,
 } from "@/lib/methodology-anchors";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
 export function TopScholarsChipRow({
@@ -29,8 +30,13 @@ export function TopScholarsChipRow({
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Top scholars in this area
+          <SectionInfoButton label="Top scholars in this area" anchor="topScholars">
+            Full-time faculty ranked by ReCiterAI on their first- or
+            senior-author publications in this research area. Curators do not
+            handpick this list; the order updates weekly as new work appears.
+          </SectionInfoButton>
         </span>
         <span className="text-xs italic text-muted-foreground">
           Ranked by ReCiterAI ·{" "}
