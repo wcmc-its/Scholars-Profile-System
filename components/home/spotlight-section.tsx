@@ -30,7 +30,6 @@
 import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
-import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
@@ -102,19 +101,10 @@ export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
         Spotlight
         <SectionInfoButton label="Spotlight" anchor="spotlight">
           Spotlight rotates subtopics with the strongest recent activity at
-          WCM. Subtopics are scored from ReCiterAI publication scores on
-          PubMed records; the order updates weekly.
+          WCM, one per parent area, refreshed weekly. Subtopics are scored
+          from ReCiterAI publication scores on PubMed records.
         </SectionInfoButton>
       </h2>
-      <p className="text-muted-foreground mt-1 text-sm italic">
-        Subtopics with the strongest recent activity at WCM, one per parent area, refreshed monthly.{" "}
-        <a
-          href={`${METHODOLOGY_BASE}#${METHODOLOGY_ANCHORS.spotlight}`}
-          className="font-semibold text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-        >
-          How this works →
-        </a>
-      </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-[1.6fr_1fr]">
         <SpotlightDetail card={active} />
