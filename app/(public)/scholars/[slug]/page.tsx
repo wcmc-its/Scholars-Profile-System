@@ -114,6 +114,11 @@ export default async function ScholarProfilePage({
     slug: profile.slug,
     preferredName: profile.publishedName,
     primaryTitle: profile.primaryTitle ?? null,
+    primaryDepartment: profile.primaryDepartment ?? null,
+    overview: profile.overview ?? null,
+    identityImageEndpoint: profile.identityImageEndpoint,
+    clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
+    keywords: profile.keywords.keywords,
   });
 
   const sparse = isSparseProfile(profile);
