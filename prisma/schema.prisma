@@ -61,6 +61,13 @@ model Scholar {
   /// Self-referential nullable FK with onDelete: SetNull so removing the
   /// mentor scholar doesn't cascade-delete the postdoc.
   postdoctoralMentorCwid String?   @map("postdoctoral_mentor_cwid") @db.VarChar(32)
+  /// Issue #171 — ORCID iD (https://orcid.org/0000-0002-1825-0097 form,
+  /// stored as the bare 19-char identifier "0000-0002-1825-0097"). Sourced
+  /// from the WCM Identity DynamoDB table (etl/identity), keyed on `uid`
+  /// (= cwid). Null when the scholar has not registered an ORCID. Used by
+  /// `lib/seo/jsonld.ts` to append an `https://orcid.org/<id>` URL to the
+  /// scholar's Person.sameAs for AI/LLM crawler entity resolution.
+  orcid                  String?   @db.VarChar(19)
   deletedAt              DateTime? @map("deleted_at")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")

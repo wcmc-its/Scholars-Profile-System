@@ -16,8 +16,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   let scholars: Array<{ slug: string; updatedAt: Date | null }> = [];
   let topics: Array<{ id: string; refreshedAt: Date | null }> = [];
   let departments: Array<{ slug: string; updatedAt: Date | null }> = [];
+  let centers: Array<{ slug: string; updatedAt: Date | null }> = [];
   try {
-    [scholars, topics, departments] = await Promise.all([
+    [scholars, topics, departments, centers] = await Promise.all([
       prisma.scholar.findMany({
         where: { deletedAt: null, status: "active" },
         select: { slug: true, updatedAt: true },
@@ -26,6 +27,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         select: { id: true, refreshedAt: true },
       }),
       prisma.department.findMany({
+        select: { slug: true, updatedAt: true },
+      }),
+      prisma.center.findMany({
         select: { slug: true, updatedAt: true },
       }),
     ]);
@@ -69,5 +73,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }),
   );
 
-  return [...staticEntries, ...scholarEntries, ...topicEntries, ...deptEntries];
+  const centerEntries: MetadataRoute.Sitemap = centers.map(
+    (c: { slug: string; updatedAt: Date | null }) => ({
+      url: `${BASE}/centers/${c.slug}`,
+      lastModified: c.updatedAt ?? now,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    }),
+  );
+
+  return [
+    ...staticEntries,
+    ...scholarEntries,
+    ...topicEntries,
+    ...deptEntries,
+    ...centerEntries,
+  ];
 }

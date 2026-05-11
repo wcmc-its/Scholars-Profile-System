@@ -181,6 +181,11 @@ export type ProfilePayload = {
    *  When present, the sidebar links here directly; when null and
    *  `hasClinicalProfile` is true, falls back to a surname-search URL. */
   clinicalProfileUrl: string | null;
+  /** Issue #171 — bare 19-char ORCID iD (e.g. "0000-0002-1825-0097"), or
+   *  null when the scholar has no Identity record or the Identity record's
+   *  orcid is null. Sourced by etl/identity. Used by lib/seo/jsonld to
+   *  append an https://orcid.org/<id> URL to Person.sameAs. */
+  orcid: string | null;
   overview: string | null;
   appointments: Array<{
     title: string;
@@ -614,6 +619,7 @@ export async function getScholarFullProfileBySlug(
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
     clinicalProfileUrl: scholar.clinicalProfileUrl,
+    orcid: scholar.orcid,
     overview: scholar.overview ? sanitizeVIVOHtml(scholar.overview) : null,
     appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
       title: a.title,
