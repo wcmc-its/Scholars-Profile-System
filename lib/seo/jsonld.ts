@@ -13,8 +13,8 @@
  * (tracked in #171).
  */
 
-/** ROR identifier for Weill Cornell Medical College. Source: ror.org. */
-const WCM_ROR = "https://ror.org/05bnh6r87";
+/** ROR identifier for Weill Cornell Medicine. Source: ror.org/02r109517. */
+const WCM_ROR = "https://ror.org/02r109517";
 
 /** Cap on `knowsAbout` entries. The schema accepts unbounded arrays but
  *  downstream consumers truncate large lists; keeping ~20 strong MeSH

@@ -23,7 +23,7 @@ import {
   type PersonJsonLdInput,
 } from "@/lib/seo/jsonld";
 
-const WCM_ROR = "https://ror.org/05bnh6r87";
+const WCM_ROR = "https://ror.org/02r109517";
 
 const baseInput: PersonJsonLdInput = {
   slug: "jane-smith",
