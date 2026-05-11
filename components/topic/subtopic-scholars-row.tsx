@@ -77,26 +77,38 @@ export function SubtopicScholarsRow({
           ? `Researchers in ${subtopicLabel} · ${scholars.length}`
           : `Researchers in this subtopic · ${scholars.length}`}
       </div>
-      <div className="text-sm leading-relaxed">
-        {visible.map((s, i) => (
-          <span key={s.cwid}>
-            <ResearcherNameLink scholar={s} />
-            {i < visible.length - 1 ? (
-              <span aria-hidden="true" className="mx-1.5 text-muted-foreground/60">
+      {/* Spec: text-[14px], weight 500 names, line-height 2 (`leading-loose`
+          in Tailwind = 2). Middot is `--border` color (faint, structural
+          punctuation — not text-tertiary which would compete with content)
+          with 8px gutters either side. No whitespace between </span> and the
+          middot span so wrap behavior stays tight. */}
+      <div className="text-[14px] leading-loose">
+        {visible.flatMap((s, i) => {
+          const nodes: React.ReactNode[] = [
+            <ResearcherNameLink key={s.cwid} scholar={s} />,
+          ];
+          if (i < visible.length - 1) {
+            nodes.push(
+              <span
+                key={`mid-${s.cwid}`}
+                aria-hidden="true"
+                className="mx-2 select-none text-border"
+              >
                 ·
-              </span>
-            ) : null}
-          </span>
-        ))}
+              </span>,
+            );
+          }
+          return nodes;
+        })}
         {overflow > 0 && (
           <>
-            <span aria-hidden="true" className="mx-1.5 text-muted-foreground/60">
+            <span aria-hidden="true" className="mx-2 select-none text-border">
               ·
             </span>
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:underline"
+              className="text-[13.5px] text-[var(--color-accent-slate)] underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
             >
               + {overflow} more →
             </button>
@@ -120,7 +132,11 @@ function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
       <a
         href={`/scholars/${scholar.slug}`}
         aria-describedby={id}
-        className="text-foreground underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none"
+        // Spec: weight 500 at rest; hover/focus shows a faint gray underline,
+        // no color shift. `:focus-visible` gets a 2px slate ring with offset
+        // so keyboard users see a clear focus indicator on both white and
+        // neutral backgrounds.
+        className="font-medium text-foreground underline-offset-4 decoration-border hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] focus-visible:no-underline"
       >
         {scholar.preferredName}
       </a>
