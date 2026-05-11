@@ -56,6 +56,20 @@ export type TopScholarChipData = {
   identityImageEndpoint: string;
 };
 
+/**
+ * Subtopic researcher row — extends TopScholarChipData with the values rendered
+ * inside the hover/focus preview popover on the subtopic researcher list
+ * (issue #172). `primaryDepartment` is the LDAP-derived org unit; pub counts
+ * answer "how concentrated is this researcher in this subtopic" — the unique
+ * signal a user gets from the popover that they can't get from the chip view
+ * or the researcher's profile page.
+ */
+export type SubtopicScholarRowData = TopScholarChipData & {
+  primaryDepartment: string | null;
+  pubCountInSubtopic: number;
+  pubCountTotal: number;
+};
+
 function logSparseHide(
   surface: "topic_top_scholars",
   qualifying: number,
@@ -196,7 +210,10 @@ export async function getTopScholarsForTopic(
   }));
 }
 
-const SUBTOPIC_SCHOLARS_TARGET = 7;
+// Inline middot-separated list threshold per issue #172 spec — up to 10
+// names render inline before collapsing to `+ N more →` overflow. Replaces
+// the prior chip-row count of 7.
+const SUBTOPIC_SCHOLARS_TARGET = 10;
 const SUBTOPIC_SCHOLARS_FLOOR = 1;
 
 /**
@@ -212,7 +229,7 @@ export async function getSubtopicScholars(
   topicSlug: string,
   subtopicId: string,
   now: Date = new Date(),
-): Promise<TopScholarChipData[] | null> {
+): Promise<SubtopicScholarRowData[] | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
 
@@ -236,6 +253,7 @@ export async function getSubtopicScholars(
           slug: true,
           preferredName: true,
           primaryTitle: true,
+          primaryDepartment: true,
           roleCategory: true,
         },
       },
@@ -253,6 +271,7 @@ export async function getSubtopicScholars(
       slug: string;
       preferredName: string;
       primaryTitle: string | null;
+      primaryDepartment: string | null;
     };
     total: number;
   };
@@ -286,12 +305,47 @@ export async function getSubtopicScholars(
   const sorted = Array.from(byCwid.values()).sort((a, b) => b.total - a.total);
   if (sorted.length < SUBTOPIC_SCHOLARS_FLOOR) return null;
 
-  return sorted.slice(0, SUBTOPIC_SCHOLARS_TARGET).map((e) => ({
+  const top = sorted.slice(0, SUBTOPIC_SCHOLARS_TARGET);
+  const cwids = top.map((e) => e.scholar.cwid);
+
+  // Pub counts for the popover. "In this subtopic" mirrors the rail's count
+  // rule (primarySubtopicId only). "Total" counts the scholar's confirmed
+  // PublicationAuthor rows — one row per (scholar, pmid) — across their whole
+  // corpus, not just this topic. Both run as Prisma `groupBy` aggregations.
+  const [subtopicCounts, totalCounts] = await Promise.all([
+    prisma.publicationTopic.groupBy({
+      by: ["cwid"],
+      where: {
+        parentTopicId: topicSlug,
+        primarySubtopicId: subtopicId,
+        cwid: { in: cwids },
+      },
+      _count: { pmid: true },
+    }),
+    prisma.publicationAuthor.groupBy({
+      by: ["cwid"],
+      where: { cwid: { in: cwids }, isConfirmed: true },
+      _count: { pmid: true },
+    }),
+  ]);
+  const subtopicCountByCwid = new Map<string, number>();
+  for (const r of subtopicCounts) {
+    if (r.cwid) subtopicCountByCwid.set(r.cwid, r._count.pmid);
+  }
+  const totalCountByCwid = new Map<string, number>();
+  for (const r of totalCounts) {
+    if (r.cwid) totalCountByCwid.set(r.cwid, r._count.pmid);
+  }
+
+  return top.map((e) => ({
     cwid: e.scholar.cwid,
     slug: e.scholar.slug,
     preferredName: e.scholar.preferredName,
     primaryTitle: e.scholar.primaryTitle,
+    primaryDepartment: e.scholar.primaryDepartment,
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+    pubCountInSubtopic: subtopicCountByCwid.get(e.scholar.cwid) ?? 0,
+    pubCountTotal: totalCountByCwid.get(e.scholar.cwid) ?? 0,
   }));
 }
 

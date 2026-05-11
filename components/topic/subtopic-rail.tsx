@@ -99,13 +99,20 @@ export function SubtopicRail({
                   <button
                     type="button"
                     onClick={() => handleClick(s.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2.5 text-left ${
-                      showHairline ? "border-t border-[#f0f1f3]" : ""
+                    // Issue #172 selected state: 3px WCM-red left border +
+                    // warm neutral fill + text weight. The red accent visually
+                    // couples this item to the right content panel; red is
+                    // not used as a fill or link color elsewhere on the page.
+                    // Unselected items reserve the same 3px gutter via a
+                    // transparent border so selection doesn't shift layout.
+                    className={`flex w-full items-center justify-between gap-2 rounded px-3 py-2.5 text-left border-l-[3px] ${
+                      showHairline ? "border-t border-t-[#f0f1f3]" : ""
                     } ${
                       isActive
-                        ? "bg-[#eff6ff] text-[var(--color-accent-slate)]"
-                        : `hover:bg-[#f5f6f8]${isLessCommon ? " opacity-60" : ""}`
+                        ? "border-l-[var(--color-primary-cornell-red)] bg-[#f5f4f0] font-semibold"
+                        : `border-l-transparent hover:bg-[#f5f6f8]${isLessCommon ? " opacity-60" : ""}`
                     }`}
+                    aria-current={isActive ? "true" : undefined}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-base break-words leading-snug">
@@ -114,9 +121,7 @@ export function SubtopicRail({
                     </div>
                     <span
                       className={`shrink-0 self-center text-sm tabular-nums ${
-                        isActive
-                          ? "text-[var(--color-accent-slate)]"
-                          : "text-muted-foreground"
+                        isActive ? "text-foreground" : "text-muted-foreground"
                       }`}
                     >
                       {s.pubCount}
