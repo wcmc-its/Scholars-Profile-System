@@ -263,6 +263,78 @@ async function main(): Promise<void> {
     })}`
   );
 
+  // Step 6b: Editorial integrity check for `display_name`.
+  //
+  // Issue #175: a runtime sentence-case normalizer used to compensate for
+  // parent-prefix contamination and missing editorial casing in the artifact.
+  // That normalizer was deleted because it corrupted semantically-meaningful
+  // casing (e.g. "CAR T cell" → "CAR t cell"). The renderer now trusts
+  // `display_name` verbatim. To keep that contract honest we validate the
+  // artifact at import time: every subtopic must have a non-empty display_name
+  // whose first word is not the same as a word in the parent topic's label
+  // (the historical contamination pattern was "Neurodegenerative Glymphatic …"
+  // under parent "Neurodegenerative Disease"). Violations are logged as WARN
+  // and the row is still upserted — same posture as taxonomy_version drift.
+  // Surfacing the count in the run log gives an early signal to fix upstream.
+  const parentTopics = await prisma.topic.findMany({ select: { id: true, label: true } });
+  const parentWordsByTopicId = new Map<string, Set<string>>();
+  for (const t of parentTopics) {
+    parentWordsByTopicId.set(
+      t.id,
+      new Set(
+        t.label
+          .toLowerCase()
+          .replace(/[^a-z0-9 ]/g, "")
+          .split(" ")
+          .filter(Boolean)
+      )
+    );
+  }
+  let editorialWarnings = 0;
+  for (const [topicId, topicEntry] of Object.entries(hierarchy.topics)) {
+    const parentWords = parentWordsByTopicId.get(topicId);
+    for (const subtopic of topicEntry.subtopics) {
+      const display = subtopic.display_name?.trim() ?? "";
+      if (!display) {
+        editorialWarnings++;
+        console.warn(
+          `[Hierarchy] ${JSON.stringify({
+            event: "editorial_warning_empty_display_name",
+            ts: Date.now(),
+            topic_id: topicId,
+            subtopic_id: subtopic.id,
+            label: subtopic.label,
+          })}`
+        );
+        continue;
+      }
+      if (parentWords && parentWords.size > 0) {
+        const firstWord = display.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+        if (firstWord && parentWords.has(firstWord)) {
+          editorialWarnings++;
+          console.warn(
+            `[Hierarchy] ${JSON.stringify({
+              event: "editorial_warning_parent_prefix",
+              ts: Date.now(),
+              topic_id: topicId,
+              subtopic_id: subtopic.id,
+              display_name: display,
+              first_word: firstWord,
+              note: "display_name starts with a parent-topic word; fix at ReCiterAI source",
+            })}`
+          );
+        }
+      }
+    }
+  }
+  console.log(
+    `[Hierarchy] ${JSON.stringify({
+      event: "editorial_validation_complete",
+      ts: Date.now(),
+      warnings: editorialWarnings,
+    })}`
+  );
+
   // Step 7: Project hierarchy to MySQL Subtopic table.
   //
   // Each ETL run is a full replacement: every artifact subtopic gets upserted.
