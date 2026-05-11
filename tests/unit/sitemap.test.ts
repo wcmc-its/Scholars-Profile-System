@@ -16,11 +16,12 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany } = vi.hoisted(
+const { mockScholarFindMany, mockTopicFindMany, mockDeptFindMany, mockCenterFindMany } = vi.hoisted(
   () => ({
     mockScholarFindMany: vi.fn(),
     mockTopicFindMany: vi.fn(),
     mockDeptFindMany: vi.fn(),
+    mockCenterFindMany: vi.fn(),
   }),
 );
 
@@ -29,6 +30,7 @@ vi.mock("@/lib/db", () => ({
     scholar: { findMany: mockScholarFindMany },
     topic: { findMany: mockTopicFindMany },
     department: { findMany: mockDeptFindMany },
+    center: { findMany: mockCenterFindMany },
   },
 }));
 
@@ -48,6 +50,7 @@ beforeEach(() => {
     { slug: "medicine", updatedAt: new Date("2026-02-01") },
     { slug: "pediatrics", updatedAt: new Date("2026-02-02") },
   ]);
+  mockCenterFindMany.mockResolvedValue([]);
 });
 
 import * as mod from "@/app/sitemap";
