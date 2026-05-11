@@ -52,6 +52,9 @@ function SubtopicPublicationLayoutInner({
   // an empty rail so the page reads as intentional rather than broken.
   const hasSubtopics = subtopics.length > 0;
 
+  const showSubtopicHeader =
+    activeSubtopic !== null && subtopicLabel !== null && subtopicLabel.length > 0;
+
   return (
     <div id="publications" className="mt-16 scroll-mt-16">
       <hr className="mb-10 border-border" />
@@ -65,7 +68,23 @@ function SubtopicPublicationLayoutInner({
           />
         </div>
       )}
-      <div className="min-w-0 flex-1">
+      {/* Issue #172 — right panel reads heading → description → researchers
+          → sort/controls → publications. The WCM-red left-border accent
+          visually couples this panel to the selected item in the left rail;
+          red is reserved for that structural connector only. */}
+      <div
+        className={`min-w-0 flex-1 ${hasSubtopics ? "lg:border-l-[3px] lg:border-[var(--color-primary-cornell-red)] lg:pl-6" : ""}`}
+      >
+        {showSubtopicHeader && (
+          <header className="mb-4">
+            <h2 className="text-xl font-semibold leading-tight">{subtopicLabel}</h2>
+            {subtopicShortDescription && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {subtopicShortDescription}
+              </p>
+            )}
+          </header>
+        )}
         {activeSubtopic && (
           <SubtopicScholarsRow
             topicSlug={topicSlug}
@@ -78,6 +97,9 @@ function SubtopicPublicationLayoutInner({
           activeSubtopic={activeSubtopic}
           subtopicLabel={subtopicLabel}
           subtopicShortDescription={subtopicShortDescription}
+          // Heading + description are now rendered above the researcher list
+          // when a subtopic is active; suppress the duplicate inside the feed.
+          suppressSubtopicHeader={showSubtopicHeader}
         />
       </div>
     </div>

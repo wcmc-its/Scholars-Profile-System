@@ -1,8 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { TopScholarChip } from "./top-scholar-chip";
-import type { TopScholarChipData } from "@/lib/api/topics";
+/**
+ * Subtopic researcher list (issue #172).
+ *
+ * Renders the researchers attributed to the currently selected subtopic as a
+ * single inline middot-separated text list. Each name is a profile link that
+ * opens a hover/focus preview popover showing the researcher's headshot,
+ * title, department, and the subtopic-scoped vs. total publication counts —
+ * the unique signal a user gets here that isn't surfaced on the chip view or
+ * the profile page itself.
+ *
+ * Styling hierarchy: this list is intentionally lower-weight than the
+ * page-level "Top Scholars in this area" chip row, because it represents a
+ * filtered slice rather than the marquee identity for the whole research
+ * area.
+ *
+ * Mobile: tap on a name navigates to the profile. The popover is desktop-only
+ * (collapses to a hidden detail in narrow viewports, where rich page context
+ * has scrolled away anyway).
+ */
+
+import { useEffect, useId, useState } from "react";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import type { SubtopicScholarRowData } from "@/lib/api/topics";
+
+const INLINE_CAP = 10;
 
 export function SubtopicScholarsRow({
   topicSlug,
@@ -13,18 +35,20 @@ export function SubtopicScholarsRow({
   subtopicId: string;
   subtopicLabel: string | null;
 }) {
-  const [scholars, setScholars] = useState<TopScholarChipData[] | null>(null);
+  const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setScholars(null);
+    setExpanded(false);
     fetch(
       `/api/topics/${encodeURIComponent(topicSlug)}/subtopics/${encodeURIComponent(subtopicId)}/scholars`,
     )
       .then((r) => (r.ok ? r.json() : { scholars: [] }))
-      .then((data: { scholars: TopScholarChipData[] }) => {
+      .then((data: { scholars: SubtopicScholarRowData[] }) => {
         if (!cancelled) {
           setScholars(data.scholars ?? []);
           setLoading(false);
@@ -43,16 +67,135 @@ export function SubtopicScholarsRow({
 
   if (loading || !scholars || scholars.length === 0) return null;
 
+  const visible = expanded ? scholars : scholars.slice(0, INLINE_CAP);
+  const overflow = scholars.length - visible.length;
+
   return (
     <div className="mb-6">
       <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {subtopicLabel ? `Researchers in ${subtopicLabel}` : "Researchers in this subtopic"}
+        {subtopicLabel
+          ? `Researchers in ${subtopicLabel} · ${scholars.length}`
+          : `Researchers in this subtopic · ${scholars.length}`}
       </div>
-      <div className="flex flex-wrap gap-2 py-1">
-        {scholars.map((s) => (
-          <TopScholarChip key={s.cwid} scholar={s} />
-        ))}
+      {/* Spec: text-[14px], weight 500 names, line-height 2 (`leading-loose`
+          in Tailwind = 2). Middot is `--border` color (faint, structural
+          punctuation — not text-tertiary which would compete with content)
+          with 8px gutters either side. No whitespace between </span> and the
+          middot span so wrap behavior stays tight. */}
+      <div className="text-[14px] leading-loose">
+        {visible.flatMap((s, i) => {
+          const nodes: React.ReactNode[] = [
+            <ResearcherNameLink key={s.cwid} scholar={s} />,
+          ];
+          if (i < visible.length - 1) {
+            nodes.push(
+              <span
+                key={`mid-${s.cwid}`}
+                aria-hidden="true"
+                className="mx-2 select-none text-border"
+              >
+                ·
+              </span>,
+            );
+          }
+          return nodes;
+        })}
+        {overflow > 0 && (
+          <>
+            <span aria-hidden="true" className="mx-2 select-none text-border">
+              ·
+            </span>
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="text-[13.5px] text-[var(--color-accent-slate)] underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
+            >
+              + {overflow} more →
+            </button>
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Profile link with hover/focus preview popover. Tooltip is anchored via a
+ * sibling `<span>` so it can extend below the link without affecting the
+ * inline flow. CSS-only open/close on `:hover` / `:focus-within` keeps
+ * keyboard parity without an extra state machine.
+ */
+function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
+  const id = useId();
+  return (
+    <span className="group relative inline-block">
+      <a
+        href={`/scholars/${scholar.slug}`}
+        aria-describedby={id}
+        // Spec: weight 500 at rest; hover/focus shows a faint gray underline,
+        // no color shift. `:focus-visible` gets a 2px slate ring with offset
+        // so keyboard users see a clear focus indicator on both white and
+        // neutral backgrounds.
+        className="font-medium text-foreground underline-offset-4 decoration-border hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] focus-visible:no-underline"
+      >
+        {scholar.preferredName}
+      </a>
+      <span
+        id={id}
+        role="tooltip"
+        // Hidden on mobile (no hover affordance, rich context has scrolled away).
+        // Desktop: shown via group-hover and group-focus-within; small open delay
+        // avoids flicker as the cursor crosses adjacent names.
+        className="
+          pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-72
+          opacity-0 transition-opacity duration-150 ease-out
+          group-hover:opacity-100 group-focus-within:opacity-100
+          group-hover:pointer-events-auto group-focus-within:pointer-events-auto
+          md:block
+        "
+        style={{ transitionDelay: "var(--popover-delay, 180ms)" }}
+      >
+        <a
+          href={`/scholars/${scholar.slug}`}
+          tabIndex={-1}
+          className="block rounded-md border border-border bg-popover p-3.5 shadow-lg ring-1 ring-black/5"
+        >
+          <div className="flex items-start gap-3">
+            <HeadshotAvatar
+              size="md"
+              cwid={scholar.cwid}
+              preferredName={scholar.preferredName}
+              identityImageEndpoint={scholar.identityImageEndpoint}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-foreground">
+                {scholar.preferredName}
+              </div>
+              {scholar.primaryTitle ? (
+                <div className="text-xs text-muted-foreground">
+                  {scholar.primaryTitle}
+                </div>
+              ) : null}
+              {scholar.primaryDepartment ? (
+                <div className="text-xs text-muted-foreground/80">
+                  {scholar.primaryDepartment}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed">
+            <div className="text-foreground">
+              {scholar.pubCountInSubtopic.toLocaleString()} publications in this subtopic
+            </div>
+            <div className="text-muted-foreground">
+              {scholar.pubCountTotal.toLocaleString()} publications total
+            </div>
+          </div>
+          <div className="mt-2 text-xs font-medium text-[var(--color-accent-slate)]">
+            View profile →
+          </div>
+        </a>
+      </span>
+    </span>
   );
 }

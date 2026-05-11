@@ -60,11 +60,19 @@ export function PublicationFeed({
   activeSubtopic,
   subtopicLabel,
   subtopicShortDescription,
+  suppressSubtopicHeader = false,
 }: {
   topicSlug: string;
   activeSubtopic: string | null;
   subtopicLabel: string | null;
   subtopicShortDescription: string | null;
+  /**
+   * When the parent layout renders the subtopic heading + description above
+   * the researcher list (issue #172 reorder), suppress the duplicate heading
+   * here. The result count and sort control stay; only the title/subtitle
+   * block is hidden.
+   */
+  suppressSubtopicHeader?: boolean;
 }) {
   const [sort, setSort] = useState<Sort>("newest");
   const [filter, setFilter] = useState<Filter>("research_articles_only");
@@ -123,19 +131,34 @@ export function PublicationFeed({
   const showSubtopicSubtitle =
     activeSubtopic !== null && subtopicShortDescription !== null && subtopicShortDescription.trim() !== "";
 
+  const totalLabel = data ? `${data.total.toLocaleString()} results` : null;
+
   return (
     <section className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex flex-col gap-1 min-w-0">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <span>{heading}</span>
-            {isCuratedSort && <CuratedTag surface="publication_centric" />}
-          </h2>
-          {showSubtopicSubtitle && (
-            <p className="text-sm text-muted-foreground">{subtopicShortDescription}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
+      <header
+        className={
+          suppressSubtopicHeader
+            ? "flex flex-wrap items-center justify-between gap-3 border-y border-border py-2"
+            : "flex flex-wrap items-start justify-between gap-4"
+        }
+      >
+        {suppressSubtopicHeader ? (
+          // Issue #172: heading + description moved above the researcher list.
+          // Header collapses to a "sort-row" — results count on the left,
+          // sort control on the right, hairline border top + bottom.
+          <span className="text-sm text-muted-foreground">{totalLabel ?? ""}</span>
+        ) : (
+          <div className="flex flex-col gap-1 min-w-0">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <span>{heading}</span>
+              {isCuratedSort && <CuratedTag surface="publication_centric" />}
+            </h2>
+            {showSubtopicSubtitle && (
+              <p className="text-sm text-muted-foreground">{subtopicShortDescription}</p>
+            )}
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Sort by</span>
           <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
             <SelectTrigger className="w-[200px]">
@@ -170,7 +193,13 @@ export function PublicationFeed({
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
-            <span>{data.total.toLocaleString()} results</span>
+            {/* In subtopic mode the count moved into the sticky header row;
+                here we keep the row so the filter-toggle still has a home. */}
+            {suppressSubtopicHeader ? (
+              <span />
+            ) : (
+              <span>{data.total.toLocaleString()} results</span>
+            )}
             {filter === "research_articles_only" && data.totalAllTypes > data.totalResearchOnly ? (
               <button
                 type="button"
