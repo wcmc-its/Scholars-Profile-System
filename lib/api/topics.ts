@@ -378,73 +378,6 @@ export type SubtopicWithCount = {
  * in the pool (O(n) per row), cannot be indexed, and the additional coverage
  * (secondary subtopics) is editorial value that doesn't justify the cost.
  */
-/**
- * Known biomedical acronyms that should be uppercased when they appear as
- * lowercase/title-case words in ReCiterAI-generated subtopic labels.
- */
-const BIOMEDICAL_ACRONYMS: Record<string, string> = {
-  csf: "CSF", ml: "ML", ai: "AI", hiv: "HIV", mri: "MRI", mci: "MCI",
-  ftd: "FTD", als: "ALS", pd: "PD", ad: "AD", eeg: "EEG", ct: "CT",
-  dna: "DNA", rna: "RNA", gwas: "GWAS", crispr: "CRISPR",
-  tdp43: "TDP-43", tdp: "TDP", fus: "FUS", sod1: "SOD1",
-  ipsc: "iPSC", bbb: "BBB", tnf: "TNF", ace: "ACE", ms: "MS",
-  tbi: "TBI", ptsd: "PTSD", ocd: "OCD", snp: "SNP", mrna: "mRNA",
-  // Ophthalmology / vision (#25)
-  ccm: "CCM", cnv: "CNV", amd: "AMD", rpe: "RPE", pvd: "PVD",
-  vegf: "VEGF", iop: "IOP", aion: "AION", gca: "GCA", oct: "OCT",
-  lasik: "LASIK", erg: "ERG", rop: "ROP", dr: "DR",
-};
-
-/**
- * Strips the redundant parent-topic prefix from a ReCiterAI subtopic label
- * and applies acronym casing. Applied when returning subtopics from the DB.
- *
- * Example: parent "Neurodegenerative Disease", label "Neurodegenerative Glymphatic Csf Clearance"
- * → "Glymphatic CSF clearance"
- */
-function normalizeSubtopicLabel(subtopicLabel: string, parentTopicLabel: string): string {
-  const words = subtopicLabel.trim().split(/\s+/);
-  if (words.length === 0) return subtopicLabel;
-
-  // Build a set of normalized words from the parent topic name.
-  const parentWords = new Set(
-    parentTopicLabel
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]/g, "")
-      .split(" ")
-      .filter(Boolean),
-  );
-
-  // Strip leading subtopic words that appear in the parent topic (prefix removal).
-  let start = 0;
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i].toLowerCase().replace(/[^a-z0-9]/g, "");
-    if (parentWords.has(w)) {
-      start = i + 1;
-    } else {
-      break;
-    }
-  }
-
-  // Guard: don't strip everything — fall back to original if nothing remains.
-  const stripped = start > 0 && start < words.length ? words.slice(start) : words;
-
-  // Apply acronym substitution; sentence-case everything else.
-  return stripped
-    .map((w, i) => {
-      const key = w.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (BIOMEDICAL_ACRONYMS[key]) return BIOMEDICAL_ACRONYMS[key];
-      // Preserve words that arrived with uppercase letters past position 0
-      // (e.g. "COVID-19", "iPSC", "mRNA", "TDP-43", "BRCA1"). Editorial intent
-      // signal — sentence-casing would destroy them.
-      if (/[A-Z]/.test(w.slice(1))) return w;
-      return i === 0
-        ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-        : w.toLowerCase();
-    })
-    .join(" ");
-}
-
 export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicWithCount[] | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
@@ -470,35 +403,20 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
     if (r.primarySubtopicId) countMap.set(r.primarySubtopicId, r._count.pmid);
   }
 
-  // HIERARCHY-05 (Path B — defensive normalization retained):
-  //
-  //   The artifact's editorial backfill populated `display_name` only for the
-  //   subset of subtopics that were relabeled. Long-tail rows still have
-  //   `display_name === label`, so they inherit the parent-prefix contamination
-  //   from the original ReCiterAI label generation (e.g. parent
-  //   "Neurodegenerative Disease" + label
-  //   "Neurodegenerative Glymphatic Csf Clearance"). Applying
-  //   `normalizeSubtopicLabel` to `display_name` (NOT to `label`, which stays
-  //   as-is for the rail filter target per D-08) strips the redundant prefix
-  //   on long-tail rows and is a no-op on already-editorial-clean rows whose
-  //   first words don't appear in the parent topic name. The function also
-  //   applies acronym substitution (csf -> CSF, etc.).
-  //
-  //   Per CONTEXT.md "Claude's Discretion": evaluate normalizeSubtopicLabel
-  //   fate. Path A (delete) would be correct if all rows were editorial-clean;
-  //   the documented backfill scope (relabeled set only) means Path B is the
-  //   safer default. If/when a future content-task populates display_name for
-  //   the full long tail, this normalizer can be removed and Path A taken.
+  // HIERARCHY-05 (Path A): `display_name` is authoritative — render verbatim.
+  // The Hierarchy ETL validates display_name editorial integrity at import time
+  // (see assertSubtopicDisplayInvariants in etl/hierarchy). Runtime case-folding
+  // can't recover semantic intent ("CAR T cell" vs. "Cat cell"), so we trust
+  // the source rather than guess.
   return catalog
     .map((s) => {
-      const rawDisplay = s.displayName?.trim() || s.label?.trim() || s.id;
-      const normalizedDisplay = normalizeSubtopicLabel(rawDisplay, topic.label);
+      const displayName = s.displayName?.trim() || s.label?.trim() || s.id;
       return {
         id: s.id,
         // unchanged — rail filter still uses this per D-08.
         label: s.label,
-        // D-09 universal fallback applied above + defensive parent-prefix strip.
-        displayName: normalizedDisplay,
+        // D-09 universal fallback: display_name → label → id.
+        displayName,
         // D-19 subtitle source; null on absence (Phase 3 D-06).
         shortDescription: s.shortDescription?.trim() || null,
         description: s.description,
@@ -1030,8 +948,7 @@ async function fetchTopSubtopicsForScholars(
   });
   const labelById = new Map<string, string>();
   for (const s of catalog) {
-    const raw = s.displayName?.trim() || s.label?.trim() || s.id;
-    labelById.set(s.id, normalizeSubtopicLabel(raw, topic.label));
+    labelById.set(s.id, s.displayName?.trim() || s.label?.trim() || s.id);
   }
 
   const byCwid = new Map<string, { id: string; count: number }[]>();
