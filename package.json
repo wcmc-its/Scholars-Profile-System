@@ -38,6 +38,7 @@
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
+    "etl:identity": "tsx etl/identity/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",

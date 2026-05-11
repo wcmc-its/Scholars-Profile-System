@@ -40,9 +40,13 @@ export type PersonJsonLdInput = {
   /** Public URL to the scholar's headshot image. Always populated by the
    *  upstream payload; passed through to `image`. */
   identityImageEndpoint: string;
-  /** When present, surfaced as the first `sameAs` entry — the canonical
+  /** When present, surfaced as a `sameAs` entry — the canonical
    *  weillcornell.org clinical profile URL. */
   clinicalProfileUrl: string | null;
+  /** Bare 19-char ORCID iD (no protocol/host); converted to a canonical
+   *  `https://orcid.org/<id>` URL and appended to `sameAs`. Strong signal
+   *  for AI/LLM entity resolution. Null when not registered. */
+  orcid?: string | null;
   /** Top MeSH keywords from this scholar's accepted publications, used
    *  verbatim for `knowsAbout`. Pass the aggregation already produced by
    *  `aggregateKeywords` (sorted by pubCount desc). Capped at
@@ -70,6 +74,7 @@ export function buildPersonJsonLd(
   }
 
   const sameAs: string[] = [];
+  if (profile.orcid) sameAs.push(`https://orcid.org/${profile.orcid}`);
   if (profile.clinicalProfileUrl) sameAs.push(profile.clinicalProfileUrl);
 
   const out: Record<string, unknown> = {

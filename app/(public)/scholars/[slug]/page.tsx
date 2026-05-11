@@ -118,6 +118,7 @@ export default async function ScholarProfilePage({
     overview: profile.overview ?? null,
     identityImageEndpoint: profile.identityImageEndpoint,
     clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
+    orcid: profile.orcid ?? null,
     keywords: profile.keywords.keywords,
   });
 

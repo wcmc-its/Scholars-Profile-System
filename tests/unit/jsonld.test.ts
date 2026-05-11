@@ -112,9 +112,42 @@ describe("buildPersonJsonLd", () => {
     expect(ld.sameAs).toEqual(["https://weillcornell.org/janesmith"]);
   });
 
-  it("omits sameAs when clinicalProfileUrl is null and no other identifiers", () => {
+  it("emits ORCID URL in sameAs when orcid is set", () => {
+    const ld = buildPersonJsonLd({ ...baseInput, orcid: "0000-0002-1825-0097" });
+    expect(ld.sameAs).toEqual([
+      "https://orcid.org/0000-0002-1825-0097",
+      "https://weillcornell.org/janesmith",
+    ]);
+  });
+
+  it("orders sameAs with ORCID first, clinical URL second", () => {
+    const ld = buildPersonJsonLd({
+      ...baseInput,
+      orcid: "0000-0001-2345-678X",
+    });
+    const same = ld.sameAs as string[];
+    expect(same[0].startsWith("https://orcid.org/")).toBe(true);
+    expect(same[1].startsWith("https://weillcornell.org/")).toBe(true);
+  });
+
+  it("emits ORCID alone when clinicalProfileUrl is null", () => {
+    const ld = buildPersonJsonLd({
+      ...baseInput,
+      clinicalProfileUrl: null,
+      orcid: "0000-0002-1825-0097",
+    });
+    expect(ld.sameAs).toEqual(["https://orcid.org/0000-0002-1825-0097"]);
+  });
+
+  it("omits sameAs when clinicalProfileUrl is null and orcid is null/absent", () => {
     const ld = buildPersonJsonLd({ ...baseInput, clinicalProfileUrl: null });
     expect(ld).not.toHaveProperty("sameAs");
+    const withNullOrcid = buildPersonJsonLd({
+      ...baseInput,
+      clinicalProfileUrl: null,
+      orcid: null,
+    });
+    expect(withNullOrcid).not.toHaveProperty("sameAs");
   });
 
   it("emits knowsAbout from MeSH keywords", () => {
