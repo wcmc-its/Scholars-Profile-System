@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+import { buildDefinedTermJsonLd } from "@/lib/seo/jsonld";
 import {
   getTopic,
   getTopScholarsForTopic,
@@ -66,8 +67,18 @@ export default async function TopicPage({
       }
     : null;
 
+  const jsonLd = buildDefinedTermJsonLd({
+    id: slug,
+    label: topic.label,
+    description: topic.description ?? null,
+  });
+
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Breadcrumbs — UI-SPEC §7 */}
       <Breadcrumb className="mb-4">
         <BreadcrumbList>

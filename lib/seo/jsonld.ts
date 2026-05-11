@@ -105,6 +105,76 @@ export function buildPersonJsonLd(
   return out;
 }
 
+export type OrganizationJsonLdInput = {
+  /** Path slug (e.g. "anesthesiology" for `/departments/anesthesiology`). */
+  slug: string;
+  /** Route base — "departments" or "centers". */
+  route: "departments" | "centers";
+  name: string;
+  description: string | null;
+};
+
+/**
+ * Organization JSON-LD for department + center pages. Both kinds roll up
+ * to WCM via `parentOrganization` with the WCM ROR identifier so external
+ * consumers can resolve the institutional context.
+ */
+export function buildOrganizationJsonLd(
+  org: OrganizationJsonLdInput,
+): Record<string, unknown> {
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const out: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: org.name,
+    url: `${baseUrl}/${org.route}/${org.slug}`,
+    parentOrganization: {
+      "@type": "Organization",
+      name: "Weill Cornell Medicine",
+      url: "https://weill.cornell.edu",
+      identifier: WCM_ROR,
+    },
+  };
+  if (org.description) {
+    const description = overviewToDescription(org.description);
+    if (description) out.description = description;
+  }
+  return out;
+}
+
+export type DefinedTermJsonLdInput = {
+  /** Topic id used as the URL slug (e.g. "aging_geroscience"). */
+  id: string;
+  /** Display label. */
+  label: string;
+  description: string | null;
+};
+
+/**
+ * DefinedTerm JSON-LD for topic pages — semantically richer than a plain
+ * Organization for taxonomy entries. WCM's research-area taxonomy is the
+ * implied `inDefinedTermSet`, surfaced by URL.
+ */
+export function buildDefinedTermJsonLd(
+  topic: DefinedTermJsonLdInput,
+): Record<string, unknown> {
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
+  const out: Record<string, unknown> = {
+    "@context": "https://schema.org",
+    "@type": "DefinedTerm",
+    name: topic.label,
+    url: `${baseUrl}/topics/${topic.id}`,
+    inDefinedTermSet: `${baseUrl}/browse`,
+  };
+  if (topic.description) {
+    const description = overviewToDescription(topic.description);
+    if (description) out.description = description;
+  }
+  return out;
+}
+
 /**
  * Strip HTML tags + decode the small set of named entities WCM Profiles
  * Manager emits in overview fields (it stores HTML-escaped prose). Collapse

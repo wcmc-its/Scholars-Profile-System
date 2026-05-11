@@ -16,6 +16,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  buildDefinedTermJsonLd,
+  buildOrganizationJsonLd,
   buildPersonJsonLd,
   overviewToDescription,
   type PersonJsonLdInput,
@@ -133,6 +135,75 @@ describe("buildPersonJsonLd", () => {
     expect(empty).not.toHaveProperty("knowsAbout");
     const absent = buildPersonJsonLd({ ...baseInput, keywords: undefined });
     expect(absent).not.toHaveProperty("knowsAbout");
+  });
+});
+
+describe("buildOrganizationJsonLd", () => {
+  it("emits Organization rolled up to WCM via parentOrganization", () => {
+    const ld = buildOrganizationJsonLd({
+      slug: "medicine",
+      route: "departments",
+      name: "Department of Medicine",
+      description: "Largest clinical department.",
+    });
+    expect(ld["@context"]).toBe("https://schema.org");
+    expect(ld["@type"]).toBe("Organization");
+    expect(ld.name).toBe("Department of Medicine");
+    expect((ld.url as string).endsWith("/departments/medicine")).toBe(true);
+    const parent = ld.parentOrganization as Record<string, unknown>;
+    expect(parent["@type"]).toBe("Organization");
+    expect(parent.name).toBe("Weill Cornell Medicine");
+    expect(parent.identifier).toBe(WCM_ROR);
+  });
+
+  it("includes description when provided, omits when null", () => {
+    const withDesc = buildOrganizationJsonLd({
+      slug: "x",
+      route: "centers",
+      name: "X",
+      description: "<p>A blurb.</p>",
+    });
+    expect(withDesc.description).toBe("A blurb.");
+    const without = buildOrganizationJsonLd({
+      slug: "x",
+      route: "centers",
+      name: "X",
+      description: null,
+    });
+    expect(without).not.toHaveProperty("description");
+  });
+
+  it("routes to /centers/<slug> when route is centers", () => {
+    const ld = buildOrganizationJsonLd({
+      slug: "meyer-cancer-center",
+      route: "centers",
+      name: "Meyer Cancer Center",
+      description: null,
+    });
+    expect((ld.url as string).endsWith("/centers/meyer-cancer-center")).toBe(true);
+  });
+});
+
+describe("buildDefinedTermJsonLd", () => {
+  it("emits DefinedTerm with url and inDefinedTermSet", () => {
+    const ld = buildDefinedTermJsonLd({
+      id: "aging_geroscience",
+      label: "Aging & Geroscience",
+      description: null,
+    });
+    expect(ld["@type"]).toBe("DefinedTerm");
+    expect(ld.name).toBe("Aging & Geroscience");
+    expect((ld.url as string).endsWith("/topics/aging_geroscience")).toBe(true);
+    expect((ld.inDefinedTermSet as string).endsWith("/browse")).toBe(true);
+  });
+
+  it("includes description when provided", () => {
+    const ld = buildDefinedTermJsonLd({
+      id: "x",
+      label: "X",
+      description: "Hallmarks of aging.",
+    });
+    expect(ld.description).toBe("Hallmarks of aging.");
   });
 });
 
