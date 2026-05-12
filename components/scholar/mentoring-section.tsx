@@ -1,20 +1,23 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
-import { CoPubPopover } from "@/components/scholar/copub-popover";
+import { Badge } from "@/components/ui/badge";
 import type { MenteeChip } from "@/lib/api/mentoring";
 
 export function MentoringSection({
   mentees,
-  mentorCwid,
+  mentorSlug,
 }: {
   mentees: MenteeChip[];
+  /** Kept on the props for telemetry symmetry with the mentee CWID, even
+   *  though the badge link only needs `mentorSlug` to build the URL. */
   mentorCwid: string;
+  mentorSlug: string;
 }) {
   if (mentees.length === 0) return null;
 
   return (
     <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {mentees.map((m) => (
-        <MenteeChipCard key={m.cwid} mentee={m} mentorCwid={mentorCwid} />
+        <MenteeChipCard key={m.cwid} mentee={m} mentorSlug={mentorSlug} />
       ))}
     </ul>
   );
@@ -22,16 +25,16 @@ export function MentoringSection({
 
 function MenteeChipCard({
   mentee,
-  mentorCwid,
+  mentorSlug,
 }: {
   mentee: MenteeChip;
-  mentorCwid: string;
+  mentorSlug: string;
 }) {
   const isLinked = mentee.scholar !== null;
   const programLabel = formatProgramLabel(mentee.programType);
   const yearLabel = mentee.graduationYear ? `Class of ${mentee.graduationYear}` : null;
   const displayName = mentee.scholar?.publishedName ?? mentee.fullName;
-  const hasCopubs = mentee.copublications.length > 0;
+  const copubCount = mentee.copublications.length;
 
   // Body region: avatar + name + meta. Becomes a link for linked mentees,
   // static content for unlinked alumni. Sits as a sibling of the badge so
@@ -53,17 +56,30 @@ function MenteeChipCard({
     </div>
   );
 
-  const badge = hasCopubs ? (
-    <CoPubPopover
-      copublications={mentee.copublications}
-      menteeFullName={mentee.fullName}
-      mentorCwid={mentorCwid}
-      menteeCwid={mentee.cwid}
-    />
-  ) : null;
+  // The co-pubs badge is a plain anchor to the dedicated page (#184).
+  // The page replaces the inline popover from #181 — bookmarkable, with
+  // CSV/Word exports. The inline-preview interaction (#185) will later
+  // wrap this same target with expandable behavior.
+  const badge =
+    copubCount > 0 ? (
+      <a
+        href={`/scholars/${mentorSlug}/co-pubs/${mentee.cwid}`}
+        className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label={`View ${copubCount} publication${copubCount === 1 ? "" : "s"} co-authored with ${mentee.fullName}`}
+      >
+        <Badge
+          variant="secondary"
+          className="whitespace-nowrap transition-colors hover:bg-zinc-200 dark:hover:bg-zinc-800"
+        >
+          {copubCount} co-pub{copubCount === 1 ? "" : "s"}
+        </Badge>
+      </a>
+    ) : null;
 
+  // Row darkening is scoped to the body anchor via a data attribute so
+  // hovering the co-pubs badge link only darkens the badge, not the row.
   const containerClasses = isLinked
-    ? "flex items-center gap-2 rounded-md border border-border bg-zinc-50 px-3 py-2.5 transition-colors hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/60"
+    ? "flex items-center gap-2 rounded-md border border-border bg-zinc-50 px-3 py-2.5 transition-colors has-[[data-mentee-body]:hover]:bg-zinc-100 dark:bg-zinc-900/40 dark:has-[[data-mentee-body]:hover]:bg-zinc-900/60"
     : "flex items-center gap-2 rounded-md border border-border border-dashed bg-transparent px-3 py-2.5 opacity-80";
 
   return (
@@ -71,6 +87,7 @@ function MenteeChipCard({
       {isLinked ? (
         <a
           href={`/scholars/${mentee.scholar!.slug}`}
+          data-mentee-body
           className="flex min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {body}
