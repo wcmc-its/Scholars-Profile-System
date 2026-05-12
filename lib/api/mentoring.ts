@@ -110,6 +110,7 @@ type AocRow = {
  *  pull everything they need from `@/lib/api/mentoring`. */
 export { formatProgramLabel } from "@/lib/mentoring-labels";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
+import { formatPublishedName } from "@/lib/postnominal";
 
 /**
  * Returns all known mentees for the given mentor CWID, sorted by graduation
@@ -301,9 +302,7 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       scholar: s
         ? {
             slug: s.slug,
-            publishedName: s.postnominal
-              ? `${s.preferredName}, ${s.postnominal}`
-              : s.preferredName,
+            publishedName: formatPublishedName(s.preferredName, s.postnominal),
             primaryDepartment: s.primaryDepartment,
             roleCategory: s.roleCategory,
           }
@@ -474,9 +473,7 @@ export async function getMentorMenteePair(
     select: { preferredName: true, postnominal: true },
   });
   const mentorName = mentor
-    ? mentor.postnominal
-      ? `${mentor.preferredName}, ${mentor.postnominal}`
-      : mentor.preferredName
+    ? formatPublishedName(mentor.preferredName, mentor.postnominal)
     : mentorCwid;
 
   return { mentorName, menteeName };

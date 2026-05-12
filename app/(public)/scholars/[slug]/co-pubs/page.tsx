@@ -21,6 +21,7 @@ import {
 import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { sanitizePubTitle } from "@/lib/utils";
+import { formatPublishedName } from "@/lib/postnominal";
 
 export const revalidate = 86400;
 export const dynamicParams = true;
@@ -38,7 +39,7 @@ function publishedName(s: {
   preferredName: string;
   postnominal: string | null;
 }): string {
-  return s.postnominal ? `${s.preferredName}, ${s.postnominal}` : s.preferredName;
+  return formatPublishedName(s.preferredName, s.postnominal);
 }
 
 export async function generateMetadata({

@@ -37,6 +37,7 @@ import {
   type MenteeCoPubGroup,
 } from "@/lib/api/mentoring";
 import { toCsv } from "@/lib/csv";
+import { formatPublishedName } from "@/lib/postnominal";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -63,9 +64,7 @@ export async function GET(
     return NextResponse.json({ error: "mentor not found" }, { status: 404 });
   }
 
-  const mentorName = mentor.postnominal
-    ? `${mentor.preferredName}, ${mentor.postnominal}`
-    : mentor.preferredName;
+  const mentorName = formatPublishedName(mentor.preferredName, mentor.postnominal);
 
   const rollup = await getAllMentorCoPublications(mentor.cwid);
   const filename = `co-pubs_${mentor.cwid}_all.${format}`;
