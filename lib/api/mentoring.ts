@@ -21,6 +21,33 @@ export type CoPublication = {
   year: number | null;
 };
 
+/** Per-pmid author row from `analysis_summary_author_list`. Carries the
+ *  CWID for any WCM-affiliated author so callers can bold / link them. */
+export type CoPublicationAuthor = {
+  rank: number;
+  lastName: string;
+  firstName: string | null;
+  personIdentifier: string | null;
+};
+
+/** Full publication record for the dedicated co-pubs page (#184). Richer
+ *  than `CoPublication` (which is what the chip popover needs) — adds
+ *  journal / doi / pmcid + structured author list for the page and
+ *  exports. */
+export type CoPublicationFull = {
+  pmid: number;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  doi: string | null;
+  pmcid: string | null;
+  volume: string | null;
+  issue: string | null;
+  pages: string | null;
+  citationCount: number;
+  authors: CoPublicationAuthor[];
+};
+
 export type MenteeChip = {
   cwid: string;
   fullName: string;
@@ -197,4 +224,162 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
   });
 
   return chips;
+}
+
+/**
+ * Returns the full set of publications co-authored by `mentorCwid` and
+ * `menteeCwid`, ordered newest first. Sources from ReCiterDB's
+ * `analysis_summary_article` for citation fields and
+ * `analysis_summary_author_list` for the structured author list (so we
+ * can render and bold WCM-affiliated authors).
+ *
+ * Returns an empty array when no co-authored publications exist — drift
+ * is possible between this query and the badge count (e.g. an alumnus
+ * mentee is in the count query but not in the author-list table for a
+ * given pmid); the page surfaces that case via its empty state.
+ */
+export async function getCoPublications(
+  mentorCwid: string,
+  menteeCwid: string,
+): Promise<CoPublicationFull[]> {
+  if (!mentorCwid || !menteeCwid || mentorCwid === menteeCwid) return [];
+
+  return await withReciterConnection(async (conn) => {
+    // Step 1: intersection of pmids the mentor + mentee both authored.
+    // Newest first; pmid desc as tiebreaker so order is stable across
+    // requests when several pubs share a year.
+    type ArticleRow = {
+      pmid: number | bigint;
+      title: string | null;
+      journal: string | null;
+      year: number | null;
+      doi: string | null;
+      pmcid: string | null;
+      volume: string | null;
+      issue: string | null;
+      pages: string | null;
+      citationCount: number | null;
+    };
+    const articleRows = (await conn.query(
+      `SELECT art.pmid          AS pmid,
+              art.articleTitle  AS title,
+              art.journalTitleVerbose AS journal,
+              art.articleYear   AS year,
+              art.doi           AS doi,
+              art.pmcid         AS pmcid,
+              art.volume        AS volume,
+              art.issue         AS issue,
+              art.pages         AS pages,
+              art.citationCountScopus AS citationCount
+         FROM analysis_summary_author a1
+         JOIN analysis_summary_author a2
+           ON a1.pmid = a2.pmid
+         JOIN analysis_summary_article art
+           ON art.pmid = a1.pmid
+        WHERE a1.personIdentifier = ?
+          AND a2.personIdentifier = ?
+        ORDER BY art.articleYear DESC, art.pmid DESC`,
+      [mentorCwid, menteeCwid],
+    )) as ArticleRow[];
+
+    if (articleRows.length === 0) return [];
+
+    const pmids = articleRows.map((r) =>
+      typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
+    );
+
+    // Step 2: full author list per pmid (one round-trip, batched).
+    type AuthorRow = {
+      pmid: number | bigint;
+      rank: number;
+      authorLastName: string | null;
+      authorFirstName: string | null;
+      personIdentifier: string | null;
+    };
+    const authorRows = (await conn.query(
+      `SELECT pmid, rank, authorLastName, authorFirstName, personIdentifier
+         FROM analysis_summary_author_list
+        WHERE pmid IN (${pmids.map(() => "?").join(",")})
+        ORDER BY pmid, rank`,
+      pmids,
+    )) as AuthorRow[];
+
+    const authorsByPmid = new Map<number, CoPublicationAuthor[]>();
+    for (const r of authorRows) {
+      const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
+      const list = authorsByPmid.get(pmid) ?? [];
+      list.push({
+        rank: r.rank,
+        lastName: r.authorLastName ?? "",
+        firstName: r.authorFirstName,
+        personIdentifier: r.personIdentifier,
+      });
+      authorsByPmid.set(pmid, list);
+    }
+
+    return articleRows.map<CoPublicationFull>((r) => {
+      const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
+      return {
+        pmid,
+        title: r.title ?? "",
+        journal: r.journal,
+        year: r.year,
+        doi: r.doi,
+        pmcid: r.pmcid,
+        volume: r.volume,
+        issue: r.issue,
+        pages: r.pages,
+        citationCount: r.citationCount ?? 0,
+        authors: authorsByPmid.get(pmid) ?? [],
+      };
+    });
+  });
+}
+
+/**
+ * Validates that `menteeCwid` is actually one of `mentorCwid`'s recorded
+ * mentees and returns mentor + mentee display names. Used by the co-pubs
+ * page (#184) to 404 on stray URLs. Returns `null` when the relationship
+ * doesn't exist in `reporting_students_mentors`.
+ */
+export async function getMentorMenteePair(
+  mentorCwid: string,
+  menteeCwid: string,
+): Promise<{ mentorName: string; menteeName: string } | null> {
+  if (!mentorCwid || !menteeCwid) return null;
+
+  type Row = {
+    studentFirstName: string | null;
+    studentLastName: string | null;
+  };
+  const rows = await withReciterConnection(async (conn) => {
+    return (await conn.query(
+      `SELECT studentFirstName, studentLastName
+         FROM reporting_students_mentors
+        WHERE mentorCWID = ? AND studentCWID = ?
+        LIMIT 1`,
+      [mentorCwid, menteeCwid],
+    )) as Row[];
+  });
+  if (rows.length === 0) return null;
+
+  const r = rows[0]!;
+  const menteeName = [r.studentFirstName, r.studentLastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim() || menteeCwid;
+
+  // Mentor display name comes from the local Scholar table; the mentor
+  // is on a scholar profile page so they're always present there.
+  const mentor = await prisma.scholar.findUnique({
+    where: { cwid: mentorCwid },
+    select: { preferredName: true, postnominal: true },
+  });
+  const mentorName = mentor
+    ? mentor.postnominal
+      ? `${mentor.preferredName}, ${mentor.postnominal}`
+      : mentor.preferredName
+    : mentorCwid;
+
+  return { mentorName, menteeName };
 }
