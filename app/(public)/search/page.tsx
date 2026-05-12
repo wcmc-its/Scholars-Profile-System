@@ -118,6 +118,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       r === "first" || r === "senior" || r === "middle",
   );
   const wcmAuthor = parseList(sp.wcmAuthor);
+  // Mentoring activity facet — multi-select on mentee program at time of
+  // mentorship. URL param `mentoringProgram` accepts repeated values from
+  // the set {md, mdphd, phd, ecr}.
+  const mentoringProgram = parseList(sp.mentoringProgram).filter(
+    (v): v is "md" | "mdphd" | "phd" | "ecr" =>
+      v === "md" || v === "mdphd" || v === "phd" || v === "ecr",
+  );
 
   // Issue #8 item 1: the subhead "{n} people · {n} publications · {n} funding"
   // needs all counts regardless of which tab is active. Run lightweight
@@ -144,6 +151,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+        mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
     }),
     searchFunding({
@@ -197,6 +205,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             journal={journal}
             wcmAuthorRole={wcmAuthorRole}
             wcmAuthor={wcmAuthor}
+            mentoringProgram={mentoringProgram}
             result={pubsResult}
           />
         ) : type === "funding" ? (
@@ -554,6 +563,7 @@ async function PublicationsResults({
   journal,
   wcmAuthorRole,
   wcmAuthor,
+  mentoringProgram,
   result,
 }: {
   q: string;
@@ -565,6 +575,7 @@ async function PublicationsResults({
   journal: string[];
   wcmAuthorRole: Array<"first" | "senior" | "middle">;
   wcmAuthor: string[];
+  mentoringProgram: Array<"md" | "mdphd" | "phd" | "ecr">;
   result: PubsResultData;
 }) {
   const buildUrl = (
@@ -581,6 +592,7 @@ async function PublicationsResults({
     for (const v of journal) sp.append("journal", v);
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
+    for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -657,6 +669,18 @@ async function PublicationsResults({
   for (const v of journal) {
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
+  const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "ecr", string> = {
+    md: "MD mentee",
+    mdphd: "MD-PhD mentee",
+    phd: "PhD mentee",
+    ecr: "Early career mentee",
+  };
+  for (const v of mentoringProgram) {
+    chips.push({
+      label: MENTORING_PROGRAM_LABEL[v],
+      removeHref: removeMulti("mentoringProgram", v),
+    });
+  }
 
   // Pre-compute journal facet items server-side: the JournalFacet client
   // component can't accept a function prop for toggleHref, so we resolve
@@ -702,6 +726,7 @@ async function PublicationsResults({
         authorTotalDistinct={result.facets.wcmAuthorsTotal}
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
+        activeMentoringProgram={mentoringProgram}
         toggleHref={toggleHref}
         buildHref={(overrides) => buildUrl((sp) => {
           for (const [k, v] of Object.entries(overrides)) {
@@ -1483,6 +1508,7 @@ function FacetSidebarPubs({
   authorTotalDistinct,
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
+  activeMentoringProgram,
   toggleHref,
   buildHref,
   hasActiveFilters,
@@ -1496,6 +1522,7 @@ function FacetSidebarPubs({
   authorTotalDistinct: number;
   wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
   activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
+  activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "ecr">;
   toggleHref: (axis: string, value: string) => string;
   buildHref: (overrides: Record<string, string>) => string;
   hasActiveFilters: boolean;
@@ -1535,6 +1562,32 @@ function FacetSidebarPubs({
           count={wcmAuthorRoleCounts.middle}
           isActive={activeWcmAuthorRole.includes("middle")}
           href={toggleHref("wcmAuthorRole", "middle")}
+        />
+      </FacetGroup>
+
+      {/* Mentoring activity — multi-select on mentee program at time of
+          mentorship. Restricts results to publications co-authored between a
+          known WCM mentor and a mentee in the chosen program(s). */}
+      <FacetGroup label="Mentoring activity">
+        <FacetCheckbox
+          label="MD mentee"
+          isActive={activeMentoringProgram.includes("md")}
+          href={toggleHref("mentoringProgram", "md")}
+        />
+        <FacetCheckbox
+          label="MD-PhD mentee"
+          isActive={activeMentoringProgram.includes("mdphd")}
+          href={toggleHref("mentoringProgram", "mdphd")}
+        />
+        <FacetCheckbox
+          label="PhD mentee"
+          isActive={activeMentoringProgram.includes("phd")}
+          href={toggleHref("mentoringProgram", "phd")}
+        />
+        <FacetCheckbox
+          label="Early career mentee"
+          isActive={activeMentoringProgram.includes("ecr")}
+          href={toggleHref("mentoringProgram", "ecr")}
         />
       </FacetGroup>
 

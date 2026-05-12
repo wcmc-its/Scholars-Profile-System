@@ -136,6 +136,41 @@ model Education {
   @@map("education")
 }
 
+/// PhD primary-mentor (thesis advisor) relationships from Jenzabar's Graduate
+/// School view `WCN_IDM_GS_ADVISOR_ADVISEE_View` filtered to ADVISOR_TYPE='MAJSP'.
+/// Complements `reciterdb.reporting_students_mentors` (MD AOC/ECR mentors) —
+/// the two sources are unioned by lib/api/mentoring.ts but cover disjoint
+/// populations (PhD students vs MD students).
+///
+/// Truncate-and-rebuild on every ETL run; no FK to Scholar (mentees may be
+/// alumni not present in the local Scholar table, identical to how AOC mentees
+/// are handled today).
+model PhdMentorRelationship {
+  id                Int      @id @default(autoincrement())
+  mentorCwid        String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid        String   @map("mentee_cwid") @db.VarChar(32)
+  mentorFirstName   String?  @map("mentor_first_name") @db.VarChar(64)
+  mentorLastName    String?  @map("mentor_last_name") @db.VarChar(64)
+  mentorEmail       String?  @map("mentor_email") @db.VarChar(128)
+  mentorDepartment  String?  @map("mentor_department") @db.VarChar(128)
+  mentorInstitution String?  @map("mentor_institution") @db.VarChar(255)
+  menteeFirstName   String?  @map("mentee_first_name") @db.VarChar(64)
+  menteeLastName    String?  @map("mentee_last_name") @db.VarChar(64)
+  conferralYear     Int?     @map("conferral_year")
+  majorDesc         String?  @map("major_desc") @db.VarChar(128)
+  advisorStatus     String   @map("advisor_status") @db.Char(1)
+  /// "PhD" or "MD-PhD" — resolved at ETL time by joining mentee CWID against
+  /// Scholar.roleCategory. Pre-LDAP-era alumni not in Scholar default to "PhD".
+  programType       String   @map("program_type") @db.VarChar(16)
+  externalId        String   @unique @map("external_id") @db.VarChar(64)
+  source            String   @default("JENZABAR-MAJSP") @db.VarChar(32)
+  lastRefreshedAt   DateTime @default(now()) @map("last_refreshed_at")
+
+  @@index([mentorCwid])
+  @@index([menteeCwid])
+  @@map("phd_mentor_relationship")
+}
+
 /// Issue #90 — mapping from a WCM scholar to their NIH RePORTER PI
 /// profile_id, for the outbound "View NIH portfolio on RePORTER" link
 /// in the Funding section header.

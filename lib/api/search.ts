@@ -21,6 +21,7 @@
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
 import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
+import { getMentoringPmidBuckets, type MentoringProgramKey } from "@/lib/api/mentoring-pmids";
 import {
   PEOPLE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -74,6 +75,12 @@ export type PublicationsFilters = {
   wcmAuthorRole?: WcmAuthorRole[];
   /** Issue #88 — multi-select WCM author CWID. OR within group. */
   wcmAuthor?: string[];
+  /** Mentoring activity facet. Multi-select on the mentee's program at time
+   *  of mentorship: 'md' (AOC + AOC-2025), 'mdphd' (MD-PhD), 'ecr' (Early
+   *  Career Researcher). Selecting one or more buckets restricts results to
+   *  publications co-authored between a known mentor and a mentee in any of
+   *  the chosen programs. Empty array (or undefined) disables the filter. */
+  mentoringPrograms?: MentoringProgramKey[];
 };
 
 export type PeopleHit = {
@@ -496,6 +503,20 @@ export async function searchPublications(opts: {
   const wcmAuthorClause = filters.wcmAuthor && filters.wcmAuthor.length > 0
     ? { terms: { wcmAuthorCwids: filters.wcmAuthor } }
     : null;
+  // Mentoring activity facet — union the precomputed pmid sets for the
+  // selected program buckets. Empty union (e.g. all programs empty) becomes
+  // a match_none clause so a stale-cache state returns zero rows rather
+  // than all rows.
+  const mentoringPrograms = filters.mentoringPrograms ?? [];
+  const mentoringBuckets = mentoringPrograms.length > 0 ? await getMentoringPmidBuckets() : null;
+  const mentoringPmids = mentoringBuckets
+    ? Array.from(new Set(mentoringPrograms.flatMap((p) => mentoringBuckets.byProgram[p] ?? [])))
+    : [];
+  const mentoringClause = mentoringPrograms.length > 0
+    ? mentoringPmids.length > 0
+      ? { terms: { pmid: mentoringPmids } }
+      : { match_none: {} }
+    : null;
 
   // Same split as searchPeople: all axes here are user-controlled, so they
   // all go in post_filter; the main query carries only the multi_match.
@@ -507,9 +528,10 @@ export async function searchPublications(opts: {
   if (journalClause) userAxisFilters.push(journalClause);
   if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
   if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
+  if (mentoringClause) userAxisFilters.push(mentoringClause);
 
   const filtersExcept = (
-    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole" | "wcmAuthor",
+    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole" | "wcmAuthor" | "mentoring",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "year" && yearClause) out.push(yearClause);
@@ -517,6 +539,7 @@ export async function searchPublications(opts: {
     if (axis !== "journal" && journalClause) out.push(journalClause);
     if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
     if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
+    if (axis !== "mentoring" && mentoringClause) out.push(mentoringClause);
     return out;
   };
 
