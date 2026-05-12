@@ -393,15 +393,39 @@ export default async function ScholarProfilePage({
             </Section>
           ) : null}
 
-          {mentees.length > 0 ? (
-            <Section title="Mentoring" headingLg count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}>
-              <MentoringSection
-                mentees={mentees}
-                mentorCwid={profile.cwid}
-                mentorSlug={slug}
-              />
-            </Section>
-          ) : null}
+          {mentees.length > 0 ? (() => {
+            // Issue #189 — header link points to the all-mentees co-pubs
+            // rollup. Hidden when no mentee has any co-pub (the rollup
+            // page would render an empty state but the link wouldn't be
+            // actionable in that case).
+            const totalCopubs = mentees.reduce(
+              (s, m) => s + m.copublicationCount,
+              0,
+            );
+            return (
+              <Section
+                title="Mentoring"
+                headingLg
+                count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}
+                headerAction={
+                  totalCopubs > 0 ? (
+                    <a
+                      href={`/scholars/${slug}/co-pubs`}
+                      className="text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline whitespace-nowrap"
+                    >
+                      All publications with mentees →
+                    </a>
+                  ) : null
+                }
+              >
+                <MentoringSection
+                  mentees={mentees}
+                  mentorCwid={profile.cwid}
+                  mentorSlug={slug}
+                />
+              </Section>
+            );
+          })() : null}
 
           {profile.disclosures.length > 0 ? (
             <Section

@@ -6,6 +6,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { MenteeChip, CoPublication } from "@/lib/api/mentoring";
+import { formatProgramLabel } from "@/lib/mentoring-labels";
 
 export function MentoringSection({
   mentees,
@@ -225,15 +226,3 @@ function CoPubInlinePanel({
   );
 }
 
-/** Map raw `reporting_students_mentors.programType` codes to user-facing
- *  labels. AOC and AOC-2025 are the same scholarly-concentration program
- *  and collapse to the same "MD mentee" bucket — the AOC acronym is not
- *  exposed in the UI because it's not widely recognized outside the
- *  registrar / Grad School audience. */
-function formatProgramLabel(programType: string | null): string | null {
-  if (!programType) return null;
-  if (programType === "AOC" || programType.startsWith("AOC-")) return "MD mentee";
-  if (programType === "MDPHD") return "MD-PhD mentee";
-  if (programType === "ECR") return "Early career mentee";
-  return programType;
-}

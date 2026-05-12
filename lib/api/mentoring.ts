@@ -106,6 +106,11 @@ type AocRow = {
   programType: string | null;
 };
 
+/** Re-exported from the client-safe label module so server callers can
+ *  pull everything they need from `@/lib/api/mentoring`. */
+export { formatProgramLabel } from "@/lib/mentoring-labels";
+import { formatProgramLabel } from "@/lib/mentoring-labels";
+
 /**
  * Returns all known mentees for the given mentor CWID, sorted by graduation
  * year descending (most recent first), then by name. Multiple AOC project
@@ -475,4 +480,161 @@ export async function getMentorMenteePair(
     : mentorCwid;
 
   return { mentorName, menteeName };
+}
+
+/** One (mentee, publication) tie for the mentor-level rollup at
+ *  /scholars/<slug>/co-pubs. A publication co-authored with multiple
+ *  mentees yields multiple entries — see issue #189 for the rationale
+ *  (RPPR-style questions are per-program). */
+export type MenteeCoPubEntry = {
+  mentee: {
+    cwid: string;
+    fullName: string;
+    graduationYear: number | null;
+    programType: string | null;
+    /** Populated when the mentee has an active Scholar row. Drives whether
+     *  the mentee name in the meta line renders as a link. */
+    scholar: { slug: string; publishedName: string } | null;
+  };
+  publication: CoPublicationFull;
+};
+
+export type MenteeCoPubGroup = {
+  /** Display label for the group heading. From `formatProgramLabel`; an
+   *  "Other mentees" bucket catches mentees whose programType is null or
+   *  doesn't map cleanly (drift). */
+  programLabel: string;
+  /** Entries within the group, sorted by publication year desc, pmid desc. */
+  entries: MenteeCoPubEntry[];
+};
+
+/** Stable identifier for deduping "the same publication across export
+ *  runs". PMID when available — preprints / in-press / non-indexed venues
+ *  with no PMID fall back to a sha1 of `doi || normalizedTitle`.
+ *
+ *  Used by the CSV `copub_id` column. Determinism is the contract: a
+ *  faculty member regenerating an export next quarter must get the same
+ *  IDs for unchanged publications so they can diff against last quarter. */
+export function copubId(p: CoPublicationFull): string {
+  if (p.pmid && p.pmid > 0) return String(p.pmid);
+  const doi = (p.doi ?? "").trim().toLowerCase();
+  const normalizedTitle = (p.title ?? "")
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const seed = doi || normalizedTitle;
+  return `nopmid_${sha1Hex(seed)}`;
+}
+
+function sha1Hex(input: string): string {
+  // Node crypto is always available server-side. Async vs sync: the sync
+  // API is fine here because copubId is called per-row during render /
+  // export, not on a hot path.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  return createHash("sha1").update(input).digest("hex");
+}
+
+/**
+ * Returns every (mentee, publication) tie for `mentorCwid`, grouped by
+ * `formatProgramLabel(programType)`. Powers the mentor-level rollup at
+ * /scholars/<slug>/co-pubs (issue #189).
+ *
+ * Shape decision: a publication co-authored with two mentees in different
+ * programs appears under both groups, once per mentee. This duplication
+ * is intentional — RPPR-style asks ("what did you produce with MD trainees"
+ * vs. "with MD-PhD trainees") are separate questions. CSV exports include
+ * a `copub_id` column so downstream consumers counting unique publications
+ * can `DISTINCT copub_id`.
+ *
+ * Within a group, entries are sorted by publication year desc, pmid desc.
+ * Groups themselves are sorted alphabetically by label.
+ */
+export async function getAllMentorCoPublications(
+  mentorCwid: string,
+): Promise<{
+  groups: MenteeCoPubGroup[];
+  /** Distinct co-pub identifiers across the entire rollup (used for the
+   *  subtitle "N publications across M mentees"). A publication that ties
+   *  to multiple mentees is counted once. */
+  publicationCount: number;
+  /** Number of distinct mentees with at least one co-pub. */
+  menteeCount: number;
+}> {
+  if (!mentorCwid) return { groups: [], publicationCount: 0, menteeCount: 0 };
+
+  // Reuse getMenteesForMentor to inherit the union + dedup logic across
+  // AOC + Jenzabar sources, the scholar-row hydration, and graduationYear.
+  // We then drop mentees with copublicationCount=0 since they don't
+  // contribute to this view.
+  const allMentees = await getMenteesForMentor(mentorCwid);
+  const menteesWithCopubs = allMentees.filter((m) => m.copublicationCount > 0);
+
+  if (menteesWithCopubs.length === 0) {
+    return { groups: [], publicationCount: 0, menteeCount: 0 };
+  }
+
+  // Fetch every co-pub for every mentee. N round-trips is acceptable here
+  // because mentee counts are small (median ~3-5, max observed <30); each
+  // call is well-indexed against analysis_summary_author. A single grand-
+  // query would save round trips but cost legibility, and the page is
+  // SSR-revalidated rather than per-request.
+  const pubsByCwid = new Map<string, CoPublicationFull[]>();
+  await Promise.all(
+    menteesWithCopubs.map(async (m) => {
+      const pubs = await getCoPublications(mentorCwid, m.cwid);
+      pubsByCwid.set(m.cwid, pubs);
+    }),
+  );
+
+  // Build per-group entry lists.
+  const groupsByLabel = new Map<string, MenteeCoPubEntry[]>();
+  for (const m of menteesWithCopubs) {
+    const label = formatProgramLabel(m.programType) ?? "Other mentees";
+    const pubs = pubsByCwid.get(m.cwid) ?? [];
+    const list = groupsByLabel.get(label) ?? [];
+    for (const p of pubs) {
+      list.push({
+        mentee: {
+          cwid: m.cwid,
+          fullName: m.fullName,
+          graduationYear: m.graduationYear,
+          programType: m.programType,
+          scholar: m.scholar
+            ? { slug: m.scholar.slug, publishedName: m.scholar.publishedName }
+            : null,
+        },
+        publication: p,
+      });
+    }
+    groupsByLabel.set(label, list);
+  }
+
+  // Sort entries within each group: year desc, pmid desc.
+  for (const entries of groupsByLabel.values()) {
+    entries.sort((a, b) => {
+      const ay = a.publication.year ?? 0;
+      const by = b.publication.year ?? 0;
+      if (ay !== by) return by - ay;
+      return b.publication.pmid - a.publication.pmid;
+    });
+  }
+
+  // Alphabetical group order.
+  const groups: MenteeCoPubGroup[] = [...groupsByLabel.entries()]
+    .map(([programLabel, entries]) => ({ programLabel, entries }))
+    .sort((a, b) => a.programLabel.localeCompare(b.programLabel));
+
+  // Distinct counts.
+  const distinctCopubIds = new Set<string>();
+  for (const g of groups) {
+    for (const e of g.entries) distinctCopubIds.add(copubId(e.publication));
+  }
+
+  return {
+    groups,
+    publicationCount: distinctCopubIds.size,
+    menteeCount: menteesWithCopubs.length,
+  };
 }
