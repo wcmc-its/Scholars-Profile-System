@@ -63,6 +63,33 @@ function awardSerial(awardNumber: string, mechanism: string): string {
   return awardNumber.replace(re, "").trim();
 }
 
+/** Issue #202 — three-tier treatment for the "No publications yet"
+ *  affordance on NIH grants. Under the early threshold the absence is
+ *  uninformative (RePORTER linkage lag + normal time-to-first-pub),
+ *  past the warning threshold it's a substantive signal. Tune these
+ *  after observing real grant timelines. */
+const NO_PUBS_EARLY_MONTHS = 18;
+const NO_PUBS_WARNING_MONTHS = 36;
+
+function monthsBetween(startISO: string, end: Date): number {
+  const start = new Date(startISO);
+  if (Number.isNaN(start.getTime())) return 0;
+  return (
+    (end.getFullYear() - start.getFullYear()) * 12 +
+    (end.getMonth() - start.getMonth())
+  );
+}
+
+function noPubsTier(group: GrantGroup): "hidden" | "muted" | "warning" {
+  // Completed grants with zero linked pubs are an unambiguous signal
+  // regardless of duration — the grant is done; nothing more will come.
+  if (!group.isActive) return "warning";
+  const age = monthsBetween(group.startDate, new Date());
+  if (age < NO_PUBS_EARLY_MONTHS) return "hidden";
+  if (age < NO_PUBS_WARNING_MONTHS) return "muted";
+  return "warning";
+}
+
 type Grant = ProfilePayload["grants"][number];
 type GrantPublication = Grant["publications"][number];
 
@@ -371,7 +398,7 @@ function GrantRow({
             // Only NIH-funded grants get the "No publications yet" affordance —
             // for non-NIH (industry, foundation, internal) we have no source
             // for pub-grant linkages, so absence isn't informative.
-            <div className="text-muted-foreground mt-1.5 text-xs">No publications yet</div>
+            <NoPubsLabel tier={noPubsTier(group)} />
           ) : null}
         </div>
         <AwardNumberDisplay grant={grant} applId={applId} />
@@ -389,6 +416,22 @@ function GrantRow({
       ) : null}
     </div>
   );
+}
+
+/** Issue #202 — renders the "No publications yet" affordance at the
+ *  tier returned by noPubsTier(). The "hidden" tier returns null so
+ *  callers can keep the conditional logic uniform. */
+function NoPubsLabel({ tier }: { tier: "hidden" | "muted" | "warning" }) {
+  if (tier === "hidden") return null;
+  if (tier === "warning") {
+    return (
+      <div className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300">
+        <span aria-hidden="true">⚠</span>
+        No publications yet
+      </div>
+    );
+  }
+  return <div className="text-muted-foreground mt-1.5 text-xs">No publications yet</div>;
 }
 
 /** Right column rendering for award number. NIH awards split the
