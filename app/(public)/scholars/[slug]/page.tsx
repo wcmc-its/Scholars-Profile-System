@@ -161,7 +161,7 @@ export default async function ScholarProfilePage({
                 identityImageEndpoint={profile.identityImageEndpoint}
               />
             </div>
-            <h1 className="text-xl font-bold tracking-tight">{profile.publishedName}</h1>
+            <h1 className="font-serif text-xl font-bold tracking-tight">{profile.publishedName}</h1>
             {profile.primaryTitle ? (
               <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
                 {profile.primaryTitle}

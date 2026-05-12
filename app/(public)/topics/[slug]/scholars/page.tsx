@@ -115,7 +115,7 @@ export default async function TopicScholarsPage({
         <div className="text-sm font-semibold uppercase tracking-wider text-[var(--color-accent-slate)]">
           RESEARCH AREA
         </div>
-        <h1 className="mt-2 text-3xl font-bold leading-tight tracking-tight">
+        <h1 className="mt-2 font-serif text-3xl font-bold leading-tight tracking-tight">
           Scholars in {topic.label}
         </h1>
       </header>

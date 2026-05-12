@@ -26,7 +26,12 @@
   --radius: 0.625rem;
 
   /* === Phase 2 design tokens (ported from .planning/sketches/themes/default.css) === */
-  /* Typography */
+  /* Typography
+   *
+   * Headline rule (issue #213): h1 uses --font-serif on every surface — marketing
+   * and interior pages alike. h2 and h3 stay in --font-sans. Charter falls back
+   * to Tiempos/Georgia so the rule holds even when the web font is still loading.
+   */
   --text-sm: 13px;
   --text-base: 15px;
   --text-lg: 18px;
