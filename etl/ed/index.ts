@@ -426,6 +426,10 @@ async function main() {
       // WCM faculty at HSS are members of the Orthopaedic Surgery dept;
       // HSS is the affiliate hospital, not an academic dept.
       "Hospital for Special Surgery": "Orthopaedic Surgery",
+      // Doctoral students' LDAP entries return the bare "Graduate School"
+      // for their level1 org unit; the official name of the unit is
+      // "Weill Cornell Graduate School" (of Medical Sciences).
+      "Graduate School": "Weill Cornell Graduate School",
     };
 
     /** Level2 org-unit names that LDAP returns under academic depts but which
