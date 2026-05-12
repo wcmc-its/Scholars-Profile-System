@@ -230,11 +230,19 @@ export const HERO_SEARCH_SUGGESTIONS: readonly string[] = [
 ];
 
 /**
- * Pick `n` distinct random entries from the suggestion pool. Server-renders
- * a fresh sample on every page load.
+ * Pick `n` distinct random entries from the suggestion pool, biased toward
+ * similar-length strings so the pill row doesn't wrap raggedly (issue #214).
+ * Filters to a 12–22 character "balanced" band first; falls back to the full
+ * pool if fewer than `n` entries qualify.
  */
+const BALANCED_LEN_MIN = 12;
+const BALANCED_LEN_MAX = 22;
+
 export function sampleHeroSuggestions(n: number): string[] {
-  const pool = [...HERO_SEARCH_SUGGESTIONS];
+  const balanced = HERO_SEARCH_SUGGESTIONS.filter(
+    (s) => s.length >= BALANCED_LEN_MIN && s.length <= BALANCED_LEN_MAX,
+  );
+  const pool = balanced.length >= n ? [...balanced] : [...HERO_SEARCH_SUGGESTIONS];
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
