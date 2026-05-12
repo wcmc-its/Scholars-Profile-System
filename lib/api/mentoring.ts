@@ -18,6 +18,7 @@ import { withReciterConnection } from "@/lib/sources/reciterdb";
 export type CoPublication = {
   pmid: number;
   title: string;
+  journal: string | null;
   year: number | null;
 };
 
@@ -53,11 +54,17 @@ export type MenteeChip = {
   fullName: string;
   programType: string | null;
   graduationYear: number | null;
-  /** Publications co-authored by the mentor and this mentee, newest first.
-   *  Sourced from ReCiterDB's `analysis_summary_author`, so includes
-   *  publications attributed to alumni mentees not present in the local
-   *  Scholar table. Empty when there are no co-pubs. */
-  copublications: CoPublication[];
+  /** Total number of publications co-authored by the mentor and this mentee.
+   *  Drives the "N co-pubs" badge. Sourced from ReCiterDB's
+   *  `analysis_summary_author` so the count includes pubs attributed to
+   *  alumni mentees not present in the local Scholar table. */
+  copublicationCount: number;
+  /** Preview rows shown when the inline chip is expanded (#185). Top 3 by
+   *  year desc, pmid desc. Includes journal so the inline list can render
+   *  "Journal · Year" without an extra fetch. Empty when count is 0. The
+   *  dedicated co-pubs page (#184) holds the full list; the chip surface
+   *  only ships the preview. */
+  copublicationPreview: CoPublication[];
   /** Same shape the avatar pipeline expects (string, possibly empty). The
    *  headshot avatar component falls back to initials when the endpoint
    *  returns 404, so passing the constructed URL here is safe even for
@@ -144,16 +151,21 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
   // Co-publications per mentee — sourced from ReCiterDB's authoritative
   // attribution (`analysis_summary_author`), not the local publication_author
   // table. Local attribution only carries CWIDs we've explicitly pulled into
-  // Scholar; ~75% of co-pub-bearing mentees are unlinked alumni with no local
-  // Scholar row (see GH #181 investigation), so querying ReCiter directly is
-  // load-bearing. Returns full rows (pmid, title, year) — the popover renders
-  // them inline and derives the count from the array length.
-  const copubByCwid = new Map<string, CoPublication[]>();
+  // Scholar; ~75% of co-pub-bearing mentees are unlinked alumni with no
+  // local Scholar row (see GH #181 investigation), so querying ReCiter
+  // directly is load-bearing.
+  //
+  // Two outputs per mentee: a total count for the badge, and a top-3
+  // preview for the inline chip expansion (#185). The full list lives on
+  // the dedicated /co-pubs/<menteeCwid> page (#184).
+  const copubCountByCwid = new Map<string, number>();
+  const copubPreviewByCwid = new Map<string, CoPublication[]>();
   await withReciterConnection(async (conn) => {
     const rows = (await conn.query(
       `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
               a1.pmid AS pmid,
               art.articleTitle AS title,
+              art.journalTitleVerbose AS journal,
               art.articleYear AS year
          FROM analysis_summary_author a1
          JOIN analysis_summary_author a2
@@ -164,15 +176,28 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
           AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
         ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
       [mentorCwid, ...cwids],
-    )) as { mentee_cwid: string; pmid: number | bigint; title: string; year: number | null }[];
+    )) as {
+      mentee_cwid: string;
+      pmid: number | bigint;
+      title: string;
+      journal: string | null;
+      year: number | null;
+    }[];
     for (const r of rows) {
-      const list = copubByCwid.get(r.mentee_cwid) ?? [];
-      list.push({
-        pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
-        title: r.title,
-        year: r.year,
-      });
-      copubByCwid.set(r.mentee_cwid, list);
+      copubCountByCwid.set(
+        r.mentee_cwid,
+        (copubCountByCwid.get(r.mentee_cwid) ?? 0) + 1,
+      );
+      const preview = copubPreviewByCwid.get(r.mentee_cwid) ?? [];
+      if (preview.length < 3) {
+        preview.push({
+          pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
+          title: r.title,
+          journal: r.journal,
+          year: r.year,
+        });
+        copubPreviewByCwid.set(r.mentee_cwid, preview);
+      }
     }
   });
 
@@ -201,7 +226,8 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       fullName: c.fullName,
       programType: c.programType,
       graduationYear: c.graduationYear,
-      copublications: copubByCwid.get(c.cwid) ?? [],
+      copublicationCount: copubCountByCwid.get(c.cwid) ?? 0,
+      copublicationPreview: copubPreviewByCwid.get(c.cwid) ?? [],
       identityImageEndpoint: identityImageEndpoint(c.cwid),
       scholar: s
         ? {
