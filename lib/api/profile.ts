@@ -575,15 +575,20 @@ export async function getScholarFullProfileBySlug(
       return bd - ad;
     });
 
-  // Issue #162 — NYP affiliate titles (source = "ED-NYP") render at the
-  // bottom of the active appointments list, beneath all WCM appointments.
-  // The Prisma query orders by isPrimary/startDate; a stable secondary pass
-  // pulls ED-NYP rows to the end while preserving the within-group order.
-  const sortedAppointments = [...scholar.appointments].sort((a, b) => {
-    const aNyp = a.source === "ED-NYP" ? 1 : 0;
-    const bNyp = b.source === "ED-NYP" ? 1 : 0;
-    return aNyp - bNyp;
-  });
+  // Issue #162, #193 — three-tier active-appointments order. The Prisma
+  // query orders by isPrimary/startDate within each source; a stable
+  // secondary pass groups by source tier. Unknown sources sort to the end
+  // (?? 99) — defensive when new sources are added without updating this
+  // map. To add a tier, insert one entry; nothing else here needs to change.
+  const APPOINTMENT_TIER_ORDER: Record<string, number> = {
+    ED: 0, // WCM College faculty (LDAP ou=faculty)
+    "JENZABAR-GSFACULTY": 1, // Weill Cornell Graduate School (#193)
+    "ED-NYP": 2, // NYP affiliates (#162)
+  };
+  const tier = (s: string) => APPOINTMENT_TIER_ORDER[s] ?? 99;
+  const sortedAppointments = [...scholar.appointments].sort(
+    (a, b) => tier(a.source) - tier(b.source),
+  );
   const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
   // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
