@@ -12,6 +12,7 @@ import { CenterTabs } from "@/components/center/center-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
 import { Spotlight } from "@/components/shared/spotlight";
 import { LeaderCard } from "@/components/scholar/leader-card";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { PubSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
@@ -125,8 +126,13 @@ export async function CenterPage({
 
         {topResearchAreas.length > 0 && (
           <div className="mt-6">
-            <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Top research areas
+              <SectionInfoButton label="Top research areas" anchor="topResearchAreas">
+                Topics are aggregated from ReCiterAI publication scores for
+                this center&apos;s members. The order reflects recent
+                publication activity, not editorial judgment.
+              </SectionInfoButton>
             </div>
             <div className="flex flex-wrap gap-[7px]">
               {topResearchAreas.map((t) => (

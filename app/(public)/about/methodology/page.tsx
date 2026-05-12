@@ -18,12 +18,135 @@ export default function MethodologyPage() {
         How algorithmic surfaces work
       </h1>
       <p className="mt-6 text-base text-muted-foreground">
-        Scholars at Weill Cornell Medicine ranks publications using a
-        multiplicative formula: research impact (from ReCiterAI) × authorship
-        weight × publication type weight × recency weight. Each surface uses a
-        different recency curve tuned to its purpose, and some surfaces apply
-        additional filters described below.
+        Scholars at Weill Cornell Medicine uses algorithmic ranking and topic
+        assignment to help readers find the work most relevant to a research
+        area. This page explains what that ranking does, what it does not
+        do, and how to read it.
       </p>
+
+      <section id={METHODOLOGY_ANCHORS.whyAi} className="mt-12">
+        <h2 className="text-lg font-semibold">Why we use ReCiterAI at all</h2>
+        <p className="mt-3 text-base">
+          Weill Cornell publishes thousands of papers a year across hundreds
+          of research areas. A static, hand-curated list of &ldquo;featured
+          work&rdquo; ages quickly, reflects whoever last edited the page,
+          and tends to miss work outside the curator&apos;s own subfield.
+          ReCiterAI lets the site keep up with the actual research output of
+          the institution &mdash; without asking a person to read every new
+          PubMed record.
+        </p>
+        <p className="mt-3 text-base">
+          Concretely, ReCiterAI does three things:
+        </p>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>
+            <strong>Attributes publications to WCM scholars.</strong> Author
+            name disambiguation against PubMed metadata, ORCID, and WCM HR
+            data.
+          </li>
+          <li>
+            <strong>Scores publications</strong> on a research-impact scale
+            derived from journal, citation pattern, and authorship signals.
+          </li>
+          <li>
+            <strong>Assigns publications to research areas</strong> so a
+            paper can show up in the topic pages it belongs to.
+          </li>
+        </ul>
+        <p className="mt-3 text-base">
+          Every surface that uses ReCiterAI shows a small{" "}
+          <span aria-hidden>(i)</span> icon next to its heading; click it to
+          read what the ranking does on that surface and jump straight to the
+          detailed write-up below.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-lg font-semibold">What this site does not do with AI</h2>
+        <p className="mt-3 text-base">
+          We are deliberately narrow about where AI shows up. In particular,
+          Scholars does <em>not</em>:
+        </p>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>
+            Generate or rewrite publication titles, abstracts, author lists,
+            journals, or citations. Every bibliographic field comes from
+            PubMed.
+          </li>
+          <li>
+            Write biographical claims about scholars. Profile overviews are
+            authored or approved by the scholar; ReCiterAI does not
+            paraphrase them.
+          </li>
+          <li>
+            Predict who &ldquo;should&rdquo; be considered a top scholar
+            beyond their published record. Rankings reflect publication
+            activity that already happened.
+          </li>
+          <li>
+            Surface a paper that does not exist in PubMed. If the underlying
+            record is wrong, the surface will reflect that &mdash; it will
+            not invent a correction.
+          </li>
+        </ul>
+        <p className="mt-3 text-base">
+          When a ranking is wrong, the fix is upstream (PubMed metadata,
+          author disambiguation, or the scoring model) rather than a
+          one-off display patch. That trade-off keeps the system honest at
+          the cost of slower response to individual edge cases.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-lg font-semibold">Where the data comes from</h2>
+        <p className="mt-3 text-base">
+          ReCiterAI is not a language model running on the page. It is a
+          publication-attribution and scoring pipeline that runs on the
+          following inputs:
+        </p>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>
+            <strong>PubMed</strong> &mdash; the source of truth for
+            publication records, authors, journals, and publication types.
+          </li>
+          <li>
+            <strong>ORCID and Scopus</strong> &mdash; supporting signals for
+            author disambiguation.
+          </li>
+          <li>
+            <strong>Weill Cornell HR data</strong> &mdash; current
+            appointments, departments, divisions, and centers, so we know
+            which scholars to attribute publications to and which to display
+            on algorithmic surfaces.
+          </li>
+        </ul>
+        <p className="mt-3 text-base">
+          Self-edits to a scholar profile (overview text and similar fields)
+          are stored separately and write through immediately; they bypass
+          the daily ETL cadence described below.
+        </p>
+      </section>
+
+      <section className="mt-12">
+        <h2 className="text-lg font-semibold">How the ranking works at a high level</h2>
+        <p className="mt-3 text-base">
+          Every surface that ranks publications uses the same multiplicative
+          formula:
+        </p>
+        <p className="mt-3 text-base">
+          <code>
+            research impact (from ReCiterAI) &times; authorship weight
+            &times; publication-type weight &times; recency weight
+          </code>
+        </p>
+        <p className="mt-3 text-base">
+          Different surfaces tune the <em>recency</em> curve differently and
+          some apply eligibility filters on top &mdash; the specifics are in
+          the sections below. Calibration is reviewed against ~20 real WCM
+          profiles spanning seniority, and weights are revisited six months
+          post-launch.
+        </p>
+      </section>
 
       <section id={METHODOLOGY_ANCHORS.recentContributions} className="mt-12">
         <h2 className="text-lg font-semibold">Recent contributions</h2>
@@ -35,11 +158,12 @@ export default function MethodologyPage() {
           excluded entirely (weight 0). Citation counts are not displayed.
         </p>
         <p className="mt-3 text-base">
-          The recency curve favors papers 6–18 months old (peak weight 1.0),
-          with modest weights for newer (0–6 months) and older (18 months–3
-          years) work. Voluntary, Adjunct, Courtesy, Instructor, Lecturer, and
-          Emeritus appointees do not appear here — they continue to appear in
-          scholar profiles and search results.
+          The recency curve favors papers 6&ndash;18 months old (peak weight
+          1.0), with modest weights for newer (0&ndash;6 months) and older
+          (18 months&ndash;3 years) work. Voluntary, Adjunct, Courtesy,
+          Instructor, Lecturer, and Emeritus appointees do not appear here
+          &mdash; they continue to appear in scholar profiles and search
+          results.
         </p>
       </section>
 
@@ -49,21 +173,22 @@ export default function MethodologyPage() {
         <h2 className="text-lg font-semibold">Spotlight</h2>
         <p className="mt-3 text-base">
           The Spotlight section surfaces a rotating set of subtopics with the
-          strongest recent activity at WCM, one per parent area. The score for
-          each subtopic sums per-publication scores using the Recent highlights
-          recency curve. Refreshes weekly with the ReCiterAI cadence.
+          strongest recent activity at WCM, one per parent area. The score
+          for each subtopic sums per-publication scores using the Recent
+          highlights recency curve. Refreshes weekly with the ReCiterAI
+          cadence.
         </p>
         <p className="mt-3 text-sm italic text-muted-foreground">
           ReCiterAI publication scoring extends back to 2020 only. Selected
           highlights on profile pages rank scholars&apos; WCM-attributed work
           scored by ReCiterAI from 2020 onward. Older landmark publications
           are visible in the most-recent-papers feed but not algorithmically
-          scored. Phase 5+ ReCiterAI backfill is out of scope. (D-15)
+          scored.
         </p>
         <p className="mt-2 text-sm italic text-muted-foreground">
           Within a single profile-page render, papers that appear in Selected
           highlights are filtered out of the most-recent-papers feed to avoid
-          showing the same paper twice. (D-16)
+          showing the same paper twice.
         </p>
       </section>
 
@@ -71,20 +196,20 @@ export default function MethodologyPage() {
         <h2 className="text-lg font-semibold">Top scholars</h2>
         <p className="mt-3 text-base">
           The Top scholars chip row on a topic page shows the seven full-time
-          faculty members with the strongest recent publication record in that
-          area. Each scholar&apos;s score is the sum of per-publication scores
-          for their first-or-senior-author papers in the topic. Second,
-          penultimate, and middle authorship contribute 0 — these papers do
-          not count toward the chip-row score.
+          faculty members with the strongest recent publication record in
+          that area. Each scholar&apos;s score is the sum of per-publication
+          scores for their first-or-senior-author papers in the topic.
+          Second, penultimate, and middle authorship contribute 0 &mdash;
+          those papers do not count toward the chip-row score.
         </p>
         <p className="mt-3 text-base">
           This surface uses a compressed recency curve distinct from Recent
           highlights:
         </p>
         <ul className="mt-3 ml-6 list-disc text-base">
-          <li>0–3 months: 0.7</li>
-          <li>3 months–3 years: 1.0 (peak)</li>
-          <li>3–6 years: 0.85</li>
+          <li>0&ndash;3 months: 0.7</li>
+          <li>3 months&ndash;3 years: 1.0 (peak)</li>
+          <li>3&ndash;6 years: 0.85</li>
           <li>6+ years: 0.7</li>
         </ul>
         <p className="mt-3 text-base">
@@ -92,7 +217,6 @@ export default function MethodologyPage() {
           curve reflect that this surface highlights principal investigators
           specifically. Postdocs, Fellows, and Doctoral students continue to
           appear on Recent contributions and on individual scholar profiles.
-          (D-14)
         </p>
       </section>
 
@@ -142,6 +266,30 @@ export default function MethodologyPage() {
         <p className="mt-3 text-sm italic text-muted-foreground">
           Citation export on profile pages currently supports Vancouver and
           BibTeX. AMA, APA, and RIS are planned for a later phase.
+        </p>
+      </section>
+
+      <section id={METHODOLOGY_ANCHORS.topResearchAreas} className="mt-12">
+        <h2 className="text-lg font-semibold">Top research areas (department, division, center)</h2>
+        <p className="mt-3 text-base">
+          Department, division, and center pages show a row of &ldquo;Top
+          research areas&rdquo; chips. These are aggregated from ReCiterAI
+          publication scores: for every scholar attached to the unit, the
+          publications they appear on contribute to the score of the topics
+          those publications are assigned to. The chips are sorted by total
+          publication score within the unit and capped to the strongest few.
+        </p>
+        <p className="mt-3 text-base">
+          The aggregation reflects recent publication activity by the
+          unit&apos;s members. It is not editorial &mdash; chairs and center
+          directors do not curate the order, and the order can move as new
+          work appears or as appointments change.
+        </p>
+        <p className="mt-3 text-sm italic text-muted-foreground">
+          A topic appearing here is evidence of recent activity, not a
+          declaration of strategic focus. Use the chip to browse the
+          underlying papers and scholars; do not read it as the unit&apos;s
+          official priority list.
         </p>
       </section>
 
@@ -214,17 +362,34 @@ export default function MethodologyPage() {
       </section>
 
       <section className="mt-12">
-        <h2 className="text-lg font-semibold">
-          A note on authorship weight (co-corresponding author limitation)
-        </h2>
-        <p className="mt-3 text-base">
-          Authorship weight 1.0 applies to first and last (senior) authors
-          only. The data feed does not currently mark co-corresponding
-          authors, so a co-corresponding middle-author position will appear
-          with weight 0 even though the spec assigns 1.0. This is tracked for
-          follow-up — the <code>is_corresponding</code> flag is not yet
-          projected from the upstream source. (D-09)
-        </p>
+        <h2 className="text-lg font-semibold">Known limits and how we mitigate them</h2>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>
+            <strong>Co-corresponding authors</strong> are not marked in our
+            upstream feed, so a co-corresponding middle-author position
+            currently receives weight 0 even though the spec assigns 1.0.
+            Tracked for follow-up.
+          </li>
+          <li>
+            <strong>Pre-2020 publications</strong> are not scored by
+            ReCiterAI. Older landmark work appears in profile publication
+            lists but does not compete on the algorithmic surfaces.
+          </li>
+          <li>
+            <strong>Name disambiguation errors</strong> &mdash; an
+            occasional paper may be attributed to the wrong WCM author or
+            missed entirely. Scholars can flag these through the contact
+            link on their profile; corrections feed back into the
+            disambiguation model rather than being patched in display.
+          </li>
+          <li>
+            <strong>Topic assignment</strong> is automatic and can put a
+            paper into a research area it only tangentially fits. The
+            aggregate-level surfaces (Recent highlights, Top scholars) are
+            relatively robust to this; chip rows on department/center pages
+            are more sensitive.
+          </li>
+        </ul>
       </section>
 
       <section className="mt-16 border-t pt-8">
@@ -236,11 +401,11 @@ export default function MethodologyPage() {
         <p className="mt-3 text-sm italic text-muted-foreground">
           Note: the profile most-recent-papers feed reuses the
           <code> recent_contributions </code>
-          recency curve (6–18 month sweet spot) because both surfaces are
-          recent scholar-attributed views. The Spotlight curve was
-          considered and rejected — the profile recent feed is year-grouped
-          and recency-sorted, so emphasizing the 6–18 month band matches the
-          surface&apos;s intent.
+          recency curve (6&ndash;18 month sweet spot) because both surfaces
+          are recent scholar-attributed views. The Spotlight curve was
+          considered and rejected &mdash; the profile recent feed is
+          year-grouped and recency-sorted, so emphasizing the 6&ndash;18
+          month band matches the surface&apos;s intent.
         </p>
       </section>
     </main>

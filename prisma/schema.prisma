@@ -411,7 +411,7 @@ model Topic {
 
 /// Subtopic catalog. Sole writer: Hierarchy ETL (etl/hierarchy/index.ts), which
 /// fetches s3://wcmc-reciterai-hierarchy/latest/hierarchy.json (a co-published JSON
-/// Schema 2020-12 contract — see ~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/hierarchy-contract.md).
+/// Schema 2020-12 contract — see ~/Dropbox/GitHub/ReciterAI/docs/hierarchy-contract.md).
 /// `display_name` and `short_description` are D-19 LOCKED UI fields; `label` and
 /// `description` are LLM-canonical (synthesis-injected, no LLM use in SPS today).
 /// NO FK from PublicationTopic.primarySubtopicId / subtopicIds — old slugs flush

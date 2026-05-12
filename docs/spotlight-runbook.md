@@ -10,10 +10,10 @@ Two repos, two halves:
 
 | Repo | What it owns |
 |---|---|
-| `wcmc-its/ReCiterAI` (cloned to `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration`) | Lede generation (Bedrock), critic gates, artifact publish to `s3://wcmc-reciterai-artifacts/spotlight/`, DynamoDB review queue + rotation history. |
+| `wcmc-its/ReciterAI` (cloned to `~/Dropbox/GitHub/ReciterAI`) | Lede generation (Bedrock), critic gates, artifact publish to `s3://wcmc-reciterai-artifacts/spotlight/`, DynamoDB review queue + rotation history. |
 | `wcmc-its/Scholars-Profile-System` (this repo) | S3 ETL into `Spotlight` MySQL table, `getSpotlights()` DAL, `<SpotlightSection>` home-page component. |
 
-Authoritative cross-repo contract: `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-contract.md`. SPS adapter brief: `…/docs/sps-spotlight-handoff.md`.
+Authoritative cross-repo contract: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md`. SPS adapter brief: `…/docs/sps-spotlight-handoff.md`.
 
 ## End-to-end flow
 
@@ -45,7 +45,7 @@ ReciterAI side                                                 SPS side
 
 ## How to re-publish (cadence: weekly, operator-run)
 
-All commands run from `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration`. AWS creds: this machine has `~/.aws/credentials` for `user/reciter` (`AdministratorAccess`).
+All commands run from `~/Dropbox/GitHub/ReciterAI`. AWS creds: this machine has `~/.aws/credentials` for `user/reciter` (`AdministratorAccess`).
 
 ```bash
 # 1. Smoke. DDB read only, ~$0.
@@ -147,8 +147,8 @@ Open issue tracking voice rules: [wcmc-its/ReciterAI#2](https://github.com/wcmc-
 ## Cross-references
 
 - Phase plan: [`docs/spotlight-integration-plan.md`](spotlight-integration-plan.md)
-- Cross-repo contract: `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-contract.md`
-- SPS coding-agent brief: `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/sps-spotlight-handoff.md`
-- Launch handoff: `~/Dropbox/GitHub/ReciterAI -ReCiter-Integration/docs/spotlight-launch-handoff.md`
+- Cross-repo contract: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md`
+- SPS coding-agent brief: `~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md`
+- Launch handoff: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-launch-handoff.md`
 - Voice-rule issue: [wcmc-its/ReciterAI#2](https://github.com/wcmc-its/ReciterAI/issues/2)
 - Mockup: `.planning/source-docs/spotlight-mockup.html` (gitignored)

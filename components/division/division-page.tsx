@@ -14,6 +14,7 @@ import {
 } from "@/lib/api/divisions";
 import { getSpotlightCardsForDivision } from "@/lib/api/spotlight";
 import { LeaderCard } from "@/components/scholar/leader-card";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { DepartmentFacultyClient } from "@/components/department/department-faculty-client";
 import { Spotlight } from "@/components/shared/spotlight";
 import { DeptTabs } from "@/components/department/dept-tabs";
@@ -126,8 +127,13 @@ export async function DivisionPage({
 
         {detail.topResearchAreas.length > 0 && (
           <div className="mt-6">
-            <div className="mb-[11px] text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            <div className="mb-[11px] inline-flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               Top research areas in this division
+              <SectionInfoButton label="Top research areas in this division" anchor="topResearchAreas">
+                Topics are aggregated from ReCiterAI publication scores for
+                division members. The order reflects recent publication
+                activity, not editorial judgment.
+              </SectionInfoButton>
             </div>
             <div className="flex flex-wrap gap-[7px]">
               {detail.topResearchAreas.map((t) => (

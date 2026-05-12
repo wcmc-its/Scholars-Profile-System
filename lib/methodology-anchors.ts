@@ -20,6 +20,10 @@ export const METHODOLOGY_ANCHORS = {
   eligibilityCarves: "eligibility-carves",
   exclusions: "exclusions",
   dataCadence: "data-cadence",
+  // Issue #176 — aggregate topic ranking shown on dept/division/center pages.
+  topResearchAreas: "top-research-areas",
+  // Issue #176 — skeptic-oriented intro: what AI does and doesn't do.
+  whyAi: "why-ai",
 } as const;
 
 export const METHODOLOGY_BASE = "/about/methodology" as const;

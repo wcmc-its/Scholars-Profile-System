@@ -3,11 +3,13 @@ import type { Metadata } from "next";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
+import { MentoringSection } from "@/components/scholar/mentoring-section";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
-import { HighlightsInfoButton } from "@/components/profile/highlights-info-button";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { PublicationsSection } from "@/components/profile/publications-section";
@@ -124,6 +126,11 @@ export default async function ScholarProfilePage({
 
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
+
+  // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
+  // for scholars with no recorded mentor relationships, in which case the
+  // section is omitted entirely by the component.
+  const mentees = await getMenteesForMentor(profile.cwid);
 
   const pubGroups = groupPublicationsByYear(profile.publications);
   const pubMinYear = pubGroups
@@ -305,7 +312,14 @@ export default async function ScholarProfilePage({
               title={
                 <span className="inline-flex items-center gap-2">
                   Highlights
-                  <HighlightsInfoButton />
+                  <SectionInfoButton
+                    label="Highlights selection"
+                    anchor="selectedHighlights"
+                  >
+                    Highlights are selected by ReCiterAI from the
+                    scholar&apos;s first- or senior-author publications,
+                    weighted by impact and recency.
+                  </SectionInfoButton>
                 </span>
               }
               headingLg
@@ -376,6 +390,16 @@ export default async function ScholarProfilePage({
               }
             >
               <GrantsSection grants={profile.grants} />
+            </Section>
+          ) : null}
+
+          {mentees.length > 0 ? (
+            <Section title="Mentoring" headingLg count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}>
+              <MentoringSection
+                mentees={mentees}
+                mentorCwid={profile.cwid}
+                mentorSlug={slug}
+              />
             </Section>
           ) : null}
 

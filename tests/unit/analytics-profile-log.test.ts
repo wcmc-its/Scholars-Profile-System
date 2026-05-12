@@ -63,6 +63,13 @@ vi.mock("@/lib/seo/jsonld", () => ({
   buildPersonJsonLd: vi.fn(() => ({})),
 }));
 
+// Mock @/lib/api/mentoring — pulled in by MentoringSection on the profile
+// page. Without this the underlying ReCiterDB pool init throws because
+// SCHOLARS_RECITERDB_* env vars are absent in CI.
+vi.mock("@/lib/api/mentoring", () => ({
+  getMenteesForMentor: vi.fn(async () => []),
+}));
+
 // Mock next/headers (used by not-found.tsx — not by profile page, but avoids
 // module resolution errors if transitively imported).
 vi.mock("next/headers", () => ({

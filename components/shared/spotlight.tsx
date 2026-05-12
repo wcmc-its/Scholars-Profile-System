@@ -16,17 +16,13 @@
 import Link from "next/link";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { sanitizePubTitle } from "@/lib/utils";
-import { methodologyHref } from "@/lib/methodology-anchors";
+import { SectionInfoButton } from "@/components/shared/section-info-button";
 import type { SpotlightData, SpotlightCard } from "@/lib/api/spotlight";
-
-const COUNT_WORD = ["zero", "One", "Two", "Three"] as const;
 
 export function Spotlight({ data }: { data: SpotlightData | null }) {
   if (!data || data.cards.length === 0) return null;
   const { cards, totalCount, viewAllHref } = data;
 
-  const word = COUNT_WORD[cards.length] ?? String(cards.length);
-  const noun = cards.length === 1 ? "publication" : "publications";
   const gridClass =
     cards.length === 3
       ? "md:grid-cols-3"
@@ -36,19 +32,15 @@ export function Spotlight({ data }: { data: SpotlightData | null }) {
 
   return (
     <section className="my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]">
-      <header className="mb-[22px] flex flex-wrap items-baseline justify-between gap-[10px]">
-        <h2 className="m-0 font-serif text-[22px] font-medium leading-[1.15] tracking-[-0.01em]">
+      <header className="mb-[22px]">
+        <h2 className="m-0 inline-flex items-center gap-2 font-serif text-[22px] font-medium leading-[1.15] tracking-[-0.01em]">
           Spotlight
+          <SectionInfoButton label="Spotlight" anchor="spotlight">
+            Spotlight rotates publications with the strongest recent activity
+            in a research area, scored by ReCiterAI from PubMed records.
+            Refreshes weekly.
+          </SectionInfoButton>
         </h2>
-        <span className="text-[12.5px] italic text-[var(--color-text-tertiary)]">
-          {word} {noun} surfaced by ReCiterAI ·{" "}
-          <Link
-            href={methodologyHref("spotlight")}
-            className="not-italic underline decoration-black/25 underline-offset-2 hover:text-foreground"
-          >
-            how this works
-          </Link>
-        </span>
       </header>
 
       <div className={`grid grid-cols-1 ${gridClass}`}>
