@@ -55,6 +55,31 @@ function programTypeLabel(programType: string): string | null {
   return TYPE_PILL_LABEL[programType] ?? programType;
 }
 
+/** Issue #202 — "No publications yet" treatment by grant age. Three tiers
+ *  map to "too early to tell" (hide), "still expected" (muted text), and
+ *  "notable absence" (warning tone). Thresholds in months, named so they're
+ *  easy to retune after looking at real grant timelines. Applies to NIH
+ *  grants only; non-NIH lack a pub-grant linkage source so absence isn't
+ *  informative regardless of age. */
+const NO_PUBS_HIDE_BEFORE_MONTHS = 18;
+const NO_PUBS_WARN_AFTER_MONTHS = 36;
+
+type NoPubsTier = "hide" | "muted" | "warn";
+
+function noPubsTier(group: GrantGroup, now: Date = new Date()): NoPubsTier {
+  // Completed grant with zero pubs is unambiguous regardless of duration —
+  // a finished R01 with no publications is a notable absence even if it
+  // was a 12-month pilot. Always escalate.
+  if (!group.isActive) return "warn";
+  const startMs = Date.parse(group.startDate);
+  if (Number.isNaN(startMs)) return "muted";
+  const monthsSinceStart =
+    (now.getTime() - startMs) / (1000 * 60 * 60 * 24 * 30.44);
+  if (monthsSinceStart < NO_PUBS_HIDE_BEFORE_MONTHS) return "hide";
+  if (monthsSinceStart < NO_PUBS_WARN_AFTER_MONTHS) return "muted";
+  return "warn";
+}
+
 /** Strip the optional NIH support-type flag + mechanism prefix from an
  *  award number so the MechanismAbbr renders separately from the
  *  IC+serial. e.g. "1R01CA245678-01A1" with mechanism "R01" → "CA245678-01A1". */
@@ -275,6 +300,15 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
   );
 }
 
+function NoPubsLabel({ tier }: { tier: NoPubsTier }) {
+  if (tier === "hide") return null;
+  const className =
+    tier === "warn"
+      ? "mt-1.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+      : "mt-1.5 text-xs text-muted-foreground";
+  return <div className={className}>No publications yet</div>;
+}
+
 function GrantRow({
   group,
   applIdFallback,
@@ -371,7 +405,11 @@ function GrantRow({
             // Only NIH-funded grants get the "No publications yet" affordance —
             // for non-NIH (industry, foundation, internal) we have no source
             // for pub-grant linkages, so absence isn't informative.
-            <div className="text-muted-foreground mt-1.5 text-xs">No publications yet</div>
+            //
+            // Tier escalation (issue #202): hidden while the grant is too new
+            // for a zero count to be informative, muted while still expected,
+            // amber once the absence becomes notable.
+            <NoPubsLabel tier={noPubsTier(group)} />
           ) : null}
         </div>
         <AwardNumberDisplay grant={grant} applId={applId} />
