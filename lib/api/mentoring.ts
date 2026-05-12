@@ -1,12 +1,20 @@
 /**
- * Mentoring data: AOC mentor↔mentee relationships from
- * `reciterdb.reporting_students_mentors`, joined with the local Scholar table
- * for profile linkage and with `publication_author` for co-authored publication
- * counts.
+ * Mentoring data — unions two sources of mentor↔mentee relationships:
  *
- * v1 source: AOC only. Jenzabar source (broader mentor relationships including
- * non-AOC PhD thesis advisors and MD program mentors) is pending access — when
- * available, add a second source here under the same shape.
+ *   1. `reciterdb.reporting_students_mentors` — MD-program scholarly-project
+ *      mentors (AOC, AOC-2025, ECR, and a 2017 MDPHD snapshot). Live-queried.
+ *
+ *   2. Local `phd_mentor_relationship` — PhD thesis advisors from Jenzabar's
+ *      `WCN_IDM_GS_ADVISOR_ADVISEE_View` (ADVISOR_TYPE='MAJSP'), populated by
+ *      etl/jenzabar/index.ts. Materialized locally because Jenzabar is VPN-
+ *      only and not designed for runtime traffic. programType is "PhD" or
+ *      "MD-PhD", resolved at ETL time against Scholar.roleCategory.
+ *
+ * The two sources cover disjoint populations (PhD students vs MD students) so
+ * mentee deduplication is per-CWID across both — a CWID appearing in both
+ * collapses to one chip (rare; would indicate an MD-PhD who also did AOC).
+ *
+ * Both feed `lib/publication_author` for co-authored publication counts.
  *
  * Spec: .planning/drafts/issue-trainee-profiles-mentoring.md (v2b — Mentoring
  * section on researcher profiles).
@@ -99,20 +107,32 @@ type AocRow = {
 export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChip[]> {
   if (!mentorCwid) return [];
 
-  const aocRows = await withReciterConnection(async (conn) => {
-    return (await conn.query(
-      `SELECT studentCWID, studentFirstName, studentLastName, studentGraduationYear, programType
-       FROM reporting_students_mentors
-       WHERE mentorCWID = ? AND studentCWID IS NOT NULL AND studentCWID != ''`,
-      [mentorCwid],
-    )) as AocRow[];
-  });
+  const [aocRows, jenzabarRows] = await Promise.all([
+    withReciterConnection(async (conn) => {
+      return (await conn.query(
+        `SELECT studentCWID, studentFirstName, studentLastName, studentGraduationYear, programType
+         FROM reporting_students_mentors
+         WHERE mentorCWID = ? AND studentCWID IS NOT NULL AND studentCWID != ''`,
+        [mentorCwid],
+      )) as AocRow[];
+    }),
+    prisma.phdMentorRelationship.findMany({
+      where: { mentorCwid },
+      select: {
+        menteeCwid: true,
+        menteeFirstName: true,
+        menteeLastName: true,
+        conferralYear: true,
+        programType: true,
+      },
+    }),
+  ]);
 
-  if (aocRows.length === 0) return [];
+  if (aocRows.length === 0 && jenzabarRows.length === 0) return [];
 
-  // Collapse to one row per studentCWID. Preserve the most recent
-  // graduationYear and any programType we saw (a student can appear under
-  // both "AOC" and "AOC-2025" — keep the more specific one if present).
+  // Collapse to one row per studentCWID across both sources. Preserve the most
+  // recent graduationYear and the most specific programType we saw (a student
+  // can appear under both "AOC" and "AOC-2025" — longer label = more specific).
   type Collapsed = {
     cwid: string;
     fullName: string;
@@ -120,30 +140,42 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     graduationYear: number | null;
   };
   const byCwid = new Map<string, Collapsed>();
-  for (const r of aocRows) {
-    const cwid = r.studentCWID;
-    const fullName = [r.studentFirstName, r.studentLastName].filter(Boolean).join(" ").trim() || cwid;
+  const upsert = (
+    cwid: string,
+    fullName: string,
+    programType: string | null,
+    graduationYear: number | null,
+  ) => {
     const existing = byCwid.get(cwid);
     if (!existing) {
-      byCwid.set(cwid, {
-        cwid,
-        fullName,
-        programType: r.programType,
-        graduationYear: r.studentGraduationYear,
-      });
-    } else {
-      // Keep the higher graduation year; prefer a more specific programType
-      // string (longer = more specific, e.g. "AOC-2025" over "AOC").
-      if (r.studentGraduationYear && (existing.graduationYear ?? 0) < r.studentGraduationYear) {
-        existing.graduationYear = r.studentGraduationYear;
-      }
-      if (
-        r.programType &&
-        (!existing.programType || r.programType.length > existing.programType.length)
-      ) {
-        existing.programType = r.programType;
-      }
+      byCwid.set(cwid, { cwid, fullName, programType, graduationYear });
+      return;
     }
+    if (graduationYear && (existing.graduationYear ?? 0) < graduationYear) {
+      existing.graduationYear = graduationYear;
+    }
+    if (
+      programType &&
+      (!existing.programType || programType.length > existing.programType.length)
+    ) {
+      existing.programType = programType;
+    }
+  };
+  for (const r of aocRows) {
+    upsert(
+      r.studentCWID,
+      [r.studentFirstName, r.studentLastName].filter(Boolean).join(" ").trim() || r.studentCWID,
+      r.programType,
+      r.studentGraduationYear,
+    );
+  }
+  for (const r of jenzabarRows) {
+    upsert(
+      r.menteeCwid,
+      [r.menteeFirstName, r.menteeLastName].filter(Boolean).join(" ").trim() || r.menteeCwid,
+      r.programType,
+      r.conferralYear,
+    );
   }
 
   const cwids = [...byCwid.keys()];
@@ -374,26 +406,29 @@ export async function getMentorMenteePair(
 ): Promise<{ mentorName: string; menteeName: string } | null> {
   if (!mentorCwid || !menteeCwid) return null;
 
-  type Row = {
-    studentFirstName: string | null;
-    studentLastName: string | null;
-  };
-  const rows = await withReciterConnection(async (conn) => {
-    return (await conn.query(
-      `SELECT studentFirstName, studentLastName
-         FROM reporting_students_mentors
-        WHERE mentorCWID = ? AND studentCWID = ?
-        LIMIT 1`,
-      [mentorCwid, menteeCwid],
-    )) as Row[];
-  });
-  if (rows.length === 0) return null;
+  // Look in both sources — AOC (ReCiterDB) and Jenzabar PhD (local Prisma).
+  // First hit wins for the mentee display name.
+  type AocPairRow = { studentFirstName: string | null; studentLastName: string | null };
+  const [aocRows, jenzabarRow] = await Promise.all([
+    withReciterConnection(async (conn) => {
+      return (await conn.query(
+        `SELECT studentFirstName, studentLastName
+           FROM reporting_students_mentors
+          WHERE mentorCWID = ? AND studentCWID = ?
+          LIMIT 1`,
+        [mentorCwid, menteeCwid],
+      )) as AocPairRow[];
+    }),
+    prisma.phdMentorRelationship.findFirst({
+      where: { mentorCwid, menteeCwid },
+      select: { menteeFirstName: true, menteeLastName: true },
+    }),
+  ]);
+  if (aocRows.length === 0 && !jenzabarRow) return null;
 
-  const r = rows[0]!;
-  const menteeName = [r.studentFirstName, r.studentLastName]
-    .filter(Boolean)
-    .join(" ")
-    .trim() || menteeCwid;
+  const first = aocRows[0]?.studentFirstName ?? jenzabarRow?.menteeFirstName ?? null;
+  const last = aocRows[0]?.studentLastName ?? jenzabarRow?.menteeLastName ?? null;
+  const menteeName = [first, last].filter(Boolean).join(" ").trim() || menteeCwid;
 
   // Mentor display name comes from the local Scholar table; the mentor
   // is on a scholar profile page so they're always present there.

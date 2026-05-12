@@ -64,6 +64,7 @@ async function main() {
     ["ReCiter", "etl/reciter/index.ts"],
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
+    ["Jenzabar", "etl/jenzabar/index.ts"],
     ["RePORTER", "etl/reporter/index.ts"],
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],
