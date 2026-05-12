@@ -9,13 +9,23 @@
 /** Map a raw `programType` value to the user-facing bucket label that
  *  appears in chip subtitles and rollup section headings.
  *
- *  AOC / AOC-2025 collapse to "MD mentee" — the AOC acronym is not
- *  exposed in the UI. MDPHD / ECR get their longer forms. PhD and
- *  MD-PhD from the Jenzabar source pass through as-is. */
+ *  Two sources feed this with overlapping populations (AOC's MDPHD vs
+ *  Jenzabar's MD-PhD; nothing vs Jenzabar's PhD), so the mapping
+ *  intentionally normalizes both to the same "<degree> mentee" form
+ *  to avoid two separate groups on the rollup page for what's
+ *  effectively the same trainee bucket.
+ *
+ *   AOC / AOC-2025      → "MD mentee"        (AOC acronym not exposed)
+ *   MDPHD / MD-PhD      → "MD-PhD mentee"
+ *   PhD                 → "PhD mentee"
+ *   ECR                 → "Early career mentee"
+ *   anything else       → passed through unchanged
+ */
 export function formatProgramLabel(programType: string | null): string | null {
   if (!programType) return null;
   if (programType === "AOC" || programType.startsWith("AOC-")) return "MD mentee";
-  if (programType === "MDPHD") return "MD-PhD mentee";
+  if (programType === "MDPHD" || programType === "MD-PhD") return "MD-PhD mentee";
+  if (programType === "PhD") return "PhD mentee";
   if (programType === "ECR") return "Early career mentee";
   return programType;
 }
