@@ -395,7 +395,11 @@ export default async function ScholarProfilePage({
 
           {mentees.length > 0 ? (
             <Section title="Mentoring" headingLg count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}>
-              <MentoringSection mentees={mentees} mentorCwid={profile.cwid} />
+              <MentoringSection
+                mentees={mentees}
+                mentorCwid={profile.cwid}
+                mentorSlug={slug}
+              />
             </Section>
           ) : null}
 
