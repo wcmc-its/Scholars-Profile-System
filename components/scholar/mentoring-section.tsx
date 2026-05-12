@@ -115,17 +115,13 @@ function MenteeChipCard({
       </button>
     ) : null;
 
-  // Resting container styling — same chip card as #184. When expanded
-  // the chip spans the full grid row so the inline-preview content has
-  // room to breathe and adjacent chips reflow below.
-  const containerClasses = [
-    isLinked
-      ? "rounded-md border border-border bg-zinc-50 transition-colors has-[[data-mentee-body]:hover]:bg-zinc-100 dark:bg-zinc-900/40 dark:has-[[data-mentee-body]:hover]:bg-zinc-900/60"
-      : "rounded-md border border-border border-dashed bg-transparent opacity-80",
-    isExpanded ? "sm:col-span-2" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // Resting container styling — same chip card as #184. The chip stays
+  // in its grid column when expanded; the inline panel grows below the
+  // header via a grid-template-rows transition so siblings reflow
+  // smoothly instead of snapping. (#185)
+  const containerClasses = isLinked
+    ? "rounded-md border border-border bg-zinc-50 transition-colors has-[[data-mentee-body]:hover]:bg-zinc-100 dark:bg-zinc-900/40 dark:has-[[data-mentee-body]:hover]:bg-zinc-900/60"
+    : "rounded-md border border-border border-dashed bg-transparent opacity-80";
 
   return (
     <li className={containerClasses}>
@@ -143,13 +139,33 @@ function MenteeChipCard({
         )}
         {badge}
       </div>
-      {isExpanded && count > 0 && (
-        <CoPubInlinePanel
-          panelId={panelId}
-          mentee={mentee}
-          mentorSlug={mentorSlug}
-        />
-      )}
+      {/*
+        Animated height transition: an outer grid whose single row goes
+        from `0fr` (collapsed) to `1fr` (expanded) animates from height 0
+        to the natural content height without a fixed max-height. The
+        inner `overflow-hidden` clips the content while the row is
+        shorter than its natural height. (#185)
+        The panel stays in the DOM at all times so CSS transitions fire;
+        aria-hidden + inert keep it out of the accessibility tree and
+        the tab order while collapsed.
+      */}
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-out ${
+          isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+        aria-hidden={!isExpanded}
+      >
+        <div className="overflow-hidden">
+          {count > 0 && (
+            <CoPubInlinePanel
+              panelId={panelId}
+              mentee={mentee}
+              mentorSlug={mentorSlug}
+              isExpanded={isExpanded}
+            />
+          )}
+        </div>
+      </div>
     </li>
   );
 }
@@ -158,16 +174,22 @@ function CoPubInlinePanel({
   panelId,
   mentee,
   mentorSlug,
+  isExpanded,
 }: {
   panelId: string;
   mentee: MenteeChip;
   mentorSlug: string;
+  isExpanded: boolean;
 }) {
   return (
     <div
       id={panelId}
       role="region"
       aria-label={`Publications co-authored with ${mentee.fullName}`}
+      // While collapsed the panel is height-zero and clipped by the
+      // outer wrapper; mark it inert so its tab stops and pointer
+      // targets don't leak into the closed state.
+      inert={!isExpanded ? true : undefined}
       className="border-t border-border px-3 py-2.5"
     >
       <ul className="space-y-2">
