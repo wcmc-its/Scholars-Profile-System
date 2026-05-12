@@ -37,7 +37,7 @@ export function MentoringSection({
   if (mentees.length === 0) return null;
 
   return (
-    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
       {mentees.map((m) => (
         <MenteeChipCard
           key={m.cwid}
