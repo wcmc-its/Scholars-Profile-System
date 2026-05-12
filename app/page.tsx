@@ -39,7 +39,7 @@ export default async function HomePage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <SiteHeader />
+      <SiteHeader revealOnScrollPast="home-hero-search-sentinel" />
       <main className="flex-1">
         <section className="border-border border-b bg-gradient-to-b from-white to-zinc-50 px-6 py-16">
           <div className="mx-auto max-w-[760px] text-center">
@@ -49,7 +49,7 @@ export default async function HomePage() {
             <p className="text-muted-foreground mt-4 text-base">
               Discover the research, expertise, and people shaping medicine at WCM.
             </p>
-            <div className="mt-8">
+            <div id="home-hero-search-sentinel" className="mt-8">
               <SearchAutocomplete variant="hero" />
               <TrySuggestionsChips count={6} />
             </div>
