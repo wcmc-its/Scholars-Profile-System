@@ -142,7 +142,7 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
         {isHero ? (
           <button
             onClick={submit}
-            className="shrink-0 rounded bg-[var(--color-accent-slate)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#1f3b53]"
+            className="shrink-0 rounded bg-[var(--color-primary-cornell-red)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#951616] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-primary-cornell-red)]"
           >
             Search
           </button>
