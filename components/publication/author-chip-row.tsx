@@ -53,8 +53,16 @@ function chipRoleLabel(
 
 export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
   if (authors.length === 0) return null;
-  const visible = authors.slice(0, CHIP_CAP);
-  const overflow = authors.length - CHIP_CAP;
+  // A chip needs a cwid to render the headshot identity. Linked authors
+  // (slug + cwid) wrap in an anchor to the profile; unlinked WCM authors
+  // — primarily alumni without a Scholar row — render as a static span
+  // so they still appear in the author row. Non-WCM authors (no cwid)
+  // are dropped: they have no chip identity and live in the unstructured
+  // authorsString instead. (#186)
+  const renderable = authors.filter((a) => a.cwid);
+  if (renderable.length === 0) return null;
+  const visible = renderable.slice(0, CHIP_CAP);
+  const overflow = renderable.length - CHIP_CAP;
   // Counts taken across the full author list (not just the visible slice) so
   // co-first / co-last labels are accurate even when some co-* authors are
   // hidden behind the +N overflow chip. (#18)
@@ -62,27 +70,37 @@ export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
   const lastCount = authors.filter((a) => a.isLast).length;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      {visible.map((a, i) =>
-        a.slug && a.cwid ? (
-          <HoverTooltip key={`${a.cwid}-${i}`} text={chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount)}>
-            <a
-              href={`/scholars/${a.slug}`}
-              className={`inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
-                a.isFirst,
-                a.isLast,
-              )}`}
-            >
-              <HeadshotAvatar
-                size="sm"
-                cwid={a.cwid}
-                preferredName={a.name}
-                identityImageEndpoint={a.identityImageEndpoint ?? ""}
-              />
-              <span>{a.name}</span>
-            </a>
+      {visible.map((a, i) => {
+        const chipClass = `inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
+          a.isFirst,
+          a.isLast,
+        )}`;
+        const inner = (
+          <>
+            <HeadshotAvatar
+              size="sm"
+              cwid={a.cwid!}
+              preferredName={a.name}
+              identityImageEndpoint={a.identityImageEndpoint ?? ""}
+            />
+            <span>{a.name}</span>
+          </>
+        );
+        return (
+          <HoverTooltip
+            key={`${a.cwid}-${i}`}
+            text={chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount)}
+          >
+            {a.slug ? (
+              <a href={`/scholars/${a.slug}`} className={chipClass}>
+                {inner}
+              </a>
+            ) : (
+              <span className={chipClass}>{inner}</span>
+            )}
           </HoverTooltip>
-        ) : null,
-      )}
+        );
+      })}
       {overflow > 0 && (
         <span className="inline-flex items-center rounded-full border border-zinc-300 bg-background px-2.5 py-0.5 text-xs text-muted-foreground">
           +{overflow} more →
