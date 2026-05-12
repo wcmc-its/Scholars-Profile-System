@@ -60,7 +60,16 @@ export type CoPublicationFull = {
 export type MenteeChip = {
   cwid: string;
   fullName: string;
+  /** Degree-bucket label sourced from `reporting_students_mentors.programType`
+   *  (AOC/MDPHD/ECR) or the Jenzabar `phd_mentor_relationship.programType`
+   *  (PhD/MD-PhD). Used as the fallback subtitle when a finer-grained
+   *  `programName` is not available. */
   programType: string | null;
+  /** Issue #195 — human-readable program name (e.g. "Immunology & Microbial
+   *  Pathogenesis"). Sourced from ED's `student_phd_program.program` first,
+   *  Jenzabar's `phd_mentor_relationship.major_desc` second. Null when
+   *  neither source has a record — UI then falls back to `programType`. */
+  programName: string | null;
   graduationYear: number | null;
   /** Total number of publications co-authored by the mentor and this mentee.
    *  Drives the "N co-pubs" badge. Sourced from ReCiterDB's
@@ -124,6 +133,7 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
         menteeLastName: true,
         conferralYear: true,
         programType: true,
+        majorDesc: true,
       },
     }),
   ]);
@@ -179,6 +189,27 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
   }
 
   const cwids = [...byCwid.keys()];
+
+  // Issue #195 — Resolve program names. Precedence: ED `student_phd_program`
+  // beats Jenzabar `phd_mentor_relationship.major_desc` (ED is the
+  // authoritative curated source; Jenzabar fills the gap for pre-LDAP
+  // alumni and off-cycle students).
+  const programNameByCwid = new Map<string, string>();
+  // Seed with Jenzabar majorDesc (lower precedence).
+  for (const r of jenzabarRows) {
+    const md = r.majorDesc?.trim();
+    if (md) programNameByCwid.set(r.menteeCwid, md);
+  }
+  // Overlay ED student_phd_program rows (higher precedence).
+  if (cwids.length > 0) {
+    const edPrograms = await prisma.studentPhdProgram.findMany({
+      where: { cwid: { in: cwids } },
+      select: { cwid: true, program: true },
+    });
+    for (const r of edPrograms) {
+      programNameByCwid.set(r.cwid, r.program);
+    }
+  }
 
   // Co-publications per mentee — sourced from ReCiterDB's authoritative
   // attribution (`analysis_summary_author`), not the local publication_author
@@ -257,6 +288,7 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       cwid: c.cwid,
       fullName: c.fullName,
       programType: c.programType,
+      programName: programNameByCwid.get(c.cwid) ?? null,
       graduationYear: c.graduationYear,
       copublicationCount: copubCountByCwid.get(c.cwid) ?? 0,
       copublicationPreview: copubPreviewByCwid.get(c.cwid) ?? [],

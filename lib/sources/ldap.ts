@@ -414,6 +414,118 @@ export async function fetchActiveNypAffiliates(
   return out;
 }
 
+/** Issue #195 — PhD student SOR Role record from `ou=students,ou=sors`. One
+ *  LDAP entry per PhD program enrollment. A scholar may have more than one
+ *  (re-enrollment, dual programs); caller collapses to the most-recent record
+ *  before persisting. Expired rows are included so alumni mentees still
+ *  resolve to a program name. */
+export type EdPhdStudentProgramRecord = {
+  cwid: string;
+  program: string;
+  programCode: string | null;
+  expectedGradYear: number | null;
+  status: string | null;
+  exitReason: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+};
+
+export const DEFAULT_STUDENT_SOR_BASE =
+  "ou=students,ou=sors,dc=weill,dc=cornell,dc=edu";
+/** Pull every PHD Role record — active and expired. Alumni mentees rely on
+ *  this; restricting to `student:active` would erase graduated PhDs. */
+export const DEFAULT_STUDENT_SOR_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)(weillCornellEduDegreeCode=PHD))";
+
+const STUDENT_SOR_ATTRS = [
+  "weillCornellEduCWID",
+  "weillCornellEduProgram",
+  "weillCornellEduProgramCode",
+  "weillCornellEduDegreeCode",
+  "weillCornellEduStatus",
+  "weillCornellEduExpectedGradYear",
+  "weillCornellEduExitReason",
+  "weillCornellEduStartDate",
+  "weillCornellEduEndDate",
+] as const;
+
+/** Fetch every PHD student Role record in `ou=students,ou=sors`. Includes
+ *  expired rows so alumni show their program of study. Caller collapses
+ *  per-CWID; see `collapsePhdStudentProgramRecords`. */
+export async function fetchPhdStudentProgramRecords(
+  client: Client,
+): Promise<EdPhdStudentProgramRecord[]> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_STUDENT_SOR_BASE ?? DEFAULT_STUDENT_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_STUDENT_SOR_FILTER ?? DEFAULT_STUDENT_SOR_FILTER;
+  const { searchEntries } = await client.search(searchBase, {
+    scope: "sub",
+    filter,
+    attributes: [...STUDENT_SOR_ATTRS],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdPhdStudentProgramRecord[] = [];
+  for (const e of searchEntries) {
+    const cwid = firstString(e.weillCornellEduCWID);
+    const program = firstString(e.weillCornellEduProgram);
+    if (!cwid || !program) continue;
+
+    const expectedGradYearRaw = firstString(e.weillCornellEduExpectedGradYear);
+    const expectedGradYear = expectedGradYearRaw
+      ? Number.parseInt(expectedGradYearRaw, 10)
+      : null;
+
+    out.push({
+      cwid: cwid.toLowerCase(),
+      program,
+      programCode: firstString(e.weillCornellEduProgramCode),
+      expectedGradYear:
+        Number.isFinite(expectedGradYear) && expectedGradYear !== 0
+          ? expectedGradYear
+          : null,
+      status: firstString(e.weillCornellEduStatus),
+      exitReason: firstString(e.weillCornellEduExitReason),
+      startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
+      endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
+    });
+  }
+  return out;
+}
+
+/** Collapse multiple PHD Role records per CWID to a single row. Selection
+ *  rule mirrors the mentoring chip's intent ("what program is this person
+ *  associated with?"): active rows beat expired; among ties, the row with
+ *  the most recent endDate wins; among further ties, the most recent
+ *  startDate. This way a re-enrolled student shows their current program
+ *  and a graduated mentee shows the terminal program. */
+export function collapsePhdStudentProgramRecords(
+  records: EdPhdStudentProgramRecord[],
+): Map<string, EdPhdStudentProgramRecord> {
+  const byCwid = new Map<string, EdPhdStudentProgramRecord>();
+  for (const r of records) {
+    const existing = byCwid.get(r.cwid);
+    if (!existing) {
+      byCwid.set(r.cwid, r);
+      continue;
+    }
+    if (rankPhdRecord(r) > rankPhdRecord(existing)) {
+      byCwid.set(r.cwid, r);
+    }
+  }
+  return byCwid;
+}
+
+function rankPhdRecord(r: EdPhdStudentProgramRecord): number {
+  // Active rows beat expired (big offset so date never wins over status).
+  const activeBoost = r.status === "student:active" ? 1e15 : 0;
+  // endDate then startDate. Null dates rank lowest.
+  const end = r.endDate ? r.endDate.getTime() : 0;
+  const start = r.startDate ? r.startDate.getTime() : 0;
+  return activeBoost + end + start / 1e6;
+}
+
 /** Parse a manager DN of the form `uid=<cwid>,ou=people,...` to its CWID.
  *  Returns null on null/malformed input. */
 export function parseManagerCwid(dn: string | null | undefined): string | null {

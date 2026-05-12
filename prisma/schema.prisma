@@ -171,6 +171,41 @@ model PhdMentorRelationship {
   @@map("phd_mentor_relationship")
 }
 
+/// Issue #195 — Per-CWID PhD program record sourced from ED's
+/// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
+/// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni
+/// mentees (e.g. graduated 2022) still resolve to their program of study.
+///
+/// One row per CWID. When ED returns multiple PHD role records for a single
+/// person (re-enrollment, dual programs), the ETL collapses to the most
+/// recently ended record so the chip reflects their terminal program.
+///
+/// Populated by `npm run etl:ed:student-programs`. Consumed by the mentoring
+/// chip subtitle (lib/api/mentoring.ts) and a planned student-profile
+/// education enrichment.
+model StudentPhdProgram {
+  cwid              String   @id @db.VarChar(32)
+  /// Human-readable program name from `weillCornellEduProgram`
+  /// (e.g. "Immunology & Microbial Pathogenesis").
+  program           String   @db.VarChar(255)
+  /// Short program code from `weillCornellEduProgramCode` (e.g. "IMP").
+  programCode       String?  @map("program_code") @db.VarChar(32)
+  /// `weillCornellEduExpectedGradYear`. Persisted separately from the
+  /// Jenzabar conferralYear so the chip can show "Class of YYYY" for
+  /// current students who haven't graduated yet.
+  expectedGradYear  Int?     @map("expected_grad_year")
+  /// `weillCornellEduStatus` — e.g. "student:active", "student:expired".
+  status            String?  @db.VarChar(64)
+  /// `weillCornellEduExitReason` — e.g. "Graduated", "Withdrawn". Only
+  /// populated when status is expired.
+  exitReason        String?  @map("exit_reason") @db.VarChar(128)
+  startDate         DateTime? @map("start_date")
+  endDate           DateTime? @map("end_date")
+  lastRefreshedAt   DateTime @default(now()) @map("last_refreshed_at")
+
+  @@map("student_phd_program")
+}
+
 /// Issue #90 — mapping from a WCM scholar to their NIH RePORTER PI
 /// profile_id, for the outbound "View NIH portfolio on RePORTER" link
 /// in the Funding section header.
