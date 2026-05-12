@@ -21,6 +21,7 @@
     "seed": "tsx seed/index.ts",
     "search:index": "tsx etl/search-index/index.ts",
     "etl:ed": "tsx etl/ed/index.ts",
+    "etl:ed:student-programs": "tsx etl/ed/student-programs.ts",
     "etl:ed:probe-chiefs": "tsx etl/ed/probe-chiefs.ts",
     "etl:ed:probe-divisions": "tsx etl/ed/probe-divisions.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",

@@ -65,7 +65,10 @@ function MenteeChipCard({
   onToggle: () => void;
 }) {
   const isLinked = mentee.scholar !== null;
-  const programLabel = formatProgramLabel(mentee.programType);
+  // Issue #195 — prefer the human-readable program name (ED authoritative,
+  // Jenzabar fallback) over the degree-bucket label. When neither source
+  // has a record, fall back to "PhD" / "MD-PhD" / "MD mentee" etc.
+  const programLabel = mentee.programName ?? formatProgramLabel(mentee.programType);
   const yearLabel = mentee.graduationYear ? `Class of ${mentee.graduationYear}` : null;
   const displayName = mentee.scholar?.publishedName ?? mentee.fullName;
   const count = mentee.copublicationCount;
