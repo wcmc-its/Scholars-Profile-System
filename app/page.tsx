@@ -51,7 +51,7 @@ export default async function HomePage() {
             </p>
             <div className="mt-8">
               <SearchAutocomplete variant="hero" />
-              <TrySuggestionsChips count={6} />
+              <TrySuggestionsChips count={4} />
             </div>
           </div>
         </section>
