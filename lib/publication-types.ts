@@ -24,3 +24,18 @@ export const FEED_EXCLUDED_TYPES = [
   "Letter",
   "Editorial Article",
 ] as const;
+
+/**
+ * Presentation-layer relabels for publication-type strings shown in the UI.
+ * Upstream source data (ReciterDB, OpenSearch, exports keyed off the canonical
+ * value) continues to use the raw label — only what reaches the user changes.
+ * Issue #179: "Academic Article" renders as "Research Article".
+ */
+const PUBLICATION_TYPE_DISPLAY: Record<string, string> = {
+  "Academic Article": "Research Article",
+};
+
+export function displayPublicationType(value: string | null | undefined): string {
+  if (!value) return "";
+  return PUBLICATION_TYPE_DISPLAY[value] ?? value;
+}
