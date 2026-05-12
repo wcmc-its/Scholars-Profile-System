@@ -51,7 +51,18 @@ function chipRoleLabel(
   return "Co-author";
 }
 
-export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
+export function AuthorChipRow({
+  authors,
+  pinnedCwids,
+}: {
+  authors: AuthorChip[];
+  /** CWIDs that must always render visibly regardless of the CHIP_CAP
+   *  truncation. Surface-specific load-bearing authors (e.g. the
+   *  mentor and mentee on the co-pubs page) are promoted to the front
+   *  of the visible slice; non-pinned authors fill the rest, preserving
+   *  their original (authorship) order. */
+  pinnedCwids?: ReadonlyArray<string>;
+}) {
   if (authors.length === 0) return null;
   // A chip needs a cwid to render the headshot identity. Linked authors
   // (slug + cwid) wrap in an anchor to the profile; unlinked WCM authors
@@ -61,8 +72,22 @@ export function AuthorChipRow({ authors }: { authors: AuthorChip[] }) {
   // authorsString instead. (#186)
   const renderable = authors.filter((a) => a.cwid);
   if (renderable.length === 0) return null;
-  const visible = renderable.slice(0, CHIP_CAP);
-  const overflow = renderable.length - CHIP_CAP;
+
+  // Promote pinned CWIDs to the front while preserving the pin-order
+  // declared by the caller, then append remaining authors in their
+  // original authorship-order. Without pins this is a no-op.
+  const pinned = pinnedCwids ?? [];
+  const ordered = pinned.length === 0
+    ? renderable
+    : [
+        ...pinned
+          .map((cwid) => renderable.find((a) => a.cwid === cwid))
+          .filter((a): a is AuthorChip => a !== undefined),
+        ...renderable.filter((a) => !pinned.includes(a.cwid!)),
+      ];
+
+  const visible = ordered.slice(0, CHIP_CAP);
+  const overflow = ordered.length - CHIP_CAP;
   // Counts taken across the full author list (not just the visible slice) so
   // co-first / co-last labels are accurate even when some co-* authors are
   // hidden behind the +N overflow chip. (#18)

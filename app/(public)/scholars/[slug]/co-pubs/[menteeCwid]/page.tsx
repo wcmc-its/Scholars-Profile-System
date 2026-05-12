@@ -21,9 +21,9 @@ import {
   getMentorMenteePair,
   type CoPublicationFull,
 } from "@/lib/api/mentoring";
-import { PublicationCard } from "@/components/department/publication-card";
-import type { DeptPublicationCard } from "@/lib/api/dept-highlights";
-import type { AuthorChip } from "@/components/publication/author-chip-row";
+import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
+import { PublicationMeta } from "@/components/publication/publication-meta";
+import { sanitizePubTitle } from "@/lib/utils";
 
 export const revalidate = 86400;
 export const dynamicParams = true;
@@ -69,7 +69,7 @@ export default async function CoPubsPage({
   const pubs = await getCoPublications(mentor.cwid, menteeCwid);
 
   // Resolve every WCM-affiliated CWID in the author lists to a Scholar row
-  // (slug + preferredName) in a single query so the publication cards can
+  // (slug + preferredName) in a single query so the citation rows can
   // render anchor author chips for linked authors. Unlinked CWIDs (alumni
   // not in Scholar) pass through with slug=null and a fallback name from
   // the analysis_summary_author_list row — AuthorChipRow renders them as
@@ -88,6 +88,11 @@ export default async function CoPubsPage({
           select: { cwid: true, slug: true, preferredName: true },
         });
   const scholarByCwid = new Map(wcmScholars.map((s) => [s.cwid, s]));
+
+  // Mentor + mentee are the load-bearing context for this page; AuthorChipRow
+  // pins their chips to the front of the visible slice so the truncation cap
+  // can never hide them.
+  const pinnedCwids = [mentor.cwid, menteeCwid];
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
@@ -145,7 +150,11 @@ export default async function CoPubsPage({
         <ul className="space-y-5">
           {pubs.map((p) => (
             <li key={p.pmid} className="border-b border-border pb-5 last:border-b-0">
-              <PublicationCard pub={toPublicationCard(p, scholarByCwid)} />
+              <CoPubCitation
+                pub={p}
+                scholarByCwid={scholarByCwid}
+                pinnedCwids={pinnedCwids}
+              />
             </li>
           ))}
         </ul>
@@ -154,31 +163,34 @@ export default async function CoPubsPage({
   );
 }
 
-/** Adapt the ReCiterDB-shaped publication row to the dept publication
- *  card shape. Marks first-author / last-author by rank (last author is
- *  the highest-ranked WCM-affiliated row in the list, per the existing
- *  AuthorChipRow convention). */
-function toPublicationCard(
-  p: CoPublicationFull,
-  scholarByCwid: Map<string, { slug: string; preferredName: string }>,
-): DeptPublicationCard {
-  const wcmRanks = p.authors
+/** Single citation row using the standard publication-row layout:
+ *  title → journal · year → author chips → meta (citations, PMID,
+ *  PMCID, DOI with copy buttons). Mirrors `components/profile/publication-row.tsx`
+ *  visually but takes the CoPublicationFull shape directly instead of
+ *  the profile-page ProfilePublication shape. */
+function CoPubCitation({
+  pub,
+  scholarByCwid,
+  pinnedCwids,
+}: {
+  pub: CoPublicationFull;
+  scholarByCwid: Map<string, { slug: string; preferredName: string }>;
+  pinnedCwids: ReadonlyArray<string>;
+}) {
+  const wcmRanks = pub.authors
     .filter((a) => a.personIdentifier)
     .map((a) => a.rank);
   const minWcmRank = wcmRanks.length > 0 ? Math.min(...wcmRanks) : null;
-  const maxRank = p.authors.reduce((m, a) => Math.max(m, a.rank), 0);
+  const maxRank = pub.authors.reduce((m, a) => Math.max(m, a.rank), 0);
 
-  const authors: AuthorChip[] = [];
-  for (const a of p.authors) {
+  const authorChips: AuthorChip[] = [];
+  for (const a of pub.authors) {
     if (!a.personIdentifier) continue;
     const s = scholarByCwid.get(a.personIdentifier);
-    // Unlinked WCM authors (alumni with no active Scholar row) fall back
-    // to the analysis_summary_author_list name; AuthorChipRow renders
-    // them as a static chip with no anchor (#186).
     const name = s
       ? s.preferredName
       : [a.firstName, a.lastName].filter(Boolean).join(" ").trim() || a.lastName;
-    authors.push({
+    authorChips.push({
       name,
       cwid: a.personIdentifier,
       slug: s?.slug ?? null,
@@ -188,14 +200,38 @@ function toPublicationCard(
     });
   }
 
-  return {
-    pmid: String(p.pmid),
-    title: p.title,
-    journal: p.journal,
-    year: p.year,
-    citationCount: p.citationCount,
-    doi: p.doi,
-    pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${p.pmid}/`,
-    authors,
-  };
+  const titleHtml = sanitizePubTitle(pub.title);
+  const pubmedUrl = `https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`;
+
+  return (
+    <div>
+      <div className="text-base font-semibold leading-snug">
+        <a
+          href={pubmedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-[var(--color-accent-slate)] hover:underline"
+          dangerouslySetInnerHTML={{ __html: titleHtml }}
+        />
+      </div>
+      {(pub.journal || pub.year) && (
+        <div className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">
+          {pub.journal ? (
+            <em
+              className="italic"
+              dangerouslySetInnerHTML={{ __html: sanitizePubTitle(pub.journal) }}
+            />
+          ) : null}
+          {pub.year ? ` · ${pub.year}` : ""}
+        </div>
+      )}
+      <AuthorChipRow authors={authorChips} pinnedCwids={pinnedCwids} />
+      <PublicationMeta
+        citationCount={pub.citationCount}
+        pmid={String(pub.pmid)}
+        pmcid={pub.pmcid}
+        doi={pub.doi}
+      />
+    </div>
+  );
 }
