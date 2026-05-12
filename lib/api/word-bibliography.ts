@@ -43,6 +43,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
+import { displayPublicationType } from "@/lib/publication-types";
 
 /** Word's per-export ceiling — lower than CSV's 5,000 because each docx
  *  citation costs more to render and a 5,000-citation bibliography is
@@ -352,7 +353,7 @@ function buildFilterSummary(req: WordExportRequest, count: number): string {
       bits.push(`through ${f.yearMax}`);
     }
   }
-  if (f.publicationType) bits.push(f.publicationType);
+  if (f.publicationType) bits.push(displayPublicationType(f.publicationType));
   if (f.wcmAuthorRole && f.wcmAuthorRole.length > 0) {
     bits.push(f.wcmAuthorRole.map((r) => `${r} author`).join(" / "));
   }

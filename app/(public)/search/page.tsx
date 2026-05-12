@@ -33,6 +33,7 @@ import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { sanitizePubTitle } from "@/lib/utils";
+import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
 import { FunderFacet } from "@/components/search/funder-facet";
@@ -646,7 +647,7 @@ async function PublicationsResults({
   }
   if (publicationType) {
     chips.push({
-      label: publicationType,
+      label: displayPublicationType(publicationType),
       removeHref: buildUrl((sp) => sp.delete("publicationType")),
     });
   }
@@ -1615,7 +1616,7 @@ function FacetSidebarPubs({
           {publicationTypes.map((p) => (
             <FacetCheckbox
               key={p.value}
-              label={p.value}
+              label={displayPublicationType(p.value)}
               count={p.count}
               isActive={p.value === activePublicationType}
               href={buildHref({

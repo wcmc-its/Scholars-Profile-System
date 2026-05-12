@@ -224,7 +224,7 @@ export default function MethodologyPage() {
         <h2 className="text-lg font-semibold">Recent highlights</h2>
         <p className="mt-3 text-base">
           The Recent highlights surface on a topic page shows up to three of
-          the most recent academic articles in that area where a WCM
+          the most recent research articles in that area where a WCM
           full-time faculty member is the first or senior author and the
           paper&apos;s ReCiterAI impact score is at least 40.
         </p>
