@@ -31,6 +31,7 @@
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",
     "etl:infoed": "tsx etl/infoed/index.ts",
     "etl:jenzabar:probe": "tsx etl/jenzabar/probe.ts",
+    "etl:jenzabar:probe-gs-faculty": "tsx etl/jenzabar/probe-gs-faculty.ts",
     "etl:jenzabar": "tsx etl/jenzabar/index.ts",
     "etl:reporter": "tsx etl/reporter/index.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
