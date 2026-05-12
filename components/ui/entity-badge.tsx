@@ -15,7 +15,7 @@ import type { EntityKind } from "@/lib/api/search";
  * WCAG AA contrast for normal text at 10px size.
  */
 const KIND_LABEL: Record<EntityKind, string> = {
-  person: "Person",
+  person: "Scholar",
   topic: "Topic",
   subtopic: "Subtopic",
   department: "Department",

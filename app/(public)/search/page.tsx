@@ -288,7 +288,7 @@ function SearchMeta({
         )}
       </h1>
       <div className="text-[13px] text-[#757575]">
-        {peopleCount.toLocaleString()} {peopleCount === 1 ? "person" : "people"} ·{" "}
+        {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
         {pubCount.toLocaleString()} publications ·{" "}
         {fundingCount.toLocaleString()} funding
       </div>
@@ -317,7 +317,7 @@ function ModeTabs({
   const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   return (
     <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
-      <ModeTab href={peopleHref} label="People" count={peopleCount} active={activeType === "people"} />
+      <ModeTab href={peopleHref} label="Scholars" count={peopleCount} active={activeType === "people"} />
       <ModeTab href={pubHref} label="Publications" count={pubCount} active={activeType === "publications"} />
       <ModeTab href={fundingHref} label="Funding" count={fundingCount} active={activeType === "funding"} />
     </nav>
@@ -1345,7 +1345,7 @@ function ResultsToolbar({
   // "matching filters" only when at least one facet is active. Without
   // filters, the qualifier reads like the count is filtered when it isn't.
   const noun = tab === "people"
-    ? `${total === 1 ? "person" : "people"}${hasActiveFilters ? " matching filters" : ""}`
+    ? `${total === 1 ? "scholar" : "scholars"}${hasActiveFilters ? " matching filters" : ""}`
     : "publications";
 
   const peopleOpts: Array<{ value: PeopleSort; label: string }> = [
@@ -1454,7 +1454,7 @@ function FacetSidebar({
       </div>
 
       {personTypes.length > 0 ? (
-        <FacetGroup label="Person type" collapseAfter={5}>
+        <FacetGroup label="Scholar type" collapseAfter={5}>
           {sortActiveFirst(personTypes, (p) => activePersonType.includes(p.value)).map((p) => (
             <FacetCheckbox
               key={p.value}
