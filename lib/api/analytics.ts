@@ -9,8 +9,13 @@
  * inject arbitrary keys/values into the structured log stream.
  */
 
-/** Event types accepted by the beacon endpoint. Phase 6 ships one. */
-export const VALID_EVENTS = new Set<string>(["search_click"]);
+/** Event types accepted by the beacon endpoint.
+ *  - search_click: result clicks on /search (Phase 6 / ANALYTICS-02).
+ *  - mentoring_copubs_open: scholar profile co-pubs popover opened (#181). */
+export const VALID_EVENTS = new Set<string>([
+  "search_click",
+  "mentoring_copubs_open",
+]);
 
 /**
  * Validates the beacon payload and emits a structured `search_click` log
@@ -55,6 +60,10 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       projectId: typeof p.projectId === "string" ? p.projectId : null,
       resultType: typeof p.resultType === "string" ? p.resultType : null,
       resultCount: typeof p.resultCount === "number" ? p.resultCount : null,
+      // mentoring_copubs_open fields. Null for other events.
+      mentorCwid: typeof p.mentorCwid === "string" ? p.mentorCwid : null,
+      menteeCwid: typeof p.menteeCwid === "string" ? p.menteeCwid : null,
+      n: typeof p.n === "number" ? p.n : null,
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),

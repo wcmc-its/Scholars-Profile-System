@@ -140,9 +140,54 @@ describe("lib/api/analytics.ts handleAnalyticsBeacon (pure function)", () => {
 
 // Test F: VALID_EVENTS export is the canonical allow-list
 describe("VALID_EVENTS allow-list", () => {
-  it("contains exactly search_click", () => {
+  it("contains the expected events", () => {
     expect(VALID_EVENTS).toBeInstanceOf(Set);
     expect(VALID_EVENTS.has("search_click")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(1);
+    expect(VALID_EVENTS.has("mentoring_copubs_open")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(2);
+  });
+});
+
+describe("handleAnalyticsBeacon mentoring_copubs_open", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs structured shape on valid payload", () => {
+    handleAnalyticsBeacon({
+      event: "mentoring_copubs_open",
+      mentorCwid: "abc1234",
+      menteeCwid: "xyz5678",
+      n: 3,
+      ts: 1700000001000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.event).toBe("mentoring_copubs_open");
+    expect(logged.mentorCwid).toBe("abc1234");
+    expect(logged.menteeCwid).toBe("xyz5678");
+    expect(logged.n).toBe(3);
+  });
+
+  it("nulls out fields with wrong types (T-06-02-01)", () => {
+    handleAnalyticsBeacon({
+      event: "mentoring_copubs_open",
+      mentorCwid: 42,
+      menteeCwid: { x: "y" },
+      n: "three",
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.mentorCwid).toBeNull();
+    expect(logged.menteeCwid).toBeNull();
+    expect(logged.n).toBeNull();
   });
 });

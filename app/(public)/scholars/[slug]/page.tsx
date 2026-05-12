@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
+import { MentoringSection } from "@/components/scholar/mentoring-section";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Suspense } from "react";
@@ -124,6 +126,11 @@ export default async function ScholarProfilePage({
 
   const sparse = isSparseProfile(profile);
   const activeAppointments = profile.appointments.filter((a) => a.isActive);
+
+  // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
+  // for scholars with no recorded mentor relationships, in which case the
+  // section is omitted entirely by the component.
+  const mentees = await getMenteesForMentor(profile.cwid);
 
   const pubGroups = groupPublicationsByYear(profile.publications);
   const pubMinYear = pubGroups
@@ -383,6 +390,12 @@ export default async function ScholarProfilePage({
               }
             >
               <GrantsSection grants={profile.grants} />
+            </Section>
+          ) : null}
+
+          {mentees.length > 0 ? (
+            <Section title="Mentoring" headingLg count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}>
+              <MentoringSection mentees={mentees} mentorCwid={profile.cwid} />
             </Section>
           ) : null}
 
