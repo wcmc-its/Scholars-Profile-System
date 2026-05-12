@@ -31,7 +31,7 @@ import {
   type RankablePublication,
 } from "@/lib/ranking";
 import { ELIGIBLE_ROLES } from "@/lib/eligibility";
-import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
+import { FEED_EXCLUDED_TYPES, NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 
 // ---------------------------------------------------------------------------
 // Per-surface floors per UI-SPEC §States and CONTEXT.md D-12
@@ -759,9 +759,16 @@ export async function getBrowseAllResearchAreas(): Promise<ParentTopic[]> {
 // ---------------------------------------------------------------------------
 
 export async function getHomeStats(): Promise<HomeStats> {
+  // Apply NEVER_DISPLAY_TYPES so the homepage publication stat matches the
+  // /search publications index (built with the same exclusion in
+  // etl/search-index/index.ts:412). Issue #216 — without this filter the
+  // hero stat over-counts by ~1.1k (Retractions + Errata that are never
+  // surfaced anywhere else).
   const [scholarCount, publicationCount, researchAreaCount] = await Promise.all([
     prisma.scholar.count({ where: { deletedAt: null, status: "active" } }),
-    prisma.publication.count(),
+    prisma.publication.count({
+      where: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+    }),
     prisma.topic.count(),
   ]);
   return { scholarCount, publicationCount, researchAreaCount };
