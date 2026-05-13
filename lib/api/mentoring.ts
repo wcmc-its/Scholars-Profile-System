@@ -1,5 +1,5 @@
 /**
- * Mentoring data — unions two sources of mentor↔mentee relationships:
+ * Mentoring data — unions three sources of mentor↔mentee relationships:
  *
  *   1. `reciterdb.reporting_students_mentors` — MD-program scholarly-project
  *      mentors (AOC, AOC-2025, ECR, and a 2017 MDPHD snapshot). Live-queried.
@@ -10,11 +10,17 @@
  *      only and not designed for runtime traffic. programType is "PhD" or
  *      "MD-PhD", resolved at ETL time against Scholar.roleCategory.
  *
- * The two sources cover disjoint populations (PhD students vs MD students) so
- * mentee deduplication is per-CWID across both — a CWID appearing in both
- * collapses to one chip (rare; would indicate an MD-PhD who also did AOC).
+ *   3. Local `postdoc_mentor_relationship` — Postdoc supervisor relationships
+ *      from ED's `weillCornellEduSORRoleRecord` under `ou=employees,ou=sors`
+ *      filtered to postdoc role-code 06. Includes both active and expired
+ *      records, so alumni postdocs appear alongside current ones (issue #183).
+ *      programType is always "POSTDOC".
  *
- * Both feed `lib/publication_author` for co-authored publication counts.
+ * Sources cover disjoint populations (MD vs PhD vs postdoc) so mentee
+ * deduplication is per-CWID across all three — a CWID appearing in multiple
+ * sources collapses to one chip with the most-specific programType preserved.
+ *
+ * All three feed `lib/publication_author` for co-authored publication counts.
  *
  * Spec: .planning/drafts/issue-trainee-profiles-mentoring.md (v2b — Mentoring
  * section on researcher profiles).
@@ -61,16 +67,27 @@ export type MenteeChip = {
   cwid: string;
   fullName: string;
   /** Degree-bucket label sourced from `reporting_students_mentors.programType`
-   *  (AOC/MDPHD/ECR) or the Jenzabar `phd_mentor_relationship.programType`
-   *  (PhD/MD-PhD). Used as the fallback subtitle when a finer-grained
-   *  `programName` is not available. */
+   *  (AOC/MDPHD/ECR), `phd_mentor_relationship.programType` (PhD/MD-PhD), or
+   *  `postdoc_mentor_relationship.programType` (POSTDOC). Used as the fallback
+   *  subtitle when a finer-grained `programName` is not available. */
   programType: string | null;
   /** Issue #195 — human-readable program name (e.g. "Immunology & Microbial
    *  Pathogenesis"). Sourced from ED's `student_phd_program.program` first,
    *  Jenzabar's `phd_mentor_relationship.major_desc` second. Null when
-   *  neither source has a record — UI then falls back to `programType`. */
+   *  neither source has a record — UI then falls back to `programType`.
+   *  Postdocs do not have program names. */
   programName: string | null;
+  /** Year the mentee graduated — populated for AOC and Jenzabar PhD sources.
+   *  Always null for postdocs (postdocs don't graduate; see appointmentRange). */
   graduationYear: number | null;
+  /** Issue #183 — appointment window for postdoc mentees. Null for AOC and
+   *  Jenzabar PhD mentees (which use `graduationYear` instead). `endYear=null`
+   *  signals a currently-active postdoc; the chip subtitle renders "since
+   *  {startYear}" in that case and "{startYear}–{endYear}" otherwise. */
+  appointmentRange: {
+    startYear: number;
+    endYear: number | null;
+  } | null;
   /** Total number of publications co-authored by the mentor and this mentee.
    *  Drives the "N co-pubs" badge. Sourced from ReCiterDB's
    *  `analysis_summary_author` so the count includes pubs attributed to
@@ -121,7 +138,7 @@ import { formatProgramLabel } from "@/lib/mentoring-labels";
 export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChip[]> {
   if (!mentorCwid) return [];
 
-  const [aocRows, jenzabarRows] = await Promise.all([
+  const [aocRows, jenzabarRows, postdocRows] = await Promise.all([
     withReciterConnection(async (conn) => {
       return (await conn.query(
         `SELECT studentCWID, studentFirstName, studentLastName, studentGraduationYear, programType
@@ -141,18 +158,34 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
         majorDesc: true,
       },
     }),
+    prisma.postdocMentorRelationship.findMany({
+      where: { mentorCwid },
+      select: {
+        menteeCwid: true,
+        menteeFirstName: true,
+        menteeLastName: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+        programType: true,
+      },
+    }),
   ]);
 
-  if (aocRows.length === 0 && jenzabarRows.length === 0) return [];
+  if (aocRows.length === 0 && jenzabarRows.length === 0 && postdocRows.length === 0)
+    return [];
 
-  // Collapse to one row per studentCWID across both sources. Preserve the most
-  // recent graduationYear and the most specific programType we saw (a student
-  // can appear under both "AOC" and "AOC-2025" — longer label = more specific).
+  // Collapse to one row per mentee CWID across all three sources. Preserve
+  // the most recent graduationYear and the most specific programType seen
+  // (a student can appear under both "AOC" and "AOC-2025" — longer label =
+  // more specific). Postdoc rows additionally carry an `appointmentRange`
+  // since postdocs don't have a graduation year (issue #183).
   type Collapsed = {
     cwid: string;
     fullName: string;
     programType: string | null;
     graduationYear: number | null;
+    appointmentRange: { startYear: number; endYear: number | null } | null;
   };
   const byCwid = new Map<string, Collapsed>();
   const upsert = (
@@ -160,10 +193,17 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     fullName: string,
     programType: string | null,
     graduationYear: number | null,
+    appointmentRange: { startYear: number; endYear: number | null } | null = null,
   ) => {
     const existing = byCwid.get(cwid);
     if (!existing) {
-      byCwid.set(cwid, { cwid, fullName, programType, graduationYear });
+      byCwid.set(cwid, {
+        cwid,
+        fullName,
+        programType,
+        graduationYear,
+        appointmentRange,
+      });
       return;
     }
     if (graduationYear && (existing.graduationYear ?? 0) < graduationYear) {
@@ -174,6 +214,24 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       (!existing.programType || programType.length > existing.programType.length)
     ) {
       existing.programType = programType;
+    }
+    // Postdoc range merge: prefer a currently-active appointment (endYear=null);
+    // among ended ones, the most recently ended wins.
+    if (appointmentRange) {
+      const cur = existing.appointmentRange;
+      const incomingIsActive = appointmentRange.endYear === null;
+      const curIsActive = cur?.endYear === null;
+      if (!cur) {
+        existing.appointmentRange = appointmentRange;
+      } else if (incomingIsActive && !curIsActive) {
+        existing.appointmentRange = appointmentRange;
+      } else if (
+        !incomingIsActive &&
+        !curIsActive &&
+        (appointmentRange.endYear ?? 0) > (cur.endYear ?? 0)
+      ) {
+        existing.appointmentRange = appointmentRange;
+      }
     }
   };
   for (const r of aocRows) {
@@ -190,6 +248,26 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       [r.menteeFirstName, r.menteeLastName].filter(Boolean).join(" ").trim() || r.menteeCwid,
       r.programType,
       r.conferralYear,
+    );
+  }
+  for (const r of postdocRows) {
+    const startYear = r.startDate ? r.startDate.getUTCFullYear() : null;
+    // status=employee:active → render as "since {startYear}" regardless of
+    // whether ED returned an explicit endDate. Expired rows use endDate's
+    // year (null if ED omitted it, which the subtitle then renders as
+    // "since {startYear}" too — degenerate but graceful).
+    const isActive = r.status === "employee:active";
+    const endYear = isActive ? null : r.endDate?.getUTCFullYear() ?? null;
+    const range =
+      startYear !== null
+        ? { startYear, endYear }
+        : null;
+    upsert(
+      r.menteeCwid,
+      [r.menteeFirstName, r.menteeLastName].filter(Boolean).join(" ").trim() || r.menteeCwid,
+      r.programType,
+      null,
+      range,
     );
   }
 
@@ -295,6 +373,7 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
       programType: c.programType,
       programName: programNameByCwid.get(c.cwid) ?? null,
       graduationYear: c.graduationYear,
+      appointmentRange: c.appointmentRange,
       copublicationCount: copubCountByCwid.get(c.cwid) ?? 0,
       copublicationPreview: copubPreviewByCwid.get(c.cwid) ?? [],
       identityImageEndpoint: identityImageEndpoint(c.cwid),
@@ -311,10 +390,22 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     });
   }
 
+  // Sort by "terminal year" desc — most recent first, then name. For AOC/PhD
+  // mentees that's graduationYear; for postdocs (issue #183) it's the
+  // appointment endYear, with active postdocs (endYear=null) pinned to the
+  // top via MAX_SAFE_INTEGER. Mixing across types is intentional: a profile
+  // with both current postdocs and recent graduates surfaces both groups
+  // together rather than clustering one above the other.
+  const sortKey = (c: MenteeChip): number => {
+    if (c.graduationYear) return c.graduationYear;
+    if (c.appointmentRange) {
+      return c.appointmentRange.endYear ?? Number.MAX_SAFE_INTEGER;
+    }
+    return 0;
+  };
   chips.sort((a, b) => {
-    const ay = a.graduationYear ?? 0;
-    const by = b.graduationYear ?? 0;
-    if (ay !== by) return by - ay;
+    const diff = sortKey(b) - sortKey(a);
+    if (diff !== 0) return diff;
     return a.fullName.localeCompare(b.fullName);
   });
 
@@ -443,10 +534,10 @@ export async function getMentorMenteePair(
 ): Promise<{ mentorName: string; menteeName: string } | null> {
   if (!mentorCwid || !menteeCwid) return null;
 
-  // Look in both sources — AOC (ReCiterDB) and Jenzabar PhD (local Prisma).
-  // First hit wins for the mentee display name.
+  // Look in all three sources — AOC (ReCiterDB), Jenzabar PhD, and postdoc
+  // (local Prisma). First hit wins for the mentee display name.
   type AocPairRow = { studentFirstName: string | null; studentLastName: string | null };
-  const [aocRows, jenzabarRow] = await Promise.all([
+  const [aocRows, jenzabarRow, postdocRow] = await Promise.all([
     withReciterConnection(async (conn) => {
       return (await conn.query(
         `SELECT studentFirstName, studentLastName
@@ -460,11 +551,23 @@ export async function getMentorMenteePair(
       where: { mentorCwid, menteeCwid },
       select: { menteeFirstName: true, menteeLastName: true },
     }),
+    prisma.postdocMentorRelationship.findFirst({
+      where: { mentorCwid, menteeCwid },
+      select: { menteeFirstName: true, menteeLastName: true },
+    }),
   ]);
-  if (aocRows.length === 0 && !jenzabarRow) return null;
+  if (aocRows.length === 0 && !jenzabarRow && !postdocRow) return null;
 
-  const first = aocRows[0]?.studentFirstName ?? jenzabarRow?.menteeFirstName ?? null;
-  const last = aocRows[0]?.studentLastName ?? jenzabarRow?.menteeLastName ?? null;
+  const first =
+    aocRows[0]?.studentFirstName ??
+    jenzabarRow?.menteeFirstName ??
+    postdocRow?.menteeFirstName ??
+    null;
+  const last =
+    aocRows[0]?.studentLastName ??
+    jenzabarRow?.menteeLastName ??
+    postdocRow?.menteeLastName ??
+    null;
   const menteeName = [first, last].filter(Boolean).join(" ").trim() || menteeCwid;
 
   // Mentor display name comes from the local Scholar table; the mentor

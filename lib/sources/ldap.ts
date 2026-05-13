@@ -414,6 +414,197 @@ export async function fetchActiveNypAffiliates(
   return out;
 }
 
+/** Issue #183 — Postdoc employment role record from `ou=employees,ou=sors`.
+ *  One entry per postdoc appointment (a postdoc may have multiple if they
+ *  re-appointed). Both currently-active and expired records are pulled so
+ *  alumni postdocs surface on the mentor's profile.
+ *
+ *  Mentor (= reporting PI) comes from the `manager` attribute on the role
+ *  record itself — parsed by `parseManagerCwid`. Names of the postdoc
+ *  themselves are NOT on the role record; the ETL resolves them via a
+ *  separate name lookup against `ou=people` (`fetchPersonNamesByCwid`).
+ *
+ *  Privacy: attribute list is the minimum required — no DOB, SSN-equivalents,
+ *  postalCode, employeeNumber, or mail. See memory note feedback_ldap_minimal_attrs.
+ */
+export type EdPostdocEmploymentRecord = {
+  cwid: string;
+  managerCwid: string | null;
+  sorId: string;
+  status: string;
+  title: string | null;
+  roleCode: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  isPrimary: boolean;
+};
+
+const POSTDOC_EMPLOYMENT_ATTRS = [
+  "weillCornellEduCWID",
+  "manager",
+  "weillCornellEduStartDate",
+  "weillCornellEduEndDate",
+  "weillCornellEduStatus",
+  "weillCornellEduSORID",
+  "weillCornellEduRoleCode",
+  "title",
+  "weillCornellEduPrimaryEntry",
+] as const;
+
+/** Active + expired postdoc role records. The role-code branch is the
+ *  primary signal (`06` = "Post Doc. Assoc-Sal" in WCM HR); the title
+ *  branch is a fallback in case a legacy record is missing the code. */
+export const DEFAULT_POSTDOC_EMPLOYMENT_FILTER =
+  "(&(objectClass=weillCornellEduSORRoleRecord)" +
+  "(|(weillCornellEduRoleCode=06)(title=Postdoctoral*))" +
+  "(|(weillCornellEduStatus=employee:active)(weillCornellEduStatus=employee:expired)))";
+
+/** Fetch every postdoc employment role record under `ou=employees,ou=sors`
+ *  (both active and expired). Caller is responsible for downstream tombstone
+ *  handling — what isn't in this result set should be deleted from
+ *  `postdoc_mentor_relationship`.
+ *
+ *  Connection handling: opens its own short-lived ldapts client and unbinds
+ *  on completion. The shared ETL client experienced sporadic `0x20`
+ *  noSuchObject errors on paged sub-searches late in a long ETL run
+ *  (probed 2026-05-13 against ed.weill.cornell.edu — the same call succeeds
+ *  on a fresh client). Owning the client locally isolates this fetcher
+ *  from whatever connection state the long-lived ETL client accumulates. */
+export async function fetchAllPostdocEmploymentRecords(): Promise<
+  EdPostdocEmploymentRecord[]
+> {
+  const searchBase =
+    process.env.SCHOLARS_LDAP_EMPLOYEE_SOR_BASE ?? DEFAULT_EMPLOYEE_SOR_BASE;
+  const filter =
+    process.env.SCHOLARS_LDAP_POSTDOC_EMPLOYMENT_FILTER ??
+    DEFAULT_POSTDOC_EMPLOYMENT_FILTER;
+  const client = await openLdap();
+  try {
+    const { searchEntries } = await client.search(searchBase, {
+      scope: "sub",
+      filter,
+      attributes: [...POSTDOC_EMPLOYMENT_ATTRS],
+      paged: { pageSize: 500 },
+    });
+
+    const out: EdPostdocEmploymentRecord[] = [];
+    for (const e of searchEntries) {
+      const cwid = firstString(e.weillCornellEduCWID);
+      const sorId = firstString(e.weillCornellEduSORID);
+      const status = firstString(e.weillCornellEduStatus);
+      if (!cwid || !sorId || !status) continue;
+      const managerDn = firstString(e.manager);
+      out.push({
+        cwid: cwid.toLowerCase(),
+        managerCwid: parseManagerCwid(managerDn),
+        sorId,
+        status,
+        title: firstString(e.title),
+        roleCode: firstString(e.weillCornellEduRoleCode),
+        startDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduStartDate)),
+        endDate: parseLdapGeneralizedTime(firstString(e.weillCornellEduEndDate)),
+        isPrimary: firstString(e.weillCornellEduPrimaryEntry) === "TRUE",
+      });
+    }
+    return out;
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // unbind failures are non-fatal — the connection will be closed by the
+      // server when the process exits anyway.
+    }
+  }
+}
+
+/** Resolve display names for a batch of CWIDs against `ou=people`. Used by
+ *  the postdoc-mentor ETL (issue #183) to populate
+ *  `postdoc_mentor_relationship.mentee_first_name` / `mentee_last_name`
+ *  for alumni postdocs who are not present in our local Scholar table.
+ *
+ *  Returns a map keyed by lowercase CWID. Missing CWIDs are simply absent
+ *  from the map — callers fall back to the CWID itself for the display
+ *  string. Batches the OR-of-CWIDs filter at 100 entries per query so a
+ *  large alumni list doesn't blow the LDAP filter-length limit.
+ *
+ *  Privacy: only requests CWID + name attributes. Explicitly does NOT
+ *  reuse `ED_FACULTY_ATTRIBUTES` (which pulls title, department, FTE, etc.)
+ *  — narrow per-call lists per the repo's LDAP minimal-attribute policy. */
+const PERSON_NAME_ATTRS = [
+  "weillCornellEduCWID",
+  "givenName",
+  "sn",
+  "displayName",
+] as const;
+
+export async function fetchPersonNamesByCwid(
+  cwids: string[],
+): Promise<Map<string, { firstName: string | null; lastName: string | null }>> {
+  const out = new Map<string, { firstName: string | null; lastName: string | null }>();
+  if (cwids.length === 0) return out;
+
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const batchSize = 100;
+  const client = await openLdap();
+  try {
+    for (let i = 0; i < cwids.length; i += batchSize) {
+      const batch = cwids.slice(i, i + batchSize);
+      const filter =
+        "(|" +
+        batch.map((c) => `(weillCornellEduCWID=${escapeLdapFilter(c)})`).join("") +
+        ")";
+      const { searchEntries } = await client.search(searchBase, {
+        scope: "sub",
+        filter,
+        attributes: [...PERSON_NAME_ATTRS],
+        paged: { pageSize: 500 },
+      });
+      for (const e of searchEntries) {
+        const cwid = firstString(e.weillCornellEduCWID);
+        if (!cwid) continue;
+        const givenName = firstString(e.givenName);
+        const sn = stripSurnameNoise(firstString(e.sn) ?? "");
+        const displayName = firstString(e.displayName);
+        // displayName beats given+sn only if the constructed form is empty;
+        // for postdoc name persistence the structured first/last fields are
+        // what downstream code reads, so prefer the components.
+        const firstName = givenName ?? (displayName ? displayName.split(/\s+/)[0] : null);
+        const lastName = sn || (displayName ? displayName.split(/\s+/).slice(-1)[0] : null) || null;
+        out.set(cwid.toLowerCase(), { firstName, lastName });
+      }
+    }
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // see fetchAllPostdocEmploymentRecords — non-fatal.
+    }
+  }
+  return out;
+}
+
+/** RFC 4515 LDAP filter escaping. CWIDs are alphanumeric in practice, but
+ *  hardening anyway in case ED ever returns a CWID with a hyphen or other
+ *  reserved character. */
+function escapeLdapFilter(s: string): string {
+  return s.replace(/[\\*()\0]/g, (c) => {
+    switch (c) {
+      case "\\":
+        return "\\5c";
+      case "*":
+        return "\\2a";
+      case "(":
+        return "\\28";
+      case ")":
+        return "\\29";
+      case "\0":
+        return "\\00";
+      default:
+        return c;
+    }
+  });
+}
+
 /** Issue #195 — PhD student SOR Role record from `ou=students,ou=sors`. One
  *  LDAP entry per PhD program enrollment. A scholar may have more than one
  *  (re-enrollment, dual programs); caller collapses to the most-recent record

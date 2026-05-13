@@ -137,10 +137,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const wcmAuthor = parseList(sp.wcmAuthor);
   // Mentoring activity facet — multi-select on mentee program at time of
   // mentorship. URL param `mentoringProgram` accepts repeated values from
-  // the set {md, mdphd, phd, ecr}.
+  // the set {md, mdphd, phd, postdoc, ecr}.
   const mentoringProgram = parseList(sp.mentoringProgram).filter(
-    (v): v is "md" | "mdphd" | "phd" | "ecr" =>
-      v === "md" || v === "mdphd" || v === "phd" || v === "ecr",
+    (v): v is "md" | "mdphd" | "phd" | "postdoc" | "ecr" =>
+      v === "md" || v === "mdphd" || v === "phd" || v === "postdoc" || v === "ecr",
   );
 
   // Issue #8 item 1: the subhead "{n} people · {n} publications · {n} funding"
@@ -637,7 +637,7 @@ async function PublicationsResults({
   journal: string[];
   wcmAuthorRole: Array<"first" | "senior" | "middle">;
   wcmAuthor: string[];
-  mentoringProgram: Array<"md" | "mdphd" | "phd" | "ecr">;
+  mentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   result: PubsResultData;
 }) {
   const buildUrl = (
@@ -731,10 +731,14 @@ async function PublicationsResults({
   for (const v of journal) {
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
-  const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "ecr", string> = {
+  const MENTORING_PROGRAM_LABEL: Record<
+    "md" | "mdphd" | "phd" | "postdoc" | "ecr",
+    string
+  > = {
     md: "MD mentee",
     mdphd: "MD-PhD mentee",
     phd: "PhD mentee",
+    postdoc: "Postdoc mentee",
     ecr: "Early career mentee",
   };
   for (const v of mentoringProgram) {
@@ -789,6 +793,7 @@ async function PublicationsResults({
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
         activeMentoringProgram={mentoringProgram}
+        mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
         buildHref={(overrides) => buildUrl((sp) => {
           for (const [k, v] of Object.entries(overrides)) {
@@ -1687,6 +1692,7 @@ function FacetSidebarPubs({
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
   activeMentoringProgram,
+  mentoringProgramCounts,
   toggleHref,
   buildHref,
   hasActiveFilters,
@@ -1700,7 +1706,8 @@ function FacetSidebarPubs({
   authorTotalDistinct: number;
   wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
   activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
-  activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "ecr">;
+  activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
+  mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
   buildHref: (overrides: Record<string, string>) => string;
   hasActiveFilters: boolean;
@@ -1787,21 +1794,31 @@ function FacetSidebarPubs({
       <FacetGroup label="Mentoring activity">
         <FacetCheckbox
           label="MD mentee"
+          count={mentoringProgramCounts.md}
           isActive={activeMentoringProgram.includes("md")}
           href={toggleHref("mentoringProgram", "md")}
         />
         <FacetCheckbox
           label="MD-PhD mentee"
+          count={mentoringProgramCounts.mdphd}
           isActive={activeMentoringProgram.includes("mdphd")}
           href={toggleHref("mentoringProgram", "mdphd")}
         />
         <FacetCheckbox
           label="PhD mentee"
+          count={mentoringProgramCounts.phd}
           isActive={activeMentoringProgram.includes("phd")}
           href={toggleHref("mentoringProgram", "phd")}
         />
         <FacetCheckbox
+          label="Postdoc mentee"
+          count={mentoringProgramCounts.postdoc}
+          isActive={activeMentoringProgram.includes("postdoc")}
+          href={toggleHref("mentoringProgram", "postdoc")}
+        />
+        <FacetCheckbox
           label="Early career mentee"
+          count={mentoringProgramCounts.ecr}
           isActive={activeMentoringProgram.includes("ecr")}
           href={toggleHref("mentoringProgram", "ecr")}
         />

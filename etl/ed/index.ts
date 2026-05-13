@@ -33,11 +33,14 @@ import {
   type EdFacultyAppointment,
   type EdFacultyEntry,
   type EdNypAffiliateTitle,
+  type EdPostdocEmploymentRecord,
   fetchActiveEmployeeRecords,
   fetchActiveFaculty,
   fetchActiveFacultyAppointments,
   fetchActiveNypAffiliates,
+  fetchAllPostdocEmploymentRecords,
   fetchDoctoralStudents,
+  fetchPersonNamesByCwid,
   openLdap,
 } from "@/lib/sources/ldap";
 
@@ -931,6 +934,182 @@ async function main() {
         `[ED] postdoctoral mentor: ${mentorAssignments} assigned across ${postdocs.length} active postdocs (` +
           `${mentorOrphans} manager DNs not in scholar table; ${cleared.count} stale pointers cleared)`,
       );
+    }
+
+    // Issue #183 — postdoc mentor↔mentee relationship table for the
+    // mentor-side rollup (PI profile's Mentoring section). Unlike the
+    // issue-#5 single-FK pass above (which only covers current postdocs),
+    // this pulls both active AND expired postdoc role records so alumni
+    // postdocs surface on the PI's profile and in the Mentoring activity
+    // facet — mirroring the alumni handling of AOC and Jenzabar PhD sources.
+    //
+    // Best-effort: a fetch failure leaves the existing
+    // `postdoc_mentor_relationship` rows in place. The single-FK pass above
+    // already cleared / set the active-postdoc side.
+    {
+      let postdocRoleRecords: EdPostdocEmploymentRecord[] = [];
+      try {
+        console.log(
+          "Fetching postdoc employment role records (active + expired)...",
+        );
+        postdocRoleRecords = await fetchAllPostdocEmploymentRecords();
+        const fetchedActive = postdocRoleRecords.filter(
+          (r) => r.status === "employee:active",
+        ).length;
+        const fetchedExpired = postdocRoleRecords.filter(
+          (r) => r.status === "employee:expired",
+        ).length;
+        console.log(
+          `ED returned ${postdocRoleRecords.length} postdoc role records ` +
+            `(${fetchedActive} active, ${fetchedExpired} expired).`,
+        );
+        // Detect a service-account ACL that's silently scoped to active-only
+        // entries. The filter explicitly requests both statuses; if expired
+        // rows come back zero while active rows are present, the bind DN
+        // probably can't read expired records — alumni postdocs will be
+        // missing from the chip surface until ACLs are widened. Warn loudly
+        // so this doesn't get masked as "the source just had no alumni".
+        if (fetchedActive > 0 && fetchedExpired === 0) {
+          console.warn(
+            "[ED] postdoc role-record fetch returned zero expired entries " +
+              "despite an active+expired filter. The LDAP bind DN may be " +
+              "scoped to employee:active rows only — alumni postdocs will " +
+              "not surface. Verify the bind DN's read ACL covers " +
+              "weillCornellEduStatus=employee:expired under ou=employees,ou=sors.",
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `Postdoc role-record fetch skipped: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      if (postdocRoleRecords.length > 0) {
+        // Drop rows with no manager DN — no PI = no relationship to record.
+        // Counted separately for the summary log.
+        const withMentor = postdocRoleRecords.filter((r) => r.managerCwid);
+        const orphanRoleRecords = postdocRoleRecords.length - withMentor.length;
+
+        // Name resolution. Existing Scholar rows provide names for active
+        // postdocs (cheap local lookup); alumni get a single LDAP pass
+        // against `ou=people` with a narrow attribute list.
+        const allMenteeCwids = Array.from(new Set(withMentor.map((r) => r.cwid)));
+        const scholarsByCwid = new Map(
+          (
+            await prisma.scholar.findMany({
+              where: { cwid: { in: allMenteeCwids } },
+              select: { cwid: true, preferredName: true, fullName: true },
+            })
+          ).map((s) => [s.cwid, s]),
+        );
+        const alumniCwids = allMenteeCwids.filter((c) => !scholarsByCwid.has(c));
+        let alumniNames = new Map<
+          string,
+          { firstName: string | null; lastName: string | null }
+        >();
+        if (alumniCwids.length > 0) {
+          try {
+            alumniNames = await fetchPersonNamesByCwid(alumniCwids);
+          } catch (err) {
+            console.warn(
+              `Alumni postdoc name lookup skipped: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
+        // Resolve a (first, last) pair per mentee CWID. Prefer the structured
+        // ou=people lookup result; fall back to splitting Scholar.fullName
+        // when the LDAP pass missed (e.g. CWID was scrubbed from ou=people).
+        const nameByCwid = new Map<
+          string,
+          { firstName: string | null; lastName: string | null }
+        >();
+        for (const cwid of allMenteeCwids) {
+          const ldap = alumniNames.get(cwid);
+          if (ldap) {
+            nameByCwid.set(cwid, ldap);
+            continue;
+          }
+          const scholar = scholarsByCwid.get(cwid);
+          if (scholar) {
+            // Best-effort split of preferredName / fullName. Used only for
+            // the chip subtitle's display; mismatched edge cases are fine.
+            const parts = (scholar.preferredName || scholar.fullName).trim().split(/\s+/);
+            nameByCwid.set(cwid, {
+              firstName: parts[0] ?? null,
+              lastName: parts.length > 1 ? parts.slice(1).join(" ") : null,
+            });
+          }
+        }
+
+        // Upsert by externalId so the same SORID across reruns stays the
+        // same DB row. Active-vs-expired status is rewritten on every run.
+        const seenExternalIds = new Set<string>();
+        let upserted = 0;
+        for (const r of withMentor) {
+          const externalId = `ED-POSTDOC-${r.sorId}`;
+          seenExternalIds.add(externalId);
+          const name = nameByCwid.get(r.cwid);
+          await prisma.postdocMentorRelationship.upsert({
+            where: { externalId },
+            create: {
+              externalId,
+              mentorCwid: r.managerCwid!,
+              menteeCwid: r.cwid,
+              menteeFirstName: name?.firstName ?? null,
+              menteeLastName: name?.lastName ?? null,
+              startDate: r.startDate,
+              endDate: r.endDate,
+              title: r.title,
+              status: r.status,
+              programType: "POSTDOC",
+              source: "ED-EMPLOYEE-SOR",
+            },
+            update: {
+              mentorCwid: r.managerCwid!,
+              menteeCwid: r.cwid,
+              menteeFirstName: name?.firstName ?? null,
+              menteeLastName: name?.lastName ?? null,
+              startDate: r.startDate,
+              endDate: r.endDate,
+              title: r.title,
+              status: r.status,
+              lastRefreshedAt: new Date(),
+            },
+          });
+          upserted += 1;
+        }
+
+        // Tombstone: any postdoc_mentor_relationship row whose externalId
+        // was NOT in this LDAP pass is deleted. Matches the Jenzabar
+        // PhD source's "what's in the SOR is canonical" stance — we don't
+        // retain rows for roles ED has removed.
+        const existing = await prisma.postdocMentorRelationship.findMany({
+          select: { externalId: true },
+        });
+        const stale = existing
+          .map((r) => r.externalId)
+          .filter((eid) => !seenExternalIds.has(eid));
+        let deleted = 0;
+        if (stale.length > 0) {
+          const res = await prisma.postdocMentorRelationship.deleteMany({
+            where: { externalId: { in: stale } },
+          });
+          deleted = res.count;
+        }
+
+        const activeCount = withMentor.filter(
+          (r) => r.status === "employee:active",
+        ).length;
+        const expiredCount = withMentor.length - activeCount;
+        console.log(
+          `[ED] postdoc mentees: ${upserted} relationships upserted ` +
+            `(${activeCount} active, ${expiredCount} alumni; ` +
+            `${orphanRoleRecords} role records skipped — no manager DN; ` +
+            `${alumniCwids.length} alumni names resolved from ou=people; ` +
+            `${deleted} stale rows tombstoned)`,
+        );
+      }
     }
 
     if (adminOverridesApplied > 0) {

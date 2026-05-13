@@ -25,6 +25,14 @@ describe("formatProgramLabel", () => {
     expect(formatProgramLabel("ECR")).toBe("Early career mentee");
   });
 
+  it("expands 'POSTDOC' to 'Postdoc mentee'", () => {
+    // Issue #183 — ED postdoc role records use programType="POSTDOC"
+    // (uppercase to match the AOC/MDPHD shape). The unstyled "Postdoc"
+    // string (in the unknown-values test below) is intentionally NOT
+    // matched — programType values are normalized at ETL write time.
+    expect(formatProgramLabel("POSTDOC")).toBe("Postdoc mentee");
+  });
+
   it("passes unknown values through unchanged", () => {
     expect(formatProgramLabel("Postdoc")).toBe("Postdoc");
     expect(formatProgramLabel("Something New")).toBe("Something New");
