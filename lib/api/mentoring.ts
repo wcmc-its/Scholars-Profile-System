@@ -130,9 +130,19 @@ import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { formatPublishedName } from "@/lib/postnominal";
 
 /**
- * Returns all known mentees for the given mentor CWID, sorted by graduation
- * year descending (most recent first), then by name. Multiple AOC project
+ * Returns all known mentees for the given mentor CWID. Multiple AOC project
  * rows for the same student are collapsed to a single chip.
+ *
+ * Sort order (issue #201): co-publication count desc, then terminal year
+ * desc (graduation year for students; appointment end year for postdocs,
+ * with active postdocs pinned to the top), then name. Surfaces the most
+ * productive collaborations first — the answer the chip badges are
+ * implicitly asking the reader to look for — while still landing recent
+ * trainees above older ones within each co-pub tier.
+ *
+ * Slice B (#201 addendum) will make the sort param-driven for the
+ * sort-control affordance at N ≥ 12; for Slice A the order here is the
+ * single default rendered on every profile.
  *
  * Returns an empty array if the mentor has no recorded relationships.
  */
@@ -389,13 +399,18 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     });
   }
 
-  // Sort by "terminal year" desc — most recent first, then name. For AOC/PhD
-  // mentees that's graduationYear; for postdocs (issue #183) it's the
-  // appointment endYear, with active postdocs (endYear=null) pinned to the
-  // top via MAX_SAFE_INTEGER. Mixing across types is intentional: a profile
-  // with both current postdocs and recent graduates surfaces both groups
-  // together rather than clustering one above the other.
-  const sortKey = (c: MenteeChip): number => {
+  // Issue #201 — sort by co-pub count desc to surface productive
+  // collaborations first; tiebreak on terminal year desc so within a
+  // co-pub tier the most recent trainees still cluster near the top,
+  // then on name for full determinism.
+  //
+  // Terminal year: graduationYear for AOC/PhD mentees; appointment
+  // endYear for postdocs (issue #183), with active postdocs
+  // (endYear=null) pinned to the top via MAX_SAFE_INTEGER. Mixing across
+  // types is intentional — a profile with both current postdocs and
+  // recent graduates surfaces both together rather than clustering one
+  // above the other.
+  const terminalYear = (c: MenteeChip): number => {
     if (c.graduationYear) return c.graduationYear;
     if (c.appointmentRange) {
       return c.appointmentRange.endYear ?? Number.MAX_SAFE_INTEGER;
@@ -403,8 +418,10 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     return 0;
   };
   chips.sort((a, b) => {
-    const diff = sortKey(b) - sortKey(a);
-    if (diff !== 0) return diff;
+    const byCopubs = b.copublicationCount - a.copublicationCount;
+    if (byCopubs !== 0) return byCopubs;
+    const byYear = terminalYear(b) - terminalYear(a);
+    if (byYear !== 0) return byYear;
     return a.fullName.localeCompare(b.fullName);
   });
 
