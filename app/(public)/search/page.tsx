@@ -1566,32 +1566,6 @@ function FacetSidebarPubs({
         />
       </FacetGroup>
 
-      {/* Mentoring activity — multi-select on mentee program at time of
-          mentorship. Restricts results to publications co-authored between a
-          known WCM mentor and a mentee in the chosen program(s). */}
-      <FacetGroup label="Mentoring activity">
-        <FacetCheckbox
-          label="MD mentee"
-          isActive={activeMentoringProgram.includes("md")}
-          href={toggleHref("mentoringProgram", "md")}
-        />
-        <FacetCheckbox
-          label="MD-PhD mentee"
-          isActive={activeMentoringProgram.includes("mdphd")}
-          href={toggleHref("mentoringProgram", "mdphd")}
-        />
-        <FacetCheckbox
-          label="PhD mentee"
-          isActive={activeMentoringProgram.includes("phd")}
-          href={toggleHref("mentoringProgram", "phd")}
-        />
-        <FacetCheckbox
-          label="Early career mentee"
-          isActive={activeMentoringProgram.includes("ecr")}
-          href={toggleHref("mentoringProgram", "ecr")}
-        />
-      </FacetGroup>
-
       {/* Issue #88 — Author facet sits between WCM author role and Year
           per spec: the two authorship axes are conceptually paired and
           users combine them ("first-author papers by Wolf"). */}
@@ -1628,6 +1602,33 @@ function FacetSidebarPubs({
       ) : null}
 
       {journalItems.length > 0 ? <JournalFacet items={journalItems} /> : null}
+
+      {/* Mentoring activity — multi-select on mentee program at time of
+          mentorship. Restricts results to publications co-authored between a
+          known WCM mentor and a mentee in the chosen program(s). Placed
+          below Journals per issue #226. */}
+      <FacetGroup label="Mentoring activity">
+        <FacetCheckbox
+          label="MD mentee"
+          isActive={activeMentoringProgram.includes("md")}
+          href={toggleHref("mentoringProgram", "md")}
+        />
+        <FacetCheckbox
+          label="MD-PhD mentee"
+          isActive={activeMentoringProgram.includes("mdphd")}
+          href={toggleHref("mentoringProgram", "mdphd")}
+        />
+        <FacetCheckbox
+          label="PhD mentee"
+          isActive={activeMentoringProgram.includes("phd")}
+          href={toggleHref("mentoringProgram", "phd")}
+        />
+        <FacetCheckbox
+          label="Early career mentee"
+          isActive={activeMentoringProgram.includes("ecr")}
+          href={toggleHref("mentoringProgram", "ecr")}
+        />
+      </FacetGroup>
     </aside>
   );
 }
