@@ -4,7 +4,9 @@ import {
   MENTORING_DISTRIBUTION_THRESHOLD,
   formatMentoringDistribution,
   formatProgramLabel,
+  menteeTerminalYear,
   mentoringDistributionBucket,
+  partitionMenteesByBucket,
 } from "@/lib/mentoring-labels";
 
 describe("formatProgramLabel", () => {
@@ -144,5 +146,123 @@ describe("formatMentoringDistribution", () => {
       "Mystery Program",
     ]);
     expect(formatMentoringDistribution(list)).toBe("7 MD · 2 other");
+  });
+});
+
+describe("menteeTerminalYear", () => {
+  it("returns graduationYear when set (AOC/PhD/MD-PhD students)", () => {
+    expect(
+      menteeTerminalYear({ graduationYear: 2024, appointmentRange: null }),
+    ).toBe(2024);
+  });
+
+  it("returns appointment endYear for ended postdocs", () => {
+    expect(
+      menteeTerminalYear({
+        graduationYear: null,
+        appointmentRange: { startYear: 2020, endYear: 2023 },
+      }),
+    ).toBe(2023);
+  });
+
+  it("pins active postdocs (endYear null) above any real year", () => {
+    // Active postdocs sort above ended postdocs and recent graduates so
+    // a profile mixing current and former trainees surfaces the active
+    // ones first within their co-pub tier.
+    const active = menteeTerminalYear({
+      graduationYear: null,
+      appointmentRange: { startYear: 2024, endYear: null },
+    });
+    expect(active).toBeGreaterThan(2099);
+  });
+
+  it("returns 0 when neither year source is populated", () => {
+    expect(
+      menteeTerminalYear({ graduationYear: null, appointmentRange: null }),
+    ).toBe(0);
+  });
+});
+
+describe("partitionMenteesByBucket", () => {
+  const m = (programType: string | null, name: string) => ({
+    programType,
+    name,
+  });
+
+  it("returns groups in fixed MD → PhD → MD-PhD → Postdoc → ECR → Other order", () => {
+    const groups = partitionMenteesByBucket([
+      m("ECR", "Ecr-A"),
+      m("POSTDOC", "Post-A"),
+      m("MD-PhD", "MdPhd-A"),
+      m("PhD", "Phd-A"),
+      m("AOC", "Md-A"),
+      m(null, "Other-A"),
+    ]);
+    expect(groups.map((g) => g.bucket)).toEqual([
+      "MD",
+      "PhD",
+      "MD-PhD",
+      "Postdoc",
+      "ECR",
+      "other",
+    ]);
+  });
+
+  it("omits empty buckets entirely (no '0 chips' placeholder groups)", () => {
+    // Two buckets present out of six; the helper must not emit headers
+    // for MD-PhD/Postdoc/ECR/Other if those buckets have no mentees.
+    const groups = partitionMenteesByBucket([
+      m("AOC", "Md-A"),
+      m("AOC", "Md-B"),
+      m("PhD", "Phd-A"),
+    ]);
+    expect(groups.map((g) => g.bucket)).toEqual(["MD", "PhD"]);
+  });
+
+  it("preserves input order within each bucket", () => {
+    // The grouped tier expects callers to pre-sort by terminal-year then
+    // name (SPEC §4.2). Partition must not reorder within a bucket.
+    const groups = partitionMenteesByBucket([
+      m("AOC", "Z-first"),
+      m("PhD", "Phd-A"),
+      m("AOC", "A-second"),
+      m("PhD", "Phd-B"),
+    ]);
+    expect(groups[0]).toEqual({
+      bucket: "MD",
+      mentees: [m("AOC", "Z-first"), m("AOC", "A-second")],
+    });
+    expect(groups[1]).toEqual({
+      bucket: "PhD",
+      mentees: [m("PhD", "Phd-A"), m("PhD", "Phd-B")],
+    });
+  });
+
+  it("collapses AOC variants and both MD-PhD spellings into the right buckets", () => {
+    const groups = partitionMenteesByBucket([
+      m("AOC-2025", "Md-A"),
+      m("AOC", "Md-B"),
+      m("MDPHD", "MdPhd-A"),
+      m("MD-PhD", "MdPhd-B"),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].bucket).toBe("MD");
+    expect(groups[0].mentees).toHaveLength(2);
+    expect(groups[1].bucket).toBe("MD-PhD");
+    expect(groups[1].mentees).toHaveLength(2);
+  });
+
+  it("buckets null and unknown programTypes into 'other'", () => {
+    const groups = partitionMenteesByBucket([
+      m("AOC", "Md-A"),
+      m(null, "Unknown-A"),
+      m("Mystery Program", "Unknown-B"),
+    ]);
+    const other = groups.find((g) => g.bucket === "other");
+    expect(other?.mentees).toHaveLength(2);
+  });
+
+  it("returns an empty array when given no mentees", () => {
+    expect(partitionMenteesByBucket([])).toEqual([]);
   });
 });
