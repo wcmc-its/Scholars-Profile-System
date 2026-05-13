@@ -12,7 +12,7 @@ Local prototype under active development. See the planning artifacts in `~/Dropb
 |---|---|---|
 | Framework | Next.js 15 (App Router) | Same, on Fargate |
 | Language | TypeScript (strict) | Same |
-| Database | MySQL 8 (Docker) | Aurora MySQL on RDS |
+| Database | MariaDB 11 on host (homebrew) | Aurora MySQL on RDS |
 | Search | OpenSearch 2.x (Docker) | OpenSearch Service (managed) |
 | ETL | TypeScript via `tsx` | Lambda + EventBridge |
 | Styling | Tailwind 4 + shadcn/ui | Same |
@@ -25,7 +25,41 @@ For the production deployment shape, caching strategy, and the runbook for "page
 
 - Node.js 22+
 - Docker (with at least 4GB allocated for OpenSearch)
+- MariaDB 11 on the host (homebrew on macOS; see "Database setup" below)
 - npm 10+
+
+## Database setup
+
+The app talks to **host MariaDB on `127.0.0.1:3306`**, not a Dockerized MySQL. The Prisma adapter is `@prisma/adapter-mariadb` and the local DSN in `.env.example` resolves to the host service.
+
+```bash
+# macOS — install + start once
+brew install mariadb
+brew services start mariadb
+
+# Create the scholars user and database (run as root once)
+mysql -uroot <<'SQL'
+CREATE DATABASE IF NOT EXISTS scholars CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'scholars'@'localhost' IDENTIFIED BY 'scholars';
+GRANT ALL PRIVILEGES ON scholars.* TO 'scholars'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+```
+
+If you have an old `scholars-mysql` Docker container from a previous setup (it shadowed the host DB via a silently-failing `3306:3306` bind), remove it so audits and `docker exec` queries can't accidentally target a stale schema:
+
+```bash
+docker rm -f scholars-mysql 2>/dev/null
+docker volume rm scholars-profile-system_mysql-data 2>/dev/null
+```
+
+After setup, confirm what your `DATABASE_URL` actually points at:
+
+```bash
+npm run db:check
+```
+
+It prints the host, port, database, server version (MySQL vs MariaDB), and the column count for the `grant` table as a schema sanity check.
 
 ## Local setup
 
@@ -40,10 +74,14 @@ npm install
 # 3. Copy env template (real credentials live in ~/.zshrc, never committed)
 cp .env.example .env.local
 
-# 4. Start MySQL + OpenSearch
+# 4. Start OpenSearch (MariaDB runs on the host — see "Database setup")
 npm run db:up
 
-# 5. Run dev server
+# 5. Verify DB target, then apply migrations
+npm run db:check
+npm run db:migrate
+
+# 6. Run dev server
 npm run dev
 ```
 
@@ -59,8 +97,9 @@ npm run typecheck    # tsc --noEmit
 npm run test         # Vitest unit tests
 npm run test:e2e     # Playwright E2E (requires dev server)
 npm run format       # Prettier
-npm run db:up        # Start MySQL + OpenSearch via docker compose
+npm run db:up        # Start OpenSearch via docker compose (MariaDB runs on the host)
 npm run db:down      # Stop the local containers
+npm run db:check     # Show which DB DATABASE_URL points at + grant schema sanity check
 npm run db:migrate   # Apply Prisma migrations (dev)
 npm run db:reset     # Drop + recreate local DB and re-run migrations
 npm run seed         # Load synthetic seed data
