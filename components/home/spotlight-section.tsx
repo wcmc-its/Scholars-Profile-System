@@ -155,7 +155,7 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
       >
         {card.parentTopicLabel}
       </a>
-      <h3 className="font-serif text-3xl font-medium leading-tight tracking-tight">
+      <h3 className="text-3xl font-medium leading-tight tracking-tight">
         <a
           href={subtopicHref}
           aria-label={`View topic page for ${card.displayName}`}

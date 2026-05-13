@@ -28,9 +28,16 @@
   /* === Phase 2 design tokens (ported from .planning/sketches/themes/default.css) === */
   /* Typography
    *
-   * Headline rule (issue #213): h1 uses --font-serif on every surface — marketing
-   * and interior pages alike. h2 and h3 stay in --font-sans. Charter falls back
-   * to Tiempos/Georgia so the rule holds even when the web font is still loading.
+   * Headline rule (issue #213, refined post-#220): the page-subject header
+   * uses --font-serif; all other headers (section headers within a page,
+   * subsection headers, etc.) stay in --font-sans. The page-subject is the
+   * single element naming what the page is about — scholar name on a profile,
+   * topic name on a topic page, "Browse" on the browse surface, etc. The
+   * styling hook is the `.page-title` class, not the HTML tag, because the
+   * page-subject is sometimes h1 and sometimes nested inside a structural
+   * container (e.g. profile sidebar) where a wider-column h2 would otherwise
+   * out-weight it. Use `.page-title` exactly once per page. Charter falls
+   * back to Tiempos/Georgia so the rule holds during font load.
    */
   --text-sm: 13px;
   --text-base: 15px;
@@ -123,6 +130,16 @@
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
   }
+}
+
+/* Page-subject header. Applied to the single element per page that names
+   what the page is about (scholar name on profile, topic name on topic page,
+   "Browse" on /browse, etc.). Class-only styling so the rule does not depend
+   on h1-vs-h2 tag choice — see the typography rule comment in :root above.
+   Family only; size and weight stay on the element so each surface can size
+   for its layout (sidebar names need different scale from a homepage hero). */
+.page-title {
+  font-family: var(--font-serif);
 }
 
 /* Entity-type badges per design spec §17 (issue #71). Pinned to a dedicated
