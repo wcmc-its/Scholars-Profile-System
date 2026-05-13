@@ -132,12 +132,16 @@ export async function GET(request: NextRequest) {
     topic,
   });
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
+  // Issue #259 §1.1 — queryShape attributes result-count and ranking
+  // changes to the code path that served the request. Reserved enum
+  // values name future §1.6 shapes up front (see PeopleQueryShape).
   console.log(
     JSON.stringify({
       event: "search_query",
       q,
       type: "people",
       resultCount: result.total,
+      queryShape: result.queryShape,
       filters: { deptDiv, personType, activity, includeIncomplete },
       ts: new Date().toISOString(),
     }),

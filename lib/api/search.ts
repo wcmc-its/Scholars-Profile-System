@@ -33,8 +33,11 @@ import {
   type RankingSources,
 } from "@/lib/api/search-ranking";
 import {
+  PEOPLE_ABSTRACTS_BOOST,
   PEOPLE_FIELD_BOOSTS,
+  PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
   PEOPLE_INDEX,
+  PEOPLE_RESTRUCTURED_MSM,
   PUBLICATION_FIELD_BOOSTS,
   PUBLICATIONS_INDEX,
   searchClient,
@@ -168,11 +171,26 @@ export type WcmAuthorFacetBucket = {
  * carries a pre-rendered display label (e.g. "Cardiology — Medicine"). */
 export type DeptDivBucket = { value: string; label: string; count: number };
 
+/**
+ * Discriminator for which query shape `searchPeople` used for a given
+ * request. Logged by the search route (issue #259 §1.1) so the analytics
+ * stream can attribute result-count and ranking changes to the correct
+ * code path. Reserved values (`concept_filtered`, `concept_fallback`) name
+ * future §1.6 shapes up front to avoid a schema migration later.
+ */
+export type PeopleQueryShape =
+  | "legacy_multi_match"
+  | "restructured_msm"
+  | "concept_filtered"
+  | "concept_fallback";
+
 export type PeopleSearchResult = {
   hits: PeopleHit[];
   total: number;
   page: number;
   pageSize: number;
+  /** Which query shape served this request — telemetry-only (issue #259). */
+  queryShape: PeopleQueryShape;
   facets: {
     deptDivs: DeptDivBucket[];
     personTypes: SearchFacetBucket[];
@@ -220,6 +238,15 @@ export async function searchPeople(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
+  // Issue #259 §1.1 — people-index query restructure. Flag default-off; the
+  // merge is a code event, the flip is the behavior event. See plan in
+  // .planning/drafts/PLAN-issue-259-phase-1.1-people-index-restructure.md.
+  const useRestructure =
+    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "off") === "on";
+  const queryShape: PeopleQueryShape = useRestructure
+    ? "restructured_msm"
+    : "legacy_multi_match";
+
   // D-10 topic pre-filter: resolve cwids via Prisma before hitting OpenSearch.
   // This ensures the search is scoped to scholars attributed to the topic regardless
   // of whether the OpenSearch index has a dedicated topic field. Pre-filtered at the DB layer.
@@ -241,6 +268,7 @@ export async function searchPeople(opts: {
         total: 0,
         page,
         pageSize: PAGE_SIZE,
+        queryShape,
         facets: {
           deptDivs: [],
           personTypes: [],
@@ -263,6 +291,48 @@ export async function searchPeople(opts: {
   const recentPubCutoff = new Date();
   recentPubCutoff.setFullYear(recentPubCutoff.getFullYear() - 2);
 
+  // Issue #259 §1.1 — when the restructure flag is on, the multi_match
+  // branch is split into a must clause over high-evidence fields (with msm)
+  // and a should clause for the publicationAbstracts blob (scoring only).
+  // The default `best_fields` multi_match has no token-coverage floor, and
+  // `publicationAbstracts` is a concatenated blob of every abstract on the
+  // scholar that clears any per-field threshold on its own — so adding msm
+  // to the existing flat shape barely tightens anything. The restructure
+  // is the fix.
+  const queryBranch: Record<string, unknown> = useRestructure
+    ? {
+        bool: {
+          must: [
+            {
+              multi_match: {
+                query: trimmed,
+                fields: [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS],
+                type: "best_fields",
+                operator: "or",
+                minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
+              },
+            },
+          ],
+          should: [
+            {
+              match: {
+                publicationAbstracts: {
+                  query: trimmed,
+                  boost: PEOPLE_ABSTRACTS_BOOST,
+                },
+              },
+            },
+          ],
+        },
+      }
+    : {
+        multi_match: {
+          query: trimmed,
+          fields: [...PEOPLE_FIELD_BOOSTS],
+          type: "best_fields",
+        },
+      };
+
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
     must.push({
@@ -272,13 +342,7 @@ export async function searchPeople(opts: {
           // match wins over the multi_match by a wide boost so a pasted
           // CWID resolves to its scholar at the top of the result list.
           { term: { cwid: { value: trimmed.toLowerCase(), boost: 100 } } },
-          {
-            multi_match: {
-              query: trimmed,
-              fields: [...PEOPLE_FIELD_BOOSTS],
-              type: "best_fields",
-            },
-          },
+          queryBranch,
         ],
         minimum_should_match: 1,
       },
@@ -532,6 +596,7 @@ export async function searchPeople(opts: {
     total: r.hits.total.value,
     page,
     pageSize: PAGE_SIZE,
+    queryShape,
     facets: {
       deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? []).map((b) => ({
         value: b.key,
