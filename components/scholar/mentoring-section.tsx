@@ -276,13 +276,16 @@ function MentoringSortSelector({
     onChange();
     // `router.replace` keeps the operation out of the browser's history
     // stack — sort selection isn't a navigation the user should be able
-    // to "back" into. Co-pubs is the default; strip the param so the
-    // canonical URL is restored.
+    // to "back" into. `scroll: false` preserves the user's scroll
+    // position; default behavior is to scroll to top, which is jarring
+    // when the Mentoring section sits well below the fold on a profile.
+    // Co-pubs is the default; strip the param so the canonical URL is
+    // restored.
     const base = `/scholars/${mentorSlug}`;
     if (next === "copubs") {
-      router.replace(base);
+      router.replace(base, { scroll: false });
     } else {
-      router.replace(`${base}?mentees-sort=class-year`);
+      router.replace(`${base}?mentees-sort=class-year`, { scroll: false });
     }
   };
 
