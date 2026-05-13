@@ -1651,6 +1651,7 @@ function PiMinStepper({
       ) : (
         <Link
           href={setMinHref(value - 1)}
+          scroll={false}
           aria-label={`Decrease minimum to ${value - 1}`}
           className={`${buttonBase} ${buttonActive} no-underline`}
         >
@@ -1665,6 +1666,7 @@ function PiMinStepper({
       ) : (
         <Link
           href={setMinHref(value + 1)}
+          scroll={false}
           aria-label={`Increase minimum to ${value + 1}`}
           className={`${buttonBase} ${buttonActive} no-underline`}
         >
