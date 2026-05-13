@@ -275,7 +275,13 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
       ) : null}
 
       {completedGroups.length > 0 ? (
-        <details className="group mt-4 border-t border-border">
+        <details
+          className={
+            activeGroups.length > 0
+              ? "group mt-4 border-t border-border"
+              : "group"
+          }
+        >
           <summary className="flex cursor-pointer list-none items-center gap-2 py-3 text-sm font-medium text-[var(--color-accent-slate)] [&::-webkit-details-marker]:hidden">
             <span className="text-muted-foreground inline-block w-3 text-[10px] transition-transform group-open:rotate-90">
               ▶
