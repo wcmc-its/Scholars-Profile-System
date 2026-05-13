@@ -112,7 +112,10 @@ export function MentoringSection({
           mentorSlug={mentorSlug}
           onChange={onSortChange}
         />
-        <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
+        {/* Controlled tier (N ≥ 12) is single-column. Avoids the column-pair
+            gap when a chip is expanded (#246) and reduces ping-pong scanning
+            at dense profiles. */}
+        <ul className="grid grid-cols-1 items-start gap-3">
           {visible.map((m) => (
             <MenteeChipCard
               key={m.cwid}
@@ -179,7 +182,11 @@ export function MentoringSection({
                   arithmetic still gives the correct number there. */}
               {g.bucket} · {g.mentees.length + g.hiddenInGroup}
             </h3>
-            <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
+            <ul
+              className={`grid grid-cols-1 items-start gap-3 ${
+                isControlledTier ? "" : "sm:grid-cols-2"
+              }`}
+            >
               {g.mentees.map((m) => (
                 <MenteeChipCard
                   key={m.cwid}
