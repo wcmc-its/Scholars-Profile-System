@@ -325,8 +325,19 @@ export const FUNDING_FIELD_BOOSTS: ReadonlyArray<string> = [
 ];
 
 /**
- * Per-field boost weights (spec lines 156, 165). Used by the people-index
- * query builder to construct multi_match field weights.
+ * Per-field boost weights used by the *legacy* flat-multimatch people-index
+ * query (the path active when `SEARCH_PEOPLE_QUERY_RESTRUCTURE` is off).
+ *
+ * Issue #21 — abstract text contributes to thematic-query relevance
+ * (e.g. "psychiatric comorbidities in serious illness") but at a low
+ * boost so a single passing mention can't displace name/title/dept hits.
+ * best_fields scoring (the multi_match default) keeps the strongest
+ * single-field match dominant.
+ *
+ * Issue #259 §1.1 — when the restructure flag is on, the query is split
+ * into a must clause over high-evidence fields and a should clause for the
+ * publicationAbstracts blob. Use `PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS` +
+ * `PEOPLE_ABSTRACTS_BOOST` for that path.
  */
 export const PEOPLE_FIELD_BOOSTS: ReadonlyArray<string> = [
   "preferredName^10",
@@ -337,13 +348,45 @@ export const PEOPLE_FIELD_BOOSTS: ReadonlyArray<string> = [
   "overview^2",
   "publicationTitles^1",
   "publicationMesh^0.5",
-  // Issue #21 — abstract text contributes to thematic-query relevance
-  // (e.g. "psychiatric comorbidities in serious illness") but at a low
-  // boost so a single passing mention can't displace name/title/dept hits.
-  // best_fields scoring (the multi_match default) keeps the strongest
-  // single-field match dominant, so this is informative without being noisy.
   "publicationAbstracts^0.3",
 ];
+
+/**
+ * High-evidence per-field boosts for the restructured people-index query
+ * (issue #259 §1.1). Used in the multi_match must clause where
+ * `minimum_should_match` applies meaningfully — none of these are blob
+ * fields. publicationAbstracts is intentionally excluded: it's a
+ * concatenated blob of every abstract on the scholar and clears any
+ * per-field token-coverage threshold on its own, defeating msm.
+ */
+export const PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
+  "preferredName^10",
+  "fullName^10",
+  "areasOfInterest^6",
+  "primaryTitle^4",
+  "primaryDepartment^3",
+  "overview^2",
+  "publicationTitles^1",
+  "publicationMesh^0.5",
+];
+
+/**
+ * Boost for `publicationAbstracts` on the people index when the restructured
+ * query (issue #259 §1.1) is active. Lives in a scoring-only `should`
+ * clause: contributes to BM25 ranking, cannot admit a doc on its own.
+ */
+export const PEOPLE_ABSTRACTS_BOOST = 0.3;
+
+/**
+ * Minimum-should-match expression for the restructured people query
+ * (issue #259 §1.1). Reads as: for ≤3 analyzed tokens require all; for >3,
+ * allow up to 25% missing. Tokens are post-analysis — `scholar_text`
+ * strips English stopwords first.
+ *
+ * Lifted to a constant because the msm DSL is easy to misread and the
+ * exact string is asserted on by `tests/unit/search-msm-parser.test.ts`.
+ */
+export const PEOPLE_RESTRUCTURED_MSM = "-0% 3<-25%";
 
 /**
  * Boost weights used by the publications-index query builder.
