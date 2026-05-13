@@ -40,7 +40,7 @@ export function PublicationCard({ pub }: { pub: DeptPublicationCard }) {
           dangerouslySetInnerHTML={{ __html: titleHtml }}
         />
       )}
-      {pub.authors.length > 0 && <AuthorChipRow authors={pub.authors} />}
+      {pub.authors.length > 0 && <AuthorChipRow authors={pub.authors} pmid={pub.pmid} />}
       {meta.length > 0 && (
         <div className="mt-2 text-[11px] text-[var(--color-text-secondary)]">
           {pub.journal && (

@@ -15,9 +15,13 @@ import { sanitizePubTitle } from "@/lib/utils";
 export function PublicationRow({
   pub,
   compact = false,
+  currentProfileCwid,
 }: {
   pub: ProfilePublication;
   compact?: boolean;
+  /** The cwid of the scholar whose profile this row is rendered on. Drives
+   *  PersonPopover's self-hover guard and co-author surface routing (#242). */
+  currentProfileCwid?: string;
 }) {
   // Role derivation lives in `author-position-badge.tsx` so the Position
   // filter (#72) and the per-row badge agree. Co-first / co-last detection
@@ -56,7 +60,11 @@ export function PublicationRow({
           {pub.year ? ` · ${pub.year}` : ""}
         </div>
       ) : null}
-      <AuthorChipRow authors={pub.wcmAuthors} />
+      <AuthorChipRow
+        authors={pub.wcmAuthors}
+        pmid={pub.pmid}
+        currentProfileCwid={currentProfileCwid}
+      />
       <PublicationMeta
         citationCount={pub.citationCount}
         role={role ? <AuthorPositionBadge role={role} /> : null}

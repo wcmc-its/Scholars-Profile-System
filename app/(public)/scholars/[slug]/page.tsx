@@ -354,7 +354,7 @@ export default async function ScholarProfilePage({
                     <div className="text-muted-foreground font-bold leading-none text-2xl tabular-nums">
                       {i + 1}
                     </div>
-                    <PublicationRow pub={p} />
+                    <PublicationRow pub={p} currentProfileCwid={profile.cwid} />
                   </li>
                 ))}
               </ol>
@@ -375,12 +375,18 @@ export default async function ScholarProfilePage({
               }
             >
               <Suspense
-                fallback={<PublicationsSection publications={profile.publications} />}
+                fallback={
+                  <PublicationsSection
+                    publications={profile.publications}
+                    scholarCwid={profile.cwid}
+                  />
+                }
               >
                 <ProfilePubsCluster
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
                   totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
+                  scholarCwid={profile.cwid}
                 />
               </Suspense>
             </Section>

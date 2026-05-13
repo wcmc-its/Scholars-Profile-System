@@ -13,10 +13,19 @@
  * Visual contract: 02-UI-SPEC.md §"/topics/{slug} — Top scholars chip row".
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { PersonPopover } from "@/components/scholar/person-popover";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
-export function TopScholarChip({ scholar }: { scholar: TopScholarChipData }) {
-  return (
+export function TopScholarChip({
+  scholar,
+  topicSlug,
+  topicLabel,
+}: {
+  scholar: TopScholarChipData;
+  topicSlug?: string;
+  topicLabel?: string;
+}) {
+  const anchor = (
     <a
       href={`/scholars/${scholar.slug}`}
       className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3 py-1 transition-colors hover:border-[var(--color-accent-slate)]"
@@ -36,5 +45,17 @@ export function TopScholarChip({ scholar }: { scholar: TopScholarChipData }) {
         ) : null}
       </div>
     </a>
+  );
+
+  if (!topicSlug) return anchor;
+  return (
+    <PersonPopover
+      cwid={scholar.cwid}
+      surface="top-scholar"
+      contextTopicSlug={topicSlug}
+      contextTopicLabel={topicLabel}
+    >
+      {anchor}
+    </PersonPopover>
   );
 }

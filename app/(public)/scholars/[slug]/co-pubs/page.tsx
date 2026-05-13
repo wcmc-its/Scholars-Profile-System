@@ -256,7 +256,12 @@ function CoPubCitation({
           {pub.year ? ` · ${pub.year}` : ""}
         </div>
       )}
-      <AuthorChipRow authors={authorChips} pinnedCwids={pinnedCwids} />
+      <AuthorChipRow
+        authors={authorChips}
+        pinnedCwids={pinnedCwids}
+        pmid={String(pub.pmid)}
+        currentProfileCwid={mentorCwid}
+      />
       <PublicationMeta
         citationCount={pub.citationCount}
         pmid={String(pub.pmid)}

@@ -11,10 +11,14 @@
 
 /** Event types accepted by the beacon endpoint.
  *  - search_click: result clicks on /search (Phase 6 / ANALYTICS-02).
- *  - mentoring_copubs_open: scholar profile co-pubs popover opened (#181). */
+ *  - mentoring_copubs_open: scholar profile co-pubs popover opened (#181).
+ *  - person_popover_open / person_popover_action: PersonPopover open + primary
+ *    action click events (#242). */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
+  "person_popover_open",
+  "person_popover_action",
 ]);
 
 /**
@@ -64,6 +68,15 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       mentorCwid: typeof p.mentorCwid === "string" ? p.mentorCwid : null,
       menteeCwid: typeof p.menteeCwid === "string" ? p.menteeCwid : null,
       n: typeof p.n === "number" ? p.n : null,
+      // person_popover_* fields (#242). Null for other events.
+      surface: typeof p.surface === "string" ? p.surface : null,
+      contextScholarCwid:
+        typeof p.contextScholarCwid === "string" ? p.contextScholarCwid : null,
+      contextPubPmid:
+        typeof p.contextPubPmid === "string" ? p.contextPubPmid : null,
+      contextTopicSlug:
+        typeof p.contextTopicSlug === "string" ? p.contextTopicSlug : null,
+      action: typeof p.action === "string" ? p.action : null,
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),

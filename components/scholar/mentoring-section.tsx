@@ -4,6 +4,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { PersonPopover } from "@/components/scholar/person-popover";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { MenteeChip, CoPublication, MenteeSort } from "@/lib/api/mentoring";
@@ -19,12 +20,13 @@ import {
 
 export function MentoringSection({
   mentees,
+  mentorCwid,
   mentorSlug,
   currentSort = "copubs",
 }: {
   mentees: MenteeChip[];
-  /** Kept for telemetry symmetry with the mentee CWID even though the
-   *  badge link / View-all link only need `mentorSlug` to build URLs. */
+  /** Drives PersonPopover's "N co-pubs with {mentor}" context (#242) and was
+   *  previously only used as a telemetry hint. */
   mentorCwid: string;
   mentorSlug: string;
   /** Issue #201 (Slice B2) — current sort, resolved server-side from
@@ -86,6 +88,7 @@ export function MentoringSection({
           <MenteeChipCard
             key={m.cwid}
             mentee={m}
+            mentorCwid={mentorCwid}
             mentorSlug={mentorSlug}
             isExpanded={expandedCwid === m.cwid}
             onToggle={() => toggleChip(m.cwid)}
@@ -120,6 +123,7 @@ export function MentoringSection({
             <MenteeChipCard
               key={m.cwid}
               mentee={m}
+              mentorCwid={mentorCwid}
               mentorSlug={mentorSlug}
               isExpanded={expandedCwid === m.cwid}
               onToggle={() => toggleChip(m.cwid)}
@@ -191,6 +195,7 @@ export function MentoringSection({
                 <MenteeChipCard
                   key={m.cwid}
                   mentee={m}
+                  mentorCwid={mentorCwid}
                   mentorSlug={mentorSlug}
                   isExpanded={expandedCwid === m.cwid}
                   onToggle={() => toggleChip(m.cwid)}
@@ -352,11 +357,13 @@ function MentoringSortSelector({
 
 function MenteeChipCard({
   mentee,
+  mentorCwid,
   mentorSlug,
   isExpanded,
   onToggle,
 }: {
   mentee: MenteeChip;
+  mentorCwid: string;
   mentorSlug: string;
   isExpanded: boolean;
   onToggle: () => void;
@@ -437,15 +444,29 @@ function MenteeChipCard({
     <li className={containerClasses}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         {isLinked ? (
-          <a
-            href={`/scholars/${mentee.scholar!.slug}`}
-            data-mentee-body
-            className="flex min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          <PersonPopover
+            cwid={mentee.cwid}
+            surface="mentee"
+            contextScholarCwid={mentorCwid}
           >
-            {body}
-          </a>
+            <a
+              href={`/scholars/${mentee.scholar!.slug}`}
+              data-mentee-body
+              className="flex min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {body}
+            </a>
+          </PersonPopover>
         ) : (
-          body
+          <PersonPopover
+            cwid={mentee.cwid}
+            surface="mentee"
+            contextScholarCwid={mentorCwid}
+          >
+            <div data-mentee-body className="flex min-w-0 flex-1">
+              {body}
+            </div>
+          </PersonPopover>
         )}
         {badge}
       </div>

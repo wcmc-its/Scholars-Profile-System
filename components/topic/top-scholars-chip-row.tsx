@@ -16,10 +16,13 @@ export function TopScholarsChipRow({
   scholars,
   scholarCount,
   topicSlug,
+  topicLabel,
 }: {
   scholars: TopScholarChipData[];
   scholarCount?: number;
   topicSlug?: string;
+  /** Topic label, used by PersonPopover's "Recent in {topic}" line (#242). */
+  topicLabel?: string;
 }) {
   const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
 
@@ -37,7 +40,12 @@ export function TopScholarsChipRow({
       </div>
       <div className="flex flex-wrap gap-2 py-1">
         {scholars.map((s) => (
-          <TopScholarChip key={s.cwid} scholar={s} />
+          <TopScholarChip
+            key={s.cwid}
+            scholar={s}
+            topicSlug={topicSlug}
+            topicLabel={topicLabel}
+          />
         ))}
         {moreCount > 0 && topicSlug && (
           <a
