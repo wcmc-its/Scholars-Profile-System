@@ -7,6 +7,7 @@ import {
   menteeTerminalYear,
   mentoringDistributionBucket,
   partitionMenteesByBucket,
+  truncateGroupedMentees,
 } from "@/lib/mentoring-labels";
 
 describe("formatProgramLabel", () => {
@@ -264,5 +265,111 @@ describe("partitionMenteesByBucket", () => {
 
   it("returns an empty array when given no mentees", () => {
     expect(partitionMenteesByBucket([])).toEqual([]);
+  });
+});
+
+describe("truncateGroupedMentees", () => {
+  // Bare bucket objects, since the helper is generic over its mentee
+  // shape. Using the same partition shape that `partitionMenteesByBucket`
+  // produces so a typical pipeline maps directly through.
+  const group = (
+    bucket: "MD" | "PhD" | "MD-PhD" | "Postdoc" | "ECR" | "other",
+    n: number,
+    prefix?: string,
+  ) => ({
+    bucket,
+    mentees: Array.from({ length: n }, (_, i) => ({
+      id: `${prefix ?? bucket}-${i + 1}`,
+    })),
+  });
+
+  it("returns every chip unhidden when the limit exceeds the total count", () => {
+    // N=8 (4 MD + 4 PhD), limit=12 — every mentee visible, totalHidden=0.
+    // Caller renders no "Show all N →" affordance in this state.
+    const { visible, totalHidden } = truncateGroupedMentees(
+      [group("MD", 4), group("PhD", 4)],
+      12,
+    );
+    expect(visible).toHaveLength(2);
+    expect(visible[0].mentees).toHaveLength(4);
+    expect(visible[0].hiddenInGroup).toBe(0);
+    expect(visible[1].mentees).toHaveLength(4);
+    expect(visible[1].hiddenInGroup).toBe(0);
+    expect(totalHidden).toBe(0);
+  });
+
+  it("emits hiddenInGroup on the mid-cut bucket (spec table #7)", () => {
+    // N=14 (4 MD + 10 PhD), limit=12 — MD fully visible (4),
+    // PhD truncated to 8 with `hiddenInGroup=2`.
+    const { visible, totalHidden } = truncateGroupedMentees(
+      [group("MD", 4), group("PhD", 10)],
+      12,
+    );
+    expect(visible).toHaveLength(2);
+    expect(visible[0].bucket).toBe("MD");
+    expect(visible[0].hiddenInGroup).toBe(0);
+    expect(visible[1].bucket).toBe("PhD");
+    expect(visible[1].mentees).toHaveLength(8);
+    expect(visible[1].hiddenInGroup).toBe(2);
+    expect(totalHidden).toBe(2);
+  });
+
+  it("omits buckets entirely below the cut (spec table #8)", () => {
+    // N=20 (4 MD + 8 PhD + 8 Postdoc), limit=12 — cut lands exactly
+    // at MD+PhD = 12. Postdoc bucket has no visible chips, so it must
+    // NOT appear in `visible` — rendering "Postdoc · 8" with no chips
+    // beneath it is the visual-debt failure mode spec §7.2 calls out.
+    const { visible, totalHidden } = truncateGroupedMentees(
+      [group("MD", 4), group("PhD", 8), group("Postdoc", 8)],
+      12,
+    );
+    expect(visible).toHaveLength(2);
+    expect(visible.map((v) => v.bucket)).toEqual(["MD", "PhD"]);
+    expect(visible[0].hiddenInGroup).toBe(0);
+    expect(visible[1].hiddenInGroup).toBe(0);
+    expect(totalHidden).toBe(8);
+  });
+
+  it("handles cut landing mid-group when downstream buckets also exist", () => {
+    // N=20 (4 MD + 6 PhD + 10 Postdoc), limit=12 — MD (4) + PhD (6)
+    // visible in full, Postdoc cut to 2 with `hiddenInGroup=8`.
+    // Verifies mid-cut accounting plus downstream-bucket suppression
+    // both work in one traversal.
+    const { visible, totalHidden } = truncateGroupedMentees(
+      [group("MD", 4), group("PhD", 6), group("Postdoc", 10)],
+      12,
+    );
+    expect(visible).toHaveLength(3);
+    expect(visible[2].bucket).toBe("Postdoc");
+    expect(visible[2].mentees).toHaveLength(2);
+    expect(visible[2].hiddenInGroup).toBe(8);
+    expect(totalHidden).toBe(8);
+  });
+
+  it("preserves the within-group order from input (no internal sort)", () => {
+    // Caller is responsible for sort order (SPEC §4.2 — class-year-desc,
+    // then name). Helper must not reshuffle within a bucket.
+    const phds = [{ id: "Z" }, { id: "A" }, { id: "M" }];
+    const { visible } = truncateGroupedMentees([{ bucket: "PhD", mentees: phds }], 2);
+    expect(visible[0].mentees.map((c) => c.id)).toEqual(["Z", "A"]);
+    expect(visible[0].hiddenInGroup).toBe(1);
+  });
+
+  it("returns empty visible + totalHidden=0 when no groups are passed", () => {
+    expect(truncateGroupedMentees([], 12)).toEqual({
+      visible: [],
+      totalHidden: 0,
+    });
+  });
+
+  it("returns empty visible when limit is 0, sums all into totalHidden", () => {
+    // Edge case in the comparator path — if a caller passed limit=0
+    // (no chips visible), every group ends up below the cut.
+    const { visible, totalHidden } = truncateGroupedMentees(
+      [group("MD", 4), group("PhD", 5)],
+      0,
+    );
+    expect(visible).toEqual([]);
+    expect(totalHidden).toBe(9);
   });
 });

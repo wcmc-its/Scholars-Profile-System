@@ -129,24 +129,41 @@ export { formatProgramLabel } from "@/lib/mentoring-labels";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
 import { formatPublishedName } from "@/lib/postnominal";
 
+/** Issue #201 (Slice B2) — sort selector states exposed at N ≥ 12.
+ *  `"copubs"` is the default everywhere; `"class-year"` is the
+ *  alternative the user picks from the section's sort selector and
+ *  serializes to `?mentees-sort=class-year`. The grouped tier itself
+ *  (N=8..11) also passes `"class-year"` here because the within-bucket
+ *  order in that tier follows the same comparator, even though no
+ *  selector is rendered. */
+export type MenteeSort = "copubs" | "class-year";
+
 /**
  * Returns all known mentees for the given mentor CWID. Multiple AOC project
  * rows for the same student are collapsed to a single chip.
  *
- * Sort order (issue #201): co-publication count desc, then terminal year
- * desc (graduation year for students; appointment end year for postdocs,
- * with active postdocs pinned to the top), then name. Surfaces the most
- * productive collaborations first — the answer the chip badges are
- * implicitly asking the reader to look for — while still landing recent
- * trainees above older ones within each co-pub tier.
+ * Sort order (issue #201):
+ *  - `"copubs"` (default) — co-publication count desc, then terminal-year
+ *    desc, then name. Surfaces the most productive collaborations first
+ *    — the answer the chip badges implicitly ask the reader to look for.
+ *    Used by the flat tier (N<8) and by the controlled tier's
+ *    "Co-publications" selector option.
+ *  - `"class-year"` — terminal-year desc, then name. Used by the
+ *    grouped tier (8≤N<12) for within-bucket order, and by the
+ *    controlled tier's "Class year" selector option.
  *
- * Slice B (#201 addendum) will make the sort param-driven for the
- * sort-control affordance at N ≥ 12; for Slice A the order here is the
- * single default rendered on every profile.
+ * Terminal year is `graduationYear` for AOC/PhD mentees; for postdocs
+ * (issue #183) it's the appointment endYear, with active postdocs
+ * (endYear=null) pinned to the top via MAX_SAFE_INTEGER. Mixing across
+ * types is intentional — a profile with both current postdocs and
+ * recent graduates surfaces both together.
  *
  * Returns an empty array if the mentor has no recorded relationships.
  */
-export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChip[]> {
+export async function getMenteesForMentor(
+  mentorCwid: string,
+  options?: { sort?: MenteeSort },
+): Promise<MenteeChip[]> {
   if (!mentorCwid) return [];
 
   const [aocRows, jenzabarRows, postdocRows] = await Promise.all([
@@ -399,17 +416,11 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     });
   }
 
-  // Issue #201 — sort by co-pub count desc to surface productive
-  // collaborations first; tiebreak on terminal year desc so within a
-  // co-pub tier the most recent trainees still cluster near the top,
-  // then on name for full determinism.
-  //
-  // Terminal year: graduationYear for AOC/PhD mentees; appointment
-  // endYear for postdocs (issue #183), with active postdocs
-  // (endYear=null) pinned to the top via MAX_SAFE_INTEGER. Mixing across
-  // types is intentional — a profile with both current postdocs and
-  // recent graduates surfaces both together rather than clustering one
-  // above the other.
+  // Issue #201 — comparator switches on the optional `sort` arg.
+  // `"copubs"` (default) leads with collaboration count; `"class-year"`
+  // skips that step and goes straight to terminal year. Both end with a
+  // name tiebreaker for determinism. See JSDoc for terminal-year semantics.
+  const sort: MenteeSort = options?.sort ?? "copubs";
   const terminalYear = (c: MenteeChip): number => {
     if (c.graduationYear) return c.graduationYear;
     if (c.appointmentRange) {
@@ -418,8 +429,10 @@ export async function getMenteesForMentor(mentorCwid: string): Promise<MenteeChi
     return 0;
   };
   chips.sort((a, b) => {
-    const byCopubs = b.copublicationCount - a.copublicationCount;
-    if (byCopubs !== 0) return byCopubs;
+    if (sort === "copubs") {
+      const byCopubs = b.copublicationCount - a.copublicationCount;
+      if (byCopubs !== 0) return byCopubs;
+    }
     const byYear = terminalYear(b) - terminalYear(a);
     if (byYear !== 0) return byYear;
     return a.fullName.localeCompare(b.fullName);

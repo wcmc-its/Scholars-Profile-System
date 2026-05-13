@@ -4,7 +4,7 @@ import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
-import { getMenteesForMentor } from "@/lib/api/mentoring";
+import { getMenteesForMentor, type MenteeSort } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -88,10 +88,25 @@ export async function generateMetadata({
 
 export default async function ScholarProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
+  // Issue #201 (Slice B2) — Mentoring sort selector at N≥12 serializes
+  // its non-default choice as `?mentees-sort=class-year`. Anything other
+  // than the two recognized values (including the default-equal
+  // `copubs` form per spec §5.3) collapses to the default; the URL
+  // self-cleans on the next user-triggered toggle via `router.replace`
+  // in the selector. Reading `searchParams` makes this page dynamic per
+  // request, so ISR (revalidate=86400) continues to cache the canonical
+  // URL while param-bearing URLs render fresh. Optional in the type so
+  // unit tests that call the page directly need not provide a stub.
+  const sp = (await searchParams) ?? {};
+  const requestedSort = sp["mentees-sort"];
+  const menteeSort: MenteeSort =
+    requestedSort === "class-year" ? "class-year" : "copubs";
 
   // First-pass redirect resolution for slug_history matches. Direct hits skip
   // the redirect cost; only renamed/old slugs incur a 301.
@@ -130,8 +145,12 @@ export default async function ScholarProfilePage({
 
   // v2b — Mentoring section. Fetches AOC mentees from reciterdb. Returns []
   // for scholars with no recorded mentor relationships, in which case the
-  // section is omitted entirely by the component.
-  const mentees = await getMenteesForMentor(profile.cwid);
+  // section is omitted entirely by the component. Sort follows the URL
+  // choice (issue #201 Slice B2); the data layer ordering is the final
+  // word — the component does no global re-sort, only within-bucket
+  // re-sort at the grouped tier when `menteeSort === "copubs"` (URL
+  // can't request class-year at that tier because no selector renders).
+  const mentees = await getMenteesForMentor(profile.cwid, { sort: menteeSort });
 
   const pubGroups = groupPublicationsByYear(profile.publications);
   const pubMinYear = pubGroups
@@ -434,6 +453,7 @@ export default async function ScholarProfilePage({
                   mentees={mentees}
                   mentorCwid={profile.cwid}
                   mentorSlug={slug}
+                  currentSort={menteeSort}
                 />
               </Section>
             );

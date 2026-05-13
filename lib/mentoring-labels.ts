@@ -183,3 +183,66 @@ export function partitionMenteesByBucket<T extends { programType: string | null 
   }
   return out;
 }
+
+/** A bucket group as returned by `truncateGroupedMentees`. `hiddenInGroup`
+ *  is the number of chips in this bucket that fell beyond the truncation
+ *  cut and should be advertised with a `"… and N more"` indicator below
+ *  the visible chips. Zero when the bucket is rendered in full or is
+ *  entirely above the cut. */
+export type TruncatedMenteeGroup<T> = {
+  bucket: MentoringDistributionBucket;
+  mentees: T[];
+  hiddenInGroup: number;
+};
+
+/** Issue #201 (Slice B2) — truncate already-partitioned groups to the
+ *  first `limit` chips, traversing buckets in their input order (which
+ *  callers will have set to `DISTRIBUTION_BUCKET_ORDER` via
+ *  `partitionMenteesByBucket`). Three behaviors land in one helper so
+ *  the component doesn't reproduce the cut logic:
+ *
+ *   - **Buckets fully above the cut** render in full with `hiddenInGroup = 0`.
+ *   - **The mid-cut bucket** (if any) renders its first `budget` chips with
+ *     `hiddenInGroup > 0` so the caller can emit `"… and N more"`.
+ *   - **Buckets entirely below the cut** are omitted from `visible` so the
+ *     caller does not render empty `"Postdoc · 6"` headers with no chips
+ *     beneath them.
+ *
+ *  `totalHidden` is the sum of all hidden chips across all buckets — the
+ *  number the caller surfaces in the "Show all N →" affordance label.
+ *
+ *  Pure and generic so it tests cleanly with bare bucket objects; the
+ *  flat-sort tier (co-pubs) bypasses this helper entirely (it slices the
+ *  flat list directly — no group accounting needed). */
+export function truncateGroupedMentees<T>(
+  groups: ReadonlyArray<{ bucket: MentoringDistributionBucket; mentees: T[] }>,
+  limit: number,
+): {
+  visible: TruncatedMenteeGroup<T>[];
+  totalHidden: number;
+} {
+  let budget = limit;
+  let totalHidden = 0;
+  const visible: TruncatedMenteeGroup<T>[] = [];
+  for (const g of groups) {
+    if (budget <= 0) {
+      totalHidden += g.mentees.length;
+      continue;
+    }
+    if (g.mentees.length <= budget) {
+      visible.push({ bucket: g.bucket, mentees: g.mentees, hiddenInGroup: 0 });
+      budget -= g.mentees.length;
+    } else {
+      const take = budget;
+      const hidden = g.mentees.length - take;
+      visible.push({
+        bucket: g.bucket,
+        mentees: g.mentees.slice(0, take),
+        hiddenInGroup: hidden,
+      });
+      totalHidden += hidden;
+      budget = 0;
+    }
+  }
+  return { visible, totalHidden };
+}
