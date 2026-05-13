@@ -403,19 +403,22 @@ export default async function ScholarProfilePage({
               (s, m) => s + m.copublicationCount,
               0,
             );
-            // Issue #201 priority #5 — show degree-bucket distribution
-            // ("7 MD · 8 PhD · 6 MD-PhD") once the portfolio is large
-            // enough that the breakdown carries shape the bare count
-            // doesn't. Helper returns null below the threshold or when
-            // every mentee falls in a single bucket; in that case the
-            // subhead falls back to the plain "N mentees".
+            // Issue #201 priority #5 — degree-bucket distribution
+            // ("7 MD · 8 PhD · 6 MD-PhD") renders on its own row beneath
+            // the count once the portfolio is large enough that the
+            // breakdown carries shape the bare count doesn't. Helper
+            // returns null below the threshold or when every mentee
+            // falls in a single bucket — in that case `subtitle` is
+            // omitted and only the count renders. Slice B1 moves this
+            // from the inline `count` slot (Slice A) to the new
+            // `subtitle` slot per SPEC §8.
             const distribution = formatMentoringDistribution(mentees);
-            const countLabel = `${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`;
             return (
               <Section
                 title="Mentoring"
                 headingLg
-                count={distribution ? `${countLabel} — ${distribution}` : countLabel}
+                count={`${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`}
+                subtitle={distribution}
                 headerAction={
                   totalCopubs > 0 ? (
                     <a
@@ -516,12 +519,18 @@ function Section({
   children,
   headingLg = false,
   count,
+  subtitle,
   headerAction,
 }: {
   title: React.ReactNode;
   children: React.ReactNode;
   headingLg?: boolean;
   count?: React.ReactNode;
+  /** Optional second-row subhead beneath the title row. Issue #201 —
+   *  Mentoring section uses this for the degree-bucket distribution so
+   *  it gets its own line rather than appending onto `count`. Renders
+   *  only in the `headingLg` branch; ignored by the small heading style. */
+  subtitle?: React.ReactNode;
   /** Optional right-aligned action (e.g., outbound link). Issue #90 —
    *  Funding section uses this for the RePORTER PI portfolio link. */
   headerAction?: React.ReactNode;
@@ -529,16 +538,23 @@ function Section({
   return (
     <section className="pt-12 first:pt-0">
       {headingLg ? (
-        <div className="mb-5 flex items-baseline justify-between gap-3">
-          <h2 className="flex items-baseline gap-3 text-2xl font-bold tracking-tight">
-            {title}
-            {count ? (
-              <span className="text-muted-foreground text-sm font-normal tracking-normal">
-                {count}
-              </span>
-            ) : null}
-          </h2>
-          {headerAction}
+        <div className="mb-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="flex items-baseline gap-3 text-2xl font-bold tracking-tight">
+              {title}
+              {count ? (
+                <span className="text-muted-foreground text-sm font-normal tracking-normal">
+                  {count}
+                </span>
+              ) : null}
+            </h2>
+            {headerAction}
+          </div>
+          {subtitle ? (
+            <div className="text-muted-foreground mt-1 text-sm">
+              {subtitle}
+            </div>
+          ) : null}
         </div>
       ) : (
         <h2 className="text-muted-foreground mb-4 text-xs font-semibold uppercase tracking-wider">

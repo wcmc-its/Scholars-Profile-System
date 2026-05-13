@@ -33,13 +33,36 @@ export function formatProgramLabel(programType: string | null): string | null {
 }
 
 /** Issue #201 — at or above this mentee count, the section header switches
- *  from the bare "N mentees" subhead to a degree-bucket distribution. The
- *  formal addendum on #201 also ties this threshold to the grouped-grid
- *  layout introduced in Slice B; the constant lives in this client-safe
- *  module so both surfaces share the same number. Defined as a named
- *  constant so the eventual recalibration after measuring real scholar
- *  distributions changes one line, not several. */
+ *  from the bare "N mentees" subhead to a degree-bucket distribution.
+ *  Defined as a named constant so the eventual recalibration after measuring
+ *  real scholar distributions changes one line, not several.
+ *
+ *  Coincides with `MENTORING_GROUPED_THRESHOLD` today, but they are kept
+ *  independent because they answer different questions and may diverge:
+ *  one controls a subhead string, the other a layout switch. */
 export const MENTORING_DISTRIBUTION_THRESHOLD = 8;
+
+/** Issue #201 (Slice B) — at or above this mentee count, the chip grid
+ *  switches from a single flat grid to per-degree-bucket subgroups, each
+ *  with an `"<Bucket> · <count>"` header. The PhD bucket spans every PhD
+ *  program (Neuroscience, Pharmacology, …); per-program detail remains on
+ *  each chip subtitle, not in the group header. */
+export const MENTORING_GROUPED_THRESHOLD = 8;
+
+/** Issue #201 (Slice B2) — at or above this mentee count, the section
+ *  header renders a sort selector and the grid truncates to
+ *  `MENTORING_TRUNCATE_LIMIT` chips with an inline "Show all N →"
+ *  affordance. Referenced in Slice B2 (truncation + sort gating); defined
+ *  here in B1 so the multi-slice plan is visible at the point anyone
+ *  touches this module between releases. */
+export const MENTORING_TRUNCATE_THRESHOLD = 12;
+
+/** Issue #201 (Slice B2) — top-N chips visible before the "Show all N →"
+ *  affordance appears. Same value as `MENTORING_TRUNCATE_THRESHOLD` today
+ *  but conceptually distinct: the threshold gates *whether* truncation
+ *  applies, the limit determines *how many* survive truncation. Referenced
+ *  in Slice B2. */
+export const MENTORING_TRUNCATE_LIMIT = 12;
 
 /** Degree-bucket label used in the section-header distribution subhead.
  *  Coarser than `formatProgramLabel` — collapses PhD program names to a
@@ -109,4 +132,54 @@ export function formatMentoringDistribution(
   if (present.length < 2) return null;
 
   return present.map((b) => `${counts.get(b)} ${b}`).join(" · ");
+}
+
+/** Single "terminal year" for sort tiebreaking across mixed mentee types
+ *  (issue #183). Graduation year for AOC/PhD mentees; appointment end
+ *  year for postdocs, with active postdocs (endYear=null) pinned to the
+ *  top via MAX_SAFE_INTEGER. Mirrors the helper inside `getMenteesForMentor`
+ *  in `lib/api/mentoring.ts`; lifted here so the grouped-tier (Slice B)
+ *  re-sort in `mentoring-section.tsx` can share the same logic without
+ *  pulling a server-only module into the client bundle. */
+export function menteeTerminalYear(c: {
+  graduationYear: number | null;
+  appointmentRange: { startYear: number; endYear: number | null } | null;
+}): number {
+  if (c.graduationYear) return c.graduationYear;
+  if (c.appointmentRange) {
+    return c.appointmentRange.endYear ?? Number.MAX_SAFE_INTEGER;
+  }
+  return 0;
+}
+
+/** Issue #201 (Slice B1) — partition mentees into degree-bucket groups
+ *  for the grouped chip grid at N ≥ `MENTORING_GROUPED_THRESHOLD`.
+ *
+ *  Buckets are returned in fixed order (MD → PhD → MD-PhD → Postdoc →
+ *  ECR → Other); empty buckets are omitted entirely so the rendered
+ *  output has no "Postdoc · 0" headers. Within each bucket the input
+ *  order is preserved — callers are responsible for sorting `mentees`
+ *  in the desired within-group order before partitioning (per §4.2 of
+ *  SPEC-issue-201-slice-b.md, that's terminal-year desc, then name).
+ *
+ *  Generic over `T extends { programType: string | null }` so this
+ *  partition helper isn't coupled to `MenteeChip` and is trivially
+ *  testable with bare bucket objects.
+ */
+export function partitionMenteesByBucket<T extends { programType: string | null }>(
+  mentees: T[],
+): Array<{ bucket: MentoringDistributionBucket; mentees: T[] }> {
+  const byBucket = new Map<MentoringDistributionBucket, T[]>();
+  for (const m of mentees) {
+    const bucket = mentoringDistributionBucket(m.programType);
+    const existing = byBucket.get(bucket);
+    if (existing) existing.push(m);
+    else byBucket.set(bucket, [m]);
+  }
+  const out: Array<{ bucket: MentoringDistributionBucket; mentees: T[] }> = [];
+  for (const bucket of DISTRIBUTION_BUCKET_ORDER) {
+    const group = byBucket.get(bucket);
+    if (group && group.length > 0) out.push({ bucket, mentees: group });
+  }
+  return out;
 }

@@ -6,7 +6,12 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import type { MenteeChip, CoPublication } from "@/lib/api/mentoring";
-import { formatProgramLabel } from "@/lib/mentoring-labels";
+import {
+  MENTORING_GROUPED_THRESHOLD,
+  formatProgramLabel,
+  menteeTerminalYear,
+  partitionMenteesByBucket,
+} from "@/lib/mentoring-labels";
 
 export function MentoringSection({
   mentees,
@@ -37,6 +42,46 @@ export function MentoringSection({
 
   if (mentees.length === 0) return null;
 
+  const toggleChip = (cwid: string) =>
+    setExpandedCwid((cur) => (cur === cwid ? null : cwid));
+
+  // Issue #201 Slice B1 — at or above the grouped threshold, partition
+  // chips into per-bucket subgroups with `"<Bucket> · <count>"` headers.
+  // Slice A's data-layer sort is co-pubs desc; the grouped tier overrides
+  // that to terminal-year desc, then name (SPEC §4.2) — collaboration
+  // ranking belongs to the Slice B2 sort selector, not to the grouped
+  // default. Below the threshold the layout is identical to today.
+  if (mentees.length >= MENTORING_GROUPED_THRESHOLD) {
+    const reordered = [...mentees].sort((a, b) => {
+      const byYear = menteeTerminalYear(b) - menteeTerminalYear(a);
+      if (byYear !== 0) return byYear;
+      return a.fullName.localeCompare(b.fullName);
+    });
+    const groups = partitionMenteesByBucket(reordered);
+    return (
+      <div className="space-y-6">
+        {groups.map((g) => (
+          <div key={g.bucket} role="group" aria-label={`${g.bucket} mentees`}>
+            <h3 className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wider">
+              {g.bucket} · {g.mentees.length}
+            </h3>
+            <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
+              {g.mentees.map((m) => (
+                <MenteeChipCard
+                  key={m.cwid}
+                  mentee={m}
+                  mentorSlug={mentorSlug}
+                  isExpanded={expandedCwid === m.cwid}
+                  onToggle={() => toggleChip(m.cwid)}
+                />
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <ul className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
       {mentees.map((m) => (
@@ -45,9 +90,7 @@ export function MentoringSection({
           mentee={m}
           mentorSlug={mentorSlug}
           isExpanded={expandedCwid === m.cwid}
-          onToggle={() =>
-            setExpandedCwid((cur) => (cur === m.cwid ? null : m.cwid))
-          }
+          onToggle={() => toggleChip(m.cwid)}
         />
       ))}
     </ul>
