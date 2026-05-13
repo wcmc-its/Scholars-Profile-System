@@ -47,7 +47,7 @@ export default async function HomePage() {
               Scholars at Weill Cornell Medicine
             </h1>
             <p className="text-muted-foreground mt-4 text-base">
-              Discover the research, expertise, and people shaping medicine at WCM.
+              Discover the research, expertise, and scholars shaping medicine at WCM.
             </p>
             <div className="mt-8">
               <SearchAutocomplete variant="hero" />
