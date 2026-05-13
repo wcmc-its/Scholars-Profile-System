@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { EntityKind } from "@/lib/api/search";
 import { EntityBadge } from "@/components/ui/entity-badge";
+import { formatRoleCategory } from "@/lib/role-display";
 
 type Suggestion = {
   kind: EntityKind;
@@ -14,6 +15,7 @@ type Suggestion = {
   subtitle?: string;
   href: string;
   cwid?: string;
+  roleCategory?: string;
 };
 
 type Variant = "header" | "hero";
@@ -176,7 +178,18 @@ export function SearchAutocomplete({ variant = "header" }: { variant?: Variant }
                     <span className="block truncate text-left text-xs text-zinc-500">{s.subtitle}</span>
                   ) : null}
                 </span>
-                <EntityBadge kind={s.kind} />
+                {s.kind === "person" ? (
+                  s.roleCategory ? (
+                    <span
+                      className="inline-flex shrink-0 items-center rounded-[3px] border border-border bg-muted px-[6px] text-[10px] font-semibold uppercase leading-[1.4] tracking-[0.06em] text-muted-foreground"
+                      aria-label={`Role: ${formatRoleCategory(s.roleCategory) ?? s.roleCategory}`}
+                    >
+                      {formatRoleCategory(s.roleCategory) ?? s.roleCategory}
+                    </span>
+                  ) : null
+                ) : (
+                  <EntityBadge kind={s.kind} />
+                )}
               </Link>
             </li>
           ))}

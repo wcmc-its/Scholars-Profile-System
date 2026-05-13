@@ -758,7 +758,14 @@ export async function searchPublications(opts: {
  * Returns up to `size` distinct suggestions from the people index.
  */
 export async function suggestNames(prefix: string, size = 5): Promise<
-  Array<{ text: string; slug: string; cwid: string; primaryTitle: string | null; primaryDepartment: string | null }>
+  Array<{
+    text: string;
+    slug: string;
+    cwid: string;
+    primaryTitle: string | null;
+    primaryDepartment: string | null;
+    personType: string | null;
+  }>
 > {
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
@@ -795,6 +802,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       preferredName?: string;
       primaryTitle?: string | null;
       primaryDepartment?: string | null;
+      personType?: string | null;
     };
   };
   const sourceByCwid = new Map<string, MGetDoc["_source"]>();
@@ -815,6 +823,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       slug: src?.slug ?? "",
       primaryTitle: src?.primaryTitle ?? null,
       primaryDepartment: src?.primaryDepartment ?? null,
+      personType: src?.personType ?? null,
     };
   });
 }
@@ -835,6 +844,10 @@ export type EntitySuggestion = {
   href: string;
   /** Present for `person` rows; powers avatar / future enrichment. */
   cwid?: string;
+  /** Present for `person` rows; raw role-category code (e.g.
+   *  "full_time_faculty"). Rendered as a chip in the dropdown via
+   *  `formatRoleCategory`. */
+  roleCategory?: string;
 };
 
 /**
@@ -959,6 +972,7 @@ export async function suggestEntities(
       subtitle: subParts.join(" · ") || undefined,
       href: `/scholars/${p.slug}`,
       cwid: p.cwid,
+      roleCategory: p.personType ?? undefined,
     });
   }
 
