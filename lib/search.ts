@@ -117,6 +117,9 @@ export const peopleIndexMapping = {
       publicationAbstracts: { type: "text", analyzer: "scholar_text" },
       // Filter facets.
       hasActiveGrants: { type: "boolean" },
+      // Issue #233 — PI facet derived fields.
+      piRoleEver: { type: "boolean" },
+      activePiGrantCount: { type: "integer" },
       isComplete: { type: "boolean" }, // sparse-profile filter (spec line 196)
       personType: { type: "keyword" }, // person-type filter (spec line 195)
       // Counters used in result snippets.

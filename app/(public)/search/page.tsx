@@ -13,9 +13,12 @@ import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import {
   searchPeople,
   searchPublications,
+  PI_MIN_CEILING,
+  PI_MIN_FLOOR,
   type ActivityFilter,
   type DeptDivBucket,
   type PeopleSort,
+  type PiFilter,
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
@@ -79,6 +82,19 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (a): a is ActivityFilter => a === "has_grants" || a === "recent_pub",
   );
 
+  // Issue #233 — Principal Investigator facet. Single-select; `none` and
+  // unset both mean "no filter" (URL contract). `pi_min` is meaningful only
+  // when pi=multi; clamp to [PI_MIN_FLOOR, PI_MIN_CEILING] and default to
+  // PI_MIN_FLOOR.
+  const rawPi = Array.isArray(sp.pi) ? sp.pi[0] : sp.pi;
+  const pi: PiFilter | undefined =
+    rawPi === "any" || rawPi === "active" || rawPi === "multi" ? rawPi : undefined;
+  const rawPiMin = parseOptionalInt(sp.pi_min);
+  const piMin = Math.min(
+    PI_MIN_CEILING,
+    Math.max(PI_MIN_FLOOR, rawPiMin ?? PI_MIN_FLOOR),
+  );
+
   // Funding filters (issue #78 Wave D — multi-select repeated params).
   const fundingFilters: FundingFilters = {
     funder: parseList(sp.funder).length > 0 ? parseList(sp.funder) : undefined,
@@ -139,6 +155,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
         personType: personType.length > 0 ? personType : undefined,
         activity: activity.length > 0 ? activity : undefined,
+        pi,
+        piMin,
       },
     }),
     searchPublications({
@@ -225,6 +243,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             deptDiv={deptDiv}
             personType={personType}
             activity={activity}
+            pi={pi}
+            piMin={piMin}
             result={peopleResult}
           />
         )}
@@ -399,6 +419,8 @@ async function PeopleResults({
   deptDiv,
   personType,
   activity,
+  pi,
+  piMin,
   result,
 }: {
   q: string;
@@ -407,6 +429,8 @@ async function PeopleResults({
   deptDiv: string[];
   personType: string[];
   activity: ActivityFilter[];
+  pi: PiFilter | undefined;
+  piMin: number;
   result: PeopleResultData;
 }) {
   const deptDivLabelMap = await resolveDeptDivLabels();
@@ -425,6 +449,10 @@ async function PeopleResults({
     for (const v of deptDiv) sp.append("deptDiv", v);
     for (const v of personType) sp.append("personType", v);
     for (const v of activity) sp.append("activity", v);
+    if (pi) sp.set("pi", pi);
+    // `pi_min` is only meaningful for pi=multi; default value is dropped
+    // from the URL to keep saved bookmarks tidy.
+    if (pi === "multi" && piMin !== PI_MIN_FLOOR) sp.set("pi_min", String(piMin));
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -449,6 +477,23 @@ async function PeopleResults({
       for (const v of current) if (v !== value) sp.append(axis, v);
     });
 
+  // Issue #233 — single-select PI radio. `null` clears the filter (returns
+  // to "No filter" default). Always wipes `pi_min` so a saved bookmark
+  // doesn't leak a stale threshold onto a non-multi selection.
+  const setPiHref = (next: PiFilter | null) =>
+    buildUrl((sp) => {
+      sp.delete("pi");
+      sp.delete("pi_min");
+      if (next) sp.set("pi", next);
+    });
+  const setPiMinHref = (next: number) =>
+    buildUrl((sp) => {
+      const clamped = Math.min(PI_MIN_CEILING, Math.max(PI_MIN_FLOOR, next));
+      sp.set("pi", "multi");
+      sp.delete("pi_min");
+      if (clamped !== PI_MIN_FLOOR) sp.set("pi_min", String(clamped));
+    });
+
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
 
   // One chip per selected value.
@@ -471,6 +516,17 @@ async function PeopleResults({
       removeHref: removeHref("activity", v),
     });
   }
+  if (pi) {
+    chips.push({
+      label:
+        pi === "any"
+          ? "Any PI role, ever"
+          : pi === "active"
+            ? "Active PI"
+            : `Multi-grant PI (≥${piMin})`,
+      removeHref: setPiHref(null),
+    });
+  }
 
   const hasActiveFilters = chips.length > 0;
 
@@ -487,10 +543,15 @@ async function PeopleResults({
         deptDivs={deptDivBuckets}
         personTypes={result.facets.personTypes}
         activity={result.facets.activity}
+        piFacets={result.facets.pi}
         activeDeptDiv={deptDiv}
         activePersonType={personType}
         activeActivity={activity}
+        activePi={pi}
+        activePiMin={piMin}
         toggleHref={toggleHref}
+        setPiHref={setPiHref}
+        setPiMinHref={setPiMinHref}
         clearAllHref={clearAllHref}
         hasActiveFilters={hasActiveFilters}
       />
@@ -1423,23 +1484,37 @@ function FacetSidebar({
   deptDivs,
   personTypes,
   activity,
+  piFacets,
   activeDeptDiv,
   activePersonType,
   activeActivity,
+  activePi,
+  activePiMin,
   toggleHref,
+  setPiHref,
+  setPiMinHref,
   clearAllHref,
   hasActiveFilters,
 }: {
   deptDivs: DeptDivBucket[];
   personTypes: SearchFacetBucket[];
   activity: { hasGrants: number; recentPub: number };
+  piFacets: { none: number; any: number; active: number; multi: number };
   activeDeptDiv: string[];
   activePersonType: string[];
   activeActivity: ActivityFilter[];
+  activePi: PiFilter | undefined;
+  activePiMin: number;
   toggleHref: (axis: string, value: string) => string;
+  setPiHref: (next: PiFilter | null) => string;
+  setPiMinHref: (next: number) => string;
   clearAllHref: string;
   hasActiveFilters: boolean;
 }) {
+  // Issue #233 — `pi=active|multi` is a strict subset of `hasActiveGrants:true`,
+  // so the Activity checkbox is presentational-only disabled with a tooltip
+  // to prevent dead-click confusion. URL contract still accepts both.
+  const piImpliesActive = activePi === "active" || activePi === "multi";
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
@@ -1486,8 +1561,10 @@ function FacetSidebar({
         <FacetCheckbox
           label="Has active grants"
           count={activity.hasGrants}
-          isActive={activeActivity.includes("has_grants")}
+          isActive={activeActivity.includes("has_grants") || piImpliesActive}
           href={toggleHref("activity", "has_grants")}
+          disabled={piImpliesActive}
+          tooltip={piImpliesActive ? "Implied by current PI filter." : undefined}
         />
         <FacetCheckbox
           label="Published in last 2 years"
@@ -1496,7 +1573,107 @@ function FacetSidebar({
           href={toggleHref("activity", "recent_pub")}
         />
       </FacetGroup>
+
+      {/* Issue #233 — Principal Investigator facet. Single-select radio
+          immediately after Activity; numeric stepper renders only when
+          "Multi-grant PI" is selected. */}
+      <FacetGroup label="Principal Investigator">
+        <FacetCheckbox
+          radio
+          label="No filter"
+          count={piFacets.none}
+          isActive={activePi === undefined}
+          href={setPiHref(null)}
+        />
+        <FacetCheckbox
+          radio
+          label="Any PI role, ever"
+          count={piFacets.any}
+          isActive={activePi === "any"}
+          href={setPiHref("any")}
+        />
+        <FacetCheckbox
+          radio
+          label="Active PI"
+          count={piFacets.active}
+          isActive={activePi === "active"}
+          href={setPiHref("active")}
+        />
+        <FacetCheckbox
+          radio
+          label="Multi-grant PI"
+          count={piFacets.multi}
+          isActive={activePi === "multi"}
+          href={setPiHref("multi")}
+        />
+        {activePi === "multi" ? (
+          <PiMinStepper
+            value={activePiMin}
+            min={PI_MIN_FLOOR}
+            max={PI_MIN_CEILING}
+            setMinHref={setPiMinHref}
+          />
+        ) : null}
+      </FacetGroup>
     </aside>
+  );
+}
+
+/**
+ * Issue #233 — numeric stepper for `pi=multi&pi_min=N`. State lives in the
+ * URL; −/+ render as `<Link>` so the whole page is still server-rendered
+ * with no client JS. Boundary buttons render as visually-muted spans.
+ */
+function PiMinStepper({
+  value,
+  min,
+  max,
+  setMinHref,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  setMinHref: (next: number) => string;
+}) {
+  const decDisabled = value <= min;
+  const incDisabled = value >= max;
+  const buttonBase =
+    "inline-flex h-6 w-6 items-center justify-center rounded border border-[#d6d6d6] text-[14px] leading-none";
+  const buttonActive = "bg-white text-[#1a1a1a] hover:border-[#2c4f6e]";
+  const buttonMuted = "bg-[#f4f4f4] text-[#bdbdbd] cursor-default";
+  return (
+    <li className="ml-6 mt-1 flex items-center gap-2 py-1 leading-[1.4]">
+      <span className="text-[12.5px] text-[#5a5a5a]">Min active grants:</span>
+      {decDisabled ? (
+        <span className={`${buttonBase} ${buttonMuted}`} aria-disabled="true">
+          −
+        </span>
+      ) : (
+        <Link
+          href={setMinHref(value - 1)}
+          scroll={false}
+          aria-label={`Decrease minimum to ${value - 1}`}
+          className={`${buttonBase} ${buttonActive} no-underline`}
+        >
+          −
+        </Link>
+      )}
+      <span className="min-w-[1.5em] text-center text-[13px] tabular-nums">{value}</span>
+      {incDisabled ? (
+        <span className={`${buttonBase} ${buttonMuted}`} aria-disabled="true">
+          +
+        </span>
+      ) : (
+        <Link
+          href={setMinHref(value + 1)}
+          scroll={false}
+          aria-label={`Increase minimum to ${value + 1}`}
+          className={`${buttonBase} ${buttonActive} no-underline`}
+        >
+          +
+        </Link>
+      )}
+    </li>
   );
 }
 
@@ -1702,6 +1879,7 @@ function FacetCheckbox({
   href,
   wrap,
   radio,
+  disabled,
 }: {
   label: React.ReactNode;
   tooltip?: string;
@@ -1716,8 +1894,45 @@ function FacetCheckbox({
    *  multi-select checkbox. Used by mutually-exclusive facets like the
    *  year-since range. Toggling the active option still clears it. */
   radio?: boolean;
+  /** When true, render the row as visually disabled (muted text, no link).
+   *  Presentational only — caller is responsible for any URL-level
+   *  enforcement. Used by issue #233 to suppress the redundant `Has active
+   *  grants` checkbox when `pi=active|multi` is set. */
+  disabled?: boolean;
 }) {
   const inputType = radio ? "radio" : "checkbox";
+  if (disabled) {
+    return (
+      <li className="flex items-center gap-2 py-1 leading-[1.4] opacity-50">
+        {(() => {
+          const row = (
+            <span
+              className="flex flex-1 items-center gap-2 text-[#1a1a1a]"
+              aria-disabled="true"
+              title={typeof label === "string" ? label : undefined}
+            >
+              <input
+                type={inputType}
+                readOnly
+                disabled
+                checked={!!isActive}
+                tabIndex={-1}
+                aria-hidden="true"
+                className="cursor-not-allowed accent-[#2c4f6e]"
+              />
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              {count !== undefined ? (
+                <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+                  {count.toLocaleString()}
+                </span>
+              ) : null}
+            </span>
+          );
+          return tooltip ? <HoverTooltip text={tooltip}>{row}</HoverTooltip> : row;
+        })()}
+      </li>
+    );
+  }
   const fallbackTitle =
     tooltip ?? (typeof label === "string" ? label : undefined);
   const wrapInTooltip = (children: React.ReactNode) =>

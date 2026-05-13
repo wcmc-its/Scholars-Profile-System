@@ -50,11 +50,31 @@ export type PublicationsSort = "relevance" | "year" | "citations";
  */
 export type ActivityFilter = "has_grants" | "recent_pub";
 
+/**
+ * Issue #233 — Principal Investigator facet. Single-select radio in the
+ * People-tab sidebar. Definitions are locked in `.planning/drafts/SPEC-pi-facet.md`.
+ *   - `any`    : ≥1 grant with role in ('PI','PI-Subaward'), any date
+ *   - `active` : ≥1 currently-active (NCE grace) PI/PI-Subaward grant that
+ *                is not a training-only mechanism
+ *   - `multi`  : ≥N grants meeting the `active` criteria (N = piMin)
+ */
+export type PiFilter = "any" | "active" | "multi";
+
+export const PI_MIN_FLOOR = 2;
+export const PI_MIN_CEILING = 30;
+
 export type PeopleFilters = {
   /** Composite dept/division keys. */
   deptDiv?: string[];
   personType?: string[];
   activity?: ActivityFilter[];
+  /** Issue #233 — Principal Investigator facet. Absent = "no filter". */
+  pi?: PiFilter;
+  /** Issue #233 — threshold for `pi=multi`. Clamped to [PI_MIN_FLOOR,
+   *  PI_MIN_CEILING] by the caller; out-of-range URL values are accepted
+   *  permissively (saved bookmarks with stale ceilings should still return
+   *  the highest-defined bucket, not an empty set). */
+  piMin?: number;
   /**
    * Sparse-profile cull. Default (undefined) includes every active scholar
    * — the directory baseline (#152). Pass `false` to opt back into the old
@@ -147,6 +167,10 @@ export type PeopleSearchResult = {
     deptDivs: DeptDivBucket[];
     personTypes: SearchFacetBucket[];
     activity: { hasGrants: number; recentPub: number };
+    /** Issue #233 — bucket counts for the PI facet. `multi` reflects the
+     *  current `piMin`. `none` is the baseline (all results matching the
+     *  other filters; used as the count beside the "No filter" radio). */
+    pi: { none: number; any: number; active: number; multi: number };
   };
 };
 
@@ -206,6 +230,7 @@ export async function searchPeople(opts: {
           deptDivs: [],
           personTypes: [],
           activity: { hasGrants: 0, recentPub: 0 },
+          pi: { none: 0, any: 0, active: 0, multi: 0 },
         },
       };
     }
@@ -273,6 +298,22 @@ export async function searchPeople(opts: {
     ? { terms: { cwid: topicCwidFilter } }
     : null;
 
+  // Issue #233 — PI facet clause. Single-select; `pi=multi` carries an
+  // additional `piMin` threshold clamped to [PI_MIN_FLOOR, PI_MIN_CEILING].
+  // Out-of-range `piMin` values are clamped silently so saved bookmarks with
+  // stale values still return the highest-defined bucket rather than empty.
+  const piMode: PiFilter | undefined = filters.pi;
+  const piMin = Math.min(
+    PI_MIN_CEILING,
+    Math.max(PI_MIN_FLOOR, filters.piMin ?? PI_MIN_FLOOR),
+  );
+  const piClauseFor = (mode: PiFilter, threshold: number): Record<string, unknown> => {
+    if (mode === "any") return { term: { piRoleEver: true } };
+    if (mode === "active") return { range: { activePiGrantCount: { gte: 1 } } };
+    return { range: { activePiGrantCount: { gte: threshold } } };
+  };
+  const piClause = piMode ? piClauseFor(piMode, piMin) : null;
+
   // Filter classification:
   //   - "Always-on" filters (sparse-profile, topic pre-filter) belong on
   //     the main query so aggregations respect them — bucket counts for
@@ -292,15 +333,17 @@ export async function searchPeople(opts: {
   if (deptDivClause) userAxisFilters.push(deptDivClause);
   if (personTypeClause) userAxisFilters.push(personTypeClause);
   for (const c of activityClauses) userAxisFilters.push(c);
+  if (piClause) userAxisFilters.push(piClause);
 
   // Helper: user-axis filters with one axis omitted, for that axis's
   // excluding-self aggregation. Always-on filters are inherited from the
   // main query context, so they don't appear here.
-  const filtersExcept = (axis: "deptDiv" | "personType" | "activity") => {
+  const filtersExcept = (axis: "deptDiv" | "personType" | "activity" | "pi") => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "deptDiv" && deptDivClause) out.push(deptDivClause);
     if (axis !== "personType" && personTypeClause) out.push(personTypeClause);
     if (axis !== "activity") for (const c of activityClauses) out.push(c);
+    if (axis !== "pi" && piClause) out.push(piClause);
     return out;
   };
 
@@ -354,6 +397,40 @@ export async function searchPeople(opts: {
             ...filtersExcept("activity"),
             { range: { mostRecentPubDate: { gte: recentPubCutoff.toISOString() } } },
           ],
+        },
+      },
+    },
+    // Issue #233 — PI facet bucket counts. Each agg re-applies the
+    // user-axis filters EXCEPT `pi`, then layers the option's own predicate
+    // on top — so the count beside an unticked radio reflects what the
+    // result set would be if the user picked that option (filters-except
+    // pattern, matching `activityHasGrants`). `piNone` carries the
+    // total-without-pi-filter so the "No filter" radio shows a baseline
+    // count next to it. `piMulti` uses the current `piMin`.
+    piNone: {
+      filter: { bool: { must, filter: filtersExcept("pi") } },
+    },
+    piAny: {
+      filter: {
+        bool: {
+          must,
+          filter: [...filtersExcept("pi"), piClauseFor("any", piMin)],
+        },
+      },
+    },
+    piActive: {
+      filter: {
+        bool: {
+          must,
+          filter: [...filtersExcept("pi"), piClauseFor("active", piMin)],
+        },
+      },
+    },
+    piMulti: {
+      filter: {
+        bool: {
+          must,
+          filter: [...filtersExcept("pi"), piClauseFor("multi", piMin)],
         },
       },
     },
@@ -414,6 +491,10 @@ export async function searchPeople(opts: {
       personTypes?: { keys: { buckets: Bucket[] } };
       activityHasGrants?: { doc_count: number };
       activityRecentPub?: { doc_count: number };
+      piNone?: { doc_count: number };
+      piAny?: { doc_count: number };
+      piActive?: { doc_count: number };
+      piMulti?: { doc_count: number };
     };
   };
 
@@ -453,6 +534,12 @@ export async function searchPeople(opts: {
       activity: {
         hasGrants: r.aggregations?.activityHasGrants?.doc_count ?? 0,
         recentPub: r.aggregations?.activityRecentPub?.doc_count ?? 0,
+      },
+      pi: {
+        none: r.aggregations?.piNone?.doc_count ?? 0,
+        any: r.aggregations?.piAny?.doc_count ?? 0,
+        active: r.aggregations?.piActive?.doc_count ?? 0,
+        multi: r.aggregations?.piMulti?.doc_count ?? 0,
       },
     },
   };

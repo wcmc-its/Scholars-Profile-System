@@ -32,6 +32,8 @@ import {
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
 import { coreProjectNum } from "@/lib/award-number";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { isFundingActive } from "@/lib/api/search-funding";
+import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 
 const AUTHORSHIP_WEIGHTS = {
   firstOrLast: 10,
@@ -235,7 +237,21 @@ async function indexPeople() {
       for (let i = 0; i < agg.weightedCount; i++) meshParts.push(term);
     }
 
-    const hasActiveGrants = s.grants.some((g) => g.endDate.getTime() > Date.now());
+    // Issue #233 — `hasActiveGrants` realigned onto NCE 12-month grace
+    // semantics so the People-tab Activity facet, the PI facet, and the
+    // Funding tab all share one definition of "currently active." Small
+    // behavior delta: grants in their NCE window flip from "inactive" to
+    // "active" here.
+    const now = new Date();
+    const PI_ROLES = new Set(["PI", "PI-Subaward"]);
+    const hasActiveGrants = s.grants.some((g) => isFundingActive(g.endDate, now));
+    const piRoleEver = s.grants.some((g) => PI_ROLES.has(g.role));
+    const activePiGrantCount = s.grants.reduce((n, g) => {
+      if (!PI_ROLES.has(g.role)) return n;
+      if (!isFundingActive(g.endDate, now)) return n;
+      if (isTrainingOnlyGrant(g)) return n;
+      return n + 1;
+    }, 0);
     const isComplete =
       !!s.overview && s.authorships.length >= 3 && hasActiveGrants ? true : false;
     // Phase 2 — sourced from ED ETL derivation (lib/eligibility.ts RoleCategory).
@@ -358,6 +374,8 @@ async function indexPeople() {
         publicationMesh: meshParts.join(" "),
         publicationAbstracts: abstractParts.join(" "),
         hasActiveGrants,
+        piRoleEver,
+        activePiGrantCount,
         isComplete,
         personType,
         publicationCount: s.authorships.length,
