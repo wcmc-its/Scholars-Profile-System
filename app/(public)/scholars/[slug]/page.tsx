@@ -5,6 +5,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
+import { formatMentoringDistribution } from "@/lib/mentoring-labels";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Suspense } from "react";
@@ -402,11 +403,19 @@ export default async function ScholarProfilePage({
               (s, m) => s + m.copublicationCount,
               0,
             );
+            // Issue #201 priority #5 — show degree-bucket distribution
+            // ("7 MD · 8 PhD · 6 MD-PhD") once the portfolio is large
+            // enough that the breakdown carries shape the bare count
+            // doesn't. Helper returns null below the threshold or when
+            // every mentee falls in a single bucket; in that case the
+            // subhead falls back to the plain "N mentees".
+            const distribution = formatMentoringDistribution(mentees);
+            const countLabel = `${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`;
             return (
               <Section
                 title="Mentoring"
                 headingLg
-                count={<>{mentees.length} {mentees.length === 1 ? "mentee" : "mentees"}</>}
+                count={distribution ? `${countLabel} — ${distribution}` : countLabel}
                 headerAction={
                   totalCopubs > 0 ? (
                     <a
