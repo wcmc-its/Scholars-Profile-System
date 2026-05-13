@@ -11,9 +11,17 @@
  *   2. Batched query of analysis_summary_author for those personIdentifiers
  *   3. Distinct pmids from result; batched query of analysis_summary_article
  *      for metadata (title, journal, year, type, citation count, dates, DOI)
- *   4. Wipe existing publication / publication_author / publication_score
- *      rows in a transaction
- *   5. Insert publications and WCM-author rows in bulk (Prisma createMany)
+ *   4. Upsert publications keyed on pmid; scoped delete-then-insert of WCM
+ *      PublicationAuthor rows for the source PMID set; full wipe of
+ *      PublicationScore (no inbound FK, so wipe is local).
+ *   5. End-of-run orphan cleanup: delete publications whose pmid is no longer
+ *      in the ReCiter source — cascade to publication_topic / publication_author
+ *      / grant_publication / publication_score is intentional for those rows.
+ *
+ * Issue #247: the prior `publication.deleteMany()` wipe cascaded into
+ * publication_topic (onDelete: Cascade), silently emptying a table owned by
+ * a different ETL (`ReCiterAI-projection`). Idempotent upsert removes the
+ * trigger; only genuinely-removed PMIDs cascade now.
  *
  * Author handling:
  *   - The `authors` string from analysis_summary_author is the full ordered
@@ -335,13 +343,13 @@ async function main() {
       }
     }
 
-    // 4. Reset existing publications data
-    console.log("Resetting publication / publication_author / publication_score tables...");
+    // 4. Build the source publication set. Issue #247: we no longer wipe the
+    //    publication table — that cascaded into publication_topic (owned by
+    //    the ReCiterAI-projection ETL). PublicationScore is still safe to wipe
+    //    because nothing FKs to it.
+    console.log("Wiping publication_score (no inbound FK)...");
     await prisma.publicationScore.deleteMany();
-    await prisma.publicationAuthor.deleteMany();
-    await prisma.publication.deleteMany();
 
-    // 5. Bulk insert Publication rows
     const pubRows = Array.from(articleByPmid.values()).map((a) => {
       const authorsString = authorsStringByPmid.get(Number(a.pmid)) ?? null;
       return {
@@ -366,18 +374,34 @@ async function main() {
         source: "ReciterDB",
       };
     });
+    const sourcePmids = pubRows.map((p) => p.pmid);
+    const sourcePmidsSet = new Set(sourcePmids);
 
-    console.log(`Inserting ${pubRows.length} publications...`);
-    let inserted = 0;
+    // 5. Upsert publications keyed on pmid. Parallel-chunk pattern mirrors
+    //    etl/dynamodb/index.ts:300-336.
+    console.log(`Upserting ${pubRows.length} publications...`);
+    let upserted = 0;
     for (const batch of chunks(pubRows, INSERT_BATCH)) {
-      await prisma.publication.createMany({ data: batch, skipDuplicates: true });
-      inserted += batch.length;
-      if (inserted % (INSERT_BATCH * 10) === 0) {
-        console.log(`  ...${inserted}/${pubRows.length}`);
+      await Promise.all(
+        batch.map((p) => {
+          const { pmid, ...rest } = p;
+          return prisma.publication.upsert({
+            where: { pmid },
+            create: { pmid, ...rest, lastRefreshedAt: new Date() },
+            update: { ...rest, lastRefreshedAt: new Date() },
+          });
+        }),
+      );
+      upserted += batch.length;
+      if (upserted % (INSERT_BATCH * 10) === 0) {
+        console.log(`  ...${upserted}/${pubRows.length}`);
       }
     }
 
-    // 6. Bulk insert PublicationAuthor rows for WCM authorships
+    // 6. Scoped refresh of PublicationAuthor rows. Delete WCM authorships only
+    //    for the source PMID set, then bulk insert the freshly-computed rows.
+    //    PublicationAuthor has no inbound FK references, so the scoped delete
+    //    doesn't cascade anywhere.
     const authorshipRows: Array<{
       pmid: string;
       cwid: string;
@@ -421,6 +445,11 @@ async function main() {
       });
     }
 
+    console.log(`Clearing prior WCM authorship rows for ${sourcePmids.length} source PMIDs...`);
+    for (const batch of chunks(sourcePmids, IN_BATCH)) {
+      await prisma.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
+    }
+
     console.log(`Inserting ${authorshipRows.length} WCM authorship rows...`);
     let authInserted = 0;
     for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
@@ -429,6 +458,30 @@ async function main() {
       if (authInserted % (INSERT_BATCH * 20) === 0) {
         console.log(`  ...${authInserted}/${authorshipRows.length}`);
       }
+    }
+
+    // 7. Orphan cleanup — delete publications whose pmid is no longer in the
+    //    ReCiter source. Cascade to publication_topic / publication_author /
+    //    grant_publication / publication_score IS intentional for these rows:
+    //    a genuinely-removed PMID should not leave dangling projections.
+    console.log("Computing orphan publications (in DB but not in ReCiter source)...");
+    const existingPmids = (
+      await prisma.publication.findMany({ select: { pmid: true } })
+    ).map((p) => p.pmid);
+    const orphanPmids = existingPmids.filter((pmid) => !sourcePmidsSet.has(pmid));
+    if (orphanPmids.length > 0) {
+      console.log(
+        `Deleting ${orphanPmids.length} orphan publication(s) ` +
+          `(cascade fires for publication_topic / publication_author / grant_publication / publication_score)...`,
+      );
+      let orphanDeleted = 0;
+      for (const batch of chunks(orphanPmids, IN_BATCH)) {
+        await prisma.publication.deleteMany({ where: { pmid: { in: batch } } });
+        orphanDeleted += batch.length;
+      }
+      console.log(`  ...deleted ${orphanDeleted} orphan publications.`);
+    } else {
+      console.log("No orphan publications.");
     }
 
     await prisma.etlRun.update({
