@@ -88,7 +88,7 @@ This compares the new `manifest.sha256` against the prior `EtlRun(source: "Spotl
 - `s3://wcmc-reciterai-artifacts/spotlight/v{ISO-date}/manifest.json` — version + sha256 + sizes
 - `s3://wcmc-reciterai-artifacts/spotlight/latest/{spotlight.json,…}` — overwrites every publish; SPS reads here
 
-### DynamoDB (`reciterai-chatbot` table)
+### DynamoDB (`reciterai` table)
 
 - `SPOTLIGHT_HISTORY#{subtopic_id}` — rotation decay multiplier source
 - `SPOTLIGHT_REVIEW#{publish_id}` — sensitive-tag and critic-failed entries pending operator review

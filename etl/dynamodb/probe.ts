@@ -1,6 +1,6 @@
 /**
  * Wave 0 probe — read-only enumeration of DynamoDB partition prefixes
- * in the reciterai-chatbot table, plus sample records per prefix.
+ * in the reciterai table, plus sample records per prefix.
  *
  * Output: JSON to stdout. Pipe to .planning/phases/02-.../probe-output.json
  * for the D-02 schema decision in 02-SCHEMA-DECISION.md.
@@ -9,7 +9,7 @@
  *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
- *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai-chatbot)
+ *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai)
  *
  * Usage:
  *   npx tsx etl/dynamodb/probe.ts > .planning/phases/02-algorithmic-surfaces-and-home-composition/probe-output.json
@@ -17,7 +17,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 
-const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai-chatbot";
+const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
 const SAMPLE_LIMIT = 5;
 
