@@ -1,7 +1,20 @@
 import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
+import { ScrollRevealedSearch } from "@/components/site/scroll-revealed-search";
 
-export function SiteHeader({ showSearch = true }: { showSearch?: boolean }) {
+export function SiteHeader({
+  showSearch = true,
+  revealOnScrollPast,
+}: {
+  showSearch?: boolean;
+  /**
+   * Optional sentinel element id. When provided, the header search stays
+   * hidden until this element scrolls out of view. Used on the homepage to
+   * suppress the duplicate header search while the hero search is on-screen
+   * (issue #215).
+   */
+  revealOnScrollPast?: string;
+}) {
   return (
     <header
       className="sticky top-0 z-50 h-[60px] border-b border-black/15"
@@ -28,7 +41,11 @@ export function SiteHeader({ showSearch = true }: { showSearch?: boolean }) {
 
         {showSearch ? (
           <div className="flex-1">
-            <SearchAutocomplete />
+            {revealOnScrollPast ? (
+              <ScrollRevealedSearch sentinelId={revealOnScrollPast} />
+            ) : (
+              <SearchAutocomplete />
+            )}
           </div>
         ) : (
           <div className="flex-1" />
