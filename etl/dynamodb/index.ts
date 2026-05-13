@@ -34,7 +34,7 @@
  *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
- *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai-chatbot)
+ *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai)
  *
  * Usage: `npm run etl:dynamodb`
  */
@@ -43,7 +43,7 @@ import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
 
-const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai-chatbot";
+const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
 
 type FacultyRecord = {
