@@ -1,4 +1,5 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
 import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -38,13 +39,15 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
       </div>
       <div className="flex min-w-0 flex-col">
         <div className="mb-[3px] flex flex-wrap items-center gap-2 text-[15px] font-medium leading-[1.3]">
-          <a
-            href={`/scholars/${hit.slug}`}
-            className="hover:underline"
-            style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
-          >
-            {hit.preferredName}
-          </a>
+          <PersonPopover cwid={hit.cwid} surface="facet">
+            <a
+              href={`/scholars/${hit.slug}`}
+              className="hover:underline"
+              style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
+            >
+              {hit.preferredName}
+            </a>
+          </PersonPopover>
           {hit.roleCategory && (() => {
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;

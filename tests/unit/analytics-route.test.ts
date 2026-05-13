@@ -144,7 +144,9 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS).toBeInstanceOf(Set);
     expect(VALID_EVENTS.has("search_click")).toBe(true);
     expect(VALID_EVENTS.has("mentoring_copubs_open")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(2);
+    expect(VALID_EVENTS.has("person_popover_open")).toBe(true);
+    expect(VALID_EVENTS.has("person_popover_action")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(4);
   });
 });
 

@@ -118,6 +118,7 @@ export default async function TopicPage({
               scholars={topScholars}
               scholarCount={scholarCount}
               topicSlug={slug}
+              topicLabel={topic.label}
             />
           </div>
         )}

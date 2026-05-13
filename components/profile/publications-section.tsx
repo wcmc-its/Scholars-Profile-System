@@ -50,8 +50,13 @@ export function PublicationsSection({
   filterActive = false,
   positions = [],
   onPositionsChange,
+  scholarCwid,
 }: {
   publications: ProfilePublication[];
+  /** The scholar whose profile these pubs belong to. Threaded to
+   *  <PublicationRow> so PersonPopover can apply the self-hover guard and
+   *  route co-author chips to the co-author surface (#242). */
+  scholarCwid?: string;
   /** Set by `<ProfilePubsCluster>` when a topic filter is active. Expands
    *  every year-group within the last 10 years (per the published max year)
    *  on top of the default "first group only" behavior, so users browsing a
@@ -245,7 +250,7 @@ export function PublicationsSection({
                       key={p.pmid}
                       className="border-t border-border py-3 pl-[24px] first:border-t-0"
                     >
-                      <PublicationRow pub={p} compact />
+                      <PublicationRow pub={p} compact currentProfileCwid={scholarCwid} />
                     </li>
                   ))}
                 </ul>

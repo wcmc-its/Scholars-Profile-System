@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { PersonPopover } from "@/components/scholar/person-popover";
 
 const TOP_VISIBLE = 10;
 const EXPANDED_VISIBLE = 50;
@@ -158,33 +159,50 @@ function lastNameKey(displayName: string): string {
 }
 
 function AuthorRow({ author }: { author: AuthorFacetItem }) {
+  const lastNameForAction = lastNameKey(author.displayName);
+  const primaryLabel = author.isActive
+    ? `Remove ${lastNameForAction || "filter"}`
+    : `Filter by ${capitalize(lastNameForAction) || "author"}`;
   return (
     <li className="py-1 leading-[1.4]">
-      <Link
-        href={author.toggleHref}
-        className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+      <PersonPopover
+        cwid={author.cwid}
+        surface="facet"
+        filterMatchCount={author.count}
+        primaryActionHref={author.toggleHref}
+        primaryActionLabel={primaryLabel}
       >
-        <input
-          type="checkbox"
-          readOnly
-          checked={author.isActive}
-          tabIndex={-1}
-          aria-hidden="true"
-          className="cursor-pointer accent-[#2c4f6e]"
-        />
-        <HeadshotAvatar
-          size="sm"
-          cwid={author.cwid}
-          preferredName={author.displayName}
-          identityImageEndpoint={author.identityImageEndpoint}
-        />
-        <span className="min-w-0 flex-1 truncate" title={author.displayName}>
-          {author.displayName}
-        </span>
-        <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
-          {author.count.toLocaleString()}
-        </span>
-      </Link>
+        <Link
+          href={author.toggleHref}
+          className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+        >
+          <input
+            type="checkbox"
+            readOnly
+            checked={author.isActive}
+            tabIndex={-1}
+            aria-hidden="true"
+            className="cursor-pointer accent-[#2c4f6e]"
+          />
+          <HeadshotAvatar
+            size="sm"
+            cwid={author.cwid}
+            preferredName={author.displayName}
+            identityImageEndpoint={author.identityImageEndpoint}
+          />
+          <span className="min-w-0 flex-1 truncate" title={author.displayName}>
+            {author.displayName}
+          </span>
+          <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+            {author.count.toLocaleString()}
+          </span>
+        </Link>
+      </PersonPopover>
     </li>
   );
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

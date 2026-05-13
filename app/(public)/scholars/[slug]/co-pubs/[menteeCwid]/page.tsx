@@ -154,6 +154,7 @@ export default async function CoPubsPage({
                 pub={p}
                 scholarByCwid={scholarByCwid}
                 pinnedCwids={pinnedCwids}
+                currentProfileCwid={mentor.cwid}
               />
             </li>
           ))}
@@ -172,10 +173,12 @@ function CoPubCitation({
   pub,
   scholarByCwid,
   pinnedCwids,
+  currentProfileCwid,
 }: {
   pub: CoPublicationFull;
   scholarByCwid: Map<string, { slug: string; preferredName: string }>;
   pinnedCwids: ReadonlyArray<string>;
+  currentProfileCwid: string;
 }) {
   const wcmRanks = pub.authors
     .filter((a) => a.personIdentifier)
@@ -225,7 +228,12 @@ function CoPubCitation({
           {pub.year ? ` · ${pub.year}` : ""}
         </div>
       )}
-      <AuthorChipRow authors={authorChips} pinnedCwids={pinnedCwids} />
+      <AuthorChipRow
+        authors={authorChips}
+        pinnedCwids={pinnedCwids}
+        pmid={String(pub.pmid)}
+        currentProfileCwid={currentProfileCwid}
+      />
       <PublicationMeta
         citationCount={pub.citationCount}
         pmid={String(pub.pmid)}

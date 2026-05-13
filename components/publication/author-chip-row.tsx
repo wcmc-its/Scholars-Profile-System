@@ -17,6 +17,7 @@
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { PersonPopover } from "@/components/scholar/person-popover";
 
 export type AuthorChip = {
   name: string;
@@ -54,6 +55,8 @@ function chipRoleLabel(
 export function AuthorChipRow({
   authors,
   pinnedCwids,
+  pmid,
+  currentProfileCwid,
 }: {
   authors: AuthorChip[];
   /** CWIDs that must always render visibly regardless of the CHIP_CAP
@@ -62,6 +65,13 @@ export function AuthorChipRow({
    *  of the visible slice; non-pinned authors fill the rest, preserving
    *  their original (authorship) order. */
   pinnedCwids?: ReadonlyArray<string>;
+  /** Pub PMID for #242 — drives the authorship-role pill and "recent pubs"
+   *  fetch inside PersonPopover. When absent, the popover still renders but
+   *  without the role pill. */
+  pmid?: string;
+  /** Scholar whose profile the chip row is rendered on, when applicable —
+   *  enables PersonPopover's self-hover guard + co-pub action. */
+  currentProfileCwid?: string;
 }) {
   if (authors.length === 0) return null;
   // A chip needs a cwid to render the headshot identity. Linked authors
@@ -111,19 +121,39 @@ export function AuthorChipRow({
             <span>{a.name}</span>
           </>
         );
+        const tooltipText = chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount);
+        const inlineChip = a.slug ? (
+          <a href={`/scholars/${a.slug}`} className={chipClass}>
+            {inner}
+          </a>
+        ) : (
+          <span className={chipClass}>{inner}</span>
+        );
+        // PersonPopover supersedes HoverTooltip when we have authorship context
+        // (the pmid + the author's cwid). Without context (no pmid passed by
+        // the caller), fall back to the legacy tooltip — same as today.
+        if (!pmid) {
+          return (
+            <HoverTooltip key={`${a.cwid}-${i}`} text={tooltipText}>
+              {inlineChip}
+            </HoverTooltip>
+          );
+        }
+        const surface: "pub-chip" | "co-author" =
+          currentProfileCwid && a.cwid !== currentProfileCwid ? "co-author" : "pub-chip";
         return (
-          <HoverTooltip
+          <PersonPopover
             key={`${a.cwid}-${i}`}
-            text={chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount)}
+            cwid={a.cwid!}
+            surface={surface}
+            contextPubPmid={pmid}
+            contextScholarCwid={
+              surface === "co-author" ? currentProfileCwid : undefined
+            }
+            currentProfileCwid={currentProfileCwid}
           >
-            {a.slug ? (
-              <a href={`/scholars/${a.slug}`} className={chipClass}>
-                {inner}
-              </a>
-            ) : (
-              <span className={chipClass}>{inner}</span>
-            )}
-          </HoverTooltip>
+            {inlineChip}
+          </PersonPopover>
         );
       })}
       {overflow > 0 && (

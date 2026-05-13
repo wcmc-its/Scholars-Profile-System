@@ -248,7 +248,7 @@ export function PublicationFeed({
                     {h.year ? <span>{h.year}</span> : null}
                   </div>
                 )}
-                <AuthorChipRow authors={h.authors} />
+                <AuthorChipRow authors={h.authors} pmid={h.pmid} />
                 <PublicationMeta
                   citationCount={h.citationCount}
                   pmid={h.pmid}

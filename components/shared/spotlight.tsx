@@ -105,7 +105,7 @@ function SpotlightPubCard({
           dangerouslySetInnerHTML={{ __html: titleHtml }}
         />
       </h3>
-      <AuthorChipRow authors={card.authors} />
+      <AuthorChipRow authors={card.authors} pmid={card.pmid} />
       <div className="text-[12px] italic leading-[1.4] text-[var(--color-text-tertiary)]">
         {card.journal ? (
           <span

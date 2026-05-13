@@ -866,7 +866,7 @@ async function PublicationsResults({
                     {h.journal && h.year ? ". " : null}
                     {h.year ?? null}.
                   </div>
-                  <AuthorChipRow authors={h.wcmAuthors} />
+                  <AuthorChipRow authors={h.wcmAuthors} pmid={h.pmid} />
                   <PublicationMeta
                     citationCount={h.citationCount}
                     pmid={h.pmid}

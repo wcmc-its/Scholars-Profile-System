@@ -31,6 +31,10 @@ type ProfilePubsClusterProps = {
   publications: ProfilePublication[];
   keywords: ScholarKeyword[];
   totalAcceptedPubs: number;
+  /** Cwid of the scholar whose profile is being rendered. Threaded down
+   *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
+   *  PersonPopover can apply the self-hover guard (#242). */
+  scholarCwid?: string;
 };
 
 export function ProfilePubsCluster(props: ProfilePubsClusterProps) {
@@ -47,6 +51,7 @@ function ProfilePubsClusterInner({
   publications,
   keywords,
   totalAcceptedPubs,
+  scholarCwid,
 }: ProfilePubsClusterProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -180,6 +185,7 @@ function ProfilePubsClusterInner({
         filterActive={filterActive}
         positions={positions}
         onPositionsChange={onPositionsChange}
+        scholarCwid={scholarCwid}
       />
     </>
   );
