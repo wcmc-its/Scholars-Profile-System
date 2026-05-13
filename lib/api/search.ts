@@ -23,6 +23,16 @@ import { prisma } from "@/lib/db";
 import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import { getMentoringPmidBuckets, type MentoringProgramKey } from "@/lib/api/mentoring-pmids";
 import {
+  capFill,
+  chooseKindOrder,
+  classifyQueryShape,
+  plausibilityHits,
+  promoteStartsWith,
+  tiebreakPeople,
+  tryFullNameCarveOut,
+  type RankingSources,
+} from "@/lib/api/search-ranking";
+import {
   PEOPLE_FIELD_BOOSTS,
   PEOPLE_INDEX,
   PUBLICATION_FIELD_BOOSTS,
@@ -899,6 +909,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
     primaryTitle: string | null;
     primaryDepartment: string | null;
     personType: string | null;
+    lastNameSort: string | null;
   }>
 > {
   const trimmed = prefix.trim();
@@ -937,6 +948,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       primaryTitle?: string | null;
       primaryDepartment?: string | null;
       personType?: string | null;
+      lastNameSort?: string | null;
     };
   };
   const sourceByCwid = new Map<string, MGetDoc["_source"]>();
@@ -958,6 +970,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       primaryTitle: src?.primaryTitle ?? null,
       primaryDepartment: src?.primaryDepartment ?? null,
       personType: src?.personType ?? null,
+      lastNameSort: src?.lastNameSort ?? null,
     };
   });
 }
@@ -986,8 +999,17 @@ export type EntitySuggestion = {
 
 /**
  * Mixed-entity autocomplete: returns people, topics, subtopics, departments,
- * divisions, and centers in a single ranked list. Per-source caps keep the
- * dropdown predictable; total ≤ `perKind * 6`.
+ * divisions, and centers in a single ranked list.
+ *
+ * Two paths, gated by `SEARCH_RANKING_V2`:
+ *   - `on` (default): #231 v1 algorithm — plausibility predicates, query-shape
+ *     classifier, full-name carve-out, deterministic person tiebreak, 12-row
+ *     position-anchored cap fill. Fetches up to 5 per source.
+ *   - `off`: legacy path — fixed kind order, per-source `perKind` cap (default
+ *     3). Kill switch for v1.
+ *
+ * The flag check lives here rather than at the route so any caller of
+ * `suggestEntities` shares the same dispatch.
  */
 export async function suggestEntities(
   prefix: string,
@@ -996,130 +1018,135 @@ export async function suggestEntities(
   const trimmed = prefix.trim();
   if (trimmed.length < 2) return [];
 
-  const [people, topics, subtopics, departments, divisions, centers] =
-    await Promise.all([
-      suggestNames(trimmed, perKind).catch(() => []),
-      prisma.topic
-        .findMany({
-          where: { label: { contains: trimmed } },
-          orderBy: { label: "asc" },
-          take: perKind,
-          select: { id: true, label: true },
-        })
-        .catch(() => [] as Array<{ id: string; label: string }>),
-      prisma.subtopic
-        .findMany({
-          // Search-on-label is intentional. `label` is the synthesis/retrieval-
-          // canonical field per D-19; users typing research-domain words match
-          // it more reliably than the UI-stylized `display_name`. Switching to
-          // displayName for matching would shrink hit counts AND introduce
-          // D-19-forbidden retrieval over UI fields. Render uses display_name;
-          // matching uses label.
-          where: { label: { contains: trimmed } },
-          orderBy: { label: "asc" },
-          take: perKind,
-          select: {
-            id: true,
-            label: true,
-            displayName: true,
-            shortDescription: true,
-            parentTopicId: true,
-            parentTopic: { select: { label: true } },
-          },
-        })
-        .catch(
-          () =>
-            [] as Array<{
-              id: string;
-              label: string;
-              displayName: string | null;
-              shortDescription: string | null;
-              parentTopicId: string;
-              parentTopic: { label: string } | null;
-            }>,
-        ),
-      prisma.department
-        .findMany({
-          where: { name: { contains: trimmed } },
-          orderBy: { name: "asc" },
-          take: perKind,
-          select: { slug: true, name: true, scholarCount: true },
-        })
-        .catch(
-          () =>
-            [] as Array<{ slug: string; name: string; scholarCount: number }>,
-        ),
-      prisma.division
-        .findMany({
-          where: { name: { contains: trimmed } },
-          orderBy: { name: "asc" },
-          take: perKind,
-          select: {
-            slug: true,
-            name: true,
-            scholarCount: true,
-            department: { select: { slug: true, name: true } },
-          },
-        })
-        .catch(
-          () =>
-            [] as Array<{
-              slug: string;
-              name: string;
-              scholarCount: number;
-              department: { slug: string; name: string } | null;
-            }>,
-        ),
-      prisma.center
-        .findMany({
-          where: { name: { contains: trimmed } },
-          orderBy: { name: "asc" },
-          take: perKind,
-          select: {
-            slug: true,
-            name: true,
-            scholarCount: true,
-            centerType: true,
-          },
-        })
-        .catch(
-          () =>
-            [] as Array<{
-              slug: string;
-              name: string;
-              scholarCount: number;
-              centerType: string;
-            }>,
-        ),
+  const useV2 = (process.env.SEARCH_RANKING_V2 ?? "on") !== "off";
+  const fetchN = useV2 ? 5 : perKind;
+
+  const [peopleR, topicsR, subtopicsR, departmentsR, divisionsR, centersR] =
+    await Promise.allSettled([
+      suggestNames(trimmed, fetchN),
+      prisma.topic.findMany({
+        where: { label: { contains: trimmed } },
+        orderBy: { label: "asc" },
+        take: fetchN,
+        select: { id: true, label: true },
+      }),
+      prisma.subtopic.findMany({
+        // Search-on-label is intentional. `label` is the synthesis/retrieval-
+        // canonical field per D-19; users typing research-domain words match
+        // it more reliably than the UI-stylized `display_name`. Switching to
+        // displayName for matching would shrink hit counts AND introduce
+        // D-19-forbidden retrieval over UI fields. Render uses display_name;
+        // matching uses label.
+        where: { label: { contains: trimmed } },
+        orderBy: { label: "asc" },
+        take: fetchN,
+        select: {
+          id: true,
+          label: true,
+          displayName: true,
+          shortDescription: true,
+          parentTopicId: true,
+          parentTopic: { select: { label: true } },
+        },
+      }),
+      prisma.department.findMany({
+        where: { name: { contains: trimmed } },
+        orderBy: { name: "asc" },
+        take: fetchN,
+        select: { slug: true, name: true, scholarCount: true },
+      }),
+      prisma.division.findMany({
+        where: { name: { contains: trimmed } },
+        orderBy: { name: "asc" },
+        take: fetchN,
+        select: {
+          slug: true,
+          name: true,
+          scholarCount: true,
+          department: { select: { slug: true, name: true } },
+        },
+      }),
+      prisma.center.findMany({
+        where: { name: { contains: trimmed } },
+        orderBy: { name: "asc" },
+        take: fetchN,
+        select: {
+          slug: true,
+          name: true,
+          scholarCount: true,
+          centerType: true,
+        },
+      }),
     ]);
 
-  const out: EntitySuggestion[] = [];
+  // §7 — allSettled means one slow/broken source contributes zero rows
+  // instead of 500-ing the dropdown.
+  const unwrap = <T>(r: PromiseSettledResult<T>, fallback: T): T =>
+    r.status === "fulfilled" ? r.value : fallback;
+  const people = unwrap(peopleR, [] as Awaited<ReturnType<typeof suggestNames>>);
+  const topics = unwrap(topicsR, [] as Array<{ id: string; label: string }>);
+  const subtopics = unwrap(
+    subtopicsR,
+    [] as Array<{
+      id: string;
+      label: string;
+      displayName: string | null;
+      shortDescription: string | null;
+      parentTopicId: string;
+      parentTopic: { label: string } | null;
+    }>,
+  );
+  const departments = unwrap(
+    departmentsR,
+    [] as Array<{ slug: string; name: string; scholarCount: number }>,
+  );
+  const divisions = unwrap(
+    divisionsR,
+    [] as Array<{
+      slug: string;
+      name: string;
+      scholarCount: number;
+      department: { slug: string; name: string } | null;
+    }>,
+  );
+  const centers = unwrap(
+    centersR,
+    [] as Array<{
+      slug: string;
+      name: string;
+      scholarCount: number;
+      centerType: string;
+    }>,
+  );
 
-  for (const p of people) {
-    if (!p.slug) continue;
+  type PersonRow = Awaited<ReturnType<typeof suggestNames>>[number];
+  type TopicRow = (typeof topics)[number];
+  type SubtopicRow = (typeof subtopics)[number];
+  type DeptRow = (typeof departments)[number];
+  type DivisionRow = (typeof divisions)[number];
+  type CenterRow = (typeof centers)[number];
+
+  const personToSuggestion = (p: PersonRow): EntitySuggestion | null => {
+    if (!p.slug) return null;
     const subParts = [p.primaryTitle, p.primaryDepartment].filter(
       (s): s is string => Boolean(s),
     );
-    out.push({
+    return {
       kind: "person",
       title: p.text,
       subtitle: subParts.join(" · ") || undefined,
       href: `/scholars/${p.slug}`,
       cwid: p.cwid,
       roleCategory: p.personType ?? undefined,
-    });
-  }
-
-  for (const t of topics) {
-    out.push({
-      kind: "topic",
-      title: t.label,
-      subtitle: "Research topic",
-      href: `/topics/${t.id}`,
-    });
-  }
-
-  for (const s of subtopics) {
+    };
+  };
+  const topicToSuggestion = (t: TopicRow): EntitySuggestion => ({
+    kind: "topic",
+    title: t.label,
+    subtitle: "Research topic",
+    href: `/topics/${t.id}`,
+  });
+  const subtopicToSuggestion = (s: SubtopicRow): EntitySuggestion => {
     // D-09 universal fallback for the suggestion title.
     const title = s.displayName?.trim() || s.label?.trim() || s.id;
     // D-07: short_description is the autocomplete subtitle source for subtopic
@@ -1133,47 +1160,140 @@ export async function suggestEntities(
       : s.parentTopic
         ? `Subtopic in ${s.parentTopic.label}`
         : "Subtopic";
-    out.push({
+    return {
       kind: "subtopic",
       title,
       subtitle,
       href: `/topics/${s.parentTopicId}?subtopic=${encodeURIComponent(s.id)}#publications`,
-    });
-  }
-
-  for (const d of departments) {
-    out.push({
-      kind: "department",
-      title: d.name,
-      subtitle: d.scholarCount
-        ? `Department · ${d.scholarCount.toLocaleString()} scholars`
-        : "Department",
-      href: `/departments/${d.slug}`,
-    });
-  }
-
-  for (const d of divisions) {
-    if (!d.department) continue;
-    out.push({
+    };
+  };
+  const deptToSuggestion = (d: DeptRow): EntitySuggestion => ({
+    kind: "department",
+    title: d.name,
+    subtitle: d.scholarCount
+      ? `Department · ${d.scholarCount.toLocaleString()} scholars`
+      : "Department",
+    href: `/departments/${d.slug}`,
+  });
+  const divisionToSuggestion = (d: DivisionRow): EntitySuggestion | null => {
+    if (!d.department) return null;
+    return {
       kind: "division",
       title: d.name,
       subtitle: `Division of ${d.department.name}`,
       href: `/departments/${d.department.slug}/divisions/${d.slug}`,
-    });
-  }
-
-  for (const c of centers) {
+    };
+  };
+  const centerToSuggestion = (c: CenterRow): EntitySuggestion => {
     const isInstitute = c.centerType === "institute";
     const kindLabel = isInstitute ? "Institute" : "Center";
-    out.push({
+    return {
       kind: isInstitute ? "institute" : "center",
       title: c.name,
       subtitle: c.scholarCount
         ? `${kindLabel} · ${c.scholarCount.toLocaleString()} members`
         : kindLabel,
       href: `/centers/${c.slug}`,
-    });
+    };
+  };
+
+  if (!useV2) {
+    // Legacy path — fixed order, per-source `perKind` cap. Kept reachable via
+    // `SEARCH_RANKING_V2=off` as a kill switch.
+    const out: EntitySuggestion[] = [];
+    for (const p of people.slice(0, perKind)) {
+      const s = personToSuggestion(p);
+      if (s) out.push(s);
+    }
+    for (const t of topics.slice(0, perKind)) out.push(topicToSuggestion(t));
+    for (const s of subtopics.slice(0, perKind)) out.push(subtopicToSuggestion(s));
+    for (const d of departments.slice(0, perKind)) out.push(deptToSuggestion(d));
+    for (const d of divisions.slice(0, perKind)) {
+      const s = divisionToSuggestion(d);
+      if (s) out.push(s);
+    }
+    for (const c of centers.slice(0, perKind)) out.push(centerToSuggestion(c));
+    return out;
   }
 
+  // v1 ranking — §1..§6 from #231.
+  const peopleSorted = tiebreakPeople(people);
+
+  // §3 carve-out: if the query is a full-name match against a single person,
+  // collapse the dropdown to one row.
+  const carveOut = tryFullNameCarveOut(trimmed, peopleSorted);
+  if (carveOut) {
+    const s = personToSuggestion(carveOut);
+    return s ? [s] : [];
+  }
+
+  // Prisma sources return contains-matches in alphabetical order. Promote rows
+  // whose primary field starts with the prefix to the front of each source so
+  // the lead row in the dropdown is the prefix match, not the alpha-first
+  // contains-match. People come from OS-scored completion suggester and don't
+  // need this.
+  const topicsPromoted = promoteStartsWith(topics, trimmed, (r) => r.label);
+  const subtopicsPromoted = promoteStartsWith(subtopics, trimmed, (r) => r.label);
+  const departmentsPromoted = promoteStartsWith(departments, trimmed, (r) => r.name, "tokenwise");
+  const divisionsPromoted = promoteStartsWith(divisions, trimmed, (r) => r.name, "tokenwise");
+  const centersPromoted = promoteStartsWith(centers, trimmed, (r) => r.name, "tokenwise");
+
+  const sources: RankingSources = {
+    person: peopleSorted,
+    topic: topicsPromoted,
+    subtopic: subtopicsPromoted,
+    department: departmentsPromoted,
+    division: divisionsPromoted,
+    center: centersPromoted,
+  };
+
+  const shape = classifyQueryShape(trimmed);
+  const hits = plausibilityHits(trimmed, sources);
+  const order = chooseKindOrder(shape, hits);
+
+  // Centers in the data layer can carry centerType "institute"; the kind
+  // resolver doesn't distinguish them. Merge "institute" rows into the
+  // "center" bucket here so cap fill sees a single source.
+  const rowsByKind: Partial<Record<EntityKind, unknown[]>> = {
+    person: peopleSorted,
+    topic: topicsPromoted,
+    subtopic: subtopicsPromoted,
+    department: departmentsPromoted,
+    division: divisionsPromoted,
+    center: centersPromoted,
+  };
+
+  const filled = capFill<unknown>(order, rowsByKind);
+
+  const out: EntitySuggestion[] = [];
+  for (const { kind, rows } of filled) {
+    switch (kind) {
+      case "person":
+        for (const p of rows as PersonRow[]) {
+          const s = personToSuggestion(p);
+          if (s) out.push(s);
+        }
+        break;
+      case "topic":
+        for (const t of rows as TopicRow[]) out.push(topicToSuggestion(t));
+        break;
+      case "subtopic":
+        for (const s of rows as SubtopicRow[]) out.push(subtopicToSuggestion(s));
+        break;
+      case "department":
+        for (const d of rows as DeptRow[]) out.push(deptToSuggestion(d));
+        break;
+      case "division":
+        for (const d of rows as DivisionRow[]) {
+          const s = divisionToSuggestion(d);
+          if (s) out.push(s);
+        }
+        break;
+      case "center":
+      case "institute":
+        for (const c of rows as CenterRow[]) out.push(centerToSuggestion(c));
+        break;
+    }
+  }
   return out;
 }
