@@ -1,27 +1,11 @@
+# Local dev services.
+#
+# Note: MySQL is intentionally NOT in this file. The local app talks to host
+# MariaDB on 127.0.0.1:3306 (homebrew install). See README.md "Local setup" for
+# the rationale and the cleanup steps if you're migrating from the old
+# `scholars-mysql` container. Run `npm run db:check` to confirm what your
+# DATABASE_URL is actually pointing at.
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: scholars-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: scholars
-      MYSQL_USER: scholars
-      MYSQL_PASSWORD: scholars
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-    command:
-      - --default-authentication-plugin=caching_sha2_password
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   opensearch:
     image: opensearchproject/opensearch:2.18.0
     container_name: scholars-opensearch
@@ -52,5 +36,4 @@ services:
       retries: 20
 
 volumes:
-  mysql-data:
   opensearch-data:
