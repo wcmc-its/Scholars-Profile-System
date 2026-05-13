@@ -40,6 +40,7 @@ import {
   PEOPLE_RESTRUCTURED_MSM,
   PUBLICATION_FIELD_BOOSTS,
   PUBLICATIONS_INDEX,
+  PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
 } from "@/lib/search";
 
@@ -202,11 +203,25 @@ export type PeopleSearchResult = {
   };
 };
 
+/**
+ * Discriminator for which query shape `searchPublications` used. Mirrors
+ * `PeopleQueryShape` so downstream analytics can group by `type +
+ * queryShape`. Reserved values name the §1.6 concept-filter shapes up
+ * front to avoid a schema migration when they ship.
+ */
+export type PublicationsQueryShape =
+  | "legacy_multi_match"
+  | "restructured_msm"
+  | "concept_filtered"
+  | "concept_fallback";
+
 export type PublicationsSearchResult = {
   hits: PublicationHit[];
   total: number;
   page: number;
   pageSize: number;
+  /** Which query shape served this request — telemetry-only (issue #259). */
+  queryShape: PublicationsQueryShape;
   facets: {
     publicationTypes: SearchFacetBucket[];
     journals: SearchFacetBucket[];
@@ -636,6 +651,18 @@ export async function searchPublications(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
+  // Issue #259 §1.2 — pub-tab minimum_should_match floor. Flag default-off;
+  // merge is a code event, the flip is the behavior event. Separate flag
+  // from SEARCH_PEOPLE_QUERY_RESTRUCTURE because spec §1.12 attaches
+  // surface-specific rollback triggers — pub-tab has the "p95 < 50"
+  // over-tightening floor, people-tab has the count-cut acceptance — and
+  // we want separable rollback.
+  const usePubMsm =
+    (process.env.SEARCH_PUB_TAB_MSM ?? "off") === "on";
+  const queryShape: PublicationsQueryShape = usePubMsm
+    ? "restructured_msm"
+    : "legacy_multi_match";
+
   const must: Record<string, unknown>[] = [];
   if (trimmed.length > 0) {
     must.push({
@@ -643,6 +670,12 @@ export async function searchPublications(opts: {
         query: trimmed,
         fields: [...PUBLICATION_FIELD_BOOSTS],
         type: "best_fields",
+        ...(usePubMsm
+          ? {
+              operator: "or",
+              minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+            }
+          : {}),
       },
     });
   } else {
@@ -935,6 +968,7 @@ export async function searchPublications(opts: {
     total: r.hits.total.value,
     page,
     pageSize: PAGE_SIZE,
+    queryShape,
     facets: {
       publicationTypes: (r.aggregations?.publicationTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,

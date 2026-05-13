@@ -403,3 +403,15 @@ export const PUBLICATION_FIELD_BOOSTS: ReadonlyArray<string> = [
   // match dominant.
   "abstract^0.5",
 ];
+
+/**
+ * Minimum-should-match expression for the pub-tab query (issue #259 §1.2).
+ * Same value as the people-tab counterpart today, but defined separately:
+ * the two surfaces have independent rollback triggers (spec §1.12) and may
+ * diverge later if abstract noise on one or the other forces a tune.
+ *
+ * `abstract` on the publications index is a single paper's abstract, not a
+ * concatenated blob, so msm works on the existing flat shape — no field
+ * restructure needed.
+ */
+export const PUBLICATIONS_RESTRUCTURED_MSM = "-0% 3<-25%";

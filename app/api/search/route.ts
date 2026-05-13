@@ -86,12 +86,17 @@ export async function GET(request: NextRequest) {
       },
     });
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
+    // Issue #259 §1.2 — queryShape attributes result-count and ranking
+    // changes to the code path that served the request. Same enum and
+    // field name as the people branch so downstream analytics can group
+    // by `type + queryShape`.
     console.log(
       JSON.stringify({
         event: "search_query",
         q,
         type: "publications",
         resultCount: result.total,
+        queryShape: result.queryShape,
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
         ts: new Date().toISOString(),
       }),
