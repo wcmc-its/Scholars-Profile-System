@@ -110,7 +110,7 @@ export default async function CoPubsPage({
 
       <header className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-serif text-2xl font-semibold">Co-authored publications</h1>
+          <h1 className="page-title text-2xl font-semibold">Co-authored publications</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             {pair.mentorName} and {pair.menteeName} ·{" "}
             {pubs.length} publication{pubs.length === 1 ? "" : "s"}

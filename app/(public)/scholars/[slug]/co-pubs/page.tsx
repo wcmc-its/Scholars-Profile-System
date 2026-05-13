@@ -108,7 +108,7 @@ export default async function MentorCoPubsRollupPage({
 
       <header className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="font-serif text-2xl font-semibold">
+          <h1 className="page-title text-2xl font-semibold">
             Co-authored publications with mentees
           </h1>
           <p className="text-muted-foreground mt-1 text-sm">

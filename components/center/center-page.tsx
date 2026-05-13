@@ -113,7 +113,7 @@ export async function CenterPage({
         <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.13em] text-[var(--color-primary-cornell-red)]">
           Center
         </div>
-        <h1 className="mb-[18px] font-serif text-[40px] font-medium leading-none tracking-[-0.01em]">
+        <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
           {detail.name}
         </h1>
         {detail.description && (

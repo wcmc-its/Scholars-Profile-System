@@ -33,7 +33,7 @@ export function Spotlight({ data }: { data: SpotlightData | null }) {
   return (
     <section className="my-8 rounded-[14px] bg-[#f5f3ee] px-[26px] pb-6 pt-[22px]">
       <header className="mb-[22px]">
-        <h2 className="m-0 inline-flex items-center gap-2 font-serif text-[22px] font-medium leading-[1.15] tracking-[-0.01em]">
+        <h2 className="m-0 inline-flex items-center gap-2 text-[22px] font-medium leading-[1.15] tracking-[-0.01em]">
           Spotlight
           <SectionInfoButton label="Spotlight" anchor="spotlight">
             Spotlight rotates publications with the strongest recent activity

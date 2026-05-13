@@ -114,7 +114,7 @@ export async function DivisionPage({
             </a>
           </span>
         </div>
-        <h1 className="mb-[18px] font-serif text-[40px] font-medium leading-none tracking-[-0.01em]">
+        <h1 className="page-title mb-[18px] text-[40px] font-medium leading-none tracking-[-0.01em]">
           {detail.division.name}
         </h1>
         {detail.division.description && (

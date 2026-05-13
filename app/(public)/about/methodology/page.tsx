@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function MethodologyPage() {
   return (
     <main className="mx-auto max-w-[720px] px-6 py-10">
-      <h1 className="font-serif text-4xl font-semibold leading-tight">
+      <h1 className="page-title text-4xl font-semibold leading-tight">
         How algorithmic surfaces work
       </h1>
       <p className="mt-6 text-base text-muted-foreground">

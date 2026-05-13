@@ -43,7 +43,7 @@ export default async function HomePage() {
       <main className="flex-1">
         <section className="border-border border-b bg-gradient-to-b from-white to-zinc-50 px-6 py-16">
           <div className="mx-auto max-w-[760px] text-center">
-            <h1 className="font-serif text-4xl font-semibold tracking-tight sm:text-5xl">
+            <h1 className="page-title text-4xl font-semibold tracking-tight sm:text-5xl">
               Scholars at Weill Cornell Medicine
             </h1>
             <p className="text-muted-foreground mt-4 text-base">

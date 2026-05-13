@@ -277,7 +277,7 @@ function SearchMeta({
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
-      <h1 className="mb-1 font-serif text-[28px] font-bold leading-tight tracking-[-0.01em]">
+      <h1 className="page-title mb-1 text-[28px] font-bold leading-tight tracking-[-0.01em]">
         {q ? (
           <>
             Results for{" "}
