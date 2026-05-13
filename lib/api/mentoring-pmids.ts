@@ -11,14 +11,21 @@
  *                thesis-advisor relationships
  *   - phd      — PhD mentees from Jenzabar's MAJSP (Major Sponsor) thesis-
  *                advisor relationships
- *   - ecr      — ECR mentees (Early Career Researcher / postdoc-stage)
+ *   - postdoc  — Postdoc mentees from ED's `weillCornellEduSORRoleRecord`
+ *                under `ou=employees,ou=sors` (issue #183). Includes both
+ *                active and expired role records so alumni postdocs surface.
+ *   - ecr      — ECR mentees (definition pending — see issue #183 thread;
+ *                NOT the postdoc bucket, despite the misreading the prior
+ *                comment promoted)
  *
- * Two underlying sources are unioned:
+ * Three underlying sources are unioned:
  *   1. `reciterdb.reporting_students_mentors` — MD-program scholarly-project
  *      mentors. Joined to ReCiter co-author graph in a single SQL query.
  *   2. Local `phd_mentor_relationship` (from Jenzabar MAJSP) — PhD thesis
  *      advisors. Pairs are loaded locally, then sent as a tuple-IN clause
  *      against `analysis_summary_author` to derive co-pub pmids.
+ *   3. Local `postdoc_mentor_relationship` (from ED postdoc role records) —
+ *      Postdoc supervisors. Same tuple-IN pattern as the Jenzabar source.
  *
  * Source-side classification is preferred over Scholar.role_category because
  * a mentee's role today (e.g. now-faculty) doesn't reflect what they were at
@@ -33,7 +40,7 @@ import { withReciterConnection } from "@/lib/sources/reciterdb";
 const TTL_MS = 10 * 60 * 1000;
 const PAIR_BATCH = 500;
 
-export type MentoringProgramKey = "md" | "mdphd" | "phd" | "ecr";
+export type MentoringProgramKey = "md" | "mdphd" | "phd" | "postdoc" | "ecr";
 export type MentoringPmidBuckets = {
   all: string[];
   byProgram: Record<MentoringProgramKey, string[]>;
@@ -46,6 +53,7 @@ function bucketProgramType(programType: string | null): MentoringProgramKey | nu
   if (!programType) return null;
   if (programType === "MDPHD" || programType === "MD-PhD") return "mdphd";
   if (programType === "PhD") return "phd";
+  if (programType === "POSTDOC") return "postdoc";
   if (programType === "ECR") return "ecr";
   if (programType === "AOC" || programType.startsWith("AOC-")) return "md";
   return null;
@@ -63,6 +71,7 @@ async function refresh(): Promise<MentoringPmidBuckets> {
     md: new Set(),
     mdphd: new Set(),
     phd: new Set(),
+    postdoc: new Set(),
     ecr: new Set(),
   };
 
@@ -123,12 +132,46 @@ async function refresh(): Promise<MentoringPmidBuckets> {
     });
   }
 
+  // Source 3: postdoc_mentor_relationship (ED postdoc role records). Same
+  // tuple-IN pattern as Jenzabar — pairs are local, the co-author graph
+  // lives in ReCiter. All pairs map to the `postdoc` bucket (programType
+  // is always POSTDOC, no per-pair variance).
+  const postdocPairs = await prisma.postdocMentorRelationship.findMany({
+    select: { mentorCwid: true, menteeCwid: true },
+  });
+  if (postdocPairs.length > 0) {
+    await withReciterConnection(async (conn) => {
+      for (const batch of chunks(postdocPairs, PAIR_BATCH)) {
+        const placeholders = batch.map(() => "(?, ?)").join(",");
+        const params: string[] = [];
+        for (const p of batch) {
+          params.push(p.mentorCwid, p.menteeCwid);
+        }
+        const rows = (await conn.query(
+          `SELECT DISTINCT a1.pmid AS pmid
+           FROM analysis_summary_author a1
+           JOIN analysis_summary_author a2
+             ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
+           WHERE a1.pmid IS NOT NULL
+             AND (a1.personIdentifier, a2.personIdentifier) IN (${placeholders})`,
+          params,
+        )) as { pmid: number | bigint }[];
+        for (const r of rows) {
+          const pmid = String(typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid);
+          allSet.add(pmid);
+          bySet.postdoc.add(pmid);
+        }
+      }
+    });
+  }
+
   return {
     all: [...allSet],
     byProgram: {
       md: [...bySet.md],
       mdphd: [...bySet.mdphd],
       phd: [...bySet.phd],
+      postdoc: [...bySet.postdoc],
       ecr: [...bySet.ecr],
     },
   };

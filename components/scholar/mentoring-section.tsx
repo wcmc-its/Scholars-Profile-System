@@ -70,7 +70,17 @@ function MenteeChipCard({
   // Jenzabar fallback) over the degree-bucket label. When neither source
   // has a record, fall back to "PhD" / "MD-PhD" / "MD mentee" etc.
   const programLabel = mentee.programName ?? formatProgramLabel(mentee.programType);
-  const yearLabel = mentee.graduationYear ? `Class of ${mentee.graduationYear}` : null;
+  // "Class of N" for AOC/PhD mentees; "YYYY–YYYY" or "since YYYY" for
+  // postdocs (issue #183). Postdocs don't graduate, so forcing them into
+  // the "Class of" string was misleading; the appointmentRange field
+  // carries the real date window from the SOR role record.
+  const yearLabel = mentee.graduationYear
+    ? `Class of ${mentee.graduationYear}`
+    : mentee.appointmentRange
+      ? mentee.appointmentRange.endYear
+        ? `${mentee.appointmentRange.startYear}–${mentee.appointmentRange.endYear}`
+        : `since ${mentee.appointmentRange.startYear}`
+      : null;
   const displayName = mentee.scholar?.publishedName ?? mentee.fullName;
   const count = mentee.copublicationCount;
   const panelId = React.useId();

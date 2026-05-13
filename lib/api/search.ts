@@ -189,6 +189,11 @@ export type PublicationsSearchResult = {
      *  count). May be larger than `wcmAuthors.length` when the agg cap is
      *  hit; surface the true cardinality so the rail can render `Author 1,619`. */
     wcmAuthorsTotal: number;
+    /** Issue #183 — contextual count per Mentoring activity bucket. Each
+     *  value is the number of publications that would be returned if the
+     *  user ticked just that checkbox, holding all other filters constant
+     *  (i.e. matches the filtersExcept pattern used by the other facets). */
+    mentoringPrograms: Record<MentoringProgramKey, number>;
   };
 };
 
@@ -594,9 +599,13 @@ export async function searchPublications(opts: {
   // selected program buckets. Empty union (e.g. all programs empty) becomes
   // a match_none clause so a stale-cache state returns zero rows rather
   // than all rows.
+  //
+  // Always load the buckets (not just when filtering) so we can compute
+  // per-bucket contextual counts for the sidebar. The buckets are cached
+  // 10 min in mentoring-pmids.ts so this is cheap.
   const mentoringPrograms = filters.mentoringPrograms ?? [];
-  const mentoringBuckets = mentoringPrograms.length > 0 ? await getMentoringPmidBuckets() : null;
-  const mentoringPmids = mentoringBuckets
+  const mentoringBuckets = await getMentoringPmidBuckets();
+  const mentoringPmids = mentoringPrograms.length > 0
     ? Array.from(new Set(mentoringPrograms.flatMap((p) => mentoringBuckets.byProgram[p] ?? [])))
     : [];
   const mentoringClause = mentoringPrograms.length > 0
@@ -704,6 +713,34 @@ export async function searchPublications(opts: {
           total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
         },
       },
+      // Mentoring activity facet — contextual counts per program bucket.
+      // One named filters-of-filters agg with 5 sub-buckets, each scoped to
+      // the bucket's pmids + filtersExcept("mentoring") + the q-bound must.
+      // Empty buckets become match_none so OpenSearch doesn't choke on
+      // `terms: { pmid: [] }`.
+      mentoringPrograms: {
+        filters: {
+          filters: (Object.keys(mentoringBuckets.byProgram) as MentoringProgramKey[]).reduce(
+            (acc, key) => {
+              const bucketPmids = mentoringBuckets.byProgram[key];
+              acc[key] =
+                bucketPmids.length > 0
+                  ? {
+                      bool: {
+                        must,
+                        filter: [
+                          ...filtersExcept("mentoring"),
+                          { terms: { pmid: bucketPmids } },
+                        ],
+                      },
+                    }
+                  : { bool: { must_not: [{ match_all: {} }] } };
+              return acc;
+            },
+            {} as Record<MentoringProgramKey, Record<string, unknown>>,
+          ),
+        },
+      },
     },
   };
 
@@ -734,6 +771,9 @@ export async function searchPublications(opts: {
       wcmAuthors?: {
         keys: { buckets: Bucket[] };
         total: { value: number };
+      };
+      mentoringPrograms?: {
+        buckets: Record<MentoringProgramKey, { doc_count: number }>;
       };
     };
   };
@@ -836,6 +876,13 @@ export async function searchPublications(opts: {
       },
       wcmAuthors: wcmAuthorBuckets,
       wcmAuthorsTotal: r.aggregations?.wcmAuthors?.total.value ?? 0,
+      mentoringPrograms: {
+        md: r.aggregations?.mentoringPrograms?.buckets.md.doc_count ?? 0,
+        mdphd: r.aggregations?.mentoringPrograms?.buckets.mdphd.doc_count ?? 0,
+        phd: r.aggregations?.mentoringPrograms?.buckets.phd.doc_count ?? 0,
+        postdoc: r.aggregations?.mentoringPrograms?.buckets.postdoc.doc_count ?? 0,
+        ecr: r.aggregations?.mentoringPrograms?.buckets.ecr.doc_count ?? 0,
+      },
     },
   };
 }

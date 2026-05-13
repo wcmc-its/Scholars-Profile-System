@@ -171,6 +171,58 @@ model PhdMentorRelationship {
   @@map("phd_mentor_relationship")
 }
 
+/// Issue #183 — Postdoc primary-mentor relationships sourced from WCM ED
+/// `weillCornellEduSORRoleRecord` entries under `ou=employees,ou=sors`
+/// filtered to `weillCornellEduRoleCode=06` (Post Doc. Assoc-Sal) or
+/// `title=Postdoctoral*`. Includes expired role records so alumni postdocs
+/// surface alongside currently-active ones on the mentor's profile.
+///
+/// Mentor is the postdoc's reporting manager (LDAP `manager` DN → CWID via
+/// `parseManagerCwid`). The role record carries appointment start/end dates,
+/// so `getMenteesForMentor` can render postdoc chips with a real date range
+/// ("2013–2019" or "since 2023") rather than the "Class of N" string used
+/// for student mentees.
+///
+/// Truncate-and-rebuild on every ETL run; no FK to Scholar (mentees may be
+/// alumni not present in the local Scholar table, identical to how AOC and
+/// Jenzabar PhD mentees are handled).
+model PostdocMentorRelationship {
+  id              Int       @id @default(autoincrement())
+  mentorCwid      String    @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid      String    @map("mentee_cwid") @db.VarChar(32)
+  menteeFirstName String?   @map("mentee_first_name") @db.VarChar(64)
+  menteeLastName  String?   @map("mentee_last_name") @db.VarChar(64)
+  /// `weillCornellEduStartDate` on the role record (LDAP generalizedTime
+  /// parsed to Date). Null when ED omits the attribute.
+  startDate       DateTime? @map("start_date") @db.Date
+  /// `weillCornellEduEndDate` on the role record. Null when ED returns the
+  /// 2099 sentinel (= open-ended / currently active), which the LDAP parser
+  /// already maps to null.
+  endDate         DateTime? @map("end_date") @db.Date
+  /// Raw `title` attribute from the role record ("Postdoctoral Associate",
+  /// "Postdoctoral Fellow", etc.). Kept for debugging / future chip enrichment
+  /// — not used by the current UI surface.
+  title           String?   @db.VarChar(128)
+  /// `weillCornellEduStatus` at last ETL run — "employee:active" or
+  /// "employee:expired". The read layer uses this to decide whether the
+  /// chip's date range renders as "since YYYY" (active) or "YYYY–YYYY"
+  /// (expired) without re-reading endDate sentinels.
+  status          String    @db.VarChar(32)
+  /// Always "POSTDOC" — defaulted so `bucketProgramType` /
+  /// `formatProgramLabel` can branch on this column with the same shape as
+  /// the AOC and Jenzabar sources.
+  programType     String    @default("POSTDOC") @map("program_type") @db.VarChar(16)
+  /// `ED-POSTDOC-<weillCornellEduSORID>`. Stable across ETL reruns; SORID
+  /// is the role record's own ID, not the parent employee record's.
+  externalId      String    @unique @map("external_id") @db.VarChar(64)
+  source          String    @default("ED-EMPLOYEE-SOR") @db.VarChar(32)
+  lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
+
+  @@index([mentorCwid])
+  @@index([menteeCwid])
+  @@map("postdoc_mentor_relationship")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni
