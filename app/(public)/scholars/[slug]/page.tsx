@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
+import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor, type MenteeSort } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
@@ -508,8 +509,9 @@ export default async function ScholarProfilePage({
                       );
                       return (
                         <div key={group}>
-                          <h3 className="text-muted-foreground mb-2 text-xs font-semibold uppercase tracking-wider">
+                          <h3 className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider">
                             {group}
+                            <DisclosureGroupInfoTooltip group={group} />
                           </h3>
                           <p className="text-base leading-snug">{entities.join("; ")}</p>
                         </div>
