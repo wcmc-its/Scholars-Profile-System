@@ -1,0 +1,28 @@
+{
+  "spec": "SPEC-issue-259-mesh-defaults-rebalance",
+  "purpose": "Frozen baselines for the SPEC's locked acceptance criteria. Each entry is the literal value the SPEC §3.1 commits to — refreshed only on deliberate SPEC amendment, not by corpus drift. See SPEC §3.1 (a) for the headline regression case rationale.",
+  "capturedAt": "2026-05-14T17:50:00Z",
+  "corpusHeadCommit": "b57765ace51e0dea8f11ec35b624840c927cc528",
+  "envFlags": {
+    "SEARCH_PUB_TAB_OR_OF_EVIDENCE": "on",
+    "SEARCH_PUB_TAB_MSM": "on"
+  },
+  "baselines": {
+    "headlineRegressionCase": {
+      "query": "health economics",
+      "type": "publications",
+      "meshOff": {
+        "url": "/api/search?q=health+economics&type=publications&mesh=off",
+        "total": 694,
+        "queryShape": "restructured_msm",
+        "purpose": "SPEC §3.1 (a) — `expanded` mode must return ≥ this value. Frozen at this number, NOT 'whatever mesh=off returns at flip time.'"
+      },
+      "default": {
+        "url": "/api/search?q=health+economics&type=publications",
+        "total": 0,
+        "queryShape": "concept_fallback",
+        "purpose": "The regression case itself — today's default returns zero. Spec resolves this by replacing concept_fallback with concept_expanded."
+      }
+    }
+  }
+}

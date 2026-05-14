@@ -1,0 +1,5470 @@
+{
+  "spec": "SPEC-issue-259-mesh-defaults-rebalance",
+  "purpose": "Frozen list of broad MeSH descriptors (descendantCount > 50) referenced by §4 Option C deferral criterion. Snapshot is committed alongside the SPEC; subsequent corpus shifts do not move the gate. Refresh only on deliberate SPEC amendment.",
+  "generatedAt": "2026-05-14T18:12:47.996Z",
+  "algorithm": {
+    "descendantsOf": "Set of distinct descriptorUis whose tree_number is prefix-subsumed (LIKE 'parent.%') by any of the parent's tree_numbers. Self is excluded.",
+    "cap": 200,
+    "threshold": 50,
+    "fields": {
+      "descendantCount": "Capped at cap. Mirrors §5.4.2 runtime precompute and feeds §4 Option C's gate (the load-bearing value).",
+      "descendantCountTrue": "Uncapped. Informational only — lets the post-flip retro bucket descriptors by true breadth ('barely broad' vs 'extremely broad'). Does NOT affect Option C gate membership."
+    }
+  },
+  "counts": {
+    "totalDescriptors": 31110,
+    "broadDescriptors": 587
+  },
+  "descriptors": [
+    {
+      "descriptorUi": "D000602",
+      "name": "Amino Acids, Peptides, and Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 4175,
+      "treeNumbers": [
+        "D12"
+      ]
+    },
+    {
+      "descriptorUi": "D011506",
+      "name": "Protein Conformation",
+      "descendantCount": 200,
+      "descendantCountTrue": 3850,
+      "treeNumbers": [
+        "D12.776"
+      ]
+    },
+    {
+      "descriptorUi": "D056890",
+      "name": "Eukaryota",
+      "descendantCount": 200,
+      "descendantCountTrue": 2454,
+      "treeNumbers": [
+        "B01"
+      ]
+    },
+    {
+      "descriptorUi": "D009930",
+      "name": "Organic Chemicals",
+      "descendantCount": 200,
+      "descendantCountTrue": 2178,
+      "treeNumbers": [
+        "D02"
+      ]
+    },
+    {
+      "descriptorUi": "D045762",
+      "name": "Enzymes and Coenzymes",
+      "descendantCount": 200,
+      "descendantCountTrue": 1897,
+      "treeNumbers": [
+        "D08"
+      ]
+    },
+    {
+      "descriptorUi": "D004798",
+      "name": "Substrate Specificity",
+      "descendantCount": 200,
+      "descendantCountTrue": 1837,
+      "treeNumbers": [
+        "D08.811"
+      ]
+    },
+    {
+      "descriptorUi": "D006571",
+      "name": "Heterocyclic Compounds",
+      "descendantCount": 200,
+      "descendantCountTrue": 1469,
+      "treeNumbers": [
+        "D03"
+      ]
+    },
+    {
+      "descriptorUi": "D008565",
+      "name": "Membrane Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 1246,
+      "treeNumbers": [
+        "D12.776.543"
+      ]
+    },
+    {
+      "descriptorUi": "D057948",
+      "name": "Viridiplantae",
+      "descendantCount": 200,
+      "descendantCountTrue": 1221,
+      "treeNumbers": [
+        "B01.875"
+      ]
+    },
+    {
+      "descriptorUi": "D008919",
+      "name": "Investigative Techniques",
+      "descendantCount": 200,
+      "descendantCountTrue": 1212,
+      "treeNumbers": [
+        "E05"
+      ]
+    },
+    {
+      "descriptorUi": "D057949",
+      "name": "Streptophyta",
+      "descendantCount": 200,
+      "descendantCountTrue": 1207,
+      "treeNumbers": [
+        "B01.875.800"
+      ]
+    },
+    {
+      "descriptorUi": "D019669",
+      "name": "Embryophyta",
+      "descendantCount": 200,
+      "descendantCountTrue": 1196,
+      "treeNumbers": [
+        "B01.875.800.575"
+      ]
+    },
+    {
+      "descriptorUi": "D064028",
+      "name": "Tracheophyta",
+      "descendantCount": 200,
+      "descendantCountTrue": 1176,
+      "treeNumbers": [
+        "B01.875.800.575.912"
+      ]
+    },
+    {
+      "descriptorUi": "D019684",
+      "name": "Magnoliopsida",
+      "descendantCount": 200,
+      "descendantCountTrue": 1133,
+      "treeNumbers": [
+        "B01.875.800.575.912.250"
+      ]
+    },
+    {
+      "descriptorUi": "D013568",
+      "name": "Pathological Conditions, Signs and Symptoms",
+      "descendantCount": 200,
+      "descendantCountTrue": 965,
+      "treeNumbers": [
+        "C23"
+      ]
+    },
+    {
+      "descriptorUi": "D009422",
+      "name": "Nervous System Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 924,
+      "treeNumbers": [
+        "C10"
+      ]
+    },
+    {
+      "descriptorUi": "D001685",
+      "name": "Biological Products",
+      "descendantCount": 200,
+      "descendantCountTrue": 888,
+      "treeNumbers": [
+        "D23"
+      ]
+    },
+    {
+      "descriptorUi": "D001419",
+      "name": "Pili, Sex",
+      "descendantCount": 200,
+      "descendantCountTrue": 858,
+      "treeNumbers": [
+        "B03"
+      ]
+    },
+    {
+      "descriptorUi": "D000818",
+      "name": "Animals",
+      "descendantCount": 200,
+      "descendantCountTrue": 835,
+      "treeNumbers": [
+        "B01.050"
+      ]
+    },
+    {
+      "descriptorUi": "D010455",
+      "name": "Amino Acid Sequence",
+      "descendantCount": 200,
+      "descendantCountTrue": 818,
+      "treeNumbers": [
+        "D12.644"
+      ]
+    },
+    {
+      "descriptorUi": "D000072471",
+      "name": "Fused-Ring Compounds",
+      "descendantCount": 200,
+      "descendantCountTrue": 801,
+      "treeNumbers": [
+        "D03.633"
+      ]
+    },
+    {
+      "descriptorUi": "D006838",
+      "name": "Hydrocarbons",
+      "descendantCount": 200,
+      "descendantCountTrue": 797,
+      "treeNumbers": [
+        "D02.455"
+      ]
+    },
+    {
+      "descriptorUi": "D006573",
+      "name": "Heterocyclic Compounds, 1-Ring",
+      "descendantCount": 200,
+      "descendantCountTrue": 788,
+      "treeNumbers": [
+        "D03.383"
+      ]
+    },
+    {
+      "descriptorUi": "D007239",
+      "name": "Anti-Infective Agents",
+      "descendantCount": 200,
+      "descendantCountTrue": 785,
+      "treeNumbers": [
+        "C01"
+      ]
+    },
+    {
+      "descriptorUi": "D003933",
+      "name": "Diagnostic Techniques and Procedures",
+      "descendantCount": 200,
+      "descendantCountTrue": 783,
+      "treeNumbers": [
+        "E01"
+      ]
+    },
+    {
+      "descriptorUi": "D009358",
+      "name": "Congenital, Hereditary, and Neonatal Diseases and Abnormalities",
+      "descendantCount": 200,
+      "descendantCountTrue": 758,
+      "treeNumbers": [
+        "C16"
+      ]
+    },
+    {
+      "descriptorUi": "D019937",
+      "name": "Sensitivity and Specificity",
+      "descendantCount": 200,
+      "descendantCountTrue": 747,
+      "treeNumbers": [
+        "E01.370"
+      ]
+    },
+    {
+      "descriptorUi": "D013812",
+      "name": "Therapeutics",
+      "descendantCount": 200,
+      "descendantCountTrue": 743,
+      "treeNumbers": [
+        "E02"
+      ]
+    },
+    {
+      "descriptorUi": "D002352",
+      "name": "Carrier Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 715,
+      "treeNumbers": [
+        "D12.776.157"
+      ]
+    },
+    {
+      "descriptorUi": "D009369",
+      "name": "Neoplasm Metastasis",
+      "descendantCount": 200,
+      "descendantCountTrue": 702,
+      "treeNumbers": [
+        "C04"
+      ]
+    },
+    {
+      "descriptorUi": "D020164",
+      "name": "Chemical Actions and Uses",
+      "descendantCount": 200,
+      "descendantCountTrue": 691,
+      "treeNumbers": [
+        "D27"
+      ]
+    },
+    {
+      "descriptorUi": "D002241",
+      "name": "Dietary Carbohydrates",
+      "descendantCount": 200,
+      "descendantCountTrue": 686,
+      "treeNumbers": [
+        "D09"
+      ]
+    },
+    {
+      "descriptorUi": "D006867",
+      "name": "Hydrolases",
+      "descendantCount": 200,
+      "descendantCountTrue": 647,
+      "treeNumbers": [
+        "D08.811.277"
+      ]
+    },
+    {
+      "descriptorUi": "D004778",
+      "name": "Environment and Public Health",
+      "descendantCount": 200,
+      "descendantCountTrue": 633,
+      "treeNumbers": [
+        "N06"
+      ]
+    },
+    {
+      "descriptorUi": "D006574",
+      "name": "Heterocyclic Compounds, 2-Ring",
+      "descendantCount": 200,
+      "descendantCountTrue": 606,
+      "treeNumbers": [
+        "D03.633.100"
+      ]
+    },
+    {
+      "descriptorUi": "D002477",
+      "name": "Cell Transplantation",
+      "descendantCount": 200,
+      "descendantCountTrue": 605,
+      "treeNumbers": [
+        "A11"
+      ]
+    },
+    {
+      "descriptorUi": "D014166",
+      "name": "Transferases",
+      "descendantCount": 200,
+      "descendantCountTrue": 589,
+      "treeNumbers": [
+        "D08.811.913"
+      ]
+    },
+    {
+      "descriptorUi": "D047908",
+      "name": "Intracellular Signaling Peptides and Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 585,
+      "treeNumbers": [
+        "D12.644.360",
+        "D12.776.476"
+      ]
+    },
+    {
+      "descriptorUi": "D013514",
+      "name": "General Surgery",
+      "descendantCount": 200,
+      "descendantCountTrue": 581,
+      "treeNumbers": [
+        "E04"
+      ]
+    },
+    {
+      "descriptorUi": "D055614",
+      "name": "Molecular Biology",
+      "descendantCount": 200,
+      "descendantCountTrue": 581,
+      "treeNumbers": [
+        "G05"
+      ]
+    },
+    {
+      "descriptorUi": "D011956",
+      "name": "Receptors, Cell Surface",
+      "descendantCount": 200,
+      "descendantCountTrue": 575,
+      "treeNumbers": [
+        "D12.776.543.750"
+      ]
+    },
+    {
+      "descriptorUi": "D001520",
+      "name": "Behavior and Behavior Mechanisms",
+      "descendantCount": 200,
+      "descendantCountTrue": 572,
+      "treeNumbers": [
+        "F01"
+      ]
+    },
+    {
+      "descriptorUi": "D006844",
+      "name": "Polycyclic Compounds",
+      "descendantCount": 200,
+      "descendantCountTrue": 572,
+      "treeNumbers": [
+        "D02.455.426"
+      ]
+    },
+    {
+      "descriptorUi": "D005159",
+      "name": "Health Care Facilities Workforce and Services",
+      "descendantCount": 200,
+      "descendantCountTrue": 568,
+      "treeNumbers": [
+        "N02"
+      ]
+    },
+    {
+      "descriptorUi": "D011083",
+      "name": "Heterocyclic Compounds",
+      "descendantCount": 200,
+      "descendantCountTrue": 564,
+      "treeNumbers": [
+        "D04"
+      ]
+    },
+    {
+      "descriptorUi": "D014780",
+      "name": "Receptors, Virus",
+      "descendantCount": 200,
+      "descendantCountTrue": 559,
+      "treeNumbers": [
+        "B04"
+      ]
+    },
+    {
+      "descriptorUi": "D012942",
+      "name": "Social Sciences",
+      "descendantCount": 200,
+      "descendantCountTrue": 557,
+      "treeNumbers": [
+        "F04.096.879",
+        "I01"
+      ]
+    },
+    {
+      "descriptorUi": "D010829",
+      "name": "Physiological Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 545,
+      "treeNumbers": [
+        "G07"
+      ]
+    },
+    {
+      "descriptorUi": "D020228",
+      "name": "Drug Therapy",
+      "descendantCount": 200,
+      "descendantCountTrue": 538,
+      "treeNumbers": [
+        "D27.505"
+      ]
+    },
+    {
+      "descriptorUi": "D006090",
+      "name": "Gram-Negative Bacteria",
+      "descendantCount": 200,
+      "descendantCountTrue": 520,
+      "treeNumbers": [
+        "B03.440"
+      ]
+    },
+    {
+      "descriptorUi": "D011634",
+      "name": "Zoonoses",
+      "descendantCount": 200,
+      "descendantCountTrue": 504,
+      "treeNumbers": [
+        "H02.403.720",
+        "N01.400.550",
+        "N06.850"
+      ]
+    },
+    {
+      "descriptorUi": "D007254",
+      "name": "Information Science",
+      "descendantCount": 200,
+      "descendantCountTrue": 500,
+      "treeNumbers": [
+        "L01"
+      ]
+    },
+    {
+      "descriptorUi": "D007287",
+      "name": "Inorganic Chemicals",
+      "descendantCount": 200,
+      "descendantCountTrue": 475,
+      "treeNumbers": [
+        "D01"
+      ]
+    },
+    {
+      "descriptorUi": "D002318",
+      "name": "Cardiac Rehabilitation",
+      "descendantCount": 200,
+      "descendantCountTrue": 470,
+      "treeNumbers": [
+        "C14"
+      ]
+    },
+    {
+      "descriptorUi": "D006841",
+      "name": "Hydrocarbons, Aromatic",
+      "descendantCount": 200,
+      "descendantCountTrue": 467,
+      "treeNumbers": [
+        "D02.455.426.559"
+      ]
+    },
+    {
+      "descriptorUi": "D013457",
+      "name": "Sulfur Compounds",
+      "descendantCount": 200,
+      "descendantCountTrue": 460,
+      "treeNumbers": [
+        "D01.875",
+        "D02.886"
+      ]
+    },
+    {
+      "descriptorUi": "D010335",
+      "name": "Pathologic Processes",
+      "descendantCount": 200,
+      "descendantCountTrue": 458,
+      "treeNumbers": [
+        "C23.550"
+      ]
+    },
+    {
+      "descriptorUi": "D013676",
+      "name": "Technology, Industry, and Agriculture",
+      "descendantCount": 200,
+      "descendantCountTrue": 455,
+      "treeNumbers": [
+        "J01"
+      ]
+    },
+    {
+      "descriptorUi": "D043344",
+      "name": "Chordata",
+      "descendantCount": 200,
+      "descendantCountTrue": 454,
+      "treeNumbers": [
+        "B01.050.150"
+      ]
+    },
+    {
+      "descriptorUi": "D030342",
+      "name": "Genetics, Medical",
+      "descendantCount": 200,
+      "descendantCountTrue": 451,
+      "treeNumbers": [
+        "C16.320"
+      ]
+    },
+    {
+      "descriptorUi": "D014714",
+      "name": "Vertebrates",
+      "descendantCount": 200,
+      "descendantCountTrue": 446,
+      "treeNumbers": [
+        "B01.050.150.900"
+      ]
+    },
+    {
+      "descriptorUi": "D009370",
+      "name": "Neoplasms by Histologic Type",
+      "descendantCount": 200,
+      "descendantCountTrue": 440,
+      "treeNumbers": [
+        "C04.557"
+      ]
+    },
+    {
+      "descriptorUi": "D004472",
+      "name": "Health Care Economics and Organizations",
+      "descendantCount": 200,
+      "descendantCountTrue": 428,
+      "treeNumbers": [
+        "N03"
+      ]
+    },
+    {
+      "descriptorUi": "D017530",
+      "name": "Health Care Quality, Access, and Evaluation",
+      "descendantCount": 200,
+      "descendantCountTrue": 425,
+      "treeNumbers": [
+        "N05"
+      ]
+    },
+    {
+      "descriptorUi": "D000091642",
+      "name": "Urogenital Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 417,
+      "treeNumbers": [
+        "C12"
+      ]
+    },
+    {
+      "descriptorUi": "D020560",
+      "name": "Proteobacteria",
+      "descendantCount": 200,
+      "descendantCountTrue": 417,
+      "treeNumbers": [
+        "B03.660"
+      ]
+    },
+    {
+      "descriptorUi": "D012816",
+      "name": "Signs and Symptoms",
+      "descendantCount": 200,
+      "descendantCountTrue": 415,
+      "treeNumbers": [
+        "C23.888"
+      ]
+    },
+    {
+      "descriptorUi": "D002493",
+      "name": "Central Nervous System Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 412,
+      "treeNumbers": [
+        "C10.228"
+      ]
+    },
+    {
+      "descriptorUi": "D017437",
+      "name": "Skin and Connective Tissue Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 409,
+      "treeNumbers": [
+        "C17"
+      ]
+    },
+    {
+      "descriptorUi": "D005842",
+      "name": "Geographic Locations",
+      "descendantCount": 200,
+      "descendantCountTrue": 405,
+      "treeNumbers": [
+        "Z01"
+      ]
+    },
+    {
+      "descriptorUi": "D006298",
+      "name": "Health Services Administration",
+      "descendantCount": 200,
+      "descendantCountTrue": 405,
+      "treeNumbers": [
+        "H02.269",
+        "N04"
+      ]
+    },
+    {
+      "descriptorUi": "D009420",
+      "name": "Neurologic Manifestations",
+      "descendantCount": 200,
+      "descendantCountTrue": 403,
+      "treeNumbers": [
+        "A08"
+      ]
+    },
+    {
+      "descriptorUi": "D055598",
+      "name": "Chemical Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 394,
+      "treeNumbers": [
+        "G02"
+      ]
+    },
+    {
+      "descriptorUi": "D002264",
+      "name": "Carboxylic Acids",
+      "descendantCount": 200,
+      "descendantCountTrue": 393,
+      "treeNumbers": [
+        "D02.241"
+      ]
+    },
+    {
+      "descriptorUi": "D009140",
+      "name": "Musculoskeletal Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 380,
+      "treeNumbers": [
+        "C05"
+      ]
+    },
+    {
+      "descriptorUi": "D010088",
+      "name": "Oxidoreductases",
+      "descendantCount": 200,
+      "descendantCountTrue": 377,
+      "treeNumbers": [
+        "D08.811.682"
+      ]
+    },
+    {
+      "descriptorUi": "D000013",
+      "name": "Abnormalities, Drug-Induced",
+      "descendantCount": 200,
+      "descendantCountTrue": 372,
+      "treeNumbers": [
+        "C16.131"
+      ]
+    },
+    {
+      "descriptorUi": "D007448",
+      "name": "Invertebrates",
+      "descendantCount": 200,
+      "descendantCountTrue": 367,
+      "treeNumbers": [
+        "B01.050.500"
+      ]
+    },
+    {
+      "descriptorUi": "D010770",
+      "name": "Phosphotransferases",
+      "descendantCount": 200,
+      "descendantCountTrue": 361,
+      "treeNumbers": [
+        "D08.811.913.696"
+      ]
+    },
+    {
+      "descriptorUi": "D009272",
+      "name": "Persons",
+      "descendantCount": 200,
+      "descendantCountTrue": 360,
+      "treeNumbers": [
+        "M01"
+      ]
+    },
+    {
+      "descriptorUi": "D006001",
+      "name": "Glycoconjugates",
+      "descendantCount": 200,
+      "descendantCountTrue": 358,
+      "treeNumbers": [
+        "D09.400"
+      ]
+    },
+    {
+      "descriptorUi": "D009750",
+      "name": "Nutritional and Metabolic Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 353,
+      "treeNumbers": [
+        "C18"
+      ]
+    },
+    {
+      "descriptorUi": "D008562",
+      "name": "Membrane Glycoproteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 351,
+      "treeNumbers": [
+        "D09.400.430.890",
+        "D12.776.395.550",
+        "D12.776.543.550"
+      ]
+    },
+    {
+      "descriptorUi": "D012871",
+      "name": "Skin Manifestations",
+      "descendantCount": 200,
+      "descendantCountTrue": 351,
+      "treeNumbers": [
+        "C17.800"
+      ]
+    },
+    {
+      "descriptorUi": "D000588",
+      "name": "Amines",
+      "descendantCount": 200,
+      "descendantCountTrue": 349,
+      "treeNumbers": [
+        "D02.092"
+      ]
+    },
+    {
+      "descriptorUi": "D011579",
+      "name": "Psychological Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 349,
+      "treeNumbers": [
+        "F02"
+      ]
+    },
+    {
+      "descriptorUi": "D005261",
+      "name": "Female Urogenital Diseases and Pregnancy Complications",
+      "descendantCount": 200,
+      "descendantCountTrue": 348,
+      "treeNumbers": [
+        "C12.050"
+      ]
+    },
+    {
+      "descriptorUi": "D001555",
+      "name": "Benzene Derivatives",
+      "descendantCount": 200,
+      "descendantCountTrue": 347,
+      "treeNumbers": [
+        "D02.455.426.559.389"
+      ]
+    },
+    {
+      "descriptorUi": "D004864",
+      "name": "Catalogs, Commercial as Topic",
+      "descendantCount": 200,
+      "descendantCountTrue": 344,
+      "treeNumbers": [
+        "E07"
+      ]
+    },
+    {
+      "descriptorUi": "D012328",
+      "name": "RNA Viruses",
+      "descendantCount": 200,
+      "descendantCountTrue": 343,
+      "treeNumbers": [
+        "B04.820"
+      ]
+    },
+    {
+      "descriptorUi": "D012961",
+      "name": "Group Processes",
+      "descendantCount": 200,
+      "descendantCountTrue": 336,
+      "treeNumbers": [
+        "F04.096.879.757",
+        "I01.880"
+      ]
+    },
+    {
+      "descriptorUi": "D014157",
+      "name": "Trans-Activators",
+      "descendantCount": 200,
+      "descendantCountTrue": 336,
+      "treeNumbers": [
+        "D12.776.930"
+      ]
+    },
+    {
+      "descriptorUi": "D001669",
+      "name": "Biochemical Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 332,
+      "treeNumbers": [
+        "G02.111"
+      ]
+    },
+    {
+      "descriptorUi": "D001927",
+      "name": "Brain Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 331,
+      "treeNumbers": [
+        "C10.228.140"
+      ]
+    },
+    {
+      "descriptorUi": "D004268",
+      "name": "Helix-Turn-Helix Motifs",
+      "descendantCount": 200,
+      "descendantCountTrue": 326,
+      "treeNumbers": [
+        "D12.776.260"
+      ]
+    },
+    {
+      "descriptorUi": "D006023",
+      "name": "Glycosylation",
+      "descendantCount": 200,
+      "descendantCountTrue": 326,
+      "treeNumbers": [
+        "D09.400.430",
+        "D12.776.395"
+      ]
+    },
+    {
+      "descriptorUi": "D008055",
+      "name": "Hyperlipidemias",
+      "descendantCount": 200,
+      "descendantCountTrue": 325,
+      "treeNumbers": [
+        "D10"
+      ]
+    },
+    {
+      "descriptorUi": "D004066",
+      "name": "Digestive System Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 324,
+      "treeNumbers": [
+        "C06"
+      ]
+    },
+    {
+      "descriptorUi": "D009706",
+      "name": "Nucleic Acids, Nucleotides, and Nucleosides",
+      "descendantCount": 200,
+      "descendantCountTrue": 324,
+      "treeNumbers": [
+        "D13"
+      ]
+    },
+    {
+      "descriptorUi": "D026901",
+      "name": "Protein Translocation Systems",
+      "descendantCount": 200,
+      "descendantCountTrue": 321,
+      "treeNumbers": [
+        "D12.776.157.530",
+        "D12.776.543.585"
+      ]
+    },
+    {
+      "descriptorUi": "D001798",
+      "name": "Serpins",
+      "descendantCount": 200,
+      "descendantCountTrue": 314,
+      "treeNumbers": [
+        "D12.776.124"
+      ]
+    },
+    {
+      "descriptorUi": "D040342",
+      "name": "Genetics",
+      "descendantCount": 200,
+      "descendantCountTrue": 312,
+      "treeNumbers": [
+        "G05.360"
+      ]
+    },
+    {
+      "descriptorUi": "D000941",
+      "name": "Receptors, Antigen",
+      "descendantCount": 200,
+      "descendantCountTrue": 307,
+      "treeNumbers": [
+        "D23.050"
+      ]
+    },
+    {
+      "descriptorUi": "D006425",
+      "name": "Hemic and Lymphatic Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 306,
+      "treeNumbers": [
+        "C15"
+      ]
+    },
+    {
+      "descriptorUi": "D008659",
+      "name": "Metabolism, Inborn Errors",
+      "descendantCount": 200,
+      "descendantCountTrue": 306,
+      "treeNumbers": [
+        "C18.452"
+      ]
+    },
+    {
+      "descriptorUi": "D046911",
+      "name": "Macromolecular Substances",
+      "descendantCount": 200,
+      "descendantCountTrue": 303,
+      "treeNumbers": [
+        "D05"
+      ]
+    },
+    {
+      "descriptorUi": "D036341",
+      "name": "Peptide Hormones",
+      "descendantCount": 200,
+      "descendantCountTrue": 293,
+      "treeNumbers": [
+        "D12.644.276",
+        "D12.776.467",
+        "D23.529"
+      ]
+    },
+    {
+      "descriptorUi": "D014652",
+      "name": "Vascular Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 287,
+      "treeNumbers": [
+        "C14.907"
+      ]
+    },
+    {
+      "descriptorUi": "D001519",
+      "name": "Genetics, Behavioral",
+      "descendantCount": 200,
+      "descendantCountTrue": 284,
+      "treeNumbers": [
+        "F01.145"
+      ]
+    },
+    {
+      "descriptorUi": "D006296",
+      "name": "Health Services Administration",
+      "descendantCount": 200,
+      "descendantCountTrue": 284,
+      "treeNumbers": [
+        "N02.421"
+      ]
+    },
+    {
+      "descriptorUi": "D001423",
+      "name": "Bacterial Infections and Mycoses",
+      "descendantCount": 200,
+      "descendantCountTrue": 279,
+      "treeNumbers": [
+        "C01.150"
+      ]
+    },
+    {
+      "descriptorUi": "D045424",
+      "name": "Drug Combinations",
+      "descendantCount": 200,
+      "descendantCountTrue": 277,
+      "treeNumbers": [
+        "D20"
+      ]
+    },
+    {
+      "descriptorUi": "D011787",
+      "name": "Ambulatory Care Sensitive Conditions",
+      "descendantCount": 200,
+      "descendantCountTrue": 276,
+      "treeNumbers": [
+        "N04.761",
+        "N05.715"
+      ]
+    },
+    {
+      "descriptorUi": "D008322",
+      "name": "Mammals",
+      "descendantCount": 200,
+      "descendantCountTrue": 274,
+      "treeNumbers": [
+        "B01.050.150.900.649"
+      ]
+    },
+    {
+      "descriptorUi": "D006281",
+      "name": "Health Occupations",
+      "descendantCount": 200,
+      "descendantCountTrue": 272,
+      "treeNumbers": [
+        "H02"
+      ]
+    },
+    {
+      "descriptorUi": "D009461",
+      "name": "Neurologic Manifestations",
+      "descendantCount": 200,
+      "descendantCountTrue": 272,
+      "treeNumbers": [
+        "C10.597",
+        "C23.888.592"
+      ]
+    },
+    {
+      "descriptorUi": "D045505",
+      "name": "Physiological Effects of Drugs",
+      "descendantCount": 200,
+      "descendantCountTrue": 271,
+      "treeNumbers": [
+        "D27.505.696"
+      ]
+    },
+    {
+      "descriptorUi": "D005128",
+      "name": "Eye Manifestations",
+      "descendantCount": 200,
+      "descendantCountTrue": 270,
+      "treeNumbers": [
+        "C11"
+      ]
+    },
+    {
+      "descriptorUi": "D000072473",
+      "name": "Heterocyclic Compounds, Fused-Ring",
+      "descendantCount": 200,
+      "descendantCountTrue": 269,
+      "treeNumbers": [
+        "D04.210"
+      ]
+    },
+    {
+      "descriptorUi": "D013256",
+      "name": "Receptors, Steroid",
+      "descendantCount": 200,
+      "descendantCountTrue": 268,
+      "treeNumbers": [
+        "D04.210.500"
+      ]
+    },
+    {
+      "descriptorUi": "D017853",
+      "name": "Phosphotransferases (Alcohol Group Acceptor)",
+      "descendantCount": 200,
+      "descendantCountTrue": 267,
+      "treeNumbers": [
+        "D08.811.913.696.620"
+      ]
+    },
+    {
+      "descriptorUi": "D000577",
+      "name": "Amides",
+      "descendantCount": 200,
+      "descendantCountTrue": 266,
+      "treeNumbers": [
+        "D02.065"
+      ]
+    },
+    {
+      "descriptorUi": "D014947",
+      "name": "Transportation of Patients",
+      "descendantCount": 200,
+      "descendantCountTrue": 266,
+      "treeNumbers": [
+        "C26"
+      ]
+    },
+    {
+      "descriptorUi": "D006730",
+      "name": "Endocrine Disruptors",
+      "descendantCount": 200,
+      "descendantCountTrue": 264,
+      "treeNumbers": [
+        "D06",
+        "D27.505.696.399"
+      ]
+    },
+    {
+      "descriptorUi": "D009934",
+      "name": "Organization and Administration",
+      "descendantCount": 200,
+      "descendantCountTrue": 264,
+      "treeNumbers": [
+        "N04.452"
+      ]
+    },
+    {
+      "descriptorUi": "D000073566",
+      "name": "Eutheria",
+      "descendantCount": 200,
+      "descendantCountTrue": 261,
+      "treeNumbers": [
+        "B01.050.150.900.649.313"
+      ]
+    },
+    {
+      "descriptorUi": "D007154",
+      "name": "Blood Protein Disorders",
+      "descendantCount": 200,
+      "descendantCountTrue": 259,
+      "treeNumbers": [
+        "C20"
+      ]
+    },
+    {
+      "descriptorUi": "D022082",
+      "name": "Cellular Structures",
+      "descendantCount": 200,
+      "descendantCountTrue": 258,
+      "treeNumbers": [
+        "A11.284"
+      ]
+    },
+    {
+      "descriptorUi": "D019411",
+      "name": "Laboratories, Clinical",
+      "descendantCount": 200,
+      "descendantCountTrue": 257,
+      "treeNumbers": [
+        "E01.370.225",
+        "E05.200"
+      ]
+    },
+    {
+      "descriptorUi": "D052776",
+      "name": "Female Urogenital Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 254,
+      "treeNumbers": [
+        "C12.050.351"
+      ]
+    },
+    {
+      "descriptorUi": "D004812",
+      "name": "Epidemiologic Methods",
+      "descendantCount": 200,
+      "descendantCountTrue": 253,
+      "treeNumbers": [
+        "E05.318",
+        "N06.850.520"
+      ]
+    },
+    {
+      "descriptorUi": "D012140",
+      "name": "Respiratory Tract Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 253,
+      "treeNumbers": [
+        "C08"
+      ]
+    },
+    {
+      "descriptorUi": "D045504",
+      "name": "Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 252,
+      "treeNumbers": [
+        "D27.505.519"
+      ]
+    },
+    {
+      "descriptorUi": "D011971",
+      "name": "Immunologic Factors",
+      "descendantCount": 200,
+      "descendantCountTrue": 251,
+      "treeNumbers": [
+        "D12.776.543.750.705"
+      ]
+    },
+    {
+      "descriptorUi": "D006094",
+      "name": "Gram-Positive Bacteria",
+      "descendantCount": 200,
+      "descendantCountTrue": 245,
+      "treeNumbers": [
+        "B03.510"
+      ]
+    },
+    {
+      "descriptorUi": "D006728",
+      "name": "Receptors, Cytoplasmic and Nuclear",
+      "descendantCount": 200,
+      "descendantCountTrue": 244,
+      "treeNumbers": [
+        "D06.472",
+        "D27.505.696.399.472"
+      ]
+    },
+    {
+      "descriptorUi": "D010811",
+      "name": "Natural Science Disciplines",
+      "descendantCount": 200,
+      "descendantCountTrue": 244,
+      "treeNumbers": [
+        "H01"
+      ]
+    },
+    {
+      "descriptorUi": "D009371",
+      "name": "Neoplasms by Site",
+      "descendantCount": 200,
+      "descendantCountTrue": 240,
+      "treeNumbers": [
+        "C04.588"
+      ]
+    },
+    {
+      "descriptorUi": "D055687",
+      "name": "Musculoskeletal and Neural Physiological Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 236,
+      "treeNumbers": [
+        "G11"
+      ]
+    },
+    {
+      "descriptorUi": "D001523",
+      "name": "Persons with Psychiatric Disorders",
+      "descendantCount": 200,
+      "descendantCountTrue": 234,
+      "treeNumbers": [
+        "F03"
+      ]
+    },
+    {
+      "descriptorUi": "D011494",
+      "name": "Protein Kinase Inhibitors",
+      "descendantCount": 200,
+      "descendantCountTrue": 234,
+      "treeNumbers": [
+        "D08.811.913.696.620.682"
+      ]
+    },
+    {
+      "descriptorUi": "D014777",
+      "name": "Antiviral Agents",
+      "descendantCount": 200,
+      "descendantCountTrue": 228,
+      "treeNumbers": [
+        "C01.925"
+      ]
+    },
+    {
+      "descriptorUi": "D045506",
+      "name": "Therapeutic Uses",
+      "descendantCount": 200,
+      "descendantCountTrue": 228,
+      "treeNumbers": [
+        "D27.505.954"
+      ]
+    },
+    {
+      "descriptorUi": "D001393",
+      "name": "Azoles",
+      "descendantCount": 200,
+      "descendantCountTrue": 226,
+      "treeNumbers": [
+        "D03.383.129"
+      ]
+    },
+    {
+      "descriptorUi": "D055585",
+      "name": "Physical Phenomena",
+      "descendantCount": 200,
+      "descendantCountTrue": 226,
+      "treeNumbers": [
+        "G01"
+      ]
+    },
+    {
+      "descriptorUi": "D001424",
+      "name": "Bacterial Infections",
+      "descendantCount": 200,
+      "descendantCountTrue": 225,
+      "treeNumbers": [
+        "C01.150.252"
+      ]
+    },
+    {
+      "descriptorUi": "D009141",
+      "name": "Musculoskeletal Development",
+      "descendantCount": 200,
+      "descendantCountTrue": 225,
+      "treeNumbers": [
+        "A02"
+      ]
+    },
+    {
+      "descriptorUi": "D000144",
+      "name": "Acids, Acyclic",
+      "descendantCount": 200,
+      "descendantCountTrue": 224,
+      "treeNumbers": [
+        "D02.241.081"
+      ]
+    },
+    {
+      "descriptorUi": "D017531",
+      "name": "Health Care Evaluation Mechanisms",
+      "descendantCount": 200,
+      "descendantCountTrue": 224,
+      "treeNumbers": [
+        "N05.715.360"
+      ]
+    },
+    {
+      "descriptorUi": "D009057",
+      "name": "Stomatognathic Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 223,
+      "treeNumbers": [
+        "C07"
+      ]
+    },
+    {
+      "descriptorUi": "D008420",
+      "name": "Manufactured Materials",
+      "descendantCount": 200,
+      "descendantCountTrue": 220,
+      "treeNumbers": [
+        "J01.637"
+      ]
+    },
+    {
+      "descriptorUi": "D011108",
+      "name": "Polymers",
+      "descendantCount": 200,
+      "descendantCountTrue": 217,
+      "treeNumbers": [
+        "D05.750",
+        "D25.720",
+        "J01.637.051.720"
+      ]
+    },
+    {
+      "descriptorUi": "D002490",
+      "name": "Central Nervous System",
+      "descendantCount": 200,
+      "descendantCountTrue": 216,
+      "treeNumbers": [
+        "A08.186"
+      ]
+    },
+    {
+      "descriptorUi": "D006402",
+      "name": "Hematologic Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 216,
+      "treeNumbers": [
+        "C15.378"
+      ]
+    },
+    {
+      "descriptorUi": "D003813",
+      "name": "Oral Medicine",
+      "descendantCount": 200,
+      "descendantCountTrue": 215,
+      "treeNumbers": [
+        "E06",
+        "H02.163"
+      ]
+    },
+    {
+      "descriptorUi": "D004191",
+      "name": "Behavioral Disciplines and Activities",
+      "descendantCount": 200,
+      "descendantCountTrue": 215,
+      "treeNumbers": [
+        "F04"
+      ]
+    },
+    {
+      "descriptorUi": "D052801",
+      "name": "Male Urogenital Diseases",
+      "descendantCount": 200,
+      "descendantCountTrue": 214,
+      "treeNumbers": [
+        "C12.200"
+      ]
+    },
+    {
+      "descriptorUi": "D000066888",
+      "name": "Diet, Food, and Nutrition",
+      "descendantCount": 200,
+      "descendantCountTrue": 213,
+      "treeNumbers": [
+        "G07.203"
+      ]
+    },
+    {
+      "descriptorUi": "D005658",
+      "name": "Fungicides, Industrial",
+      "descendantCount": 200,
+      "descendantCountTrue": 213,
+      "treeNumbers": [
+        "B01.300"
+      ]
+    },
+    {
+      "descriptorUi": "D006809",
+      "name": "Humanities",
+      "descendantCount": 200,
+      "descendantCountTrue": 207,
+      "treeNumbers": [
+        "K01"
+      ]
+    },
+    {
+      "descriptorUi": "D009419",
+      "name": "Nerve Tissue Proteins",
+      "descendantCount": 200,
+      "descendantCountTrue": 203,
+      "treeNumbers": [
+        "D12.776.631"
+      ]
+    },
+    {
+      "descriptorUi": "D001921",
+      "name": "Psychosurgery",
+      "descendantCount": 196,
+      "descendantCountTrue": 196,
+      "treeNumbers": [
+        "A08.186.211"
+      ]
+    },
+    {
+      "descriptorUi": "D002468",
+      "name": "Cell Physiological Phenomena",
+      "descendantCount": 196,
+      "descendantCountTrue": 196,
+      "treeNumbers": [
+        "G04"
+      ]
+    },
+    {
+      "descriptorUi": "D020563",
+      "name": "Gammaproteobacteria",
+      "descendantCount": 196,
+      "descendantCountTrue": 196,
+      "treeNumbers": [
+        "B03.660.250"
+      ]
+    },
+    {
+      "descriptorUi": "D006331",
+      "name": "Neurocirculatory Asthenia",
+      "descendantCount": 195,
+      "descendantCountTrue": 195,
+      "treeNumbers": [
+        "C14.280"
+      ]
+    },
+    {
+      "descriptorUi": "D001686",
+      "name": "Biological Phenomena",
+      "descendantCount": 192,
+      "descendantCountTrue": 192,
+      "treeNumbers": [
+        "G16"
+      ]
+    },
+    {
+      "descriptorUi": "D000954",
+      "name": "Antigens, Surface",
+      "descendantCount": 191,
+      "descendantCountTrue": 191,
+      "treeNumbers": [
+        "D23.050.301"
+      ]
+    },
+    {
+      "descriptorUi": "D003952",
+      "name": "Phantoms, Imaging",
+      "descendantCount": 191,
+      "descendantCountTrue": 191,
+      "treeNumbers": [
+        "E01.370.350"
+      ]
+    },
+    {
+      "descriptorUi": "D010447",
+      "name": "Protease Inhibitors",
+      "descendantCount": 191,
+      "descendantCountTrue": 191,
+      "treeNumbers": [
+        "D08.811.277.656"
+      ]
+    },
+    {
+      "descriptorUi": "D016678",
+      "name": "Genomics",
+      "descendantCount": 190,
+      "descendantCountTrue": 190,
+      "treeNumbers": [
+        "G05.360.340"
+      ]
+    },
+    {
+      "descriptorUi": "D006088",
+      "name": "Gram-Negative Aerobic Bacteria",
+      "descendantCount": 189,
+      "descendantCountTrue": 189,
+      "treeNumbers": [
+        "B03.440.400"
+      ]
+    },
+    {
+      "descriptorUi": "D008660",
+      "name": "Metabolism",
+      "descendantCount": 184,
+      "descendantCountTrue": 184,
+      "treeNumbers": [
+        "G03"
+      ]
+    },
+    {
+      "descriptorUi": "D043562",
+      "name": "Receptors, G-Protein-Coupled",
+      "descendantCount": 183,
+      "descendantCountTrue": 183,
+      "treeNumbers": [
+        "D12.776.543.750.695"
+      ]
+    },
+    {
+      "descriptorUi": "D007162",
+      "name": "Immunoproteins",
+      "descendantCount": 182,
+      "descendantCountTrue": 182,
+      "treeNumbers": [
+        "D12.776.124.486"
+      ]
+    },
+    {
+      "descriptorUi": "D004267",
+      "name": "DNA, Viral",
+      "descendantCount": 181,
+      "descendantCountTrue": 181,
+      "treeNumbers": [
+        "B04.280"
+      ]
+    },
+    {
+      "descriptorUi": "D014024",
+      "name": "Tissue Transplantation",
+      "descendantCount": 181,
+      "descendantCountTrue": 181,
+      "treeNumbers": [
+        "A10"
+      ]
+    },
+    {
+      "descriptorUi": "D016946",
+      "name": "Gram-Negative Aerobic Rods and Cocci",
+      "descendantCount": 180,
+      "descendantCountTrue": 180,
+      "treeNumbers": [
+        "B03.440.400.425"
+      ]
+    },
+    {
+      "descriptorUi": "D004950",
+      "name": "Esterases",
+      "descendantCount": 178,
+      "descendantCountTrue": 178,
+      "treeNumbers": [
+        "D08.811.277.352"
+      ]
+    },
+    {
+      "descriptorUi": "D000438",
+      "name": "Alcohols",
+      "descendantCount": 176,
+      "descendantCountTrue": 176,
+      "treeNumbers": [
+        "D02.033"
+      ]
+    },
+    {
+      "descriptorUi": "D005767",
+      "name": "Gastrointestinal Diseases",
+      "descendantCount": 176,
+      "descendantCountTrue": 176,
+      "treeNumbers": [
+        "C06.405"
+      ]
+    },
+    {
+      "descriptorUi": "D020313",
+      "name": "Specialty Uses of Chemicals",
+      "descendantCount": 176,
+      "descendantCountTrue": 176,
+      "treeNumbers": [
+        "D27.720"
+      ]
+    },
+    {
+      "descriptorUi": "D004602",
+      "name": "Radioisotopes",
+      "descendantCount": 173,
+      "descendantCountTrue": 173,
+      "treeNumbers": [
+        "D01.268"
+      ]
+    },
+    {
+      "descriptorUi": "D008606",
+      "name": "Mental Processes",
+      "descendantCount": 173,
+      "descendantCountTrue": 173,
+      "treeNumbers": [
+        "F02.463"
+      ]
+    },
+    {
+      "descriptorUi": "D000093983",
+      "name": "Information Sources",
+      "descendantCount": 172,
+      "descendantCountTrue": 172,
+      "treeNumbers": [
+        "L01.462"
+      ]
+    },
+    {
+      "descriptorUi": "D040481",
+      "name": "Genome Components",
+      "descendantCount": 171,
+      "descendantCountTrue": 171,
+      "treeNumbers": [
+        "G05.360.340.024"
+      ]
+    },
+    {
+      "descriptorUi": "D002623",
+      "name": "Autoanalysis",
+      "descendantCount": 170,
+      "descendantCountTrue": 170,
+      "treeNumbers": [
+        "E05.196"
+      ]
+    },
+    {
+      "descriptorUi": "D004700",
+      "name": "Endocrinology",
+      "descendantCount": 170,
+      "descendantCountTrue": 170,
+      "treeNumbers": [
+        "C19"
+      ]
+    },
+    {
+      "descriptorUi": "D005916",
+      "name": "Serum Globulins",
+      "descendantCount": 170,
+      "descendantCountTrue": 170,
+      "treeNumbers": [
+        "D12.776.377"
+      ]
+    },
+    {
+      "descriptorUi": "D006268",
+      "name": "Health Facility Administration",
+      "descendantCount": 170,
+      "descendantCountTrue": 170,
+      "treeNumbers": [
+        "N02.278"
+      ]
+    },
+    {
+      "descriptorUi": "D004467",
+      "name": "Models, Economic",
+      "descendantCount": 169,
+      "descendantCountTrue": 169,
+      "treeNumbers": [
+        "I01.261",
+        "N03.219"
+      ]
+    },
+    {
+      "descriptorUi": "D009687",
+      "name": "Nuclear Proteins",
+      "descendantCount": 169,
+      "descendantCountTrue": 169,
+      "treeNumbers": [
+        "D12.776.660"
+      ]
+    },
+    {
+      "descriptorUi": "D004777",
+      "name": "Ecosystem",
+      "descendantCount": 168,
+      "descendantCountTrue": 168,
+      "treeNumbers": [
+        "G16.500.275",
+        "N06.230"
+      ]
+    },
+    {
+      "descriptorUi": "D002943",
+      "name": "Circulatory and Respiratory Physiological Phenomena",
+      "descendantCount": 167,
+      "descendantCountTrue": 167,
+      "treeNumbers": [
+        "G09"
+      ]
+    },
+    {
+      "descriptorUi": "D001688",
+      "name": "Biological Factors",
+      "descendantCount": 166,
+      "descendantCountTrue": 166,
+      "treeNumbers": [
+        "D20.215"
+      ]
+    },
+    {
+      "descriptorUi": "D012712",
+      "name": "Serum Globulins",
+      "descendantCount": 166,
+      "descendantCountTrue": 166,
+      "treeNumbers": [
+        "D12.776.124.790",
+        "D12.776.377.715"
+      ]
+    },
+    {
+      "descriptorUi": "D016987",
+      "name": "Gram-Positive Rods",
+      "descendantCount": 166,
+      "descendantCountTrue": 166,
+      "treeNumbers": [
+        "B03.510.460"
+      ]
+    },
+    {
+      "descriptorUi": "D012101",
+      "name": "Reproductive and Urinary Physiological Phenomena",
+      "descendantCount": 165,
+      "descendantCountTrue": 165,
+      "treeNumbers": [
+        "G08"
+      ]
+    },
+    {
+      "descriptorUi": "D000068536",
+      "name": "Bacillota",
+      "descendantCount": 163,
+      "descendantCountTrue": 163,
+      "treeNumbers": [
+        "B03.353"
+      ]
+    },
+    {
+      "descriptorUi": "D001847",
+      "name": "Fractures, Bone",
+      "descendantCount": 163,
+      "descendantCountTrue": 163,
+      "treeNumbers": [
+        "C05.116"
+      ]
+    },
+    {
+      "descriptorUi": "D009363",
+      "name": "Biomarkers, Tumor",
+      "descendantCount": 161,
+      "descendantCountTrue": 161,
+      "treeNumbers": [
+        "D12.776.624"
+      ]
+    },
+    {
+      "descriptorUi": "D008661",
+      "name": "Metabolism, Inborn Errors",
+      "descendantCount": 160,
+      "descendantCountTrue": 160,
+      "treeNumbers": [
+        "C16.320.565",
+        "C18.452.648"
+      ]
+    },
+    {
+      "descriptorUi": "D000596",
+      "name": "Receptors, Amino Acid",
+      "descendantCount": 159,
+      "descendantCountTrue": 159,
+      "treeNumbers": [
+        "D12.125"
+      ]
+    },
+    {
+      "descriptorUi": "D015394",
+      "name": "Models, Molecular",
+      "descendantCount": 159,
+      "descendantCountTrue": 159,
+      "treeNumbers": [
+        "G02.111.570",
+        "G02.466"
+      ]
+    },
+    {
+      "descriptorUi": "D000074424",
+      "name": "Rosanae",
+      "descendantCount": 158,
+      "descendantCountTrue": 158,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.859"
+      ]
+    },
+    {
+      "descriptorUi": "D000470",
+      "name": "Alkaloids",
+      "descendantCount": 158,
+      "descendantCountTrue": 158,
+      "treeNumbers": [
+        "D03.132"
+      ]
+    },
+    {
+      "descriptorUi": "D012863",
+      "name": "Bone and Bones",
+      "descendantCount": 158,
+      "descendantCountTrue": 158,
+      "treeNumbers": [
+        "A02.835"
+      ]
+    },
+    {
+      "descriptorUi": "D017346",
+      "name": "Protein Serine-Threonine Kinases",
+      "descendantCount": 158,
+      "descendantCountTrue": 158,
+      "treeNumbers": [
+        "D08.811.913.696.620.682.700",
+        "D12.776.476.563"
+      ]
+    },
+    {
+      "descriptorUi": "D009274",
+      "name": "Occupations",
+      "descendantCount": 156,
+      "descendantCountTrue": 156,
+      "treeNumbers": [
+        "M01.526"
+      ]
+    },
+    {
+      "descriptorUi": "D009375",
+      "name": "Neoplasms, Glandular and Epithelial",
+      "descendantCount": 155,
+      "descendantCountTrue": 155,
+      "treeNumbers": [
+        "C04.557.470"
+      ]
+    },
+    {
+      "descriptorUi": "D012926",
+      "name": "Public Policy",
+      "descendantCount": 154,
+      "descendantCountTrue": 154,
+      "treeNumbers": [
+        "I01.880.604",
+        "N03.706"
+      ]
+    },
+    {
+      "descriptorUi": "D000091662",
+      "name": "Genital Diseases",
+      "descendantCount": 151,
+      "descendantCountTrue": 151,
+      "treeNumbers": [
+        "C12.100"
+      ]
+    },
+    {
+      "descriptorUi": "D055703",
+      "name": "Reproductive Physiological Phenomena",
+      "descendantCount": 151,
+      "descendantCountTrue": 151,
+      "treeNumbers": [
+        "G08.686"
+      ]
+    },
+    {
+      "descriptorUi": "D052180",
+      "name": "Publication Formats",
+      "descendantCount": 150,
+      "descendantCountTrue": 150,
+      "treeNumbers": [
+        "V02"
+      ]
+    },
+    {
+      "descriptorUi": "D011084",
+      "name": "Fused-Ring Compounds",
+      "descendantCount": 148,
+      "descendantCountTrue": 148,
+      "treeNumbers": [
+        "D02.455.426.559.847",
+        "D04.615"
+      ]
+    },
+    {
+      "descriptorUi": "D000085102",
+      "name": "Positive-Strand RNA Viruses",
+      "descendantCount": 147,
+      "descendantCountTrue": 147,
+      "treeNumbers": [
+        "B04.820.578"
+      ]
+    },
+    {
+      "descriptorUi": "D008511",
+      "name": "Legislation, Medical",
+      "descendantCount": 147,
+      "descendantCountTrue": 147,
+      "treeNumbers": [
+        "H02.403"
+      ]
+    },
+    {
+      "descriptorUi": "D009424",
+      "name": "Nervous System Physiological Phenomena",
+      "descendantCount": 146,
+      "descendantCountTrue": 146,
+      "treeNumbers": [
+        "G11.561"
+      ]
+    },
+    {
+      "descriptorUi": "D012327",
+      "name": "RNA Virus Infections",
+      "descendantCount": 146,
+      "descendantCountTrue": 146,
+      "treeNumbers": [
+        "C01.925.782"
+      ]
+    },
+    {
+      "descriptorUi": "D011154",
+      "name": "Population Characteristics",
+      "descendantCount": 145,
+      "descendantCountTrue": 145,
+      "treeNumbers": [
+        "N01"
+      ]
+    },
+    {
+      "descriptorUi": "D019602",
+      "name": "Food and Beverages",
+      "descendantCount": 145,
+      "descendantCountTrue": 145,
+      "treeNumbers": [
+        "J02"
+      ]
+    },
+    {
+      "descriptorUi": "D000146",
+      "name": "Acids, Carbocyclic",
+      "descendantCount": 143,
+      "descendantCountTrue": 143,
+      "treeNumbers": [
+        "D02.241.223"
+      ]
+    },
+    {
+      "descriptorUi": "D001181",
+      "name": "Arthropods",
+      "descendantCount": 142,
+      "descendantCountTrue": 142,
+      "treeNumbers": [
+        "B01.050.500.131"
+      ]
+    },
+    {
+      "descriptorUi": "D003205",
+      "name": "Computing Methodologies",
+      "descendantCount": 142,
+      "descendantCountTrue": 142,
+      "treeNumbers": [
+        "L01.224"
+      ]
+    },
+    {
+      "descriptorUi": "D017766",
+      "name": "Acid Anhydride Hydrolases",
+      "descendantCount": 140,
+      "descendantCountTrue": 140,
+      "treeNumbers": [
+        "D08.811.277.040"
+      ]
+    },
+    {
+      "descriptorUi": "D001697",
+      "name": "Biomedical and Dental Materials",
+      "descendantCount": 139,
+      "descendantCountTrue": 139,
+      "treeNumbers": [
+        "D25",
+        "D27.720.102",
+        "J01.637.051"
+      ]
+    },
+    {
+      "descriptorUi": "D009696",
+      "name": "Nucleic Acids",
+      "descendantCount": 139,
+      "descendantCountTrue": 139,
+      "treeNumbers": [
+        "D13.444"
+      ]
+    },
+    {
+      "descriptorUi": "D009698",
+      "name": "Nucleoproteins",
+      "descendantCount": 139,
+      "descendantCountTrue": 139,
+      "treeNumbers": [
+        "D12.776.664"
+      ]
+    },
+    {
+      "descriptorUi": "D010272",
+      "name": "Parasitic Diseases, Animal",
+      "descendantCount": 138,
+      "descendantCountTrue": 138,
+      "treeNumbers": [
+        "C01.610"
+      ]
+    },
+    {
+      "descriptorUi": "D014570",
+      "name": "Urologic Diseases",
+      "descendantCount": 137,
+      "descendantCountTrue": 137,
+      "treeNumbers": [
+        "C12.050.351.968",
+        "C12.200.777",
+        "C12.950"
+      ]
+    },
+    {
+      "descriptorUi": "D000820",
+      "name": "Animal Diseases",
+      "descendantCount": 135,
+      "descendantCountTrue": 135,
+      "treeNumbers": [
+        "C22"
+      ]
+    },
+    {
+      "descriptorUi": "D010636",
+      "name": "Phenols",
+      "descendantCount": 135,
+      "descendantCountTrue": 135,
+      "treeNumbers": [
+        "D02.455.426.559.389.657"
+      ]
+    },
+    {
+      "descriptorUi": "D000569",
+      "name": "Americas",
+      "descendantCount": 134,
+      "descendantCountTrue": 134,
+      "treeNumbers": [
+        "Z01.107"
+      ]
+    },
+    {
+      "descriptorUi": "D002319",
+      "name": "Blood Circulation",
+      "descendantCount": 134,
+      "descendantCountTrue": 134,
+      "treeNumbers": [
+        "A07"
+      ]
+    },
+    {
+      "descriptorUi": "D007136",
+      "name": "Immunologic Factors",
+      "descendantCount": 134,
+      "descendantCountTrue": 134,
+      "treeNumbers": [
+        "D12.776.124.486.485",
+        "D12.776.124.790.651",
+        "D12.776.377.715.548"
+      ]
+    },
+    {
+      "descriptorUi": "D010450",
+      "name": "Protease Inhibitors",
+      "descendantCount": 134,
+      "descendantCountTrue": 134,
+      "treeNumbers": [
+        "D08.811.277.656.300"
+      ]
+    },
+    {
+      "descriptorUi": "D001690",
+      "name": "Biological Science Disciplines",
+      "descendantCount": 133,
+      "descendantCountTrue": 133,
+      "treeNumbers": [
+        "H01.158"
+      ]
+    },
+    {
+      "descriptorUi": "D011743",
+      "name": "Pyrimidines",
+      "descendantCount": 133,
+      "descendantCountTrue": 133,
+      "treeNumbers": [
+        "D03.383.742"
+      ]
+    },
+    {
+      "descriptorUi": "D001704",
+      "name": "RNA",
+      "descendantCount": 132,
+      "descendantCountTrue": 132,
+      "treeNumbers": [
+        "D05.750.078",
+        "D25.720.099",
+        "J01.637.051.720.099"
+      ]
+    },
+    {
+      "descriptorUi": "D010038",
+      "name": "Pharyngeal Diseases",
+      "descendantCount": 130,
+      "descendantCountTrue": 130,
+      "treeNumbers": [
+        "C09"
+      ]
+    },
+    {
+      "descriptorUi": "D003598",
+      "name": "Cytoskeletal Proteins",
+      "descendantCount": 129,
+      "descendantCountTrue": 129,
+      "treeNumbers": [
+        "D12.776.220"
+      ]
+    },
+    {
+      "descriptorUi": "D006092",
+      "name": "Gram-Negative Facultatively Anaerobic Rods",
+      "descendantCount": 129,
+      "descendantCountTrue": 129,
+      "treeNumbers": [
+        "B03.440.450"
+      ]
+    },
+    {
+      "descriptorUi": "D013729",
+      "name": "Terpenes",
+      "descendantCount": 129,
+      "descendantCountTrue": 129,
+      "treeNumbers": [
+        "D02.455.849"
+      ]
+    },
+    {
+      "descriptorUi": "D004364",
+      "name": "Receptors, Drug",
+      "descendantCount": 128,
+      "descendantCountTrue": 128,
+      "treeNumbers": [
+        "D26"
+      ]
+    },
+    {
+      "descriptorUi": "D005796",
+      "name": "Genome",
+      "descendantCount": 128,
+      "descendantCountTrue": 128,
+      "treeNumbers": [
+        "G05.360.340.024.340"
+      ]
+    },
+    {
+      "descriptorUi": "D036361",
+      "name": "Intercellular Signaling Peptides and Proteins",
+      "descendantCount": 128,
+      "descendantCountTrue": 128,
+      "treeNumbers": [
+        "D06.472.699",
+        "D12.644.548"
+      ]
+    },
+    {
+      "descriptorUi": "D003146",
+      "name": "Communications Media",
+      "descendantCount": 126,
+      "descendantCountTrue": 126,
+      "treeNumbers": [
+        "L01.462.500"
+      ]
+    },
+    {
+      "descriptorUi": "D005227",
+      "name": "Fatty Acids",
+      "descendantCount": 126,
+      "descendantCountTrue": 126,
+      "treeNumbers": [
+        "D10.251"
+      ]
+    },
+    {
+      "descriptorUi": "D008670",
+      "name": "Organometallic Compounds",
+      "descendantCount": 125,
+      "descendantCountTrue": 125,
+      "treeNumbers": [
+        "D01.552"
+      ]
+    },
+    {
+      "descriptorUi": "D018000",
+      "name": "Receptors, Peptide",
+      "descendantCount": 125,
+      "descendantCountTrue": 125,
+      "treeNumbers": [
+        "D12.776.543.750.750"
+      ]
+    },
+    {
+      "descriptorUi": "D009468",
+      "name": "Neuromuscular Diseases",
+      "descendantCount": 124,
+      "descendantCountTrue": 124,
+      "treeNumbers": [
+        "C10.668"
+      ]
+    },
+    {
+      "descriptorUi": "D016623",
+      "name": "Ion Pumps",
+      "descendantCount": 124,
+      "descendantCountTrue": 124,
+      "treeNumbers": [
+        "D12.776.157.530.450",
+        "D12.776.543.585.450"
+      ]
+    },
+    {
+      "descriptorUi": "D006282",
+      "name": "Health Personnel",
+      "descendantCount": 123,
+      "descendantCountTrue": 123,
+      "treeNumbers": [
+        "M01.526.485",
+        "N02.360"
+      ]
+    },
+    {
+      "descriptorUi": "D006376",
+      "name": "Helminths",
+      "descendantCount": 123,
+      "descendantCountTrue": 123,
+      "treeNumbers": [
+        "B01.050.500.500"
+      ]
+    },
+    {
+      "descriptorUi": "D016207",
+      "name": "Cytokines",
+      "descendantCount": 123,
+      "descendantCountTrue": 123,
+      "treeNumbers": [
+        "D12.644.276.374",
+        "D12.776.467.374",
+        "D23.529.374"
+      ]
+    },
+    {
+      "descriptorUi": "D042541",
+      "name": "Intracellular Fluid",
+      "descendantCount": 123,
+      "descendantCountTrue": 123,
+      "treeNumbers": [
+        "A10.082.750",
+        "A11.284.430"
+      ]
+    },
+    {
+      "descriptorUi": "D011725",
+      "name": "Piperidines",
+      "descendantCount": 122,
+      "descendantCountTrue": 122,
+      "treeNumbers": [
+        "D03.383.725"
+      ]
+    },
+    {
+      "descriptorUi": "D055669",
+      "name": "Ecological and Environmental Phenomena",
+      "descendantCount": 122,
+      "descendantCountTrue": 122,
+      "treeNumbers": [
+        "G16.500"
+      ]
+    },
+    {
+      "descriptorUi": "D006575",
+      "name": "Heterocyclic Compounds, 3-Ring",
+      "descendantCount": 121,
+      "descendantCountTrue": 121,
+      "treeNumbers": [
+        "D03.633.300"
+      ]
+    },
+    {
+      "descriptorUi": "D009059",
+      "name": "Oral Manifestations",
+      "descendantCount": 121,
+      "descendantCountTrue": 121,
+      "treeNumbers": [
+        "C07.465"
+      ]
+    },
+    {
+      "descriptorUi": "D009938",
+      "name": "Societies",
+      "descendantCount": 121,
+      "descendantCountTrue": 121,
+      "treeNumbers": [
+        "N03.540"
+      ]
+    },
+    {
+      "descriptorUi": "D055633",
+      "name": "Immune System Phenomena",
+      "descendantCount": 121,
+      "descendantCountTrue": 121,
+      "treeNumbers": [
+        "G12"
+      ]
+    },
+    {
+      "descriptorUi": "D004358",
+      "name": "Pharmacologic Actions",
+      "descendantCount": 120,
+      "descendantCountTrue": 120,
+      "treeNumbers": [
+        "E02.319"
+      ]
+    },
+    {
+      "descriptorUi": "D005502",
+      "name": "Plants, Edible",
+      "descendantCount": 120,
+      "descendantCountTrue": 120,
+      "treeNumbers": [
+        "G07.203.300",
+        "J02.500"
+      ]
+    },
+    {
+      "descriptorUi": "D020763",
+      "name": "Pathological Conditions, Anatomical",
+      "descendantCount": 120,
+      "descendantCountTrue": 120,
+      "treeNumbers": [
+        "C23.300"
+      ]
+    },
+    {
+      "descriptorUi": "D017981",
+      "name": "Receptors, Neurotransmitter",
+      "descendantCount": 119,
+      "descendantCountTrue": 119,
+      "treeNumbers": [
+        "D12.776.543.750.720"
+      ]
+    },
+    {
+      "descriptorUi": "D005821",
+      "name": "Chromosomes, Artificial, Yeast",
+      "descendantCount": 117,
+      "descendantCountTrue": 117,
+      "treeNumbers": [
+        "E05.393"
+      ]
+    },
+    {
+      "descriptorUi": "D016548",
+      "name": "Prosencephalon",
+      "descendantCount": 117,
+      "descendantCountTrue": 117,
+      "treeNumbers": [
+        "A08.186.211.200"
+      ]
+    },
+    {
+      "descriptorUi": "D006027",
+      "name": "Glycosides",
+      "descendantCount": 116,
+      "descendantCountTrue": 116,
+      "treeNumbers": [
+        "D09.408"
+      ]
+    },
+    {
+      "descriptorUi": "D009711",
+      "name": "Base Sequence",
+      "descendantCount": 116,
+      "descendantCountTrue": 116,
+      "treeNumbers": [
+        "D09.408.620",
+        "D13.695"
+      ]
+    },
+    {
+      "descriptorUi": "D011593",
+      "name": "Race Relations",
+      "descendantCount": 116,
+      "descendantCountTrue": 116,
+      "treeNumbers": [
+        "F01.829",
+        "F04.096.628.829"
+      ]
+    },
+    {
+      "descriptorUi": "D047028",
+      "name": "Macrocyclic Compounds",
+      "descendantCount": 116,
+      "descendantCountTrue": 116,
+      "treeNumbers": [
+        "D04.345"
+      ]
+    },
+    {
+      "descriptorUi": "D007473",
+      "name": "Ion Pumps",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "D12.776.157.530.400",
+        "D12.776.543.550.450",
+        "D12.776.543.585.400"
+      ]
+    },
+    {
+      "descriptorUi": "D011687",
+      "name": "Purines",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "D03.633.100.759"
+      ]
+    },
+    {
+      "descriptorUi": "D012679",
+      "name": "Sensory Receptor Cells",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "A09"
+      ]
+    },
+    {
+      "descriptorUi": "D014118",
+      "name": "Toxoids",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "D23.946"
+      ]
+    },
+    {
+      "descriptorUi": "D015513",
+      "name": "Oncogene Proteins",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "D12.776.624.664"
+      ]
+    },
+    {
+      "descriptorUi": "D017933",
+      "name": "Neural Pathways",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "A08.800"
+      ]
+    },
+    {
+      "descriptorUi": "D064419",
+      "name": "Bioaccumulation",
+      "descendantCount": 115,
+      "descendantCountTrue": 115,
+      "treeNumbers": [
+        "C25"
+      ]
+    },
+    {
+      "descriptorUi": "D001842",
+      "name": "Osteotomy",
+      "descendantCount": 114,
+      "descendantCountTrue": 114,
+      "treeNumbers": [
+        "A02.835.232",
+        "A10.165.265"
+      ]
+    },
+    {
+      "descriptorUi": "D006802",
+      "name": "Human Activities",
+      "descendantCount": 114,
+      "descendantCountTrue": 114,
+      "treeNumbers": [
+        "I03"
+      ]
+    },
+    {
+      "descriptorUi": "D016905",
+      "name": "Gram-Negative Bacterial Infections",
+      "descendantCount": 114,
+      "descendantCountTrue": 114,
+      "treeNumbers": [
+        "C01.150.252.400"
+      ]
+    },
+    {
+      "descriptorUi": "D048868",
+      "name": "Adaptor Proteins, Signal Transducing",
+      "descendantCount": 114,
+      "descendantCountTrue": 114,
+      "treeNumbers": [
+        "D12.644.360.024",
+        "D12.776.157.057",
+        "D12.776.476.024"
+      ]
+    },
+    {
+      "descriptorUi": "D007410",
+      "name": "Intestinal Diseases",
+      "descendantCount": 112,
+      "descendantCountTrue": 112,
+      "treeNumbers": [
+        "C06.405.469"
+      ]
+    },
+    {
+      "descriptorUi": "D018121",
+      "name": "Receptors, Cytokine",
+      "descendantCount": 112,
+      "descendantCountTrue": 112,
+      "treeNumbers": [
+        "D12.776.543.750.705.852"
+      ]
+    },
+    {
+      "descriptorUi": "D005791",
+      "name": "Nursing Care",
+      "descendantCount": 111,
+      "descendantCountTrue": 111,
+      "treeNumbers": [
+        "E02.760",
+        "N02.421.585"
+      ]
+    },
+    {
+      "descriptorUi": "D012940",
+      "name": "Substance-Related Disorders",
+      "descendantCount": 111,
+      "descendantCountTrue": 111,
+      "treeNumbers": [
+        "I01.880.735"
+      ]
+    },
+    {
+      "descriptorUi": "D008171",
+      "name": "Pulmonary Heart Disease",
+      "descendantCount": 110,
+      "descendantCountTrue": 110,
+      "treeNumbers": [
+        "C08.381"
+      ]
+    },
+    {
+      "descriptorUi": "D008206",
+      "name": "Lymphoma",
+      "descendantCount": 110,
+      "descendantCountTrue": 110,
+      "treeNumbers": [
+        "C15.604"
+      ]
+    },
+    {
+      "descriptorUi": "D003625",
+      "name": "Empirical Research",
+      "descendantCount": 109,
+      "descendantCountTrue": 109,
+      "treeNumbers": [
+        "E05.318.308",
+        "L01.399.250",
+        "N05.715.360.300",
+        "N06.850.520.308"
+      ]
+    },
+    {
+      "descriptorUi": "D003695",
+      "name": "Patient Acceptance of Health Care",
+      "descendantCount": 109,
+      "descendantCountTrue": 109,
+      "treeNumbers": [
+        "N04.590.374",
+        "N05.300"
+      ]
+    },
+    {
+      "descriptorUi": "D006424",
+      "name": "Hemic and Immune Systems",
+      "descendantCount": 108,
+      "descendantCountTrue": 108,
+      "treeNumbers": [
+        "A15"
+      ]
+    },
+    {
+      "descriptorUi": "D011134",
+      "name": "Polysaccharides",
+      "descendantCount": 108,
+      "descendantCountTrue": 108,
+      "treeNumbers": [
+        "D09.698"
+      ]
+    },
+    {
+      "descriptorUi": "D003584",
+      "name": "Cytodiagnosis",
+      "descendantCount": 107,
+      "descendantCountTrue": 107,
+      "treeNumbers": [
+        "E01.370.225.500",
+        "E05.200.500",
+        "E05.242"
+      ]
+    },
+    {
+      "descriptorUi": "D010105",
+      "name": "Oxygenases",
+      "descendantCount": 107,
+      "descendantCountTrue": 107,
+      "treeNumbers": [
+        "D08.811.682.690"
+      ]
+    },
+    {
+      "descriptorUi": "D018836",
+      "name": "Inflammation Mediators",
+      "descendantCount": 107,
+      "descendantCountTrue": 107,
+      "treeNumbers": [
+        "D23.469"
+      ]
+    },
+    {
+      "descriptorUi": "D000906",
+      "name": "Immunologic Factors",
+      "descendantCount": 104,
+      "descendantCountTrue": 104,
+      "treeNumbers": [
+        "D12.776.124.486.485.114",
+        "D12.776.124.790.651.114",
+        "D12.776.377.715.548.114"
+      ]
+    },
+    {
+      "descriptorUi": "D020561",
+      "name": "Alphaproteobacteria",
+      "descendantCount": 104,
+      "descendantCountTrue": 104,
+      "treeNumbers": [
+        "B03.660.050"
+      ]
+    },
+    {
+      "descriptorUi": "D000086103",
+      "name": "Negative-Sense RNA Viruses",
+      "descendantCount": 103,
+      "descendantCountTrue": 103,
+      "treeNumbers": [
+        "B04.820.480"
+      ]
+    },
+    {
+      "descriptorUi": "D006420",
+      "name": "Hemeproteins",
+      "descendantCount": 103,
+      "descendantCountTrue": 103,
+      "treeNumbers": [
+        "D12.776.422"
+      ]
+    },
+    {
+      "descriptorUi": "D014764",
+      "name": "Viral Proteins",
+      "descendantCount": 103,
+      "descendantCountTrue": 103,
+      "treeNumbers": [
+        "D12.776.964"
+      ]
+    },
+    {
+      "descriptorUi": "D018204",
+      "name": "Neoplasms, Connective and Soft Tissue",
+      "descendantCount": 103,
+      "descendantCountTrue": 103,
+      "treeNumbers": [
+        "C04.557.450"
+      ]
+    },
+    {
+      "descriptorUi": "D006839",
+      "name": "Hydrocarbons, Acyclic",
+      "descendantCount": 100,
+      "descendantCountTrue": 100,
+      "treeNumbers": [
+        "D02.455.326"
+      ]
+    },
+    {
+      "descriptorUi": "D006576",
+      "name": "Heterocyclic Compounds, 4 or More Rings",
+      "descendantCount": 99,
+      "descendantCountTrue": 99,
+      "treeNumbers": [
+        "D03.633.400"
+      ]
+    },
+    {
+      "descriptorUi": "D011603",
+      "name": "Psychosomatic Medicine",
+      "descendantCount": 99,
+      "descendantCountTrue": 99,
+      "treeNumbers": [
+        "F02.830",
+        "F04.096.795",
+        "H01.158.782.795"
+      ]
+    },
+    {
+      "descriptorUi": "D048788",
+      "name": "Gene Expression Regulation, Developmental",
+      "descendantCount": 98,
+      "descendantCountTrue": 98,
+      "treeNumbers": [
+        "G07.345"
+      ]
+    },
+    {
+      "descriptorUi": "D010346",
+      "name": "Patient Care Management",
+      "descendantCount": 97,
+      "descendantCountTrue": 97,
+      "treeNumbers": [
+        "N04.590"
+      ]
+    },
+    {
+      "descriptorUi": "D001829",
+      "name": "Body Regions",
+      "descendantCount": 96,
+      "descendantCountTrue": 96,
+      "treeNumbers": [
+        "A01"
+      ]
+    },
+    {
+      "descriptorUi": "D011248",
+      "name": "Pregnancy, Prolonged",
+      "descendantCount": 96,
+      "descendantCountTrue": 96,
+      "treeNumbers": [
+        "C12.050.703"
+      ]
+    },
+    {
+      "descriptorUi": "D020969",
+      "name": "Disease Attributes",
+      "descendantCount": 95,
+      "descendantCountTrue": 95,
+      "treeNumbers": [
+        "C23.550.291"
+      ]
+    },
+    {
+      "descriptorUi": "D001808",
+      "name": "Vasomotor System",
+      "descendantCount": 94,
+      "descendantCountTrue": 94,
+      "treeNumbers": [
+        "A07.015"
+      ]
+    },
+    {
+      "descriptorUi": "D014612",
+      "name": "Immunologic Factors",
+      "descendantCount": 94,
+      "descendantCountTrue": 94,
+      "treeNumbers": [
+        "D20.215.894"
+      ]
+    },
+    {
+      "descriptorUi": "D004493",
+      "name": "Training Support",
+      "descendantCount": 93,
+      "descendantCountTrue": 93,
+      "treeNumbers": [
+        "I02"
+      ]
+    },
+    {
+      "descriptorUi": "D007158",
+      "name": "Immunotherapy",
+      "descendantCount": 93,
+      "descendantCountTrue": 93,
+      "treeNumbers": [
+        "E05.478"
+      ]
+    },
+    {
+      "descriptorUi": "D000068378",
+      "name": "Lamiales",
+      "descendantCount": 92,
+      "descendantCountTrue": 92,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.583"
+      ]
+    },
+    {
+      "descriptorUi": "D000075063",
+      "name": "Lilianae",
+      "descendantCount": 92,
+      "descendantCountTrue": 92,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.618"
+      ]
+    },
+    {
+      "descriptorUi": "D009142",
+      "name": "Musculoskeletal Physiological Phenomena",
+      "descendantCount": 92,
+      "descendantCountTrue": 92,
+      "treeNumbers": [
+        "G11.427"
+      ]
+    },
+    {
+      "descriptorUi": "D012596",
+      "name": "Scleroproteins",
+      "descendantCount": 92,
+      "descendantCountTrue": 92,
+      "treeNumbers": [
+        "D12.776.860"
+      ]
+    },
+    {
+      "descriptorUi": "D012098",
+      "name": "Reproduction",
+      "descendantCount": 91,
+      "descendantCountTrue": 91,
+      "treeNumbers": [
+        "G08.686.784"
+      ]
+    },
+    {
+      "descriptorUi": "D018377",
+      "name": "Neurotransmitter Agents",
+      "descendantCount": 91,
+      "descendantCountTrue": 91,
+      "treeNumbers": [
+        "D27.505.519.625",
+        "D27.505.696.577"
+      ]
+    },
+    {
+      "descriptorUi": "D001565",
+      "name": "Benzoates",
+      "descendantCount": 90,
+      "descendantCountTrue": 90,
+      "treeNumbers": [
+        "D02.241.223.100",
+        "D02.455.426.559.389.127"
+      ]
+    },
+    {
+      "descriptorUi": "D002620",
+      "name": "Pharmacologic Actions",
+      "descendantCount": 90,
+      "descendantCountTrue": 90,
+      "treeNumbers": [
+        "G07.690"
+      ]
+    },
+    {
+      "descriptorUi": "D008190",
+      "name": "Lyases",
+      "descendantCount": 90,
+      "descendantCountTrue": 90,
+      "treeNumbers": [
+        "D08.811.520"
+      ]
+    },
+    {
+      "descriptorUi": "D009474",
+      "name": "Neural Conduction",
+      "descendantCount": 90,
+      "descendantCountTrue": 90,
+      "treeNumbers": [
+        "A08.675",
+        "A11.671"
+      ]
+    },
+    {
+      "descriptorUi": "D046912",
+      "name": "Multiprotein Complexes",
+      "descendantCount": 90,
+      "descendantCountTrue": 90,
+      "treeNumbers": [
+        "D05.500"
+      ]
+    },
+    {
+      "descriptorUi": "D003593",
+      "name": "Cytoplasm",
+      "descendantCount": 89,
+      "descendantCountTrue": 89,
+      "treeNumbers": [
+        "A11.284.430.214"
+      ]
+    },
+    {
+      "descriptorUi": "D006846",
+      "name": "Hydrocarbons, Halogenated",
+      "descendantCount": 89,
+      "descendantCountTrue": 89,
+      "treeNumbers": [
+        "D02.455.526"
+      ]
+    },
+    {
+      "descriptorUi": "D009479",
+      "name": "Receptors, Neuropeptide",
+      "descendantCount": 89,
+      "descendantCountTrue": 89,
+      "treeNumbers": [
+        "D12.644.400",
+        "D12.776.631.650"
+      ]
+    },
+    {
+      "descriptorUi": "D013450",
+      "name": "Sulfones",
+      "descendantCount": 89,
+      "descendantCountTrue": 89,
+      "treeNumbers": [
+        "D02.886.590"
+      ]
+    },
+    {
+      "descriptorUi": "D007554",
+      "name": "Radioisotopes",
+      "descendantCount": 88,
+      "descendantCountTrue": 88,
+      "treeNumbers": [
+        "D01.496"
+      ]
+    },
+    {
+      "descriptorUi": "D012313",
+      "name": "Nissl Bodies",
+      "descendantCount": 87,
+      "descendantCountTrue": 87,
+      "treeNumbers": [
+        "D13.444.735"
+      ]
+    },
+    {
+      "descriptorUi": "D019736",
+      "name": "Prosthesis Retention",
+      "descendantCount": 87,
+      "descendantCountTrue": 87,
+      "treeNumbers": [
+        "E07.695"
+      ]
+    },
+    {
+      "descriptorUi": "D022083",
+      "name": "Cytoplasmic Structures",
+      "descendantCount": 87,
+      "descendantCountTrue": 87,
+      "treeNumbers": [
+        "A11.284.430.214.190"
+      ]
+    },
+    {
+      "descriptorUi": "D005831",
+      "name": "Genital Diseases, Female",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "C12.050.351.500",
+        "C12.100.250"
+      ]
+    },
+    {
+      "descriptorUi": "D006880",
+      "name": "Hydroxy Acids",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "D02.241.511"
+      ]
+    },
+    {
+      "descriptorUi": "D007313",
+      "name": "Insecta",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "B01.050.500.131.617"
+      ]
+    },
+    {
+      "descriptorUi": "D011714",
+      "name": "Pyrans",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "D03.383.663"
+      ]
+    },
+    {
+      "descriptorUi": "D016908",
+      "name": "Gram-Positive Bacterial Infections",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "C01.150.252.410"
+      ]
+    },
+    {
+      "descriptorUi": "D018797",
+      "name": "Cell Cycle Checkpoints",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "D12.776.167"
+      ]
+    },
+    {
+      "descriptorUi": "D019954",
+      "name": "Neurobehavioral Manifestations",
+      "descendantCount": 86,
+      "descendantCountTrue": 86,
+      "treeNumbers": [
+        "C10.597.606",
+        "C23.888.592.604",
+        "F01.700"
+      ]
+    },
+    {
+      "descriptorUi": "D000828",
+      "name": "Animal Population Groups",
+      "descendantCount": 85,
+      "descendantCountTrue": 85,
+      "treeNumbers": [
+        "B01.050.050"
+      ]
+    },
+    {
+      "descriptorUi": "D007674",
+      "name": "Kidney Diseases",
+      "descendantCount": 85,
+      "descendantCountTrue": 85,
+      "treeNumbers": [
+        "C12.050.351.968.419",
+        "C12.200.777.419",
+        "C12.950.419"
+      ]
+    },
+    {
+      "descriptorUi": "D009656",
+      "name": "North America",
+      "descendantCount": 85,
+      "descendantCountTrue": 85,
+      "treeNumbers": [
+        "Z01.107.567"
+      ]
+    },
+    {
+      "descriptorUi": "D019659",
+      "name": "Asteraceae",
+      "descendantCount": 85,
+      "descendantCountTrue": 85,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.100"
+      ]
+    },
+    {
+      "descriptorUi": "D066252",
+      "name": "Sociological Factors",
+      "descendantCount": 85,
+      "descendantCountTrue": 85,
+      "treeNumbers": [
+        "I01.880.853"
+      ]
+    },
+    {
+      "descriptorUi": "D000529",
+      "name": "Complementary Therapies",
+      "descendantCount": 84,
+      "descendantCountTrue": 84,
+      "treeNumbers": [
+        "E02.190"
+      ]
+    },
+    {
+      "descriptorUi": "D006093",
+      "name": "Gram-Positive Asporogenous Rods",
+      "descendantCount": 84,
+      "descendantCountTrue": 84,
+      "treeNumbers": [
+        "B03.510.460.400"
+      ]
+    },
+    {
+      "descriptorUi": "D013223",
+      "name": "Bibliometrics",
+      "descendantCount": 84,
+      "descendantCountTrue": 84,
+      "treeNumbers": [
+        "E05.318.740",
+        "H01.548.832",
+        "N05.715.360.750",
+        "N06.850.520.830"
+      ]
+    },
+    {
+      "descriptorUi": "D039903",
+      "name": "Actinobacteria",
+      "descendantCount": 84,
+      "descendantCountTrue": 84,
+      "treeNumbers": [
+        "B03.510.024",
+        "B03.510.460.400.400.049"
+      ]
+    },
+    {
+      "descriptorUi": "D001695",
+      "name": "Biology",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "H01.158.273"
+      ]
+    },
+    {
+      "descriptorUi": "D005231",
+      "name": "Fatty Acids, Unsaturated",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "D10.251.355"
+      ]
+    },
+    {
+      "descriptorUi": "D005381",
+      "name": "Financing, Organized",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "N03.219.521"
+      ]
+    },
+    {
+      "descriptorUi": "D007769",
+      "name": "Anti-Bacterial Agents",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "D02.065.589",
+        "D03.383.411"
+      ]
+    },
+    {
+      "descriptorUi": "D007887",
+      "name": "Fabaceae",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.401"
+      ]
+    },
+    {
+      "descriptorUi": "D008968",
+      "name": "Models, Molecular",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "G02.111.570.820"
+      ]
+    },
+    {
+      "descriptorUi": "D010684",
+      "name": "Philosophy",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "K01.752"
+      ]
+    },
+    {
+      "descriptorUi": "D011278",
+      "name": "Pregnanes",
+      "descendantCount": 83,
+      "descendantCountTrue": 83,
+      "treeNumbers": [
+        "D04.210.500.745"
+      ]
+    },
+    {
+      "descriptorUi": "D001203",
+      "name": "Ascomycota",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "B01.300.107"
+      ]
+    },
+    {
+      "descriptorUi": "D003240",
+      "name": "Collagen Diseases",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "C17.300"
+      ]
+    },
+    {
+      "descriptorUi": "D004725",
+      "name": "Endospore-Forming Bacteria",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "B03.300"
+      ]
+    },
+    {
+      "descriptorUi": "D008025",
+      "name": "Ligases",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "D08.811.464"
+      ]
+    },
+    {
+      "descriptorUi": "D009858",
+      "name": "Tumor Virus Infections",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "B04.613"
+      ]
+    },
+    {
+      "descriptorUi": "D013523",
+      "name": "Surgical Equipment",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "E07.858"
+      ]
+    },
+    {
+      "descriptorUi": "D014566",
+      "name": "Urography",
+      "descendantCount": 82,
+      "descendantCountTrue": 82,
+      "treeNumbers": [
+        "A05"
+      ]
+    },
+    {
+      "descriptorUi": "D002277",
+      "name": "Carcinoma",
+      "descendantCount": 81,
+      "descendantCountTrue": 81,
+      "treeNumbers": [
+        "C04.557.470.200"
+      ]
+    },
+    {
+      "descriptorUi": "D007211",
+      "name": "Indoles",
+      "descendantCount": 81,
+      "descendantCountTrue": 81,
+      "treeNumbers": [
+        "D03.633.100.473"
+      ]
+    },
+    {
+      "descriptorUi": "D011505",
+      "name": "src Homology Domains",
+      "descendantCount": 81,
+      "descendantCountTrue": 81,
+      "treeNumbers": [
+        "D08.811.913.696.620.682.725",
+        "D12.776.476.568"
+      ]
+    },
+    {
+      "descriptorUi": "D016936",
+      "name": "Gram-Positive Endospore-Forming Bacteria",
+      "descendantCount": 81,
+      "descendantCountTrue": 81,
+      "treeNumbers": [
+        "B03.300.390",
+        "B03.510.415"
+      ]
+    },
+    {
+      "descriptorUi": "D005060",
+      "name": "Europe",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "Z01.542"
+      ]
+    },
+    {
+      "descriptorUi": "D006840",
+      "name": "Hydrocarbons, Alicyclic",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "D02.455.426.392"
+      ]
+    },
+    {
+      "descriptorUi": "D007519",
+      "name": "Isoantigens",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "D23.050.705"
+      ]
+    },
+    {
+      "descriptorUi": "D009348",
+      "name": "Antinematodal Agents",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "B01.050.500.500.294"
+      ]
+    },
+    {
+      "descriptorUi": "D011518",
+      "name": "Proto-Oncogene Proteins",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "D12.776.624.664.700"
+      ]
+    },
+    {
+      "descriptorUi": "D013284",
+      "name": "Dental Arch",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "A14"
+      ]
+    },
+    {
+      "descriptorUi": "D016937",
+      "name": "Gram-Positive Endospore-Forming Rods",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "B03.300.390.400",
+        "B03.510.415.400",
+        "B03.510.460.410"
+      ]
+    },
+    {
+      "descriptorUi": "D047090",
+      "name": "Anti-Bacterial Agents",
+      "descendantCount": 80,
+      "descendantCountTrue": 80,
+      "treeNumbers": [
+        "D02.065.589.099",
+        "D02.886.108",
+        "D03.633.100.300"
+      ]
+    },
+    {
+      "descriptorUi": "D002561",
+      "name": "Cerebrovascular Disorders",
+      "descendantCount": 79,
+      "descendantCountTrue": 79,
+      "treeNumbers": [
+        "C10.228.140.300",
+        "C14.907.253"
+      ]
+    },
+    {
+      "descriptorUi": "D003516",
+      "name": "Cycloparaffins",
+      "descendantCount": 79,
+      "descendantCountTrue": 79,
+      "treeNumbers": [
+        "D02.455.426.392.368",
+        "D04.345.133"
+      ]
+    },
+    {
+      "descriptorUi": "D006899",
+      "name": "Mixed Function Oxygenases",
+      "descendantCount": 79,
+      "descendantCountTrue": 79,
+      "treeNumbers": [
+        "D08.811.682.690.708"
+      ]
+    },
+    {
+      "descriptorUi": "D000814",
+      "name": "Aniline Compounds",
+      "descendantCount": 78,
+      "descendantCountTrue": 78,
+      "treeNumbers": [
+        "D02.092.146"
+      ]
+    },
+    {
+      "descriptorUi": "D003710",
+      "name": "Demography",
+      "descendantCount": 78,
+      "descendantCountTrue": 78,
+      "treeNumbers": [
+        "I01.240",
+        "N01.224",
+        "N06.850.505.400"
+      ]
+    },
+    {
+      "descriptorUi": "D008563",
+      "name": "Membrane Lipids",
+      "descendantCount": 78,
+      "descendantCountTrue": 78,
+      "treeNumbers": [
+        "D10.570"
+      ]
+    },
+    {
+      "descriptorUi": "D012377",
+      "name": "Rodentia",
+      "descendantCount": 78,
+      "descendantCountTrue": 78,
+      "treeNumbers": [
+        "B01.050.150.900.649.313.992"
+      ]
+    },
+    {
+      "descriptorUi": "D000015",
+      "name": "Intellectual Disability",
+      "descendantCount": 77,
+      "descendantCountTrue": 77,
+      "treeNumbers": [
+        "C16.131.077"
+      ]
+    },
+    {
+      "descriptorUi": "D000605",
+      "name": "Amino Alcohols",
+      "descendantCount": 77,
+      "descendantCountTrue": 77,
+      "treeNumbers": [
+        "D02.033.100",
+        "D02.092.063"
+      ]
+    },
+    {
+      "descriptorUi": "D006026",
+      "name": "Glycoside Hydrolases",
+      "descendantCount": 77,
+      "descendantCountTrue": 77,
+      "treeNumbers": [
+        "D08.811.277.450"
+      ]
+    },
+    {
+      "descriptorUi": "D011613",
+      "name": "Psychology, Clinical",
+      "descendantCount": 77,
+      "descendantCountTrue": 77,
+      "treeNumbers": [
+        "F04.754"
+      ]
+    },
+    {
+      "descriptorUi": "D019636",
+      "name": "Neurodegenerative Diseases",
+      "descendantCount": 77,
+      "descendantCountTrue": 77,
+      "treeNumbers": [
+        "C10.574"
+      ]
+    },
+    {
+      "descriptorUi": "D001578",
+      "name": "Benzopyrans",
+      "descendantCount": 76,
+      "descendantCountTrue": 76,
+      "treeNumbers": [
+        "D03.383.663.283",
+        "D03.633.100.150"
+      ]
+    },
+    {
+      "descriptorUi": "D002320",
+      "name": "Cardiovascular Physiological Phenomena",
+      "descendantCount": 76,
+      "descendantCountTrue": 76,
+      "treeNumbers": [
+        "G09.330"
+      ]
+    },
+    {
+      "descriptorUi": "D004791",
+      "name": "Enzyme Inhibitors",
+      "descendantCount": 76,
+      "descendantCountTrue": 76,
+      "treeNumbers": [
+        "D27.505.519.389"
+      ]
+    },
+    {
+      "descriptorUi": "D009135",
+      "name": "Muscular Diseases",
+      "descendantCount": 76,
+      "descendantCountTrue": 76,
+      "treeNumbers": [
+        "C05.651",
+        "C10.668.491"
+      ]
+    },
+    {
+      "descriptorUi": "D009943",
+      "name": "Phosphoamino Acids",
+      "descendantCount": 76,
+      "descendantCountTrue": 76,
+      "treeNumbers": [
+        "D02.705"
+      ]
+    },
+    {
+      "descriptorUi": "D000251",
+      "name": "Adenosine Triphosphatases",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "D08.811.277.040.025"
+      ]
+    },
+    {
+      "descriptorUi": "D000429",
+      "name": "Alcohol Oxidoreductases",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "D08.811.682.047"
+      ]
+    },
+    {
+      "descriptorUi": "D003389",
+      "name": "Neuroaspergillosis",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "C10.292"
+      ]
+    },
+    {
+      "descriptorUi": "D004064",
+      "name": "Digestive System Surgical Procedures",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "A03"
+      ]
+    },
+    {
+      "descriptorUi": "D007107",
+      "name": "Immune System",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "A15.382"
+      ]
+    },
+    {
+      "descriptorUi": "D007592",
+      "name": "Joint Diseases",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "C05.550"
+      ]
+    },
+    {
+      "descriptorUi": "D008827",
+      "name": "Dysbiosis",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "G06"
+      ]
+    },
+    {
+      "descriptorUi": "D010808",
+      "name": "Physical Examination",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "E01.370.600"
+      ]
+    },
+    {
+      "descriptorUi": "D015991",
+      "name": "Epidemiologic Measurements",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "N06.850.505"
+      ]
+    },
+    {
+      "descriptorUi": "D016601",
+      "name": "RNA-Binding Proteins",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "D12.776.157.725",
+        "D12.776.664.962"
+      ]
+    },
+    {
+      "descriptorUi": "D020196",
+      "name": "Trauma, Nervous System",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "C10.900",
+        "C26.915"
+      ]
+    },
+    {
+      "descriptorUi": "D062312",
+      "name": "Islands",
+      "descendantCount": 75,
+      "descendantCountTrue": 75,
+      "treeNumbers": [
+        "G16.500.275.505",
+        "N06.230.295",
+        "Z01.639"
+      ]
+    },
+    {
+      "descriptorUi": "D000070590",
+      "name": "Solute Carrier Proteins",
+      "descendantCount": 74,
+      "descendantCountTrue": 74,
+      "treeNumbers": [
+        "D12.776.157.530.937",
+        "D12.776.543.585.937"
+      ]
+    },
+    {
+      "descriptorUi": "D000079426",
+      "name": "Vector Borne Diseases",
+      "descendantCount": 74,
+      "descendantCountTrue": 74,
+      "treeNumbers": [
+        "C01.920"
+      ]
+    },
+    {
+      "descriptorUi": "D009139",
+      "name": "Musculoskeletal Abnormalities",
+      "descendantCount": 74,
+      "descendantCountTrue": 74,
+      "treeNumbers": [
+        "C05.660",
+        "C16.131.621"
+      ]
+    },
+    {
+      "descriptorUi": "D015415",
+      "name": "Endophenotypes",
+      "descendantCount": 74,
+      "descendantCountTrue": 74,
+      "treeNumbers": [
+        "D23.101"
+      ]
+    },
+    {
+      "descriptorUi": "D019216",
+      "name": "Heavy Metal Poisoning",
+      "descendantCount": 74,
+      "descendantCountTrue": 74,
+      "treeNumbers": [
+        "D01.268.556",
+        "D01.552.544"
+      ]
+    },
+    {
+      "descriptorUi": "D011323",
+      "name": "Primates",
+      "descendantCount": 73,
+      "descendantCountTrue": 73,
+      "treeNumbers": [
+        "B01.050.150.900.649.313.988"
+      ]
+    },
+    {
+      "descriptorUi": "D013672",
+      "name": "Technology",
+      "descendantCount": 73,
+      "descendantCountTrue": 73,
+      "treeNumbers": [
+        "J01.897"
+      ]
+    },
+    {
+      "descriptorUi": "D018376",
+      "name": "Heart Defects, Congenital",
+      "descendantCount": 73,
+      "descendantCountTrue": 73,
+      "treeNumbers": [
+        "C14.240",
+        "C16.131.240"
+      ]
+    },
+    {
+      "descriptorUi": "D020562",
+      "name": "Betaproteobacteria",
+      "descendantCount": 73,
+      "descendantCountTrue": 73,
+      "treeNumbers": [
+        "B03.660.075"
+      ]
+    },
+    {
+      "descriptorUi": "D009373",
+      "name": "Neoplasms, Germ Cell and Embryonal",
+      "descendantCount": 72,
+      "descendantCountTrue": 72,
+      "treeNumbers": [
+        "C04.557.465"
+      ]
+    },
+    {
+      "descriptorUi": "D002494",
+      "name": "Central Nervous System Infections",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "C01.207",
+        "C10.228.228"
+      ]
+    },
+    {
+      "descriptorUi": "D002875",
+      "name": "Karyotyping",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "A11.284.187",
+        "A11.284.430.106.279.345.190",
+        "G05.360.162"
+      ]
+    },
+    {
+      "descriptorUi": "D003418",
+      "name": "Criminology",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "I01.198"
+      ]
+    },
+    {
+      "descriptorUi": "D004755",
+      "name": "Enterobacteriaceae",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "B03.440.450.425",
+        "B03.660.250.150"
+      ]
+    },
+    {
+      "descriptorUi": "D009705",
+      "name": "Nucleosides",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "D09.408.595",
+        "D13.570"
+      ]
+    },
+    {
+      "descriptorUi": "D013449",
+      "name": "Sulfonamides",
+      "descendantCount": 71,
+      "descendantCountTrue": 71,
+      "treeNumbers": [
+        "D02.065.884",
+        "D02.886.590.700"
+      ]
+    },
+    {
+      "descriptorUi": "D000073560",
+      "name": "Chromadorea",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "B01.050.500.500.294.400"
+      ]
+    },
+    {
+      "descriptorUi": "D003580",
+      "name": "Cytochromes",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "D08.244",
+        "D12.776.422.220"
+      ]
+    },
+    {
+      "descriptorUi": "D008107",
+      "name": "Chemical and Drug Induced Liver Injury",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "C06.552"
+      ]
+    },
+    {
+      "descriptorUi": "D012265",
+      "name": "Ribonucleotides",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "D13.695.827"
+      ]
+    },
+    {
+      "descriptorUi": "D048088",
+      "name": "Informatics",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "L01.313"
+      ]
+    },
+    {
+      "descriptorUi": "D055641",
+      "name": "Mathematical Concepts",
+      "descendantCount": 70,
+      "descendantCountTrue": 70,
+      "treeNumbers": [
+        "G17"
+      ]
+    },
+    {
+      "descriptorUi": "D001525",
+      "name": "Behavioral Sciences",
+      "descendantCount": 69,
+      "descendantCountTrue": 69,
+      "treeNumbers": [
+        "F04.096"
+      ]
+    },
+    {
+      "descriptorUi": "D003935",
+      "name": "Diagnostic Techniques, Cardiovascular",
+      "descendantCount": 69,
+      "descendantCountTrue": 69,
+      "treeNumbers": [
+        "E01.370.370"
+      ]
+    },
+    {
+      "descriptorUi": "D005441",
+      "name": "Fluids and Secretions",
+      "descendantCount": 69,
+      "descendantCountTrue": 69,
+      "treeNumbers": [
+        "A12"
+      ]
+    },
+    {
+      "descriptorUi": "D009747",
+      "name": "Nutritional and Metabolic Diseases",
+      "descendantCount": 69,
+      "descendantCountTrue": 69,
+      "treeNumbers": [
+        "G07.203.650"
+      ]
+    },
+    {
+      "descriptorUi": "D001327",
+      "name": "Autoimmunity",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "C20.111"
+      ]
+    },
+    {
+      "descriptorUi": "D004628",
+      "name": "Embryonic Structures",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "A16"
+      ]
+    },
+    {
+      "descriptorUi": "D006373",
+      "name": "Anthelmintics",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "C01.610.335"
+      ]
+    },
+    {
+      "descriptorUi": "D007221",
+      "name": "Ethics, Business",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "J01.576"
+      ]
+    },
+    {
+      "descriptorUi": "D011642",
+      "name": "Publications",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "L01.462.500.682"
+      ]
+    },
+    {
+      "descriptorUi": "D012046",
+      "name": "Sports for Persons with Disabilities",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "E02.760.169.063.500",
+        "E02.831",
+        "H02.403.680.600",
+        "N02.421.784"
+      ]
+    },
+    {
+      "descriptorUi": "D014481",
+      "name": "United States",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "Z01.107.567.875"
+      ]
+    },
+    {
+      "descriptorUi": "D014644",
+      "name": "Genetic Variation",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "G05.365"
+      ]
+    },
+    {
+      "descriptorUi": "D015388",
+      "name": "Organelles",
+      "descendantCount": 68,
+      "descendantCountTrue": 68,
+      "treeNumbers": [
+        "A11.284.430.214.190.875"
+      ]
+    },
+    {
+      "descriptorUi": "D000825",
+      "name": "Animal Structures",
+      "descendantCount": 67,
+      "descendantCountTrue": 67,
+      "treeNumbers": [
+        "A13"
+      ]
+    },
+    {
+      "descriptorUi": "D004573",
+      "name": "Water-Electrolyte Imbalance",
+      "descendantCount": 67,
+      "descendantCountTrue": 67,
+      "treeNumbers": [
+        "D01.248"
+      ]
+    },
+    {
+      "descriptorUi": "D007535",
+      "name": "Isomerases",
+      "descendantCount": 67,
+      "descendantCountTrue": 67,
+      "treeNumbers": [
+        "D08.811.399"
+      ]
+    },
+    {
+      "descriptorUi": "D016695",
+      "name": "Glycosyltransferases",
+      "descendantCount": 67,
+      "descendantCountTrue": 67,
+      "treeNumbers": [
+        "D08.811.913.400"
+      ]
+    },
+    {
+      "descriptorUi": "D000217",
+      "name": "Acyltransferases",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "D08.811.913.050"
+      ]
+    },
+    {
+      "descriptorUi": "D001848",
+      "name": "Bone Diseases, Developmental",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "C05.116.099"
+      ]
+    },
+    {
+      "descriptorUi": "D001928",
+      "name": "Brain Diseases, Metabolic",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "C10.228.140.163",
+        "C18.452.132"
+      ]
+    },
+    {
+      "descriptorUi": "D010860",
+      "name": "Pigmentation",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "D23.767"
+      ]
+    },
+    {
+      "descriptorUi": "D011859",
+      "name": "Technology, Radiologic",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "E01.370.350.700"
+      ]
+    },
+    {
+      "descriptorUi": "D012898",
+      "name": "Autacoids",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "D23.469.050"
+      ]
+    },
+    {
+      "descriptorUi": "D013687",
+      "name": "Telencephalon",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "A08.186.211.200.885"
+      ]
+    },
+    {
+      "descriptorUi": "D015980",
+      "name": "Public Health Practice",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "N06.850.780"
+      ]
+    },
+    {
+      "descriptorUi": "D016326",
+      "name": "Extracellular Traps",
+      "descendantCount": 66,
+      "descendantCountTrue": 66,
+      "treeNumbers": [
+        "D12.776.860.300"
+      ]
+    },
+    {
+      "descriptorUi": "D001208",
+      "name": "Asia",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "Z01.252"
+      ]
+    },
+    {
+      "descriptorUi": "D006259",
+      "name": "Optic Nerve Injuries",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "C10.900.300",
+        "C26.915.300"
+      ]
+    },
+    {
+      "descriptorUi": "D006649",
+      "name": "Histocompatibility Antigens",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "D23.050.301.500",
+        "D23.050.705.552"
+      ]
+    },
+    {
+      "descriptorUi": "D006967",
+      "name": "Anti-Allergic Agents",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "C20.543"
+      ]
+    },
+    {
+      "descriptorUi": "D007160",
+      "name": "Immunoproliferative Disorders",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "C20.683"
+      ]
+    },
+    {
+      "descriptorUi": "D007477",
+      "name": "Ions",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "D01.248.497"
+      ]
+    },
+    {
+      "descriptorUi": "D010465",
+      "name": "Sensation",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "F02.463.593"
+      ]
+    },
+    {
+      "descriptorUi": "D010523",
+      "name": "Peripheral Nervous System Diseases",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "C10.668.829"
+      ]
+    },
+    {
+      "descriptorUi": "D011868",
+      "name": "Isotopes",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "D01.496.749"
+      ]
+    },
+    {
+      "descriptorUi": "D056546",
+      "name": "Lactobacillales",
+      "descendantCount": 65,
+      "descendantCountTrue": 65,
+      "treeNumbers": [
+        "B03.353.750",
+        "B03.510.550"
+      ]
+    },
+    {
+      "descriptorUi": "D000882",
+      "name": "Haplorhini",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "B01.050.150.900.649.313.988.400"
+      ]
+    },
+    {
+      "descriptorUi": "D001691",
+      "name": "Biological Therapy",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "E02.095"
+      ]
+    },
+    {
+      "descriptorUi": "D001933",
+      "name": "Brain Stem",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "A08.186.211.132"
+      ]
+    },
+    {
+      "descriptorUi": "D006089",
+      "name": "Gram-Negative Anaerobic Bacteria",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "B03.440.425"
+      ]
+    },
+    {
+      "descriptorUi": "D007858",
+      "name": "Learning",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "F02.463.425",
+        "F02.784.629.529"
+      ]
+    },
+    {
+      "descriptorUi": "D008232",
+      "name": "Lymphoproliferative Disorders",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "C15.604.515",
+        "C20.683.515"
+      ]
+    },
+    {
+      "descriptorUi": "D009115",
+      "name": "Muridae",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "B01.050.150.900.649.313.992.635"
+      ]
+    },
+    {
+      "descriptorUi": "D009842",
+      "name": "Oligopeptides",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "D12.644.456"
+      ]
+    },
+    {
+      "descriptorUi": "D010525",
+      "name": "Nerve Fibers",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "A08.800.800"
+      ]
+    },
+    {
+      "descriptorUi": "D010940",
+      "name": "Plants",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "D12.776.765"
+      ]
+    },
+    {
+      "descriptorUi": "D012141",
+      "name": "Respiratory Tract Infections",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "C01.748",
+        "C08.730"
+      ]
+    },
+    {
+      "descriptorUi": "D012874",
+      "name": "Skin Diseases, Infectious",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "C01.800",
+        "C17.800.838"
+      ]
+    },
+    {
+      "descriptorUi": "D019685",
+      "name": "Rosales",
+      "descendantCount": 64,
+      "descendantCountTrue": 64,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.859.937"
+      ]
+    },
+    {
+      "descriptorUi": "D000072182",
+      "name": "Non-Medical Public and Private Facilities",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "J03"
+      ]
+    },
+    {
+      "descriptorUi": "D000883",
+      "name": "Hominidae",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "F04.096.879.201",
+        "I01.076"
+      ]
+    },
+    {
+      "descriptorUi": "D004266",
+      "name": "DNA Virus Infections",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "C01.925.256"
+      ]
+    },
+    {
+      "descriptorUi": "D004427",
+      "name": "Ear Diseases",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "C09.218"
+      ]
+    },
+    {
+      "descriptorUi": "D007093",
+      "name": "Benzimidazoles",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "D03.383.129.308"
+      ]
+    },
+    {
+      "descriptorUi": "D012873",
+      "name": "Skin Diseases, Genetic",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "C16.320.850",
+        "C17.800.827"
+      ]
+    },
+    {
+      "descriptorUi": "D014076",
+      "name": "Mouth Rehabilitation",
+      "descendantCount": 63,
+      "descendantCountTrue": 63,
+      "treeNumbers": [
+        "C07.793"
+      ]
+    },
+    {
+      "descriptorUi": "D005021",
+      "name": "Ethylamines",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "D02.092.471"
+      ]
+    },
+    {
+      "descriptorUi": "D007341",
+      "name": "Insurance",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "N03.219.521.576"
+      ]
+    },
+    {
+      "descriptorUi": "D007783",
+      "name": "Lactones",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "D02.540"
+      ]
+    },
+    {
+      "descriptorUi": "D011487",
+      "name": "Protein Conformation",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "G02.111.570.820.709"
+      ]
+    },
+    {
+      "descriptorUi": "D012190",
+      "name": "Retroviridae",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "B04.613.807",
+        "B04.820.650"
+      ]
+    },
+    {
+      "descriptorUi": "D012919",
+      "name": "Interpersonal Relations",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "F01.145.813"
+      ]
+    },
+    {
+      "descriptorUi": "D013504",
+      "name": "Thoracic Surgery",
+      "descendantCount": 62,
+      "descendantCountTrue": 62,
+      "treeNumbers": [
+        "E04.100"
+      ]
+    },
+    {
+      "descriptorUi": "D000349",
+      "name": "Africa",
+      "descendantCount": 61,
+      "descendantCountTrue": 61,
+      "treeNumbers": [
+        "Z01.058"
+      ]
+    },
+    {
+      "descriptorUi": "D000475",
+      "name": "Alkenes",
+      "descendantCount": 61,
+      "descendantCountTrue": 61,
+      "treeNumbers": [
+        "D02.455.326.271"
+      ]
+    },
+    {
+      "descriptorUi": "D004847",
+      "name": "Epithelial Cells",
+      "descendantCount": 61,
+      "descendantCountTrue": 61,
+      "treeNumbers": [
+        "A11.436"
+      ]
+    },
+    {
+      "descriptorUi": "D005399",
+      "name": "Fishes",
+      "descendantCount": 61,
+      "descendantCountTrue": 61,
+      "treeNumbers": [
+        "B01.050.150.900.493"
+      ]
+    },
+    {
+      "descriptorUi": "D015815",
+      "name": "Integrins",
+      "descendantCount": 61,
+      "descendantCountTrue": 61,
+      "treeNumbers": [
+        "D09.400.430.890.200",
+        "D12.776.395.550.200",
+        "D12.776.543.550.200",
+        "D23.050.301.350"
+      ]
+    },
+    {
+      "descriptorUi": "D000838",
+      "name": "Anions",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "D01.248.497.158"
+      ]
+    },
+    {
+      "descriptorUi": "D004787",
+      "name": "Environmental Pollutants",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "N06.850.460"
+      ]
+    },
+    {
+      "descriptorUi": "D005123",
+      "name": "Vision, Ocular",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "A01.456.505.420",
+        "A09.371"
+      ]
+    },
+    {
+      "descriptorUi": "D009372",
+      "name": "Soft Tissue Neoplasms",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "C04.557.450.565",
+        "C17.300.680"
+      ]
+    },
+    {
+      "descriptorUi": "D019060",
+      "name": "Minimally Invasive Surgical Procedures",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "E04.502"
+      ]
+    },
+    {
+      "descriptorUi": "D056893",
+      "name": "Alveolata",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "B01.043"
+      ]
+    },
+    {
+      "descriptorUi": "D058016",
+      "name": "Health Facility Administration",
+      "descendantCount": 60,
+      "descendantCountTrue": 60,
+      "treeNumbers": [
+        "N02.278.216",
+        "N04.452.442"
+      ]
+    },
+    {
+      "descriptorUi": "D001105",
+      "name": "Archaea",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "B02"
+      ]
+    },
+    {
+      "descriptorUi": "D002868",
+      "name": "Chromosomal Proteins, Non-Histone",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "D12.776.660.235",
+        "D12.776.664.235"
+      ]
+    },
+    {
+      "descriptorUi": "D003904",
+      "name": "Mitosporic Fungi",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "B01.300.381"
+      ]
+    },
+    {
+      "descriptorUi": "D005835",
+      "name": "Genitalia",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "A05.360"
+      ]
+    },
+    {
+      "descriptorUi": "D006739",
+      "name": "Professional Staff Committees",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "H02.309",
+        "N02.278.216.500",
+        "N04.452.442.452"
+      ]
+    },
+    {
+      "descriptorUi": "D009380",
+      "name": "Neoplasms, Nerve Tissue",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "C04.557.580"
+      ]
+    },
+    {
+      "descriptorUi": "D045726",
+      "name": "Metalloproteases",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "D08.811.277.656.675"
+      ]
+    },
+    {
+      "descriptorUi": "D052439",
+      "name": "Lipid Metabolism Disorders",
+      "descendantCount": 59,
+      "descendantCountTrue": 59,
+      "treeNumbers": [
+        "C18.452.584"
+      ]
+    },
+    {
+      "descriptorUi": "D000465",
+      "name": "Algorithms",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "G17.035",
+        "L01.224.050"
+      ]
+    },
+    {
+      "descriptorUi": "D003238",
+      "name": "Collagen",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "A10.165"
+      ]
+    },
+    {
+      "descriptorUi": "D004786",
+      "name": "Toxic Actions",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "D27.888"
+      ]
+    },
+    {
+      "descriptorUi": "D006076",
+      "name": "Government",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "I01.409",
+        "N03.540.348"
+      ]
+    },
+    {
+      "descriptorUi": "D008490",
+      "name": "American Recovery and Reinvestment Act",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "L01.313.500"
+      ]
+    },
+    {
+      "descriptorUi": "D010880",
+      "name": "Pyridines",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "D03.383.621"
+      ]
+    },
+    {
+      "descriptorUi": "D013505",
+      "name": "Digestive System Surgical Procedures",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "E04.210"
+      ]
+    },
+    {
+      "descriptorUi": "D020739",
+      "name": "Intellectual Disability",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "C10.228.140.163.100",
+        "C16.320.565.189",
+        "C18.452.132.100",
+        "C18.452.648.189"
+      ]
+    },
+    {
+      "descriptorUi": "D033921",
+      "name": "Transport Vesicles",
+      "descendantCount": 58,
+      "descendantCountTrue": 58,
+      "treeNumbers": [
+        "D12.776.543.990"
+      ]
+    },
+    {
+      "descriptorUi": "D000074745",
+      "name": "Pterygota",
+      "descendantCount": 57,
+      "descendantCountTrue": 57,
+      "treeNumbers": [
+        "B01.050.500.131.617.720"
+      ]
+    },
+    {
+      "descriptorUi": "D000644",
+      "name": "Quinolinium Compounds",
+      "descendantCount": 57,
+      "descendantCountTrue": 57,
+      "treeNumbers": [
+        "D01.625.062.500",
+        "D02.092.877",
+        "D02.675.276"
+      ]
+    },
+    {
+      "descriptorUi": "D003142",
+      "name": "Communication",
+      "descendantCount": 57,
+      "descendantCountTrue": 57,
+      "treeNumbers": [
+        "F01.145.209",
+        "L01.143"
+      ]
+    },
+    {
+      "descriptorUi": "D007899",
+      "name": "Leisure Activities",
+      "descendantCount": 57,
+      "descendantCountTrue": 57,
+      "treeNumbers": [
+        "I03.450"
+      ]
+    },
+    {
+      "descriptorUi": "D016965",
+      "name": "Gram-Negative Anaerobic Straight, Curved, and Helical Rods",
+      "descendantCount": 57,
+      "descendantCountTrue": 57,
+      "treeNumbers": [
+        "B03.440.425.410"
+      ]
+    },
+    {
+      "descriptorUi": "D002135",
+      "name": "Calcium-Binding Proteins",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "D12.776.157.125"
+      ]
+    },
+    {
+      "descriptorUi": "D004703",
+      "name": "Endocrine System",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "A06"
+      ]
+    },
+    {
+      "descriptorUi": "D008032",
+      "name": "Limbic System",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "A08.186.211.180"
+      ]
+    },
+    {
+      "descriptorUi": "D010744",
+      "name": "Phosphoric Monoester Hydrolases",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "D08.811.277.352.650"
+      ]
+    },
+    {
+      "descriptorUi": "D011041",
+      "name": "Antidotes",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "C25.723"
+      ]
+    },
+    {
+      "descriptorUi": "D012586",
+      "name": "Religion and Science",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "H01.770"
+      ]
+    },
+    {
+      "descriptorUi": "D018160",
+      "name": "Receptors, Cytoplasmic and Nuclear",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "D12.776.826"
+      ]
+    },
+    {
+      "descriptorUi": "D041981",
+      "name": "Gastrointestinal Tract",
+      "descendantCount": 56,
+      "descendantCountTrue": 56,
+      "treeNumbers": [
+        "A03.556"
+      ]
+    },
+    {
+      "descriptorUi": "D000072416",
+      "name": "Protein Structural Elements",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "G02.111.570.820.709.275"
+      ]
+    },
+    {
+      "descriptorUi": "D001426",
+      "name": "Bacterial Proteins",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "D12.776.097"
+      ]
+    },
+    {
+      "descriptorUi": "D001483",
+      "name": "Base Sequence",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "G02.111.570.080",
+        "G05.360.080",
+        "L01.462.750.245.667.080"
+      ]
+    },
+    {
+      "descriptorUi": "D001769",
+      "name": "Occult Blood",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "A12.207.152",
+        "A15.145"
+      ]
+    },
+    {
+      "descriptorUi": "D006077",
+      "name": "Government Agencies",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "I01.409.418",
+        "N03.540.400"
+      ]
+    },
+    {
+      "descriptorUi": "D007232",
+      "name": "Congenital Abnormalities",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "C16.614"
+      ]
+    },
+    {
+      "descriptorUi": "D009055",
+      "name": "Surgery, Oral",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "A01.456.505.631",
+        "A03.556.500",
+        "A14.549"
+      ]
+    },
+    {
+      "descriptorUi": "D009181",
+      "name": "Antifungal Agents",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "C01.150.703"
+      ]
+    },
+    {
+      "descriptorUi": "D013456",
+      "name": "Sulfur Acids",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "D01.029.260.877",
+        "D01.875.800",
+        "D02.886.645"
+      ]
+    },
+    {
+      "descriptorUi": "D015777",
+      "name": "Receptors, Eicosanoid",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "D10.251.355.255",
+        "D23.469.050.175"
+      ]
+    },
+    {
+      "descriptorUi": "D019637",
+      "name": "Orthopedics",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "E02.718",
+        "E04.555"
+      ]
+    },
+    {
+      "descriptorUi": "D051189",
+      "name": "Murinae",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "B01.050.150.900.649.313.992.635.505"
+      ]
+    },
+    {
+      "descriptorUi": "D054022",
+      "name": "Cerebrum",
+      "descendantCount": 55,
+      "descendantCountTrue": 55,
+      "treeNumbers": [
+        "A08.186.211.200.885.287"
+      ]
+    },
+    {
+      "descriptorUi": "D003577",
+      "name": "Cytochrome P-450 Enzyme Inhibitors",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "D08.244.453",
+        "D08.811.682.690.708.170",
+        "D12.776.422.220.453"
+      ]
+    },
+    {
+      "descriptorUi": "D004987",
+      "name": "Ethers",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "D02.355"
+      ]
+    },
+    {
+      "descriptorUi": "D006095",
+      "name": "Gram-Positive Cocci",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "B03.510.400"
+      ]
+    },
+    {
+      "descriptorUi": "D006470",
+      "name": "Phlebotomy",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "C23.550.414"
+      ]
+    },
+    {
+      "descriptorUi": "D008491",
+      "name": "Medical Informatics Applications",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "L01.313.500.750"
+      ]
+    },
+    {
+      "descriptorUi": "D009421",
+      "name": "Nervous System Malformations",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "C10.500",
+        "C16.131.666"
+      ]
+    },
+    {
+      "descriptorUi": "D009748",
+      "name": "Feeding Behavior",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "C18.654"
+      ]
+    },
+    {
+      "descriptorUi": "D011804",
+      "name": "Quinolines",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "D03.633.100.810"
+      ]
+    },
+    {
+      "descriptorUi": "D017954",
+      "name": "Africa South of the Sahara",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "Z01.058.290"
+      ]
+    },
+    {
+      "descriptorUi": "D057057",
+      "name": "Serine Proteinase Inhibitors",
+      "descendantCount": 54,
+      "descendantCountTrue": 54,
+      "treeNumbers": [
+        "D08.811.277.656.959"
+      ]
+    },
+    {
+      "descriptorUi": "D000074746",
+      "name": "Neoptera",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "B01.050.500.131.617.720.500"
+      ]
+    },
+    {
+      "descriptorUi": "D000193",
+      "name": "Actinomycetales Infections",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "C01.150.252.410.040"
+      ]
+    },
+    {
+      "descriptorUi": "D005786",
+      "name": "Trans-Activators",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "G05.308"
+      ]
+    },
+    {
+      "descriptorUi": "D009014",
+      "name": "Retrospective Moral Judgment",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "F01.829.500",
+        "K01.752.566"
+      ]
+    },
+    {
+      "descriptorUi": "D009154",
+      "name": "Antimutagenic Agents",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "G05.365.590"
+      ]
+    },
+    {
+      "descriptorUi": "D010551",
+      "name": "Human Characteristics",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "F01.752"
+      ]
+    },
+    {
+      "descriptorUi": "D011998",
+      "name": "Recreation",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "I03.450.642"
+      ]
+    },
+    {
+      "descriptorUi": "D012677",
+      "name": "Perception",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "F02.830.816",
+        "G11.561.790"
+      ]
+    },
+    {
+      "descriptorUi": "D035082",
+      "name": "Federal Government",
+      "descendantCount": 53,
+      "descendantCountTrue": 53,
+      "treeNumbers": [
+        "I01.409.137",
+        "I01.409.418.625",
+        "N03.540.348.500",
+        "N03.540.400.750"
+      ]
+    },
+    {
+      "descriptorUi": "D000070677",
+      "name": "Gentianales",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "B01.875.800.575.912.250.456"
+      ]
+    },
+    {
+      "descriptorUi": "D003469",
+      "name": "Cross-Cultural Comparison",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "I01.076.201.450",
+        "I01.880.853.100"
+      ]
+    },
+    {
+      "descriptorUi": "D006058",
+      "name": "Gonadal Disorders",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "C19.391"
+      ]
+    },
+    {
+      "descriptorUi": "D006572",
+      "name": "Heterocyclic Compounds, Bridged-Ring",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "D03.605"
+      ]
+    },
+    {
+      "descriptorUi": "D007159",
+      "name": "Immunologic Tests",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "E01.370.225.812",
+        "E05.200.812",
+        "E05.478.594"
+      ]
+    },
+    {
+      "descriptorUi": "D009024",
+      "name": "Morphogenesis",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "G07.345.500"
+      ]
+    },
+    {
+      "descriptorUi": "D009713",
+      "name": "Nucleotidyltransferases",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "D08.811.913.696.445"
+      ]
+    },
+    {
+      "descriptorUi": "D012106",
+      "name": "Ethics, Research",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "H01.770.644"
+      ]
+    },
+    {
+      "descriptorUi": "D017599",
+      "name": "Neuroectodermal Tumors",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "C04.557.465.625",
+        "C04.557.580.625"
+      ]
+    },
+    {
+      "descriptorUi": "D037041",
+      "name": "United States Government Agencies",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "I01.409.418.750",
+        "N03.540.348.500.500"
+      ]
+    },
+    {
+      "descriptorUi": "D042341",
+      "name": "Gonadal Hormones",
+      "descendantCount": 52,
+      "descendantCountTrue": 52,
+      "treeNumbers": [
+        "D06.472.334"
+      ]
+    },
+    {
+      "descriptorUi": "D000074748",
+      "name": "Holometabola",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "B01.050.500.131.617.720.500.500"
+      ]
+    },
+    {
+      "descriptorUi": "D000230",
+      "name": "Adenocarcinoma",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "C04.557.470.200.025"
+      ]
+    },
+    {
+      "descriptorUi": "D000884",
+      "name": "Qualitative Research",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "I01.076.201"
+      ]
+    },
+    {
+      "descriptorUi": "D001773",
+      "name": "Blood Cells",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "A11.118",
+        "A15.145.229"
+      ]
+    },
+    {
+      "descriptorUi": "D002908",
+      "name": "Persistent Infection",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "C23.550.291.500"
+      ]
+    },
+    {
+      "descriptorUi": "D006330",
+      "name": "Heart Defects, Congenital",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "C14.240.400",
+        "C14.280.400",
+        "C16.131.240.400"
+      ]
+    },
+    {
+      "descriptorUi": "D009097",
+      "name": "Multifunctional Enzymes",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "D05.500.562",
+        "D08.811.600"
+      ]
+    },
+    {
+      "descriptorUi": "D009729",
+      "name": "Legislation, Nursing",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "H02.478",
+        "N04.452.758.377"
+      ]
+    },
+    {
+      "descriptorUi": "D011476",
+      "name": "Oral Surgical Procedures, Preprosthetic",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "E06.780",
+        "H02.163.876.708"
+      ]
+    },
+    {
+      "descriptorUi": "D012697",
+      "name": "Serine Proteinase Inhibitors",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "D08.811.277.656.300.760",
+        "D08.811.277.656.959.350"
+      ]
+    },
+    {
+      "descriptorUi": "D012959",
+      "name": "Socioeconomic Factors",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "I01.880.853.996",
+        "N01.824"
+      ]
+    },
+    {
+      "descriptorUi": "D013519",
+      "name": "Urogenital Surgical Procedures",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "E04.950"
+      ]
+    },
+    {
+      "descriptorUi": "D020558",
+      "name": "GTP Phosphohydrolases",
+      "descendantCount": 51,
+      "descendantCountTrue": 51,
+      "treeNumbers": [
+        "D08.811.277.040.330"
+      ]
+    }
+  ]
+}
