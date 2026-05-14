@@ -165,7 +165,20 @@ export async function* parseMeshXmlStream(
       state.inAnyConcept = true;
       const attrs = node.attributes as Record<string, string>;
       state.inPreferredConcept = attrs.PreferredConceptYN === "Y";
-    } else if (node.name === "DescriptorName") {
+    } else if (
+      node.name === "DescriptorName" &&
+      path.length === depthDescriptor + 1
+    ) {
+      // Issue #273 — only treat the DescriptorName that's a direct child of
+      // DescriptorRecord as canonical. Nested DescriptorName elements appear
+      // inside `PharmacologicalAction > DescriptorReferredTo`,
+      // `SeeRelatedDescriptor > DescriptorReferredTo`, and similar references
+      // to OTHER descriptors. Without this depth gate, a nested
+      // DescriptorName/String would overwrite the canonical name and the
+      // catalog would silently store the referenced descriptor's name
+      // (e.g. D009369 "Neoplasms" stored as "Neoplasm Metastasis" because
+      // its PharmacologicalActionList ends with a reference to that
+      // descriptor).
       state.inDescriptorName = true;
     }
   });
@@ -183,8 +196,18 @@ export async function* parseMeshXmlStream(
     textBuffer = "";
 
     if (depthDescriptor >= 0 && name === "String") {
-      // DescriptorRecord > DescriptorName > String → descriptor name
-      if (state.inDescriptorName && at("DescriptorName", "String")) {
+      // DescriptorRecord > DescriptorName > String → descriptor name.
+      // The opentag guard for DescriptorName is what actually prevents a
+      // nested DescriptorReferredTo's String from leaking in here (it
+      // never sets `inDescriptorName` to true). The path-depth check
+      // below is belt-and-braces against a future opentag refactor; the
+      // canonical String at the close-tag moment sits at
+      // depthDescriptor + 2 (DescriptorRecord > DescriptorName > String).
+      if (
+        state.inDescriptorName &&
+        at("DescriptorName", "String") &&
+        path.length === depthDescriptor + 2
+      ) {
         descriptorName = text;
       } else if (
         state.inAnyConcept &&
