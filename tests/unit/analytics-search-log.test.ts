@@ -10,12 +10,17 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// Mock @/lib/db (used transitively by search module for topic pre-filter).
+// Mock @/lib/db (used transitively by the search module for topic pre-filter
+// and by matchQueryToTaxonomy for the curated callout + MeSH resolution).
 vi.mock("@/lib/db", () => ({
   prisma: {
     publicationTopic: {
       groupBy: vi.fn().mockResolvedValue([]),
     },
+    topic: { findMany: vi.fn().mockResolvedValue([]) },
+    subtopic: { findMany: vi.fn().mockResolvedValue([]) },
+    meshDescriptor: { findMany: vi.fn().mockResolvedValue([]) },
+    etlRun: { findFirst: vi.fn().mockResolvedValue(null) },
   },
 }));
 
