@@ -46,6 +46,7 @@
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:identity": "tsx etl/identity/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
+    "etl:mesh": "tsx etl/mesh-descriptors/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
@@ -70,6 +71,7 @@
     "radix-ui": "^1.4.3",
     "react": "19.0.0",
     "react-dom": "19.0.0",
+    "sax": "^1.6.0",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
@@ -80,6 +82,7 @@
     "@types/node": "^22.10.6",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
+    "@types/sax": "^1.2.7",
     "@vitejs/plugin-react": "^4.3.4",
     "dotenv": "^17.4.2",
     "eslint": "^9.18.0",
