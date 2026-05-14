@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ChevronDown } from "lucide-react";
+import { SortLinks } from "@/components/search/sort-links";
 import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
 import { ExportButton } from "@/components/search/export-button";
@@ -1486,6 +1487,14 @@ function ResultsToolbar({
         { value: "citations", label: "Citation count" },
       ];
   const opts = tab === "people" ? peopleOpts : pubOpts;
+  // Pre-compute hrefs server-side so the SortLinks client component
+  // receives only serializable string props (no function across the
+  // server→client boundary).
+  const optsWithHref = opts.map((o) => ({
+    value: o.value,
+    label: o.label,
+    href: buildSortHref(o.value),
+  }));
 
   return (
     <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-[#757575]">
@@ -1499,47 +1508,10 @@ function ResultsToolbar({
         {extraControls}
         <span className="inline-flex items-center gap-2">
           Sort:
-          <SortLinks current={sort} options={opts} buildSortHref={buildSortHref} />
+          <SortLinks current={sort} options={optsWithHref} />
         </span>
       </span>
     </div>
-  );
-}
-
-// Server-rendered sort selector — render the active option as the visible
-// label, the rest as a small dropdown of links via <details>. Native
-// behavior, no client JS, accessible by keyboard.
-function SortLinks({
-  current,
-  options,
-  buildSortHref,
-}: {
-  current: string;
-  options: Array<{ value: string; label: string }>;
-  buildSortHref: (value: string) => string;
-}) {
-  const activeLabel = options.find((o) => o.value === current)?.label ?? options[0].label;
-  return (
-    <details className="relative">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] [&::-webkit-details-marker]:hidden">
-        {activeLabel}
-        <ChevronDown aria-hidden className="h-3.5 w-3.5 text-[#757575]" strokeWidth={2} />
-      </summary>
-      <ul className="absolute right-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-[#e3e2dd] bg-white py-1 shadow-md">
-        {options.map((o) => (
-          <li key={o.value}>
-            <Link
-              href={buildSortHref(o.value)}
-              className={`block px-3 py-1.5 text-[13px] hover:bg-[#fafaf8] ${
-                o.value === current ? "font-semibold text-[#2c4f6e]" : "text-[#1a1a1a]"
-              }`}
-            >
-              {o.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </details>
   );
 }
 
