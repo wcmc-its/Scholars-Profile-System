@@ -66,4 +66,26 @@ describe("extractMeshLabels", () => {
       ]),
     ).toEqual(["Carcinoma"]);
   });
+
+  // Issue #259 / PR 1 of MeSH defaults rebalance — adjacent edit adds the new
+  // `extractMeshDescriptorUis` extractor to the same module. This snapshot-
+  // style assertion locks the names-extraction shape against an unintended
+  // refactor of `extractMeshLabels` slipping through under the same PR.
+  it("locks the canonical { ui, label } × 5 fixture against accidental drift", () => {
+    expect(
+      extractMeshLabels([
+        { ui: "D006801", label: "Humans" },
+        { ui: "D009369", label: "Neoplasms" },
+        { ui: "D003920", label: "Diabetes Mellitus" },
+        { ui: "D006973", label: "Hypertension" },
+        { ui: "D000368", label: "Aged" },
+      ]),
+    ).toEqual([
+      "Humans",
+      "Neoplasms",
+      "Diabetes Mellitus",
+      "Hypertension",
+      "Aged",
+    ]);
+  });
 });

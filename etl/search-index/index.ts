@@ -73,6 +73,35 @@ export function extractMeshLabels(raw: unknown): string[] {
 }
 
 /**
+ * Extract NLM MeSH descriptor UIs from `Publication.meshTerms`.
+ *
+ * The JSON column shape verified at the time of this PR (2026-05): 100% of
+ * rows with non-empty `mesh_terms` are arrays of `{ ui, label }` objects.
+ * No bare-string rows remain in production. The bare-string branch in
+ * `extractMeshLabels` is dead code in the current corpus but is preserved
+ * there for defense-in-depth; here we only emit UIs from the object shape.
+ *
+ * Returns deduped UIs in source order. Drops rows missing a valid string
+ * `ui` (defensive — should be unreachable under the ETL contract per #278).
+ *
+ * Exported for unit tests.
+ */
+export function extractMeshDescriptorUis(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || !("ui" in item)) continue;
+    const ui = (item as { ui: unknown }).ui;
+    if (typeof ui !== "string" || ui.length === 0) continue;
+    if (seen.has(ui)) continue;
+    seen.add(ui);
+    out.push(ui);
+  }
+  return out;
+}
+
+/**
  * Build trailing-token slices of a name so the OpenSearch completion
  * suggester resolves arbitrary middle-token prefixes. For "M. Cary Reid"
  * returns ["Cary Reid", "Reid"] — these get added as suggestion inputs
@@ -599,6 +628,7 @@ async function indexPublications() {
     }
 
     const mesh = extractMeshLabels(p.meshTerms);
+    const meshUis = extractMeshDescriptorUis(p.meshTerms);
 
     // Issue #259 §1.6 — ReciterAI parent-topic IDs. `parentTopicId` is
     // non-nullable on PublicationTopic (it's part of the composite PK
@@ -629,6 +659,10 @@ async function indexPublications() {
         pmcid: p.pmcid,
         pubmedUrl: p.pubmedUrl,
         meshTerms: mesh.join(" "),
+        // Issue #259 — MeSH defaults rebalance. OMIT-on-empty: pubs whose
+        // mesh_terms yielded no UIs (empty column or all-malformed rows) write
+        // nothing for this field, mirroring the reciterParentTopicId pattern.
+        ...(meshUis.length > 0 ? { meshDescriptorUi: meshUis } : {}),
         // Issue #32 — index abstract text on the publications doc so
         // thematic queries (e.g. "psychiatric comorbidities") can match
         // the paper itself, not just the scholar. Empty/missing abstracts
@@ -875,6 +909,24 @@ async function assertPublicationsIndexHealth(
     throw new Error(
       `[smoke] scholars-publications: match_phrase: meshTerms = "Neoplasms" returned 0 ` +
         `across ${total.body.count} docs — meshTerms regression suspected (see #278)`,
+    );
+  }
+
+  // Issue #259 — MeSH defaults rebalance. The same regression class as #278
+  // applies to the UI extractor: a future code change to the JSON column shape
+  // (or to `extractMeshDescriptorUis`) could silently zero out the new field
+  // on every doc. Smoke against a ubiquitous descriptor (D006801 = Humans;
+  // tagged on > 60% of indexed pubs) catches the regression at ETL time.
+  const meshUiSmoke = await client.search({
+    index: PUBLICATIONS_INDEX,
+    body: { query: { term: { meshDescriptorUi: "D006801" } } },
+    size: 0,
+  });
+  if ((meshUiSmoke.body.hits.total as { value: number }).value < 50_000) {
+    throw new Error(
+      `[smoke] scholars-publications: term: meshDescriptorUi = "D006801" returned ` +
+        `${(meshUiSmoke.body.hits.total as { value: number }).value} hits ` +
+        `(expected > 50,000) — extractMeshDescriptorUis regression suspected (see SPEC §5.4.1)`,
     );
   }
 
