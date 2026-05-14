@@ -330,6 +330,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
     entryTerms: ["EHR", "Electronic Medical Records"],
     scopeNote: "Media for storing electronic versions of individuals' medical records.",
     dateRevised: new Date("2024-06-01"),
+    localPubCoverage: null as number | null,
   };
 
   it("exact name match → confidence: exact", async () => {
@@ -439,6 +440,126 @@ describe("resolveMeshDescriptor (§1.5)", () => {
     const r = await resolveMeshDescriptor("foo");
     expect(r?.descriptorUi).toBe("D001B");
     expect(r?.confidence).toBe("entry-term");
+  });
+
+  it("§1.7 tiebreaker: higher localPubCoverage wins among same-confidence, same-anchor candidates", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_LOW",
+        name: "Niche Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+        localPubCoverage: 0.001,
+      },
+      {
+        descriptorUi: "D_HIGH",
+        name: "Broad Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        // Older dateRevised — would lose the pre-§1.7 tiebreaker. Coverage
+        // is the new key and outranks dateRevised.
+        dateRevised: new Date("2020-01-01"),
+        localPubCoverage: 0.04,
+      },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D_HIGH");
+  });
+
+  it("§1.7: NULL localPubCoverage sorts last (a populated 0 beats NULL)", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_NULL",
+        name: "Null Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+        localPubCoverage: null,
+      },
+      {
+        descriptorUi: "D_ZERO",
+        name: "Zero Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+        localPubCoverage: 0,
+      },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D_ZERO");
+  });
+
+  it("§1.7: tie on coverage falls through to dateRevised", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_OLD",
+        name: "Older Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2024-01-01"),
+        localPubCoverage: 0.02,
+      },
+      {
+        descriptorUi: "D_NEW",
+        name: "Newer Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+        localPubCoverage: 0.02,
+      },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D_NEW");
+  });
+
+  it("§1.7: anchor-exists outranks coverage (spec line 220 order)", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_ANCHORED",
+        name: "Anchored Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+        localPubCoverage: 0.001,
+      },
+      {
+        descriptorUi: "D_BROAD",
+        name: "Broad Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+        localPubCoverage: 0.5,
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D_ANCHORED", parentTopicId: "some_topic" },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D_ANCHORED");
+  });
+
+  it("§1.7: fully-NULL coverage column degrades to dateRevised (pre-§1.7 ordering)", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_OLD",
+        name: "Older Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2024-01-01"),
+        localPubCoverage: null,
+      },
+      {
+        descriptorUi: "D_NEW",
+        name: "Newer Concept",
+        entryTerms: ["Foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+        localPubCoverage: null,
+      },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D_NEW");
   });
 
   it("collision: shared entry term, no dateRevised, descriptorUi ascending wins", async () => {

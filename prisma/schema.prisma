@@ -571,9 +571,9 @@ model Subtopic {
 /// intact in the table so future resolution logic (§1.5) and downstream
 /// telemetry can still see the full set.
 ///
-/// `localPubCoverage` and `localLeadAuthorScholarCoverage` (spec §1.7, §2.x) are
-/// deliberately NOT modeled here yet — they land in their own migrations when
-/// those phases ship.
+/// `localLeadAuthorScholarCoverage` (spec §2.x) is deliberately NOT modeled
+/// here yet — it depends on Phase 2 lead-author fields and lands in its own
+/// migration when that phase ships.
 model MeshDescriptor {
   descriptorUi String   @id @map("descriptor_ui") @db.VarChar(10) // e.g. "D057286"
   name         String   @db.VarChar(255) // Descriptor's preferred-concept preferred term
@@ -581,6 +581,13 @@ model MeshDescriptor {
   treeNumbers  Json     @map("tree_numbers") // string[] — e.g. ["E05.318.308.250", ...]
   scopeNote    String?  @map("scope_note") @db.Text // From preferred Concept/ScopeNote
   dateRevised  DateTime? @map("date_revised") @db.Date // NLM DateRevised
+  /// Spec §1.7 — fraction of `publication` rows whose `mesh_terms` JSON
+  /// contains this descriptor's `ui`. Range [0, 1]. NULL = not yet
+  /// computed (e.g., between a MeSH-descriptor full-replace ETL and the
+  /// next `etl:mesh-coverage` run). Updated daily by
+  /// `etl/mesh-coverage/index.ts`; consumed by `resolveMeshDescriptor`
+  /// (§1.5) as a tiebreaker and reserved for §3.3's too-broad cutoff.
+  localPubCoverage Float? @map("local_pub_coverage")
   refreshedAt  DateTime @default(now()) @map("refreshed_at")
 
   @@index([name])
