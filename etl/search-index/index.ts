@@ -71,6 +71,59 @@ export function buildReciterParentTopicIdField(
   return ids.length > 0 ? { reciterParentTopicId: ids } : {};
 }
 
+/**
+ * Issue #259 §1.8 — derive the `impactScore` (doc-level MAX, sortable float)
+ * and `topicImpacts` (per-topic MAX, used by the API to compute the
+ * "Concept impact" badge value when a MeSH descriptor resolves to one or
+ * more anchored curated topics).
+ *
+ * Input rows come from the un-deduped publication_topic join: one row per
+ * (pmid, cwid, parentTopicId). For each parentTopicId we take the MAX
+ * across cwids, skipping null impact scores. Pubs with zero non-null
+ * impact rows write nothing for either field — the OMIT-on-empty pattern
+ * matches `reciterParentTopicId` and lets `_source` consumers distinguish
+ * "no signal" from "[]" / 0.
+ *
+ * `impactScore` is a `number` (JSON float, not Prisma Decimal) so the
+ * OpenSearch float mapping accepts it directly and sort works as expected.
+ * Decimal(8,4) fits well within float precision.
+ *
+ * Exported solely for unit testing.
+ */
+export function buildPubImpactFields(
+  publicationTopics: ReadonlyArray<{
+    parentTopicId: string;
+    impactScore: { toNumber(): number } | number | null;
+  }>,
+):
+  | {
+      impactScore: number;
+      topicImpacts: Array<{ parentTopicId: string; impactScore: number }>;
+    }
+  | Record<string, never> {
+  const perTopic = new Map<string, number>();
+  for (const pt of publicationTopics) {
+    if (pt.impactScore === null || pt.impactScore === undefined) continue;
+    const v =
+      typeof pt.impactScore === "number"
+        ? pt.impactScore
+        : pt.impactScore.toNumber();
+    if (!Number.isFinite(v)) continue;
+    const prev = perTopic.get(pt.parentTopicId);
+    if (prev === undefined || v > prev) perTopic.set(pt.parentTopicId, v);
+  }
+  if (perTopic.size === 0) return {};
+  const topicImpacts = Array.from(perTopic.entries(), ([parentTopicId, impactScore]) => ({
+    parentTopicId,
+    impactScore,
+  }));
+  let max = topicImpacts[0].impactScore;
+  for (let i = 1; i < topicImpacts.length; i++) {
+    if (topicImpacts[i].impactScore > max) max = topicImpacts[i].impactScore;
+  }
+  return { impactScore: max, topicImpacts };
+}
+
 function trailingNameSlices(name: string): string[] {
   if (!name) return [];
   const raw = name.trim().split(/\s+/).filter(Boolean);
@@ -462,15 +515,17 @@ async function indexPublications() {
             },
           },
         },
-        // Issue #259 §1.6 — ReciterAI parent-topic IDs for the OR-of-evidence
-        // pub filter. `distinct: ["parentTopicId"]` collapses per-scholar
-        // duplicates at the query layer; PublicationTopic is keyed
-        // (pmid, cwid, parentTopicId) so a single pub × topic appears as
-        // many rows as it has WCM authors with that topic. Doc-level field
-        // needs one entry per parent topic, not per (scholar, topic) pair.
+        // Issue #259 §1.6 + §1.8 — ReciterAI parent-topic IDs (for the
+        // OR-of-evidence pub filter) and per-(scholar, topic) `impactScore`
+        // (for the §1.8 doc-level MAX + per-topic-MAX badge values).
+        //
+        // No `distinct: ["parentTopicId"]` here: §1.8 needs all cwid rows
+        // so the helper can take MAX(impactScore) per parentTopicId across
+        // cwids. `buildReciterParentTopicIdField` does its own Set-based
+        // dedup, so the §1.6 field stays correct without the query-layer
+        // distinct.
         publicationTopics: {
-          select: { parentTopicId: true },
-          distinct: ["parentTopicId"],
+          select: { parentTopicId: true, impactScore: true },
         },
       },
     });
@@ -528,6 +583,13 @@ async function indexPublications() {
       p.publicationTopics,
     );
 
+    // Issue #259 §1.8 — doc-level MAX `impactScore` (sortable) and per-topic
+    // MAX `topicImpacts` (used by the API to compute the "Concept impact"
+    // badge value against the resolved concept's anchored topics).
+    // OMIT-on-empty: pubs with no non-null impact rows write neither
+    // field, mirroring the `reciterParentTopicId` distinction.
+    const pubImpactFields = buildPubImpactFields(p.publicationTopics);
+
     docs.push({
       pmid: p.pmid,
       doc: {
@@ -559,6 +621,10 @@ async function indexPublications() {
         // `[]` identically at query time, so this is a `_source`-only
         // distinction.
         ...reciterParentTopicIdField,
+        // Issue #259 §1.8 — same OMIT-on-empty contract for the doc-level
+        // impact aggregates; spread emits nothing on pubs with no non-null
+        // impact rows.
+        ...pubImpactFields,
       },
     });
   }

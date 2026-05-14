@@ -65,7 +65,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const rawPage = parseInt((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
   const rawSort = Array.isArray(sp.sort) ? sp.sort[0] : sp.sort;
-  const sort = rawSort ?? (q === "" && type === "publications" ? "year" : "relevance");
+  // Issue #259 §1.8 — when the impact-display flag is on, the empty-query
+  // pub-tab default is "recency" (the new §1.8 option that subsumes the
+  // legacy `year` sort with a `dateAddedToEntrez` tiebreak). Flag off
+  // preserves the original `year` default so behaviour is unchanged.
+  const pubImpactFlag = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+  const emptyPubDefault = pubImpactFlag ? "recency" : "year";
+  const sort = rawSort ?? (q === "" && type === "publications" ? emptyPubDefault : "relevance");
 
   const showAZ = q === "" && type === "people";
   const [azBuckets, taxonomyMatch] = await Promise.all([
@@ -172,6 +178,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
+      // Issue #259 §1.6 + §1.8 — taxonomyMatch is computed unconditionally
+      // above for the curated-callout. Forward the MeSH resolution so
+      // searchPublications can (a) restructure to OR-of-evidence when the
+      // §1.6 flag is on, and (b) compute per-hit `conceptImpactScore` when
+      // the §1.8 flag is on. The API route (route.ts:107) already does
+      // this; mirroring here keeps the server-rendered page consistent.
+      meshResolution: taxonomyMatch.meshResolution,
     }),
     searchFunding({
       q,
@@ -874,6 +887,15 @@ async function PublicationsResults({
                     doi={h.doi}
                     className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
                   />
+                  {/* Issue #259 §1.8 — impactScore badge. "Concept impact"
+                      when a MeSH descriptor resolved AND the pub has at least
+                      one publication_topic row matching an anchored topic with
+                      non-null impact; "Impact" otherwise. Omit when both
+                      fields are null (no signal). */}
+                  <ImpactBadge
+                    impactScore={h.impactScore}
+                    conceptImpactScore={h.conceptImpactScore}
+                  />
                 </li>
               );
             })}
@@ -1419,11 +1441,23 @@ function ResultsToolbar({
     { value: "lastname", label: "Last name (A–Z)" },
     { value: "recentPub", label: "Most recent publication" },
   ];
-  const pubOpts: Array<{ value: PublicationsSort; label: string }> = [
-    { value: "relevance", label: "Relevance" },
-    { value: "year", label: "Year (newest)" },
-    { value: "citations", label: "Citation count" },
-  ];
+  // Issue #259 §1.8 — pub-tab sort options swap under the §1.8 flag:
+  // Relevance / Impact / Recency replaces Relevance / Year / Citations.
+  // Flag check is server-side (this is a Server Component); the legacy
+  // values still resolve correctly in `searchPublications` so old URLs
+  // don't 500 mid-deploy. Default-off mirrors the §1.6 rollout pattern.
+  const pubImpactOn = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+  const pubOpts: Array<{ value: PublicationsSort; label: string }> = pubImpactOn
+    ? [
+        { value: "relevance", label: "Relevance" },
+        { value: "impact", label: "Impact" },
+        { value: "recency", label: "Recency" },
+      ]
+    : [
+        { value: "relevance", label: "Relevance" },
+        { value: "year", label: "Year (newest)" },
+        { value: "citations", label: "Citation count" },
+      ];
   const opts = tab === "people" ? peopleOpts : pubOpts;
 
   return (
@@ -2012,6 +2046,50 @@ function FacetCheckbox({
       )}
     </li>
   );
+}
+
+/* ============================================================
+ * Issue #259 §1.8 — Impact badge on pub-tab result rows.
+ *
+ * Renders one of:
+ *   - "Concept impact: 78"  when `conceptImpactScore` is non-null
+ *     (resolved MeSH descriptor + matching anchored topic with non-null
+ *     impact). Whole-number display per spec example.
+ *   - "Impact: 78"          when only `impactScore` is non-null.
+ *   - nothing               when both are null (no §1.8 signal, or flag off).
+ *
+ * Values are rounded to the nearest integer for display; the API returns
+ * raw floats so future refinements (e.g. one decimal) don't need a
+ * round-trip change.
+ * ============================================================ */
+function ImpactBadge({
+  impactScore,
+  conceptImpactScore,
+}: {
+  impactScore: number | null;
+  conceptImpactScore: number | null;
+}) {
+  if (conceptImpactScore !== null) {
+    return (
+      <div className="mt-1 text-xs text-[#757575]">
+        Concept impact:{" "}
+        <span className="font-semibold text-[#4a4a4a]">
+          {Math.round(conceptImpactScore)}
+        </span>
+      </div>
+    );
+  }
+  if (impactScore !== null) {
+    return (
+      <div className="mt-1 text-xs text-[#757575]">
+        Impact:{" "}
+        <span className="font-semibold text-[#4a4a4a]">
+          {Math.round(impactScore)}
+        </span>
+      </div>
+    );
+  }
+  return null;
 }
 
 /* ============================================================
