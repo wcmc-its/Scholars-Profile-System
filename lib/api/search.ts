@@ -43,6 +43,7 @@ import {
   PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
 } from "@/lib/search";
+import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const PAGE_SIZE = 20;
 
@@ -662,6 +663,13 @@ export async function searchPublications(opts: {
   page?: number;
   sort?: PublicationsSort;
   filters?: PublicationsFilters;
+  /**
+   * Issue #259 §1.6 — when set AND `SEARCH_PUB_TAB_OR_OF_EVIDENCE=on`, the
+   * query is restructured as `must(MeSH-evidence OR ReciterAI-evidence) +
+   * should(BM25 free-text)`. Null/undefined → no restructure, byte-identical
+   * to the §1.2 shape.
+   */
+  meshResolution?: MeshResolution | null;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -678,12 +686,79 @@ export async function searchPublications(opts: {
   // Set SEARCH_PUB_TAB_MSM=off as an emergency rollback without redeploying.
   const usePubMsm =
     (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
-  const queryShape: PublicationsQueryShape = usePubMsm
-    ? "restructured_msm"
-    : "legacy_multi_match";
 
+  // Issue #259 §1.6 — OR-of-evidence pub filter. Flag default-OFF; flip
+  // requires the publications index to have been reindexed with the new
+  // `reciterParentTopicId` field. The flag is independent of
+  // SEARCH_PUB_TAB_MSM: this gate decides query *shape*, the msm gate
+  // decides whether the existing flat-multi_match has an msm floor. When
+  // §1.6 is active, the BM25 should-clause carries msm unconditionally
+  // (it's part of the OR-of-evidence shape definition; the msm flag does
+  // not influence it). To escape §1.6 entirely, flip this flag off.
+  const useOrOfEvidence =
+    (process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE ?? "off") === "on";
+  const resolution = opts.meshResolution ?? null;
+
+  let queryShape: PublicationsQueryShape;
   const must: Record<string, unknown>[] = [];
-  if (trimmed.length > 0) {
+  const topLevelShould: Record<string, unknown>[] = [];
+
+  if (trimmed.length === 0) {
+    must.push({ match_all: {} });
+    queryShape = usePubMsm ? "restructured_msm" : "legacy_multi_match";
+  } else if (useOrOfEvidence && resolution) {
+    // §1.6 — admission is `(Path A: MeSH evidence) OR (Path B: ReciterAI
+    // evidence)`. BM25 sits in the top-level `should` and contributes to
+    // scoring only — it cannot admit a doc on its own.
+    //
+    // Path A: match_phrase chosen per spec footnote (lines 251-254). The
+    // pre-merge probe against pmid 25848412 verifies the analyzed
+    // `meshTerms` stream injects position gaps between distinct MeSH terms
+    // so this works; if the probe fails, swap to:
+    //   { match: { meshTerms: { query: resolution.name, operator: "and", boost: 8 } } }
+    const pathA = {
+      match_phrase: { meshTerms: { query: resolution.name, boost: 8 } },
+    };
+
+    const evidenceShould: Record<string, unknown>[] = [pathA];
+    if (resolution.curatedTopicAnchors.length > 0) {
+      // Path B: ReciterAI evidence. Flat-score by design — a doc matching
+      // N anchors scores the same as a doc matching 1. Admission is what
+      // matters; ordering across the admitted set comes from the top-level
+      // BM25 should-clause. Multi-anchor hit-count would over-weight broad
+      // descriptors whose anchor count is itself a curation-density signal,
+      // not a relevance signal.
+      evidenceShould.push({
+        terms: {
+          reciterParentTopicId: resolution.curatedTopicAnchors,
+          boost: 6,
+        },
+      });
+      queryShape = "concept_filtered";
+    } else {
+      // Anchors empty (§1.4 hasn't seeded this descriptor yet, or it's a
+      // narrow leaf descriptor with no curated coverage). Path A alone;
+      // admission is MeSH-only.
+      queryShape = "concept_fallback";
+    }
+
+    must.push({
+      bool: { should: evidenceShould, minimum_should_match: 1 },
+    });
+    topLevelShould.push({
+      multi_match: {
+        query: trimmed,
+        fields: [...PUBLICATION_FIELD_BOOSTS],
+        type: "best_fields",
+        operator: "or",
+        minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+      },
+    });
+  } else {
+    // §1.2 path — unresolved query OR flag off. Body MUST be byte-identical
+    // to today's output; do not push to topLevelShould (the body spread
+    // below skips the `should` key when the array is empty, preserving
+    // the exact pre-§1.6 shape).
     must.push({
       multi_match: {
         query: trimmed,
@@ -697,8 +772,7 @@ export async function searchPublications(opts: {
           : {}),
       },
     });
-  } else {
-    must.push({ match_all: {} });
+    queryShape = usePubMsm ? "restructured_msm" : "legacy_multi_match";
   }
 
   // Build named filter clauses so per-facet aggs can re-apply every OTHER
@@ -782,7 +856,18 @@ export async function searchPublications(opts: {
     // counts a few thousand extra docs on broad queries, but it's needed
     // for an accurate count line.
     track_total_hits: true,
-    query: { bool: { must } },
+    query: {
+      bool: {
+        must,
+        // §1.6 — top-level BM25 scoring clause. Only added when populated
+        // (concept_filtered / concept_fallback shapes); empty array spreads
+        // to nothing so the §1.2 path produces a byte-identical body.
+        // Intentionally NOT propagated to the agg filter contexts below —
+        // facet counts are filter-context only and shouldn't be biased by
+        // BM25 ordering signal.
+        ...(topLevelShould.length > 0 ? { should: topLevelShould } : {}),
+      },
+    },
     // post_filter applies all user-axis filters to hits AFTER the
     // aggregations run, so each per-facet agg can compute correct
     // excluding-self counts (see searchPeople for the rationale).

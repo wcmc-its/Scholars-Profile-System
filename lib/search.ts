@@ -170,6 +170,14 @@ export const publicationsIndexMapping = {
       pmcid: { type: "keyword" },
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
+      // Issue #259 §1.6 — ReciterAI parent-topic IDs on each pub, used by
+      // the OR-of-evidence pub filter's Path B (`terms` on a keyword field
+      // is the natural shape for exact-value match on opaque topic-slug
+      // IDs). Multi-valued by storing as a JSON array; OpenSearch handles
+      // array-of-keyword natively. Field is OMITTED on docs with zero
+      // `publication_topic` rows so `_source` consumers can distinguish
+      // "no signal" from "[]" — see the ETL writer for the rationale.
+      reciterParentTopicId: { type: "keyword" },
       // Issue #32 — abstract text on the publications index lets thematic
       // queries find the right paper, not just the right scholar (issue #21
       // already covers that on the people index). One abstract per doc, no

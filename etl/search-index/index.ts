@@ -52,6 +52,25 @@ type AuthorshipKind = keyof typeof AUTHORSHIP_WEIGHTS;
  * Drops trailing generational suffixes ("Jr", "Sr", "II", "III", "IV") so
  * "Smith Jr" still surfaces a "Smith" slice. Empty for single-token names.
  */
+/**
+ * Issue #259 §1.6 — derive the deduped `reciterParentTopicId` array for one
+ * publication doc from its joined `publicationTopics` rows. The Prisma
+ * `distinct: ["parentTopicId"]` clause is the primary dedupe at the query
+ * layer; this is a belt-and-braces against any future relaxation. Returns
+ * either `{ reciterParentTopicId: [...] }` to be spread into the doc, or
+ * `{}` for pubs with zero topic rows so the field is omitted (not stored
+ * as `[]`) — see the call site for the `_source`-distinguishability
+ * rationale.
+ *
+ * Exported solely for unit testing. Not part of the indexer's public API.
+ */
+export function buildReciterParentTopicIdField(
+  publicationTopics: ReadonlyArray<{ parentTopicId: string }>,
+): { reciterParentTopicId: string[] } | Record<string, never> {
+  const ids = Array.from(new Set(publicationTopics.map((pt) => pt.parentTopicId)));
+  return ids.length > 0 ? { reciterParentTopicId: ids } : {};
+}
+
 function trailingNameSlices(name: string): string[] {
   if (!name) return [];
   const raw = name.trim().split(/\s+/).filter(Boolean);
@@ -443,6 +462,16 @@ async function indexPublications() {
             },
           },
         },
+        // Issue #259 §1.6 — ReciterAI parent-topic IDs for the OR-of-evidence
+        // pub filter. `distinct: ["parentTopicId"]` collapses per-scholar
+        // duplicates at the query layer; PublicationTopic is keyed
+        // (pmid, cwid, parentTopicId) so a single pub × topic appears as
+        // many rows as it has WCM authors with that topic. Doc-level field
+        // needs one entry per parent topic, not per (scholar, topic) pair.
+        publicationTopics: {
+          select: { parentTopicId: true },
+          distinct: ["parentTopicId"],
+        },
       },
     });
 
@@ -491,6 +520,14 @@ async function indexPublications() {
       ? (p.meshTerms as unknown[]).filter((x): x is string => typeof x === "string")
       : [];
 
+    // Issue #259 §1.6 — ReciterAI parent-topic IDs. `parentTopicId` is
+    // non-nullable on PublicationTopic (it's part of the composite PK
+    // `[pmid, cwid, parentTopicId]` per prisma/schema.prisma:744), so no
+    // null filter is needed. The helper handles dedup + omit-on-empty.
+    const reciterParentTopicIdField = buildReciterParentTopicIdField(
+      p.publicationTopics,
+    );
+
     docs.push({
       pmid: p.pmid,
       doc: {
@@ -515,6 +552,13 @@ async function indexPublications() {
         wcmAuthorPositions: Array.from(wcmAuthorPositions),
         // Issue #88 — flat CWID array for the Author facet aggregation.
         wcmAuthorCwids: wcmAuthors.map((a) => a.cwid),
+        // Issue #259 §1.6 — OMIT-on-empty: pubs with zero publication_topic
+        // rows write nothing for this field, not an empty array. Lets
+        // `_source` consumers (the §1.11 chip path, debug tooling)
+        // distinguish "no signal" from "[]". OpenSearch treats absent and
+        // `[]` identically at query time, so this is a `_source`-only
+        // distinction.
+        ...reciterParentTopicIdField,
       },
     });
   }
