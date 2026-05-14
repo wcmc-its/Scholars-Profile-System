@@ -44,6 +44,35 @@ const AUTHORSHIP_WEIGHTS = {
 type AuthorshipKind = keyof typeof AUTHORSHIP_WEIGHTS;
 
 /**
+ * Normalize the `Publication.meshTerms` JSON column into a flat list of
+ * descriptor labels suitable for indexing.
+ *
+ * The column has historically held two shapes: bare strings (older rows)
+ * and `{ ui, label }` objects emitted by the current MeSH descriptor ETL.
+ * Earlier indexer code filtered to `typeof x === "string"`, which silently
+ * dropped every object-shaped term — leaving every doc with an empty
+ * `meshTerms` field in OpenSearch and breaking the #259 §1.6 OR-of-evidence
+ * concept query (every `match_phrase: meshTerms` returned 0).
+ *
+ * Accepts both shapes so a partial migration on the source side doesn't
+ * silently lose terms. Non-string `label` values, empty strings, and
+ * malformed rows are dropped.
+ */
+export function extractMeshLabels(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item === "string") {
+      if (item.length > 0) out.push(item);
+    } else if (item && typeof item === "object" && "label" in item) {
+      const label = (item as { label: unknown }).label;
+      if (typeof label === "string" && label.length > 0) out.push(label);
+    }
+  }
+  return out;
+}
+
+/**
  * Build trailing-token slices of a name so the OpenSearch completion
  * suggester resolves arbitrary middle-token prefixes. For "M. Cary Reid"
  * returns ["Cary Reid", "Reid"] — these get added as suggestion inputs
@@ -286,9 +315,7 @@ async function indexPeople() {
         abstractParts.push(a.publication.abstract);
       }
 
-      const mesh = Array.isArray(a.publication.meshTerms)
-        ? (a.publication.meshTerms as unknown[]).filter((x): x is string => typeof x === "string")
-        : [];
+      const mesh = extractMeshLabels(a.publication.meshTerms);
       for (const term of mesh) {
         const cur = termAgg.get(term) ?? {
           distinctPubs: 0,
@@ -571,9 +598,7 @@ async function indexPublications() {
       if (!a.isFirst && !a.isLast) wcmAuthorPositions.add("middle");
     }
 
-    const mesh = Array.isArray(p.meshTerms)
-      ? (p.meshTerms as unknown[]).filter((x): x is string => typeof x === "string")
-      : [];
+    const mesh = extractMeshLabels(p.meshTerms);
 
     // Issue #259 §1.6 — ReciterAI parent-topic IDs. `parentTopicId` is
     // non-nullable on PublicationTopic (it's part of the composite PK
@@ -759,24 +784,64 @@ async function indexFunding() {
   return docs.length;
 }
 
+type SourceType = "people" | "publications" | "funding";
+
+function parseSelected(argv: string[]): Set<SourceType> {
+  const all: SourceType[] = ["people", "publications", "funding"];
+  const flagMap: Record<string, SourceType> = {
+    "--people-only": "people",
+    "--publications-only": "publications",
+    "--funding-only": "funding",
+  };
+  const selected = new Set<SourceType>();
+  for (const arg of argv) {
+    if (arg in flagMap) selected.add(flagMap[arg]);
+    else if (arg === "--help" || arg === "-h") {
+      console.log(
+        "Usage: tsx etl/search-index/index.ts [--people-only] [--publications-only] [--funding-only]\n" +
+          "  Flags are additive; pass none to (re)index all three sources.\n" +
+          "  Each selected source has its index dropped and recreated; unselected indices are left alone.",
+      );
+      process.exit(0);
+    } else {
+      console.error(`Unknown flag: ${arg}`);
+      process.exit(2);
+    }
+  }
+  if (selected.size === 0) for (const s of all) selected.add(s);
+  return selected;
+}
+
 async function main() {
-  console.log("Recreating indices...");
-  await ensureIndex(PEOPLE_INDEX, peopleIndexMapping);
-  await ensureIndex(PUBLICATIONS_INDEX, publicationsIndexMapping);
-  await ensureIndex(FUNDING_INDEX, fundingIndexMapping);
+  const selected = parseSelected(process.argv.slice(2));
+  const counts: Partial<Record<SourceType, number>> = {};
 
-  console.log("Indexing people...");
-  const peopleCount = await indexPeople();
+  if (selected.has("people")) {
+    console.log("Recreating people index...");
+    await ensureIndex(PEOPLE_INDEX, peopleIndexMapping);
+    console.log("Indexing people...");
+    counts.people = await indexPeople();
+  }
 
-  console.log("Indexing publications...");
-  const pubCount = await indexPublications();
+  if (selected.has("publications")) {
+    console.log("Recreating publications index...");
+    await ensureIndex(PUBLICATIONS_INDEX, publicationsIndexMapping);
+    console.log("Indexing publications...");
+    counts.publications = await indexPublications();
+  }
 
-  console.log("Indexing funding...");
-  const fundingCount = await indexFunding();
+  if (selected.has("funding")) {
+    console.log("Recreating funding index...");
+    await ensureIndex(FUNDING_INDEX, fundingIndexMapping);
+    console.log("Indexing funding...");
+    counts.funding = await indexFunding();
+  }
 
-  console.log(
-    `Indexed ${peopleCount} scholars, ${pubCount} publications, ${fundingCount} funding projects.`,
-  );
+  const parts: string[] = [];
+  if (counts.people !== undefined) parts.push(`${counts.people} scholars`);
+  if (counts.publications !== undefined) parts.push(`${counts.publications} publications`);
+  if (counts.funding !== undefined) parts.push(`${counts.funding} funding projects`);
+  console.log(`Indexed ${parts.join(", ")}.`);
 }
 
 main()
