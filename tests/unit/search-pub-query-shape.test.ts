@@ -3,7 +3,7 @@
  *
  * Captures the `body.query` sent to OpenSearch by `searchPublications` and
  * checks the multi_match shape. Flag off: no `minimum_should_match`, no
- * `operator: or`, fields untouched. Flag on: msm is `"3<-25%"`,
+ * `operator: or`, fields untouched. Flag on: msm is `"2<-34%"`,
  * operator is `"or"`, fields still untouched (no field-restructure on
  * pub-tab — abstract is per-doc, not a blob).
  *
@@ -47,7 +47,7 @@ vi.mock("@/lib/search", () => ({
     "journal^1",
     "abstract^0.5",
   ],
-  PUBLICATIONS_RESTRUCTURED_MSM: "3<-25%",
+  PUBLICATIONS_RESTRUCTURED_MSM: "2<-34%",
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
       capturedBodies.push(req.body);
@@ -144,7 +144,7 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_MSM", () => {
     const mm = clause.multi_match as Record<string, unknown>;
     expect(mm.type).toBe("best_fields");
     expect(mm.operator).toBe("or");
-    expect(mm.minimum_should_match).toBe("3<-25%");
+    expect(mm.minimum_should_match).toBe("2<-34%");
     // Fields list is identical — pub-tab does NOT restructure (abstract on
     // the publications index is per-doc, not a concatenated blob).
     expect(mm.fields).toEqual([

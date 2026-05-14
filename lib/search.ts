@@ -379,21 +379,34 @@ export const PEOPLE_ABSTRACTS_BOOST = 0.3;
 
 /**
  * Minimum-should-match expression for the restructured people query
- * (issue #259 §1.1). Reads as: for ≤3 analyzed tokens require all; for >3,
- * allow up to 25% missing. Tokens are post-analysis — `scholar_text`
- * strips English stopwords first.
+ * (issue #259 §1.1, loosened in v2.2). Reads as: for ≤2 analyzed tokens
+ * require all; for >2, allow up to 34% missing. Tokens are post-analysis
+ * — `scholar_text` strips English stopwords first.
  *
- * The original spec wrote this as `"-0% 3<-25%"`, but OpenSearch rejects
- * any space-separated part that isn't of the form `N<spec`. A bare `-0%`
- * trips "For input string: \"-0%\"" — the leading "require everything"
- * fragment is already the implicit default when no condition matches,
- * so `"3<-25%"` alone is equivalent and parses. Required-token table
- * (1/2/3/4/5/8 → 1/2/3/3/4/6) is unchanged.
+ * Required-token table by analyzed-token count:
+ *   1 → 1,  2 → 2,  3 → 2,  4 → 3,  5 → 4,  8 → 6
+ *
+ * The original spec wrote `"-0% 3<-25%"` which (a) is invalid OpenSearch
+ * syntax — a bare `-0%` segment trips "For input string: \"-0%\"" — and
+ * (b) required all tokens on 3-token queries, the modal length of concept
+ * queries after stemmer collapse ("electronic health records" → 3 tokens).
+ * The first issue was fixed in v2.1's clarification (`"3<-25%"` produces
+ * the same table); the second surfaced during prod verification, when the
+ * 3-token EHR headline query cut from 4,303 to 155 — far below the spec's
+ * 1,000–2,500 band, because every scholar needed all three of
+ * "electron"+"health"+"record" scattered across the high-evidence fields.
+ *
+ * "2<-34%" is the surgical loosening: only the 3-token row of the table
+ * changes (3-required → 2-required, i.e. 1 of 3 tokens may be missing).
+ * 1/2-token nominal queries are unaffected (must still match all tokens);
+ * 4+-token queries are unaffected (msm boundary is still 25% effective).
+ * 34%, not 33%, because `floor(0.33 * 3) = 0` (the floor-rounding bites
+ * exactly at the boundary); 34% rounds up cleanly.
  *
  * Lifted to a constant because the msm DSL is easy to misread and the
  * exact string is asserted on by `tests/unit/search-msm-parser.test.ts`.
  */
-export const PEOPLE_RESTRUCTURED_MSM = "3<-25%";
+export const PEOPLE_RESTRUCTURED_MSM = "2<-34%";
 
 /**
  * Boost weights used by the publications-index query builder.
@@ -419,8 +432,8 @@ export const PUBLICATION_FIELD_BOOSTS: ReadonlyArray<string> = [
  *
  * `abstract` on the publications index is a single paper's abstract, not a
  * concatenated blob, so msm works on the existing flat shape — no field
- * restructure needed. See `PEOPLE_RESTRUCTURED_MSM` for why this is
- * `"3<-25%"` and not the spec's literal `"-0% 3<-25%"` (same table, valid
- * OpenSearch syntax).
+ * restructure needed. See `PEOPLE_RESTRUCTURED_MSM` for the full rationale
+ * on the `"2<-34%"` choice (it's the loosened form of the original spec
+ * literal `"-0% 3<-25%"`, surgically fixing the 3-token boundary).
  */
-export const PUBLICATIONS_RESTRUCTURED_MSM = "3<-25%";
+export const PUBLICATIONS_RESTRUCTURED_MSM = "2<-34%";

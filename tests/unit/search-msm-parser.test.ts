@@ -1,17 +1,20 @@
 /**
  * Issue #259 §1.1 — msm-parser semantics for the people-index query.
  *
- * The restructured query uses `minimum_should_match: "3<-25%"`. The
+ * The restructured query uses `minimum_should_match: "2<-34%"`. The
  * OpenSearch DSL is easy to misread, and the exact required-token counts
- * decide whether a doc is admitted. The spec calls for a fixed test table
- * (1, 2, 3, 4, 5, 8 analyzed tokens → 1, 2, 3, 3, 4, 6 required tokens) so
- * any future tweak to the msm string fails this test loudly.
+ * decide whether a doc is admitted. Required-token table:
+ *   1, 2, 3, 4, 5, 8 analyzed tokens → 1, 2, 2, 3, 4, 6 required tokens.
  *
- * Note: the spec originally wrote this as `"-0% 3<-25%"`, but OpenSearch
- * rejects bare segments without a `<` operator (it throws `For input
- * string: "-0%"`). The shorter form `"3<-25%"` produces the same table:
- * the bare-segment form was meant to express "require all when ≤3" which
- * is already the implicit default when no condition matches.
+ * Spec evolution:
+ *   - v2.0 literal: `"-0% 3<-25%"` — invalid OpenSearch syntax.
+ *   - v2.1 syntactic fix: `"3<-25%"` — valid, same table as v2.0 intent.
+ *     Table was 1/2/3/3/4/6.
+ *   - v2.2 loosening: `"2<-34%"` — only the 3-token row changes (3→2).
+ *     Prod verification showed v2.1's 3-token-strict cut "electronic
+ *     health records" from 4,303 to 155, far below the spec's 1,000–2,500
+ *     band. 34%, not 33%, because floor(0.33*3) rounds to 0 — 34% rounds
+ *     cleanly to allow 1 token missing.
  *
  * We don't run OpenSearch here. We test our local interpretation of the
  * DSL: a pure function that mirrors the documented semantics, fed the same
@@ -53,16 +56,16 @@ function requiredClauses(clauseCount: number, msm: string): number {
 }
 
 describe("msm parser — PEOPLE_RESTRUCTURED_MSM semantics", () => {
-  it('msm string is "3<-25%"', () => {
+  it('msm string is "2<-34%"', () => {
     // If this constant changes, the table below must change with it.
-    expect(PEOPLE_RESTRUCTURED_MSM).toBe("3<-25%");
+    expect(PEOPLE_RESTRUCTURED_MSM).toBe("2<-34%");
   });
 
-  // Spec table from docs/taxonomy-aware-search.md §1.1 ("Unit test required").
+  // Spec table from docs/taxonomy-aware-search.md §1.1 (v2.2).
   const cases: Array<[number, number]> = [
     [1, 1],
     [2, 2],
-    [3, 3],
+    [3, 2],
     [4, 3],
     [5, 4],
     [8, 6],

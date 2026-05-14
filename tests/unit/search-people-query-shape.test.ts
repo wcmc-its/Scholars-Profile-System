@@ -5,7 +5,7 @@
  * behavior. With the flag off, the existing flat multi_match shape must
  * be preserved bit-for-bit. With the flag on, the multimatch branch must
  * become a bool with:
- *   - must: [multi_match over high-evidence fields, msm "3<-25%"]
+ *   - must: [multi_match over high-evidence fields, msm "2<-34%"]
  *   - should: [match on publicationAbstracts with boost 0.3]
  * and `publicationAbstracts` must NOT appear in the must clause's fields.
  *
@@ -52,7 +52,7 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^0.5",
   ],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
-  PEOPLE_RESTRUCTURED_MSM: "3<-25%",
+  PEOPLE_RESTRUCTURED_MSM: "2<-34%",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
@@ -167,7 +167,7 @@ describe("people-index query shape — SEARCH_PEOPLE_QUERY_RESTRUCTURE", () => {
     // operator:or with msm (not operator:and) because OpenSearch ignores
     // msm under operator:and, and the §1.1 msm table is the contract.
     expect(mm.operator).toBe("or");
-    expect(mm.minimum_should_match).toBe("3<-25%");
+    expect(mm.minimum_should_match).toBe("2<-34%");
     expect(mm.fields).not.toContain("publicationAbstracts^0.3");
     const fieldNames = (mm.fields as string[]).map((f) => f.split("^")[0]);
     expect(fieldNames).not.toContain("publicationAbstracts");

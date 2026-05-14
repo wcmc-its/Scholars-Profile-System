@@ -20,8 +20,8 @@ describe("PEOPLE_RESTRUCTURED_MSM / PUBLICATIONS_RESTRUCTURED_MSM parity", () =>
     expect(PUBLICATIONS_RESTRUCTURED_MSM).toBe(PEOPLE_RESTRUCTURED_MSM);
   });
 
-  it('both equal the spec value "3<-25%"', () => {
-    expect(PEOPLE_RESTRUCTURED_MSM).toBe("3<-25%");
-    expect(PUBLICATIONS_RESTRUCTURED_MSM).toBe("3<-25%");
+  it('both equal the spec value "2<-34%"', () => {
+    expect(PEOPLE_RESTRUCTURED_MSM).toBe("2<-34%");
+    expect(PUBLICATIONS_RESTRUCTURED_MSM).toBe("2<-34%");
   });
 });
