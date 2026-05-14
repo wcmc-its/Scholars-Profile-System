@@ -48,7 +48,23 @@ import type { MeshResolution } from "@/lib/api/search-taxonomy";
 const PAGE_SIZE = 20;
 
 export type PeopleSort = "relevance" | "lastname" | "recentPub";
-export type PublicationsSort = "relevance" | "year" | "citations";
+/**
+ * Pub-tab sort options.
+ *
+ * Issue #259 §1.8 replaces the original `year` / `citations` options with
+ * `impact` (doc-level MAX `impactScore` desc) and `recency` (`year` desc,
+ * tiebreak on `dateAddedToEntrez`). The §1.8 options only render in the
+ * UI when `SEARCH_PUB_TAB_IMPACT=on`; under flag-off the dropdown surfaces
+ * `year` / `citations` as before. Both sets are accepted by
+ * `searchPublications` regardless of flag state so saved URLs and the
+ * cross-tab transition window keep working.
+ */
+export type PublicationsSort =
+  | "relevance"
+  | "year"
+  | "citations"
+  | "impact"
+  | "recency";
 
 /**
  * Issue #8 / #9 — multi-select facets. All filter axes are now arrays so a
@@ -155,6 +171,23 @@ export type PublicationHit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
+  /**
+   * Issue #259 §1.8 — doc-level MAX `impactScore` across this pub's
+   * `publication_topic` rows (max over cwids and parent topics). Null when
+   * the pub has no non-null impact rows, OR when the §1.8 flag is off
+   * (in which case the field is suppressed at the API boundary). Renders
+   * as `"Impact: 78"` on the row when `conceptImpactScore` is null.
+   */
+  impactScore: number | null;
+  /**
+   * Issue #259 §1.8 — MAX `impactScore` across the pub's topic rows whose
+   * `parentTopicId` matches one of the resolved MeSH descriptor's anchored
+   * curated topics (from `meshResolution.curatedTopicAnchors`, §1.4).
+   * Null when no MeSH descriptor resolved, no anchors, no matching rows,
+   * or all matching impact values are null. When non-null, the row renders
+   * `"Concept impact: 78"` and the "Impact" fallback is suppressed.
+   */
+  conceptImpactScore: number | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -699,6 +732,17 @@ export async function searchPublications(opts: {
     (process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE ?? "off") === "on";
   const resolution = opts.meshResolution ?? null;
 
+  // Issue #259 §1.8 — impactScore display + three-way sort. Flag default-OFF;
+  // flip requires the publications index to have been reindexed with the
+  // new `impactScore` + `topicImpacts` fields. Flag controls API exposure
+  // only: when off, hit-level `impactScore` and `conceptImpactScore` are
+  // forced to null and new sort values (`impact` / `recency`) fall through
+  // to relevance. ETL writes the fields unconditionally so flipping the
+  // flag on requires no reindex if the data was already loaded with the
+  // §1.8 ETL build.
+  const useImpact =
+    (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+
   let queryShape: PublicationsQueryShape;
   const must: Record<string, unknown>[] = [];
   const topLevelShould: Record<string, unknown>[] = [];
@@ -840,11 +884,26 @@ export async function searchPublications(opts: {
     return out;
   };
 
+  // Issue #259 §1.8 — pub-tab sort. Under the §1.8 flag the visible options
+  // are Relevance / Impact / Recency; the legacy `year` and `citations`
+  // values keep working for back-compat URLs regardless of flag state.
+  // Off-flag callers passing `impact` or `recency` fall through to
+  // relevance (no sort clause) — the new values aren't surfaced in the
+  // dropdown when the flag is off, but a hand-crafted URL shouldn't 500.
   const sortClause: Record<string, "asc" | "desc">[] = [];
   if (sort === "year") {
     sortClause.push({ year: "desc" });
   } else if (sort === "citations") {
     sortClause.push({ citationCount: "desc" });
+  } else if (useImpact && sort === "impact") {
+    // impactScore desc; stable tiebreak on pmid so paging is deterministic
+    // across pages where many docs share an impact value.
+    sortClause.push({ impactScore: "desc" });
+    sortClause.push({ pmid: "asc" });
+  } else if (useImpact && sort === "recency") {
+    // Spec §1.8: year desc, tiebreak on dateAddedToEntrez.
+    sortClause.push({ year: "desc" });
+    sortClause.push({ dateAddedToEntrez: "desc" });
   }
 
   const body = {
@@ -969,6 +1028,10 @@ export async function searchPublications(opts: {
       doi: string | null;
       pmcid: string | null;
       pubmedUrl: string | null;
+      // Issue #259 §1.8 — both optional in `_source`: ETL omits them on pubs
+      // with zero non-null impact rows (OMIT-on-empty contract).
+      impactScore?: number;
+      topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -1040,9 +1103,35 @@ export async function searchPublications(opts: {
   const pmids = r.hits.hits.map((h) => h._source.pmid);
   const wcmAuthorsByPmid = await fetchWcmAuthorsForPmids(pmids);
 
+  // Issue #259 §1.8 — anchored-topic set for "Concept impact" computation.
+  // Empty Set when the §1.8 flag is off, when no MeSH resolved, or when
+  // the resolved descriptor has no curated anchors (`curatedTopicAnchors`
+  // empty per §1.4). In all three cases `conceptImpactScore` falls
+  // through to null and the row renders the "Impact" fallback.
+  const anchorSet =
+    useImpact && resolution && resolution.curatedTopicAnchors.length > 0
+      ? new Set(resolution.curatedTopicAnchors)
+      : new Set<string>();
+
   return {
     hits: r.hits.hits.map((h) => {
       const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
+      // Compute per-hit impact display fields. Flag-off short-circuits to
+      // both-null so legacy callers see unchanged shape.
+      let impactScore: number | null = null;
+      let conceptImpactScore: number | null = null;
+      if (useImpact) {
+        impactScore = h._source.impactScore ?? null;
+        const ti = h._source.topicImpacts;
+        if (anchorSet.size > 0 && ti && ti.length > 0) {
+          let max: number | null = null;
+          for (const t of ti) {
+            if (!anchorSet.has(t.parentTopicId)) continue;
+            if (max === null || t.impactScore > max) max = t.impactScore;
+          }
+          conceptImpactScore = max;
+        }
+      }
       return {
         pmid: h._source.pmid,
         title: h._source.title,
@@ -1067,6 +1156,8 @@ export async function searchPublications(opts: {
               ]
             : [],
         ),
+        impactScore,
+        conceptImpactScore,
       };
     }),
     total: r.hits.total.value,

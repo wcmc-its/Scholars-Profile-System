@@ -178,6 +178,22 @@ export const publicationsIndexMapping = {
       // `publication_topic` rows so `_source` consumers can distinguish
       // "no signal" from "[]" — see the ETL writer for the rationale.
       reciterParentTopicId: { type: "keyword" },
+      // Issue #259 §1.8 — doc-level MAX `impactScore` across the pub's
+      // `publication_topic` rows, indexed as a sortable float for the
+      // "Impact" sort option on the pub-tab. Float (not scaled_float)
+      // because Decimal(8,4) values fit well within IEEE 754 single
+      // precision and we don't need exact-decimal semantics for ranking.
+      // Field is OMITTED on docs with zero non-null impact rows so a
+      // missing field reads as "no signal" rather than 0 (and so OpenSearch
+      // sorts those docs last under desc).
+      impactScore: { type: "float" },
+      // Issue #259 §1.8 — per-(pmid, parentTopicId) MAX `impactScore`,
+      // stored as a `_source`-only payload (not indexed) so the API can
+      // compute the "Concept impact" badge value against the resolved
+      // concept's anchored topics without a second MySQL hop. `enabled:
+      // false` skips field indexing entirely; OpenSearch still returns the
+      // raw payload in `_source`.
+      topicImpacts: { type: "object", enabled: false },
       // Issue #32 — abstract text on the publications index lets thematic
       // queries find the right paper, not just the right scholar (issue #21
       // already covers that on the people index). One abstract per doc, no
