@@ -34,6 +34,15 @@ export async function GET(request: NextRequest) {
   // is hot. Same call the server-rendered /search page makes; the duplication
   // is acceptable until call sites consolidate.
   const taxonomyMatch = await matchQueryToTaxonomy(q);
+  // Issue #259 §1.11 — `?mesh=off` is the chip's "Search broadly instead"
+  // escape. The server-rendered page applies the same override; mirroring
+  // it here keeps the JSON API in lockstep so a programmatic caller
+  // setting the param gets the broad result set rather than the
+  // concept-filtered one. Telemetry (descriptorUi / confidence) keeps
+  // logging the resolution that WAS computed so we can attribute opt-out
+  // rates per descriptor.
+  const meshOff = params.get("mesh") === "off";
+  const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
   const meshResolutionDescriptorUi =
     taxonomyMatch.meshResolution?.descriptorUi ?? null;
   const meshResolutionConfidence =
@@ -104,7 +113,9 @@ export async function GET(request: NextRequest) {
       // non-null, searchPublications restructures the query as
       // must(evidence) + should(BM25). Flag-default-off, so today this
       // travels but does not change the produced ES body.
-      meshResolution: taxonomyMatch.meshResolution,
+      // §1.11 — `effectiveMeshResolution` honors `?mesh=off`; when off,
+      // this is null and the pub query falls back to the §1.2 shape.
+      meshResolution: effectiveMeshResolution,
     });
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     // Issue #259 §1.2 — queryShape attributes result-count and ranking
@@ -121,6 +132,10 @@ export async function GET(request: NextRequest) {
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        // Issue #259 §1.11 — opt-out signal. True when the request set
+        // `?mesh=off`; logging the rate per descriptor tells us when the
+        // chip's broaden affordance is over- or under-used.
+        meshOff,
         ts: new Date().toISOString(),
       }),
     );

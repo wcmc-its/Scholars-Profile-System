@@ -10,6 +10,8 @@ import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
+import { ConceptChip } from "@/components/search/concept-chip";
+import { buildBroadenHref } from "./url-helpers";
 import {
   searchPeople,
   searchPublications,
@@ -80,6 +82,16 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       ? matchQueryToTaxonomy(q)
       : Promise.resolve({ state: "none" as const, meshResolution: null }),
   ]);
+
+  // Issue #259 §1.11 — "Search broadly instead" escape. `?mesh=off`
+  // suppresses the MeSH resolution before it reaches searchPublications,
+  // so §1.6 OR-of-evidence falls back to the §1.2 multi_match shape
+  // (msm floor intact) and §1.8 hits return `conceptImpactScore: null`.
+  // The chip is also hidden in this state so the affordance doesn't
+  // re-appear after the user has explicitly opted out.
+  const meshParam = Array.isArray(sp.mesh) ? sp.mesh[0] : sp.mesh;
+  const meshOff = meshParam === "off";
+  const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
 
   // People filters (multi-select).
   const deptDiv = parseList(sp.deptDiv);
@@ -182,9 +194,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // above for the curated-callout. Forward the MeSH resolution so
       // searchPublications can (a) restructure to OR-of-evidence when the
       // §1.6 flag is on, and (b) compute per-hit `conceptImpactScore` when
-      // the §1.8 flag is on. The API route (route.ts:107) already does
-      // this; mirroring here keeps the server-rendered page consistent.
-      meshResolution: taxonomyMatch.meshResolution,
+      // the §1.8 flag is on. §1.11 — `effectiveMeshResolution` honors the
+      // user's `mesh=off` "Search broadly instead" escape; when off, this
+      // is null and the pub query falls back to the §1.2 shape.
+      meshResolution: effectiveMeshResolution,
     }),
     searchFunding({
       q,
@@ -204,6 +217,20 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       />
       <div className="mx-auto max-w-[1280px] px-6">
         <TaxonomyCallout result={taxonomyMatch} />
+        {/* Issue #259 §1.11 — resolved-concept chip. Pub-tab only (the
+            MeSH descriptor doesn't yet drive scholar / funding results
+            in Phase 1, so the line "Showing pubs for MeSH concept" would
+            mislead on the other tabs). Hidden after the user clicks
+            "Search broadly instead" (mesh=off) — the param itself is the
+            persistent state, so the chip stays gone on subsequent
+            renders until the user clears the param or runs a new query. */}
+        {type === "publications" && effectiveMeshResolution ? (
+          <ConceptChip
+            resolution={effectiveMeshResolution}
+            matchedQuery={q}
+            broadenHref={buildBroadenHref(sp, "off")}
+          />
+        ) : null}
       </div>
       <ModeTabs
         q={q}
