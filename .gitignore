@@ -42,6 +42,9 @@ data/
 *.sql.gz
 *.csv
 seed-output/
+# Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
+# so curation-team edits flow through PR review.
+!etl/mesh-anchors/curated.csv
 
 # Phase 5 — VIVO redirect map output (contains CWIDs, never commit)
 etl/vivo-redirect/output/

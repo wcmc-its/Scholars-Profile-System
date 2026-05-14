@@ -11,12 +11,14 @@ const {
   mockPubTopicGroupBy,
   mockMeshFindMany,
   mockEtlRunFindFirst,
+  mockMeshAnchorFindMany,
 } = vi.hoisted(() => ({
   mockTopicFindMany: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
   mockPubTopicGroupBy: vi.fn(),
   mockMeshFindMany: vi.fn(),
   mockEtlRunFindFirst: vi.fn(),
+  mockMeshAnchorFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/db", () => ({
     publicationTopic: { groupBy: mockPubTopicGroupBy },
     meshDescriptor: { findMany: mockMeshFindMany },
     etlRun: { findFirst: mockEtlRunFindFirst },
+    meshCuratedTopicAnchor: { findMany: mockMeshAnchorFindMany },
   },
 }));
 
@@ -42,6 +45,7 @@ beforeEach(() => {
   mockPubTopicGroupBy.mockReset().mockResolvedValue([]);
   mockMeshFindMany.mockReset().mockResolvedValue([]);
   mockEtlRunFindFirst.mockReset().mockResolvedValue({ manifestSha256: "sha-1" });
+  mockMeshAnchorFindMany.mockReset().mockResolvedValue([]);
   _resetMeshMapForTests();
 });
 
@@ -479,8 +483,9 @@ describe("resolveMeshDescriptor (§1.5)", () => {
     expect(r?.matchedForm).toBe("E-Cadherin");
   });
 
-  it("curatedTopicAnchors is always [] in v1 (§1.4 wires it later)", async () => {
+  it("curatedTopicAnchors is [] when the descriptor has no anchor row", async () => {
     mockMeshFindMany.mockResolvedValue([D_EHR]);
+    // mockMeshAnchorFindMany defaults to [] in beforeEach.
     const r = await resolveMeshDescriptor("EHR");
     expect(r?.curatedTopicAnchors).toEqual([]);
   });
@@ -590,5 +595,175 @@ describe("matchQueryToTaxonomy × meshResolution integration (§1.5)", () => {
     expect(r.meshResolution).toBeNull();
     expect(mockMeshFindMany).not.toHaveBeenCalled();
     expect(mockTopicFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
+  const D_EHR = {
+    descriptorUi: "D057286",
+    name: "Electronic Health Records",
+    entryTerms: ["EHR"],
+    scopeNote: null,
+    dateRevised: new Date("2024-06-01"),
+  };
+
+  it("populates curatedTopicAnchors from anchor rows", async () => {
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D057286", parentTopicId: "biomedical_informatics" },
+    ]);
+    const r = await resolveMeshDescriptor("Electronic Health Records");
+    expect(r?.curatedTopicAnchors).toEqual(["biomedical_informatics"]);
+  });
+
+  it("descriptor with multiple anchor rows returns all parent_topic_id values", async () => {
+    mockMeshFindMany.mockResolvedValue([D_EHR]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D057286", parentTopicId: "biomedical_informatics" },
+      { descriptorUi: "D057286", parentTopicId: "digital_health_telemedicine" },
+    ]);
+    const r = await resolveMeshDescriptor("EHR");
+    expect(r?.curatedTopicAnchors.sort()).toEqual([
+      "biomedical_informatics",
+      "digital_health_telemedicine",
+    ]);
+  });
+
+  it("anchor-exists tiebreaker: same entry-term confidence, with-anchor wins regardless of dateRevised", async () => {
+    // D-X has an anchor and is OLDER (would lose dateRevised);
+    // D-Y has no anchor and is NEWER (would win dateRevised).
+    // Anchor-exists fires above dateRevised, so D-X must win.
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-X",
+        name: "X Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+      },
+      {
+        descriptorUi: "D-Y",
+        name: "Y Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D-X", parentTopicId: "some_topic" },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D-X");
+    expect(r?.curatedTopicAnchors).toEqual(["some_topic"]);
+  });
+
+  it("anchor-exists check is a tie when both candidates have anchors → dateRevised fallback", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-X",
+        name: "X Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+      },
+      {
+        descriptorUi: "D-Y",
+        name: "Y Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D-X", parentTopicId: "t1" },
+      { descriptorUi: "D-Y", parentTopicId: "t2" },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D-Y"); // newer dateRevised
+  });
+
+  it("anchor-exists check falls through to dateRevised when neither has anchor", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-X",
+        name: "X Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+      },
+      {
+        descriptorUi: "D-Y",
+        name: "Y Concept",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+      },
+    ]);
+    // mockMeshAnchorFindMany defaults to [] — no anchors anywhere.
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D-Y"); // dateRevised fallback fires
+  });
+
+  it("exact-match confidence beats anchor-exists (confidence is the first tiebreaker)", async () => {
+    // D-Anchored is an entry-term match WITH an anchor; D-Exact is the
+    // exact-name match WITHOUT an anchor. Exact wins.
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-Anchored",
+        name: "Other Name",
+        entryTerms: ["foo"],
+        scopeNote: null,
+        dateRevised: new Date("2026-01-01"),
+      },
+      {
+        descriptorUi: "D-Exact",
+        name: "Foo",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: new Date("2020-01-01"),
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([
+      { descriptorUi: "D-Anchored", parentTopicId: "some_topic" },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descriptorUi).toBe("D-Exact");
+    expect(r?.confidence).toBe("exact");
+    expect(r?.curatedTopicAnchors).toEqual([]); // exact winner has no anchor
+  });
+
+  it("anchor table is loaded once per cache lifetime", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-1",
+        name: "One",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+      },
+    ]);
+    mockMeshAnchorFindMany.mockResolvedValue([]);
+    await resolveMeshDescriptor("one");
+    await resolveMeshDescriptor("one");
+    expect(mockMeshAnchorFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("anchor load failure does not break the resolver (fail-closed envelope still fires)", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D-1",
+        name: "One",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+      },
+    ]);
+    mockMeshAnchorFindMany.mockRejectedValue(new Error("anchor table read failed"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await resolveMeshDescriptor("one");
+    expect(r).toBeNull();
+    const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("mesh_map_load_failed");
+    warn.mockRestore();
   });
 });

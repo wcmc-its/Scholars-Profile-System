@@ -587,6 +587,38 @@ model MeshDescriptor {
   @@map("mesh_descriptor")
 }
 
+/// Spec §1.4 — anchor between a NLM MeSH descriptor and one or more
+/// ReciterAI parent topics. Read by `resolveMeshDescriptor` (§1.5) to
+/// populate `MeshResolution.curatedTopicAnchors`; the populated array is
+/// then consumed by §1.6's OR-of-evidence publication filter and §1.11's
+/// resolved-concept chip. One row per (descriptor_ui, parent_topic_id)
+/// pair. A descriptor may anchor to multiple parent topics and a parent
+/// topic may anchor to many descriptors.
+///
+/// `confidence` is 'curated' for hand-authored rows (top concept queries
+/// from access logs, maintained by the curation team via the CSV at
+/// `data/mesh-anchors/curated.csv`) or 'derived' for ETL-emitted rows
+/// produced by the co-occurrence calculation. Curated wins on conflict.
+///
+/// No Prisma FKs:
+///   - To `MeshDescriptor.descriptorUi`: the MeSH ETL full-replaces the
+///     descriptor table inside a transaction; a cascading FK would wipe
+///     all anchors on every MeSH refresh. Stale `descriptor_ui` values
+///     become inert — the resolver never finds them.
+///   - To `Topic.id`: matches the existing PublicationTopic.primarySubtopicId
+///     "no FK" pattern; stale parent_topic_id rows are surfaced by audit
+///     query A5 in PLAN-issue-259-phase-1.4-anchor-table.md.
+model MeshCuratedTopicAnchor {
+  descriptorUi  String   @map("descriptor_ui") @db.VarChar(10)
+  parentTopicId String   @map("parent_topic_id") @db.VarChar(128)
+  confidence    String   @db.VarChar(16) // 'curated' | 'derived'
+  sourceNote    String?  @map("source_note") @db.Text
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@id([descriptorUi, parentTopicId])
+  @@map("mesh_curated_topic_anchor")
+}
+
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
 /// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
@@ -786,7 +818,7 @@ model SlugHistory {
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
 model EtlRun {
   id                      String    @id @default(uuid()) @db.VarChar(64)
-  source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index
+  source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | ReCiterAI-projection | OpenSearch-index | MeSH | MeshAnchor
   startedAt               DateTime  @default(now()) @map("started_at")
   completedAt             DateTime? @map("completed_at")
   status                  String    @db.VarChar(16) // 'running' | 'success' | 'failed'

@@ -62,8 +62,7 @@ export type TaxonomyMatch = {
 /**
  * MeSH descriptor resolution (issue #259 §1.5). Returned alongside curated
  * taxonomy matches; consumers (§1.6, §1.11) can use this without touching
- * the curated-callout shape. `curatedTopicAnchors` is empty in v1 — populated
- * once the §1.4 anchor table ships.
+ * the curated-callout shape.
  */
 export type MeshResolution = {
   descriptorUi: string;
@@ -73,7 +72,11 @@ export type MeshResolution = {
   confidence: "exact" | "entry-term";
   scopeNote: string | null;
   entryTerms: string[];
-  /** Empty until §1.4 ships. §1.6 / §2.4 fall back to MeSH-only when empty. */
+  /**
+   * Populated from `mesh_curated_topic_anchor` (spec §1.4); empty when the
+   * descriptor has no anchor row. §1.6 / §2.4 fall back to MeSH-only when
+   * empty.
+   */
   curatedTopicAnchors: string[];
 };
 
@@ -304,6 +307,12 @@ type MeshMap = {
   byForm: Map<string, string[]>;
   /** descriptorUi → row */
   byUi: Map<string, DescriptorRow>;
+  /**
+   * descriptorUi → parentTopicId[] (any confidence). Empty array entries
+   * are not stored — `.get(ui)` returns undefined when no anchor exists.
+   * Loaded from `mesh_curated_topic_anchor` (spec §1.4).
+   */
+  anchorsByUi: Map<string, string[]>;
   /** EtlRun.manifestSha256 captured at load time, used for invalidation. */
   manifestSha256: string | null;
   loadedAt: number;
@@ -346,7 +355,7 @@ async function getMeshMap(): Promise<MeshMap> {
   }
   if (meshMapInFlight) return meshMapInFlight;
   meshMapInFlight = (async () => {
-    const [rows, manifestSha256] = await Promise.all([
+    const [rows, manifestSha256, anchors] = await Promise.all([
       prisma.meshDescriptor.findMany({
         select: {
           descriptorUi: true,
@@ -357,7 +366,21 @@ async function getMeshMap(): Promise<MeshMap> {
         },
       }),
       latestMeshManifest().catch(() => null),
+      // §1.4 — anchor rows. Loaded alongside descriptors so the resolver
+      // can populate `curatedTopicAnchors` and apply the anchor-exists
+      // tiebreaker without a second round-trip. Invalidation piggybacks
+      // on the existing MeSH-manifest sha refresh tick; up to 1h staleness
+      // for anchor edits is acceptable while §1.6 has no consumer.
+      prisma.meshCuratedTopicAnchor.findMany({
+        select: { descriptorUi: true, parentTopicId: true },
+      }),
     ]);
+    const anchorsByUi = new Map<string, string[]>();
+    for (const a of anchors) {
+      const arr = anchorsByUi.get(a.descriptorUi);
+      if (arr) arr.push(a.parentTopicId);
+      else anchorsByUi.set(a.descriptorUi, [a.parentTopicId]);
+    }
     const byForm = new Map<string, string[]>();
     const byUi = new Map<string, DescriptorRow>();
     let droppedEntries = 0;
@@ -401,6 +424,7 @@ async function getMeshMap(): Promise<MeshMap> {
     const map: MeshMap = {
       byForm,
       byUi,
+      anchorsByUi,
       manifestSha256,
       loadedAt: Date.now(),
     };
@@ -422,9 +446,9 @@ async function getMeshMap(): Promise<MeshMap> {
  *      entry-term) → descriptorUi[].
  *   3. Per candidate: exact-name confidence iff query == normalized(name);
  *      otherwise entry-term.
- *   4. Tiebreak: exact > entry-term, then dateRevised desc, then descriptorUi
- *      asc. Curated-anchor and localPubCoverage tiebreakers from §1.4/§1.7
- *      are no-ops until those phases ship.
+ *   4. Tiebreak: exact > entry-term, then anchor-exists > no-anchor (§1.4),
+ *      then dateRevised desc, then descriptorUi asc. The §1.7
+ *      localPubCoverage tiebreaker remains a no-op until that phase ships.
  *
  * Fails closed: any prisma error from the cache load is logged and `null` is
  * returned, so the curated-callout path keeps working.
@@ -471,7 +495,13 @@ export async function resolveMeshDescriptor(
     if (a.confidence !== b.confidence) {
       return a.confidence === "exact" ? -1 : 1;
     }
-    // §1.4 (anchor exists) and §1.7 (localPubCoverage) tiebreakers no-op here.
+    // §1.4 — anchor exists wins over no anchor. When both sides agree on
+    // the boolean (both have, or both don't), this returns 0 and we fall
+    // through to the dateRevised tiebreaker.
+    const aHasAnchor = (map.anchorsByUi.get(a.row.descriptorUi)?.length ?? 0) > 0;
+    const bHasAnchor = (map.anchorsByUi.get(b.row.descriptorUi)?.length ?? 0) > 0;
+    if (aHasAnchor !== bHasAnchor) return aHasAnchor ? -1 : 1;
+    // §1.7 (localPubCoverage) tiebreaker is still a no-op until that phase ships.
     const ad = a.row.dateRevised?.getTime() ?? 0;
     const bd = b.row.dateRevised?.getTime() ?? 0;
     if (ad !== bd) return bd - ad;
@@ -486,7 +516,7 @@ export async function resolveMeshDescriptor(
     confidence: winner.confidence,
     scopeNote: winner.row.scopeNote,
     entryTerms: winner.row.entryTerms,
-    curatedTopicAnchors: [], // wired in §1.4
+    curatedTopicAnchors: map.anchorsByUi.get(winner.row.descriptorUi) ?? [],
   };
 }
 
