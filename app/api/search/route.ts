@@ -99,6 +99,12 @@ export async function GET(request: NextRequest) {
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
       },
+      // Issue #259 §1.6 — pass the MeSH resolution computed at the top of
+      // the handler. When SEARCH_PUB_TAB_OR_OF_EVIDENCE=on AND this is
+      // non-null, searchPublications restructures the query as
+      // must(evidence) + should(BM25). Flag-default-off, so today this
+      // travels but does not change the produced ES body.
+      meshResolution: taxonomyMatch.meshResolution,
     });
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     // Issue #259 §1.2 — queryShape attributes result-count and ranking
