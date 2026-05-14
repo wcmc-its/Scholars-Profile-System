@@ -253,11 +253,13 @@ export async function searchPeople(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
-  // Issue #259 §1.1 — people-index query restructure. Flag default-off; the
-  // merge is a code event, the flip is the behavior event. See plan in
-  // .planning/drafts/PLAN-issue-259-phase-1.1-people-index-restructure.md.
+  // Issue #259 §1.1 — people-index query restructure. Now default-on after
+  // prod verification of the 4,303 → low-4-figure scholar-tab cut for
+  // "electronic health records" (#260 shipped flag-off; this is the
+  // promised default flip). Set SEARCH_PEOPLE_QUERY_RESTRUCTURE=off as an
+  // emergency rollback without redeploying.
   const useRestructure =
-    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "off") === "on";
+    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "on") === "on";
   const queryShape: PeopleQueryShape = useRestructure
     ? "restructured_msm"
     : "legacy_multi_match";
@@ -651,14 +653,16 @@ export async function searchPublications(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
-  // Issue #259 §1.2 — pub-tab minimum_should_match floor. Flag default-off;
-  // merge is a code event, the flip is the behavior event. Separate flag
-  // from SEARCH_PEOPLE_QUERY_RESTRUCTURE because spec §1.12 attaches
-  // surface-specific rollback triggers — pub-tab has the "p95 < 50"
+  // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
+  // after prod verification of the >50% p95 cut for resolved-concept
+  // queries (#261 shipped flag-off; this is the promised default flip).
+  // Separate flag from SEARCH_PEOPLE_QUERY_RESTRUCTURE because spec §1.12
+  // attaches surface-specific rollback triggers — pub-tab has the "p95 < 50"
   // over-tightening floor, people-tab has the count-cut acceptance — and
-  // we want separable rollback.
+  // separable rollback means flipping one off without disturbing the other.
+  // Set SEARCH_PUB_TAB_MSM=off as an emergency rollback without redeploying.
   const usePubMsm =
-    (process.env.SEARCH_PUB_TAB_MSM ?? "off") === "on";
+    (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
   const queryShape: PublicationsQueryShape = usePubMsm
     ? "restructured_msm"
     : "legacy_multi_match";

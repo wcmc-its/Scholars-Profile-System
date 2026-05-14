@@ -103,8 +103,10 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_MSM", () => {
     process.env.SEARCH_PUB_TAB_MSM = originalEnv;
   });
 
-  it("flag off (default): multi_match has no minimum_should_match, no operator", async () => {
-    delete process.env.SEARCH_PUB_TAB_MSM;
+  it("flag explicitly off: multi_match has no minimum_should_match, no operator", async () => {
+    // Default flipped on in this PR; explicit "off" exercises the legacy
+    // emergency-rollback path.
+    process.env.SEARCH_PUB_TAB_MSM = "off";
     const mod = (await import("@/lib/api/search")) as {
       searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
     };
@@ -169,7 +171,7 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_MSM", () => {
   });
 });
 
-// NOTE: the people/pubs msm parity assertion (PUBLICATIONS_RESTRUCTURED_MSM
-// === PEOPLE_RESTRUCTURED_MSM) belongs here but PEOPLE_RESTRUCTURED_MSM is
-// added in the §1.1 PR (#260) and doesn't exist on master yet. Add the
-// parity test in a follow-up after both branches are integrated.
+// Parity assertion (PUBLICATIONS_RESTRUCTURED_MSM === PEOPLE_RESTRUCTURED_MSM)
+// lives in tests/unit/search-msm-parity.test.ts. It needs the real
+// @/lib/search module, not the mock above, so it's in a separate file
+// with no vi.mock at module scope.

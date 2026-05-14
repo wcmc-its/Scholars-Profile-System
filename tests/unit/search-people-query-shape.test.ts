@@ -121,8 +121,10 @@ describe("people-index query shape — SEARCH_PEOPLE_QUERY_RESTRUCTURE", () => {
     process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = originalEnv;
   });
 
-  it("flag off (default): emits a flat multi_match over all 9 PEOPLE_FIELD_BOOSTS", async () => {
-    delete process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE;
+  it("flag explicitly off: emits a flat multi_match over all 9 PEOPLE_FIELD_BOOSTS", async () => {
+    // Default flipped on in this PR; explicit "off" exercises the legacy
+    // emergency-rollback path.
+    process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = "off";
     const mod = (await import("@/lib/api/search")) as {
       searchPeople: (opts: unknown) => Promise<{ queryShape: string }>;
     };
