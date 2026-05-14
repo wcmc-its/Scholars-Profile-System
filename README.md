@@ -147,6 +147,33 @@ npm run etl:asms:probe            # ASMS source probe
 npm run etl:infoed:probe          # InfoEd source probe
 ```
 
+### MeSH catalog
+
+The MeSH descriptor catalog feeds the §1.5 concept resolver and the §1.6
+OR-of-evidence pub search. Three scripts, each on its own cadence:
+
+```bash
+npm run etl:mesh              # Full-replace mesh_descriptor from NLM desc<year>.xml (yearly + on demand)
+npm run etl:mesh-anchors      # Rebuild mesh_curated_topic_anchor from curated.csv + co-occurrence (on demand)
+npm run etl:mesh-coverage     # Refresh mesh_descriptor.local_pub_coverage per descriptor (daily, in etl:daily chain)
+```
+
+- `etl:mesh` short-circuits when the upstream NLM file's sha256 matches the
+  last successful run, so re-running is cheap. Fetches `desc<currentYear>.xml`
+  with a fallback to `desc<currentYear-1>.xml` (covers Jan–Oct before NLM
+  ships the new year).
+- `etl:mesh-anchors` reads `etl/mesh-anchors/curated.csv` and layers derived
+  anchors from a co-occurrence aggregation; tune `MESH_ANCHOR_THRESHOLD`
+  and `MESH_ANCHOR_MIN_SUPPORT` env vars if the derived count drifts.
+- `etl:mesh-coverage` is in the `etl:daily` chain; only run it standalone
+  after a publication-side reload to refresh coverage without waiting for
+  the next nightly tick.
+
+Run `etl:mesh` if `mesh_descriptor.name` rows ever look misaligned with
+their `descriptor_ui` (see #273 for the historical parser bug that
+corrupted the catalog). A full replace is the fix; there is no incremental
+repair path.
+
 ### Search index
 
 ```bash
