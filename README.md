@@ -150,8 +150,13 @@ npm run etl:infoed:probe          # InfoEd source probe
 ### Search index
 
 ```bash
-npm run search:index          # Rebuild OpenSearch indices from the local DB
+npm run search:index                  # Rebuild all three OpenSearch indices (people, publications, funding)
+npm run search:index:people           # Rebuild only the scholars-people index (~2 min)
+npm run search:index:publications     # Rebuild only the scholars-publications index (slow; ~420k docs)
+npm run search:index:funding          # Rebuild only the scholars-funding index
 ```
+
+Each per-source script drops and recreates only its own index; the other two are left intact. Useful when one index drifts out of sync (e.g. after a partial seed) without paying the cost of re-indexing the publications corpus. Under the hood these pass `--people-only` / `--publications-only` / `--funding-only` to `etl/search-index/index.ts`; flags can be combined.
 
 ### Other
 
