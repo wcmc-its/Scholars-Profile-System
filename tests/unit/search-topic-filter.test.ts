@@ -36,7 +36,11 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
   PEOPLE_FIELD_BOOSTS: ["preferredName^10"],
+  PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: ["preferredName^10"],
+  PEOPLE_ABSTRACTS_BOOST: 0.3,
+  PEOPLE_RESTRUCTURED_MSM: "2<-34%",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
+  PUBLICATIONS_RESTRUCTURED_MSM: "2<-34%",
   searchClient: () => ({
     search: mockSearchClientSearch,
     mget: mockSearchClientMGet,

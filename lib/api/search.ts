@@ -253,11 +253,13 @@ export async function searchPeople(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
-  // Issue #259 §1.1 — people-index query restructure. Flag default-off; the
-  // merge is a code event, the flip is the behavior event. See plan in
-  // .planning/drafts/PLAN-issue-259-phase-1.1-people-index-restructure.md.
+  // Issue #259 §1.1 — people-index query restructure. Now default-on after
+  // prod verification of the 4,303 → low-4-figure scholar-tab cut for
+  // "electronic health records" (#260 shipped flag-off; this is the
+  // promised default flip). Set SEARCH_PEOPLE_QUERY_RESTRUCTURE=off as an
+  // emergency rollback without redeploying.
   const useRestructure =
-    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "off") === "on";
+    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "on") === "on";
   const queryShape: PeopleQueryShape = useRestructure
     ? "restructured_msm"
     : "legacy_multi_match";
@@ -314,6 +316,21 @@ export async function searchPeople(opts: {
   // scholar that clears any per-field threshold on its own — so adding msm
   // to the existing flat shape barely tightens anything. The restructure
   // is the fix.
+  // Spec correction (v2.2): `type` switched from `best_fields` to
+  // `cross_fields`. The §1.1 prose described cross_fields semantics — "a
+  // scholar with 'electronic' + 'health' + 'record' scattered across name,
+  // areasOfInterest, title, publicationTitles should match" — but the code
+  // snippet specified `best_fields`, which picks the single best-matching
+  // field and applies msm to its tokens alone. With best_fields, a scholar
+  // whose three tokens land in three different fields fails msm (each field
+  // sees only 1 of 3). cross_fields blends the field group as one big field
+  // for IDF and matching, which is what concept queries actually want.
+  //
+  // `operator: "or"` is kept (not "and") because OpenSearch ignores msm
+  // when operator is "and", and the msm table is exactly what §1.1
+  // committed to enforce. For a 3-token query like "electronic health
+  // records", and/or are equivalent (msm requires all 3 anyway); they
+  // diverge on 4+ tokens where msm allows 25% missing and "and" doesn't.
   const queryBranch: Record<string, unknown> = useRestructure
     ? {
         bool: {
@@ -322,7 +339,7 @@ export async function searchPeople(opts: {
               multi_match: {
                 query: trimmed,
                 fields: [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS],
-                type: "best_fields",
+                type: "cross_fields",
                 operator: "or",
                 minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
               },
@@ -651,14 +668,16 @@ export async function searchPublications(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
-  // Issue #259 §1.2 — pub-tab minimum_should_match floor. Flag default-off;
-  // merge is a code event, the flip is the behavior event. Separate flag
-  // from SEARCH_PEOPLE_QUERY_RESTRUCTURE because spec §1.12 attaches
-  // surface-specific rollback triggers — pub-tab has the "p95 < 50"
+  // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
+  // after prod verification of the >50% p95 cut for resolved-concept
+  // queries (#261 shipped flag-off; this is the promised default flip).
+  // Separate flag from SEARCH_PEOPLE_QUERY_RESTRUCTURE because spec §1.12
+  // attaches surface-specific rollback triggers — pub-tab has the "p95 < 50"
   // over-tightening floor, people-tab has the count-cut acceptance — and
-  // we want separable rollback.
+  // separable rollback means flipping one off without disturbing the other.
+  // Set SEARCH_PUB_TAB_MSM=off as an emergency rollback without redeploying.
   const usePubMsm =
-    (process.env.SEARCH_PUB_TAB_MSM ?? "off") === "on";
+    (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
   const queryShape: PublicationsQueryShape = usePubMsm
     ? "restructured_msm"
     : "legacy_multi_match";

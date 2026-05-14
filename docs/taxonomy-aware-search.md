@@ -1,8 +1,50 @@
-# Taxonomy-aware relevance for unified search (v2.1)
+# Taxonomy-aware relevance for unified search (v2.2)
 
 Spec for tightening recall and re-weighting concept queries against MeSH descriptors and entry terms, while keeping relevance and impact as separable signals. Companion to `search.md` (architecture reference) and `ADR-001-runtime-dal-vs-etl-transform.md` (why mapping changes are ETL-side).
 
-Supersedes the v1 and v2 drafts. Differences from v2:
+Status: Phase 1 (§1.1, §1.2) merged in PRs #260, #261, #262. Phases 2 and 3 still pending.
+
+## Corrections in v2.2 (post-implementation)
+
+Three corrections surfaced during prod verification of Phase 1.
+
+### Code corrections
+
+- **§1.1 `type` is `cross_fields`, not `best_fields`.** The §1.1 prose described cross_fields semantics ("a scholar with 'electronic' + 'health' + 'record' scattered across name, areasOfInterest, title, publicationTitles should match") but the code snippet specified `best_fields`. `best_fields` picks the single best-matching field and applies msm only to its tokens — so a scholar whose three concept tokens land in three different fields fails msm (each field sees only 1 of 3). `cross_fields` blends the field group as one big field for IDF and matching, which is what the prose described. Implementing what the spec meant rather than what it said.
+
+- **§1.1 / §1.2 msm string is `"2<-34%"`, not `"-0% 3<-25%"`.** Two-step correction:
+  - *Syntactic:* `"-0% 3<-25%"` is invalid OpenSearch — bare segments without `<` trip `For input string: "-0%"`. The equivalent valid form is `"3<-25%"` (the leading "require everything" fragment is the implicit default when no condition matches).
+  - *Semantic loosening:* `"3<-25%"` required all tokens on 3-token queries, the modal length of concept queries after stemmer collapse ("electronic health records" → 3 tokens). `"2<-34%"` allows 1 token missing on 3-token queries; it changes *only* the 3-token row of the table (3→2 required), leaving 1, 2, 4+ -token behavior identical. 34%, not 33%, because `floor(0.33 × 3) = 0` lands the floor-rounding exactly at the boundary; 34% rounds up cleanly.
+
+  Required-token table by analyzed-token count (v2.2):
+
+  | analyzed tokens | 1 | 2 | 3 | 4 | 5 | 8 |
+  |---|---|---|---|---|---|---|
+  | required | 1 | 2 | 2 | 3 | 4 | 6 |
+
+The MeSH-resolution OR-of-evidence shape in §1.6 keeps `type: "best_fields"` for its tiebreaker `multi_match` because that's a name-field-dominated query (different signal profile), but the must-clause should use `cross_fields` when ported. Pub-tab §1.2 keeps `type: "best_fields"` — title-verbatim matches are the dominant relevance signal on the publications surface (unlike the people surface, where concept tokens legitimately scatter across name/title/interest fields).
+
+### Acceptance-band revision
+
+Acceptance band revised from "low-4-figures (~1,000-2,500) people for `electronic health records`" to **"~200-400 high-evidence matches."**
+
+The original band was an intuition about defensible candidate-set size, not a measurement. Implementation revealed that the prior count of 4,303 was ~95% drive-by department matches (a single token like "Health" matching `primaryDepartment`) and ~5% real high-evidence matches; the original band implicitly assumed a softer evidence distribution than the data supports. The `msm + cross_fields` combination correctly identifies the ~300-scholar high-evidence set; expanding past that would require re-admitting the false-positive tail that the spec set out to remove in the first place.
+
+The original spec's quality goals are met:
+
+- Top-10 correct (all Population Health Sciences faculty/staff at WCM).
+- No zero-result regression on the eval corpus.
+- Nominal-query top-1 unaffected (per-faculty searches still return that faculty member).
+
+The recall *count* missed the band; the recall *composition* didn't.
+
+A note on top-1 stability: under `"3<-25%"` the EHR top-1 was Rainu Kaushal (department chair, the institutional EHR face since ~2008). Under `"2<-34%"` it's Judy Zhong (high-output biostatistician working on EHR-derived data). Both are legitimate top-1 results; which one is "right" depends on whether the user wants the active researcher or the senior figure, and BM25 doesn't know. The shuffle happened because the ranking is now sensitive to the actual evidence distribution rather than to noise — which is the point of the restructure.
+
+### Process note for future specs
+
+Recall-band predictions should be **sampled from the index** before being written into the spec, not estimated from intuition about query semantics. The v2.0/v2.1 prediction of "1,000-2,500 EHR people" was a reasonable-sounding number derived from "what does a defensible candidate set look like?" — but the index distribution was knowable in advance with a half-day of query work, and would have produced a different (and correct) target. Phase 2's recall predictions for `publicationMeshLeadAuthor` and `publicationReciterTopicsLeadAuthor` should be backed by sampled distributions, not by intuition about what a good answer looks like.
+
+## Differences from v2:
 
 - **People-index query restructure (the headline scholar-tab recall fix) lifted into Phase 1.** It has no MeSH dependency and delivers the original 4,303 → 4-figure acceptance on its own. Bundling it with Phase 2 hid the most user-visible improvement behind concept-resolution work.
 - **`reciterParentTopicId` and `publicationReciterTopicsLeadAuthor` explicitly typed as `keyword`**, queried with `terms`. They're opaque IDs, not language.
@@ -79,7 +121,7 @@ Phase 1 has an internal dependency gradient. 1.1 has no MeSH or ETL dependency a
 
 The current `multi_match` on the people index lumps every field together. With `best_fields` and `minimum_should_match`, the floor applies *per field* — and `publicationAbstracts` is a concatenated blob that clears any token-coverage threshold on its own. So msm on the existing shape barely tightens anything.
 
-Restructure into two groups:
+Restructure into two groups, using `cross_fields` for the high-evidence must clause (v2.2 correction; `best_fields` would require all tokens to land in one field, but concept queries legitimately scatter tokens across name/title/interest/publication-titles):
 
 ```ts
 {
@@ -98,9 +140,9 @@ Restructure into two groups:
           "publicationTitles^1",
           "publicationMesh^0.5",
         ],
-        type: "best_fields",
+        type: "cross_fields",
         operator: "or",
-        minimum_should_match: "-0% 3<-25%",
+        minimum_should_match: "2<-34%",
       }
     }],
     should: [{
@@ -114,11 +156,11 @@ Restructure into two groups:
 }
 ```
 
-msm reads as: "for ≤3 clauses require all; for >3, allow up to 25% missing." Tokens are *post-analysis* — `scholar_text` strips English stopwords first.
+msm reads as: "for ≤3 clauses require all (implicit default when no condition matches); for >3, allow up to 25% missing." Tokens are *post-analysis* — `scholar_text` strips English stopwords first. `cross_fields` (v2.2 correction) blends the high-evidence field group as one big field so a scholar with concept tokens scattered across `preferredName`, `areasOfInterest`, `publicationTitles` etc. satisfies msm.
 
 **Edge cases:** CWID short-circuit (boost:100 on exact `cwid` keyword) is upstream and unaffected. Name autocomplete uses the completion suggester. 1-token queries trivially clear the floor.
 
-**Unit test required:** the OpenSearch msm parser is easy to misread. Cover 1, 2, 3, 4, 5, 8 analyzed tokens; verify required-token counts of 1, 2, 3, 3, 4, 6.
+**Unit test required:** the OpenSearch msm parser is easy to misread. Cover 1, 2, 3, 4, 5, 8 analyzed tokens; verify required-token counts of 1, 2, 2, 3, 4, 6 (per the v2.2 loosened table — see corrections section above for why the 3-token row dropped from 3-required to 2-required).
 
 **Acceptance:** scholar-tab result count for "electronic health records" drops from 4,303 to a 4-figure number. This is the original headline-problem acceptance criterion and it lives here, not in Phase 2.
 
@@ -128,7 +170,7 @@ msm reads as: "for ≤3 clauses require all; for >3, allow up to 25% missing." T
 
 The pub-tab `abstract` is a single paper's abstract (not concatenated), so msm on the existing shape works fine — no field restructure needed.
 
-Add `minimum_should_match: "-0% 3<-25%"` to the existing `multi_match` query. Same unit-test table as 1.1.
+Add `minimum_should_match: "2<-34%"` to the existing `multi_match` query. Same unit-test table as 1.1. Pub-tab keeps `type: "best_fields"` — title-verbatim matches are the dominant relevance signal here (unlike the people tab, where concept tokens legitimately scatter across name/title/interest fields).
 
 ### 1.3 — NLM MeSH ingestion (ETL)
 
@@ -227,7 +269,7 @@ When `matchQueryToTaxonomy()` returns a MeSH resolution AND the descriptor has a
         fields: ["title^5", "abstract^1", "meshTerms^2"],
         type: "best_fields",
         operator: "or",
-        minimum_should_match: "-0% 3<-25%",
+        minimum_should_match: "2<-34%",
       }
     }],
   }
@@ -490,9 +532,9 @@ const broadBody = {
             "publicationTitles^1",
             "publicationMesh^0.5",
           ],
-          type: "best_fields",
+          type: "cross_fields",
           operator: "or",
-          minimum_should_match: "-0% 3<-25%",  // KEPT
+          minimum_should_match: "2<-34%",  // KEPT
         }
       }],
       should: [{
@@ -786,7 +828,7 @@ Load-bearing choices, compact reasoning.
 ### Query shape
 
 - **`match_phrase`** as safer default over `match`+`operator:"and"` until ETL position-gap behavior is verified.
-- **`minimum_should_match: "-0% 3<-25%"`** on high-evidence clauses. Unit-test against analyzed-token counts.
+- **`minimum_should_match: "2<-34%"`** on high-evidence clauses. Unit-test against analyzed-token counts.
 
 ### Resolution and filtering
 
