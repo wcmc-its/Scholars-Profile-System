@@ -812,6 +812,96 @@ function parseSelected(argv: string[]): Set<SourceType> {
   return selected;
 }
 
+/**
+ * Issue #275 — post-indexing smoke assertions.
+ *
+ * These run after each selected source finishes bulk-loading. The bar is
+ * "would this have caught the all-empty-meshTerms regression that shipped
+ * silently in #278?" — not full data validation. Each assertion is a
+ * single count query against OpenSearch (cheap, ~ms), and each one names
+ * a specific invariant that, if it fails, points the operator at the
+ * code path that broke it.
+ *
+ * Strict failure: any assertion that fails throws. The ETL exits non-zero
+ * and a downstream EventBridge alarm fires. Soft warnings (e.g. coverage
+ * below an expected band) are stderr-only and DO NOT fail the run; a hard
+ * failure should always mean "the index is unusable" so on-call doesn't
+ * learn to ignore the alarm.
+ */
+async function assertPeopleIndexHealth(
+  client: ReturnType<typeof searchClient>,
+): Promise<void> {
+  const total = await client.count({ index: PEOPLE_INDEX });
+  if (total.body.count === 0) {
+    throw new Error("[smoke] scholars-people index is empty after indexPeople()");
+  }
+
+  // publicationMesh is the people-side rollup of joined Publication.meshTerms.
+  // Pre-#278 it was always "" across every doc because extractMeshLabels
+  // didn't exist; the {ui,label} object rows were dropped before join.
+  // We probe with a `match_phrase` for "Humans" — the most universally-
+  // applied MeSH descriptor in any biomedical corpus — instead of
+  // negating an empty term query, which doesn't behave as expected on
+  // analyzed text fields (a `term: {field: ""}` clause matches nothing,
+  // so the must_not would mark every doc as a hit).
+  const withMesh = await client.count({
+    index: PEOPLE_INDEX,
+    body: { query: { match_phrase: { publicationMesh: "Humans" } } },
+  });
+  if (withMesh.body.count === 0) {
+    throw new Error(
+      "[smoke] scholars-people: no scholar's publicationMesh contains \"Humans\" — extractMeshLabels regression suspected (see #278)",
+    );
+  }
+}
+
+async function assertPublicationsIndexHealth(
+  client: ReturnType<typeof searchClient>,
+): Promise<void> {
+  const total = await client.count({ index: PUBLICATIONS_INDEX });
+  if (total.body.count === 0) {
+    throw new Error("[smoke] scholars-publications index is empty after indexPublications()");
+  }
+
+  // "Neoplasms" is the most heavily-tagged MeSH descriptor in any
+  // biomedical corpus we'd ever load. Zero hits means the indexer dropped
+  // the meshTerms field on every doc — the exact silent-regression mode
+  // from #278.
+  const meshHit = await client.count({
+    index: PUBLICATIONS_INDEX,
+    body: { query: { match_phrase: { meshTerms: "Neoplasms" } } },
+  });
+  if (meshHit.body.count === 0) {
+    throw new Error(
+      `[smoke] scholars-publications: match_phrase: meshTerms = "Neoplasms" returned 0 ` +
+        `across ${total.body.count} docs — meshTerms regression suspected (see #278)`,
+    );
+  }
+
+  // reciterParentTopicId is the #259 §1.6 OR-of-evidence anchor field.
+  // Omit-on-empty per `buildReciterParentTopicIdField`: docs with no
+  // topic rows shouldn't carry the field. A healthy index has it on at
+  // least one publication.
+  const withTopicId = await client.count({
+    index: PUBLICATIONS_INDEX,
+    body: { query: { exists: { field: "reciterParentTopicId" } } },
+  });
+  if (withTopicId.body.count === 0) {
+    throw new Error(
+      "[smoke] scholars-publications: no doc carries reciterParentTopicId — §1.6 OR-of-evidence path is dead",
+    );
+  }
+}
+
+async function assertFundingIndexHealth(
+  client: ReturnType<typeof searchClient>,
+): Promise<void> {
+  const total = await client.count({ index: FUNDING_INDEX });
+  if (total.body.count === 0) {
+    throw new Error("[smoke] scholars-funding index is empty after indexFunding()");
+  }
+}
+
 async function main() {
   const selected = parseSelected(process.argv.slice(2));
   const counts: Partial<Record<SourceType, number>> = {};
@@ -836,6 +926,13 @@ async function main() {
     console.log("Indexing funding...");
     counts.funding = await indexFunding();
   }
+
+  console.log("Running smoke checks...");
+  const client = searchClient();
+  if (selected.has("people")) await assertPeopleIndexHealth(client);
+  if (selected.has("publications")) await assertPublicationsIndexHealth(client);
+  if (selected.has("funding")) await assertFundingIndexHealth(client);
+  console.log("Smoke checks passed.");
 
   const parts: string[] = [];
   if (counts.people !== undefined) parts.push(`${counts.people} scholars`);
