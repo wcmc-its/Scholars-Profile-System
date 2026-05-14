@@ -557,6 +557,36 @@ model Subtopic {
   @@map("subtopic")
 }
 
+/// NLM MeSH descriptor catalog. Sole writer: MeSH ETL (etl/mesh-descriptors/index.ts),
+/// which yearly fetches the desc<year>.xml release from
+/// https://nlmpubs.nlm.nih.gov/projects/mesh/MESH_FILES/xmlmesh/ (NLM publishes
+/// in November; mid-year files run on demand). One row per DescriptorUI.
+///
+/// `entryTerms` and `treeNumbers` are JSON string arrays (MariaDB JSON column,
+/// matching the Publication.meshTerms convention at line 427). `entryTerms`
+/// stores every Term/String under every Concept of the descriptor EXCEPT the
+/// descriptor's own preferred name. The synonym-collision filter (spec §1.3 step
+/// 4: terms that map to >1 descriptor get dropped from synonyms.txt) runs at
+/// synonym-emission time, not at row write time — the raw entry-term list stays
+/// intact in the table so future resolution logic (§1.5) and downstream
+/// telemetry can still see the full set.
+///
+/// `localPubCoverage` and `localLeadAuthorScholarCoverage` (spec §1.7, §2.x) are
+/// deliberately NOT modeled here yet — they land in their own migrations when
+/// those phases ship.
+model MeshDescriptor {
+  descriptorUi String   @id @map("descriptor_ui") @db.VarChar(10) // e.g. "D057286"
+  name         String   @db.VarChar(255) // Descriptor's preferred-concept preferred term
+  entryTerms   Json     @map("entry_terms") // string[] — every Term/String except `name`
+  treeNumbers  Json     @map("tree_numbers") // string[] — e.g. ["E05.318.308.250", ...]
+  scopeNote    String?  @map("scope_note") @db.Text // From preferred Concept/ScopeNote
+  dateRevised  DateTime? @map("date_revised") @db.Date // NLM DateRevised
+  refreshedAt  DateTime @default(now()) @map("refreshed_at")
+
+  @@index([name])
+  @@map("mesh_descriptor")
+}
+
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
 /// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
