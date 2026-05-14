@@ -316,6 +316,21 @@ export async function searchPeople(opts: {
   // scholar that clears any per-field threshold on its own — so adding msm
   // to the existing flat shape barely tightens anything. The restructure
   // is the fix.
+  // Spec correction (v2.2): `type` switched from `best_fields` to
+  // `cross_fields`. The §1.1 prose described cross_fields semantics — "a
+  // scholar with 'electronic' + 'health' + 'record' scattered across name,
+  // areasOfInterest, title, publicationTitles should match" — but the code
+  // snippet specified `best_fields`, which picks the single best-matching
+  // field and applies msm to its tokens alone. With best_fields, a scholar
+  // whose three tokens land in three different fields fails msm (each field
+  // sees only 1 of 3). cross_fields blends the field group as one big field
+  // for IDF and matching, which is what concept queries actually want.
+  //
+  // `operator: "or"` is kept (not "and") because OpenSearch ignores msm
+  // when operator is "and", and the msm table is exactly what §1.1
+  // committed to enforce. For a 3-token query like "electronic health
+  // records", and/or are equivalent (msm requires all 3 anyway); they
+  // diverge on 4+ tokens where msm allows 25% missing and "and" doesn't.
   const queryBranch: Record<string, unknown> = useRestructure
     ? {
         bool: {
@@ -324,7 +339,7 @@ export async function searchPeople(opts: {
               multi_match: {
                 query: trimmed,
                 fields: [...PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS],
-                type: "best_fields",
+                type: "cross_fields",
                 operator: "or",
                 minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
               },

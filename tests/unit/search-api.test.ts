@@ -20,8 +20,9 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_FIELD_BOOSTS: ["preferredName^10"],
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: ["preferredName^10"],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
-  PEOPLE_RESTRUCTURED_MSM: "-0% 3<-25%",
+  PEOPLE_RESTRUCTURED_MSM: "3<-25%",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
+  PUBLICATIONS_RESTRUCTURED_MSM: "3<-25%",
   searchClient: () => ({
     async search() {
       return {

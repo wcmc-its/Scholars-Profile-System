@@ -383,10 +383,17 @@ export const PEOPLE_ABSTRACTS_BOOST = 0.3;
  * allow up to 25% missing. Tokens are post-analysis — `scholar_text`
  * strips English stopwords first.
  *
+ * The original spec wrote this as `"-0% 3<-25%"`, but OpenSearch rejects
+ * any space-separated part that isn't of the form `N<spec`. A bare `-0%`
+ * trips "For input string: \"-0%\"" — the leading "require everything"
+ * fragment is already the implicit default when no condition matches,
+ * so `"3<-25%"` alone is equivalent and parses. Required-token table
+ * (1/2/3/4/5/8 → 1/2/3/3/4/6) is unchanged.
+ *
  * Lifted to a constant because the msm DSL is easy to misread and the
  * exact string is asserted on by `tests/unit/search-msm-parser.test.ts`.
  */
-export const PEOPLE_RESTRUCTURED_MSM = "-0% 3<-25%";
+export const PEOPLE_RESTRUCTURED_MSM = "3<-25%";
 
 /**
  * Boost weights used by the publications-index query builder.
@@ -412,6 +419,8 @@ export const PUBLICATION_FIELD_BOOSTS: ReadonlyArray<string> = [
  *
  * `abstract` on the publications index is a single paper's abstract, not a
  * concatenated blob, so msm works on the existing flat shape — no field
- * restructure needed.
+ * restructure needed. See `PEOPLE_RESTRUCTURED_MSM` for why this is
+ * `"3<-25%"` and not the spec's literal `"-0% 3<-25%"` (same table, valid
+ * OpenSearch syntax).
  */
-export const PUBLICATIONS_RESTRUCTURED_MSM = "-0% 3<-25%";
+export const PUBLICATIONS_RESTRUCTURED_MSM = "3<-25%";
