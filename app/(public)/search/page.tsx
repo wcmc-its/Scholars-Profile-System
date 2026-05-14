@@ -12,6 +12,7 @@ import { PublicationMeta } from "@/components/publication/publication-meta";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import { ConceptChip } from "@/components/search/concept-chip";
+import { ConceptEmptyState } from "@/components/search/concept-empty-state";
 import { buildBroadenHref } from "./url-helpers";
 import {
   searchPeople,
@@ -208,6 +209,40 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     }),
   ]);
 
+  // Issue #274 — when the pub-tab concept search lands on zero hits, we
+  // want to offer the broad-text count as a concrete affordance. Run the
+  // fallback count only when the empty-state path can actually fire (pub
+  // tab, a MeSH resolution was applied, AND the main result is empty).
+  // This is a single extra OS query, paid only on the dead-end pages
+  // where the user is otherwise stuck staring at "no results".
+  let conceptEmptyBroadCount: number | null = null;
+  if (
+    type === "publications" &&
+    effectiveMeshResolution &&
+    pubsResult.total === 0 &&
+    (pubsResult.queryShape === "concept_filtered" ||
+      pubsResult.queryShape === "concept_fallback")
+  ) {
+    const broad = await searchPublications({
+      q,
+      page: 0,
+      sort: "relevance",
+      filters: {
+        yearMin,
+        yearMax,
+        publicationType: publicationType || undefined,
+        journal: journal.length > 0 ? journal : undefined,
+        wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+        wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+        mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
+      },
+      // Suppress the resolution → falls through to the §1.2 shape, same
+      // as the user clicking "Search broadly instead" on the chip.
+      meshResolution: null,
+    });
+    conceptEmptyBroadCount = broad.total;
+  }
+
   return (
     <main>
       <SearchMeta
@@ -267,6 +302,15 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             wcmAuthor={wcmAuthor}
             mentoringProgram={mentoringProgram}
             result={pubsResult}
+            conceptEmpty={
+              effectiveMeshResolution && pubsResult.total === 0
+                ? {
+                    descriptorName: effectiveMeshResolution.name,
+                    broadCount: conceptEmptyBroadCount,
+                    broadenHref: buildBroadenHref(sp, "off"),
+                  }
+                : null
+            }
           />
         ) : type === "funding" ? (
           <FundingResults
@@ -668,6 +712,7 @@ async function PublicationsResults({
   wcmAuthor,
   mentoringProgram,
   result,
+  conceptEmpty,
 }: {
   q: string;
   page: number;
@@ -680,6 +725,17 @@ async function PublicationsResults({
   wcmAuthor: string[];
   mentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   result: PubsResultData;
+  /**
+   * Issue #274 — when populated, the empty state for the pub tab swaps for
+   * a concept-aware variant that names the resolved descriptor and offers
+   * a broad-search escape with a concrete result count. Null when the
+   * query didn't resolve to a MeSH concept or when there are non-zero hits.
+   */
+  conceptEmpty: {
+    descriptorName: string;
+    broadCount: number | null;
+    broadenHref: string;
+  } | null;
 }) {
   const buildUrl = (
     mut: (sp: URLSearchParams) => void,
@@ -879,10 +935,19 @@ async function PublicationsResults({
           }
         />
         {result.hits.length === 0 ? (
-          <EmptyState
-            query={q}
-            tip="Try removing the year filter, or search a different phrase."
-          />
+          conceptEmpty ? (
+            <ConceptEmptyState
+              query={q}
+              descriptorName={conceptEmpty.descriptorName}
+              broadCount={conceptEmpty.broadCount}
+              broadenHref={conceptEmpty.broadenHref}
+            />
+          ) : (
+            <EmptyState
+              query={q}
+              tip="Try removing the year filter, or search a different phrase."
+            />
+          )
         ) : (
           <ul>
             {result.hits.map((h) => {
