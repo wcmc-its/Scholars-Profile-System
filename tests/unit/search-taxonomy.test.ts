@@ -33,6 +33,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  _deleteDescendantsForTests,
   _resetMeshMapForTests,
   matchQueryToTaxonomy,
   normalizeForMatch,
@@ -341,6 +342,9 @@ describe("resolveMeshDescriptor (§1.5)", () => {
     expect(r?.confidence).toBe("exact");
     expect(r?.matchedForm).toBe("Electronic Health Records");
     expect(r?.curatedTopicAnchors).toEqual([]);
+    // SPEC §5.4.2 — fixtures that omit `treeNumbers` resolve with self
+    // only. Locks the defensive-parser contract against accidental drift.
+    expect(r?.descendantUis).toEqual(["D057286"]);
   });
 
   it("entry-term match → confidence: entry-term, matchedForm is the entry term", async () => {
@@ -885,6 +889,146 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
     expect(r).toBeNull();
     const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logged).toContain("mesh_map_load_failed");
+    warn.mockRestore();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #259 / SPEC §5.4.2 — resolver descendant precompute
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("resolveMeshDescriptor — §5.4.2 descendant precompute", () => {
+  /**
+   * Fixture builder for the §5.4.2 tests. Real descriptors carry
+   * `treeNumbers`; these are required for the prefix-index build.
+   */
+  function descriptor(
+    descriptorUi: string,
+    name: string,
+    treeNumbers: string[],
+    extra: Partial<{ entryTerms: string[] }> = {},
+  ) {
+    return {
+      descriptorUi,
+      name,
+      entryTerms: extra.entryTerms ?? [],
+      treeNumbers,
+      scopeNote: null,
+      dateRevised: null,
+      localPubCoverage: null,
+    };
+  }
+
+  it("§8.3 #1 — one tree number, no children → descendantUis = [self]", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_A", "Alpha", ["C14.280.123"]),
+    ]);
+    const r = await resolveMeshDescriptor("Alpha");
+    expect(r?.descendantUis).toEqual(["D_A"]);
+  });
+
+  it("§8.3 #2 — one tree with two children → [self, child1, child2] in tn-sorted order", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_PARENT", "Parent", ["C14.280"]),
+      descriptor("D_CHILD1", "Child1", ["C14.280.123"]),
+      descriptor("D_CHILD2", "Child2", ["C14.280.456"]),
+    ]);
+    const r = await resolveMeshDescriptor("Parent");
+    expect(r?.descendantUis).toEqual(["D_PARENT", "D_CHILD1", "D_CHILD2"]);
+  });
+
+  it("§8.3 #3 — multiple tree numbers with descendants under each → union, deduped, self at index 0", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_MULTI", "Multi", ["C14.280", "G09.330"]),
+      descriptor("D_C_CHILD", "CChild", ["C14.280.111"]),
+      descriptor("D_G_CHILD", "GChild", ["G09.330.222"]),
+    ]);
+    const r = await resolveMeshDescriptor("Multi");
+    expect(r?.descendantUis?.[0]).toBe("D_MULTI");
+    expect(r?.descendantUis?.slice(1).sort()).toEqual(["D_C_CHILD", "D_G_CHILD"]);
+    expect(r?.descendantUis?.length).toBe(3);
+  });
+
+  it("§8.3 #4 — wide subtree → cap at 200 with self always at index 0", async () => {
+    const rows = [descriptor("D_ROOT", "Root", ["C14"])];
+    for (let i = 0; i < 250; i++) {
+      const idx = String(i).padStart(3, "0");
+      rows.push(descriptor(`D_CHILD_${idx}`, `Child${idx}`, [`C14.${idx}`]));
+    }
+    mockMeshFindMany.mockResolvedValue(rows);
+    const r = await resolveMeshDescriptor("Root");
+    expect(r?.descendantUis?.length).toBe(200);
+    expect(r?.descendantUis?.[0]).toBe("D_ROOT");
+  });
+
+  it("§8.3 #5 — hot cache: identical array reference returned on consecutive resolves (eager precompute populated the cache)", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_HOT", "Hot", ["A.1"]),
+    ]);
+    const r1 = await resolveMeshDescriptor("Hot");
+    const r2 = await resolveMeshDescriptor("Hot");
+    expect(r1?.descendantUis).toBe(r2?.descendantUis);
+  });
+
+  it("§8.3 #5b — invariant assertion: throws when descendantsByUi is missing the resolved descriptor", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_HOT", "Hot", ["A.1"]),
+    ]);
+    // Warm the cache so descendantsByUi is populated, then evict the
+    // one entry the next resolve would read. This is the only path the
+    // throw exercises today; production code never reaches it.
+    await resolveMeshDescriptor("Hot");
+    _deleteDescendantsForTests("D_HOT");
+    await expect(resolveMeshDescriptor("Hot")).rejects.toThrow(
+      /invariant violation: descendantsByUi missing entry for D_HOT/,
+    );
+  });
+
+  it("§8.3 #6 — cache reload (manifest sha changes) → descendants recomputed, no carry-over", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_X", "Xenon", ["A.1"]),
+    ]);
+    const r1 = await resolveMeshDescriptor("Xenon");
+    expect(r1?.descendantUis).toEqual(["D_X"]);
+
+    // Simulate a MeSH ETL run that adds a child descriptor under A.1.
+    _resetMeshMapForTests();
+    mockEtlRunFindFirst.mockResolvedValue({ manifestSha256: "sha-2" });
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_X", "Xenon", ["A.1"]),
+      descriptor("D_X_CHILD", "XenonChild", ["A.1.1"]),
+    ]);
+    const r2 = await resolveMeshDescriptor("Xenon");
+    expect(r2?.descendantUis).toEqual(["D_X", "D_X_CHILD"]);
+  });
+
+  it("§8.3 #7 — empty treeNumbers in a production-sized load (>100 rows) → [self] + one aggregate warn fires", async () => {
+    // Padding rows have plausible tree numbers so they don't all trigger
+    // the empty-trees aggregate. Only the one target row has [].
+    const rows = [descriptor("D_NOTREES", "Notrees", [])];
+    for (let i = 0; i < 120; i++) {
+      const idx = String(i).padStart(3, "0");
+      rows.push(descriptor(`D_PAD_${idx}`, `Pad${idx}`, [`Z.${idx}`]));
+    }
+    mockMeshFindMany.mockResolvedValue(rows);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await resolveMeshDescriptor("Notrees");
+    expect(r?.descendantUis).toEqual(["D_NOTREES"]);
+    const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("empty_tree_numbers");
+    expect(logged).toContain('"descriptorsWithEmptyTreeNumbers":1');
+    warn.mockRestore();
+  });
+
+  it("§8.3 #7 (threshold) — empty treeNumbers in a small (≤100 rows) load → warn does NOT fire", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      descriptor("D_NOTREES", "Notrees", []),
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await resolveMeshDescriptor("Notrees");
+    expect(r?.descendantUis).toEqual(["D_NOTREES"]);
+    const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).not.toContain("empty_tree_numbers");
     warn.mockRestore();
   });
 });

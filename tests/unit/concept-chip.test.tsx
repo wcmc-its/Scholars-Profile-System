@@ -24,6 +24,7 @@ const RESOLUTION_WITH_SCOPE: MeshResolution = {
   scopeNote: "Media that store digital health information for individuals.",
   entryTerms: ["EHR", "EMR"],
   curatedTopicAnchors: ["digital-health", "informatics"],
+  descendantUis: ["D057286"],
 };
 
 const RESOLUTION_NO_SCOPE: MeshResolution = {
