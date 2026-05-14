@@ -150,7 +150,17 @@ export async function GET(request: NextRequest) {
   const activity = activityRaw.filter(
     (a): a is "has_grants" | "recent_pub" => a === "has_grants" || a === "recent_pub",
   );
-  const includeIncomplete = params.get("includeIncomplete") === "true";
+  // URL contract: `?includeIncomplete=false` opts INTO the sparse-profile
+  // cull (only scholars with overview + ≥3 pubs + active grant). Any other
+  // value — including the param being absent — leaves the filter unset so
+  // the result matches the /search page (which never sends the param).
+  // Previously this was `=== "true"`, which silently coerced "absent" to
+  // `false` and triggered the cull on every API call, producing API totals
+  // far below the page totals (#152's `isComplete` filter applied to every
+  // headless caller by accident).
+  const rawIncludeIncomplete = params.get("includeIncomplete");
+  const includeIncomplete =
+    rawIncludeIncomplete === null ? undefined : rawIncludeIncomplete === "true";
 
   // D-10 topic filter: validate slug shape before passing to searchPeople.
   const topicRaw = params.get("topic");
