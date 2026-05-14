@@ -59,8 +59,26 @@ export type TaxonomyMatch = {
   similarity: number;
 };
 
+/**
+ * MeSH descriptor resolution (issue #259 §1.5). Returned alongside curated
+ * taxonomy matches; consumers (§1.6, §1.11) can use this without touching
+ * the curated-callout shape. `curatedTopicAnchors` is empty in v1 — populated
+ * once the §1.4 anchor table ships.
+ */
+export type MeshResolution = {
+  descriptorUi: string;
+  name: string;
+  /** The exact surface form (verbatim) that drove the match. */
+  matchedForm: string;
+  confidence: "exact" | "entry-term";
+  scopeNote: string | null;
+  entryTerms: string[];
+  /** Empty until §1.4 ships. §1.6 / §2.4 fall back to MeSH-only when empty. */
+  curatedTopicAnchors: string[];
+};
+
 export type TaxonomyMatchResult =
-  | { state: "none" }
+  | { state: "none"; meshResolution: MeshResolution | null }
   | {
       state: "matches";
       primary: TaxonomyMatch;
@@ -69,6 +87,7 @@ export type TaxonomyMatchResult =
       overflowCount: number;
       /** Original query, used for the overflow link target. */
       query: string;
+      meshResolution: MeshResolution | null;
     };
 
 /**
@@ -202,16 +221,21 @@ export async function matchQueryToTaxonomy(
 ): Promise<TaxonomyMatchResult> {
   const trimmed = query.trim();
   const normalized = normalizeForMatch(trimmed);
-  if (normalized.length < MIN_QUERY_LEN) return { state: "none" };
+  if (normalized.length < MIN_QUERY_LEN) {
+    return { state: "none", meshResolution: null };
+  }
 
-  const all = await loadEntityCandidates();
+  const [all, meshResolution] = await Promise.all([
+    loadEntityCandidates(),
+    resolveMeshDescriptor(trimmed),
+  ]);
   const matched = all
     .filter((c) => c.matchKey.includes(normalized))
     .map((c) => ({
       ...c,
       similarity: normalized.length / c.matchKey.length,
     }));
-  if (matched.length === 0) return { state: "none" };
+  if (matched.length === 0) return { state: "none", meshResolution };
 
   // Pre-rank by [type priority, similarity desc] before the hard cap so the
   // best candidates make it through to count enrichment regardless of how
@@ -259,5 +283,215 @@ export async function matchQueryToTaxonomy(
     secondary: visibleSecondary,
     overflowCount,
     query: trimmed,
+    meshResolution,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MeSH descriptor resolution (§1.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type DescriptorRow = {
+  descriptorUi: string;
+  name: string;
+  entryTerms: string[];
+  scopeNote: string | null;
+  dateRevised: Date | null;
+};
+
+type MeshMap = {
+  /** normalized surface form → descriptorUi[] (array because of collisions across descriptors) */
+  byForm: Map<string, string[]>;
+  /** descriptorUi → row */
+  byUi: Map<string, DescriptorRow>;
+  /** EtlRun.manifestSha256 captured at load time, used for invalidation. */
+  manifestSha256: string | null;
+  loadedAt: number;
+};
+
+/** Soft refresh interval. The real invalidation signal is the EtlRun sha256
+ *  diff below — this only bounds how often the freshness probe runs. */
+const MESH_MAP_REFRESH_MS = 60 * 60 * 1000; // 1h
+
+let meshMapCache: MeshMap | null = null;
+let meshMapInFlight: Promise<MeshMap> | null = null;
+
+/** Latest successful MeSH ETL manifest sha — single indexed lookup. */
+async function latestMeshManifest(): Promise<string | null> {
+  const row = await prisma.etlRun.findFirst({
+    where: { source: "MeSH", status: "success" },
+    orderBy: { completedAt: "desc" },
+    select: { manifestSha256: true },
+  });
+  return row?.manifestSha256 ?? null;
+}
+
+async function getMeshMap(): Promise<MeshMap> {
+  if (meshMapCache) {
+    const age = Date.now() - meshMapCache.loadedAt;
+    if (age < MESH_MAP_REFRESH_MS) return meshMapCache;
+    // Past the refresh interval: see whether the ETL has shipped a new
+    // manifest. Sha match → reuse and bump loadedAt. Sha differs → reload.
+    try {
+      const latest = await latestMeshManifest();
+      if (latest === meshMapCache.manifestSha256) {
+        meshMapCache.loadedAt = Date.now();
+        return meshMapCache;
+      }
+    } catch {
+      // Freshness probe failed — serve stale instead of thrashing.
+      meshMapCache.loadedAt = Date.now();
+      return meshMapCache;
+    }
+  }
+  if (meshMapInFlight) return meshMapInFlight;
+  meshMapInFlight = (async () => {
+    const [rows, manifestSha256] = await Promise.all([
+      prisma.meshDescriptor.findMany({
+        select: {
+          descriptorUi: true,
+          name: true,
+          entryTerms: true,
+          scopeNote: true,
+          dateRevised: true,
+        },
+      }),
+      latestMeshManifest().catch(() => null),
+    ]);
+    const byForm = new Map<string, string[]>();
+    const byUi = new Map<string, DescriptorRow>();
+    let droppedEntries = 0;
+    for (const r of rows) {
+      let entryTerms: string[] = [];
+      if (Array.isArray(r.entryTerms)) {
+        const raw = r.entryTerms as unknown[];
+        entryTerms = raw.filter((x): x is string => typeof x === "string");
+        droppedEntries += raw.length - entryTerms.length;
+      }
+      byUi.set(r.descriptorUi, {
+        descriptorUi: r.descriptorUi,
+        name: r.name,
+        entryTerms,
+        scopeNote: r.scopeNote,
+        dateRevised: r.dateRevised,
+      });
+      const forms = [r.name, ...entryTerms];
+      for (const f of forms) {
+        const key = normalizeForMatch(f);
+        if (!key) continue;
+        const arr = byForm.get(key);
+        if (arr) {
+          if (!arr.includes(r.descriptorUi)) arr.push(r.descriptorUi);
+        } else {
+          byForm.set(key, [r.descriptorUi]);
+        }
+      }
+    }
+    if (droppedEntries > 0) {
+      // ETL contract violation: entry_terms JSON contained non-string members.
+      // Surface loudly so silent data loss is observable.
+      console.warn(
+        JSON.stringify({
+          event: "mesh_map_load_warning",
+          reason: "non_string_entry_terms",
+          droppedEntries,
+        }),
+      );
+    }
+    const map: MeshMap = {
+      byForm,
+      byUi,
+      manifestSha256,
+      loadedAt: Date.now(),
+    };
+    meshMapCache = map;
+    meshMapInFlight = null;
+    return map;
+  })();
+  return meshMapInFlight;
+}
+
+/**
+ * Resolve a free-text query to a single MeSH descriptor, or null.
+ *
+ * Algorithm (§1.5):
+ *   1. Normalize query (lowercase, strip non-alphanumeric) — same as
+ *      curated-callout matching above so "Cardio-Oncology" ↔ "cardio oncology"
+ *      ↔ "cardiooncology" all collapse.
+ *   2. Lookup against an in-memory map of (normalized name | normalized
+ *      entry-term) → descriptorUi[].
+ *   3. Per candidate: exact-name confidence iff query == normalized(name);
+ *      otherwise entry-term.
+ *   4. Tiebreak: exact > entry-term, then dateRevised desc, then descriptorUi
+ *      asc. Curated-anchor and localPubCoverage tiebreakers from §1.4/§1.7
+ *      are no-ops until those phases ship.
+ *
+ * Fails closed: any prisma error from the cache load is logged and `null` is
+ * returned, so the curated-callout path keeps working.
+ */
+export async function resolveMeshDescriptor(
+  query: string,
+): Promise<MeshResolution | null> {
+  const normalized = normalizeForMatch(query);
+  if (normalized.length < MIN_QUERY_LEN) return null;
+  let map: MeshMap;
+  try {
+    map = await getMeshMap();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  }
+  const hits = map.byForm.get(normalized);
+  if (!hits || hits.length === 0) return null;
+
+  // matchedForm note: when multiple entry terms on the same descriptor
+  // normalize to the same key, array order wins. Intentional — both forms
+  // point to the same descriptor; only the display string differs.
+  // The `?? r.name` fallback is unreachable under the ETL contract.
+  const candidates = hits
+    .map((ui) => map.byUi.get(ui))
+    .filter((r): r is DescriptorRow => r !== undefined)
+    .map((r) => {
+      const isExactName = normalizeForMatch(r.name) === normalized;
+      return {
+        row: r,
+        confidence: isExactName ? ("exact" as const) : ("entry-term" as const),
+        matchedForm: isExactName
+          ? r.name
+          : r.entryTerms.find((t) => normalizeForMatch(t) === normalized) ?? r.name,
+      };
+    });
+
+  candidates.sort((a, b) => {
+    if (a.confidence !== b.confidence) {
+      return a.confidence === "exact" ? -1 : 1;
+    }
+    // §1.4 (anchor exists) and §1.7 (localPubCoverage) tiebreakers no-op here.
+    const ad = a.row.dateRevised?.getTime() ?? 0;
+    const bd = b.row.dateRevised?.getTime() ?? 0;
+    if (ad !== bd) return bd - ad;
+    return a.row.descriptorUi.localeCompare(b.row.descriptorUi);
+  });
+
+  const winner = candidates[0];
+  return {
+    descriptorUi: winner.row.descriptorUi,
+    name: winner.row.name,
+    matchedForm: winner.matchedForm,
+    confidence: winner.confidence,
+    scopeNote: winner.row.scopeNote,
+    entryTerms: winner.row.entryTerms,
+    curatedTopicAnchors: [], // wired in §1.4
+  };
+}
+
+/** @internal — test-only hook. Resets the module-level MeSH cache. */
+export function _resetMeshMapForTests(): void {
+  meshMapCache = null;
+  meshMapInFlight = null;
 }

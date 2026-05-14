@@ -72,7 +72,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     showAZ ? getAZBuckets() : Promise.resolve(null),
     q.trim().length >= 3
       ? matchQueryToTaxonomy(q)
-      : Promise.resolve({ state: "none" as const }),
+      : Promise.resolve({ state: "none" as const, meshResolution: null }),
   ]);
 
   // People filters (multi-select).

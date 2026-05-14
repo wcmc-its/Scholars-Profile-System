@@ -12,6 +12,7 @@ import {
   type FundingSort,
   type FundingStatus,
 } from "@/lib/api/search-funding";
+import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,18 @@ export async function GET(request: NextRequest) {
   const type = params.get("type") ?? "people";
   const rawPage = parseInt(params.get("page") ?? "0", 10);
   const page = Number.isFinite(rawPage) ? Math.max(0, rawPage) : 0;
+
+  // Issue #259 §1.5 — taxonomy match (curated + MeSH resolution) computed
+  // once at the top so all three branches can log resolution outcome.
+  // matchQueryToTaxonomy short-circuits on q < 3 normalized chars, so the
+  // cost here is one Map lookup + one indexed etl_run row when the cache
+  // is hot. Same call the server-rendered /search page makes; the duplication
+  // is acceptable until call sites consolidate.
+  const taxonomyMatch = await matchQueryToTaxonomy(q);
+  const meshResolutionDescriptorUi =
+    taxonomyMatch.meshResolution?.descriptorUi ?? null;
+  const meshResolutionConfidence =
+    taxonomyMatch.meshResolution?.confidence ?? null;
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
   // OR within group, AND across groups. Mirrors the people/publications
@@ -56,6 +69,8 @@ export async function GET(request: NextRequest) {
         type: "funding",
         resultCount: result.total,
         filters,
+        meshResolutionDescriptorUi,
+        meshResolutionConfidence,
         ts: new Date().toISOString(),
       }),
     );
@@ -98,6 +113,8 @@ export async function GET(request: NextRequest) {
         resultCount: result.total,
         queryShape: result.queryShape,
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
+        meshResolutionDescriptorUi,
+        meshResolutionConfidence,
         ts: new Date().toISOString(),
       }),
     );
@@ -148,6 +165,8 @@ export async function GET(request: NextRequest) {
       resultCount: result.total,
       queryShape: result.queryShape,
       filters: { deptDiv, personType, activity, includeIncomplete },
+      meshResolutionDescriptorUi,
+      meshResolutionConfidence,
       ts: new Date().toISOString(),
     }),
   );
