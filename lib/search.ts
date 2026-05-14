@@ -170,6 +170,13 @@ export const publicationsIndexMapping = {
       pmcid: { type: "keyword" },
       pubmedUrl: { type: "keyword" },
       meshTerms: { type: "text" },
+      // Issue #259 — MeSH defaults rebalance. NLM "Unique Identifier" (Dnnnnnn)
+      // for each descriptor on the pub. Queried via `terms` in the §5 concept_expanded
+      // shape (PR 3). Multi-valued by storing as a JSON string array; OpenSearch
+      // handles array-of-keyword natively. Field is OMITTED on docs with zero
+      // derivable UIs (mesh_terms empty or all bare-string legacy rows) so
+      // `_source` consumers can distinguish "no signal" from "[]". See SPEC §5.4.1.
+      meshDescriptorUi: { type: "keyword" },
       // Issue #259 §1.6 — ReciterAI parent-topic IDs on each pub, used by
       // the OR-of-evidence pub filter's Path B (`terms` on a keyword field
       // is the natural shape for exact-value match on opaque topic-slug

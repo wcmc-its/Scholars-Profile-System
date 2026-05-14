@@ -66,4 +66,27 @@ describe("extractMeshLabels", () => {
       ]),
     ).toEqual(["Carcinoma"]);
   });
+
+  // Issue #259 / SPEC §5.4.1 — snapshot-style lock on the names-extraction
+  // shape. The MeSH defaults rebalance PR adds an adjacent sibling extractor
+  // (`extractMeshDescriptorUis`); this test exists to catch any unintended
+  // drift in `extractMeshLabels`' output that might sneak through the same
+  // PR. Fixture mirrors a real `Publication.meshTerms` row.
+  it("locks the names-extraction shape against accidental drift (§5.4.1 snapshot)", () => {
+    expect(
+      extractMeshLabels([
+        { ui: "D006801", label: "Humans" },
+        { ui: "D009369", label: "Neoplasms" },
+        { ui: "D003920", label: "Diabetes Mellitus" },
+        { ui: "D000368", label: "Aged" },
+        { ui: "D008297", label: "Male" },
+      ]),
+    ).toEqual([
+      "Humans",
+      "Neoplasms",
+      "Diabetes Mellitus",
+      "Aged",
+      "Male",
+    ]);
+  });
 });
