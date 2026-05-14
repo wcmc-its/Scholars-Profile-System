@@ -1,0 +1,3 @@
+descriptor_ui,parent_topic_id,source_note
+D057286,biomedical_informatics,"Initial seed — spec example (Electronic Health Records per public NLM). Replace via curation team review."
+D008498,biomedical_informatics,"Initial seed — covers EHR under local mesh_descriptor naming (apparent §1.3 ETL name/UI inconsistency; tracked separately). Replace via curation team review."

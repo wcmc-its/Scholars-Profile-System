@@ -47,6 +47,7 @@
     "etl:identity": "tsx etl/identity/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
     "etl:mesh": "tsx etl/mesh-descriptors/index.ts",
+    "etl:mesh-anchors": "tsx etl/mesh-anchors/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
