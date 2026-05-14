@@ -74,6 +74,10 @@ async function main() {
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],
+    // Spec §1.7 — runs after ReCiter so the publication.mesh_terms numerator
+    // is fresh. No-op-safe: if ReCiter failed earlier this still updates
+    // against the prior snapshot, which is at worst stale by one cycle.
+    ["MeshCoverage", "etl/mesh-coverage/index.ts"],
   ] as const) {
     results.push(await step(source, file));
   }

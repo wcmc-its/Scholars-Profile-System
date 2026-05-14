@@ -300,6 +300,12 @@ type DescriptorRow = {
   entryTerms: string[];
   scopeNote: string | null;
   dateRevised: Date | null;
+  /** §1.7 — fraction of indexed pubs tagged with this descriptor.
+   *  NULL when the coverage ETL hasn't populated yet (e.g., immediately
+   *  after a MeSH-descriptor full-replace). Treated as lowest priority
+   *  in the resolver tiebreaker so a fully-NULL column degrades to the
+   *  pre-§1.7 ordering. */
+  localPubCoverage: number | null;
 };
 
 type MeshMap = {
@@ -363,6 +369,7 @@ async function getMeshMap(): Promise<MeshMap> {
           entryTerms: true,
           scopeNote: true,
           dateRevised: true,
+          localPubCoverage: true,
         },
       }),
       latestMeshManifest().catch(() => null),
@@ -397,6 +404,7 @@ async function getMeshMap(): Promise<MeshMap> {
         entryTerms,
         scopeNote: r.scopeNote,
         dateRevised: r.dateRevised,
+        localPubCoverage: r.localPubCoverage,
       });
       const forms = [r.name, ...entryTerms];
       for (const f of forms) {
@@ -447,8 +455,8 @@ async function getMeshMap(): Promise<MeshMap> {
  *   3. Per candidate: exact-name confidence iff query == normalized(name);
  *      otherwise entry-term.
  *   4. Tiebreak: exact > entry-term, then anchor-exists > no-anchor (§1.4),
- *      then dateRevised desc, then descriptorUi asc. The §1.7
- *      localPubCoverage tiebreaker remains a no-op until that phase ships.
+ *      then higher localPubCoverage (§1.7; NULL sorts last), then
+ *      dateRevised desc, then descriptorUi asc.
  *
  * Fails closed: any prisma error from the cache load is logged and `null` is
  * returned, so the curated-callout path keeps working.
@@ -501,7 +509,13 @@ export async function resolveMeshDescriptor(
     const aHasAnchor = (map.anchorsByUi.get(a.row.descriptorUi)?.length ?? 0) > 0;
     const bHasAnchor = (map.anchorsByUi.get(b.row.descriptorUi)?.length ?? 0) > 0;
     if (aHasAnchor !== bHasAnchor) return aHasAnchor ? -1 : 1;
-    // §1.7 (localPubCoverage) tiebreaker is still a no-op until that phase ships.
+    // §1.7 — higher localPubCoverage wins. Coverage is in [0, 1]; NULL is
+    // mapped to -1 so any populated value beats a not-yet-computed row.
+    // Fully-NULL column (post-MeSH-refresh, pre-coverage-ETL) falls through
+    // to dateRevised, preserving pre-§1.7 ordering.
+    const aCov = a.row.localPubCoverage ?? -1;
+    const bCov = b.row.localPubCoverage ?? -1;
+    if (aCov !== bCov) return bCov - aCov;
     const ad = a.row.dateRevised?.getTime() ?? 0;
     const bd = b.row.dateRevised?.getTime() ?? 0;
     if (ad !== bd) return bd - ad;
