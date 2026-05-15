@@ -54,6 +54,7 @@ export function TopScholarChip({
       surface="top-scholar"
       contextTopicSlug={topicSlug}
       contextTopicLabel={topicLabel}
+      contextTopicRank={scholar.rank}
     >
       {anchor}
     </PersonPopover>
