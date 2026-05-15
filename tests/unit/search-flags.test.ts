@@ -1,6 +1,6 @@
 /**
- * Issue #259 SPEC §7.1 + §7.1.1 + §6.2 — shared flag-resolution and
- * URL-param parsing for the pub-tab concept-mode rebalance.
+ * Issue #259 SPEC §7.1 + §6.2 — shared flag-resolution and URL-param parsing
+ * for the pub-tab concept-mode rebalance.
  *
  * Three call sites (search.ts body builder, route.ts handler, page.tsx
  * SSR) all depend on these helpers agreeing on the precedence rules.
@@ -11,27 +11,23 @@ import {
   resolveConceptMode,
 } from "@/lib/api/search-flags";
 
-describe("resolveConceptMode (§7.1 + §7.1.1)", () => {
+describe("resolveConceptMode (§7.1)", () => {
   const originalNew = process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
-  const originalLegacy = process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
 
   beforeEach(() => {
     delete process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
-    delete process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
   });
 
   afterEach(() => {
     if (originalNew === undefined) delete process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
     else process.env.SEARCH_PUB_TAB_CONCEPT_MODE = originalNew;
-    if (originalLegacy === undefined) delete process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
-    else process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = originalLegacy;
   });
 
-  it("defaults to 'expanded' when both envs are unset (PR-4 default)", () => {
+  it("defaults to 'expanded' when the env is unset (PR-4 default)", () => {
     expect(resolveConceptMode()).toBe("expanded");
   });
 
-  it("returns the new env's value when set ∈ {strict, expanded, off}", () => {
+  it("returns the env's value when set ∈ {strict, expanded, off}", () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
     expect(resolveConceptMode()).toBe("strict");
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
@@ -40,26 +36,8 @@ describe("resolveConceptMode (§7.1 + §7.1.1)", () => {
     expect(resolveConceptMode()).toBe("off");
   });
 
-  it("ignores unknown new-env values and falls back to legacy/default", () => {
+  it("ignores unknown values and falls back to the default", () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "garbage";
-    expect(resolveConceptMode()).toBe("expanded");
-    process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "off";
-    expect(resolveConceptMode()).toBe("off");
-  });
-
-  it("legacy OR_OF_EVIDENCE=on maps to strict (legacy default-on prod state)", () => {
-    process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "on";
-    expect(resolveConceptMode()).toBe("strict");
-  });
-
-  it("legacy OR_OF_EVIDENCE=off maps to off", () => {
-    process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "off";
-    expect(resolveConceptMode()).toBe("off");
-  });
-
-  it("new env wins over legacy when both are set", () => {
-    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
-    process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "off";
     expect(resolveConceptMode()).toBe("expanded");
   });
 });

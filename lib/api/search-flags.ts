@@ -14,32 +14,16 @@
 export type ConceptMode = "strict" | "expanded" | "off";
 
 /**
- * SPEC §7.1 + §7.1.1. Resolve the active concept-mode.
+ * SPEC §7.1. Resolve the active concept-mode.
  *
  *   `SEARCH_PUB_TAB_CONCEPT_MODE` set ∈ {strict, expanded, off} → that value
- *   unset:
- *     legacy `SEARCH_PUB_TAB_OR_OF_EVIDENCE=off` → "off"
- *     legacy `SEARCH_PUB_TAB_OR_OF_EVIDENCE=on`  → "strict"
- *                                                  (operator explicitly chose
- *                                                  the §1.6 admission shape;
- *                                                  preserve that intent —
- *                                                  bumping silently to
- *                                                  `expanded` would be a
- *                                                  scope expansion they
- *                                                  didn't ask for)
- *     legacy unset                               → "expanded" (PR-4 default;
- *                                                  the §5.2 four-clause shape)
+ *   otherwise → "expanded" (PR-4 default; the §5.2 four-clause shape)
  *
- * To roll back the PR-4 flip: set `SEARCH_PUB_TAB_CONCEPT_MODE=strict` in the
- * env. The legacy `SEARCH_PUB_TAB_OR_OF_EVIDENCE` fallback is removed in a
- * follow-up minor release after operators set the new env in every
- * environment (SPEC §7.1.1 retirement plan).
+ * To roll back the PR-4 flip: set `SEARCH_PUB_TAB_CONCEPT_MODE=strict`.
  */
 export function resolveConceptMode(): ConceptMode {
   const v = process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
   if (v === "strict" || v === "expanded" || v === "off") return v;
-  if (process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE === "off") return "off";
-  if (process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE === "on") return "strict";
   return "expanded";
 }
 
