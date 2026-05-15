@@ -16,7 +16,7 @@ import type {
   PublicationDetailPayload,
   PublicationDetailTopic,
 } from "@/lib/api/publication-detail";
-import { sanitizePubTitle } from "@/lib/utils";
+import { sanitizePubmedHtml, sanitizePubTitle } from "@/lib/utils";
 
 /**
  * Publication detail modal (#288 PR-B). One modal shared across profile,
@@ -325,6 +325,12 @@ function ModalContent({
         {citationContext ? (
           <p className="text-muted-foreground mt-1 text-sm">{citationContext}</p>
         ) : null}
+        <IdentifiersLine
+          pmid={pub.pmid}
+          pmcid={pub.pmcid}
+          doi={pub.doi}
+          pubmedUrl={pub.pubmedUrl}
+        />
         <AuthorsLine fullAuthors={pub.fullAuthorsString} />
         <CloseButton onClose={onClose} />
       </header>
@@ -340,14 +346,9 @@ function ModalContent({
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
           <CitingPubsSection
+            citationCount={pub.citationCount}
             citingPubs={citingPubs}
             citingPubsTotal={citingPubsTotal}
-          />
-          <IdentifiersFooter
-            pmid={pub.pmid}
-            pmcid={pub.pmcid}
-            doi={pub.doi}
-            pubmedUrl={pub.pubmedUrl}
           />
         </div>
       </div>
@@ -422,9 +423,12 @@ function ImpactSection({
         <span className="text-muted-foreground">/ 100</span>
       </p>
       {impactJustification ? (
-        <p className="text-foreground/80 mt-1 text-sm leading-relaxed">
-          {impactJustification}
-        </p>
+        <p
+          className="text-foreground/80 mt-1 text-sm leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: sanitizePubmedHtml(impactJustification),
+          }}
+        />
       ) : null}
     </section>
   );
@@ -446,6 +450,11 @@ function AbstractSection({ abstract }: { abstract: string | null }) {
   }, [abstract]);
 
   if (!abstract) return null;
+  // PubMed abstracts ship with whitelisted inline HTML for italic Latin
+  // terms (<i>ACE2</i>), structured-abstract headers (<b>Rationale:</b>),
+  // and sub/sup for chemical formulae. sanitizePubmedHtml strips everything
+  // else and renders the survivors via dangerouslySetInnerHTML.
+  const html = sanitizePubmedHtml(abstract);
   return (
     <section>
       <SectionHeading>Abstract</SectionHeading>
@@ -454,9 +463,8 @@ function AbstractSection({ abstract }: { abstract: string | null }) {
         className={`text-foreground/90 mt-1 whitespace-pre-line text-sm leading-relaxed ${
           expanded ? "" : "line-clamp-4"
         }`}
-      >
-        {abstract}
-      </p>
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
       {overflows ? (
         <button
           type="button"
@@ -476,9 +484,10 @@ function SynopsisSection({ synopsis }: { synopsis: string | null }) {
   return (
     <section>
       <SectionHeading>Plain-language synopsis</SectionHeading>
-      <p className="text-foreground/90 mt-1 text-sm leading-relaxed">
-        {synopsis}
-      </p>
+      <p
+        className="text-foreground/90 mt-1 text-sm leading-relaxed"
+        dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(synopsis) }}
+      />
     </section>
   );
 }
@@ -586,7 +595,7 @@ function MeshSection({
   );
 }
 
-function IdentifiersFooter({
+function IdentifiersLine({
   pmid,
   pmcid,
   doi,
@@ -597,10 +606,11 @@ function IdentifiersFooter({
   doi: string | null;
   pubmedUrl: string | null;
 }) {
-  // Identifiers render as a footer-style meta row (no SectionHeading) — they
-  // are reference data, not content, so they belong at the bottom under a
-  // hairline divider instead of taking a full section slot. Layout mirrors
-  // the per-row meta band on the publication-feed cards so the modal reads
+  // Identifiers flow inside the header citation block as a small meta row.
+  // PMID/PMCID/DOI are paper identity, not afterthought — they let users
+  // cite the paper and link to upstream sources, so they sit near the
+  // title with the rest of the citation metadata. Layout mirrors the
+  // per-row meta band on the publication-feed cards so the modal reads
   // as the source-of-truth detail view for the same row.
   const blocks: ReactNode[] = [];
   blocks.push(
@@ -660,37 +670,46 @@ function IdentifiersFooter({
     interleaved.push(b);
   });
   return (
-    <footer
+    <div
       aria-label="Identifiers"
-      className="border-border text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t pt-3 text-xs"
+      className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
     >
       {interleaved}
-    </footer>
+    </div>
   );
 }
 
 function CitingPubsSection({
+  citationCount,
   citingPubs,
   citingPubsTotal,
 }: {
+  citationCount: number;
   citingPubs: PublicationDetailPayload["citingPubs"];
   citingPubsTotal: number | null;
 }) {
-  // Header layout: section label on the left, total count chip on the right
-  // (formatted with locale-aware grouping so 1,234 reads at a glance). The
-  // count anchors the section semantically — readers see the citation
-  // volume before the list itself, which is just a most-recent window.
-  //
-  // Subhead copy adapts to the relationship between cap and total:
-  //   - Capped (cap < total): "Showing N most recent of M"
-  //   - Not capped + multi:   "Most recent first"
-  //   - Single / zero:        omit (no order to talk about)
+  // Header chip = the canonical Scopus citation count from
+  // `Publication.citationCount` — what users mean when they say "this paper
+  // has been cited N times". The listed window comes from `analysis_nih_cites`
+  // (iCite-derived, Cornell-indexed) which is typically much smaller —
+  // PMID 32432483 has 197 Scopus cites but only 19 rows in nih_cites. The
+  // subhead clarifies that gap so readers don't mistake the listed N for
+  // the true total.
   const hasList = citingPubs !== null && citingPubs.length > 0;
-  const showCount = citingPubsTotal !== null && citingPubsTotal > 0;
+  const showCount = citationCount > 0;
   let subhead: string | null = null;
   if (hasList && citingPubsTotal !== null) {
     if (citingPubsTotal > citingPubs.length) {
-      subhead = `Showing ${citingPubs.length.toLocaleString()} most recent of ${citingPubsTotal.toLocaleString()}`;
+      // 500-row cap kicked in inside the indexed subset.
+      subhead = `Showing ${citingPubs.length.toLocaleString()} most recent of ${citingPubsTotal.toLocaleString()} indexed citers`;
+    } else if (citingPubsTotal < citationCount) {
+      // List exhausts our indexed subset but the Scopus total is larger —
+      // be explicit so the chip number and list length don't seem to
+      // contradict each other.
+      subhead =
+        citingPubs.length === 1
+          ? `1 indexed citer · ${citationCount.toLocaleString()} total per Scopus`
+          : `Showing ${citingPubs.length.toLocaleString()} indexed citers (most recent first) · ${citationCount.toLocaleString()} total per Scopus`;
     } else if (citingPubs.length > 1) {
       subhead = "Most recent first";
     }
@@ -698,10 +717,10 @@ function CitingPubsSection({
   return (
     <section>
       <div className="flex items-baseline justify-between gap-2">
-        <SectionHeading>Citing publications</SectionHeading>
+        <SectionHeading>Cited by</SectionHeading>
         {showCount ? (
           <span className="text-muted-foreground text-xs tabular-nums">
-            {citingPubsTotal.toLocaleString()}
+            {citationCount.toLocaleString()}
           </span>
         ) : null}
       </div>
@@ -710,11 +729,13 @@ function CitingPubsSection({
       ) : null}
       {citingPubs === null ? (
         <p className="text-muted-foreground mt-2 text-sm">
-          Citation list temporarily unavailable.
+          Citing publication list temporarily unavailable.
         </p>
       ) : citingPubs.length === 0 ? (
         <p className="text-muted-foreground mt-2 text-sm">
-          No citing publications.
+          {citationCount > 0
+            ? "No citing publications in our index yet."
+            : "No citing publications."}
         </p>
       ) : (
         <ul className="mt-2 flex flex-col gap-2">

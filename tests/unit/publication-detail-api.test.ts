@@ -83,6 +83,7 @@ describe("getPublicationDetail — topic collapse", () => {
       abstract: "An abstract.",
       impactScore: 75,
       impactJustification: "Novel.",
+      citationCount: 42,
       pmcid: null,
       doi: null,
       pubmedUrl: null,
@@ -211,6 +212,19 @@ describe("getPublicationDetail — topic collapse", () => {
     expect(r?.pub.abstract).toBeNull();
     expect(r?.pub.impactJustification).toBeNull();
   });
+
+  it("surfaces Publication.citationCount as the canonical cited-by total", async () => {
+    // pub.citationCount carries the Scopus-broad count from
+    // analysis_summary_article.citationCountScopus and is the headline number
+    // for "Cited by N". It is distinct from citingPubsTotal (the iCite
+    // subset reciterdb tracks for citing-link display) — for many papers
+    // citationCount >> citingPubsTotal.
+    mocks.publicationFindUnique.mockResolvedValueOnce(
+      basePub({ citationCount: 197 }),
+    );
+    const r = await getPublicationDetail("12345");
+    expect(r?.pub.citationCount).toBe(197);
+  });
 });
 
 describe("getPublicationDetail — citing publications", () => {
@@ -227,6 +241,7 @@ describe("getPublicationDetail — citing publications", () => {
       abstract: null,
       impactScore: null,
       impactJustification: null,
+      citationCount: 0,
       pmcid: null,
       doi: null,
       pubmedUrl: null,

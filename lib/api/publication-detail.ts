@@ -50,6 +50,15 @@ export type PublicationDetailPayload = {
     abstract: string | null;
     impactScore: number | null;
     impactJustification: string | null;
+    /**
+     * Scopus-broad citation count from `Publication.citationCount` — the
+     * canonical "this paper has been cited N times" number. Distinct from
+     * `citingPubsTotal` below, which is the (much narrower) count of citing
+     * pmids that reciterdb's `analysis_nih_cites` table tracks for citing-
+     * link display. Surface this as the headline citation count; surface
+     * `citingPubsTotal` only to qualify the listed window.
+     */
+    citationCount: number;
     pmcid: string | null;
     doi: string | null;
     pubmedUrl: string | null;
@@ -60,12 +69,17 @@ export type PublicationDetailPayload = {
     synopsis: string | null;
   };
   topics: PublicationDetailTopic[];
-  /** Up to CITING_PUBS_CAP rows, ordered by date desc. Null when reciterdb
-   *  was unreachable — the modal renders "Citation list temporarily
-   *  unavailable" in that case. */
+  /** Up to CITING_PUBS_CAP rows from `analysis_nih_cites` joined to
+   *  `analysis_summary_article` (the iCite-derived subset that reciterdb
+   *  also has article metadata for), ordered by date desc. Null when
+   *  reciterdb was unreachable — the modal renders "Citation list
+   *  temporarily unavailable" in that case. */
   citingPubs: PublicationDetailCitingPub[] | null;
-  /** Total citing-pub count from reciterdb (may exceed CITING_PUBS_CAP).
-   *  Null when reciterdb was unreachable. */
+  /** Total rows in `analysis_nih_cites` for this `cited_pmid`. Typically
+   *  smaller than `pub.citationCount` because the upstream table is iCite-
+   *  derived and Cornell-indexed (NIH-funded citers only, and only those
+   *  also present in `analysis_summary_article`). Null when reciterdb was
+   *  unreachable. */
   citingPubsTotal: number | null;
 };
 
@@ -116,6 +130,7 @@ export async function getPublicationDetail(
       abstract: true,
       impactScore: true,
       impactJustification: true,
+      citationCount: true,
       pmcid: true,
       doi: true,
       pubmedUrl: true,
@@ -293,6 +308,7 @@ export async function getPublicationDetail(
         pub.impactJustification && pub.impactJustification.length > 0
           ? pub.impactJustification
           : null,
+      citationCount: pub.citationCount,
       pmcid: pub.pmcid,
       doi: pub.doi,
       pubmedUrl: pub.pubmedUrl,

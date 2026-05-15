@@ -45,6 +45,7 @@ function makePayload(
       abstract: "Widgets are interesting.\nThis study probes them.",
       impactScore: 78,
       impactJustification: "Novel methodology and broad influence.",
+      citationCount: 2,
       pmcid: "PMC123",
       doi: "10.1234/widgets",
       pubmedUrl: "https://pubmed.ncbi.nlm.nih.gov/12345/",
@@ -324,25 +325,28 @@ describe("PublicationModal — content sections", () => {
     expect(screen.queryByRole("heading", { name: "Authors" })).toBeNull();
   });
 
-  it("renders identifiers as a footer with no section heading", async () => {
+  it("renders identifiers inside the header with no section heading", async () => {
     mockFetch(makePayload());
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    // The footer carries an aria-label so screen readers still identify the
-    // block; visually there is no "Identifiers" heading.
+    // The identifier row carries an aria-label so screen readers can find
+    // it; visually it sits inside the header between citation context and
+    // authors, with no "Identifiers" heading.
     const dialog = screen.getByRole("dialog");
-    const footer = dialog.querySelector('footer[aria-label="Identifiers"]');
-    expect(footer).not.toBeNull();
+    const idLine = dialog.querySelector(
+      'header [aria-label="Identifiers"]',
+    ) as HTMLElement | null;
+    expect(idLine).not.toBeNull();
     expect(screen.queryByRole("heading", { name: "Identifiers" })).toBeNull();
-    // The PMID, PMCID, and DOI links still ship.
-    expect(footer?.querySelector('a[href*="pubmed.ncbi.nlm.nih.gov"]')).not.toBeNull();
-    expect(footer?.querySelector('a[href*="pmc/articles/"]')).not.toBeNull();
-    expect(footer?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
+    // The PMID, PMCID, and DOI links still ship inside the identifier row.
+    expect(idLine?.querySelector('a[href*="pubmed.ncbi.nlm.nih.gov"]')).not.toBeNull();
+    expect(idLine?.querySelector('a[href*="pmc/articles/"]')).not.toBeNull();
+    expect(idLine?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
   });
 });
 
-describe("PublicationModal — citing publications", () => {
+describe("PublicationModal — Cited by section", () => {
   it("renders the fallback message when reciterdb returned null", async () => {
     mockFetch(
       makePayload({ citingPubs: null, citingPubsTotal: null }),
@@ -351,27 +355,79 @@ describe("PublicationModal — citing publications", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText(/Citation list temporarily unavailable/),
+      screen.getByText(/Citing publication list temporarily unavailable/),
     ).toBeDefined();
   });
 
-  it("renders 'No citing publications' when the list is empty", async () => {
+  it("uses pub.citationCount for the count chip even when the list is smaller", async () => {
+    // Mirrors the real-world PMID 32432483 case: Publication.citationCount
+    // = 197 (Scopus total), citingPubsTotal = 19 (iCite subset). Chip must
+    // reflect 197 and the subhead must qualify the listed window.
     mockFetch(
-      makePayload({ citingPubs: [], citingPubsTotal: 0 }),
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 197 },
+        citingPubs: Array.from({ length: 19 }, (_, i) => ({
+          pmid: String(i + 1),
+          title: `c${i}`,
+          journal: null,
+          year: 2024,
+        })),
+        citingPubsTotal: 19,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("197")).toBeDefined();
+    expect(
+      screen.getByText(
+        /Showing 19 indexed citers \(most recent first\) · 197 total per Scopus/,
+      ),
+    ).toBeDefined();
+  });
+
+  it("renders 'No citing publications in our index yet.' when list empty but Scopus has cites", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 5 },
+        citingPubs: [],
+        citingPubsTotal: 0,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("No citing publications in our index yet.")).toBeDefined();
+    // Chip still shows the Scopus count.
+    expect(screen.getByText("5")).toBeDefined();
+  });
+
+  it("renders 'No citing publications.' when both citationCount and list are zero", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 0 },
+        citingPubs: [],
+        citingPubsTotal: 0,
+      }),
     );
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(screen.getByText("No citing publications.")).toBeDefined();
+    // No chip when citationCount is 0.
+    expect(screen.queryByText("0")).toBeNull();
   });
 
-  it("shows the cap-overflow subhead when total exceeds rows returned", async () => {
+  it("shows the cap-overflow subhead when the iCite subset exceeds 500", async () => {
     mockFetch(
       makePayload({
-        citingPubs: [
-          { pmid: "1", title: "x", journal: null, year: 2024 },
-          { pmid: "2", title: "y", journal: null, year: 2024 },
-        ],
+        pub: { ...makePayload().pub, citationCount: 1500 },
+        citingPubs: Array.from({ length: 500 }, (_, i) => ({
+          pmid: String(i + 1),
+          title: `c${i}`,
+          journal: null,
+          year: 2024,
+        })),
         citingPubsTotal: 1234,
       }),
     );
@@ -379,15 +435,17 @@ describe("PublicationModal — citing publications", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText("Showing 2 most recent of 1,234"),
+      screen.getByText("Showing 500 most recent of 1,234 indexed citers"),
     ).toBeDefined();
-    // Total count chip in the section header renders the formatted total.
-    expect(screen.getByText("1,234")).toBeDefined();
+    // Chip reflects the true Scopus total, not the indexed total.
+    expect(screen.getByText("1,500")).toBeDefined();
   });
 
-  it("shows 'Most recent first' subhead when list is multi but not capped", async () => {
+  it("shows 'Most recent first' subhead when list equals total and >1", async () => {
+    // Equal case: indexed total matches Scopus and list isn't capped.
     mockFetch(
       makePayload({
+        pub: { ...makePayload().pub, citationCount: 2 },
         citingPubs: [
           { pmid: "1", title: "x", journal: null, year: 2024 },
           { pmid: "2", title: "y", journal: null, year: 2024 },
@@ -402,9 +460,10 @@ describe("PublicationModal — citing publications", () => {
     expect(screen.queryByText(/Showing/)).toBeNull();
   });
 
-  it("omits the order subhead when there is only one citing pub", async () => {
+  it("omits the order subhead when there is only one citing pub and counts align", async () => {
     mockFetch(
       makePayload({
+        pub: { ...makePayload().pub, citationCount: 1 },
         citingPubs: [{ pmid: "1", title: "Only one", journal: null, year: 2024 }],
         citingPubsTotal: 1,
       }),
@@ -416,18 +475,20 @@ describe("PublicationModal — citing publications", () => {
     expect(screen.queryByText(/Showing/)).toBeNull();
   });
 
-  it("omits the count chip when total is null (reciterdb unavailable)", async () => {
-    mockFetch(makePayload({ citingPubs: null, citingPubsTotal: null }));
+  it("omits the count chip when citationCount is 0", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 0 },
+        citingPubs: null,
+        citingPubsTotal: null,
+      }),
+    );
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const dialog = screen.getByRole("dialog");
-    // The chip lives next to the "Citing publications" heading; no number
-    // should appear there when the reciterdb soft-fail path triggers.
-    const headingRow = within(dialog)
-      .getByText("Citing publications")
-      .closest("div") as HTMLElement;
-    expect(headingRow.textContent).toBe("Citing publications");
+    const headingRow = within(dialog).getByText("Cited by").closest("div") as HTMLElement;
+    expect(headingRow.textContent).toBe("Cited by");
   });
 
   it("renders citing pubs in the order returned by the payload (date desc)", async () => {

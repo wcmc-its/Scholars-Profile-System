@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { sanitizePubmedHtml } from "@/lib/utils";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
@@ -216,9 +217,8 @@ export function PublicationMeta({
           className={`text-sm leading-relaxed text-foreground/90 ${
             abstractExpanded ? "" : "line-clamp-3"
           }`}
-        >
-          {abstract}
-        </p>
+          dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(abstract as string) }}
+        />
         <button
           type="button"
           onClick={() => setAbstractExpanded((s) => !s)}
