@@ -199,6 +199,14 @@ export type PublicationHit = {
    * `impactScore`).
    */
   impactJustification: string | null;
+  /**
+   * Issue #288 PR-A — plain-text article abstract sourced from
+   * `Publication.abstract` via the OS `_source` payload (the search-index
+   * ETL writes it on the per-pub doc; see etl/search-index/index.ts).
+   * Null when the publication has no abstract or the ETL wrote an empty
+   * string. Rendered inline via `<AbstractDisclosure>` on the row.
+   */
+  abstract: string | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -1191,6 +1199,10 @@ export async function searchPublications(opts: {
       topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
       // Issue #316 PR-C follow-up — optional pass-through justification text.
       impactJustification?: string;
+      // Issue #288 PR-A — pass-through abstract. ETL writes empty string on
+      // pubs with no abstract, so this is always-present in practice but
+      // optional-typed for defensive null handling on older index docs.
+      abstract?: string;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -1328,6 +1340,10 @@ export async function searchPublications(opts: {
         impactScore,
         conceptImpactScore,
         impactJustification,
+        abstract:
+          typeof h._source.abstract === "string" && h._source.abstract.length > 0
+            ? h._source.abstract
+            : null,
       };
     }),
     total: r.hits.total.value,

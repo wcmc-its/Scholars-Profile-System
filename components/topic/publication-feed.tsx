@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AbstractDisclosure } from "@/components/publication/abstract-disclosure";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -58,6 +59,9 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
+  /** Issue #288 PR-A — inline abstract disclosure. Null when the publication
+   *  has no abstract; the disclosure component returns null in that case. */
+  abstract: string | null;
 };
 
 type FeedResponse = {
@@ -271,6 +275,7 @@ export function PublicationFeed({
                   pmcid={h.pmcid}
                   doi={h.doi}
                 />
+                <AbstractDisclosure abstract={h.abstract} />
               </li>
               );
             })}

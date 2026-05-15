@@ -479,6 +479,10 @@ export type TopicPublicationHit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
+  /** Plain-text article abstract from `Publication.abstract` (#288 PR-A).
+   *  Null when the publication has no abstract. Rendered inline via
+   *  `<AbstractDisclosure>` in the topic publication feed. */
+  abstract: string | null;
 };
 
 export type TopicPublicationsResult = {
@@ -599,6 +603,8 @@ export async function getTopicPublications(
     // GPT-generated rubric justification (issue #316 PR-C) — surfaced as a
     // hover tooltip on the inline `Impact: NN` value.
     impactJustification: true,
+    // Inline abstract disclosure (issue #288 PR-A).
+    abstract: true,
   } as const;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publicationTopic.findMany({
@@ -687,6 +693,7 @@ function mapToTopicPublicationHit(
     impactScore,
     impactJustification,
     authors: wcmAuthors ?? [],
+    abstract: r.publication.abstract ?? null,
   };
 }
 
