@@ -13,6 +13,7 @@ import {
   type FundingStatus,
 } from "@/lib/api/search-funding";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { parseMeshParam, resolveConceptMode } from "@/lib/api/search-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -33,16 +34,22 @@ export async function GET(request: NextRequest) {
   // cost here is one Map lookup + one indexed etl_run row when the cache
   // is hot. Same call the server-rendered /search page makes; the duplication
   // is acceptable until call sites consolidate.
+  //
+  // Issue #259 SPEC §7.5 — split-scope timing. `taxonomyMatchMs` measures
+  // the resolver in isolation so a resolver regression doesn't dilute the
+  // §3.1 (c) +10ms p95 guardrail (which targets the rebalance's body
+  // construction + OpenSearch round-trip, not the resolver).
+  const taxonomyStart = Date.now();
   const taxonomyMatch = await matchQueryToTaxonomy(q);
-  // Issue #259 §1.11 — `?mesh=off` is the chip's "Search broadly instead"
-  // escape. The server-rendered page applies the same override; mirroring
-  // it here keeps the JSON API in lockstep so a programmatic caller
-  // setting the param gets the broad result set rather than the
-  // concept-filtered one. Telemetry (descriptorUi / confidence) keeps
-  // logging the resolution that WAS computed so we can attribute opt-out
-  // rates per descriptor.
-  const meshOff = params.get("mesh") === "off";
+  const taxonomyMatchMs = Date.now() - taxonomyStart;
+  // Issue #259 §6.2 — `?mesh=off` wins over `?mesh=strict` regardless of
+  // URL ordering. `parseMeshParam` uses `getAll + includes` so the rule
+  // holds for `?mesh=strict&mesh=off`, which the raw `params.get` shape
+  // got wrong (it returns the first value only). Single source of truth
+  // shared with the SSR page so route handler and page agree on a URL.
+  const { meshOff, meshStrict } = parseMeshParam(params);
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
+  const conceptMode = resolveConceptMode();
   const meshResolutionDescriptorUi =
     taxonomyMatch.meshResolution?.descriptorUi ?? null;
   const meshResolutionConfidence =
@@ -80,6 +87,9 @@ export async function GET(request: NextRequest) {
         filters,
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        // SPEC §7.5 — resolver scope. Logged on every branch so a resolver
+        // regression (orthogonal to the rebalance) is observable here too.
+        taxonomyMatchMs,
         ts: new Date().toISOString(),
       }),
     );
@@ -97,6 +107,12 @@ export async function GET(request: NextRequest) {
       (r): r is "first" | "senior" | "middle" =>
         r === "first" || r === "senior" || r === "middle",
     );
+    // Issue #259 SPEC §7.5 — `searchLatencyMs` covers the body construction
+    // + OpenSearch round-trip + Prisma hydration. Excludes the resolver
+    // (captured separately as `taxonomyMatchMs`) so the §3.1 (c) guardrail
+    // attributes regressions to the rebalance code path, not unrelated
+    // resolver drift.
+    const searchStart = Date.now();
     const result = await searchPublications({
       q,
       page,
@@ -108,15 +124,20 @@ export async function GET(request: NextRequest) {
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
       },
-      // Issue #259 §1.6 — pass the MeSH resolution computed at the top of
-      // the handler. When SEARCH_PUB_TAB_OR_OF_EVIDENCE=on AND this is
-      // non-null, searchPublications restructures the query as
-      // must(evidence) + should(BM25). Flag-default-off, so today this
-      // travels but does not change the produced ES body.
+      // Issue #259 §5 — pass the MeSH resolution computed at the top of
+      // the handler. Under `SEARCH_PUB_TAB_CONCEPT_MODE=expanded` and this
+      // non-null, searchPublications produces the §5.2 four-clause body.
+      // Under `strict` (default at PR-3 merge), it produces the same
+      // `concept_filtered` / `concept_fallback` body as today's prod.
       // §1.11 — `effectiveMeshResolution` honors `?mesh=off`; when off,
       // this is null and the pub query falls back to the §1.2 shape.
       meshResolution: effectiveMeshResolution,
+      // §6.2 — chip's "Narrow to this concept only" opt-in. Forces
+      // strict-mode admission under flag = `expanded`. `?mesh=off`
+      // precedence is already enforced upstream by nulling the resolution.
+      meshStrict,
     });
+    const searchLatencyMs = Date.now() - searchStart;
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     // Issue #259 §1.2 — queryShape attributes result-count and ranking
     // changes to the code path that served the request. Same enum and
@@ -129,6 +150,10 @@ export async function GET(request: NextRequest) {
         type: "publications",
         resultCount: result.total,
         queryShape: result.queryShape,
+        // SPEC §7.5 — resolved mode (after the legacy `OR_OF_EVIDENCE`
+        // fallback). Captures the per-request shape without analysts
+        // having to know which env mapping was active.
+        conceptMode,
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
@@ -138,12 +163,25 @@ export async function GET(request: NextRequest) {
         // is null (mesh=off, no-match, or under-3-char query) so downstream
         // queries can distinguish "no resolution" from "resolution with a
         // self-only descendant set" (length 1).
-        meshDescendantSetSize:
-          taxonomyMatch.meshResolution?.descendantUis.length ?? null,
+        meshDescendantSetSize: result.meshDescendantSetSize,
+        // SPEC §7.5 — anchor-set size mirrors the descendant convention:
+        // `null` distinguishes "no resolution" from "resolution with zero
+        // anchors" (which exercises the `concept_fallback` strict-mode path).
+        meshAnchorCount: result.meshAnchorCount,
         // Issue #259 §1.11 — opt-out signal. True when the request set
         // `?mesh=off`; logging the rate per descriptor tells us when the
         // chip's broaden affordance is over- or under-used.
         meshOff,
+        // §6.2 — chip-engaged narrow-mode opt-in. True when `?mesh=strict`
+        // present (and `?mesh=off` absent).
+        meshStrict,
+        // SPEC §7.5 — split-scope latency. `taxonomyMatchMs` is the resolver
+        // alone; `searchLatencyMs` is the rebalance scope (body construction
+        // + OpenSearch + hydration). The §3.1 (c) guardrail targets the
+        // latter; the former is logged on every branch (people/funding too)
+        // so resolver-only regressions are attributable.
+        taxonomyMatchMs,
+        searchLatencyMs,
         ts: new Date().toISOString(),
       }),
     );
@@ -206,6 +244,7 @@ export async function GET(request: NextRequest) {
       filters: { deptDiv, personType, activity, includeIncomplete },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
+      taxonomyMatchMs,
       ts: new Date().toISOString(),
     }),
   );

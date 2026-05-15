@@ -96,6 +96,8 @@ type MeshResolutionForTest = {
   scopeNote: string | null;
   entryTerms: string[];
   curatedTopicAnchors: string[];
+  /** PR 2 invariant — self at index 0, then descendants. */
+  descendantUis: string[];
 };
 
 const RESOLUTION: MeshResolutionForTest = {
@@ -106,6 +108,7 @@ const RESOLUTION: MeshResolutionForTest = {
   scopeNote: null,
   entryTerms: ["EHR"],
   curatedTopicAnchors: ["digital-health", "informatics"],
+  descendantUis: ["D057286"],
 };
 
 function sortOf(body: Record<string, unknown>): unknown {

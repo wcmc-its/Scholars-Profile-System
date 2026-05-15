@@ -13,7 +13,8 @@ import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import { ConceptChip } from "@/components/search/concept-chip";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
-import { buildBroadenHref } from "./url-helpers";
+import { buildMeshHref } from "./url-helpers";
+import { parseMeshParam, resolveConceptMode } from "@/lib/api/search-flags";
 import {
   searchPeople,
   searchPublications,
@@ -85,15 +86,26 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       : Promise.resolve({ state: "none" as const, meshResolution: null }),
   ]);
 
-  // Issue #259 §1.11 — "Search broadly instead" escape. `?mesh=off`
-  // suppresses the MeSH resolution before it reaches searchPublications,
-  // so §1.6 OR-of-evidence falls back to the §1.2 multi_match shape
-  // (msm floor intact) and §1.8 hits return `conceptImpactScore: null`.
-  // The chip is also hidden in this state so the affordance doesn't
-  // re-appear after the user has explicitly opted out.
-  const meshParam = Array.isArray(sp.mesh) ? sp.mesh[0] : sp.mesh;
-  const meshOff = meshParam === "off";
+  // Issue #259 §1.11 / §6.2 — `?mesh` URL contract. Three states:
+  //   absent     → default expanded mode (chip renders narrow + broaden affordances)
+  //   `=strict`  → chip-narrow override (force `concept_filtered` admission)
+  //   `=off`     → "Search broadly instead" escape; resolution suppressed
+  //                before reaching searchPublications, so §1.6/§5 fall back
+  //                to the §1.2 multi_match shape (msm intact) and §1.8 hits
+  //                return `conceptImpactScore: null`.
+  // Precedence rule: `?mesh=off` wins over `?mesh=strict` regardless of URL
+  // order. Shared helper guarantees route handler + SSR page agree.
+  const { meshOff, meshStrict } = parseMeshParam(sp);
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
+  // §5 / §7.1 — chip mode discriminator. Single source of truth shared with
+  // `searchPublications`'s body construction and the route handler's log.
+  const conceptMode = resolveConceptMode();
+  const chipMode: "strict" | "expanded_default" | "expanded_narrow" =
+    conceptMode === "expanded" && !meshStrict
+      ? "expanded_default"
+      : conceptMode === "expanded" && meshStrict
+        ? "expanded_narrow"
+        : "strict";
 
   // People filters (multi-select).
   const deptDiv = parseList(sp.deptDiv);
@@ -192,14 +204,19 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
-      // Issue #259 §1.6 + §1.8 — taxonomyMatch is computed unconditionally
+      // Issue #259 §5 + §1.8 — taxonomyMatch is computed unconditionally
       // above for the curated-callout. Forward the MeSH resolution so
-      // searchPublications can (a) restructure to OR-of-evidence when the
-      // §1.6 flag is on, and (b) compute per-hit `conceptImpactScore` when
-      // the §1.8 flag is on. §1.11 — `effectiveMeshResolution` honors the
-      // user's `mesh=off` "Search broadly instead" escape; when off, this
-      // is null and the pub query falls back to the §1.2 shape.
+      // searchPublications can (a) build the `concept_expanded` shape
+      // when CONCEPT_MODE=expanded, (b) keep today's `concept_filtered`
+      // body under strict mode, and (c) compute per-hit
+      // `conceptImpactScore` when the §1.8 flag is on. §1.11 —
+      // `effectiveMeshResolution` honors the user's `mesh=off` "Search
+      // broadly instead" escape; when off, this is null and the pub query
+      // falls back to the §1.2 shape.
       meshResolution: effectiveMeshResolution,
+      // §6.2 — chip-engaged narrow-mode opt-in (`?mesh=strict`). Forces
+      // strict-mode admission under flag = `expanded`.
+      meshStrict,
     }),
     searchFunding({
       q,
@@ -220,6 +237,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     type === "publications" &&
     effectiveMeshResolution &&
     pubsResult.total === 0 &&
+    // SPEC §6.1 — empty state with broad-count CTA fires whenever the
+    // active shape gates on the resolved concept. `concept_expanded`
+    // doesn't gate (admission via top-level should), so it's excluded —
+    // expanded mode falls through to the generic empty state instead.
     (pubsResult.queryShape === "concept_filtered" ||
       pubsResult.queryShape === "concept_fallback")
   ) {
@@ -261,11 +282,29 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             persistent state, so the chip stays gone on subsequent
             renders until the user clears the param or runs a new query. */}
         {type === "publications" && effectiveMeshResolution ? (
-          <ConceptChip
-            resolution={effectiveMeshResolution}
-            matchedQuery={q}
-            broadenHref={buildBroadenHref(sp, "off")}
-          />
+          chipMode === "strict" ? (
+            <ConceptChip
+              mode="strict"
+              resolution={effectiveMeshResolution}
+              matchedQuery={q}
+              broadenHref={buildMeshHref(sp, "off")}
+            />
+          ) : chipMode === "expanded_default" ? (
+            <ConceptChip
+              mode="expanded_default"
+              resolution={effectiveMeshResolution}
+              matchedQuery={q}
+              narrowHref={buildMeshHref(sp, "strict")}
+              broadenHref={buildMeshHref(sp, "off")}
+            />
+          ) : (
+            <ConceptChip
+              mode="expanded_narrow"
+              resolution={effectiveMeshResolution}
+              matchedQuery={q}
+              expandHref={buildMeshHref(sp, "clear")}
+            />
+          )
         ) : null}
       </div>
       <ModeTabs
@@ -303,11 +342,17 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
             mentoringProgram={mentoringProgram}
             result={pubsResult}
             conceptEmpty={
-              effectiveMeshResolution && pubsResult.total === 0
+              effectiveMeshResolution &&
+              pubsResult.total === 0 &&
+              // SPEC §6.1 row 2 — suppress the concept-aware empty state
+              // under default expanded mode; concept_expanded won't return
+              // 0 unless `mesh=off` would also. Fall through to the
+              // generic empty state in that case.
+              chipMode !== "expanded_default"
                 ? {
                     descriptorName: effectiveMeshResolution.name,
                     broadCount: conceptEmptyBroadCount,
-                    broadenHref: buildBroadenHref(sp, "off"),
+                    broadenHref: buildMeshHref(sp, "off"),
                   }
                 : null
             }

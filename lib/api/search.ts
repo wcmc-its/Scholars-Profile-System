@@ -44,6 +44,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
+import { resolveConceptMode } from "@/lib/api/search-flags";
 
 const PAGE_SIZE = 20;
 
@@ -247,7 +248,8 @@ export type PublicationsQueryShape =
   | "legacy_multi_match"
   | "restructured_msm"
   | "concept_filtered"
-  | "concept_fallback";
+  | "concept_fallback"
+  | "concept_expanded";
 
 export type PublicationsSearchResult = {
   hits: PublicationHit[];
@@ -256,6 +258,17 @@ export type PublicationsSearchResult = {
   pageSize: number;
   /** Which query shape served this request — telemetry-only (issue #259). */
   queryShape: PublicationsQueryShape;
+  /**
+   * Issue #259 SPEC §7.5 — telemetry fields surfaced for the route-handler
+   * log line. Populated unconditionally so the per-request log schema is
+   * stable across modes; `null` distinguishes "no resolution" from
+   * "resolution with N anchors" (N >= 0). PR 2 populates `descendantUis`
+   * on every resolution regardless of consumption, so under `strict` /
+   * `off` modes the field carries the *would-be* set size — the baseline
+   * distribution for §7.3 pre-flip latency/recall comparison.
+   */
+  meshDescendantSetSize: number | null;
+  meshAnchorCount: number | null;
   facets: {
     publicationTypes: SearchFacetBucket[];
     journals: SearchFacetBucket[];
@@ -697,12 +710,24 @@ export async function searchPublications(opts: {
   sort?: PublicationsSort;
   filters?: PublicationsFilters;
   /**
-   * Issue #259 §1.6 — when set AND `SEARCH_PUB_TAB_OR_OF_EVIDENCE=on`, the
-   * query is restructured as `must(MeSH-evidence OR ReciterAI-evidence) +
-   * should(BM25 free-text)`. Null/undefined → no restructure, byte-identical
-   * to the §1.2 shape.
+   * Issue #259 §1.6 — when set AND `SEARCH_PUB_TAB_OR_OF_EVIDENCE=on` (or
+   * §5 `SEARCH_PUB_TAB_CONCEPT_MODE=strict`), the query is restructured as
+   * `must(MeSH-evidence OR ReciterAI-evidence) + should(BM25 free-text)`.
+   * Null/undefined → no restructure, byte-identical to the §1.2 shape.
    */
   meshResolution?: MeshResolution | null;
+  /**
+   * Issue #259 SPEC §5.1 + §6.1. When true AND the active concept mode is
+   * `expanded`, the function falls back to today's `concept_filtered` /
+   * `concept_fallback` body (chip's "Narrow to this concept only" opt-in).
+   * Under `strict` mode this is a no-op (already strict); under `off` mode
+   * this is ignored (resolution is suppressed upstream by the route handler
+   * setting `meshResolution: null`, same pattern as `?mesh=off`).
+   *
+   * Source: `?mesh=strict` URL param, parsed in `app/api/search/route.ts`
+   * and `app/(public)/search/page.tsx` via `parseMeshParam`.
+   */
+  meshStrict?: boolean;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -720,17 +745,20 @@ export async function searchPublications(opts: {
   const usePubMsm =
     (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
 
-  // Issue #259 §1.6 — OR-of-evidence pub filter. Flag default-OFF; flip
-  // requires the publications index to have been reindexed with the new
-  // `reciterParentTopicId` field. The flag is independent of
-  // SEARCH_PUB_TAB_MSM: this gate decides query *shape*, the msm gate
-  // decides whether the existing flat-multi_match has an msm floor. When
-  // §1.6 is active, the BM25 should-clause carries msm unconditionally
-  // (it's part of the OR-of-evidence shape definition; the msm flag does
-  // not influence it). To escape §1.6 entirely, flip this flag off.
-  const useOrOfEvidence =
-    (process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE ?? "off") === "on";
+  // Issue #259 §5 / §7.1 — pub-tab concept mode supersedes §1.6's
+  // `SEARCH_PUB_TAB_OR_OF_EVIDENCE`. Three values:
+  //   `strict`   — today's `concept_filtered` / `concept_fallback` admission
+  //                shape. Body byte-identical to pre-PR-3.
+  //   `expanded` — §5.2 `concept_expanded` shape. MeSH adds, never gates.
+  //   `off`      — pre-§1.6 fallback. `restructured_msm` for resolved queries
+  //                (resolution is logged but not applied).
+  // Default at PR-3 merge: `strict` (rollback target). The legacy
+  // `SEARCH_PUB_TAB_OR_OF_EVIDENCE` env is read only when the new flag is
+  // unset (SPEC §7.1.1 retirement plan). Resolution lives in
+  // `lib/api/search-flags.ts` so route handler + SSR page agree.
+  const conceptMode = resolveConceptMode();
   const resolution = opts.meshResolution ?? null;
+  const meshStrict = opts.meshStrict ?? false;
 
   // Issue #259 §1.8 — impactScore display + three-way sort. Flag default-OFF;
   // flip requires the publications index to have been reindexed with the
@@ -750,28 +778,95 @@ export async function searchPublications(opts: {
   if (trimmed.length === 0) {
     must.push({ match_all: {} });
     queryShape = usePubMsm ? "restructured_msm" : "legacy_multi_match";
-  } else if (useOrOfEvidence && resolution) {
-    // §1.6 — admission is `(Path A: MeSH evidence) OR (Path B: ReciterAI
-    // evidence)`. BM25 sits in the top-level `should` and contributes to
-    // scoring only — it cannot admit a doc on its own.
-    //
-    // Path A: match_phrase chosen per spec footnote (lines 251-254). The
-    // pre-merge probe against pmid 25848412 verifies the analyzed
-    // `meshTerms` stream injects position gaps between distinct MeSH terms
-    // so this works; if the probe fails, swap to:
-    //   { match: { meshTerms: { query: resolution.name, operator: "and", boost: 8 } } }
+  } else if (
+    // §5.2 `concept_expanded` admission. Engaged only under:
+    //   - flag = `expanded`
+    //   - resolution non-null
+    //   - chip-narrow opt-in NOT set (`?mesh=strict` would force strict)
+    //   - `descendantUis` populated (PR 2's invariant guarantees ≥ 1; the
+    //     length check is a belt-and-braces against malformed
+    //     `terms { meshDescriptorUi: [] }` at OpenSearch).
+    // The predicate lives in the branch condition (not inside the body)
+    // so TypeScript narrows `resolution` to non-null AND an empty
+    // descendant set falls through to the trailing `else`, where the
+    // §1.2 builder + the `concept_expanded_invariant_violated` log fire
+    // together as a single coherent fall-back.
+    conceptMode === "expanded" &&
+    resolution !== null &&
+    !meshStrict &&
+    resolution.descendantUis.length > 0
+  ) {
+    queryShape = "concept_expanded";
+    // Clause 1: BM25 over the original surface query. Same fields/boosts
+    // as the §1.2 multi_match — preserves token-coverage signal.
+    topLevelShould.push({
+      multi_match: {
+        query: trimmed,
+        fields: [...PUBLICATION_FIELD_BOOSTS],
+        type: "best_fields",
+        operator: "or",
+        minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+        boost: 1,
+      },
+    });
+    // Clause 2: parallel BM25 over the descriptor's canonical name. Token
+    // count drawn from `resolution.name` only (NOT the entry-term list)
+    // so msm is computed against name-tokens, avoiding cross-contamination
+    // with the surface query's tokens (§5.5). Always emitted when
+    // resolution is non-null — even when name === q (snapshot byte-stability).
+    topLevelShould.push({
+      multi_match: {
+        query: resolution.name,
+        fields: [...PUBLICATION_FIELD_BOOSTS],
+        type: "best_fields",
+        operator: "or",
+        minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+        boost: 1,
+      },
+    });
+    // Clause 3: terms on the descriptor + descendants. PR 2's eager
+    // precompute populates `descendantUis` with self at index 0, bounded
+    // at DESCENDANT_HARD_CAP (200). Read as-is; no re-cap here.
+    topLevelShould.push({
+      terms: {
+        meshDescriptorUi: resolution.descendantUis,
+        boost: 8,
+      },
+    });
+    // Clause 4: anchor terms, omitted when empty (§1.4 hasn't seeded
+    // this descriptor yet, or it's a narrow leaf with no curated coverage).
+    if (resolution.curatedTopicAnchors.length > 0) {
+      topLevelShould.push({
+        terms: {
+          reciterParentTopicId: resolution.curatedTopicAnchors,
+          boost: 6,
+        },
+      });
+    }
+    // No `must` clause: admission lives entirely in the top-level should
+    // + minimum_should_match: 1 (emitted by the body assembly below). The
+    // empty-must spread below omits the key, matching SPEC §5.2's literal
+    // body.
+  } else if (
+    // §1.6 strict-admission path. Engaged under:
+    //   - flag = `strict` with a resolution
+    //   - flag = `expanded` with chip-narrow opt-in (`?mesh=strict`) and a resolution
+    // Body byte-identical to today's prod `concept_filtered` / `concept_fallback`.
+    resolution !== null &&
+    (conceptMode === "strict" || (conceptMode === "expanded" && meshStrict))
+  ) {
+    // Path A: match_phrase chosen per spec footnote. The pre-merge probe
+    // against pmid 25848412 verifies the analyzed `meshTerms` stream
+    // injects position gaps between distinct MeSH terms so this works.
     const pathA = {
       match_phrase: { meshTerms: { query: resolution.name, boost: 8 } },
     };
-
     const evidenceShould: Record<string, unknown>[] = [pathA];
     if (resolution.curatedTopicAnchors.length > 0) {
       // Path B: ReciterAI evidence. Flat-score by design — a doc matching
       // N anchors scores the same as a doc matching 1. Admission is what
       // matters; ordering across the admitted set comes from the top-level
-      // BM25 should-clause. Multi-anchor hit-count would over-weight broad
-      // descriptors whose anchor count is itself a curation-density signal,
-      // not a relevance signal.
+      // BM25 should-clause.
       evidenceShould.push({
         terms: {
           reciterParentTopicId: resolution.curatedTopicAnchors,
@@ -780,12 +875,9 @@ export async function searchPublications(opts: {
       });
       queryShape = "concept_filtered";
     } else {
-      // Anchors empty (§1.4 hasn't seeded this descriptor yet, or it's a
-      // narrow leaf descriptor with no curated coverage). Path A alone;
-      // admission is MeSH-only.
+      // Anchors empty: Path A alone, admission is MeSH-only.
       queryShape = "concept_fallback";
     }
-
     must.push({
       bool: { should: evidenceShould, minimum_should_match: 1 },
     });
@@ -799,10 +891,30 @@ export async function searchPublications(opts: {
       },
     });
   } else {
-    // §1.2 path — unresolved query OR flag off. Body MUST be byte-identical
-    // to today's output; do not push to topLevelShould (the body spread
-    // below skips the `should` key when the array is empty, preserving
-    // the exact pre-§1.6 shape).
+    // §1.2 path. Catches:
+    //   - resolution null (mesh=off, no match, under-3-char)
+    //   - conceptMode=off (with or without resolution)
+    //   - PR 2 invariant violation: expanded + resolution + !meshStrict
+    //     + empty `descendantUis`. The expanded branch's condition includes
+    //     `descendantUis.length > 0`, so the empty case falls through to
+    //     here. Log loudly before constructing the §1.2 body so the
+    //     regression is observable (silent fall-through would mask a PR 2
+    //     contract break).
+    if (
+      conceptMode === "expanded" &&
+      resolution !== null &&
+      !meshStrict &&
+      resolution.descendantUis.length === 0
+    ) {
+      console.error(
+        JSON.stringify({
+          event: "concept_expanded_invariant_violated",
+          reason: "empty_descendantUis",
+          descriptorUi: resolution.descriptorUi,
+          confidence: resolution.confidence,
+        }),
+      );
+    }
     must.push({
       multi_match: {
         query: trimmed,
@@ -906,6 +1018,43 @@ export async function searchPublications(opts: {
     sortClause.push({ dateAddedToEntrez: "desc" });
   }
 
+  // Issue #259 §5.2 — facet aggs must mirror the admission shape:
+  //   - strict / §1.2: must carries the admission clause; filter adds the
+  //     other axes (today's `must`-only contract).
+  //   - concept_expanded: should + msm=1 carries the admission; filter adds
+  //     the other axes (`must` is empty so it would short-circuit to
+  //     match-all, producing a wrong denominator).
+  //
+  // Scope caveat — filter-context aggregations only. Every current agg is a
+  // filter-context `terms` / `filter` / `filters` aggregation: admission
+  // count is what matters, scoring contribution is irrelevant. Filter
+  // clauses don't score, so the `should`-with-msm shape admits the same
+  // docs as `must` would while contributing zero to `_score`. Aggs that
+  // consume `_score` (e.g. `top_hits` with `_score` sort, `significant_terms`)
+  // would behave differently between modes and silently break the cross-mode
+  // equivalence — none exist today; a future addition needs a
+  // `must: { match_all }` + `should` + `msm: 1` + `filter` shape that
+  // promotes admission into a scoring path.
+  //
+  // Closure captures: `queryShape`, `topLevelShould`, `must`. The msm
+  // value is the literal `1` (the only value SPEC §5.2 specifies); not
+  // threaded through a variable so a future rename can't accidentally
+  // serialize `minimum_should_match: undefined`.
+  const aggBoolFor = (
+    filter: Record<string, unknown>[],
+  ): Record<string, unknown> => {
+    if (queryShape === "concept_expanded") {
+      return {
+        bool: {
+          should: topLevelShould,
+          minimum_should_match: 1,
+          filter,
+        },
+      };
+    }
+    return { bool: { must, filter } };
+  };
+
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
@@ -917,14 +1066,25 @@ export async function searchPublications(opts: {
     track_total_hits: true,
     query: {
       bool: {
-        must,
-        // §1.6 — top-level BM25 scoring clause. Only added when populated
-        // (concept_filtered / concept_fallback shapes); empty array spreads
-        // to nothing so the §1.2 path produces a byte-identical body.
-        // Intentionally NOT propagated to the agg filter contexts below —
-        // facet counts are filter-context only and shouldn't be biased by
-        // BM25 ordering signal.
+        // §5.2 — `concept_expanded` admission lives entirely in the
+        // top-level should, so `must` is empty in that branch. Spread
+        // conditionally so the body omits the `must` key (matches SPEC
+        // §5.2's literal). Strict / §1.2 paths always populate `must`,
+        // so this is a no-op for them — strict-mode body remains
+        // byte-identical to pre-PR-3 (§7.2 rollback target).
+        ...(must.length > 0 ? { must } : {}),
+        // §1.6 — top-level BM25 scoring clause under strict modes; empty
+        // array spreads to nothing so the §1.2 path produces a byte-
+        // identical body.
         ...(topLevelShould.length > 0 ? { should: topLevelShould } : {}),
+        // §5.2 — minimum_should_match: 1 only under `concept_expanded`
+        // (the only shape where should-as-admission carries msm at the
+        // outer bool). Strict-mode top-level `should` is BM25-scoring-
+        // only; adding msm there would break the §7.2 byte-identical
+        // guarantee.
+        ...(queryShape === "concept_expanded"
+          ? { minimum_should_match: 1 }
+          : {}),
       },
     },
     // post_filter applies all user-axis filters to hits AFTER the
@@ -936,7 +1096,7 @@ export async function searchPublications(opts: {
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs: {
       publicationTypes: {
-        filter: { bool: { must, filter: filtersExcept("publicationType") } },
+        filter: aggBoolFor(filtersExcept("publicationType")),
         aggs: { keys: { terms: { field: "publicationType", size: 15 } } },
       },
       // Top journals by count. 500 covers the mid-tail of any plausibly
@@ -946,39 +1106,33 @@ export async function searchPublications(opts: {
       // JournalFacet narrows this list as the user types — beyond 500
       // they should sharpen the main query rather than scroll a facet.
       journals: {
-        filter: { bool: { must, filter: filtersExcept("journal") } },
+        filter: aggBoolFor(filtersExcept("journal")),
         aggs: { keys: { terms: { field: "journal.keyword", size: 500 } } },
       },
       wcmRoleFirst: {
-        filter: {
-          bool: {
-            must,
-            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "first" } }],
-          },
-        },
+        filter: aggBoolFor([
+          ...filtersExcept("wcmAuthorRole"),
+          { term: { wcmAuthorPositions: "first" } },
+        ]),
       },
       wcmRoleSenior: {
-        filter: {
-          bool: {
-            must,
-            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "senior" } }],
-          },
-        },
+        filter: aggBoolFor([
+          ...filtersExcept("wcmAuthorRole"),
+          { term: { wcmAuthorPositions: "senior" } },
+        ]),
       },
       wcmRoleMiddle: {
-        filter: {
-          bool: {
-            must,
-            filter: [...filtersExcept("wcmAuthorRole"), { term: { wcmAuthorPositions: "middle" } }],
-          },
-        },
+        filter: aggBoolFor([
+          ...filtersExcept("wcmAuthorRole"),
+          { term: { wcmAuthorPositions: "middle" } },
+        ]),
       },
       // Issue #88 — Author facet. Top 500 mirrors the journal cap;
       // typeahead in the client narrows further. Cardinality sub-agg
       // surfaces the true distinct author count for the rail header
       // (`Author 1,619`) so users see the full scope of the facet.
       wcmAuthors: {
-        filter: { bool: { must, filter: filtersExcept("wcmAuthor") } },
+        filter: aggBoolFor(filtersExcept("wcmAuthor")),
         aggs: {
           keys: { terms: { field: "wcmAuthorCwids", size: 500 } },
           total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
@@ -996,15 +1150,10 @@ export async function searchPublications(opts: {
               const bucketPmids = mentoringBuckets.byProgram[key];
               acc[key] =
                 bucketPmids.length > 0
-                  ? {
-                      bool: {
-                        must,
-                        filter: [
-                          ...filtersExcept("mentoring"),
-                          { terms: { pmid: bucketPmids } },
-                        ],
-                      },
-                    }
+                  ? aggBoolFor([
+                      ...filtersExcept("mentoring"),
+                      { terms: { pmid: bucketPmids } },
+                    ])
                   : { bool: { must_not: [{ match_all: {} }] } };
               return acc;
             },
@@ -1164,6 +1313,8 @@ export async function searchPublications(opts: {
     page,
     pageSize: PAGE_SIZE,
     queryShape,
+    meshDescendantSetSize: resolution?.descendantUis.length ?? null,
+    meshAnchorCount: resolution?.curatedTopicAnchors.length ?? null,
     facets: {
       publicationTypes: (r.aggregations?.publicationTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,
