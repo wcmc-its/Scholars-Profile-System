@@ -38,6 +38,7 @@ describe("ConceptChip", () => {
   it("renders the primary line with the descriptor name", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -50,6 +51,7 @@ describe("ConceptChip", () => {
   it("surfaces the scope note in a HoverTooltip on focus (dark-pill aesthetic)", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -69,6 +71,7 @@ describe("ConceptChip", () => {
   it("mouse-enter also shows the tooltip immediately (no 200ms delay for §1.11)", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -82,6 +85,7 @@ describe("ConceptChip", () => {
   it("renders a plain <span> with no tooltip when scopeNote is null", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_NO_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -97,6 +101,7 @@ describe("ConceptChip", () => {
   it("renders the matched query in the secondary line, wrapped in curly quotes", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -112,6 +117,7 @@ describe("ConceptChip", () => {
   it("renders the broaden link at the provided href (not synthesized in the component)", () => {
     render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&type=publications&mesh=off"
@@ -126,6 +132,7 @@ describe("ConceptChip", () => {
   it("declares an accessible label on the chip surface", () => {
     const { container } = render(
       <ConceptChip
+        mode="strict"
         resolution={RESOLUTION_WITH_SCOPE}
         matchedQuery="EHR"
         broadenHref="/search?q=EHR&mesh=off"
@@ -134,6 +141,114 @@ describe("ConceptChip", () => {
     const root = container.firstChild as HTMLElement;
     expect(root.getAttribute("aria-label")).toBe(
       "Search refined by MeSH concept",
+    );
+  });
+});
+
+/**
+ * Issue #259 §6.1 — `expanded_default` mode renders the new copy and two
+ * affordances ("Narrow to this concept only" + "Don't use MeSH ✕").
+ */
+describe("ConceptChip — expanded_default mode (§6.1)", () => {
+  it("renders the 'Boosted by MeSH concept' heading", () => {
+    render(
+      <ConceptChip
+        mode="expanded_default"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        narrowHref="/search?q=EHR&mesh=strict"
+        broadenHref="/search?q=EHR&mesh=off"
+      />,
+    );
+    expect(screen.getByText(/Boosted by MeSH concept/i)).toBeTruthy();
+    expect(screen.queryByText(/Showing pubs for MeSH concept/i)).toBeNull();
+    expect(screen.getByText("Electronic Health Records")).toBeTruthy();
+  });
+
+  it("renders the narrow link at narrowHref", () => {
+    render(
+      <ConceptChip
+        mode="expanded_default"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        narrowHref="/search?q=EHR&mesh=strict"
+        broadenHref="/search?q=EHR&mesh=off"
+      />,
+    );
+    const narrow = screen.getByRole("link", {
+      name: /narrow to this concept only/i,
+    });
+    expect(narrow.getAttribute("href")).toBe("/search?q=EHR&mesh=strict");
+  });
+
+  it("renders the broaden link at broadenHref with 'Don't use MeSH ✕' copy", () => {
+    render(
+      <ConceptChip
+        mode="expanded_default"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        narrowHref="/search?q=EHR&mesh=strict"
+        broadenHref="/search?q=EHR&mesh=off"
+      />,
+    );
+    const broaden = screen.getByRole("link", { name: /don.?t use MeSH/i });
+    expect(broaden.getAttribute("href")).toBe("/search?q=EHR&mesh=off");
+    // The strict-mode "Search broadly instead" copy must not appear.
+    expect(
+      screen.queryByRole("link", { name: /search broadly instead/i }),
+    ).toBeNull();
+  });
+});
+
+/**
+ * Issue #259 §6.1 — `expanded_narrow` mode renders the narrow heading and
+ * a single "Expand to related ✕" affordance.
+ */
+describe("ConceptChip — expanded_narrow mode (§6.1)", () => {
+  it("renders the 'Narrowed to MeSH concept' heading", () => {
+    render(
+      <ConceptChip
+        mode="expanded_narrow"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        expandHref="/search?q=EHR"
+      />,
+    );
+    expect(screen.getByText(/Narrowed to MeSH concept/i)).toBeTruthy();
+    expect(screen.getByText("Electronic Health Records")).toBeTruthy();
+  });
+
+  it("renders the expand link at expandHref with 'Expand to related ✕' copy", () => {
+    render(
+      <ConceptChip
+        mode="expanded_narrow"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        expandHref="/search?q=EHR"
+      />,
+    );
+    const expand = screen.getByRole("link", { name: /expand to related/i });
+    expect(expand.getAttribute("href")).toBe("/search?q=EHR");
+    // Neither narrow nor broaden affordances appear in this mode.
+    expect(
+      screen.queryByRole("link", { name: /narrow to this concept only/i }),
+    ).toBeNull();
+    expect(screen.queryByRole("link", { name: /don.?t use MeSH/i })).toBeNull();
+  });
+
+  it("preserves the scope-note tooltip on the descriptor name", () => {
+    render(
+      <ConceptChip
+        mode="expanded_narrow"
+        resolution={RESOLUTION_WITH_SCOPE}
+        matchedQuery="EHR"
+        expandHref="/search?q=EHR"
+      />,
+    );
+    const name = screen.getByText("Electronic Health Records");
+    fireEvent.focus(name);
+    expect(screen.getByRole("tooltip").textContent).toBe(
+      "Media that store digital health information for individuals.",
     );
   });
 });

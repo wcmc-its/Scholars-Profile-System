@@ -194,6 +194,8 @@ type MeshResolutionForTest = {
   scopeNote: string | null;
   entryTerms: string[];
   curatedTopicAnchors: string[];
+  /** Issue #259 §5.4.2 / PR 2 — self at index 0, then descendants. */
+  descendantUis: string[];
 };
 
 const RESOLUTION_WITH_ANCHORS: MeshResolutionForTest = {
@@ -204,11 +206,17 @@ const RESOLUTION_WITH_ANCHORS: MeshResolutionForTest = {
   scopeNote: null,
   entryTerms: ["EHR", "EMR", "Electronic Medical Records"],
   curatedTopicAnchors: ["digital-health", "informatics"],
+  descendantUis: ["D057286", "D000077863"],
 };
 
 const RESOLUTION_WITHOUT_ANCHORS: MeshResolutionForTest = {
   ...RESOLUTION_WITH_ANCHORS,
   curatedTopicAnchors: [],
+};
+
+const RESOLUTION_EMPTY_DESCENDANTS: MeshResolutionForTest = {
+  ...RESOLUTION_WITH_ANCHORS,
+  descendantUis: [],
 };
 
 function topLevelBool(body: Record<string, unknown>): {
@@ -417,5 +425,292 @@ describe("pub-tab query shape — SEARCH_PUB_TAB_OR_OF_EVIDENCE (§1.6)", () => 
     // reciterParentTopicId must NOT appear anywhere — anchors were empty,
     // so Path B wasn't built.
     expect(JSON.stringify(capturedBodies[0])).not.toContain("reciterParentTopicId");
+  });
+});
+
+
+/**
+ * Issue #259 SPEC §5 — `SEARCH_PUB_TAB_CONCEPT_MODE` query-shape cases.
+ *
+ *   `strict`   (default at PR-3 merge) — body byte-identical to today's
+ *              `concept_filtered` / `concept_fallback` / §1.2 paths.
+ *   `expanded` — §5.2 four-clause body when resolution+descendants present.
+ *   `off`      — §1.2 path even when resolution is present (resolution is
+ *              logged but not applied).
+ *
+ * §6.2 — `meshStrict` opt-in forces strict-mode admission under flag=expanded.
+ */
+describe("pub-tab query shape — SEARCH_PUB_TAB_CONCEPT_MODE (§5)", () => {
+  const originalMsm = process.env.SEARCH_PUB_TAB_MSM;
+  const originalNew = process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
+  const originalLegacy = process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
+
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    vi.resetModules();
+    process.env.SEARCH_PUB_TAB_MSM = "on";
+    delete process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
+    delete process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
+  });
+
+  afterEach(() => {
+    process.env.SEARCH_PUB_TAB_MSM = originalMsm;
+    if (originalNew === undefined) delete process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
+    else process.env.SEARCH_PUB_TAB_CONCEPT_MODE = originalNew;
+    if (originalLegacy === undefined) delete process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE;
+    else process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = originalLegacy;
+  });
+
+  it("case 1 — strict, resolution=null: §1.2 shape, no top-level should", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const result = await mod.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: null,
+    });
+    expect(result.queryShape).toBe("restructured_msm");
+    const bool = topLevelBool(capturedBodies[0]);
+    expect(bool).not.toHaveProperty("should");
+    expect(bool).not.toHaveProperty("minimum_should_match");
+    expect(bool.must).toHaveLength(1);
+  });
+
+  it("case 2 — strict, resolution with anchors: concept_filtered body byte-identical to legacy OR_OF_EVIDENCE=on", async () => {
+    // Run under new flag = strict.
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
+    const mod1 = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const r1 = await mod1.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    expect(r1.queryShape).toBe("concept_filtered");
+    const strictBody = capturedBodies[0];
+
+    // Reset and run under legacy OR_OF_EVIDENCE=on.
+    capturedBodies.length = 0;
+    vi.resetModules();
+    delete process.env.SEARCH_PUB_TAB_CONCEPT_MODE;
+    process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "on";
+    const mod2 = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const r2 = await mod2.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    expect(r2.queryShape).toBe("concept_filtered");
+    const legacyBody = capturedBodies[0];
+
+    // §7.2 byte-identical guarantee — strict mode produces the same body
+    // the legacy OR_OF_EVIDENCE=on path produces today. Locks the rollback
+    // target across the SEARCH_PUB_TAB_OR_OF_EVIDENCE retirement.
+    expect(strictBody).toEqual(legacyBody);
+  });
+
+  it("case 3 — expanded, resolution with anchors + descendants: §5.2 four-clause body", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const result = await mod.searchPublications({
+      q: "EHR",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    expect(result.queryShape).toBe("concept_expanded");
+    const bool = topLevelBool(capturedBodies[0]);
+
+    // SPEC §5.2 — no `must` key (admission lives in top-level should).
+    expect(bool).not.toHaveProperty("must");
+    // minimum_should_match: 1 at top-level bool.
+    expect((bool as { minimum_should_match?: number }).minimum_should_match).toBe(1);
+
+    // Four clauses: BM25(q) + BM25(name) + terms(descendantUis) + terms(anchors).
+    const should = bool.should as Record<string, unknown>[];
+    expect(should).toHaveLength(4);
+
+    const bm25Q = should[0] as { multi_match: Record<string, unknown> };
+    expect(bm25Q.multi_match.query).toBe("EHR");
+    expect(bm25Q.multi_match.boost).toBe(1);
+
+    const bm25Name = should[1] as { multi_match: Record<string, unknown> };
+    expect(bm25Name.multi_match.query).toBe("Electronic Health Records");
+    expect(bm25Name.multi_match.boost).toBe(1);
+
+    const meshUi = should[2] as { terms: Record<string, unknown> };
+    expect(meshUi.terms.meshDescriptorUi).toEqual(["D057286", "D000077863"]);
+    expect(meshUi.terms.boost).toBe(8);
+
+    const anchors = should[3] as { terms: Record<string, unknown> };
+    expect(anchors.terms.reciterParentTopicId).toEqual([
+      "digital-health",
+      "informatics",
+    ]);
+    expect(anchors.terms.boost).toBe(6);
+  });
+
+  it("case 4 — expanded, resolution without anchors: §5.2 with clause 4 omitted (3 clauses)", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const result = await mod.searchPublications({
+      q: "EHR",
+      page: 0,
+      meshResolution: RESOLUTION_WITHOUT_ANCHORS,
+    });
+    expect(result.queryShape).toBe("concept_expanded");
+    const bool = topLevelBool(capturedBodies[0]);
+    const should = bool.should as Record<string, unknown>[];
+    expect(should).toHaveLength(3);
+    // No anchor clause; reciterParentTopicId absent from the serialized body.
+    expect(JSON.stringify(capturedBodies[0])).not.toContain("reciterParentTopicId");
+  });
+
+  it("case 5 — expanded + meshStrict=true: byte-identical to strict-mode concept_filtered (chip narrow override)", async () => {
+    // Run expanded + meshStrict.
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const modExp = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const rExp = await modExp.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+      meshStrict: true,
+    });
+    expect(rExp.queryShape).toBe("concept_filtered");
+    const expandedNarrowBody = capturedBodies[0];
+
+    // Reset and run pure strict mode.
+    capturedBodies.length = 0;
+    vi.resetModules();
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
+    const modStrict = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    await modStrict.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    const strictBody = capturedBodies[0];
+
+    expect(expandedNarrowBody).toEqual(strictBody);
+  });
+
+  it("case 6 — off, resolution present: §1.2 shape (resolution logged but not applied)", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "off";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    const result = await mod.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    expect(result.queryShape).toBe("restructured_msm");
+    const bool = topLevelBool(capturedBodies[0]);
+    expect(bool).not.toHaveProperty("should");
+    expect(JSON.stringify(capturedBodies[0])).not.toContain("reciterParentTopicId");
+    expect(JSON.stringify(capturedBodies[0])).not.toContain("meshDescriptorUi");
+  });
+
+  it("case 7 — expanded + empty descendantUis: falls through to §1.2 + logs invariant violation", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const mod = (await import("@/lib/api/search")) as {
+        searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+      };
+      const result = await mod.searchPublications({
+        q: "EHR",
+        page: 0,
+        meshResolution: RESOLUTION_EMPTY_DESCENDANTS,
+      });
+      // Defensive fall-through: not concept_expanded, body is the §1.2 shape.
+      expect(result.queryShape).toBe("restructured_msm");
+      expect(JSON.stringify(capturedBodies[0])).not.toContain("meshDescriptorUi");
+      // Loud log fired exactly once with the descriptor UI for grep.
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(errorSpy.mock.calls[0][0] as string);
+      expect(payload.event).toBe("concept_expanded_invariant_violated");
+      expect(payload.descriptorUi).toBe("D057286");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("case 8 — expanded shape: facet aggs reference top-level should + msm:1, not must", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "expanded";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    await mod.searchPublications({
+      q: "EHR",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    const body = capturedBodies[0];
+    const aggs = body.aggs as Record<string, Record<string, unknown>>;
+    const expectedShould = (topLevelBool(body).should as Record<string, unknown>[]);
+
+    for (const aggName of ["publicationTypes", "journals", "wcmRoleFirst"]) {
+      const filter = aggs[aggName].filter as { bool: Record<string, unknown> };
+      expect(filter.bool).not.toHaveProperty("must");
+      expect(filter.bool.should).toEqual(expectedShould);
+      expect(filter.bool.minimum_should_match).toBe(1);
+    }
+  });
+
+  it("case 9 — strict mode aggs still carry `must` (byte-identical to legacy)", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{ queryShape: string }>;
+    };
+    await mod.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    const body = capturedBodies[0];
+    const aggs = body.aggs as Record<string, Record<string, unknown>>;
+    const expectedMust = (topLevelBool(body).must as Record<string, unknown>[]);
+    const pubTypesFilter = aggs.publicationTypes.filter as { bool: Record<string, unknown> };
+    expect(pubTypesFilter.bool.must).toEqual(expectedMust);
+    expect(pubTypesFilter.bool).not.toHaveProperty("should");
+  });
+
+  it("case 10 — telemetry fields populated unconditionally on the result", async () => {
+    process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "strict";
+    const mod = (await import("@/lib/api/search")) as {
+      searchPublications: (opts: unknown) => Promise<{
+        queryShape: string;
+        meshDescendantSetSize: number | null;
+        meshAnchorCount: number | null;
+      }>;
+    };
+    const withResolution = await mod.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: RESOLUTION_WITH_ANCHORS,
+    });
+    expect(withResolution.meshDescendantSetSize).toBe(2);
+    expect(withResolution.meshAnchorCount).toBe(2);
+
+    const withoutResolution = await mod.searchPublications({
+      q: "electronic health records",
+      page: 0,
+      meshResolution: null,
+    });
+    expect(withoutResolution.meshDescendantSetSize).toBe(null);
+    expect(withoutResolution.meshAnchorCount).toBe(null);
   });
 });
