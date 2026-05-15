@@ -117,4 +117,50 @@ describe("PublicationMeta — impact / concept inline (issue #284)", () => {
     const { container } = render(<PublicationMeta impactScore={42} />);
     expect(container.textContent).toMatch(/Impact:\s*42/);
   });
+
+  // Issue #316 PR-C — when `impactJustification` is provided alongside a
+  // non-null impactScore, the inline value becomes a hover/focus tooltip
+  // trigger. The text content of the row stays the same; the wrapper
+  // gets a focusable trigger with `cursor-help`.
+  it("wraps Impact: NN in a focusable tooltip trigger when impactJustification is provided (#316 PR-C)", () => {
+    const { container } = render(
+      <PublicationMeta
+        impactScore={42}
+        impactJustification="Widely cited mechanistic study with strong methodology."
+      />,
+    );
+    // The value still renders.
+    expect(container.textContent).toMatch(/Impact:\s*42/);
+    // A focusable span is now wrapping it (tabIndex=0 means tabindex attr present).
+    const focusable = container.querySelector('[tabindex="0"]');
+    expect(focusable).not.toBeNull();
+    expect(focusable!.textContent).toMatch(/Impact:\s*42/);
+  });
+
+  it("does NOT wrap Impact in a tooltip when impactJustification is null or empty (no signal worth surfacing)", () => {
+    const { container: bareContainer } = render(<PublicationMeta impactScore={42} />);
+    expect(bareContainer.querySelector('[tabindex="0"]')).toBeNull();
+
+    const { container: nullContainer } = render(
+      <PublicationMeta impactScore={42} impactJustification={null} />,
+    );
+    expect(nullContainer.querySelector('[tabindex="0"]')).toBeNull();
+
+    const { container: emptyContainer } = render(
+      <PublicationMeta impactScore={42} impactJustification="" />,
+    );
+    expect(emptyContainer.querySelector('[tabindex="0"]')).toBeNull();
+  });
+
+  it("does NOT wrap when impactScore is null even if a justification string is provided (nothing to explain)", () => {
+    const { container } = render(
+      <PublicationMeta
+        impactScore={null}
+        impactJustification="Some text that wouldn't have a referent"
+      />,
+    );
+    // No impact value rendered, so no tooltip trigger.
+    expect(container.textContent).not.toContain("Impact:");
+    expect(container.querySelector('[tabindex="0"]')).toBeNull();
+  });
 });

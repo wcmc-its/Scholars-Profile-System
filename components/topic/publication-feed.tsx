@@ -43,6 +43,13 @@ type Hit = {
    * `SEARCH_PUB_TAB_IMPACT` is off (API short-circuits to null).
    */
   impactScore: number | null;
+  /**
+   * Issue #316 PR-C — GPT-generated rubric justification for `impactScore`.
+   * When present, the inline `Impact: NN` becomes a hover/focus tooltip
+   * trigger revealing this text. Null when impactScore is null or the
+   * publication has no impact data.
+   */
+  impactJustification: string | null;
   authors: Array<{
     name: string;
     cwid: string;
@@ -259,6 +266,7 @@ export function PublicationFeed({
                 <PublicationMeta
                   citationCount={h.citationCount}
                   impactScore={h.impactScore}
+                  impactJustification={h.impactJustification}
                   pmid={h.pmid}
                   pmcid={h.pmcid}
                   doi={h.doi}
