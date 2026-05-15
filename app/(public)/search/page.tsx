@@ -44,6 +44,7 @@ import { sanitizePubTitle } from "@/lib/utils";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
+import { methodologyHref } from "@/lib/methodology-anchors";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
@@ -1604,12 +1605,30 @@ function ResultsToolbar({
     href: buildSortHref(o.value),
   }));
 
+  // Issue #285 — single page-level disclosure pointing at the methodology
+  // anchor explaining the 0–100 impact score. Pub-tab only, gated on the
+  // same §1.8 flag that surfaces the inline score so the link doesn't
+  // promise an explanation for a number that isn't being shown.
+  const showAboutImpact = tab === "publications" && pubImpactOn && total > 0;
+
   return (
     <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-[#757575]">
       {total > 0 ? (
         <span>
           Showing {start}–{end} of{" "}
           <strong className="font-semibold text-[#4a4a4a]">{total.toLocaleString()}</strong> {noun}
+          {showAboutImpact ? (
+            <>
+              {" "}
+              <span aria-hidden="true" className="text-muted-foreground/60">·</span>{" "}
+              <Link
+                href={methodologyHref("impact")}
+                className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+              >
+                About impact
+              </Link>
+            </>
+          ) : null}
         </span>
       ) : null}
       <span className="ml-auto inline-flex items-center gap-3 text-[#4a4a4a]">

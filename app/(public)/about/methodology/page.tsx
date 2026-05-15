@@ -127,6 +127,70 @@ export default function MethodologyPage() {
         </p>
       </section>
 
+      <section id={METHODOLOGY_ANCHORS.impact} className="mt-12">
+        <h2 className="text-lg font-semibold">What the impact score means</h2>
+        <p className="mt-3 text-base">
+          The number labelled <strong>Impact</strong> on a publication is an
+          integer between 0 and 100, where higher means greater research
+          impact. It is the <em>research impact</em> term in the ranking
+          formula described below &mdash; the same number that drives the
+          &ldquo;By impact (ReCiterAI)&rdquo; sort option on publication
+          lists.
+        </p>
+        <p className="mt-3 text-base">
+          To produce it, a large language model reads the publication&apos;s
+          title, abstract, journal, year, authorship, citation count, and
+          (when available) the NIH iCite percentile, and scores the paper
+          against a calibrated rubric. The rubric weighs novelty,
+          methodological rigor, evidence of influence or uptake by other
+          researchers, translational relevance, citation potential, and
+          venue prestige. Scores refresh daily as new publications enter the
+          corpus and as citation and iCite signals update.
+        </p>
+        <p className="mt-3 text-base">
+          A few things the impact score is <em>not</em>:
+        </p>
+        <ul className="mt-3 ml-6 list-disc text-base">
+          <li>
+            Not a citation count. A 2024 paper with no citations yet can
+            score high on rubric criteria; an older paper with many
+            citations can score lower if the underlying work is judged
+            incremental.
+          </li>
+          <li>
+            Not a journal impact factor. The score is per-paper, not
+            per-venue. A high-impact paper in a low-prestige journal will
+            score on its own merits.
+          </li>
+          <li>
+            Not a field-normalized percentile. There is no &ldquo;top 10%
+            of cardiology&rdquo; calculation; the rubric is applied
+            uniformly across fields.
+          </li>
+        </ul>
+        <p className="mt-3 text-base">
+          When a search resolves to a specific research area &mdash; for
+          example, typing a MeSH term like &ldquo;diabetes&rdquo; that maps
+          to a curated topic &mdash; result rows may show a second number
+          labelled <strong>Concept</strong>. That value is the
+          publication&apos;s strongest score within the searched topic&apos;s
+          curated subtopics. Comparing <em>Impact</em> against{" "}
+          <em>Concept</em> shows whether a paper is judged more or less
+          impactful <em>within the searched topic</em> than across its
+          overall record. A paper might score 65 globally but 82 within a
+          narrow subfield it helped establish, or 65 globally and 41 within
+          a topic it only tangentially touches.
+        </p>
+        <p className="mt-3 text-base">
+          A practical caveat: language-model scoring is not fully
+          deterministic. Re-scoring the same paper at a different time can
+          produce a score a few points higher or lower without any
+          underlying change. Treat the number as a coarse signal, not a
+          precise rank &mdash; the gap between a 72 and a 74 is noise; the
+          gap between a 45 and a 75 is meaningful.
+        </p>
+      </section>
+
       <section className="mt-12">
         <h2 className="text-lg font-semibold">How the ranking works at a high level</h2>
         <p className="mt-3 text-base">
