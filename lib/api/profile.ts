@@ -471,26 +471,23 @@ export async function getScholarFullProfileBySlug(
     },
   });
 
-  // Fallback impact source: the IMPACT# DynamoDB projection that populates
-  // `publication_score` is documented as pending (etl/dynamodb/index.ts:14-22),
-  // so `publication_score` is empty in the prototype DB. The TOPIC# projection
-  // (`publication_topic`) carries the canonical per-paper impact in
-  // `impact_score` (mirrored from IMPACT#.impact_score; same value across all
-  // topic rows for a single pmid, so MAX collapses safely). NOT `score` —
-  // that's per-topic relevance (0–1), not impact, and using it ranks high-
-  // relevance lightweight papers above true high-impact ones.
-  const topicImpactRows = (await prisma.$queryRawUnsafe(
-    `SELECT pmid, MAX(impact_score) AS max_impact
-       FROM publication_topic
-      WHERE cwid = ? AND impact_score IS NOT NULL
-      GROUP BY pmid`,
-    scholar.cwid,
-  )) as Array<{ pmid: string; max_impact: number | string | null }>;
-  const topicImpactByPmid = new Map<string, number>(
-    topicImpactRows.map((r) => [r.pmid, Number(r.max_impact ?? 0)]),
-  );
-
-  const rankablePubs = authorships.map((a) => ({
+  const rankablePubs = authorships.map((a) => {
+    // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
+    // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
+    // (currently empty in prototype — populated by a future per-(cwid, pmid)
+    // projection), then fall back to the per-pmid global `Publication.impactScore`
+    // landed by the IMPACT# DynamoDB ETL block. Pre-2020 papers and papers
+    // ReCiterAI didn't score yield 0, which legitimately excludes them from
+    // Selected highlights per D-15.
+    //
+    // The previous fallback ran a MAX-collapse over `publication_topic.impact_score`
+    // because the global score had no home column; that workaround was retired in
+    // PR-B of #316 once `Publication.impactScore` came online.
+    const pubImpact =
+      a.publication.impactScore !== null && a.publication.impactScore !== undefined
+        ? Number(a.publication.impactScore)
+        : 0;
+    return {
     pmid: a.publication.pmid,
     title: a.publication.title,
     authorsString: a.publication.authorsString,
@@ -498,15 +495,8 @@ export async function getScholarFullProfileBySlug(
     year: a.publication.year,
     publicationType: a.publication.publicationType,
     citationCount: a.publication.citationCount, // display-only — NOT used by Variant B ranking
-    // ReCiterAI publication score for this scholar+pmid pair (D-08). Prefers
-    // PublicationScore (IMPACT# projection); falls back to MAX across the
-    // scholar's PublicationTopic rows (TOPIC# projection — populated). Both
-    // pre-2020 papers and papers ReCiterAI didn't score at all yield 0, which
-    // legitimately excludes them from Selected highlights per D-15.
     reciteraiImpact:
-      a.publication.publicationScores[0]?.score
-        ?? topicImpactByPmid.get(a.publication.pmid)
-        ?? 0,
+      a.publication.publicationScores[0]?.score ?? pubImpact,
     dateAddedToEntrez: a.publication.dateAddedToEntrez,
     doi: a.publication.doi,
     pmcid: a.publication.pmcid,
@@ -540,7 +530,8 @@ export async function getScholarFullProfileBySlug(
         })),
       scholar.cwid,
     ),
-  }));
+    };
+  });
 
   const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
 
