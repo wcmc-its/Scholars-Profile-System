@@ -15,7 +15,7 @@
  *   - returns null for unknown topic slug
  *   - getSubtopicsForTopic returns subtopics sorted by pubCount DESC
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // vi.mock is hoisted above imports; declare via vi.hoisted so variables are
 // available when the factory runs.
@@ -83,6 +83,13 @@ function makePtRow(overrides: {
   primarySubtopicId?: string | null;
   year?: number;
   score?: number;
+  /**
+   * Issue #305 — per-row topic-context impact score from
+   * `PublicationTopic.impactScore`. Defaults to null so existing tests
+   * (which don't care about this field) see the same hit shape they did
+   * before #305 added impact surfacing.
+   */
+  impactScore?: number | null;
   authorPosition?: string;
   publicationType?: string;
   citationCount?: number;
@@ -97,7 +104,7 @@ function makePtRow(overrides: {
     subtopicIds: null,
     subtopicConfidences: null,
     score: overrides.score ?? 1.0,
-    impactScore: null,
+    impactScore: overrides.impactScore ?? null,
     authorPosition: overrides.authorPosition ?? "first",
     year: overrides.year ?? 2024,
     publication: {
@@ -294,6 +301,71 @@ describe("getTopicPublications", () => {
       mockTransaction.mockResolvedValue([[], 0]);
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.pageSize).toBe(20);
+    });
+  });
+
+  // Issue #305 — topic-context impactScore surfacing on hits. Pure mapper
+  // behavior (Decimal → number, null passthrough, env-flag gating). All
+  // three sort paths share the same mapper, so the SQL-direct (newest) +
+  // in-process (by_impact) paths each get one assertion to lock the flow.
+  describe("issue #305 — impactScore surfacing", () => {
+    const originalImpactFlag = process.env.SEARCH_PUB_TAB_IMPACT;
+    beforeEach(() => {
+      process.env.SEARCH_PUB_TAB_IMPACT = "on";
+    });
+    afterEach(() => {
+      if (originalImpactFlag === undefined) {
+        delete process.env.SEARCH_PUB_TAB_IMPACT;
+      } else {
+        process.env.SEARCH_PUB_TAB_IMPACT = originalImpactFlag;
+      }
+    });
+
+    it("flag on: surfaces PublicationTopic.impactScore on hits (SQL-direct path)", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [
+        makePtRow({ pmid: "100", impactScore: 47 }),
+        makePtRow({ pmid: "101", impactScore: 12 }),
+      ];
+      mockTransaction.mockResolvedValue([rows, 2, 2, 2]);
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits.map((h) => h.impactScore)).toEqual([47, 12]);
+    });
+
+    it("flag on: null impactScore on the row stays null on the hit", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [makePtRow({ pmid: "200", impactScore: null })];
+      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.impactScore).toBeNull();
+    });
+
+    it("flag on: surfaces impactScore on the in-process by_impact path too", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [makePtRow({ pmid: "300", impactScore: 73 })];
+      mockPublicationTopicFindMany.mockResolvedValue(rows);
+      mockPublicationTopicCount.mockResolvedValue(1);
+      mockScorePublication.mockReturnValue(0.9);
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
+      expect(result!.hits[0]!.impactScore).toBe(73);
+    });
+
+    it("flag off: API short-circuits impactScore to null even when row has a value", async () => {
+      process.env.SEARCH_PUB_TAB_IMPACT = "off";
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [makePtRow({ pmid: "400", impactScore: 89 })];
+      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.impactScore).toBeNull();
+    });
+
+    it("flag unset: defaults to off (impactScore forced to null)", async () => {
+      delete process.env.SEARCH_PUB_TAB_IMPACT;
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [makePtRow({ pmid: "500", impactScore: 55 })];
+      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.impactScore).toBeNull();
     });
   });
 });

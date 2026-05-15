@@ -445,6 +445,20 @@ export type TopicPublicationHit = {
   pubmedUrl: string | null;
   doi: string | null;
   pmcid: string | null;
+  /**
+   * Issue #305 — topic-context impact score for the row's
+   * `parentTopicId = topicSlug` pairing, sourced from
+   * `PublicationTopic.impactScore`. Surfaces as `Impact: NN` in the
+   * publication-feed meta row. Null when the row has no LLM-scored impact
+   * value (older publications, non-research types) OR when the
+   * `SEARCH_PUB_TAB_IMPACT` flag is off (API short-circuits to null for
+   * cross-surface consistency with the search pub-tab).
+   *
+   * Single label `Impact` (not `Impact + Concept` like the search pub-tab):
+   * the whole page is already topic-scoped, so the disambiguation that's
+   * useful on search is redundant here.
+   */
+  impactScore: number | null;
   /** WCM-confirmed coauthors with chip-render data (headshot + first/last role
    *  flags). Empty array when the publication has no confirmed WCM authors;
    *  publication-feed UI suppresses the chip row in that case. */
@@ -504,6 +518,11 @@ export async function getTopicPublications(
 ): Promise<TopicPublicationsResult | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
   if (!topic) return null;
+
+  // #305 — flag-gate the `impactScore` field surfacing to the public hit
+  // shape so flipping `SEARCH_PUB_TAB_IMPACT=off` hides the new number on
+  // topic pages too. Computed once here, passed to mapToTopicPublicationHit.
+  const includeImpact = (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
 
   const page = Math.max(0, opts.page ?? 0);
   const filter = opts.filter ?? "research_articles_only";
@@ -568,7 +587,7 @@ export async function getTopicPublications(
     return {
       hits: (rows as Array<{ pmid: string }>).map((r) =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid)),
+        mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact),
       ),
       total,
       totalAllTypes,
@@ -632,7 +651,7 @@ export async function getTopicPublications(
   return {
     hits: slice.map((s) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mapToTopicPublicationHit(s.row as any, authorsByPmid.get(s.row.pmid)),
+      mapToTopicPublicationHit(s.row as any, authorsByPmid.get(s.row.pmid), includeImpact),
     ),
     total,
     totalAllTypes,
@@ -647,12 +666,26 @@ export async function getTopicPublications(
  * Optional `wcmAuthors` argument carries the confirmed WCM coauthors for this pmid
  * (fetched in batch via fetchWcmAuthorsForPmids); when omitted, authors defaults to []
  * which the publication-feed UI suppresses per Phase 3 D-06 absence-as-default.
+ *
+ * `includeImpact` (#305) gates the surfacing of `PublicationTopic.impactScore`
+ * to the public hit shape under the `SEARCH_PUB_TAB_IMPACT` flag, matching
+ * the search pub-tab's gating pattern. Off → impactScore always null.
  */
 function mapToTopicPublicationHit(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   r: any,
-  wcmAuthors?: TopicPublicationHit["authors"],
+  wcmAuthors: TopicPublicationHit["authors"] | undefined,
+  includeImpact: boolean,
 ): TopicPublicationHit {
+  // r.impactScore is Prisma's Decimal | null on PublicationTopic. Convert
+  // via Number() (Decimal#toNumber for non-null; coalesce null straight
+  // through). Cap at 0 floor — the source is the LLM rubric on the
+  // [0, 100] scale, but defense-in-depth against a stray negative leak.
+  let impactScore: number | null = null;
+  if (includeImpact && r.impactScore !== null && r.impactScore !== undefined) {
+    const n = Number(r.impactScore);
+    impactScore = Number.isFinite(n) ? n : null;
+  }
   return {
     pmid: r.pmid,
     title: r.publication.title ?? "",
@@ -663,6 +696,7 @@ function mapToTopicPublicationHit(
     pubmedUrl: r.publication.pubmedUrl ?? null,
     doi: r.publication.doi ?? null,
     pmcid: r.publication.pmcid ?? null,
+    impactScore,
     authors: wcmAuthors ?? [],
   };
 }

@@ -36,6 +36,13 @@ type Hit = {
   pubmedUrl: string | null;
   doi: string | null;
   pmcid: string | null;
+  /**
+   * Issue #305 — topic-context impact score for the row at this topic's
+   * `parentTopicId`. Renders inline as `Impact: NN` in the meta row when
+   * non-null. Null when the row has no LLM-scored impact value OR when
+   * `SEARCH_PUB_TAB_IMPACT` is off (API short-circuits to null).
+   */
+  impactScore: number | null;
   authors: Array<{
     name: string;
     cwid: string;
@@ -251,6 +258,7 @@ export function PublicationFeed({
                 <AuthorChipRow authors={h.authors} pmid={h.pmid} />
                 <PublicationMeta
                   citationCount={h.citationCount}
+                  impactScore={h.impactScore}
                   pmid={h.pmid}
                   pmcid={h.pmcid}
                   doi={h.doi}
