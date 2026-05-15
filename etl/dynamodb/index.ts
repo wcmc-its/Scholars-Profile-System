@@ -242,7 +242,6 @@ async function main() {
       subtopicIds: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       subtopicConfidences: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       score: Prisma.Decimal;
-      impactScore: Prisma.Decimal | null;
       rationale: string | null;
       synopsis: string | null;
       authorPosition: string;
@@ -300,8 +299,9 @@ async function main() {
             ? (it.subtopic_confidences as Prisma.InputJsonValue)
             : Prisma.JsonNull,
         score: new Prisma.Decimal(score),
-        impactScore:
-          typeof it.impact_score === "number" ? new Prisma.Decimal(it.impact_score) : null,
+        // it.impact_score is intentionally not persisted to publication_topic;
+        // the mirror column was dropped in #316 PR-B-finalize. The IMPACT#
+        // Block 4 below writes the canonical value to Publication.impactScore.
         rationale: typeof it.rationale === "string" && it.rationale ? it.rationale : null,
         synopsis: typeof it.synopsis === "string" && it.synopsis ? it.synopsis : null,
         authorPosition,
@@ -336,7 +336,6 @@ async function main() {
               subtopicIds: w.subtopicIds,
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
-              impactScore: w.impactScore,
               rationale: w.rationale,
               synopsis: w.synopsis,
               authorPosition: w.authorPosition,
@@ -347,7 +346,6 @@ async function main() {
               subtopicIds: w.subtopicIds,
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
-              impactScore: w.impactScore,
               rationale: w.rationale,
               synopsis: w.synopsis,
               authorPosition: w.authorPosition,

@@ -1,18 +1,17 @@
 /**
- * Issue #259 §1.8 (migrated in #316 PR-B) — `buildPubImpactFields` derives
- * the doc-level `impactScore` (sortable, sourced from Publication.impactScore)
- * and `topicImpacts` (per-topic MAX over publication_topic.impact_score rows,
- * used by the API for the "Concept impact" badge).
+ * Issue #259 §1.8 (migrated through #316 PR-B-finalize) —
+ * `buildPubImpactFields` derives the doc-level `impactScore` (sortable,
+ * sourced from Publication.impactScore) and `topicImpacts[]` (one entry
+ * per distinct parentTopicId; each carries the same doc-level value).
  *
  * Invariants under test:
- *   - publicationImpactScore null AND no non-null topic rows → empty object.
- *   - publicationImpactScore null + non-null topic rows → only topicImpacts.
- *   - publicationImpactScore non-null + no topic rows → only impactScore.
- *   - Both present → both fields output, independently sourced.
- *   - Multiple cwids × same topic → topicImpacts MAX over cwids.
- *   - Prisma Decimal values (objects with `toNumber()`) coerce to plain
- *     numbers for both inputs.
- *   - NaN / non-finite values are skipped (defense against bad upstream data).
+ *   - publicationImpactScore null → no fields output (regardless of topics).
+ *   - publicationImpactScore non-null + zero topic rows → only impactScore.
+ *   - publicationImpactScore non-null + n topic rows → both fields, with
+ *     topicImpacts deduped to distinct parentTopicIds and each entry's
+ *     impactScore equal to the doc-level value.
+ *   - Prisma Decimal values (objects with `toNumber()`) coerce to plain numbers.
+ *   - Non-finite publicationImpactScore is skipped (defensive guard).
  */
 import { describe, it, expect } from "vitest";
 import { buildPubImpactFields } from "@/etl/search-index/index";
@@ -22,21 +21,12 @@ import { buildPubImpactFields } from "@/etl/search-index/index";
 // `Decimal.js` which expose `.toNumber()`.
 const dec = (n: number) => ({ toNumber: () => n });
 
-describe("buildPubImpactFields (§1.8 doc-level + per-topic, #316 PR-B)", () => {
-  it("publication null + zero topic rows → empty object", () => {
-    const result = buildPubImpactFields(null, []);
-    expect(result).toEqual({});
-    const doc = { pmid: "1", ...result };
-    expect(doc).not.toHaveProperty("impactScore");
-    expect(doc).not.toHaveProperty("topicImpacts");
-  });
-
-  it("publication null + all-null topic rows → empty object", () => {
-    const result = buildPubImpactFields(null, [
-      { parentTopicId: "cardiology", impactScore: null },
-      { parentTopicId: "oncology", impactScore: null },
-    ]);
-    expect(result).toEqual({});
+describe("buildPubImpactFields (§1.8 doc-level + per-topic, post-#316 PR-B-finalize)", () => {
+  it("publication null → empty object regardless of topic rows", () => {
+    expect(buildPubImpactFields(null, [])).toEqual({});
+    expect(
+      buildPubImpactFields(null, [{ parentTopicId: "cardiology" }]),
+    ).toEqual({});
   });
 
   it("publication non-null + no topic rows → only impactScore", () => {
@@ -45,103 +35,54 @@ describe("buildPubImpactFields (§1.8 doc-level + per-topic, #316 PR-B)", () => 
     expect(result).not.toHaveProperty("topicImpacts");
   });
 
-  it("publication null + non-null topic rows → only topicImpacts", () => {
-    // Defensive scenario: data-quality gap where the mirror has values but
-    // the canonical Publication.impactScore wasn't ETL'd. topicImpacts
-    // continues to populate so conceptImpactScore can still compute.
-    const result = buildPubImpactFields(null, [
-      { parentTopicId: "cardiology", impactScore: dec(20) },
-    ]);
-    expect(result).toEqual({
-      topicImpacts: [{ parentTopicId: "cardiology", impactScore: 20 }],
-    });
-    expect(result).not.toHaveProperty("impactScore");
-  });
-
-  it("publication non-null + topic rows → both fields, independently sourced", () => {
-    const result = buildPubImpactFields(dec(42.5), [
-      { parentTopicId: "cardiology", impactScore: dec(42.5) },
-    ]);
+  it("publication non-null + single topic → both fields, topicImpact equals doc-level", () => {
+    const result = buildPubImpactFields(dec(42.5), [{ parentTopicId: "cardiology" }]);
     expect(result).toEqual({
       impactScore: 42.5,
       topicImpacts: [{ parentTopicId: "cardiology", impactScore: 42.5 }],
     });
   });
 
-  it("two cwids × same topic → topicImpacts MAX over cwids", () => {
-    // §1.8 spec: "max impact across the pub's publication_topic rows" — kept
-    // for backwards-compat with the conceptImpactScore consumer even though
-    // post-#316 PR-A every per-topic value mirrors the global.
-    const result = buildPubImpactFields(dec(78), [
-      { parentTopicId: "cardiology", impactScore: dec(10) },
-      { parentTopicId: "cardiology", impactScore: dec(78) },
-      { parentTopicId: "cardiology", impactScore: dec(33) },
+  it("duplicate parentTopicIds collapse to a single entry", () => {
+    // Two PublicationTopic rows for the same parent (one per scholar) — the
+    // dedup-by-parentTopicId means topicImpacts has just one entry. Pre-PR-B
+    // this was a MAX-over-cwids; post-finalize the value is uniform.
+    const result = buildPubImpactFields(dec(60), [
+      { parentTopicId: "cardiology" },
+      { parentTopicId: "cardiology" },
+      { parentTopicId: "cardiology" },
     ]);
     expect(result).toEqual({
-      impactScore: 78,
-      topicImpacts: [{ parentTopicId: "cardiology", impactScore: 78 }],
+      impactScore: 60,
+      topicImpacts: [{ parentTopicId: "cardiology", impactScore: 60 }],
     });
   });
 
-  it("multiple topics → one entry per topic; doc impactScore from Publication", () => {
-    // Post-#316 PR-A the topic values would all equal the global, but the
-    // unit-tested invariant is "doc-level comes from publication, topic
-    // values come from publication_topic." Different inputs prove the
-    // sources are independent.
+  it("multiple parent topics → one entry per topic, all with the same doc-level impactScore", () => {
     const result = buildPubImpactFields(dec(78), [
-      { parentTopicId: "cardiology", impactScore: dec(10) },
-      { parentTopicId: "oncology", impactScore: dec(78) },
-      { parentTopicId: "neurology", impactScore: dec(55) },
+      { parentTopicId: "cardiology" },
+      { parentTopicId: "oncology" },
+      { parentTopicId: "neurology" },
     ]);
-    expect(result).toMatchObject({ impactScore: 78 });
-    const out = result as { topicImpacts: Array<{ parentTopicId: string; impactScore: number }> };
-    expect(out.topicImpacts).toHaveLength(3);
-    const byTopic = new Map(out.topicImpacts.map((t) => [t.parentTopicId, t.impactScore]));
-    expect(byTopic.get("cardiology")).toBe(10);
+    expect(result.impactScore).toBe(78);
+    const ti = result.topicImpacts!;
+    expect(ti).toHaveLength(3);
+    const byTopic = new Map(ti.map((t) => [t.parentTopicId, t.impactScore]));
+    expect(byTopic.get("cardiology")).toBe(78);
     expect(byTopic.get("oncology")).toBe(78);
-    expect(byTopic.get("neurology")).toBe(55);
+    expect(byTopic.get("neurology")).toBe(78);
   });
 
-  it("mixed null + non-null rows for one topic → topicImpacts MAX over non-nulls only", () => {
-    const result = buildPubImpactFields(dec(20), [
-      { parentTopicId: "cardiology", impactScore: null },
-      { parentTopicId: "cardiology", impactScore: dec(20) },
-      { parentTopicId: "cardiology", impactScore: null },
-    ]);
-    expect(result).toEqual({
-      impactScore: 20,
-      topicImpacts: [{ parentTopicId: "cardiology", impactScore: 20 }],
-    });
+  it("accepts plain numbers as well as Decimal-like objects for publicationImpactScore", () => {
+    const result = buildPubImpactFields(42, [{ parentTopicId: "cardiology" }]);
+    expect(result.impactScore).toBe(42);
+    expect(result.topicImpacts).toEqual([{ parentTopicId: "cardiology", impactScore: 42 }]);
   });
 
-  it("accepts plain numbers as well as Decimal-like objects for both args", () => {
-    const result = buildPubImpactFields(42, [
-      { parentTopicId: "cardiology", impactScore: 17 },
-      { parentTopicId: "oncology", impactScore: dec(42) },
-    ]);
-    expect(result).toMatchObject({ impactScore: 42 });
-    const out = result as { topicImpacts: Array<{ parentTopicId: string; impactScore: number }> };
-    expect(out.topicImpacts.map((t) => t.impactScore).sort((a, b) => a - b)).toEqual([17, 42]);
-  });
-
-  it("skips non-finite publication impact and per-topic values", () => {
+  it("non-finite publicationImpactScore is skipped (no fields output)", () => {
     const result = buildPubImpactFields(dec(Number.NaN), [
-      { parentTopicId: "cardiology", impactScore: dec(Number.NaN) },
-      { parentTopicId: "cardiology", impactScore: dec(11) },
+      { parentTopicId: "cardiology" },
     ]);
-    expect(result).toEqual({
-      topicImpacts: [{ parentTopicId: "cardiology", impactScore: 11 }],
-    });
-    expect(result).not.toHaveProperty("impactScore");
-  });
-
-  it("topic with only NaN rows is dropped from topicImpacts entirely", () => {
-    const result = buildPubImpactFields(dec(50), [
-      { parentTopicId: "cardiology", impactScore: dec(Number.NaN) },
-      { parentTopicId: "oncology", impactScore: dec(50) },
-    ]);
-    expect(result).toMatchObject({ impactScore: 50 });
-    const out = result as { topicImpacts: Array<{ parentTopicId: string }> };
-    expect(out.topicImpacts.map((t) => t.parentTopicId)).toEqual(["oncology"]);
+    expect(result).toEqual({});
   });
 });
