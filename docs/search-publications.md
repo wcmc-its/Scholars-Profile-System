@@ -307,9 +307,8 @@ The `mesh` precedence rule (`off` wins) is enforced both server-side in the rout
 | `SEARCH_PUB_TAB_CONCEPT_MODE` | `expanded` | Set to `strict` to revert to PR-3-merge admission (today's `concept_filtered` body). Set to `off` for pre-§1.6 fallback (resolution logged but not applied). |
 | `SEARCH_PUB_TAB_MSM` | `on` | Set to `off` to remove the `minimum_should_match` floor on unresolved-query multi_match. Pre-§1.2 behavior. |
 | `SEARCH_PUB_TAB_IMPACT` | `off` | Set to `on` to surface Impact + Recency sort options + display `impactScore` / `conceptImpactScore` in hit rows. |
-| `SEARCH_PUB_TAB_OR_OF_EVIDENCE` | unset | Legacy env. When the new `CONCEPT_MODE` env is unset and this is `on`, the resolver picks `strict` (preserves pre-§5 operator intent). Removed in a follow-up minor release. |
 
-All four are env-flips, no redeploy required.
+All three are env-flips, no redeploy required.
 
 ---
 
