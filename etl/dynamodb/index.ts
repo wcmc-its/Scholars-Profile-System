@@ -1,11 +1,12 @@
 /**
- * DynamoDB ETL — Phase 4f + Phase 2 D-02 + Phase 8 D-03 (Block 2b retired).
+ * DynamoDB ETL — Phase 4f + Phase 2 D-02 + Phase 8 D-03 (Block 2b retired) + Issue #316.
  *
- * Three projection blocks land ReCiterAI ground truth into MySQL:
+ * Four projection blocks land ReCiterAI ground truth into MySQL:
  *
  *   1. TAXONOMY#  → topic                  (67 rows; parent topic catalog)
  *   2. TOPIC#     → publication_topic      (~78,103 rows; per-pub × scholar × parent_topic triples)
  *   3. FACULTY#   → topic_assignment       (Q6 minimal projection — preserved unchanged)
+ *   4. IMPACT#    → publication             (issue #316; global per-pmid impact score + GPT justification)
  *
  * The TAXONOMY# + TOPIC# blocks are the Phase 2 D-02 candidate (e) projection
  * locked in .planning/phases/02-algorithmic-surfaces-and-home-composition/02-SCHEMA-DECISION.md.
@@ -23,14 +24,16 @@
  * / subtopicIds[]; the graceful-skip behavior on missing FK rows handles the
  * rare case where Hierarchy ETL fails on a given day (Q5' fail-isolated semantics).
  *
- * D-08 verification: publication_score is NOT currently projected by this ETL —
- * the existing FACULTY# scan only lands topic_assignment rows. The IMPACT# →
- * publication_score projection is still pending and tracked separately (out of
- * scope for Plan 02-05; the addendum's "verify don't rewrite" clause for
- * publication_score therefore reduces to: confirm absence and document. The
- * downstream lib/ranking.ts Variant B math will read from publication_topic.
- * impact_score (mirrored from IMPACT#.impact_score by the TOPIC# projection)
- * once /topics surfaces query publication_topic directly.
+ * Issue #316 — IMPACT# projection. Probe confirms IMPACT# is per-pmid only
+ * (PK=IMPACT#pmid_<pmid>, SK=SCORE), with attributes { impact_score, justification,
+ * model }. The schema decision (.planning/drafts/316-impact-etl/schema-decision.md)
+ * lands these onto Publication directly rather than PublicationScore (which is
+ * per-(cwid, pmid) — wrong scope) or a sibling table (redundant with Publication).
+ * Block 2 (TOPIC#) is also extended to persist `rationale` and `synopsis`, which
+ * the scan already reads but previously discarded. The downstream MAX-collapse
+ * workaround in lib/api/profile.ts:482-491 retires in PR-B once readers migrate
+ * to Publication.impactScore; PublicationTopic.impactScore continues to be
+ * populated as a denormalized mirror during the transition.
  *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
@@ -72,8 +75,20 @@ type TopicRecord = {
   subtopic_confidences?: unknown;
   score?: number;
   impact_score?: number;
+  rationale?: string; // issue #316: per-topic "why this paper maps here" — persisted to publication_topic.rationale
+  synopsis?: string; // issue #316: one-line plain-language synopsis — persisted to publication_topic.synopsis
   author_position?: string;
   year?: number;
+  [key: string]: unknown;
+};
+
+type ImpactRecord = {
+  PK: string; // IMPACT#pmid_<pmid>
+  SK?: string; // "SCORE" (only seen value as of probe 2026-05-15)
+  pmid?: string | number;
+  impact_score?: number;
+  justification?: string;
+  model?: string;
   [key: string]: unknown;
 };
 
@@ -228,6 +243,8 @@ async function main() {
       subtopicConfidences: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       score: Prisma.Decimal;
       impactScore: Prisma.Decimal | null;
+      rationale: string | null;
+      synopsis: string | null;
       authorPosition: string;
       year: number;
     };
@@ -285,6 +302,8 @@ async function main() {
         score: new Prisma.Decimal(score),
         impactScore:
           typeof it.impact_score === "number" ? new Prisma.Decimal(it.impact_score) : null,
+        rationale: typeof it.rationale === "string" && it.rationale ? it.rationale : null,
+        synopsis: typeof it.synopsis === "string" && it.synopsis ? it.synopsis : null,
         authorPosition,
         year: yearNum,
       });
@@ -318,6 +337,8 @@ async function main() {
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
               impactScore: w.impactScore,
+              rationale: w.rationale,
+              synopsis: w.synopsis,
               authorPosition: w.authorPosition,
               year: w.year,
             },
@@ -327,6 +348,8 @@ async function main() {
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
               impactScore: w.impactScore,
+              rationale: w.rationale,
+              synopsis: w.synopsis,
               authorPosition: w.authorPosition,
               year: w.year,
             },
@@ -414,9 +437,119 @@ async function main() {
     }
 
     // ===================================================================
+    // Block 4: IMPACT# → publication  (issue #316)
+    // ===================================================================
+    // IMPACT# is per-pmid only (PK=IMPACT#pmid_<pmid>, SK=SCORE). Probe 2026-05-15
+    // shows ~7,097 records carrying { impact_score, justification, model }. Lands
+    // these as denormalized fields on Publication; PMIDs not in our publication
+    // table are skipped (same fail-isolated pattern as Block 2).
+    console.log(`Scanning ${TABLE} for IMPACT# records (paginated)...`);
+    const impactItems: ImpactRecord[] = [];
+    {
+      let lastKey: Record<string, unknown> | undefined;
+      do {
+        const resp = await ddb.send(
+          new ScanCommand({
+            TableName: TABLE,
+            FilterExpression: "begins_with(PK, :prefix)",
+            ExpressionAttributeValues: { ":prefix": "IMPACT#pmid_" },
+            ExclusiveStartKey: lastKey,
+          }),
+        );
+        for (const it of (resp.Items ?? []) as ImpactRecord[]) impactItems.push(it);
+        lastKey = resp.LastEvaluatedKey;
+      } while (lastKey);
+    }
+    console.log(`Found ${impactItems.length} IMPACT# records (expected ~7,097 per probe).`);
+
+    let impactSkippedMissingPublication = 0;
+    let impactSkippedMissingFields = 0;
+    let impactRowsUpserted = 0;
+    let impactJustificationLengthSum = 0;
+    let impactJustificationCount = 0;
+
+    type ImpactWrite = {
+      pmid: string;
+      impactScore: Prisma.Decimal;
+      impactJustification: string | null;
+      impactScoreModel: string | null;
+    };
+
+    const impactWrites: ImpactWrite[] = [];
+    for (const it of impactItems) {
+      const pmidStr =
+        typeof it.pmid === "number" && Number.isFinite(it.pmid)
+          ? String(it.pmid)
+          : typeof it.pmid === "string" && /^\d+$/.test(it.pmid.trim())
+            ? it.pmid.trim()
+            : it.PK.startsWith("IMPACT#pmid_")
+              ? it.PK.slice("IMPACT#pmid_".length)
+              : "";
+      const scoreNum = typeof it.impact_score === "number" ? it.impact_score : NaN;
+      if (!pmidStr || !Number.isFinite(scoreNum)) {
+        impactSkippedMissingFields += 1;
+        continue;
+      }
+      if (!knownPmidSet.has(pmidStr)) {
+        impactSkippedMissingPublication += 1;
+        continue;
+      }
+      const justification =
+        typeof it.justification === "string" && it.justification ? it.justification : null;
+      if (justification) {
+        impactJustificationLengthSum += justification.length;
+        impactJustificationCount += 1;
+      }
+      impactWrites.push({
+        pmid: pmidStr,
+        impactScore: new Prisma.Decimal(scoreNum),
+        impactJustification: justification,
+        impactScoreModel: typeof it.model === "string" && it.model ? it.model : null,
+      });
+    }
+    console.log(
+      `IMPACT# candidates: ${impactWrites.length} (skipped: ${impactSkippedMissingPublication} missing publication, ${impactSkippedMissingFields} missing required fields).`,
+    );
+
+    // Update-only by pmid. Publication rows are created by the ReCiter ETL; this
+    // block only fills in the impact fields on existing rows. `updateMany` with a
+    // single-row where clause stays idempotent and avoids `update` throwing on a
+    // missing row in the (rare) race where a publication was deleted between
+    // knownPmidSet load and write.
+    const IMPACT_BATCH = 100;
+    for (let i = 0; i < impactWrites.length; i += IMPACT_BATCH) {
+      const chunk = impactWrites.slice(i, i + IMPACT_BATCH);
+      await Promise.all(
+        chunk.map((w) =>
+          prisma.publication.updateMany({
+            where: { pmid: w.pmid },
+            data: {
+              impactScore: w.impactScore,
+              impactJustification: w.impactJustification,
+              impactScoreModel: w.impactScoreModel,
+              impactRefreshedAt: new Date(),
+            },
+          }),
+        ),
+      );
+      impactRowsUpserted += chunk.length;
+      if ((i / IMPACT_BATCH) % 20 === 0) {
+        console.log(`  ...updated ${impactRowsUpserted}/${impactWrites.length} publication impact rows`);
+      }
+    }
+    const avgJustificationLen =
+      impactJustificationCount > 0
+        ? Math.round(impactJustificationLengthSum / impactJustificationCount)
+        : 0;
+    console.log(
+      `publication impact updates complete: ${impactRowsUpserted} rows; avg justification length ${avgJustificationLen} chars across ${impactJustificationCount} non-null justifications.`,
+    );
+
+    // ===================================================================
     // Bookkeeping
     // ===================================================================
-    const totalRowsProcessed = topicRowsUpserted + pubTopicRowsUpserted + rows.length;
+    const totalRowsProcessed =
+      topicRowsUpserted + pubTopicRowsUpserted + rows.length + impactRowsUpserted;
     await prisma.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
@@ -424,7 +557,7 @@ async function main() {
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}`,
+      `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}`,
     );
   } catch (err) {
     await prisma.etlRun.update({

@@ -495,10 +495,17 @@ const HARD_EXCLUDE_TYPES = [...FEED_EXCLUDED_TYPES];
 /**
  * CSR browsable publication feed for a topic detail page.
  *
- * Sort modes:
- *   - newest      SQL ORDER BY year DESC, dateAddedToEntrez DESC
- *   - most_cited  SQL ORDER BY citationCount DESC NULLS LAST
- *   - by_impact   In-process Variant B: scorePublication(row, "recent_highlights", false)
+ * Sort modes (all SQL-direct):
+ *   - newest      ORDER BY year DESC, dateAddedToEntrez DESC
+ *   - most_cited  ORDER BY citationCount DESC
+ *   - by_impact   ORDER BY impactScore DESC, year DESC
+ *
+ * by_impact was previously routed through the in-process Variant B scorer
+ * (`scorePublication` in lib/ranking.ts), which produced recency-weighted
+ * impact rankings — non-monotonic against the inline `Impact: NN` numbers
+ * surfaced by #305 (62 → 76 → 60), reading as "the sort doesn't work".
+ * Strict DESC matches user expectation that the visible number is the
+ * sort key.
  *
  * Filter modes:
  *   - research_articles_only (default) excludes Letter / Editorial Article / Erratum
@@ -507,9 +514,6 @@ const HARD_EXCLUDE_TYPES = [...FEED_EXCLUDED_TYPES];
  * Security: Allowlist validation of sort/filter/subtopic/slug must happen in the
  * route handler (app/api/topics/[slug]/publications/route.ts) before calling this
  * function. This function trusts its inputs have already been validated.
- *
- * Pool limit: by_impact uses POOL_LIMIT=5000 for DoS mitigation per
- * 03-RESEARCH.md threat table. Page clamped to MAX_PAGE=500 in route handler.
  */
 export async function getTopicPublications(
   topicSlug: string,
@@ -544,114 +548,61 @@ export async function getTopicPublications(
     publication: { publicationType: { notIn: HARD_EXCLUDE_TYPES } },
   };
 
-  // SQL-direct sort path (newest, most_cited) — do NOT call scorePublication here.
-  if (opts.sort === "newest" || opts.sort === "most_cited") {
-    // most_cited: sort DESC. MySQL/MariaDB do not support NULLS LAST natively in
-    // older versions; Prisma 7 with mariadb adapter does not expose a nulls option
-    // on scalar fields. Rows with NULL citationCount will sort first under DESC
-    // (NULL > value in MySQL). The route handler clamps page to MAX_PAGE so the
-    // null rows only affect the first page for datasets where all rows are null —
-    // an acceptable trade-off vs. a raw SQL workaround per 03-RESEARCH.md.
-    const orderBy =
-      opts.sort === "newest"
-        ? [{ year: "desc" as const }, { publication: { dateAddedToEntrez: "desc" as const } }]
-        : [{ publication: { citationCount: "desc" as const } }];
-    const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
-    const pubSelectFields = {
-      pmid: true,
-      title: true,
-      journal: true,
-      year: true,
-      publicationType: true,
-      citationCount: true,
-      pubmedUrl: true,
-      doi: true,
-      dateAddedToEntrez: true,
-    } as const;
-    const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
-      prisma.publicationTopic.findMany({
-        where: baseWhere,
-        skip,
-        take: TOPIC_PUBLICATIONS_PAGE_SIZE,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        orderBy: orderBy as any,
-        distinct: ["pmid"],
-        include: { publication: { select: pubSelectFields } },
-      }),
-      prisma.publicationTopic.count({ where: baseWhere }),
-      prisma.publicationTopic.count({ where: baseWhereAllTypes }),
-      prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
-    ]);
-    const pmids = rows.map((r) => r.pmid);
-    const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
-    return {
-      hits: (rows as Array<{ pmid: string }>).map((r) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact),
-      ),
-      total,
-      totalAllTypes,
-      totalResearchOnly,
-      page,
-      pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
-    };
-  }
-
-  // In-process Variant B scoring path (by_impact).
-  // Pool size: 5000 covers ≤500 page bound × 20 = 10k ceiling per 03-RESEARCH.md DoS mitigation.
-  const POOL_LIMIT = 5000;
-  const candidates = await prisma.publicationTopic.findMany({
-    where: baseWhere,
-    take: POOL_LIMIT,
-    distinct: ["pmid"],
-    include: {
-      publication: {
-        select: {
-          pmid: true,
-          title: true,
-          journal: true,
-          year: true,
-          publicationType: true,
-          citationCount: true,
-          pubmedUrl: true,
-          doi: true,
-          dateAddedToEntrez: true,
-        },
-      },
-    },
-  });
-
-  const scored = candidates.map((r) => {
-    const rankable: RankablePublication = {
-      pmid: r.pmid,
-      publicationType: r.publication.publicationType ?? "",
-      reciteraiImpact: Number(r.score),
-      dateAddedToEntrez: r.publication.dateAddedToEntrez ?? new Date(0),
-      // Publication-centric surface: scholarCentric=false makes authorshipWeight=1.0
-      // regardless of position, per D-13 (no first/senior filter on topic pub feed).
-      authorship: { isFirst: false, isLast: false, isPenultimate: false },
-      isConfirmed: true,
-    };
-    return { row: r, score: scorePublication(rankable, "recent_highlights", false, now) };
-  });
-
-  scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return (b.row.publication.year ?? 0) - (a.row.publication.year ?? 0);
-  });
-
-  const total = scored.length;
-  const slice = scored.slice(page * TOPIC_PUBLICATIONS_PAGE_SIZE, (page + 1) * TOPIC_PUBLICATIONS_PAGE_SIZE);
-  const slicePmids = slice.map((s) => s.row.pmid);
-  const [authorsByPmid, totalAllTypes, totalResearchOnly] = await Promise.all([
-    fetchWcmAuthorsForPmids(slicePmids),
+  // All three sorts are SQL-direct — by_impact previously routed through the
+  // Variant B in-process scorer (lib/ranking.ts) but the user-facing expectation
+  // is strict DESC on the visible Impact: NN number. Recency-weighted scoring
+  // produced non-monotonic results (62 → 76 → 60), which read as "the sort
+  // doesn't work" against the inline display from issue #305.
+  //
+  // NULLS LAST is not expressible in Prisma's MariaDB adapter on scalar fields;
+  // empirically every publication_topic row currently carries impact_score
+  // (mirrored from IMPACT# by the TOPIC# ETL block), so any null rows that
+  // appear would be transient data-quality issues, not steady-state. Most_cited
+  // shares the same null-first MySQL quirk per the prior comment.
+  const orderBy =
+    opts.sort === "newest"
+      ? [{ year: "desc" as const }, { publication: { dateAddedToEntrez: "desc" as const } }]
+      : opts.sort === "most_cited"
+        ? [{ publication: { citationCount: "desc" as const } }]
+        : [
+            { impactScore: "desc" as const },
+            { year: "desc" as const },
+          ];
+  const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
+  const pubSelectFields = {
+    pmid: true,
+    title: true,
+    journal: true,
+    year: true,
+    publicationType: true,
+    citationCount: true,
+    pubmedUrl: true,
+    doi: true,
+    dateAddedToEntrez: true,
+  } as const;
+  const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
+    prisma.publicationTopic.findMany({
+      where: baseWhere,
+      skip,
+      take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      orderBy: orderBy as any,
+      distinct: ["pmid"],
+      include: { publication: { select: pubSelectFields } },
+    }),
+    prisma.publicationTopic.count({ where: baseWhere }),
     prisma.publicationTopic.count({ where: baseWhereAllTypes }),
     prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
   ]);
+  const pmids = rows.map((r) => r.pmid);
+  const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
+  // `now` parameter is preserved for backwards compatibility with callers but
+  // is unused since the Variant B scoring path was retired in favor of SQL sort.
+  void now;
   return {
-    hits: slice.map((s) =>
+    hits: (rows as Array<{ pmid: string }>).map((r) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mapToTopicPublicationHit(s.row as any, authorsByPmid.get(s.row.pmid), includeImpact),
+      mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact),
     ),
     total,
     totalAllTypes,
