@@ -198,6 +198,31 @@ describe("PublicationModal — content sections", () => {
     expect(abstractPara.className).toContain("whitespace-pre-line");
   });
 
+  it("clamps the abstract to line-clamp-4 by default", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const abstractPara = screen.getByText(
+      /Widgets are interesting\.\s*This study probes them\./,
+    );
+    expect(abstractPara.className).toContain("line-clamp-4");
+  });
+
+  it("shows the Show more toggle only when the abstract overflows the clamp", async () => {
+    // jsdom can't measure scrollHeight, so the overflow detector defaults to
+    // false — Show more should NOT be present for short abstracts. We assert
+    // the abstract paragraph renders without the toggle, then assert the
+    // toggle's expand-collapse contract via the topics test below.
+    mockFetch(
+      makePayload({ pub: { ...makePayload().pub, abstract: "Short text." } }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
   it("renders topics sorted by score desc", async () => {
     mockFetch(makePayload());
     renderModalHarness();
@@ -208,6 +233,32 @@ describe("PublicationModal — content sections", () => {
       .map((el) => el.textContent);
     expect(topicHeadings[0]).toBe("Widget Science");
     expect(topicHeadings[1]).toBe("Engineering");
+  });
+
+  it("renders subtopics inline without per-subtopic confidence numbers", async () => {
+    // Calmer presentation: comma-separated subtopic links, primary in
+    // slightly heavier weight, no confidence floats per subtopic.
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const primary = screen.getByRole("link", { name: "Widget Design" });
+    const other = screen.getByRole("link", { name: "Widget Manufacturing" });
+    expect(primary.className).toContain("font-medium");
+    expect(other.className).not.toContain("font-medium");
+    // No 0.9 / 0.6 confidence labels anywhere — only the parent topic score
+    // 0.92 renders.
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByText("0.9")).toBeNull();
+    expect(within(dialog).queryByText("0.6")).toBeNull();
+  });
+
+  it("omits the chatty Topics subtitle", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByText(/Higher score = stronger fit/)).toBeNull();
   });
 
   it("shows '(this page)' marker on the current topic when slug matches", async () => {
@@ -262,6 +313,33 @@ describe("PublicationModal — content sections", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(screen.queryByText("MeSH terms")).toBeNull();
   });
+
+  it("renders authors inline in the header without a section heading", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("Smith A, Jones B, Wong C")).toBeDefined();
+    // No "Authors" section heading anymore — flow as part of the citation block.
+    expect(screen.queryByRole("heading", { name: "Authors" })).toBeNull();
+  });
+
+  it("renders identifiers as a footer with no section heading", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    // The footer carries an aria-label so screen readers still identify the
+    // block; visually there is no "Identifiers" heading.
+    const dialog = screen.getByRole("dialog");
+    const footer = dialog.querySelector('footer[aria-label="Identifiers"]');
+    expect(footer).not.toBeNull();
+    expect(screen.queryByRole("heading", { name: "Identifiers" })).toBeNull();
+    // The PMID, PMCID, and DOI links still ship.
+    expect(footer?.querySelector('a[href*="pubmed.ncbi.nlm.nih.gov"]')).not.toBeNull();
+    expect(footer?.querySelector('a[href*="pmc/articles/"]')).not.toBeNull();
+    expect(footer?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
+  });
 });
 
 describe("PublicationModal — citing publications", () => {
@@ -287,7 +365,7 @@ describe("PublicationModal — citing publications", () => {
     expect(screen.getByText("No citing publications.")).toBeDefined();
   });
 
-  it("shows the truncation footer when total exceeds rows returned", async () => {
+  it("shows the cap-overflow subhead when total exceeds rows returned", async () => {
     mockFetch(
       makePayload({
         citingPubs: [
@@ -301,8 +379,55 @@ describe("PublicationModal — citing publications", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText(/Showing 2 most recent of 1,234 total/),
+      screen.getByText("Showing 2 most recent of 1,234"),
     ).toBeDefined();
+    // Total count chip in the section header renders the formatted total.
+    expect(screen.getByText("1,234")).toBeDefined();
+  });
+
+  it("shows 'Most recent first' subhead when list is multi but not capped", async () => {
+    mockFetch(
+      makePayload({
+        citingPubs: [
+          { pmid: "1", title: "x", journal: null, year: 2024 },
+          { pmid: "2", title: "y", journal: null, year: 2024 },
+        ],
+        citingPubsTotal: 2,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.getByText("Most recent first")).toBeDefined();
+    expect(screen.queryByText(/Showing/)).toBeNull();
+  });
+
+  it("omits the order subhead when there is only one citing pub", async () => {
+    mockFetch(
+      makePayload({
+        citingPubs: [{ pmid: "1", title: "Only one", journal: null, year: 2024 }],
+        citingPubsTotal: 1,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByText("Most recent first")).toBeNull();
+    expect(screen.queryByText(/Showing/)).toBeNull();
+  });
+
+  it("omits the count chip when total is null (reciterdb unavailable)", async () => {
+    mockFetch(makePayload({ citingPubs: null, citingPubsTotal: null }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const dialog = screen.getByRole("dialog");
+    // The chip lives next to the "Citing publications" heading; no number
+    // should appear there when the reciterdb soft-fail path triggers.
+    const headingRow = within(dialog)
+      .getByText("Citing publications")
+      .closest("div") as HTMLElement;
+    expect(headingRow.textContent).toBe("Citing publications");
   });
 
   it("renders citing pubs in the order returned by the payload (date desc)", async () => {

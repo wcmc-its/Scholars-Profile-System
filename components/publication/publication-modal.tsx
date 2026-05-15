@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useEffect,
@@ -324,29 +325,29 @@ function ModalContent({
         {citationContext ? (
           <p className="text-muted-foreground mt-1 text-sm">{citationContext}</p>
         ) : null}
+        <AuthorsLine fullAuthors={pub.fullAuthorsString} />
         <CloseButton onClose={onClose} />
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="flex flex-col gap-6">
-          <AuthorsSection fullAuthors={pub.fullAuthorsString} />
+          <AbstractSection abstract={pub.abstract} />
+          <SynopsisSection synopsis={pub.synopsis} />
           <ImpactSection
             impactScore={pub.impactScore}
             impactJustification={pub.impactJustification}
           />
-          <AbstractSection abstract={pub.abstract} />
-          <SynopsisSection synopsis={pub.synopsis} />
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
-          <IdentifiersSection
+          <CitingPubsSection
+            citingPubs={citingPubs}
+            citingPubsTotal={citingPubsTotal}
+          />
+          <IdentifiersFooter
             pmid={pub.pmid}
             pmcid={pub.pmcid}
             doi={pub.doi}
             pubmedUrl={pub.pubmedUrl}
-          />
-          <CitingPubsSection
-            citingPubs={citingPubs}
-            citingPubsTotal={citingPubsTotal}
           />
         </div>
       </div>
@@ -371,7 +372,10 @@ function formatCitationContext(pub: PublicationDetailPayload["pub"]): string {
 
 const AUTHORS_TRUNCATE = 8;
 
-function AuthorsSection({ fullAuthors }: { fullAuthors: string | null }) {
+function AuthorsLine({ fullAuthors }: { fullAuthors: string | null }) {
+  // Authors flow as part of the header citation block — no section heading.
+  // Long lists collapse to the first AUTHORS_TRUNCATE names with a "Show all"
+  // toggle; short lists render verbatim.
   const [expanded, setExpanded] = useState(false);
   if (!fullAuthors) return null;
   const list = fullAuthors
@@ -382,25 +386,23 @@ function AuthorsSection({ fullAuthors }: { fullAuthors: string | null }) {
   const overflows = list.length > AUTHORS_TRUNCATE;
   const visible = expanded || !overflows ? list : list.slice(0, AUTHORS_TRUNCATE);
   return (
-    <section>
-      <SectionHeading>Authors</SectionHeading>
-      <p className="text-foreground/90 mt-1 text-sm leading-relaxed">
-        {visible.join(", ")}
-        {!expanded && overflows ? <>, …</> : null}
-      </p>
+    <p className="text-foreground/80 mt-2 text-sm leading-relaxed">
+      {visible.join(", ")}
+      {!expanded && overflows ? <>, … </> : null}
       {overflows ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((s) => !s)}
-          aria-expanded={expanded}
-          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
-        >
-          {expanded
-            ? "Show fewer"
-            : `Show all ${list.length} authors`}
-        </button>
+        <>
+          {!expanded && overflows ? null : " "}
+          <button
+            type="button"
+            onClick={() => setExpanded((s) => !s)}
+            aria-expanded={expanded}
+            className="text-xs text-[var(--color-accent-slate)] hover:underline"
+          >
+            {expanded ? "Show fewer" : `Show all ${list.length}`}
+          </button>
+        </>
       ) : null}
-    </section>
+    </p>
   );
 }
 
@@ -429,13 +431,42 @@ function ImpactSection({
 }
 
 function AbstractSection({ abstract }: { abstract: string | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  const paraRef = useRef<HTMLParagraphElement | null>(null);
+
+  // Measure overflow once after the clamped paragraph mounts. scrollHeight
+  // exceeds clientHeight when the text is taller than the line-clamp box;
+  // when it isn't, "Show more" stays hidden so short abstracts don't carry
+  // a misleading affordance. Re-runs on abstract change (next modal open).
+  useEffect(() => {
+    if (!paraRef.current) return;
+    const el = paraRef.current;
+    setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [abstract]);
+
   if (!abstract) return null;
   return (
     <section>
       <SectionHeading>Abstract</SectionHeading>
-      <p className="text-foreground/90 mt-1 whitespace-pre-line text-sm leading-relaxed">
+      <p
+        ref={paraRef}
+        className={`text-foreground/90 mt-1 whitespace-pre-line text-sm leading-relaxed ${
+          expanded ? "" : "line-clamp-4"
+        }`}
+      >
         {abstract}
       </p>
+      {overflows ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((s) => !s)}
+          aria-expanded={expanded}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -463,10 +494,6 @@ function TopicsSection({
   return (
     <section>
       <SectionHeading>Topics</SectionHeading>
-      <p className="text-muted-foreground mt-0.5 text-xs">
-        Scores from ReCiterAI per-paper assignments. Higher score = stronger
-        fit.
-      </p>
       <ul className="mt-2 flex flex-col gap-3">
         {topics.map((t) => (
           <TopicListItem
@@ -487,9 +514,14 @@ function TopicListItem({
   topic: PublicationDetailTopic;
   isCurrent: boolean;
 }) {
+  // Parent topic row: name on the left, score pinned right. Subtopics flow
+  // as a single comma-separated line below; the primary subtopic shows in
+  // slightly heavier weight as the only visual marker. Per-subtopic
+  // confidence numbers were dropped to keep the section readable on heavy
+  // multi-topic papers.
   return (
     <li>
-      <div className="flex flex-wrap items-baseline gap-x-2">
+      <div className="flex items-baseline gap-x-2">
         <Link
           href={`/topics/${topic.topicSlug}`}
           className="text-sm font-medium text-[var(--color-accent-slate)] hover:underline"
@@ -499,39 +531,33 @@ function TopicListItem({
         {isCurrent ? (
           <span className="text-muted-foreground text-xs">(this page)</span>
         ) : null}
-        <span className="text-muted-foreground text-xs tabular-nums">
+        <span className="text-muted-foreground ml-auto text-xs tabular-nums">
           {topic.score.toFixed(2)}
         </span>
       </div>
       {topic.subtopics.length > 0 ? (
-        <ul className="mt-1 flex flex-col gap-0.5 pl-3 text-xs">
-          {topic.subtopics.map((s) => {
+        <p className="text-foreground/70 mt-0.5 text-xs leading-relaxed">
+          {topic.subtopics.map((s, i) => {
             const isPrimary = s.slug === topic.primarySubtopicId;
             return (
-              <li
-                key={s.slug}
-                className="text-foreground/80 flex flex-wrap items-baseline gap-x-2"
-              >
+              <Fragment key={s.slug}>
+                {i > 0 ? (
+                  <span className="text-muted-foreground/60">, </span>
+                ) : null}
                 <Link
                   href={`/topics/${topic.topicSlug}?subtopic=${encodeURIComponent(
                     s.slug,
                   )}`}
-                  className="hover:underline"
+                  className={`hover:underline ${
+                    isPrimary ? "text-foreground/90 font-medium" : ""
+                  }`}
                 >
                   {s.name}
                 </Link>
-                {isPrimary ? (
-                  <span className="text-muted-foreground/80">primary</span>
-                ) : null}
-                {s.confidence !== null ? (
-                  <span className="text-muted-foreground/80 tabular-nums">
-                    {s.confidence.toFixed(2)}
-                  </span>
-                ) : null}
-              </li>
+              </Fragment>
             );
           })}
-        </ul>
+        </p>
       ) : null}
     </li>
   );
@@ -560,7 +586,7 @@ function MeshSection({
   );
 }
 
-function IdentifiersSection({
+function IdentifiersFooter({
   pmid,
   pmcid,
   doi,
@@ -571,53 +597,75 @@ function IdentifiersSection({
   doi: string | null;
   pubmedUrl: string | null;
 }) {
+  // Identifiers render as a footer-style meta row (no SectionHeading) — they
+  // are reference data, not content, so they belong at the bottom under a
+  // hairline divider instead of taking a full section slot. Layout mirrors
+  // the per-row meta band on the publication-feed cards so the modal reads
+  // as the source-of-truth detail view for the same row.
+  const blocks: ReactNode[] = [];
+  blocks.push(
+    <span key="pmid">
+      PMID:{" "}
+      <a
+        href={pubmedUrl ?? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+      >
+        {pmid}
+      </a>
+    </span>,
+  );
+  if (pmcid) {
+    blocks.push(
+      <span key="pmcid">
+        PMCID:{" "}
+        <a
+          href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+        >
+          {pmcid}
+        </a>
+      </span>,
+    );
+  }
+  if (doi) {
+    blocks.push(
+      <a
+        key="doi"
+        href={`https://doi.org/${doi}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+      >
+        DOI
+      </a>,
+    );
+  }
+  const interleaved: ReactNode[] = [];
+  blocks.forEach((b, i) => {
+    if (i > 0) {
+      interleaved.push(
+        <span
+          key={`sep-${i}`}
+          aria-hidden="true"
+          className="text-muted-foreground/60"
+        >
+          ·
+        </span>,
+      );
+    }
+    interleaved.push(b);
+  });
   return (
-    <section>
-      <SectionHeading>Identifiers</SectionHeading>
-      <dl className="text-foreground/90 mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">PMID</dt>
-        <dd>
-          <a
-            href={pubmedUrl ?? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-          >
-            {pmid}
-          </a>
-        </dd>
-        {pmcid ? (
-          <>
-            <dt className="text-muted-foreground">PMCID</dt>
-            <dd>
-              <a
-                href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-              >
-                {pmcid}
-              </a>
-            </dd>
-          </>
-        ) : null}
-        {doi ? (
-          <>
-            <dt className="text-muted-foreground">DOI</dt>
-            <dd>
-              <a
-                href={`https://doi.org/${doi}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-              >
-                {doi}
-              </a>
-            </dd>
-          </>
-        ) : null}
-      </dl>
-    </section>
+    <footer
+      aria-label="Identifiers"
+      className="border-border text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t pt-3 text-xs"
+    >
+      {interleaved}
+    </footer>
   );
 }
 
@@ -628,49 +676,70 @@ function CitingPubsSection({
   citingPubs: PublicationDetailPayload["citingPubs"];
   citingPubsTotal: number | null;
 }) {
+  // Header layout: section label on the left, total count chip on the right
+  // (formatted with locale-aware grouping so 1,234 reads at a glance). The
+  // count anchors the section semantically — readers see the citation
+  // volume before the list itself, which is just a most-recent window.
+  //
+  // Subhead copy adapts to the relationship between cap and total:
+  //   - Capped (cap < total): "Showing N most recent of M"
+  //   - Not capped + multi:   "Most recent first"
+  //   - Single / zero:        omit (no order to talk about)
+  const hasList = citingPubs !== null && citingPubs.length > 0;
+  const showCount = citingPubsTotal !== null && citingPubsTotal > 0;
+  let subhead: string | null = null;
+  if (hasList && citingPubsTotal !== null) {
+    if (citingPubsTotal > citingPubs.length) {
+      subhead = `Showing ${citingPubs.length.toLocaleString()} most recent of ${citingPubsTotal.toLocaleString()}`;
+    } else if (citingPubs.length > 1) {
+      subhead = "Most recent first";
+    }
+  }
   return (
     <section>
-      <SectionHeading>Citing publications</SectionHeading>
+      <div className="flex items-baseline justify-between gap-2">
+        <SectionHeading>Citing publications</SectionHeading>
+        {showCount ? (
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {citingPubsTotal.toLocaleString()}
+          </span>
+        ) : null}
+      </div>
+      {subhead ? (
+        <p className="text-muted-foreground mt-0.5 text-xs">{subhead}</p>
+      ) : null}
       {citingPubs === null ? (
-        <p className="text-muted-foreground mt-1 text-sm">
+        <p className="text-muted-foreground mt-2 text-sm">
           Citation list temporarily unavailable.
         </p>
       ) : citingPubs.length === 0 ? (
-        <p className="text-muted-foreground mt-1 text-sm">
+        <p className="text-muted-foreground mt-2 text-sm">
           No citing publications.
         </p>
       ) : (
-        <>
-          <ul className="mt-2 flex flex-col gap-2">
-            {citingPubs.map((c) => (
-              <li
-                key={c.pmid}
-                className="text-foreground/90 text-sm leading-snug"
-              >
-                <a
-                  href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-[var(--color-accent-slate)] hover:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
-                />
-                {c.journal || c.year ? (
-                  <div className="text-muted-foreground mt-0.5 text-xs">
-                    {c.journal ? <em className="not-italic">{c.journal}</em> : null}
-                    {c.journal && c.year ? " · " : null}
-                    {c.year ?? null}
-                  </div>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-          {citingPubsTotal !== null && citingPubsTotal > citingPubs.length ? (
-            <p className="text-muted-foreground mt-2 text-xs">
-              Showing {citingPubs.length.toLocaleString()} most recent of{" "}
-              {citingPubsTotal.toLocaleString()} total.
-            </p>
-          ) : null}
-        </>
+        <ul className="mt-2 flex flex-col gap-2">
+          {citingPubs.map((c) => (
+            <li
+              key={c.pmid}
+              className="text-foreground/90 text-sm leading-snug"
+            >
+              <a
+                href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-[var(--color-accent-slate)] hover:underline"
+                dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
+              />
+              {c.journal || c.year ? (
+                <div className="text-muted-foreground mt-0.5 text-xs">
+                  {c.journal ? <em className="not-italic">{c.journal}</em> : null}
+                  {c.journal && c.year ? " · " : null}
+                  {c.year ?? null}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
