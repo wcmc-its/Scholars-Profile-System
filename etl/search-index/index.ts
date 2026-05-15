@@ -130,41 +130,35 @@ export function buildReciterParentTopicIdField(
 }
 
 /**
- * Issue #259 §1.8 — derive the `impactScore` (doc-level, sortable float)
- * and `topicImpacts` (per-topic MAX, used by the API to compute the
- * "Concept impact" badge value when a MeSH descriptor resolves to one or
- * more anchored curated topics).
+ * Issue #259 §1.8 (migrated through #316 PR-B-finalize) — derive the
+ * `impactScore` (doc-level, sortable float) and `topicImpacts` (one entry
+ * per parent topic, used by the API to compute the "Concept impact" badge
+ * value when a MeSH descriptor resolves to anchored curated topics).
  *
- * Doc-level `impactScore` sources `Publication.impactScore` directly
- * (issue #316 PR-B consumer migration). The previous implementation took a
- * MAX across `publication_topic.impact_score` rows; that mirror is
- * semantically equivalent today but retires after the mirror-removal PR.
+ * Both fields source `Publication.impactScore` after the mirror retirement.
+ * The previous per-topic MAX-over-cwids derivation operated on the
+ * `publication_topic.impact_score` mirror that has since been dropped;
+ * every per-topic value was already equal to the global, so `topicImpacts[]`
+ * is now `parentTopicIds.map(id => ({ parentTopicId: id, impactScore: <global> }))`
+ * — uniform by construction. Kept for OS index schema backwards-compat and
+ * the existing conceptImpactScore consumer in lib/api/search.ts:1272 that
+ * MAX-over-anchor-matched-entries (with uniform values, MAX equals the
+ * single value when anchor set is non-empty).
  *
- * `topicImpacts[]` still derives from the un-deduped publication_topic
- * join: one row per (pmid, cwid, parentTopicId). For each parentTopicId
- * we take the MAX across cwids, skipping null impact scores. Each topic's
- * value equals the global `publicationImpactScore` post-PR-A (mirror is
- * uniform per pmid); the field is preserved for backwards-compatibility
- * with the OS index schema and the API consumer that filters by anchored
- * topics to compute `conceptImpactScore`.
- *
- * OMIT-on-empty: fields are independently optional in the result. Doc-level
- * is omitted when `publicationImpactScore` is null; `topicImpacts` is omitted
- * when no non-null per-topic rows. An all-empty result is `{}`, matching
- * the previous contract for spread-into-doc use.
+ * OMIT-on-empty: doc-level `impactScore` is omitted when
+ * `publicationImpactScore` is null; `topicImpacts` is omitted when either
+ * the publication has no impact score or it has zero parent topics. An
+ * all-empty result is `{}`, matching the previous contract for spread-into-doc.
  *
  * `impactScore` is a `number` (JSON float, not Prisma Decimal) so the
- * OpenSearch float mapping accepts it directly and sort works as expected.
- * Decimal(8,4) fits well within float precision.
+ * OpenSearch float mapping accepts it directly. Decimal(8,4) fits well
+ * within float precision.
  *
  * Exported solely for unit testing.
  */
 export function buildPubImpactFields(
   publicationImpactScore: { toNumber(): number } | number | null,
-  publicationTopics: ReadonlyArray<{
-    parentTopicId: string;
-    impactScore: { toNumber(): number } | number | null;
-  }>,
+  publicationTopics: ReadonlyArray<{ parentTopicId: string }>,
 ): {
   impactScore?: number;
   topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
@@ -184,23 +178,17 @@ export function buildPubImpactFields(
     if (Number.isFinite(n)) result.impactScore = n;
   }
 
-  // Per-topic: MAX over cwids per parent_topic. Skip null / non-finite rows.
-  const perTopic = new Map<string, number>();
-  for (const pt of publicationTopics) {
-    if (pt.impactScore === null || pt.impactScore === undefined) continue;
-    const v =
-      typeof pt.impactScore === "number"
-        ? pt.impactScore
-        : pt.impactScore.toNumber();
-    if (!Number.isFinite(v)) continue;
-    const prev = perTopic.get(pt.parentTopicId);
-    if (prev === undefined || v > prev) perTopic.set(pt.parentTopicId, v);
-  }
-  if (perTopic.size > 0) {
-    result.topicImpacts = Array.from(perTopic.entries(), ([parentTopicId, impactScore]) => ({
-      parentTopicId,
-      impactScore,
-    }));
+  // Per-topic: one entry per distinct parentTopicId, value mirrors doc-level.
+  // Skip entirely when there's no doc-level impact (no signal to attach).
+  if (result.impactScore !== undefined) {
+    const uniqueParents = new Set(publicationTopics.map((pt) => pt.parentTopicId));
+    if (uniqueParents.size > 0) {
+      const score = result.impactScore;
+      result.topicImpacts = Array.from(uniqueParents, (parentTopicId) => ({
+        parentTopicId,
+        impactScore: score,
+      }));
+    }
   }
 
   return result;
@@ -595,17 +583,14 @@ async function indexPublications() {
             },
           },
         },
-        // Issue #259 §1.6 + §1.8 — ReciterAI parent-topic IDs (for the
-        // OR-of-evidence pub filter) and per-(scholar, topic) `impactScore`
-        // (for the §1.8 doc-level MAX + per-topic-MAX badge values).
-        //
-        // No `distinct: ["parentTopicId"]` here: §1.8 needs all cwid rows
-        // so the helper can take MAX(impactScore) per parentTopicId across
-        // cwids. `buildReciterParentTopicIdField` does its own Set-based
-        // dedup, so the §1.6 field stays correct without the query-layer
-        // distinct.
+        // Issue #259 §1.6 — ReciterAI parent-topic IDs feed both the
+        // OR-of-evidence pub filter and the post-#316 PR-B-finalize
+        // `topicImpacts[]` derivation (impactScore comes from Publication
+        // directly, see buildPubImpactFields). `buildReciterParentTopicIdField`
+        // does its own Set-based dedup; `buildPubImpactFields` dedups by
+        // parentTopicId too, so the query doesn't need `distinct`.
         publicationTopics: {
-          select: { parentTopicId: true, impactScore: true },
+          select: { parentTopicId: true },
         },
       },
     });

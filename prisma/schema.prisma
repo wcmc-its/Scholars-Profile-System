@@ -748,28 +748,24 @@ model CenterMembership {
 /// One PublicationTopic row per `TOPIC#<parent_topic_id>` item in DynamoDB.
 /// Subtopic data lives as embedded JSON fields here (no separate subtopic table).
 model PublicationTopic {
-  pmid                String   @db.VarChar(32)
-  cwid                String   @db.VarChar(32)
-  parentTopicId       String   @map("parent_topic_id") @db.VarChar(128)
-  primarySubtopicId   String?  @map("primary_subtopic_id") @db.VarChar(128) // slug; NO FK
-  subtopicIds         Json?    @map("subtopic_ids") // ["slug1","slug2",...]
-  subtopicConfidences Json?    @map("subtopic_confidences") // {slug: score}
-  score               Decimal  @db.Decimal(8, 4) // ReciterAI parent-topic score
-  /// Denormalized mirror of `Publication.impactScore` populated by the TOPIC#
-  /// ETL block. Kept during the issue #316 transition while consumers migrate
-  /// to `Publication.impactScore`; retire in a follow-up PR after PR-B.
-  impactScore         Decimal? @map("impact_score") @db.Decimal(8, 4)
+  pmid                String  @db.VarChar(32)
+  cwid                String  @db.VarChar(32)
+  parentTopicId       String  @map("parent_topic_id") @db.VarChar(128)
+  primarySubtopicId   String? @map("primary_subtopic_id") @db.VarChar(128) // slug; NO FK
+  subtopicIds         Json?   @map("subtopic_ids") // ["slug1","slug2",...]
+  subtopicConfidences Json?   @map("subtopic_confidences") // {slug: score}
+  score               Decimal @db.Decimal(8, 4) // ReciterAI parent-topic score
   /// Natural-language "why this paper maps to this topic" from TOPIC#.rationale.
   /// Per-(pmid, cwid, parent_topic) — different scope from the global
   /// `Publication.impactJustification`. Surfaced in topic-chip tooltips by
   /// PR-C of issue #316.
-  rationale           String?  @db.Text
+  rationale           String? @db.Text
   /// One-line plain-language synopsis from TOPIC#.synopsis (separate from the
   /// per-publication `Publication.abstract`, which is the raw PubMed abstract).
   /// Reserved for tooltip / list-row use; surface wiring deferred to PR-C.
-  synopsis            String?  @db.Text
-  authorPosition      String   @map("author_position") @db.VarChar(16)
-  year                Int      @db.SmallInt
+  synopsis            String? @db.Text
+  authorPosition      String  @map("author_position") @db.VarChar(16)
+  year                Int     @db.SmallInt
 
   publication Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
   scholar     Scholar     @relation(fields: [cwid], references: [cwid], onDelete: Cascade)

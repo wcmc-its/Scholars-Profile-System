@@ -5,18 +5,23 @@
  * department pages (slices 2 + 3 add center + division by reusing this).
  *
  * Selection (same criterion intended by the prior Recent Highlights surface):
- *   - publication_topic.impact_score >= 40   (impact floor; range ~9-83)
+ *   - publication.impact_score >= 40         (impact floor; range ~9-83)
  *   - author_position IN ('first','last')
  *   - scholar.role_category = 'full_time_faculty', active, not deleted
  *   - publication.publication_type = 'Academic Article'
  *   - year >= 2020 (D-15 ReCiterAI scoring data floor)
  * Order: dateAddedToEntrez DESC, year DESC, impactScore DESC.
  *
+ * Impact source: `Publication.impactScore` (canonical column from the IMPACT#
+ * DynamoDB ETL, issue #316 PR-A). Before #316 PR-B-finalize this was read
+ * through the `publication_topic.impact_score` mirror; that column has been
+ * dropped and is no longer queried.
+ *
  * Note: the legacy code in `lib/api/topics.ts:getRecentHighlightsForTopic`
  * filtered on `score` (the 0-1 relevance value) instead of `impact_score`
  * — a long-standing bug that caused the surface to silently render zero
  * cards. The variable name `RECENT_HIGHLIGHTS_IMPACT_FLOOR = 40` makes
- * the intent unambiguous; we apply it to `impact_score` here.
+ * the intent unambiguous; we apply it to `publication.impact_score` here.
  *
  * Kicker varies by entity:
  *   - Topic page    → subtopic.displayName (drill into the topic)
@@ -198,13 +203,13 @@ async function fillTier2(
   const topicRows = await prisma.publicationTopic.findMany({
     where: {
       pmid: { in: pmids },
-      impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
+      publication: { impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR } },
     },
     select: {
       pmid: true,
-      impactScore: true,
       parentTopicId: true,
       primarySubtopicId: true,
+      publication: { select: { impactScore: true } },
     },
   });
   type Best = {
@@ -214,7 +219,11 @@ async function fillTier2(
   };
   const bestTopicByPmid = new Map<string, Best>();
   for (const t of topicRows) {
-    const score = Number(t.impactScore);
+    // Post-#316 PR-B-finalize: every publication_topic row for a pmid has the
+    // same global impact value via the publication relation. The "best topic"
+    // pick degenerates to "first topic seen" — keep the loop for clarity even
+    // though the MAX collapse is now a no-op.
+    const score = Number(t.publication.impactScore);
     const cur = bestTopicByPmid.get(t.pmid);
     if (!cur || score > cur.impactScore) {
       bestTopicByPmid.set(t.pmid, {
@@ -257,21 +266,22 @@ export async function getSpotlightCardsForTopic(
     where: {
       parentTopicId: topicSlug,
       year: { gte: RECITERAI_YEAR_FLOOR },
-      impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
       authorPosition: { in: ["first", "last"] },
       scholar: {
         deletedAt: null,
         status: "active",
         roleCategory: "full_time_faculty",
       },
-      publication: { publicationType: "Academic Article" },
+      publication: {
+        publicationType: "Academic Article",
+        impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
+      },
     },
     select: {
       pmid: true,
       cwid: true,
       parentTopicId: true,
       primarySubtopicId: true,
-      impactScore: true,
       publication: {
         select: {
           pmid: true,
@@ -281,16 +291,19 @@ export async function getSpotlightCardsForTopic(
           pubmedUrl: true,
           doi: true,
           dateAddedToEntrez: true,
+          impactScore: true,
         },
       },
     },
   })) as unknown as Array<
-    Omit<CandidateRow, "impactScore" | "position"> & { impactScore: unknown }
+    Omit<CandidateRow, "impactScore" | "position"> & {
+      publication: { impactScore: unknown } & CandidateRow["publication"];
+    }
   >;
 
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
-    impactScore: Number(r.impactScore),
+    impactScore: Number(r.publication.impactScore),
     position: null,
   }));
   let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
@@ -368,7 +381,6 @@ async function getSpotlightCardsForEntity(
   const rows = (await prisma.publicationTopic.findMany({
     where: {
       year: { gte: RECITERAI_YEAR_FLOOR },
-      impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
       authorPosition: { in: ["first", "last"] },
       scholar: {
         deletedAt: null,
@@ -376,14 +388,16 @@ async function getSpotlightCardsForEntity(
         roleCategory: "full_time_faculty",
         ...scholarFilter,
       },
-      publication: { publicationType: "Academic Article" },
+      publication: {
+        publicationType: "Academic Article",
+        impactScore: { gte: HIGHLIGHTS_IMPACT_FLOOR },
+      },
     },
     select: {
       pmid: true,
       cwid: true,
       parentTopicId: true,
       primarySubtopicId: true,
-      impactScore: true,
       publication: {
         select: {
           pmid: true,
@@ -393,16 +407,19 @@ async function getSpotlightCardsForEntity(
           pubmedUrl: true,
           doi: true,
           dateAddedToEntrez: true,
+          impactScore: true,
         },
       },
     },
   })) as unknown as Array<
-    Omit<CandidateRow, "impactScore" | "position"> & { impactScore: unknown }
+    Omit<CandidateRow, "impactScore" | "position"> & {
+      publication: { impactScore: unknown } & CandidateRow["publication"];
+    }
   >;
 
   const normalized: CandidateRow[] = rows.map((r) => ({
     ...r,
-    impactScore: Number(r.impactScore),
+    impactScore: Number(r.publication.impactScore),
     position: null,
   }));
   let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
