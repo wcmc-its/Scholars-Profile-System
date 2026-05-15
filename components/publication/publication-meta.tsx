@@ -3,11 +3,12 @@ import { CopyButton } from "@/components/publication/copy-button";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
- *   citations · impact · role · PMID · PMCID · DOI
+ *   PMID · PMCID · DOI · role · citations · impact
  *
- * Adjacent middot separators collapse so a publication missing an identifier
- * never shows `· ·`. Server-compatible — the embedded `<CopyButton>` carries
- * its own `"use client"`.
+ * Identifiers lead the row (canonical references first), then role, then
+ * citation count and impact-score numbers trail. Adjacent middot separators
+ * collapse so a publication missing an identifier never shows `· ·`.
+ * Server-compatible — the embedded `<CopyButton>` carries its own `"use client"`.
  *
  * Surfaces pass `role` as a pre-rendered node (badge, plain text, or null);
  * the component owns gap, separator, and identifier-link semantics.
@@ -37,49 +38,6 @@ export function PublicationMeta({
   className?: string;
 }) {
   const blocks: ReactNode[] = [];
-
-  if (citationCount && citationCount > 0) {
-    blocks.push(
-      <span key="cite" className="font-medium text-zinc-700 dark:text-zinc-300">
-        {citationCount.toLocaleString()} citations
-      </span>,
-    );
-  }
-
-  const hasImpact = impactScore !== null && impactScore !== undefined;
-  const hasConcept =
-    conceptImpactScore !== null && conceptImpactScore !== undefined;
-  if (hasImpact || hasConcept) {
-    blocks.push(
-      <span key="impact" className="whitespace-nowrap">
-        {hasImpact ? (
-          <>
-            Impact:{" "}
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              {Math.round(impactScore as number)}
-            </span>
-          </>
-        ) : null}
-        {hasImpact && hasConcept ? (
-          <span aria-hidden="true" className="text-muted-foreground/60">
-            {" · "}
-          </span>
-        ) : null}
-        {hasConcept ? (
-          <>
-            Concept:{" "}
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              {Math.round(conceptImpactScore as number)}
-            </span>
-          </>
-        ) : null}
-      </span>,
-    );
-  }
-
-  if (role) {
-    blocks.push(<span key="role">{role}</span>);
-  }
 
   if (pmid) {
     blocks.push(
@@ -129,6 +87,35 @@ export function PublicationMeta({
       >
         DOI
       </a>,
+    );
+  }
+
+  if (role) {
+    blocks.push(<span key="role">{role}</span>);
+  }
+
+  if (citationCount && citationCount > 0) {
+    blocks.push(
+      <span key="cite" className="font-medium text-zinc-700 dark:text-zinc-300">
+        {citationCount.toLocaleString()} citations
+      </span>,
+    );
+  }
+
+  const hasImpact = impactScore !== null && impactScore !== undefined;
+  const hasConcept =
+    conceptImpactScore !== null && conceptImpactScore !== undefined;
+  if (hasImpact || hasConcept) {
+    blocks.push(
+      <span key="impact" className="whitespace-nowrap">
+        {hasImpact ? <>Impact: {Math.round(impactScore as number)}</> : null}
+        {hasImpact && hasConcept ? (
+          <span aria-hidden="true" className="text-muted-foreground/60">
+            {" · "}
+          </span>
+        ) : null}
+        {hasConcept ? <>Concept: {Math.round(conceptImpactScore as number)}</> : null}
+      </span>,
     );
   }
 
