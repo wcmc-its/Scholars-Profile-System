@@ -262,6 +262,34 @@ describe("PublicationModal — content sections", () => {
     expect(screen.queryByText(/Higher score = stronger fit/)).toBeNull();
   });
 
+  it("renders a score bar with width proportional to the topic score", async () => {
+    // 0.92 → 92%, 0.50 → 50%. The bar role="img" has a descriptive
+    // aria-label so screen readers verbalize the score.
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const dialog = screen.getByRole("dialog");
+    const widget = dialog.querySelector(
+      'span[role="img"][aria-label*="Widget Science"]',
+    ) as HTMLElement | null;
+    const eng = dialog.querySelector(
+      'span[role="img"][aria-label*="Engineering"]',
+    ) as HTMLElement | null;
+    expect(widget?.getAttribute("aria-label")).toBe(
+      "Widget Science score 0.92 of 1.00",
+    );
+    expect(eng?.getAttribute("aria-label")).toBe(
+      "Engineering score 0.50 of 1.00",
+    );
+    // Inner fill carries the width inline style; clamp to two decimals
+    // when reading from style.width since browsers may round.
+    const widgetFill = widget?.querySelector("span") as HTMLElement | null;
+    const engFill = eng?.querySelector("span") as HTMLElement | null;
+    expect(widgetFill?.style.width).toBe("92%");
+    expect(engFill?.style.width).toBe("50%");
+  });
+
   it("shows '(this page)' marker on the current topic when slug matches", async () => {
     mockFetch(makePayload());
     renderModalHarness({ currentTopicSlug: "widget_science" });
@@ -361,8 +389,8 @@ describe("PublicationModal — Cited by section", () => {
 
   it("uses pub.citationCount for the count chip even when the list is smaller", async () => {
     // Mirrors the real-world PMID 32432483 case: Publication.citationCount
-    // = 197 (Scopus total), citingPubsTotal = 19 (iCite subset). Chip must
-    // reflect 197 and the subhead must qualify the listed window.
+    // = 197 (Scopus total), citingPubsTotal = 19 (PubMed/iCite subset).
+    // Chip reflects 197 and the subhead qualifies the listed window.
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 197 },
@@ -380,13 +408,11 @@ describe("PublicationModal — Cited by section", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(screen.getByText("197")).toBeDefined();
     expect(
-      screen.getByText(
-        /Showing 19 indexed citers \(most recent first\) · 197 total per Scopus/,
-      ),
+      screen.getByText("19 in PubMed · Scopus reports 197"),
     ).toBeDefined();
   });
 
-  it("renders 'No citing publications in our index yet.' when list empty but Scopus has cites", async () => {
+  it("renders 'No PubMed-indexed citations yet.' when list empty but Scopus has cites", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 5 },
@@ -397,7 +423,7 @@ describe("PublicationModal — Cited by section", () => {
     renderModalHarness();
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
-    expect(screen.getByText("No citing publications in our index yet.")).toBeDefined();
+    expect(screen.getByText("No PubMed-indexed citations yet.")).toBeDefined();
     // Chip still shows the Scopus count.
     expect(screen.getByText("5")).toBeDefined();
   });
@@ -418,7 +444,7 @@ describe("PublicationModal — Cited by section", () => {
     expect(screen.queryByText("0")).toBeNull();
   });
 
-  it("shows the cap-overflow subhead when the iCite subset exceeds 500", async () => {
+  it("shows the cap-overflow subhead when the PubMed subset exceeds 500", async () => {
     mockFetch(
       makePayload({
         pub: { ...makePayload().pub, citationCount: 1500 },
@@ -435,10 +461,138 @@ describe("PublicationModal — Cited by section", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     expect(
-      screen.getByText("Showing 500 most recent of 1,234 indexed citers"),
+      screen.getByText(
+        "500 most recent in PubMed of 1,234 total · use CSV for the full list",
+      ),
     ).toBeDefined();
-    // Chip reflects the true Scopus total, not the indexed total.
+    // Chip reflects the true Scopus total, not the PubMed indexed total.
     expect(screen.getByText("1,500")).toBeDefined();
+  });
+
+  it("paginates the citing list to 50 by default with a Show all toggle", async () => {
+    // > 50 rows → first 50 render, "Show all 75" button reveals the rest.
+    const rows = Array.from({ length: 75 }, (_, i) => ({
+      pmid: String(i + 1),
+      title: `Citation ${i + 1}`,
+      journal: null,
+      year: 2024,
+    }));
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 75 },
+        citingPubs: rows,
+        citingPubsTotal: 75,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const dialog = screen.getByRole("dialog");
+    const visible = () =>
+      Array.from(dialog.querySelectorAll("ul a"))
+        .map((a) => a.textContent)
+        .filter((t) => t && t.startsWith("Citation "));
+    expect(visible().length).toBe(50);
+    const toggle = screen.getByRole("button", { name: "Show all 75" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(visible().length).toBe(75);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.textContent).toBe("Show fewer");
+    fireEvent.click(toggle);
+    expect(visible().length).toBe(50);
+  });
+
+  it("renders no pagination toggle when the list fits in the initial window", async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => ({
+      pmid: String(i + 1),
+      title: `Citation ${i + 1}`,
+      journal: null,
+      year: 2024,
+    }));
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 10 },
+        citingPubs: rows,
+        citingPubsTotal: 10,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Show fewer/ })).toBeNull();
+  });
+
+  it("renders a copyable PMID on every citing-pub row", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    // Two citing pubs with pmid 999 and 888 from makePayload defaults.
+    // Each row should carry a "PMID:" label, the pmid as a link, and a
+    // copy-to-clipboard button.
+    expect(screen.getByText("999")).toBeDefined();
+    expect(screen.getByText("888")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Copy PMID 999" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Copy PMID 888" })).toBeDefined();
+  });
+
+  it("renders a Download CSV link pointing at the citations.csv route", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const link = screen.getByRole("link", { name: /Download CSV/ });
+    expect(link.getAttribute("href")).toBe(
+      "/api/publications/12345/citations.csv",
+    );
+    expect(link.hasAttribute("download")).toBe(true);
+  });
+
+  it("nudges users toward CSV when the 500-row cap kicks in", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 5000 },
+        citingPubs: Array.from({ length: 500 }, (_, i) => ({
+          pmid: String(i + 1),
+          title: `c${i}`,
+          journal: null,
+          year: 2024,
+        })),
+        citingPubsTotal: 5000,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(
+      screen.getByText(
+        /500 most recent in PubMed of 5,000 total · use CSV for the full list/,
+      ),
+    ).toBeDefined();
+  });
+
+  it("omits the CSV download link when reciterdb soft-failed (citingPubsTotal=null)", async () => {
+    mockFetch(makePayload({ citingPubs: null, citingPubsTotal: null }));
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("link", { name: /Download CSV/ })).toBeNull();
+  });
+
+  it("omits the CSV download link when the indexed total is zero", async () => {
+    mockFetch(
+      makePayload({
+        pub: { ...makePayload().pub, citationCount: 5 },
+        citingPubs: [],
+        citingPubsTotal: 0,
+      }),
+    );
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    expect(screen.queryByRole("link", { name: /Download CSV/ })).toBeNull();
   });
 
   it("shows 'Most recent first' subhead when list equals total and >1", async () => {

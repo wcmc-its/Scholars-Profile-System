@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { CopyButton } from "@/components/publication/copy-button";
 import type {
   PublicationDetailPayload,
   PublicationDetailTopic,
@@ -346,6 +347,7 @@ function ModalContent({
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
           <CitingPubsSection
+            pmid={pub.pmid}
             citationCount={pub.citationCount}
             citingPubs={citingPubs}
             citingPubsTotal={citingPubsTotal}
@@ -523,14 +525,14 @@ function TopicListItem({
   topic: PublicationDetailTopic;
   isCurrent: boolean;
 }) {
-  // Parent topic row: name on the left, score pinned right. Subtopics flow
-  // as a single comma-separated line below; the primary subtopic shows in
-  // slightly heavier weight as the only visual marker. Per-subtopic
-  // confidence numbers were dropped to keep the section readable on heavy
-  // multi-topic papers.
+  // Parent topic row: name on the left, score bar + number pinned right.
+  // Subtopics flow as a single comma-separated line below; the primary
+  // subtopic shows in slightly heavier weight as the only visual marker.
+  // Per-subtopic confidence numbers were dropped to keep the section
+  // readable on heavy multi-topic papers.
   return (
     <li>
-      <div className="flex items-baseline gap-x-2">
+      <div className="flex items-center gap-x-2">
         <Link
           href={`/topics/${topic.topicSlug}`}
           className="text-sm font-medium text-[var(--color-accent-slate)] hover:underline"
@@ -540,9 +542,11 @@ function TopicListItem({
         {isCurrent ? (
           <span className="text-muted-foreground text-xs">(this page)</span>
         ) : null}
-        <span className="text-muted-foreground ml-auto text-xs tabular-nums">
-          {topic.score.toFixed(2)}
-        </span>
+        <ScoreBar
+          score={topic.score}
+          label={topic.topicName}
+          className="ml-auto"
+        />
       </div>
       {topic.subtopics.length > 0 ? (
         <p className="text-foreground/70 mt-0.5 text-xs leading-relaxed">
@@ -679,46 +683,69 @@ function IdentifiersLine({
   );
 }
 
+const CITING_PUBS_INITIAL_VISIBLE = 50;
+
 function CitingPubsSection({
+  pmid,
   citationCount,
   citingPubs,
   citingPubsTotal,
 }: {
+  pmid: string;
   citationCount: number;
   citingPubs: PublicationDetailPayload["citingPubs"];
   citingPubsTotal: number | null;
 }) {
   // Header chip = the canonical Scopus citation count from
-  // `Publication.citationCount` — what users mean when they say "this paper
-  // has been cited N times". The listed window comes from `analysis_nih_cites`
-  // (iCite-derived, Cornell-indexed) which is typically much smaller —
-  // PMID 32432483 has 197 Scopus cites but only 19 rows in nih_cites. The
-  // subhead clarifies that gap so readers don't mistake the listed N for
-  // the true total.
+  // `Publication.citationCount` — the headline "this paper has been cited
+  // N times" number. The listed citations come from `analysis_nih_cites`,
+  // which is iCite-derived and ties to PubMed's own Cited By tab in
+  // practice — that's how users recognize the number. The subhead spells
+  // out the gap when Scopus reports more than PubMed tracks.
+  //
+  // Pagination: the API caps at 500 rows; the UI further trims to the
+  // first CITING_PUBS_INITIAL_VISIBLE on first render with a "Show all N"
+  // toggle. Reveal-all is a single click rather than incremental — the
+  // additional rows are already in the response so no fetch is needed.
+  // For papers with >500 citers (e.g. seminal methods papers, COVID-era
+  // outliers) the CSV download is the escape hatch — see
+  // `/api/publications/[pmid]/citations.csv`, capped at 50k server-side.
+  const [expanded, setExpanded] = useState(false);
   const hasList = citingPubs !== null && citingPubs.length > 0;
-  const showCount = citationCount > 0;
+  const showCountChip = citationCount > 0;
+  const showCsvDownload =
+    citingPubsTotal !== null && citingPubsTotal > 0;
+
+  const visible =
+    !hasList
+      ? null
+      : expanded || citingPubs.length <= CITING_PUBS_INITIAL_VISIBLE
+        ? citingPubs
+        : citingPubs.slice(0, CITING_PUBS_INITIAL_VISIBLE);
+
   let subhead: string | null = null;
   if (hasList && citingPubsTotal !== null) {
     if (citingPubsTotal > citingPubs.length) {
-      // 500-row cap kicked in inside the indexed subset.
-      subhead = `Showing ${citingPubs.length.toLocaleString()} most recent of ${citingPubsTotal.toLocaleString()} indexed citers`;
+      // 500-row API cap kicked in inside the PubMed-cited subset; CSV is
+      // the only path to the full list, so the subhead nudges users
+      // toward it.
+      subhead = `${citingPubs.length.toLocaleString()} most recent in PubMed of ${citingPubsTotal.toLocaleString()} total · use CSV for the full list`;
     } else if (citingPubsTotal < citationCount) {
-      // List exhausts our indexed subset but the Scopus total is larger —
-      // be explicit so the chip number and list length don't seem to
-      // contradict each other.
+      // Listed full PubMed subset but Scopus reports more.
       subhead =
-        citingPubs.length === 1
-          ? `1 indexed citer · ${citationCount.toLocaleString()} total per Scopus`
-          : `Showing ${citingPubs.length.toLocaleString()} indexed citers (most recent first) · ${citationCount.toLocaleString()} total per Scopus`;
+        citingPubsTotal === 1
+          ? `1 in PubMed · Scopus reports ${citationCount.toLocaleString()}`
+          : `${citingPubsTotal.toLocaleString()} in PubMed · Scopus reports ${citationCount.toLocaleString()}`;
     } else if (citingPubs.length > 1) {
       subhead = "Most recent first";
     }
   }
+
   return (
     <section>
       <div className="flex items-baseline justify-between gap-2">
         <SectionHeading>Cited by</SectionHeading>
-        {showCount ? (
+        {showCountChip ? (
           <span className="text-muted-foreground text-xs tabular-nums">
             {citationCount.toLocaleString()}
           </span>
@@ -727,6 +754,30 @@ function CitingPubsSection({
       {subhead ? (
         <p className="text-muted-foreground mt-0.5 text-xs">{subhead}</p>
       ) : null}
+      {showCsvDownload ? (
+        <a
+          href={`/api/publications/${encodeURIComponent(pmid)}/citations.csv`}
+          download
+          className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          <svg
+            aria-hidden="true"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download CSV
+        </a>
+      ) : null}
       {citingPubs === null ? (
         <p className="text-muted-foreground mt-2 text-sm">
           Citing publication list temporarily unavailable.
@@ -734,33 +785,66 @@ function CitingPubsSection({
       ) : citingPubs.length === 0 ? (
         <p className="text-muted-foreground mt-2 text-sm">
           {citationCount > 0
-            ? "No citing publications in our index yet."
+            ? "No PubMed-indexed citations yet."
             : "No citing publications."}
         </p>
       ) : (
-        <ul className="mt-2 flex flex-col gap-2">
-          {citingPubs.map((c) => (
-            <li
-              key={c.pmid}
-              className="text-foreground/90 text-sm leading-snug"
-            >
-              <a
-                href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-[var(--color-accent-slate)] hover:underline"
-                dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
-              />
-              {c.journal || c.year ? (
-                <div className="text-muted-foreground mt-0.5 text-xs">
-                  {c.journal ? <em className="not-italic">{c.journal}</em> : null}
-                  {c.journal && c.year ? " · " : null}
-                  {c.year ?? null}
+        <>
+          <ul className="mt-2 flex flex-col gap-2">
+            {visible?.map((c) => (
+              <li
+                key={c.pmid}
+                className="text-foreground/90 text-sm leading-snug"
+              >
+                <a
+                  href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-[var(--color-accent-slate)] hover:underline"
+                  dangerouslySetInnerHTML={{ __html: sanitizePubTitle(c.title) }}
+                />
+                <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+                  {c.journal ? (
+                    <em className="not-italic">{c.journal}</em>
+                  ) : null}
+                  {c.journal && c.year ? (
+                    <span aria-hidden="true">·</span>
+                  ) : null}
+                  {c.year !== null && c.year !== undefined ? (
+                    <span>{c.year}</span>
+                  ) : null}
+                  {(c.journal || c.year) ? (
+                    <span aria-hidden="true">·</span>
+                  ) : null}
+                  <span className="inline-flex items-center">
+                    PMID:{" "}
+                    <a
+                      href={`https://pubmed.ncbi.nlm.nih.gov/${c.pmid}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-0.5 underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+                    >
+                      {c.pmid}
+                    </a>
+                    <CopyButton value={c.pmid} label={`Copy PMID ${c.pmid}`} />
+                  </span>
                 </div>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+          {citingPubs.length > CITING_PUBS_INITIAL_VISIBLE ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((s) => !s)}
+              aria-expanded={expanded}
+              className="mt-2 text-xs text-[var(--color-accent-slate)] hover:underline"
+            >
+              {expanded
+                ? `Show fewer`
+                : `Show all ${citingPubs.length.toLocaleString()}`}
+            </button>
+          ) : null}
+        </>
       )}
     </section>
   );
@@ -771,5 +855,38 @@ function SectionHeading({ children }: { children: ReactNode }) {
     <h3 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
       {children}
     </h3>
+  );
+}
+
+function ScoreBar({
+  score,
+  label,
+  className,
+}: {
+  /** Score in 0..1. Values outside that range get clamped. */
+  score: number;
+  /** Aria label seed; bar gets "{label} score 0.92" so screen readers
+   *  describe what the bar represents. */
+  label: string;
+  className?: string;
+}) {
+  const pct = Math.max(0, Math.min(100, score * 100));
+  return (
+    <span className={`inline-flex items-center gap-2 ${className ?? ""}`}>
+      <span
+        role="img"
+        aria-label={`${label} score ${score.toFixed(2)} of 1.00`}
+        className="bg-muted relative h-1.5 w-16 overflow-hidden rounded-full"
+      >
+        <span
+          aria-hidden="true"
+          className="block h-full rounded-full bg-[var(--color-accent-slate)]"
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="text-muted-foreground text-xs tabular-nums">
+        {score.toFixed(2)}
+      </span>
+    </span>
   );
 }

@@ -30,7 +30,12 @@ vi.mock("@/lib/sources/reciterdb", () => ({
   withReciterConnection: mocks.withReciterConnection,
 }));
 
-import { getPublicationDetail } from "@/lib/api/publication-detail";
+import {
+  encodeCsvField,
+  getCitingPublicationsForCsv,
+  getPublicationDetail,
+  serializeCitingPubsCsv,
+} from "@/lib/api/publication-detail";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -325,5 +330,100 @@ describe("getPublicationDetail — citing publications", () => {
     const r = await getPublicationDetail("12345");
     expect(r?.citingPubs?.[0].pmid).toBe("999");
     expect(r?.citingPubsTotal).toBe(1);
+  });
+});
+
+describe("encodeCsvField", () => {
+  it("returns plain values unchanged", () => {
+    expect(encodeCsvField("hello")).toBe("hello");
+    expect(encodeCsvField(42)).toBe("42");
+  });
+
+  it("quotes fields containing commas, quotes, or newlines (RFC 4180)", () => {
+    expect(encodeCsvField("a,b")).toBe('"a,b"');
+    expect(encodeCsvField('with "quotes"')).toBe('"with ""quotes"""');
+    expect(encodeCsvField("line1\nline2")).toBe('"line1\nline2"');
+    expect(encodeCsvField("line1\r\nline2")).toBe('"line1\r\nline2"');
+  });
+
+  it("returns empty string for null/undefined", () => {
+    expect(encodeCsvField(null)).toBe("");
+    expect(encodeCsvField(undefined)).toBe("");
+  });
+});
+
+describe("serializeCitingPubsCsv", () => {
+  it("emits a header row and CRLF-terminated lines", () => {
+    const csv = serializeCitingPubsCsv([
+      {
+        pmid: "100",
+        title: "Title One",
+        journal: "J1",
+        year: 2024,
+        publicationDate: "2024-01-15",
+      },
+      {
+        pmid: "200",
+        title: "Title, with comma",
+        journal: null,
+        year: null,
+        publicationDate: null,
+      },
+    ]);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe("PMID,Title,Journal,Year,Publication date");
+    expect(lines[1]).toBe("100,Title One,J1,2024,2024-01-15");
+    expect(lines[2]).toBe('200,"Title, with comma",,,');
+    // Trailing CRLF after the last row.
+    expect(lines[3]).toBe("");
+  });
+
+  it("handles an empty row list (header-only export)", () => {
+    const csv = serializeCitingPubsCsv([]);
+    expect(csv).toBe("PMID,Title,Journal,Year,Publication date\r\n");
+  });
+});
+
+describe("getCitingPublicationsForCsv", () => {
+  it("returns null for invalid pmid", async () => {
+    const r = await getCitingPublicationsForCsv("garbage");
+    expect(r).toBeNull();
+    expect(mocks.withReciterConnection).not.toHaveBeenCalled();
+  });
+
+  it("queries with a higher cap than the inline endpoint and includes publicationDate", async () => {
+    const queryMock = vi.fn().mockResolvedValueOnce([
+      {
+        pmid: 1,
+        title: "T",
+        journal: "J",
+        year: 2024,
+        publicationDate: "2024-01-01",
+      },
+    ]);
+    mocks.withReciterConnection.mockImplementationOnce(
+      async (fn: (conn: unknown) => Promise<unknown>) => fn({ query: queryMock }),
+    );
+    const r = await getCitingPublicationsForCsv("12345");
+    expect(r).toEqual([
+      {
+        pmid: "1",
+        title: "T",
+        journal: "J",
+        year: 2024,
+        publicationDate: "2024-01-01",
+      },
+    ]);
+    // CSV cap must be much larger than the inline 500.
+    const params = queryMock.mock.calls[0][1] as [number, number];
+    expect(params[0]).toBe(12345);
+    expect(params[1]).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("throws (does not soft-fail) when reciterdb is unavailable so the route can return 502", async () => {
+    mocks.withReciterConnection.mockImplementationOnce(async () => {
+      throw new Error("reciterdb down");
+    });
+    await expect(getCitingPublicationsForCsv("12345")).rejects.toThrow();
   });
 });

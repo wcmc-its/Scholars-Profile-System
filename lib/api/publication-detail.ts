@@ -11,6 +11,7 @@ import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
 
 const CITING_PUBS_CAP = 500;
+const CITING_PUBS_CSV_CAP = 50_000;
 
 export type PublicationDetailTopic = {
   topicId: string;
@@ -322,3 +323,84 @@ export async function getPublicationDetail(
 }
 
 export const PUBLICATION_DETAIL_CITING_PUBS_CAP = CITING_PUBS_CAP;
+
+export type PublicationDetailCsvRow = {
+  pmid: string;
+  title: string;
+  journal: string | null;
+  year: number | null;
+  publicationDate: string | null;
+};
+
+/**
+ * Streams the full list of citing publications for a pmid as plain rows
+ * (caller is responsible for CSV serialization + HTTP transport). Capped
+ * at CITING_PUBS_CSV_CAP — far above CITING_PUBS_CAP so highly cited
+ * papers (5,000+ citers) export completely. Returns `null` when the pmid
+ * is invalid; throws on reciterdb failure so the caller can return a
+ * 5xx instead of an empty/misleading CSV.
+ */
+export async function getCitingPublicationsForCsv(
+  pmid: string,
+): Promise<PublicationDetailCsvRow[] | null> {
+  const pmidInt = parsePmid(pmid);
+  if (pmidInt === null) return null;
+  let rows: PublicationDetailCsvRow[] = [];
+  await withReciterConnection(async (conn) => {
+    const raw = (await conn.query(
+      `SELECT a.pmid AS pmid,
+              a.articleTitle AS title,
+              a.journalTitleVerbose AS journal,
+              a.articleYear AS year,
+              a.publicationDateStandardized AS publicationDate
+         FROM analysis_nih_cites c
+         JOIN analysis_summary_article a ON a.pmid = c.citing_pmid
+        WHERE c.cited_pmid = ?
+        ORDER BY a.publicationDateStandardized DESC, a.pmid DESC
+        LIMIT ?`,
+      [pmidInt, CITING_PUBS_CSV_CAP],
+    )) as Array<{
+      pmid: number | bigint;
+      title: string | null;
+      journal: string | null;
+      year: number | null;
+      publicationDate: string | null;
+    }>;
+    rows = raw.map((r) => ({
+      pmid: String(r.pmid),
+      title: r.title ?? "",
+      journal: r.journal ?? null,
+      year: r.year ?? null,
+      publicationDate: r.publicationDate ?? null,
+    }));
+  });
+  return rows;
+}
+
+/** RFC 4180 CSV field encoding: double-quote-wrap, double-up inner quotes. */
+export function encodeCsvField(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+/** Serialize citing-pub rows into a CSV document. Header row included. */
+export function serializeCitingPubsCsv(rows: PublicationDetailCsvRow[]): string {
+  const header = ["PMID", "Title", "Journal", "Year", "Publication date"];
+  const out: string[] = [header.join(",")];
+  for (const r of rows) {
+    out.push(
+      [
+        encodeCsvField(r.pmid),
+        encodeCsvField(r.title),
+        encodeCsvField(r.journal),
+        encodeCsvField(r.year),
+        encodeCsvField(r.publicationDate),
+      ].join(","),
+    );
+  }
+  return out.join("\r\n") + "\r\n";
+}
