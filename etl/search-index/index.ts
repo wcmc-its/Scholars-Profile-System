@@ -873,18 +873,20 @@ async function assertPeopleIndexHealth(
   // publicationMesh is the people-side rollup of joined Publication.meshTerms.
   // Pre-#278 it was always "" across every doc because extractMeshLabels
   // didn't exist; the {ui,label} object rows were dropped before join.
-  // We probe with a `match_phrase` for "Humans" — the most universally-
-  // applied MeSH descriptor in any biomedical corpus — instead of
-  // negating an empty term query, which doesn't behave as expected on
-  // analyzed text fields (a `term: {field: ""}` clause matches nothing,
-  // so the must_not would mark every doc as a hit).
+  // We probe with a `match_phrase` against a content descriptor that's
+  // dense in this corpus — "Neoplasms" parallels the publications-side
+  // smoke below — instead of negating an empty term query, which doesn't
+  // behave as expected on analyzed text fields (a `term: {field: ""}`
+  // clause matches nothing, so the must_not would mark every doc as a
+  // hit). MeSH check-tags (Humans, Male, Female, Adult, ...) are filtered
+  // upstream by ReciterDB and don't appear in this field — see #292.
   const withMesh = await client.count({
     index: PEOPLE_INDEX,
-    body: { query: { match_phrase: { publicationMesh: "Humans" } } },
+    body: { query: { match_phrase: { publicationMesh: "Neoplasms" } } },
   });
   if (withMesh.body.count === 0) {
     throw new Error(
-      "[smoke] scholars-people: no scholar's publicationMesh contains \"Humans\" — extractMeshLabels regression suspected (see #278)",
+      "[smoke] scholars-people: no scholar's publicationMesh contains \"Neoplasms\" — extractMeshLabels regression suspected (see #278)",
     );
   }
 }
@@ -915,18 +917,23 @@ async function assertPublicationsIndexHealth(
   // Issue #259 — MeSH defaults rebalance. The same regression class as #278
   // applies to the UI extractor: a future code change to the JSON column shape
   // (or to `extractMeshDescriptorUis`) could silently zero out the new field
-  // on every doc. Smoke against a ubiquitous descriptor (D006801 = Humans;
-  // tagged on > 60% of indexed pubs) catches the regression at ETL time.
+  // on every doc. Smoke against D001943 (Breast Neoplasms), the densest
+  // content descriptor in the WCM corpus (~4.5k indexed pubs). The earlier
+  // smoke targeted D006801 ("Humans") assuming PubMed-average tag density
+  // (~60%), but MeSH check-tags (Humans, Male, Female, Adult, ...) are
+  // filtered upstream by ReciterDB and never enter this pipeline — see
+  // #292. The 2,500 floor gives ~45% headroom on the current count and
+  // catches any regression that drops the field on more than ~half the docs.
   const meshUiSmoke = await client.search({
     index: PUBLICATIONS_INDEX,
-    body: { query: { term: { meshDescriptorUi: "D006801" } } },
+    body: { query: { term: { meshDescriptorUi: "D001943" } } },
     size: 0,
   });
-  if ((meshUiSmoke.body.hits.total as { value: number }).value < 50_000) {
+  if ((meshUiSmoke.body.hits.total as { value: number }).value < 2_500) {
     throw new Error(
-      `[smoke] scholars-publications: term: meshDescriptorUi = "D006801" returned ` +
+      `[smoke] scholars-publications: term: meshDescriptorUi = "D001943" returned ` +
         `${(meshUiSmoke.body.hits.total as { value: number }).value} hits ` +
-        `(expected > 50,000) — extractMeshDescriptorUis regression suspected (see SPEC §5.4.1)`,
+        `(expected > 2,500) — extractMeshDescriptorUis regression suspected (see SPEC §5.4.1)`,
     );
   }
 
