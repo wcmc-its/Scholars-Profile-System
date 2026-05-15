@@ -4,15 +4,17 @@
  * TDD cycle: RED scaffold was the single typeof tripwire (Plan 02). This file
  * replaces it with concrete expectations (Plan 05 GREEN target).
  *
- * Covers:
+ * Covers (post-#316 PR-A consolidation: by_impact is now SQL-direct,
+ * not Variant B in-process scoring):
  *   - sort=newest orders by year DESC then dateAddedToEntrez DESC
  *   - sort=most_cited orders by citationCount DESC NULLs LAST
- *   - sort=by_impact uses recent_highlights curve, scholarCentric=false
- *   - sort=by_impact uses recent_highlights curve
+ *   - sort=by_impact orders by publication.impactScore DESC, year DESC (SQL)
  *   - filter=research_articles_only excludes Letter, Editorial Article, Erratum
  *   - filter=all includes all publication types
  *   - subtopic param filters by primarySubtopicId
  *   - returns null for unknown topic slug
+ *   - issue #305 impactScore surfacing (gated on SEARCH_PUB_TAB_IMPACT) —
+ *     sources Publication.impactScore via the include after #316 PR-B
  *   - getSubtopicsForTopic returns subtopics sorted by pubCount DESC
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -84,10 +86,12 @@ function makePtRow(overrides: {
   year?: number;
   score?: number;
   /**
-   * Issue #305 — per-row topic-context impact score from
-   * `PublicationTopic.impactScore`. Defaults to null so existing tests
-   * (which don't care about this field) see the same hit shape they did
-   * before #305 added impact surfacing.
+   * Global per-pmid impact score from `Publication.impactScore` (issue #316
+   * IMPACT# ETL). Placed on the publication relation since #316 PR-B routed
+   * the API hit mapper to read `r.publication.impactScore` rather than the
+   * deprecated `r.impactScore` mirror on publication_topic. Defaults to
+   * null so existing tests (which don't care about this field) see the
+   * same hit shape they did before #305 added impact surfacing.
    */
   impactScore?: number | null;
   authorPosition?: string;
@@ -104,7 +108,6 @@ function makePtRow(overrides: {
     subtopicIds: null,
     subtopicConfidences: null,
     score: overrides.score ?? 1.0,
-    impactScore: overrides.impactScore ?? null,
     authorPosition: overrides.authorPosition ?? "first",
     year: overrides.year ?? 2024,
     publication: {
@@ -117,6 +120,7 @@ function makePtRow(overrides: {
       dateAddedToEntrez: overrides.dateAddedToEntrez ?? new Date("2025-06-01T00:00:00Z"),
       doi: null,
       pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
+      impactScore: overrides.impactScore ?? null,
     },
   };
 }
@@ -189,41 +193,30 @@ describe("getTopicPublications", () => {
     });
   });
 
-  describe("sort=by_impact uses recent_highlights curve and scholarCentric=false", () => {
-    it("calls scorePublication with curve=recent_highlights and scholarCentric=false", async () => {
+  describe("sort=by_impact orders SQL-direct by publication.impactScore DESC, year DESC", () => {
+    // Post-#316 PR-A: the in-process Variant B scoring path on by_impact was
+    // retired in favor of a strict SQL DESC. PR-B-1 then pointed the ORDER BY
+    // at the canonical `publication.impactScore` column.
+    it("uses $transaction (SQL-direct path), not scorePublication", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      const rows = [makePtRow({ pmid: "10" }), makePtRow({ pmid: "11" })];
-      mockPublicationTopicFindMany.mockResolvedValue(rows);
-      mockScorePublication.mockReturnValue(0.8);
+      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
-      expect(mockScorePublication).toHaveBeenCalled();
-      // All calls must use "recent_highlights" curve and scholarCentric=false
-      for (const call of mockScorePublication.mock.calls) {
-        expect(call[1]).toBe("recent_highlights");
-        expect(call[2]).toBe(false);
-      }
+      expect(mockTransaction).toHaveBeenCalled();
+      expect(mockScorePublication).not.toHaveBeenCalled();
     });
 
-    it("does NOT call $transaction (in-process scoring path)", async () => {
+    it("passes orderBy `publication.impactScore desc` + `year desc` to findMany", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockPublicationTopicFindMany.mockResolvedValue([]);
+      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
-      expect(mockTransaction).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("sort=by_impact uses recent_highlights curve", () => {
-    it("calls scorePublication with curve=recent_highlights and scholarCentric=false", async () => {
-      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      const rows = [makePtRow({ pmid: "20" }), makePtRow({ pmid: "21" })];
-      mockPublicationTopicFindMany.mockResolvedValue(rows);
-      mockScorePublication.mockReturnValue(0.9);
-      await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
-      expect(mockScorePublication).toHaveBeenCalled();
-      for (const call of mockScorePublication.mock.calls) {
-        expect(call[1]).toBe("recent_highlights");
-        expect(call[2]).toBe(false);
-      }
+      // The inner findMany inside $transaction still captures its own args
+      // via the publicationTopic.findMany mock.
+      expect(mockPublicationTopicFindMany).toHaveBeenCalled();
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.orderBy).toEqual([
+        { publication: { impactScore: "desc" } },
+        { year: "desc" },
+      ]);
     });
   });
 
@@ -250,20 +243,20 @@ describe("getTopicPublications", () => {
   });
 
   describe("filter=all includes all publication types", () => {
-    it("on by_impact path, does not apply notIn filter — returns all types from findMany", async () => {
+    it("on by_impact path, does not apply notIn filter — where clause omits publicationType restriction", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      // Simulate Letter-type row in pool — filter=all should include it
       const rows = [
         makePtRow({ pmid: "30", publicationType: "Letter" }),
         makePtRow({ pmid: "31", publicationType: "Academic Article" }),
       ];
-      mockPublicationTopicFindMany.mockResolvedValue(rows);
-      mockScorePublication.mockReturnValue(0.5);
+      mockTransaction.mockResolvedValue([rows, 2, 2, 2]);
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "by_impact", filter: "all" }, NOW);
       expect(result).not.toBeNull();
-      // With filter=all, the pool includes all rows returned by findMany.
-      // scorePublication is called for both rows.
-      expect(mockScorePublication).toHaveBeenCalledTimes(2);
+      // After #316 PR-A's SQL-direct by_impact migration: the publicationType
+      // notIn restriction is only attached when filter=research_articles_only.
+      // With filter=all, the where clause has no publicationType key.
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.publication).toBeUndefined();
     });
   });
 
@@ -280,8 +273,10 @@ describe("getTopicPublications", () => {
 
     it("passes primarySubtopicId filter on by_impact path", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockPublicationTopicFindMany.mockResolvedValue([]);
+      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact", subtopic: "lung_cancer" }, NOW);
+      // by_impact is SQL-direct after #316 PR-A — assert the where clause
+      // through the captured findMany args (executed inside $transaction).
       expect(mockPublicationTopicFindMany).toHaveBeenCalled();
       const args = mockPublicationTopicFindMany.mock.calls[0][0];
       expect(args.where.primarySubtopicId).toBe("lung_cancer");
@@ -304,10 +299,11 @@ describe("getTopicPublications", () => {
     });
   });
 
-  // Issue #305 — topic-context impactScore surfacing on hits. Pure mapper
-  // behavior (Decimal → number, null passthrough, env-flag gating). All
-  // three sort paths share the same mapper, so the SQL-direct (newest) +
-  // in-process (by_impact) paths each get one assertion to lock the flow.
+  // Issue #305 — impactScore surfacing on hits. Pure mapper behavior
+  // (Decimal → number, null passthrough, env-flag gating). Post-#316 PR-B
+  // the mapper reads `r.publication.impactScore` (canonical column from
+  // the IMPACT# ETL), not `r.impactScore` (the publication_topic mirror).
+  // All three sort paths are SQL-direct after PR-A and share this mapper.
   describe("issue #305 — impactScore surfacing", () => {
     const originalImpactFlag = process.env.SEARCH_PUB_TAB_IMPACT;
     beforeEach(() => {
@@ -321,7 +317,7 @@ describe("getTopicPublications", () => {
       }
     });
 
-    it("flag on: surfaces PublicationTopic.impactScore on hits (SQL-direct path)", async () => {
+    it("flag on: surfaces Publication.impactScore on hits (newest path)", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [
         makePtRow({ pmid: "100", impactScore: 47 }),
@@ -340,12 +336,14 @@ describe("getTopicPublications", () => {
       expect(result!.hits[0]!.impactScore).toBeNull();
     });
 
-    it("flag on: surfaces impactScore on the in-process by_impact path too", async () => {
+    it("flag on: surfaces impactScore on the by_impact SQL-direct path too", async () => {
+      // After #316 PR-A by_impact is no longer the in-process scoring path;
+      // it routes through $transaction like newest and most_cited. The hit
+      // mapper is shared, so the surfacing assertion stays — only the path
+      // taken changes (mockTransaction, not the legacy findMany direct call).
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "300", impactScore: 73 })];
-      mockPublicationTopicFindMany.mockResolvedValue(rows);
-      mockPublicationTopicCount.mockResolvedValue(1);
-      mockScorePublication.mockReturnValue(0.9);
+      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
       expect(result!.hits[0]!.impactScore).toBe(73);
     });

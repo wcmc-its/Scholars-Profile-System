@@ -89,21 +89,28 @@ describe("PublicationMeta — impact / concept inline (issue #284)", () => {
     expect(container.textContent).toMatch(/Concept:\s*37/);
   });
 
-  it("places the impact block between citations and PMID in the row", () => {
+  it("renders the meta row in the canonical order: PMID · DOI · citations · impact (#316 PR-A reorder)", () => {
+    // Pre-#316 order was citations · impact · PMID · ... — identifiers were
+    // trailing the LLM-derived numbers. The reorder leads with canonical
+    // references (PMID, PMCID, DOI), then role (when present), then the
+    // citation count, then impact / concept. This test pins the new order.
     const { container } = render(
       <PublicationMeta
         citationCount={10}
         impactScore={42}
         pmid="123"
+        doi="10.0/example"
       />,
     );
     const text = container.textContent ?? "";
+    const pmidPos = text.indexOf("PMID:");
+    const doiPos = text.indexOf("DOI");
     const citePos = text.indexOf("10 citations");
     const impactPos = text.indexOf("Impact:");
-    const pmidPos = text.indexOf("PMID:");
-    expect(citePos).toBeGreaterThanOrEqual(0);
+    expect(pmidPos).toBeGreaterThanOrEqual(0);
+    expect(doiPos).toBeGreaterThan(pmidPos);
+    expect(citePos).toBeGreaterThan(doiPos);
     expect(impactPos).toBeGreaterThan(citePos);
-    expect(pmidPos).toBeGreaterThan(impactPos);
   });
 
   it("renders the impact block with no surrounding row content when it is the only block", () => {
