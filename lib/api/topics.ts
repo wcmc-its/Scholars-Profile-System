@@ -565,7 +565,12 @@ export async function getTopicPublications(
       : opts.sort === "most_cited"
         ? [{ publication: { citationCount: "desc" as const } }]
         : [
-            { impactScore: "desc" as const },
+            // Sort by the canonical global per-pmid impact (issue #316 PR-B
+            // consumer migration). Was `{ impactScore: "desc" }` reading
+            // `publication_topic.impact_score` — equivalent today since the
+            // mirror is identical, but pre-resolving to the publication
+            // column lets the mirror retire without touching this sort.
+            { publication: { impactScore: "desc" as const } },
             { year: "desc" as const },
           ];
   const skip = page * TOPIC_PUBLICATIONS_PAGE_SIZE;
@@ -579,6 +584,11 @@ export async function getTopicPublications(
     pubmedUrl: true,
     doi: true,
     dateAddedToEntrez: true,
+    // Global per-pmid impact score landed by the IMPACT# DynamoDB ETL block
+    // (issue #316 PR-A). Canonical source after PR-B; the per-(pmid, cwid,
+    // parent_topic) mirror on `publication_topic.impact_score` retires in
+    // the follow-up mirror-removal PR.
+    impactScore: true,
   } as const;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publicationTopic.findMany({
@@ -618,9 +628,14 @@ export async function getTopicPublications(
  * (fetched in batch via fetchWcmAuthorsForPmids); when omitted, authors defaults to []
  * which the publication-feed UI suppresses per Phase 3 D-06 absence-as-default.
  *
- * `includeImpact` (#305) gates the surfacing of `PublicationTopic.impactScore`
- * to the public hit shape under the `SEARCH_PUB_TAB_IMPACT` flag, matching
- * the search pub-tab's gating pattern. Off → impactScore always null.
+ * `includeImpact` (#305) gates the surfacing of the global per-pmid impact
+ * score to the public hit shape under the `SEARCH_PUB_TAB_IMPACT` flag,
+ * matching the search pub-tab's gating pattern. Off → impactScore always null.
+ *
+ * Sources `r.publication.impactScore` (the canonical column landed by the
+ * IMPACT# ETL in #316 PR-A) rather than the `r.impactScore` mirror on
+ * `publication_topic`. The mirror stays populated through the transition
+ * and retires in a focused follow-up PR.
  */
 function mapToTopicPublicationHit(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -628,13 +643,15 @@ function mapToTopicPublicationHit(
   wcmAuthors: TopicPublicationHit["authors"] | undefined,
   includeImpact: boolean,
 ): TopicPublicationHit {
-  // r.impactScore is Prisma's Decimal | null on PublicationTopic. Convert
-  // via Number() (Decimal#toNumber for non-null; coalesce null straight
-  // through). Cap at 0 floor — the source is the LLM rubric on the
-  // [0, 100] scale, but defense-in-depth against a stray negative leak.
+  // Prisma Decimal | number | null from the include. Convert via Number();
+  // defense-in-depth against non-finite values from a future schema change.
   let impactScore: number | null = null;
-  if (includeImpact && r.impactScore !== null && r.impactScore !== undefined) {
-    const n = Number(r.impactScore);
+  if (
+    includeImpact &&
+    r.publication.impactScore !== null &&
+    r.publication.impactScore !== undefined
+  ) {
+    const n = Number(r.publication.impactScore);
     impactScore = Number.isFinite(n) ? n : null;
   }
   return {
