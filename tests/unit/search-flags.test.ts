@@ -27,8 +27,8 @@ describe("resolveConceptMode (§7.1 + §7.1.1)", () => {
     else process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = originalLegacy;
   });
 
-  it("defaults to 'strict' when both envs are unset (PR-3 rollback target)", () => {
-    expect(resolveConceptMode()).toBe("strict");
+  it("defaults to 'expanded' when both envs are unset (PR-4 default)", () => {
+    expect(resolveConceptMode()).toBe("expanded");
   });
 
   it("returns the new env's value when set ∈ {strict, expanded, off}", () => {
@@ -42,7 +42,7 @@ describe("resolveConceptMode (§7.1 + §7.1.1)", () => {
 
   it("ignores unknown new-env values and falls back to legacy/default", () => {
     process.env.SEARCH_PUB_TAB_CONCEPT_MODE = "garbage";
-    expect(resolveConceptMode()).toBe("strict");
+    expect(resolveConceptMode()).toBe("expanded");
     process.env.SEARCH_PUB_TAB_OR_OF_EVIDENCE = "off";
     expect(resolveConceptMode()).toBe("off");
   });

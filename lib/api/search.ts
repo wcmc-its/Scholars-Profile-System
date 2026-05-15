@@ -747,14 +747,14 @@ export async function searchPublications(opts: {
 
   // Issue #259 §5 / §7.1 — pub-tab concept mode supersedes §1.6's
   // `SEARCH_PUB_TAB_OR_OF_EVIDENCE`. Three values:
-  //   `strict`   — today's `concept_filtered` / `concept_fallback` admission
-  //                shape. Body byte-identical to pre-PR-3.
+  //   `strict`   — pre-PR-3 `concept_filtered` / `concept_fallback` admission
+  //                shape (rollback target).
   //   `expanded` — §5.2 `concept_expanded` shape. MeSH adds, never gates.
+  //                **Default at PR-4 merge.**
   //   `off`      — pre-§1.6 fallback. `restructured_msm` for resolved queries
   //                (resolution is logged but not applied).
-  // Default at PR-3 merge: `strict` (rollback target). The legacy
-  // `SEARCH_PUB_TAB_OR_OF_EVIDENCE` env is read only when the new flag is
-  // unset (SPEC §7.1.1 retirement plan). Resolution lives in
+  // The legacy `SEARCH_PUB_TAB_OR_OF_EVIDENCE` env is read only when the new
+  // flag is unset (SPEC §7.1.1 retirement plan). Resolution lives in
   // `lib/api/search-flags.ts` so route handler + SSR page agree.
   const conceptMode = resolveConceptMode();
   const resolution = opts.meshResolution ?? null;
