@@ -14,6 +14,7 @@ function pub(overrides: Partial<CoPublicationFull>): CoPublicationFull {
     issue: null,
     pages: null,
     citationCount: 0,
+    abstract: null,
     authors: [],
     ...overrides,
   };

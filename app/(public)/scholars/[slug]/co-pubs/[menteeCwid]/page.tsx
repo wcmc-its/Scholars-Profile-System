@@ -239,6 +239,7 @@ function CoPubCitation({
         pmid={String(pub.pmid)}
         pmcid={pub.pmcid}
         doi={pub.doi}
+        abstract={pub.abstract}
       />
     </div>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AbstractDisclosure } from "@/components/publication/abstract-disclosure";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -274,8 +273,8 @@ export function PublicationFeed({
                   pmid={h.pmid}
                   pmcid={h.pmcid}
                   doi={h.doi}
+                  abstract={h.abstract}
                 />
-                <AbstractDisclosure abstract={h.abstract} />
               </li>
               );
             })}

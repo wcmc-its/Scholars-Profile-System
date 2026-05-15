@@ -7,7 +7,6 @@ import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
 import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
-import { AbstractDisclosure } from "@/components/publication/abstract-disclosure";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { AZDirectory } from "@/components/browse/az-directory";
@@ -1033,9 +1032,9 @@ async function PublicationsResults({
                     pmid={h.pmid}
                     pmcid={h.pmcid}
                     doi={h.doi}
+                    abstract={h.abstract}
                     className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
                   />
-                  <AbstractDisclosure abstract={h.abstract} />
                 </li>
               );
             })}

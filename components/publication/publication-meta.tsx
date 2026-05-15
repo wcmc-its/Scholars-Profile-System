@@ -1,15 +1,23 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
- *   PMID · PMCID · DOI · role · citations · impact
+ *   PMID · PMCID · DOI · role · citations · impact · Abstract
  *
  * Identifiers lead the row (canonical references first), then role, then
- * citation count and impact-score numbers trail. Adjacent middot separators
- * collapse so a publication missing an identifier never shows `· ·`.
- * Server-compatible — the embedded `<CopyButton>` carries its own `"use client"`.
+ * citation count and impact-score numbers. The optional Abstract trigger
+ * (#288 PR-A) sits at the trailing edge as a peer link — same style as
+ * PMID/PMC/DOI — that reveals the inline abstract snippet below the row
+ * on click. Adjacent middot separators collapse so a publication missing
+ * an identifier never shows `· ·`.
+ *
+ * Client component because the abstract toggle and "show more" inside it
+ * own local UI state. Server-rendered children (`role` ReactNode, etc.)
+ * pass through fine — Next.js treats them as opaque rendered trees.
  *
  * Surfaces pass `role` as a pre-rendered node (badge, plain text, or null);
  * the component owns gap, separator, and identifier-link semantics.
@@ -23,6 +31,13 @@ import { HoverTooltip } from "@/components/ui/hover-tooltip";
  * non-null `impactScore`, the inline `Impact: NN` becomes a hover/focus
  * tooltip trigger revealing the GPT-generated rubric justification.
  * Skipped when impactScore is null (nothing to explain).
+ *
+ * `abstract` (issue #288 PR-A) — when non-null, appends an "Abstract" link
+ * to the row. Click reveals the abstract clamped at 3 lines with a
+ * "Show more" toggle for the full text. Hidden when abstract is null,
+ * matching the disappear-when-missing pattern of DOI / PMC. Pass
+ * `defaultAbstractOpen` to ship a surface with the abstract expanded by
+ * default (reserved for future per-surface tuning; default is false).
  */
 export function PublicationMeta({
   citationCount,
@@ -33,6 +48,8 @@ export function PublicationMeta({
   pmid,
   pmcid,
   doi,
+  abstract,
+  defaultAbstractOpen = false,
   className,
 }: {
   citationCount?: number | null;
@@ -43,8 +60,13 @@ export function PublicationMeta({
   pmid?: string | null;
   pmcid?: string | null;
   doi?: string | null;
+  abstract?: string | null;
+  defaultAbstractOpen?: boolean;
   className?: string;
 }) {
+  const [abstractOpen, setAbstractOpen] = useState(defaultAbstractOpen);
+  const [abstractExpanded, setAbstractExpanded] = useState(false);
+
   const blocks: ReactNode[] = [];
 
   if (pmid) {
@@ -140,6 +162,21 @@ export function PublicationMeta({
     );
   }
 
+  const hasAbstract = typeof abstract === "string" && abstract.length > 0;
+  if (hasAbstract) {
+    blocks.push(
+      <button
+        key="abstract"
+        type="button"
+        onClick={() => setAbstractOpen((s) => !s)}
+        aria-expanded={abstractOpen}
+        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+      >
+        Abstract
+      </button>,
+    );
+  }
+
   if (blocks.length === 0) return null;
 
   const interleaved: ReactNode[] = [];
@@ -158,7 +195,7 @@ export function PublicationMeta({
     interleaved.push(b);
   });
 
-  return (
+  const row = (
     <div
       className={
         className ??
@@ -167,5 +204,30 @@ export function PublicationMeta({
     >
       {interleaved}
     </div>
+  );
+
+  if (!hasAbstract || !abstractOpen) return row;
+
+  return (
+    <>
+      {row}
+      <div className="mt-2">
+        <p
+          className={`text-sm leading-relaxed text-foreground/90 ${
+            abstractExpanded ? "" : "line-clamp-3"
+          }`}
+        >
+          {abstract}
+        </p>
+        <button
+          type="button"
+          onClick={() => setAbstractExpanded((s) => !s)}
+          aria-expanded={abstractExpanded}
+          className="mt-1 text-xs text-[var(--color-accent-slate)] hover:underline"
+        >
+          {abstractExpanded ? "Show less" : "Show more"}
+        </button>
+      </div>
+    </>
   );
 }

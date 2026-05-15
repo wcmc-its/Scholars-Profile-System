@@ -267,6 +267,7 @@ function CoPubCitation({
         pmid={String(pub.pmid)}
         pmcid={pub.pmcid}
         doi={pub.doi}
+        abstract={pub.abstract}
       />
       <p className="text-muted-foreground mt-2 text-xs">
         With{" "}

@@ -1,4 +1,3 @@
-import { AbstractDisclosure } from "@/components/publication/abstract-disclosure";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import {
@@ -72,8 +71,8 @@ export function PublicationRow({
         pmid={pub.pmid}
         pmcid={pub.pmcid}
         doi={pub.doi}
+        abstract={pub.abstract}
       />
-      <AbstractDisclosure abstract={pub.abstract} />
     </div>
   );
 }
