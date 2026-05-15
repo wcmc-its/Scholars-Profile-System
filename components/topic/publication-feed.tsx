@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
+import { usePublicationModal } from "@/components/publication/publication-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -97,6 +98,7 @@ export function PublicationFeed({
   const [data, setData] = useState<FeedResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { open: openModal } = usePublicationModal();
 
   const isCuratedSort = sort === "by_impact";
   const heading =
@@ -241,17 +243,12 @@ export function PublicationFeed({
               return (
               <li key={h.pmid} className="py-4">
                 <div className="line-clamp-2 font-semibold leading-snug">
-                  {h.pubmedUrl ? (
-                    <a
-                      href={h.pubmedUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                      dangerouslySetInnerHTML={{ __html: titleHtml }}
-                    />
-                  ) : (
-                    <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => openModal(h.pmid, { currentTopicSlug: topicSlug })}
+                    className="text-left hover:underline"
+                    dangerouslySetInnerHTML={{ __html: titleHtml }}
+                  />
                 </div>
                 {(h.journal || h.year) && (
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
