@@ -710,8 +710,8 @@ export async function searchPublications(opts: {
   sort?: PublicationsSort;
   filters?: PublicationsFilters;
   /**
-   * Issue #259 §1.6 — when set AND `SEARCH_PUB_TAB_OR_OF_EVIDENCE=on` (or
-   * §5 `SEARCH_PUB_TAB_CONCEPT_MODE=strict`), the query is restructured as
+   * Issue #259 §5 — when set AND `SEARCH_PUB_TAB_CONCEPT_MODE=strict` (or
+   * `=expanded` with `meshStrict: true`), the query is restructured as
    * `must(MeSH-evidence OR ReciterAI-evidence) + should(BM25 free-text)`.
    * Null/undefined → no restructure, byte-identical to the §1.2 shape.
    */
@@ -745,17 +745,15 @@ export async function searchPublications(opts: {
   const usePubMsm =
     (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
 
-  // Issue #259 §5 / §7.1 — pub-tab concept mode supersedes §1.6's
-  // `SEARCH_PUB_TAB_OR_OF_EVIDENCE`. Three values:
+  // Issue #259 §5 / §7.1 — pub-tab concept mode. Three values:
   //   `strict`   — pre-PR-3 `concept_filtered` / `concept_fallback` admission
   //                shape (rollback target).
   //   `expanded` — §5.2 `concept_expanded` shape. MeSH adds, never gates.
-  //                **Default at PR-4 merge.**
+  //                **Default since PR-4.**
   //   `off`      — pre-§1.6 fallback. `restructured_msm` for resolved queries
   //                (resolution is logged but not applied).
-  // The legacy `SEARCH_PUB_TAB_OR_OF_EVIDENCE` env is read only when the new
-  // flag is unset (SPEC §7.1.1 retirement plan). Resolution lives in
-  // `lib/api/search-flags.ts` so route handler + SSR page agree.
+  // Resolution lives in `lib/api/search-flags.ts` so route handler + SSR
+  // page agree.
   const conceptMode = resolveConceptMode();
   const resolution = opts.meshResolution ?? null;
   const meshStrict = opts.meshStrict ?? false;
