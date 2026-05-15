@@ -201,6 +201,13 @@ export const publicationsIndexMapping = {
       // false` skips field indexing entirely; OpenSearch still returns the
       // raw payload in `_source`.
       topicImpacts: { type: "object", enabled: false },
+      // Issue #316 PR-C follow-up — GPT-generated rubric justification for
+      // `impactScore`. Pure pass-through (no search/sort use), stored as
+      // a `_source` keyword field for the API to surface as the hover
+      // tooltip text on the inline `Impact: NN` value. `index: false`
+      // skips inverted-index allocation; the bytes still ride along in
+      // `_source` like the field's nature requires.
+      impactJustification: { type: "keyword", index: false, doc_values: false },
       // Issue #32 — abstract text on the publications index lets thematic
       // queries find the right paper, not just the right scholar (issue #21
       // already covers that on the people index). One abstract per doc, no
