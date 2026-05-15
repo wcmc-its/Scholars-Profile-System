@@ -236,24 +236,24 @@ model PostdocMentorRelationship {
 /// chip subtitle (lib/api/mentoring.ts) and a planned student-profile
 /// education enrichment.
 model StudentPhdProgram {
-  cwid              String   @id @db.VarChar(32)
+  cwid             String    @id @db.VarChar(32)
   /// Human-readable program name from `weillCornellEduProgram`
   /// (e.g. "Immunology & Microbial Pathogenesis").
-  program           String   @db.VarChar(255)
+  program          String    @db.VarChar(255)
   /// Short program code from `weillCornellEduProgramCode` (e.g. "IMP").
-  programCode       String?  @map("program_code") @db.VarChar(32)
+  programCode      String?   @map("program_code") @db.VarChar(32)
   /// `weillCornellEduExpectedGradYear`. Persisted separately from the
   /// Jenzabar conferralYear so the chip can show "Class of YYYY" for
   /// current students who haven't graduated yet.
-  expectedGradYear  Int?     @map("expected_grad_year")
+  expectedGradYear Int?      @map("expected_grad_year")
   /// `weillCornellEduStatus` — e.g. "student:active", "student:expired".
-  status            String?  @db.VarChar(64)
+  status           String?   @db.VarChar(64)
   /// `weillCornellEduExitReason` — e.g. "Graduated", "Withdrawn". Only
   /// populated when status is expired.
-  exitReason        String?  @map("exit_reason") @db.VarChar(128)
-  startDate         DateTime? @map("start_date")
-  endDate           DateTime? @map("end_date")
-  lastRefreshedAt   DateTime @default(now()) @map("last_refreshed_at")
+  exitReason       String?   @map("exit_reason") @db.VarChar(128)
+  startDate        DateTime? @map("start_date")
+  endDate          DateTime? @map("end_date")
+  lastRefreshedAt  DateTime  @default(now()) @map("last_refreshed_at")
 
   @@map("student_phd_program")
 }
@@ -273,24 +273,24 @@ model StudentPhdProgram {
 /// resolves each profile_id back to a WCM cwid via grant-join (primary)
 /// + fuzzy name match against scholars with NIH grants (fallback).
 model PersonNihProfile {
-  cwid            String   @db.VarChar(32)
-  scholar         Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  cwid             String   @db.VarChar(32)
+  scholar          Scholar  @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
   /// NIH eRA Commons profile_id — stable across institutions, so it
   /// captures pre-WCM funding history too. UI tooltip warns the user
   /// that the linked view is NIH-funding-only.
-  nihProfileId    Int      @map("nih_profile_id")
+  nihProfileId     Int      @map("nih_profile_id")
   /// Exactly one row per cwid carries this. When a scholar has a single
   /// profile_id this is trivially true; when multiple, the resolver
   /// picks the one with the most recent project activity.
-  isPreferred     Boolean  @default(false) @map("is_preferred")
-  firstSeen       DateTime @default(now()) @map("first_seen")
-  lastVerified    DateTime @default(now()) @map("last_verified")
-  source          String   @default("RePORTER") @db.VarChar(32)
+  isPreferred      Boolean  @default(false) @map("is_preferred")
+  firstSeen        DateTime @default(now()) @map("first_seen")
+  lastVerified     DateTime @default(now()) @map("last_verified")
+  source           String   @default("RePORTER") @db.VarChar(32)
   /// 'grant_join' (project core_project_num matched a WCM Grant row) or
   /// 'name_match' (fallback fuzzy match against scholars-with-NIH-grants
   /// pool). Tracked so the curator review queue can surface low-confidence
   /// matches without re-running the resolver.
-  resolutionSource String  @map("resolution_source") @db.VarChar(32)
+  resolutionSource String   @map("resolution_source") @db.VarChar(32)
 
   @@id([cwid, nihProfileId])
   @@index([cwid, isPreferred])
@@ -366,7 +366,7 @@ model Grant {
   /// 'nsf', 'pcori', 'cdmrp', 'gates'. Null when no abstract has been
   /// fetched. Surfaces as small "Source: NSF" attribution in the
   /// expanded grant view.
-  abstractSource String? @map("abstract_source") @db.VarChar(32)
+  abstractSource    String?   @map("abstract_source") @db.VarChar(32)
 
   publications GrantPublication[]
 
@@ -385,54 +385,69 @@ model Grant {
 /// rows are inserted only for WCM scholars; profile rendering overlays
 /// hyperlinks onto the matching substrings in authorsString.
 model Publication {
-  pmid              String    @id @db.VarChar(32)
-  title             String    @db.Text
-  authorsString     String?   @map("authors_string") @db.VarChar(2000)
+  pmid                String    @id @db.VarChar(32)
+  title               String    @db.Text
+  authorsString       String?   @map("authors_string") @db.VarChar(2000)
   /// Full author list (no truncation) sourced from
   /// `reciterdb.analysis_summary_author_all.authors` and reformatted
   /// from pipe-separated `Lastname, Initials` to comma-separated
   /// `Lastname Initials`. Used by the Word bibliography export (#89)
   /// where citations need every author present, including middle
   /// authors that the truncated `authorsString` drops.
-  fullAuthorsString String?   @map("full_authors_string") @db.Text
-  journal           String?   @db.VarChar(512)
-  year              Int?
-  publicationType   String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
-  citationCount     Int       @default(0) @map("citation_count")
-  dateAddedToEntrez DateTime? @map("date_added_to_entrez") @db.Date
-  doi               String?   @db.VarChar(255)
+  fullAuthorsString   String?   @map("full_authors_string") @db.Text
+  journal             String?   @db.VarChar(512)
+  year                Int?
+  publicationType     String?   @map("publication_type") @db.VarChar(64) // publicationTypeCanonical
+  citationCount       Int       @default(0) @map("citation_count")
+  dateAddedToEntrez   DateTime? @map("date_added_to_entrez") @db.Date
+  doi                 String?   @db.VarChar(255)
   /// PubMed Central identifier including the `PMC` prefix (e.g. "PMC11098699").
   /// Sourced from `analysis_summary_article.pmcid`. Surfaced on publication
   /// cards alongside DOI/PMID; signals NIH public-access compliance.
-  pmcid             String?   @db.VarChar(32)
+  pmcid               String?   @db.VarChar(32)
   /// Issue #89 — Vancouver-style citation fields. Sourced from
   /// `analysis_summary_article.{volume,issue,pages}`. Stored as varchar
   /// since they're free-form ("12", "Suppl 1", "S5", "538-40").
-  volume            String?   @db.VarChar(64)
-  issue             String?   @db.VarChar(128)
-  pages             String?   @db.VarChar(128)
+  volume              String?   @db.VarChar(64)
+  issue               String?   @db.VarChar(128)
+  pages               String?   @db.VarChar(128)
   /// NLM/Index Medicus journal abbreviation (e.g., "Proc Natl Acad Sci U S A").
   /// Sourced from `reciterdb.person_article.journalTitleISOabbreviation` —
   /// despite the field name, the values are the standard NLM abbreviation
   /// form (no periods between abbreviated words). Used by the Word
   /// bibliography export; falls back to `journal` (full title) when null.
-  journalAbbrev     String?   @map("journal_abbrev") @db.VarChar(200)
-  pubmedUrl         String?   @map("pubmed_url") @db.VarChar(512)
+  journalAbbrev       String?   @map("journal_abbrev") @db.VarChar(200)
+  pubmedUrl           String?   @map("pubmed_url") @db.VarChar(512)
   /// MeSH keywords from accepted publications, used by the profile Topics
   /// section (issue #73). Format: `[{ ui: "D015316", label: "Genetic Therapy" }, ...]`.
   /// `ui` is null for the rare label that doesn't resolve to a `mesh.DescriptorUI`
   /// in reciterdb. Source: `reciterdb.person_article_keyword` joined to
   /// `reciterdb.mesh`. Keyword sets are per-PMID, not per-(person, pmid) —
   /// verified during ETL design.
-  meshTerms         Json?     @map("mesh_terms")
+  meshTerms           Json?     @map("mesh_terms")
   /// Plain-text article abstract from ReciterDB.reporting_abstracts.abstractVarchar
   /// (capped at 15000 chars at the source). Used by the search-index ETL to
   /// emit `publicationAbstracts` on the people document for thematic-query
   /// recall (issue #21). Nullable — many older publications and many
   /// non-research article types have no abstract.
-  abstract          String?   @db.Text
-  source            String    @default("ReCiter") @db.VarChar(32)
-  lastRefreshedAt   DateTime  @default(now()) @map("last_refreshed_at")
+  abstract            String?   @db.Text
+  /// ReCiterAI per-publication impact score (0-100, GPT-rubric). Sourced from
+  /// DynamoDB `IMPACT#pmid_<pmid>` records by the DynamoDB ETL (issue #316).
+  /// Global per-pmid — no scholar or topic dimension. `PublicationTopic.impactScore`
+  /// is a denormalized mirror kept for the transition; readers should migrate
+  /// to this field, then the mirror can retire in a follow-up.
+  impactScore         Decimal?  @map("impact_score") @db.Decimal(8, 4)
+  /// GPT-generated natural-language justification for `impactScore` citing
+  /// novelty / methodology / influence / translational relevance. Surfaced in
+  /// hover tooltips by PR-C of issue #316.
+  impactJustification String?   @map("impact_justification") @db.Text
+  /// Model identifier used to generate `impactScore` / `impactJustification`
+  /// (e.g. "gpt-5.1"). Stored for ETL traceability and to flag regenerations
+  /// when the upstream model bumps.
+  impactScoreModel    String?   @map("impact_score_model") @db.VarChar(64)
+  impactRefreshedAt   DateTime? @map("impact_refreshed_at")
+  source              String    @default("ReCiter") @db.VarChar(32)
+  lastRefreshedAt     DateTime  @default(now()) @map("last_refreshed_at")
 
   authors           PublicationAuthor[]
   publicationScores PublicationScore[]
@@ -575,20 +590,20 @@ model Subtopic {
 /// here yet — it depends on Phase 2 lead-author fields and lands in its own
 /// migration when that phase ships.
 model MeshDescriptor {
-  descriptorUi String   @id @map("descriptor_ui") @db.VarChar(10) // e.g. "D057286"
-  name         String   @db.VarChar(255) // Descriptor's preferred-concept preferred term
-  entryTerms   Json     @map("entry_terms") // string[] — every Term/String except `name`
-  treeNumbers  Json     @map("tree_numbers") // string[] — e.g. ["E05.318.308.250", ...]
-  scopeNote    String?  @map("scope_note") @db.Text // From preferred Concept/ScopeNote
-  dateRevised  DateTime? @map("date_revised") @db.Date // NLM DateRevised
+  descriptorUi     String    @id @map("descriptor_ui") @db.VarChar(10) // e.g. "D057286"
+  name             String    @db.VarChar(255) // Descriptor's preferred-concept preferred term
+  entryTerms       Json      @map("entry_terms") // string[] — every Term/String except `name`
+  treeNumbers      Json      @map("tree_numbers") // string[] — e.g. ["E05.318.308.250", ...]
+  scopeNote        String?   @map("scope_note") @db.Text // From preferred Concept/ScopeNote
+  dateRevised      DateTime? @map("date_revised") @db.Date // NLM DateRevised
   /// Spec §1.7 — fraction of `publication` rows whose `mesh_terms` JSON
   /// contains this descriptor's `ui`. Range [0, 1]. NULL = not yet
   /// computed (e.g., between a MeSH-descriptor full-replace ETL and the
   /// next `etl:mesh-coverage` run). Updated daily by
   /// `etl/mesh-coverage/index.ts`; consumed by `resolveMeshDescriptor`
   /// (§1.5) as a tiebreaker and reserved for §3.3's too-broad cutoff.
-  localPubCoverage Float? @map("local_pub_coverage")
-  refreshedAt  DateTime @default(now()) @map("refreshed_at")
+  localPubCoverage Float?    @map("local_pub_coverage")
+  refreshedAt      DateTime  @default(now()) @map("refreshed_at")
 
   @@index([name])
   @@map("mesh_descriptor")
@@ -740,7 +755,19 @@ model PublicationTopic {
   subtopicIds         Json?    @map("subtopic_ids") // ["slug1","slug2",...]
   subtopicConfidences Json?    @map("subtopic_confidences") // {slug: score}
   score               Decimal  @db.Decimal(8, 4) // ReciterAI parent-topic score
+  /// Denormalized mirror of `Publication.impactScore` populated by the TOPIC#
+  /// ETL block. Kept during the issue #316 transition while consumers migrate
+  /// to `Publication.impactScore`; retire in a follow-up PR after PR-B.
   impactScore         Decimal? @map("impact_score") @db.Decimal(8, 4)
+  /// Natural-language "why this paper maps to this topic" from TOPIC#.rationale.
+  /// Per-(pmid, cwid, parent_topic) — different scope from the global
+  /// `Publication.impactJustification`. Surfaced in topic-chip tooltips by
+  /// PR-C of issue #316.
+  rationale           String?  @db.Text
+  /// One-line plain-language synopsis from TOPIC#.synopsis (separate from the
+  /// per-publication `Publication.abstract`, which is the raw PubMed abstract).
+  /// Reserved for tooltip / list-row use; surface wiring deferred to PR-C.
+  synopsis            String?  @db.Text
   authorPosition      String   @map("author_position") @db.VarChar(16)
   year                Int      @db.SmallInt
 
