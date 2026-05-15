@@ -54,6 +54,10 @@ export type TopScholarChipData = {
   preferredName: string;
   primaryTitle: string | null;
   identityImageEndpoint: string;
+  /** 1-indexed position in the D-13/D-14 top_scholars ranking for this topic
+   *  (or subtopic). Surfaced on the chip's hover popover so the rank shown
+   *  there matches the chip's visual position — see #264. */
+  rank: number;
 };
 
 /**
@@ -201,12 +205,13 @@ export async function getTopScholarsForTopic(
     return null;
   }
 
-  return sorted.slice(0, TOP_SCHOLARS_TARGET).map((e) => ({
+  return sorted.slice(0, TOP_SCHOLARS_TARGET).map((e, i) => ({
     cwid: e.scholar.cwid,
     slug: e.scholar.slug,
     preferredName: e.scholar.preferredName,
     primaryTitle: e.scholar.primaryTitle,
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
+    rank: i + 1,
   }));
 }
 
@@ -337,7 +342,7 @@ export async function getSubtopicScholars(
     if (r.cwid) totalCountByCwid.set(r.cwid, r._count.pmid);
   }
 
-  return top.map((e) => ({
+  return top.map((e, i) => ({
     cwid: e.scholar.cwid,
     slug: e.scholar.slug,
     preferredName: e.scholar.preferredName,
@@ -346,6 +351,7 @@ export async function getSubtopicScholars(
     identityImageEndpoint: identityImageEndpoint(e.scholar.cwid),
     pubCountInSubtopic: subtopicCountByCwid.get(e.scholar.cwid) ?? 0,
     pubCountTotal: totalCountByCwid.get(e.scholar.cwid) ?? 0,
+    rank: i + 1,
   }));
 }
 

@@ -94,6 +94,11 @@ export type PersonPopoverProps = {
   /** Label for the context topic, used in the bottom row ("Recent in
    *  {topicLabel}"). Optional — falls back to the slug. */
   contextTopicLabel?: string;
+  /** Pre-computed rank for the top-scholar surface. When provided, overrides
+   *  the API's rank value so the popover matches the chip-row's D-13/D-14
+   *  position (#264). The API still supplies topicPubCount and recent pubs;
+   *  only the rank semantics change. */
+  contextTopicRank?: number;
   /** Pre-known filter match count for the facet surface ("N pubs match
    *  filters"). When present, replaces the all-time total pub count line. */
   filterMatchCount?: number;
@@ -125,6 +130,7 @@ export function PersonPopover({
   currentProfileCwid,
   contextScholarName,
   contextTopicLabel,
+  contextTopicRank,
   filterMatchCount,
   filterTopTopic,
   primaryActionHref,
@@ -230,6 +236,7 @@ export function PersonPopover({
             isSelf={isSelf}
             contextScholarName={contextScholarName}
             contextTopicLabel={contextTopicLabel}
+            contextTopicRank={contextTopicRank}
             filterMatchCount={filterMatchCount}
             filterTopTopic={filterTopTopic}
             primaryActionHref={primaryActionHref}
@@ -247,6 +254,7 @@ function PersonPopoverBody({
   isSelf,
   contextScholarName,
   contextTopicLabel,
+  contextTopicRank,
   filterMatchCount,
   filterTopTopic,
   primaryActionHref,
@@ -257,6 +265,7 @@ function PersonPopoverBody({
   isSelf: boolean;
   contextScholarName?: string;
   contextTopicLabel?: string;
+  contextTopicRank?: number;
   filterMatchCount?: number;
   filterTopTopic?: string;
   primaryActionHref?: string;
@@ -289,6 +298,7 @@ function PersonPopoverBody({
       surface={surface}
       data={data}
       contextScholarName={contextScholarName}
+      contextTopicRank={contextTopicRank}
       filterMatchCount={filterMatchCount}
       filterTopTopic={filterTopTopic}
     />
@@ -382,12 +392,14 @@ function SurfaceContextLine({
   surface,
   data,
   contextScholarName,
+  contextTopicRank,
   filterMatchCount,
   filterTopTopic,
 }: {
   surface: PersonPopoverSurface;
   data: ApiResponse;
   contextScholarName?: string;
+  contextTopicRank?: number;
   filterMatchCount?: number;
   filterTopTopic?: string;
 }) {
@@ -462,9 +474,14 @@ function SurfaceContextLine({
         />
       );
     }
+    // #264 — prefer the chip-row's D-13/D-14 rank (passed as
+    // contextTopicRank) over the API's count-based rank so the rank line
+    // here matches the chip's visual position. Fall back to tr.rank for
+    // any future top-scholar surface that doesn't supply the prop.
+    const displayRank = contextTopicRank ?? tr.rank;
     return (
       <div className="mt-3 border-t border-border pt-2.5 text-[11.5px] leading-snug text-muted-foreground">
-        Rank <strong className="font-semibold text-foreground">#{tr.rank}</strong>{" "}
+        Rank <strong className="font-semibold text-foreground">#{displayRank}</strong>{" "}
         in this topic ·{" "}
         <strong className="font-semibold text-foreground">{tr.topicPubCount} pubs</strong>{" "}
         tagged

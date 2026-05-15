@@ -385,5 +385,30 @@ describe("getTopScholarsForTopic (RANKING-03 / D-13 / D-14)", () => {
       expect(chip).not.toHaveProperty("citationCount");
     }
   });
+
+  it("populates `rank` as 1-indexed sorted position so the popover matches the chip's slot (#264)", async () => {
+    mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+    // "winner" has 2 first-author papers, the others have 1 each — score
+    // ordering is winner > {second, third}. The rank field MUST mirror the
+    // sorted-array order, not arbitrary input ordering.
+    const rows = [
+      makePtRow({ cwid: "winner00", pmid: 500, authorPosition: "first", reciteraiImpact: 1.0 }),
+      makePtRow({ cwid: "winner00", pmid: 501, authorPosition: "last", reciteraiImpact: 1.0 }),
+      makePtRow({ cwid: "second00", pmid: 502, authorPosition: "first", reciteraiImpact: 1.0 }),
+      makePtRow({ cwid: "third000", pmid: 503, authorPosition: "first", reciteraiImpact: 1.0 }),
+    ];
+    const pubs = [500, 501, 502, 503].map((pmid) =>
+      makePubRow({ pmid, dateAddedToEntrez: new Date("2025-04-01T00:00:00Z") }),
+    );
+    mockPublicationTopicFindMany.mockResolvedValue(rows);
+    mockPublicationFindMany.mockResolvedValue(pubs);
+    const result = await getTopScholarsForTopic(TOPIC_SLUG, NOW);
+    expect(result).not.toBeNull();
+    expect(result![0].rank).toBe(1);
+    expect(result![1].rank).toBe(2);
+    expect(result![2].rank).toBe(3);
+    // Rank matches sorted position regardless of input order.
+    expect(result![0].cwid).toBe("winner00");
+  });
 });
 
