@@ -130,17 +130,28 @@ export function buildReciterParentTopicIdField(
 }
 
 /**
- * Issue #259 §1.8 — derive the `impactScore` (doc-level MAX, sortable float)
+ * Issue #259 §1.8 — derive the `impactScore` (doc-level, sortable float)
  * and `topicImpacts` (per-topic MAX, used by the API to compute the
  * "Concept impact" badge value when a MeSH descriptor resolves to one or
  * more anchored curated topics).
  *
- * Input rows come from the un-deduped publication_topic join: one row per
- * (pmid, cwid, parentTopicId). For each parentTopicId we take the MAX
- * across cwids, skipping null impact scores. Pubs with zero non-null
- * impact rows write nothing for either field — the OMIT-on-empty pattern
- * matches `reciterParentTopicId` and lets `_source` consumers distinguish
- * "no signal" from "[]" / 0.
+ * Doc-level `impactScore` sources `Publication.impactScore` directly
+ * (issue #316 PR-B consumer migration). The previous implementation took a
+ * MAX across `publication_topic.impact_score` rows; that mirror is
+ * semantically equivalent today but retires after the mirror-removal PR.
+ *
+ * `topicImpacts[]` still derives from the un-deduped publication_topic
+ * join: one row per (pmid, cwid, parentTopicId). For each parentTopicId
+ * we take the MAX across cwids, skipping null impact scores. Each topic's
+ * value equals the global `publicationImpactScore` post-PR-A (mirror is
+ * uniform per pmid); the field is preserved for backwards-compatibility
+ * with the OS index schema and the API consumer that filters by anchored
+ * topics to compute `conceptImpactScore`.
+ *
+ * OMIT-on-empty: fields are independently optional in the result. Doc-level
+ * is omitted when `publicationImpactScore` is null; `topicImpacts` is omitted
+ * when no non-null per-topic rows. An all-empty result is `{}`, matching
+ * the previous contract for spread-into-doc use.
  *
  * `impactScore` is a `number` (JSON float, not Prisma Decimal) so the
  * OpenSearch float mapping accepts it directly and sort works as expected.
@@ -149,16 +160,31 @@ export function buildReciterParentTopicIdField(
  * Exported solely for unit testing.
  */
 export function buildPubImpactFields(
+  publicationImpactScore: { toNumber(): number } | number | null,
   publicationTopics: ReadonlyArray<{
     parentTopicId: string;
     impactScore: { toNumber(): number } | number | null;
   }>,
-):
-  | {
-      impactScore: number;
-      topicImpacts: Array<{ parentTopicId: string; impactScore: number }>;
-    }
-  | Record<string, never> {
+): {
+  impactScore?: number;
+  topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
+} {
+  const result: {
+    impactScore?: number;
+    topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
+  } = {};
+
+  // Doc-level: canonical Publication.impactScore. Skip non-finite values
+  // defensively in case a schema migration ever introduces NaN-tainted rows.
+  if (publicationImpactScore !== null && publicationImpactScore !== undefined) {
+    const n =
+      typeof publicationImpactScore === "number"
+        ? publicationImpactScore
+        : publicationImpactScore.toNumber();
+    if (Number.isFinite(n)) result.impactScore = n;
+  }
+
+  // Per-topic: MAX over cwids per parent_topic. Skip null / non-finite rows.
   const perTopic = new Map<string, number>();
   for (const pt of publicationTopics) {
     if (pt.impactScore === null || pt.impactScore === undefined) continue;
@@ -170,16 +196,14 @@ export function buildPubImpactFields(
     const prev = perTopic.get(pt.parentTopicId);
     if (prev === undefined || v > prev) perTopic.set(pt.parentTopicId, v);
   }
-  if (perTopic.size === 0) return {};
-  const topicImpacts = Array.from(perTopic.entries(), ([parentTopicId, impactScore]) => ({
-    parentTopicId,
-    impactScore,
-  }));
-  let max = topicImpacts[0].impactScore;
-  for (let i = 1; i < topicImpacts.length; i++) {
-    if (topicImpacts[i].impactScore > max) max = topicImpacts[i].impactScore;
+  if (perTopic.size > 0) {
+    result.topicImpacts = Array.from(perTopic.entries(), ([parentTopicId, impactScore]) => ({
+      parentTopicId,
+      impactScore,
+    }));
   }
-  return { impactScore: max, topicImpacts };
+
+  return result;
 }
 
 function trailingNameSlices(name: string): string[] {
@@ -638,12 +662,11 @@ async function indexPublications() {
       p.publicationTopics,
     );
 
-    // Issue #259 §1.8 — doc-level MAX `impactScore` (sortable) and per-topic
-    // MAX `topicImpacts` (used by the API to compute the "Concept impact"
-    // badge value against the resolved concept's anchored topics).
-    // OMIT-on-empty: pubs with no non-null impact rows write neither
-    // field, mirroring the `reciterParentTopicId` distinction.
-    const pubImpactFields = buildPubImpactFields(p.publicationTopics);
+    // Issue #259 §1.8 (consumer-migrated in #316 PR-B) — doc-level
+    // `impactScore` from `Publication.impactScore` and per-topic MAX
+    // `topicImpacts` from publication_topic. OMIT-on-empty per field
+    // independently; fully empty pubs write neither.
+    const pubImpactFields = buildPubImpactFields(p.impactScore, p.publicationTopics);
 
     docs.push({
       pmid: p.pmid,
