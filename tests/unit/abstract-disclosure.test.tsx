@@ -13,45 +13,65 @@ describe("AbstractDisclosure", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders the abstract text when present", () => {
-    render(<AbstractDisclosure abstract="The mitochondrion is the powerhouse of the cell." />);
-    expect(
-      screen.getByText("The mitochondrion is the powerhouse of the cell."),
-    ).toBeTruthy();
+  it("collapsed by default — only the Abstract chevron button is visible", () => {
+    const { container } = render(
+      <AbstractDisclosure abstract="The mitochondrion is the powerhouse of the cell." />,
+    );
+    const btn = screen.getByRole("button", { name: /Abstract/ });
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    expect(btn.textContent).toContain("▼");
+    // No paragraph rendered while collapsed.
+    expect(container.querySelector("p")).toBeNull();
+    // No Show more affordance while collapsed.
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
-  it("clamps by default with line-clamp-3 and shows the Show more button", () => {
+  it("clicking the chevron reveals the abstract clamped to 3 lines with Show more", () => {
     const { container } = render(<AbstractDisclosure abstract="abc" />);
+    fireEvent.click(screen.getByRole("button", { name: /Abstract/ }));
+    const btn = screen.getByRole("button", { name: /Abstract/ });
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(btn.textContent).toContain("▲");
     const para = container.querySelector("p");
     expect(para?.className).toContain("line-clamp-3");
-    const btn = screen.getByRole("button", { name: "Show more" });
-    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    const showMore = screen.getByRole("button", { name: "Show more" });
+    expect(showMore.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("toggles expanded state and flips aria-expanded + label on click", () => {
+  it("clicking Show more removes the clamp and flips the label/aria", () => {
     const { container } = render(<AbstractDisclosure abstract="abc" />);
-    const btn = screen.getByRole("button", { name: "Show more" });
-    fireEvent.click(btn);
-    expect(btn.getAttribute("aria-expanded")).toBe("true");
-    expect(btn.textContent).toBe("Show less");
+    fireEvent.click(screen.getByRole("button", { name: /Abstract/ }));
+    const showMore = screen.getByRole("button", { name: "Show more" });
+    fireEvent.click(showMore);
+    expect(showMore.getAttribute("aria-expanded")).toBe("true");
+    expect(showMore.textContent).toBe("Show less");
     const para = container.querySelector("p");
     expect(para?.className).not.toContain("line-clamp-");
-    fireEvent.click(btn);
-    expect(btn.getAttribute("aria-expanded")).toBe("false");
-    expect(btn.textContent).toBe("Show more");
   });
 
-  it("renders fully with no button when clampLines={false}", () => {
+  it("collapsing the chevron hides the abstract paragraph and the Show more button", () => {
+    const { container } = render(<AbstractDisclosure abstract="abc" />);
+    const chevron = screen.getByRole("button", { name: /Abstract/ });
+    fireEvent.click(chevron);
+    fireEvent.click(chevron);
+    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector("p")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("renders fully with no chevron and no clamp when clampLines={false}", () => {
     const { container } = render(
       <AbstractDisclosure abstract="abc" clampLines={false} />,
     );
-    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelectorAll("button").length).toBe(0);
     const para = container.querySelector("p");
+    expect(para?.textContent).toBe("abc");
     expect(para?.className).not.toContain("line-clamp-");
   });
 
-  it("respects custom clampLines (2)", () => {
+  it("respects custom clampLines (2) after expand", () => {
     const { container } = render(<AbstractDisclosure abstract="abc" clampLines={2} />);
+    fireEvent.click(screen.getByRole("button", { name: /Abstract/ }));
     const para = container.querySelector("p");
     expect(para?.className).toContain("line-clamp-2");
   });
