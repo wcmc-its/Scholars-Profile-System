@@ -1032,6 +1032,7 @@ async function PublicationsResults({
                     pmid={h.pmid}
                     pmcid={h.pmcid}
                     doi={h.doi}
+                    abstract={h.abstract}
                     className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
                   />
                 </li>

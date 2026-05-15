@@ -60,6 +60,11 @@ export type CoPublicationFull = {
   issue: string | null;
   pages: string | null;
   citationCount: number;
+  /** Issue #288 PR-A — plain-text abstract from ReciterDB.reporting_abstracts.
+   *  Drives the inline "Abstract" disclosure in the meta row of the co-pubs
+   *  rollup pages. Null when the publication has no abstract (older papers,
+   *  many non-research types). */
+  abstract: string | null;
   authors: CoPublicationAuthor[];
 };
 
@@ -474,7 +479,13 @@ export async function getCoPublications(
       issue: string | null;
       pages: string | null;
       citationCount: number | null;
+      abstract: string | null;
     };
+    // Issue #288 PR-A — LEFT JOIN reporting_abstracts so the row carries the
+    // raw PubMed abstract for the inline disclosure on co-pubs pages. Same
+    // source the nightly ETL uses (see etl/reciter/backfill-abstracts.ts).
+    // LEFT JOIN keeps the row when the upstream lacks an abstract (common
+    // for older papers and many non-research types).
     const articleRows = (await conn.query(
       `SELECT art.pmid          AS pmid,
               art.articleTitle  AS title,
@@ -485,12 +496,15 @@ export async function getCoPublications(
               art.volume        AS volume,
               art.issue         AS issue,
               art.pages         AS pages,
-              art.citationCountScopus AS citationCount
+              art.citationCountScopus AS citationCount,
+              ra.abstractVarchar AS abstract
          FROM analysis_summary_author a1
          JOIN analysis_summary_author a2
            ON a1.pmid = a2.pmid
          JOIN analysis_summary_article art
            ON art.pmid = a1.pmid
+         LEFT JOIN reporting_abstracts ra
+           ON ra.pmid = art.pmid
         WHERE a1.personIdentifier = ?
           AND a2.personIdentifier = ?
         ORDER BY art.articleYear DESC, art.pmid DESC`,
@@ -545,6 +559,7 @@ export async function getCoPublications(
         issue: r.issue,
         pages: r.pages,
         citationCount: r.citationCount ?? 0,
+        abstract: r.abstract ?? null,
         authors: authorsByPmid.get(pmid) ?? [],
       };
     });

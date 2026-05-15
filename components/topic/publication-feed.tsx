@@ -58,6 +58,9 @@ type Hit = {
     isFirst: boolean;
     isLast: boolean;
   }>;
+  /** Issue #288 PR-A — inline abstract disclosure. Null when the publication
+   *  has no abstract; the disclosure component returns null in that case. */
+  abstract: string | null;
 };
 
 type FeedResponse = {
@@ -270,6 +273,7 @@ export function PublicationFeed({
                   pmid={h.pmid}
                   pmcid={h.pmcid}
                   doi={h.doi}
+                  abstract={h.abstract}
                 />
               </li>
               );
