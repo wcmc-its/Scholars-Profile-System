@@ -33,6 +33,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import {
+  _clearDescendantsForTests,
   _resetMeshMapForTests,
   matchQueryToTaxonomy,
   normalizeForMatch,
@@ -331,6 +332,10 @@ describe("resolveMeshDescriptor (§1.5)", () => {
     scopeNote: "Media for storing electronic versions of individuals' medical records.",
     dateRevised: new Date("2024-06-01"),
     localPubCoverage: null as number | null,
+    // §5.4.2 — synthetic single-tn (leaf in its own subtree). Empty arrays
+    // would trip the empty_tree_numbers warn on every cache load and pollute
+    // unrelated console.warn spies; per-fixture unique tns keep that path silent.
+    treeNumbers: ["L01.700.508"],
   };
 
   it("exact name match → confidence: exact", async () => {
@@ -359,6 +364,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["C04.999.100"],
       },
     ]);
     const r1 = await resolveMeshDescriptor("cardio oncology");
@@ -371,6 +377,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["C04.999.100"],
       },
     ]);
     const r2 = await resolveMeshDescriptor("CARDIOONCOLOGY");
@@ -403,6 +410,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
+        treeNumbers: ["A01.001"],
       },
       {
         descriptorUi: "D000B",
@@ -410,6 +418,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["A01.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -428,6 +437,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Foo"],
         scopeNote: null,
         dateRevised: new Date("2024-01-01"),
+        treeNumbers: ["B01.001"],
       },
       {
         descriptorUi: "D001B",
@@ -435,6 +445,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["B01.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -451,6 +462,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
         localPubCoverage: 0.001,
+        treeNumbers: ["E01.001"],
       },
       {
         descriptorUi: "D_HIGH",
@@ -461,6 +473,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         // is the new key and outranks dateRevised.
         dateRevised: new Date("2020-01-01"),
         localPubCoverage: 0.04,
+        treeNumbers: ["E01.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -476,6 +489,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
         localPubCoverage: null,
+        treeNumbers: ["E02.001"],
       },
       {
         descriptorUi: "D_ZERO",
@@ -484,6 +498,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
         localPubCoverage: 0,
+        treeNumbers: ["E02.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -499,6 +514,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2024-01-01"),
         localPubCoverage: 0.02,
+        treeNumbers: ["E03.001"],
       },
       {
         descriptorUi: "D_NEW",
@@ -507,6 +523,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
         localPubCoverage: 0.02,
+        treeNumbers: ["E03.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -522,6 +539,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
         localPubCoverage: 0.001,
+        treeNumbers: ["E04.001"],
       },
       {
         descriptorUi: "D_BROAD",
@@ -530,6 +548,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
         localPubCoverage: 0.5,
+        treeNumbers: ["E04.002"],
       },
     ]);
     mockMeshAnchorFindMany.mockResolvedValue([
@@ -548,6 +567,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2024-01-01"),
         localPubCoverage: null,
+        treeNumbers: ["E05.001"],
       },
       {
         descriptorUi: "D_NEW",
@@ -556,6 +576,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
         localPubCoverage: null,
+        treeNumbers: ["E05.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -570,6 +591,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Foo"],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["E06.001"],
       },
       {
         descriptorUi: "D040",
@@ -577,6 +599,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Foo"],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["E06.002"],
       },
     ]);
     const r = await resolveMeshDescriptor("foo");
@@ -594,6 +617,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["E-cadherin", "E cadherin"],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["G01.001"],
       },
     ]);
     const r = await resolveMeshDescriptor("e cadherin");
@@ -638,6 +662,7 @@ describe("resolveMeshDescriptor (§1.5)", () => {
         entryTerms: ["Valid Term", 42, null, "Another"],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["G02.001"],
       },
     ]);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -666,6 +691,7 @@ describe("matchQueryToTaxonomy × meshResolution integration (§1.5)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["L01.700.508"],
       },
     ]);
     const r = await matchQueryToTaxonomy("Electronic Health Records");
@@ -685,6 +711,7 @@ describe("matchQueryToTaxonomy × meshResolution integration (§1.5)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["L01.700.508"],
       },
     ]);
     const r = await matchQueryToTaxonomy("Electronic Health Records");
@@ -726,6 +753,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
     entryTerms: ["EHR"],
     scopeNote: null,
     dateRevised: new Date("2024-06-01"),
+    treeNumbers: ["L01.700.508"],
   };
 
   it("populates curatedTopicAnchors from anchor rows", async () => {
@@ -761,6 +789,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
+        treeNumbers: ["H01.001"],
       },
       {
         descriptorUi: "D-Y",
@@ -768,6 +797,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["H01.002"],
       },
     ]);
     mockMeshAnchorFindMany.mockResolvedValue([
@@ -786,6 +816,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
+        treeNumbers: ["H01.001"],
       },
       {
         descriptorUi: "D-Y",
@@ -793,6 +824,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["H01.002"],
       },
     ]);
     mockMeshAnchorFindMany.mockResolvedValue([
@@ -811,6 +843,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
+        treeNumbers: ["H01.001"],
       },
       {
         descriptorUi: "D-Y",
@@ -818,6 +851,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["H01.002"],
       },
     ]);
     // mockMeshAnchorFindMany defaults to [] — no anchors anywhere.
@@ -835,6 +869,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: ["foo"],
         scopeNote: null,
         dateRevised: new Date("2026-01-01"),
+        treeNumbers: ["H02.001"],
       },
       {
         descriptorUi: "D-Exact",
@@ -842,6 +877,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: new Date("2020-01-01"),
+        treeNumbers: ["H02.002"],
       },
     ]);
     mockMeshAnchorFindMany.mockResolvedValue([
@@ -861,6 +897,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["I01.001"],
       },
     ]);
     mockMeshAnchorFindMany.mockResolvedValue([]);
@@ -877,6 +914,7 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
         entryTerms: [],
         scopeNote: null,
         dateRevised: null,
+        treeNumbers: ["I01.001"],
       },
     ]);
     mockMeshAnchorFindMany.mockRejectedValue(new Error("anchor table read failed"));
@@ -886,5 +924,255 @@ describe("resolveMeshDescriptor × curatedTopicAnchors (§1.4)", () => {
     const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logged).toContain("mesh_map_load_failed");
     warn.mockRestore();
+  });
+});
+
+describe("resolveMeshDescriptor × descendantUis (§5.4.2)", () => {
+  it("descendantUis: [self] when no descendants exist", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D000001",
+        name: "Foo",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.123"],
+      },
+    ]);
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descendantUis).toEqual(["D000001"]);
+  });
+
+  it("single-tree-number descendant set in tn-asc order", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_PARENT",
+        name: "Parent",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280"],
+      },
+      {
+        descriptorUi: "D_CHILD_456",
+        name: "Child 456",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.456"],
+      },
+      {
+        descriptorUi: "D_CHILD_123",
+        name: "Child 123",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.123"],
+      },
+    ]);
+    const r = await resolveMeshDescriptor("parent");
+    expect(r?.descendantUis).toEqual(["D_PARENT", "D_CHILD_123", "D_CHILD_456"]);
+  });
+
+  it("multi-tree-number union is deduped; parent first, then per-tn subtrees in tn-asc order", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_PARENT",
+        name: "Parent",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280", "G09.330"],
+      },
+      {
+        descriptorUi: "D_C14_ONLY",
+        name: "C14 child",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.123"],
+      },
+      {
+        descriptorUi: "D_G09_ONLY",
+        name: "G09 child",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["G09.330.500"],
+      },
+      {
+        descriptorUi: "D_OVERLAP",
+        name: "Overlap",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.555", "G09.330.999"],
+      },
+    ]);
+    const r = await resolveMeshDescriptor("parent");
+    // Parent first; C14 subtree walked first (tn-asc), G09 subtree second.
+    // Overlap appears once — first time reached via C14.
+    expect(r?.descendantUis).toEqual([
+      "D_PARENT",
+      "D_C14_ONLY",
+      "D_OVERLAP",
+      "D_G09_ONLY",
+    ]);
+  });
+
+  it("cap saturation at DESCENDANT_HARD_CAP (200)", async () => {
+    // 500 children under one parent. Tree numbers zero-padded so lex sort is
+    // numerically meaningful: A01.001 … A01.500. The cap takes the first 199
+    // descendants (A01.001 … A01.199) plus the parent at index 0.
+    const parent = {
+      descriptorUi: "D_PARENT",
+      name: "Parent",
+      entryTerms: [],
+      scopeNote: null,
+      dateRevised: null,
+      treeNumbers: ["A01"],
+    };
+    const children = Array.from({ length: 500 }, (_, i) => {
+      const n = String(i + 1).padStart(3, "0");
+      return {
+        descriptorUi: `D_C_${n}`,
+        name: `Child ${n}`,
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: [`A01.${n}`],
+      };
+    });
+    mockMeshFindMany.mockResolvedValue([parent, ...children]);
+    const r = await resolveMeshDescriptor("parent");
+    expect(r?.descendantUis).toHaveLength(200);
+    expect(r?.descendantUis[0]).toBe("D_PARENT");
+    expect(r?.descendantUis[1]).toBe("D_C_001");
+    expect(r?.descendantUis[199]).toBe("D_C_199");
+  });
+
+  it("cache reuse: precompute runs once per cache load", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D000001",
+        name: "Foo",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280"],
+      },
+    ]);
+    const r1 = await resolveMeshDescriptor("foo");
+    const r2 = await resolveMeshDescriptor("foo");
+    expect(mockMeshFindMany).toHaveBeenCalledTimes(1);
+    expect(r1?.descendantUis).toEqual(r2?.descendantUis);
+  });
+
+  it("cache reload on manifest sha change rebuilds descendantUis", async () => {
+    vi.useFakeTimers();
+    try {
+      mockMeshFindMany.mockResolvedValue([
+        {
+          descriptorUi: "D_PARENT",
+          name: "Parent",
+          entryTerms: [],
+          scopeNote: null,
+          dateRevised: null,
+          treeNumbers: ["C14.280"],
+        },
+        {
+          descriptorUi: "D_OLD_CHILD",
+          name: "Old Child",
+          entryTerms: [],
+          scopeNote: null,
+          dateRevised: null,
+          treeNumbers: ["C14.280.001"],
+        },
+      ]);
+      const r1 = await resolveMeshDescriptor("parent");
+      expect(r1?.descendantUis).toEqual(["D_PARENT", "D_OLD_CHILD"]);
+
+      // Past the 1h refresh interval AND the manifest sha differs → full reload.
+      vi.advanceTimersByTime(60 * 60 * 1000 + 1);
+      mockEtlRunFindFirst.mockResolvedValue({ manifestSha256: "sha-2" });
+      mockMeshFindMany.mockResolvedValue([
+        {
+          descriptorUi: "D_PARENT",
+          name: "Parent",
+          entryTerms: [],
+          scopeNote: null,
+          dateRevised: null,
+          treeNumbers: ["C14.280"],
+        },
+        // Old child removed from corpus; new child added.
+        {
+          descriptorUi: "D_NEW_CHILD",
+          name: "New Child",
+          entryTerms: [],
+          scopeNote: null,
+          dateRevised: null,
+          treeNumbers: ["C14.280.002"],
+        },
+      ]);
+      const r2 = await resolveMeshDescriptor("parent");
+      expect(r2?.descendantUis).toEqual(["D_PARENT", "D_NEW_CHILD"]);
+      expect(r2?.descendantUis).not.toContain("D_OLD_CHILD");
+      expect(mockMeshFindMany).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("empty treeNumbers: [] data anomaly produces [self] and emits aggregate warn", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D000001",
+        name: "Foo",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: [],
+      },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const r = await resolveMeshDescriptor("foo");
+    expect(r?.descendantUis).toEqual(["D000001"]);
+    const logged = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logged).toContain("mesh_map_load_warning");
+    expect(logged).toContain("empty_tree_numbers");
+    expect(logged).toContain('"descriptorsAffected":1');
+    warn.mockRestore();
+  });
+
+  it("lazy-compute fallback: when descendantsByUi entry is cleared, resolver recomputes from the persisted prefix index", async () => {
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D_PARENT",
+        name: "Parent",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280"],
+      },
+      {
+        descriptorUi: "D_CHILD",
+        name: "Child",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        treeNumbers: ["C14.280.001"],
+      },
+    ]);
+    const r1 = await resolveMeshDescriptor("parent");
+    const expected = r1?.descendantUis;
+    expect(expected).toEqual(["D_PARENT", "D_CHILD"]);
+
+    // Wipe the precomputed entry; do NOT reset the cache. Second resolve
+    // call exercises the lazy-compute path against the persisted prefix index.
+    _clearDescendantsForTests("D_PARENT");
+    const r2 = await resolveMeshDescriptor("parent");
+    expect(r2?.descendantUis).toEqual(expected);
+    // findMany still only called once — cache load was not re-triggered.
+    expect(mockMeshFindMany).toHaveBeenCalledTimes(1);
   });
 });
