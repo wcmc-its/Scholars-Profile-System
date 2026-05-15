@@ -7,8 +7,7 @@ import { JournalFacet } from "@/components/search/journal-facet";
 import { AuthorFacet } from "@/components/search/author-facet";
 import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
-import { AuthorChipRow } from "@/components/publication/author-chip-row";
-import { PublicationMeta } from "@/components/publication/publication-meta";
+import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import { ConceptChip } from "@/components/search/concept-chip";
@@ -40,7 +39,6 @@ import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
-import { sanitizePubTitle } from "@/lib/utils";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
 import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
@@ -996,48 +994,9 @@ async function PublicationsResults({
           )
         ) : (
           <ul>
-            {result.hits.map((h) => {
-              const titleHtml = sanitizePubTitle(h.title);
-              return (
-                <li key={h.pmid} className="border-b border-[#e3e2dd] py-5">
-                  <div className="mb-2 text-[16px] font-semibold leading-snug">
-                    {h.pubmedUrl ? (
-                      <a
-                        href={h.pubmedUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#1a1a1a] hover:text-[#2c4f6e] hover:no-underline"
-                        dangerouslySetInnerHTML={{ __html: titleHtml }}
-                      />
-                    ) : (
-                      <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
-                    )}
-                  </div>
-                  <div className="mb-2 text-[13px] leading-snug text-[#4a4a4a]">
-                    {h.journal ? <em className="not-italic">{h.journal}</em> : null}
-                    {h.journal && h.year ? ". " : null}
-                    {h.year ?? null}.
-                  </div>
-                  <AuthorChipRow authors={h.wcmAuthors} pmid={h.pmid} />
-                  {/* Issue #284 — impact and concept-impact land inline in
-                      the meta row (between citations and PMID). When both are
-                      non-null the row shows `Impact: 42 · Concept: 38` so the
-                      §1.8 reweighting delta is visible. Both null → block
-                      omitted. */}
-                  <PublicationMeta
-                    citationCount={h.citationCount}
-                    impactScore={h.impactScore}
-                    impactJustification={h.impactJustification}
-                    conceptImpactScore={h.conceptImpactScore}
-                    pmid={h.pmid}
-                    pmcid={h.pmcid}
-                    doi={h.doi}
-                    abstract={h.abstract}
-                    className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
-                  />
-                </li>
-              );
-            })}
+            {result.hits.map((h) => (
+              <PublicationResultRow key={h.pmid} hit={h} />
+            ))}
           </ul>
         )}
         <Pagination

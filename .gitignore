@@ -45,6 +45,12 @@ seed-output/
 # Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
 # so curation-team edits flow through PR review.
 !etl/mesh-anchors/curated.csv
+# Exception: Next.js dynamic route segment that happens to look like a CSV
+# filename — the literal `citations.csv` directory is the route path that
+# serves /api/publications/[pmid]/citations.csv. Brackets are escaped so
+# Git doesn't interpret them as a character class.
+!app/api/publications/\[pmid\]/citations.csv/
+!app/api/publications/\[pmid\]/citations.csv/route.ts
 
 # Phase 5 — VIVO redirect map output (contains CWIDs, never commit)
 etl/vivo-redirect/output/

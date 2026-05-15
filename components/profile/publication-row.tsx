@@ -1,5 +1,8 @@
+"use client";
+
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
+import { usePublicationModal } from "@/components/publication/publication-modal";
 import {
   AuthorPositionBadge,
   deriveAuthorPositionRole,
@@ -8,9 +11,15 @@ import type { ProfilePublication } from "@/lib/api/profile";
 import { sanitizePubTitle } from "@/lib/utils";
 
 /**
- * Render a single profile publication row. Server-or-client compatible — no
- * hooks, no "use client" directive. The embedded `<AuthorChipRow>` handles
- * the chip-row interactivity (tooltip) on its own.
+ * Render a single profile publication row. Client component because the
+ * title is a modal trigger (#288 PR-B). The embedded `<AuthorChipRow>`
+ * already brought its own client interactivity (tooltip); the row chrome
+ * is otherwise structural.
+ *
+ * Title click opens the publication detail modal in place of the previous
+ * `<a href={pubmedUrl}>` navigation. PubMed is still reachable via the
+ * PMID link in the meta row and inside the modal itself, so users who
+ * want the upstream record still have a one-click path.
  */
 export function PublicationRow({
   pub,
@@ -28,6 +37,7 @@ export function PublicationRow({
   // (#18) compares the full WCM author list against authorship flags.
   const role = deriveAuthorPositionRole(pub.authorship, pub.wcmAuthors);
   const titleHtml = sanitizePubTitle(pub.title);
+  const { open } = usePublicationModal();
   return (
     <div>
       <div
@@ -37,17 +47,12 @@ export function PublicationRow({
             : "text-base font-semibold leading-snug"
         }
       >
-        {pub.pubmedUrl ? (
-          <a
-            href={pub.pubmedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-[var(--color-accent-slate)] hover:underline"
-            dangerouslySetInnerHTML={{ __html: titleHtml }}
-          />
-        ) : (
-          <span dangerouslySetInnerHTML={{ __html: titleHtml }} />
-        )}
+        <button
+          type="button"
+          onClick={() => open(pub.pmid)}
+          className="text-left hover:text-[var(--color-accent-slate)] hover:underline"
+          dangerouslySetInnerHTML={{ __html: titleHtml }}
+        />
       </div>
       {pub.journal || pub.year ? (
         <div className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">
