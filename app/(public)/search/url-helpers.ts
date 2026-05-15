@@ -53,26 +53,3 @@ export function buildMeshHref(
   const qs = out.toString();
   return qs.length > 0 ? `/search?${qs}` : "/search";
 }
-
-/**
- * @deprecated Use `buildMeshHref(sp, "off" | "strict" | "clear")` instead.
- * Kept for callers not yet migrated. Behavior preserved verbatim: sets the
- * `mesh` param to the literal string value passed; `page` and `sort` are
- * stripped on every call. Removed in a follow-up cleanup once all callers
- * migrate.
- */
-export function buildBroadenHref(
-  sp: Record<string, string | string[] | undefined>,
-  meshValue: "off" | "on",
-): string {
-  const out = new URLSearchParams();
-  for (const [k, v] of Object.entries(sp)) {
-    if (STRIPPED_ON_MESH_TRANSITION.has(k)) continue;
-    if (v === undefined) continue;
-    if (Array.isArray(v)) for (const item of v) out.append(k, item);
-    else out.append(k, v);
-  }
-  out.set("mesh", meshValue);
-  const qs = out.toString();
-  return qs.length > 0 ? `/search?${qs}` : "/search";
-}
