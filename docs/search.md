@@ -2,7 +2,7 @@
 
 How the unified search at `/search` ranks **people**, **publications**, and **grants**, and what signals back each rank.
 
-Sibling docs: `browse-vs-search.md` (when to browse vs. search), `ADR-001-runtime-dal-vs-etl-transform.md` (why ranking signals are pre-computed in ETL).
+Sibling docs: `browse-vs-search.md` (when to browse vs. search), `search-publications.md` (example-driven walkthrough of the pub tab, including MeSH-aware behavior), `taxonomy-aware-search.md` (the v2.x SPEC behind the MeSH work), `ADR-001-runtime-dal-vs-etl-transform.md` (why ranking signals are pre-computed in ETL).
 
 ---
 
