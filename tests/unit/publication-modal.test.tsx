@@ -372,6 +372,47 @@ describe("PublicationModal — content sections", () => {
     expect(idLine?.querySelector('a[href*="pmc/articles/"]')).not.toBeNull();
     expect(idLine?.querySelector('a[href*="doi.org/"]')).not.toBeNull();
   });
+
+  it("carries copy buttons next to PMID and PMCID in the header", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const dialog = screen.getByRole("dialog");
+    const idLine = dialog.querySelector(
+      'header [aria-label="Identifiers"]',
+    ) as HTMLElement | null;
+    expect(idLine).not.toBeNull();
+    // PMID 12345 and PMCID PMC123 in the default test payload.
+    const pmidCopy = idLine?.querySelector('button[aria-label="Copy PMID 12345"]');
+    const pmcidCopy = idLine?.querySelector('button[aria-label="Copy PMCID PMC123"]');
+    expect(pmidCopy).not.toBeNull();
+    expect(pmcidCopy).not.toBeNull();
+  });
+
+  it("renders an About Impact info link in the Impact heading", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    // Info link sits adjacent to the SectionHeading and opens the
+    // methodology deeplink in a new tab.
+    const info = screen.getByRole("link", { name: /About Impact/ });
+    expect(info.getAttribute("href")).toBe("/about/methodology#impact");
+    expect(info.getAttribute("target")).toBe("_blank");
+    expect(info.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("renders an About Topics info link in the Topics heading", async () => {
+    mockFetch(makePayload());
+    renderModalHarness();
+    fireEvent.click(screen.getByTestId("harness-trigger"));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
+    const info = screen.getByRole("link", { name: /About Topics/ });
+    expect(info.getAttribute("href")).toBe("/about/methodology#why-ai");
+    expect(info.getAttribute("target")).toBe("_blank");
+    expect(info.getAttribute("rel")).toContain("noopener");
+  });
 });
 
 describe("PublicationModal — Cited by section", () => {

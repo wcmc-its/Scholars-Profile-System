@@ -12,7 +12,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { HelpCircle } from "lucide-react";
 import { CopyButton } from "@/components/publication/copy-button";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
   PublicationDetailPayload,
   PublicationDetailTopic,
@@ -419,7 +422,14 @@ function ImpactSection({
   if (impactScore === null) return null;
   return (
     <section>
-      <SectionHeading>Impact</SectionHeading>
+      <div className="flex items-center gap-1.5">
+        <SectionHeading>Impact</SectionHeading>
+        <SectionInfoLink
+          label="About Impact"
+          description={IMPACT_INFO_COPY}
+          href={methodologyHref("impact")}
+        />
+      </div>
       <p className="text-foreground/90 mt-1 text-sm">
         <span className="font-medium">{Math.round(impactScore)}</span>{" "}
         <span className="text-muted-foreground">/ 100</span>
@@ -504,7 +514,14 @@ function TopicsSection({
   if (topics.length === 0) return null;
   return (
     <section>
-      <SectionHeading>Topics</SectionHeading>
+      <div className="flex items-center gap-1.5">
+        <SectionHeading>Topics</SectionHeading>
+        <SectionInfoLink
+          label="About Topics"
+          description={TOPICS_INFO_COPY}
+          href={methodologyHref("whyAi")}
+        />
+      </div>
       <ul className="mt-2 flex flex-col gap-3">
         {topics.map((t) => (
           <TopicListItem
@@ -618,30 +635,32 @@ function IdentifiersLine({
   // as the source-of-truth detail view for the same row.
   const blocks: ReactNode[] = [];
   blocks.push(
-    <span key="pmid">
+    <span key="pmid" className="inline-flex items-center">
       PMID:{" "}
       <a
         href={pubmedUrl ?? `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
         target="_blank"
         rel="noopener noreferrer"
-        className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+        className="ml-0.5 underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
       >
         {pmid}
       </a>
+      <CopyButton value={pmid} label={`Copy PMID ${pmid}`} />
     </span>,
   );
   if (pmcid) {
     blocks.push(
-      <span key="pmcid">
+      <span key="pmcid" className="inline-flex items-center">
         PMCID:{" "}
         <a
           href={`https://www.ncbi.nlm.nih.gov/pmc/articles/${pmcid}/`}
           target="_blank"
           rel="noopener noreferrer"
-          className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+          className="ml-0.5 underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
         >
           {pmcid}
         </a>
+        <CopyButton value={pmcid} label={`Copy PMCID ${pmcid}`} />
       </span>,
     );
   }
@@ -855,6 +874,47 @@ function SectionHeading({ children }: { children: ReactNode }) {
     <h3 className="text-muted-foreground text-xs font-semibold uppercase tracking-wide">
       {children}
     </h3>
+  );
+}
+
+const IMPACT_INFO_COPY =
+  "An AI-generated research-impact score from 0–100. A language model reads the title, abstract, journal, citation pattern, and iCite signals and scores against a rubric covering novelty, methodology, evidence of influence, translational relevance, and venue prestige. Click for the full methodology.";
+
+const TOPICS_INFO_COPY =
+  "ReCiterAI assigns each publication to one or more research areas. The score (0–1) reflects how strongly the paper fits each parent topic; subtopics give finer-grained breakdown. Click for the full methodology.";
+
+function SectionInfoLink({
+  label,
+  description,
+  href,
+}: {
+  /** Accessible label for the icon link — e.g. "About Impact". */
+  label: string;
+  /** Tooltip body. One short paragraph; HoverTooltip caps the width and
+   *  wraps automatically. */
+  description: string;
+  /** Methodology page deeplink, e.g. methodologyHref("impact"). */
+  href: string;
+}) {
+  // (i) icon next to AI-derived section headings (#288 PR-B follow-up).
+  // Matches the disclosure-tooltip pattern used elsewhere on the site
+  // (DisclosureInfoTooltip, profile TopicsSection): HelpCircle icon,
+  // muted color, hover/focus tooltip with the description. Clicking the
+  // icon opens the methodology page deeplink in a new tab so the modal
+  // isn't lost — same trade-off the per-row HoverTooltip on Impact (PR-C
+  // #316) makes for the inline justification text.
+  return (
+    <HoverTooltip text={description} wide>
+      <Link
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`${label} (opens methodology page in a new tab)`}
+        className="text-muted-foreground hover:text-foreground inline-flex h-4 w-4 items-center justify-center rounded-full"
+      >
+        <HelpCircle className="size-3.5" aria-hidden="true" />
+      </Link>
+    </HoverTooltip>
   );
 }
 
