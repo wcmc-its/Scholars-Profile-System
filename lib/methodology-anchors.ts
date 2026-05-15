@@ -24,6 +24,9 @@ export const METHODOLOGY_ANCHORS = {
   topResearchAreas: "top-research-areas",
   // Issue #176 — skeptic-oriented intro: what AI does and doesn't do.
   whyAi: "why-ai",
+  // Issue #285 — explainer for the 0–100 impact score surfaced inline in
+  // pub-tab meta rows (#284) and on the topic page once #305 ships.
+  impact: "impact",
 } as const;
 
 export const METHODOLOGY_BASE = "/about/methodology" as const;
