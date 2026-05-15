@@ -78,6 +78,15 @@ export type MeshResolution = {
    * empty.
    */
   curatedTopicAnchors: string[];
+  /**
+   * Issue #259 / SPEC §5.4.2. UIs of descriptors whose tree numbers are
+   * prefix-subsumed by any of this descriptor's tree numbers. Always non-empty
+   * — the resolved descriptor itself is always the first element. Bounded by
+   * DESCENDANT_HARD_CAP (200). Consumed by the §5 `concept_expanded` shape in
+   * a follow-up PR as the `terms { meshDescriptorUi }` array; today logged on
+   * the publications-branch `search_query` line for baseline analysis only.
+   */
+  descendantUis: string[];
 };
 
 export type TaxonomyMatchResult =
@@ -306,6 +315,11 @@ type DescriptorRow = {
    *  in the resolver tiebreaker so a fully-NULL column degrades to the
    *  pre-§1.7 ordering. */
   localPubCoverage: number | null;
+  /** Issue #259 / §5.4.2. JSON string array from `mesh_descriptor.tree_numbers`
+   *  (e.g. ["N03.219", "N03.706"]). Used by the eager descendant precompute
+   *  below; never surfaced to callers directly. Empty array if the column was
+   *  empty/null in the source — surfaced as a data-anomaly aggregate warn. */
+  treeNumbers: string[];
 };
 
 type MeshMap = {
@@ -319,6 +333,26 @@ type MeshMap = {
    * Loaded from `mesh_curated_topic_anchor` (spec §1.4).
    */
   anchorsByUi: Map<string, string[]>;
+  /**
+   * Issue #259 / §5.4.2. descriptorUi → [self, ...descendants in tn-walk order],
+   * bounded by DESCENDANT_HARD_CAP. Populated eagerly at map-load time for every
+   * descriptor in `byUi`; `getOrComputeDescendants` is the single read-path
+   * helper. Populated lazily as a defensive fallback if a miss is ever
+   * observed (test-only transient under normal operation).
+   */
+  descendantsByUi: Map<string, string[]>;
+  /**
+   * Issue #259 / §5.4.2. Parallel-array sorted index over (treeNumber,
+   * descriptorUi). Built once at map-load time; consulted by
+   * `computeDescendants` for both the eager precompute pass and any
+   * subsequent lazy miss. `tns[i]` and `uis[i]` describe the i-th tree-number
+   * occurrence in sort order; `tns` is sorted lex ascending.
+   *
+   * Retained on the map (rather than scoped to the load IIFE) so the lazy
+   * fallback in `getOrComputeDescendants` has it available without rebuilding.
+   * Memory budget: ~5 MB for the current MeSH corpus.
+   */
+  treePrefixIndex: { tns: string[]; uis: string[] };
   /** EtlRun.manifestSha256 captured at load time, used for invalidation. */
   manifestSha256: string | null;
   loadedAt: number;
@@ -327,6 +361,12 @@ type MeshMap = {
 /** Soft refresh interval. The real invalidation signal is the EtlRun sha256
  *  diff below — this only bounds how often the freshness probe runs. */
 const MESH_MAP_REFRESH_MS = 60 * 60 * 1000; // 1h
+
+/** Issue #259 / SPEC §5.6. Cap on the number of UIs returned in
+ *  `MeshResolution.descendantUis`. Bounds the future `terms { meshDescriptorUi }`
+ *  array in the `concept_expanded` shape; ranking saturates well before
+ *  this size, so the cap costs little recall. Inline literal, not externalized. */
+const DESCENDANT_HARD_CAP = 200;
 
 let meshMapCache: MeshMap | null = null;
 let meshMapInFlight: Promise<MeshMap> | null = null;
@@ -339,6 +379,84 @@ async function latestMeshManifest(): Promise<string | null> {
     select: { manifestSha256: true },
   });
   return row?.manifestSha256 ?? null;
+}
+
+/**
+ * Issue #259 / §5.4.2. Return the descendant UI array for `ui`, computing
+ * it on miss and caching the result on the map.
+ *
+ * Steady-state (post-eager-precompute): `map.descendantsByUi.get(ui)` is a
+ * hit on every call. Cost: one Map lookup.
+ *
+ * Cold-load / test transient (descendantsByUi not yet fully populated for
+ * `ui`): compute synchronously by binary-searching the parallel-array tree
+ * prefix index and walking contiguous prefix-matching entries up to
+ * DESCENDANT_HARD_CAP. Worst-case ~5ms for a broad descriptor against the
+ * 30k-row MeSH corpus.
+ *
+ * Thunder-herd note: if N concurrent reads on a fresh map all miss for the
+ * same `ui`, each computes independently and the last `Map.set` wins.
+ * Output is deterministic for a fixed input snapshot (same `byUi`, same
+ * `treePrefixIndex`), so the duplicate-write race is benign — every writer
+ * stores the same array contents.
+ */
+function getOrComputeDescendants(
+  map: Pick<MeshMap, "byUi" | "descendantsByUi" | "treePrefixIndex">,
+  ui: string,
+): string[] {
+  const cached = map.descendantsByUi.get(ui);
+  if (cached) return cached;
+  const computed = computeDescendants(ui, map);
+  map.descendantsByUi.set(ui, computed);
+  return computed;
+}
+
+/**
+ * Issue #259 / §5.4.2. Synchronously compute `[self, ...descendants]` from
+ * the prefix index. Result invariants:
+ *   - First element is always `ui`.
+ *   - Subsequent elements are descendant UIs in tree-number-walk order,
+ *     deduped (a descendant reachable via two of `ui`'s tree numbers
+ *     appears once).
+ *   - Length ≤ DESCENDANT_HARD_CAP.
+ *   - If `byUi.get(ui)` returns undefined (caller bug) or has empty
+ *     `treeNumbers`, returns `[ui]`.
+ */
+function computeDescendants(
+  ui: string,
+  map: Pick<MeshMap, "byUi" | "treePrefixIndex">,
+): string[] {
+  const row = map.byUi.get(ui);
+  if (!row) return [ui];
+  const result: string[] = [ui];
+  const seen = new Set<string>([ui]);
+  const { tns, uis } = map.treePrefixIndex;
+  for (const tn of row.treeNumbers) {
+    if (typeof tn !== "string" || tn.length === 0) continue;
+    const tnDot = `${tn}.`;
+    // Lower-bound binary search: first index i where tns[i] >= tn.
+    let lo = 0;
+    let hi = tns.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (tns[mid] < tn) lo = mid + 1;
+      else hi = mid;
+    }
+    // Walk contiguous entries while the prefix holds:
+    //   entry === tn (self, or another descriptor sharing this tn — rare)
+    //   entry.startsWith(`${tn}.`) (proper descendant)
+    for (let i = lo; i < tns.length; i++) {
+      const cand = tns[i];
+      if (cand !== tn && !cand.startsWith(tnDot)) break;
+      const candUi = uis[i];
+      if (seen.has(candUi)) continue;
+      seen.add(candUi);
+      result.push(candUi);
+      if (result.length >= DESCENDANT_HARD_CAP) return result;
+    }
+    if (result.length >= DESCENDANT_HARD_CAP) return result;
+  }
+  return result;
 }
 
 async function getMeshMap(): Promise<MeshMap> {
@@ -370,6 +488,9 @@ async function getMeshMap(): Promise<MeshMap> {
           scopeNote: true,
           dateRevised: true,
           localPubCoverage: true,
+          // §5.4.2 — JSON array of tree numbers. Already populated by the
+          // existing MeSH ETL; widening the select is the only DB-side change.
+          treeNumbers: true,
         },
       }),
       latestMeshManifest().catch(() => null),
@@ -398,6 +519,15 @@ async function getMeshMap(): Promise<MeshMap> {
         entryTerms = raw.filter((x): x is string => typeof x === "string");
         droppedEntries += raw.length - entryTerms.length;
       }
+      // §5.4.2 — defensive parse for tree numbers, mirroring entryTerms. JSON
+      // column contract is `string[]`; non-string members would surface as a
+      // data anomaly. Empty array (column absent / [] in source) is captured
+      // separately by `emptyTreeNumberCount` below.
+      let treeNumbers: string[] = [];
+      if (Array.isArray(r.treeNumbers)) {
+        const raw = r.treeNumbers as unknown[];
+        treeNumbers = raw.filter((x): x is string => typeof x === "string" && x.length > 0);
+      }
       byUi.set(r.descriptorUi, {
         descriptorUi: r.descriptorUi,
         name: r.name,
@@ -405,6 +535,7 @@ async function getMeshMap(): Promise<MeshMap> {
         scopeNote: r.scopeNote,
         dateRevised: r.dateRevised,
         localPubCoverage: r.localPubCoverage,
+        treeNumbers,
       });
       const forms = [r.name, ...entryTerms];
       for (const f of forms) {
@@ -429,10 +560,68 @@ async function getMeshMap(): Promise<MeshMap> {
         }),
       );
     }
+
+    // ── §5.4.2 prefix-index build ─────────────────────────────────────────
+    // Flatten (tn, ui) pairs across every descriptor, sort lex ascending by tn.
+    // Parallel arrays (not array-of-objects) to keep the index compact.
+    const flat: Array<{ tn: string; ui: string }> = [];
+    let emptyTreeNumberCount = 0;
+    for (const r of byUi.values()) {
+      if (r.treeNumbers.length === 0) {
+        emptyTreeNumberCount += 1;
+        continue;
+      }
+      for (const tn of r.treeNumbers) {
+        flat.push({ tn, ui: r.descriptorUi });
+      }
+    }
+    flat.sort((a, b) => {
+      if (a.tn < b.tn) return -1;
+      if (a.tn > b.tn) return 1;
+      // Secondary tiebreak by ui for deterministic order across reloads,
+      // independent of any sort-stability assumption.
+      return a.ui.localeCompare(b.ui);
+    });
+    const tns: string[] = new Array(flat.length);
+    const uis: string[] = new Array(flat.length);
+    for (let i = 0; i < flat.length; i++) {
+      tns[i] = flat[i].tn;
+      uis[i] = flat[i].ui;
+    }
+    const treePrefixIndex = { tns, uis };
+
+    // ── §5.4.2 descendant precompute pass ────────────────────────────────
+    // One pass over every descriptor; populates descendantsByUi by calling
+    // the unified read-path helper (which inserts on miss). Same code path
+    // the lazy fallback uses.
+    const descendantsByUi = new Map<string, string[]>();
+    const mapInProgress: Pick<
+      MeshMap,
+      "byUi" | "descendantsByUi" | "treePrefixIndex"
+    > = { byUi, descendantsByUi, treePrefixIndex };
+    for (const ui of byUi.keys()) {
+      getOrComputeDescendants(mapInProgress, ui);
+    }
+
+    if (emptyTreeNumberCount > 0) {
+      // Data anomaly — every descriptor SHOULD have ≥ 1 tree number per the
+      // NLM contract. One aggregate line per cache load, not per-descriptor,
+      // to keep log volume bounded; mirrors the `droppedEntries` warn pattern.
+      console.warn(
+        JSON.stringify({
+          event: "mesh_map_load_warning",
+          reason: "empty_tree_numbers",
+          descriptorsAffected: emptyTreeNumberCount,
+        }),
+      );
+    }
+
     const map: MeshMap = {
       byForm,
       byUi,
       anchorsByUi,
+      descendantsByUi,
+      treePrefixIndex,
       manifestSha256,
       loadedAt: Date.now(),
     };
@@ -531,6 +720,10 @@ export async function resolveMeshDescriptor(
     scopeNote: winner.row.scopeNote,
     entryTerms: winner.row.entryTerms,
     curatedTopicAnchors: map.anchorsByUi.get(winner.row.descriptorUi) ?? [],
+    // §5.4.2 — populated via the unified read-path helper so the steady-state
+    // (post-eager-precompute) and the defensive lazy-fallback path go through
+    // a single implementation. Invariant: descendantUis[0] === descriptorUi.
+    descendantUis: getOrComputeDescendants(map, winner.row.descriptorUi),
   };
 }
 
@@ -538,4 +731,13 @@ export async function resolveMeshDescriptor(
 export function _resetMeshMapForTests(): void {
   meshMapCache = null;
   meshMapInFlight = null;
+}
+
+/** @internal — test-only hook for the §5.4.2 lazy-compute path. Removes
+ *  either a single descriptor's descendant entry, or all entries when called
+ *  without an argument. Not used in production code paths. */
+export function _clearDescendantsForTests(ui?: string): void {
+  if (!meshMapCache) return;
+  if (ui) meshMapCache.descendantsByUi.delete(ui);
+  else meshMapCache.descendantsByUi.clear();
 }

@@ -24,6 +24,9 @@ const RESOLUTION_WITH_SCOPE: MeshResolution = {
   scopeNote: "Media that store digital health information for individuals.",
   entryTerms: ["EHR", "EMR"],
   curatedTopicAnchors: ["digital-health", "informatics"],
+  // §5.4.2 — chip rendering doesn't depend on this field; self-only fixture
+  // keeps the invariant (length >= 1, first element === descriptorUi) honest.
+  descendantUis: ["D057286"],
 };
 
 const RESOLUTION_NO_SCOPE: MeshResolution = {

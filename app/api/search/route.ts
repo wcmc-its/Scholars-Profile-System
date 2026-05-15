@@ -132,6 +132,14 @@ export async function GET(request: NextRequest) {
         filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
+        // Issue #259 §5.4.2 / SPEC §7.5. Bucketed in the post-flip retro plot
+        // to attribute recall lift to descendant-set size (small subtree →
+        // small lift, broad descriptor → big lift). `null` when resolution
+        // is null (mesh=off, no-match, or under-3-char query) so downstream
+        // queries can distinguish "no resolution" from "resolution with a
+        // self-only descendant set" (length 1).
+        meshDescendantSetSize:
+          taxonomyMatch.meshResolution?.descendantUis.length ?? null,
         // Issue #259 §1.11 — opt-out signal. True when the request set
         // `?mesh=off`; logging the rate per descriptor tells us when the
         // chip's broaden affordance is over- or under-used.
