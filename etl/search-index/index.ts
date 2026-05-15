@@ -692,6 +692,15 @@ async function indexPublications() {
         // impact aggregates; spread emits nothing on pubs with no non-null
         // impact rows.
         ...pubImpactFields,
+        // Issue #316 PR-C follow-up — GPT-generated impact justification.
+        // Pass-through to the OS `_source`; the API surfaces it as the
+        // hover tooltip on the inline `Impact: NN` value. OMIT-on-empty:
+        // null/blank justifications write nothing so `_source` consumers
+        // can distinguish "no signal" from "" the same way the impact
+        // aggregates do.
+        ...(typeof p.impactJustification === "string" && p.impactJustification.length > 0
+          ? { impactJustification: p.impactJustification }
+          : {}),
       },
     });
   }

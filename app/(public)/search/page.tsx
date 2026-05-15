@@ -1027,6 +1027,7 @@ async function PublicationsResults({
                   <PublicationMeta
                     citationCount={h.citationCount}
                     impactScore={h.impactScore}
+                    impactJustification={h.impactJustification}
                     conceptImpactScore={h.conceptImpactScore}
                     pmid={h.pmid}
                     pmcid={h.pmcid}

@@ -189,6 +189,16 @@ export type PublicationHit = {
    * `"Concept impact: 78"` and the "Impact" fallback is suppressed.
    */
   conceptImpactScore: number | null;
+  /**
+   * Issue #316 PR-C follow-up — GPT-generated rubric justification for
+   * `impactScore`. Sourced from `Publication.impactJustification` via
+   * the OS `_source` payload (search-index ETL emits it). When present
+   * alongside a non-null `impactScore`, the UI surfaces the text as a
+   * hover/focus tooltip on the inline `Impact: NN` value. Null when the
+   * pub has no LLM impact data or the impact flag is off (same gating as
+   * `impactScore`).
+   */
+  impactJustification: string | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -1179,6 +1189,8 @@ export async function searchPublications(opts: {
       // with zero non-null impact rows (OMIT-on-empty contract).
       impactScore?: number;
       topicImpacts?: Array<{ parentTopicId: string; impactScore: number }>;
+      // Issue #316 PR-C follow-up — optional pass-through justification text.
+      impactJustification?: string;
     };
   };
   type Bucket = { key: string; doc_count: number };
@@ -1267,6 +1279,7 @@ export async function searchPublications(opts: {
       // both-null so legacy callers see unchanged shape.
       let impactScore: number | null = null;
       let conceptImpactScore: number | null = null;
+      let impactJustification: string | null = null;
       if (useImpact) {
         impactScore = h._source.impactScore ?? null;
         const ti = h._source.topicImpacts;
@@ -1277,6 +1290,15 @@ export async function searchPublications(opts: {
             if (max === null || t.impactScore > max) max = t.impactScore;
           }
           conceptImpactScore = max;
+        }
+        // Only surface justification text when there's a score for it to
+        // explain, matching the same gating used on /topics (#316 PR-C).
+        if (
+          impactScore !== null &&
+          typeof h._source.impactJustification === "string" &&
+          h._source.impactJustification.length > 0
+        ) {
+          impactJustification = h._source.impactJustification;
         }
       }
       return {
@@ -1305,6 +1327,7 @@ export async function searchPublications(opts: {
         ),
         impactScore,
         conceptImpactScore,
+        impactJustification,
       };
     }),
     total: r.hits.total.value,
