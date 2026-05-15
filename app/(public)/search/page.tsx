@@ -1018,21 +1018,19 @@ async function PublicationsResults({
                     {h.year ?? null}.
                   </div>
                   <AuthorChipRow authors={h.wcmAuthors} pmid={h.pmid} />
+                  {/* Issue #284 — impact and concept-impact land inline in
+                      the meta row (between citations and PMID). When both are
+                      non-null the row shows `Impact: 42 · Concept: 38` so the
+                      §1.8 reweighting delta is visible. Both null → block
+                      omitted. */}
                   <PublicationMeta
                     citationCount={h.citationCount}
+                    impactScore={h.impactScore}
+                    conceptImpactScore={h.conceptImpactScore}
                     pmid={h.pmid}
                     pmcid={h.pmcid}
                     doi={h.doi}
                     className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
-                  />
-                  {/* Issue #259 §1.8 — impactScore badge. "Concept impact"
-                      when a MeSH descriptor resolved AND the pub has at least
-                      one publication_topic row matching an anchored topic with
-                      non-null impact; "Impact" otherwise. Omit when both
-                      fields are null (no signal). */}
-                  <ImpactBadge
-                    impactScore={h.impactScore}
-                    conceptImpactScore={h.conceptImpactScore}
                   />
                 </li>
               );
@@ -2155,50 +2153,6 @@ function FacetCheckbox({
       )}
     </li>
   );
-}
-
-/* ============================================================
- * Issue #259 §1.8 — Impact badge on pub-tab result rows.
- *
- * Renders one of:
- *   - "Concept impact: 78"  when `conceptImpactScore` is non-null
- *     (resolved MeSH descriptor + matching anchored topic with non-null
- *     impact). Whole-number display per spec example.
- *   - "Impact: 78"          when only `impactScore` is non-null.
- *   - nothing               when both are null (no §1.8 signal, or flag off).
- *
- * Values are rounded to the nearest integer for display; the API returns
- * raw floats so future refinements (e.g. one decimal) don't need a
- * round-trip change.
- * ============================================================ */
-function ImpactBadge({
-  impactScore,
-  conceptImpactScore,
-}: {
-  impactScore: number | null;
-  conceptImpactScore: number | null;
-}) {
-  if (conceptImpactScore !== null) {
-    return (
-      <div className="mt-1 text-xs text-[#757575]">
-        Concept impact:{" "}
-        <span className="font-semibold text-[#4a4a4a]">
-          {Math.round(conceptImpactScore)}
-        </span>
-      </div>
-    );
-  }
-  if (impactScore !== null) {
-    return (
-      <div className="mt-1 text-xs text-[#757575]">
-        Impact:{" "}
-        <span className="font-semibold text-[#4a4a4a]">
-          {Math.round(impactScore)}
-        </span>
-      </div>
-    );
-  }
-  return null;
 }
 
 /* ============================================================

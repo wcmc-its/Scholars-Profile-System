@@ -3,7 +3,7 @@ import { CopyButton } from "@/components/publication/copy-button";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
- *   citations · role · PMID · PMCID · DOI
+ *   citations · impact · role · PMID · PMCID · DOI
  *
  * Adjacent middot separators collapse so a publication missing an identifier
  * never shows `· ·`. Server-compatible — the embedded `<CopyButton>` carries
@@ -11,9 +11,16 @@ import { CopyButton } from "@/components/publication/copy-button";
  *
  * Surfaces pass `role` as a pre-rendered node (badge, plain text, or null);
  * the component owns gap, separator, and identifier-link semantics.
+ *
+ * `impactScore` / `conceptImpactScore` (issue #284, refs #259 §1.8) render
+ * a single nowrap block so `Impact: 42 · Concept: 38` never line-breaks
+ * mid-pair on mobile. Both null/undefined → block omitted. Only surfaces
+ * with §1.8 data pass these; other callers leave them undefined.
  */
 export function PublicationMeta({
   citationCount,
+  impactScore,
+  conceptImpactScore,
   role,
   pmid,
   pmcid,
@@ -21,6 +28,8 @@ export function PublicationMeta({
   className,
 }: {
   citationCount?: number | null;
+  impactScore?: number | null;
+  conceptImpactScore?: number | null;
   role?: ReactNode;
   pmid?: string | null;
   pmcid?: string | null;
@@ -33,6 +42,37 @@ export function PublicationMeta({
     blocks.push(
       <span key="cite" className="font-medium text-zinc-700 dark:text-zinc-300">
         {citationCount.toLocaleString()} citations
+      </span>,
+    );
+  }
+
+  const hasImpact = impactScore !== null && impactScore !== undefined;
+  const hasConcept =
+    conceptImpactScore !== null && conceptImpactScore !== undefined;
+  if (hasImpact || hasConcept) {
+    blocks.push(
+      <span key="impact" className="whitespace-nowrap">
+        {hasImpact ? (
+          <>
+            Impact:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {Math.round(impactScore as number)}
+            </span>
+          </>
+        ) : null}
+        {hasImpact && hasConcept ? (
+          <span aria-hidden="true" className="text-muted-foreground/60">
+            {" · "}
+          </span>
+        ) : null}
+        {hasConcept ? (
+          <>
+            Concept:{" "}
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              {Math.round(conceptImpactScore as number)}
+            </span>
+          </>
+        ) : null}
       </span>,
     );
   }
