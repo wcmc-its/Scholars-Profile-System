@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { CopyButton } from "@/components/publication/copy-button";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 /**
  * Unified publication-card metadata row (#87). Renders, in order:
@@ -17,10 +18,16 @@ import { CopyButton } from "@/components/publication/copy-button";
  * a single nowrap block so `Impact: 42 · Concept: 38` never line-breaks
  * mid-pair on mobile. Both null/undefined → block omitted. Only surfaces
  * with §1.8 data pass these; other callers leave them undefined.
+ *
+ * `impactJustification` (issue #316 PR-C) — when present alongside a
+ * non-null `impactScore`, the inline `Impact: NN` becomes a hover/focus
+ * tooltip trigger revealing the GPT-generated rubric justification.
+ * Skipped when impactScore is null (nothing to explain).
  */
 export function PublicationMeta({
   citationCount,
   impactScore,
+  impactJustification,
   conceptImpactScore,
   role,
   pmid,
@@ -30,6 +37,7 @@ export function PublicationMeta({
 }: {
   citationCount?: number | null;
   impactScore?: number | null;
+  impactJustification?: string | null;
   conceptImpactScore?: number | null;
   role?: ReactNode;
   pmid?: string | null;
@@ -105,10 +113,23 @@ export function PublicationMeta({
   const hasImpact = impactScore !== null && impactScore !== undefined;
   const hasConcept =
     conceptImpactScore !== null && conceptImpactScore !== undefined;
+  const hasJustification =
+    typeof impactJustification === "string" && impactJustification.length > 0;
   if (hasImpact || hasConcept) {
+    const impactValue = hasImpact ? (
+      <>Impact: {Math.round(impactScore as number)}</>
+    ) : null;
     blocks.push(
       <span key="impact" className="whitespace-nowrap">
-        {hasImpact ? <>Impact: {Math.round(impactScore as number)}</> : null}
+        {hasImpact && hasJustification ? (
+          <HoverTooltip text={impactJustification as string} wide>
+            <span tabIndex={0} className="cursor-help">
+              {impactValue}
+            </span>
+          </HoverTooltip>
+        ) : (
+          impactValue
+        )}
         {hasImpact && hasConcept ? (
           <span aria-hidden="true" className="text-muted-foreground/60">
             {" · "}

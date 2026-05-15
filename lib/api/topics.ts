@@ -459,6 +459,15 @@ export type TopicPublicationHit = {
    * useful on search is redundant here.
    */
   impactScore: number | null;
+  /**
+   * Issue #316 PR-C — GPT-generated rubric justification for `impactScore`.
+   * Sourced from `Publication.impactJustification` (IMPACT# ETL). When
+   * present alongside a non-null `impactScore`, the UI surfaces the text
+   * as a hover/focus tooltip on the inline `Impact: NN` value. Null when
+   * the publication has no LLM impact data or the flag is off (same gating
+   * as `impactScore`).
+   */
+  impactJustification: string | null;
   /** WCM-confirmed coauthors with chip-render data (headshot + first/last role
    *  flags). Empty array when the publication has no confirmed WCM authors;
    *  publication-feed UI suppresses the chip row in that case. */
@@ -585,10 +594,11 @@ export async function getTopicPublications(
     doi: true,
     dateAddedToEntrez: true,
     // Global per-pmid impact score landed by the IMPACT# DynamoDB ETL block
-    // (issue #316 PR-A). Canonical source after PR-B; the per-(pmid, cwid,
-    // parent_topic) mirror on `publication_topic.impact_score` retires in
-    // the follow-up mirror-removal PR.
+    // (issue #316 PR-A); canonical source since PR-B-finalize.
     impactScore: true,
+    // GPT-generated rubric justification (issue #316 PR-C) — surfaced as a
+    // hover tooltip on the inline `Impact: NN` value.
+    impactJustification: true,
   } as const;
   const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
     prisma.publicationTopic.findMany({
@@ -646,6 +656,7 @@ function mapToTopicPublicationHit(
   // Prisma Decimal | number | null from the include. Convert via Number();
   // defense-in-depth against non-finite values from a future schema change.
   let impactScore: number | null = null;
+  let impactJustification: string | null = null;
   if (
     includeImpact &&
     r.publication.impactScore !== null &&
@@ -653,6 +664,15 @@ function mapToTopicPublicationHit(
   ) {
     const n = Number(r.publication.impactScore);
     impactScore = Number.isFinite(n) ? n : null;
+    // Only surface the justification when there's a score for it to explain.
+    // Defensive coerce: tolerate non-string upstream values rather than crash.
+    if (
+      impactScore !== null &&
+      typeof r.publication.impactJustification === "string" &&
+      r.publication.impactJustification.length > 0
+    ) {
+      impactJustification = r.publication.impactJustification;
+    }
   }
   return {
     pmid: r.pmid,
@@ -665,6 +685,7 @@ function mapToTopicPublicationHit(
     doi: r.publication.doi ?? null,
     pmcid: r.publication.pmcid ?? null,
     impactScore,
+    impactJustification,
     authors: wcmAuthors ?? [],
   };
 }
