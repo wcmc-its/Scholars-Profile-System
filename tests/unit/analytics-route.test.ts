@@ -146,7 +146,57 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("mentoring_copubs_open")).toBe(true);
     expect(VALID_EVENTS.has("person_popover_open")).toBe(true);
     expect(VALID_EVENTS.has("person_popover_action")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(4);
+    expect(VALID_EVENTS.has("spotlight_paper_click")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(5);
+  });
+});
+
+describe("handleAnalyticsBeacon spotlight_paper_click (#343)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs PMID + slot + cycle ID on a valid payload", () => {
+    handleAnalyticsBeacon({
+      event: "spotlight_paper_click",
+      pmid: "39123456",
+      slot: 2,
+      cycleId: "v2026-05-16",
+      subtopicId: "sub_cardio",
+      ts: 1700000002000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.event).toBe("spotlight_paper_click");
+    expect(logged.pmid).toBe("39123456");
+    expect(logged.slot).toBe(2);
+    expect(logged.cycleId).toBe("v2026-05-16");
+    expect(logged.subtopicId).toBe("sub_cardio");
+    expect(logged.ts).toBe(1700000002000);
+  });
+
+  it("nulls out fields with wrong types (T-06-02-01)", () => {
+    handleAnalyticsBeacon({
+      event: "spotlight_paper_click",
+      pmid: 39123456,
+      slot: "2",
+      cycleId: { v: "x" },
+      subtopicId: ["sub"],
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.pmid).toBeNull();
+    expect(logged.slot).toBeNull();
+    expect(logged.cycleId).toBeNull();
+    expect(logged.subtopicId).toBeNull();
   });
 });
 

@@ -646,6 +646,9 @@ describe("getSpotlights (Phase 9 SPOTLIGHT-03)", () => {
     expect(bigCard.papers).toHaveLength(3);
     expect(new Set(bigCard.papers.map((p) => p.pmid)).size).toBe(3);
     for (const p of bigCard.papers) expect(bigPmids).toContain(p.pmid);
+    // #343 — the publish-cycle ID is surfaced on the card so Spotlight
+    // paper-click telemetry can attribute CTR per cycle.
+    expect(bigCard.artifactVersion).toBe("v2026-05-07");
     // Pools of 3 or fewer pass through untouched.
     for (const card of first!.filter((c) => c.subtopicId !== "sub_big")) {
       expect(card.papers).toHaveLength(1);

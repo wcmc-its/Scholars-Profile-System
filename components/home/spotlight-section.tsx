@@ -13,6 +13,8 @@
  *     useEffect immediately rerolls to avoid a hydration mismatch).
  *   - Auto-advances every AUTO_ADVANCE_MS while the user is not interacting
  *     with the section (hover/focus pauses).
+ *   - Representative-paper clicks fire a `spotlight_paper_click` analytics
+ *     beacon (PMID + slot + publish cycle) for #286 CTR attribution (#343).
  *
  * Author rule (operator decision 2026-05-07): authors come from SPS
  * `PublicationAuthor` joined to `Scholar` — NOT the artifact's first/last
@@ -190,7 +192,7 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
         <div className="text-[10.5px] font-medium uppercase tracking-[0.13em] text-zinc-500">
           Representative papers
         </div>
-        {card.papers.map((p) => (
+        {card.papers.map((p, slot) => (
           <PaperRow
             key={p.pmid}
             pmid={p.pmid}
@@ -198,6 +200,9 @@ function SpotlightDetail({ card }: { card: SpotlightCard }) {
             journal={p.journal}
             year={p.year}
             authors={p.authors}
+            slot={slot}
+            subtopicId={card.subtopicId}
+            cycleId={card.artifactVersion}
           />
         ))}
       </div>
@@ -211,22 +216,51 @@ function PaperRow({
   journal,
   year,
   authors,
+  slot,
+  subtopicId,
+  cycleId,
 }: {
   pmid: string;
   title: string;
   journal: string;
   year: number;
   authors: SpotlightAuthor[];
+  // Display position 0|1|2 and the publish-cycle ID — beaconed on click so
+  // the #286 CTR-across-cycles metric can attribute each click (#343).
+  slot: number;
+  subtopicId: string;
+  cycleId: string;
 }) {
   const pubmedUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmid}`;
   const visible = authors.slice(0, AUTHOR_DISPLAY_CAP);
   const overflow = authors.length - visible.length;
+
+  // Fire-and-forget CTR beacon. Mirrors the search-result pattern: the Blob
+  // wrapper sets the JSON content-type the route's request.json() expects.
+  // Never blocks navigation; no-ops where sendBeacon is unavailable.
+  function handleClick() {
+    if (typeof navigator === "undefined" || !navigator.sendBeacon) return;
+    const payload = {
+      event: "spotlight_paper_click",
+      pmid,
+      slot,
+      subtopicId,
+      cycleId,
+      ts: Date.now(),
+    };
+    navigator.sendBeacon(
+      "/api/analytics",
+      new Blob([JSON.stringify(payload)], { type: "application/json" }),
+    );
+  }
+
   return (
     <div className="text-sm leading-snug">
       <a
         href={pubmedUrl}
         target="_blank"
         rel="noopener noreferrer"
+        onClick={handleClick}
         className="font-medium text-zinc-900 hover:underline"
         dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(title) }}
       />
