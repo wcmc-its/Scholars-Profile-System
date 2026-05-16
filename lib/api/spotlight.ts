@@ -41,6 +41,7 @@ export type SpotlightCard = {
   title: string;
   journal: string | null;
   year: number | null;
+  citationCount: number;
   pubmedUrl: string | null;
   doi: string | null;
   authors: WcmAuthorChip[];
@@ -68,6 +69,7 @@ type CandidateRow = {
     title: string | null;
     journal: string | null;
     year: number | null;
+    citationCount: number;
     pubmedUrl: string | null;
     doi: string | null;
     dateAddedToEntrez: Date | null;
@@ -128,6 +130,7 @@ const PUB_SELECT_FIELDS = {
   title: true,
   journal: true,
   year: true,
+  citationCount: true,
   pubmedUrl: true,
   doi: true,
   dateAddedToEntrez: true,
@@ -288,6 +291,7 @@ export async function getSpotlightCardsForTopic(
           title: true,
           journal: true,
           year: true,
+          citationCount: true,
           pubmedUrl: true,
           doi: true,
           dateAddedToEntrez: true,
@@ -356,6 +360,7 @@ export async function getSpotlightCardsForTopic(
       title: r.publication.title ?? "",
       journal: r.publication.journal,
       year: r.publication.year,
+      citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
       authors: authorsByPmid.get(r.pmid) ?? [],
@@ -404,6 +409,7 @@ async function getSpotlightCardsForEntity(
           title: true,
           journal: true,
           year: true,
+          citationCount: true,
           pubmedUrl: true,
           doi: true,
           dateAddedToEntrez: true,
@@ -457,6 +463,7 @@ async function getSpotlightCardsForEntity(
       title: r.publication.title ?? "",
       journal: r.publication.journal,
       year: r.publication.year,
+      citationCount: r.publication.citationCount,
       pubmedUrl: r.publication.pubmedUrl,
       doi: r.publication.doi,
       authors: authorsByPmid.get(r.pmid) ?? [],

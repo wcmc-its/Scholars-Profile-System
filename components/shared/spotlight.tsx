@@ -74,6 +74,12 @@ function SpotlightPubCard({
   const titleHref = card.pubmedUrl ?? card.doi ?? "#";
   const isExternal = titleHref !== "#";
 
+  // #337 — citation count on the bibliographic line, mirroring the
+  // publication-feed PublicationMeta convention: `{N} citations`, omitted
+  // when null/0 (citationCount is Int @default(0), so 0 is the empty state).
+  const hasCitations = card.citationCount > 0;
+  const hasMetaBeforeCitations = Boolean(card.journal) || card.year !== null;
+
   // First card has no left rule; subsequent cards add a left rule on md+.
   // On mobile (single column), each card after the first gets a top rule.
   const dividerClass =
@@ -114,6 +120,10 @@ function SpotlightPubCard({
         ) : null}
         {card.journal && card.year !== null ? " · " : null}
         {card.year !== null ? String(card.year) : null}
+        {hasCitations && hasMetaBeforeCitations ? " · " : null}
+        {hasCitations
+          ? `${card.citationCount.toLocaleString()} citations`
+          : null}
       </div>
     </article>
   );
