@@ -32,6 +32,7 @@ import {
 } from "@/lib/ranking";
 import { ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES, NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
+import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
 
 // ---------------------------------------------------------------------------
 // Per-surface floors per UI-SPEC §States and CONTEXT.md D-12
@@ -152,7 +153,8 @@ export type SpotlightCard = {
   // omitted in v1 — Grant has no topic linkage in the current schema.
   publicationCount: number;
   scholarCount: number;
-  // 2-3 representative WCM publications.
+  // Up to 3 representative WCM publications, seeded-sampled per publish cycle
+  // from the artifact pool by `sampleSpotlightPapers` (#286).
   papers: SpotlightPaperCard[];
 };
 
@@ -517,8 +519,9 @@ export async function getSelectedResearch(
 /**
  * 10 editorial spotlights from the ReciterAI rotation pipeline (`Spotlight`
  * table, sole-written by `etl/spotlight/index.ts`). Each card pairs a 25-35
- * word lede with 2-3 representative WCM publications, with first + last
- * author photos resolved against the existing Scholar table.
+ * word lede with up to 3 representative WCM publications — seeded-sampled per
+ * publish cycle from the artifact pool (#286) — with author photos resolved
+ * against the existing Scholar table.
  *
  * Sparse-state hide: returns null if fewer than `SPOTLIGHT_FLOOR` rows exist
  * (publish degraded; section hides rather than render a half-empty layout).
@@ -675,6 +678,14 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       pubs: 0,
       scholars: 0,
     };
+    // Issue #286 — seeded 3-of-N sample of the artifact pool, stable per
+    // publish cycle (keyed on artifactVersion + subtopicId) and rotating
+    // across cycles. Deterministic, so it is SSR-safe; the component no
+    // longer shuffles papers itself.
+    const sampledPapers = sampleSpotlightPapers(
+      papers,
+      `${row.artifactVersion}:${row.subtopicId}`,
+    );
     cards.push({
       subtopicId: row.subtopicId,
       parentTopicSlug: row.parentTopicId,
@@ -684,7 +695,7 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       lede: row.lede,
       publicationCount: counts.pubs,
       scholarCount: counts.scholars,
-      papers,
+      papers: sampledPapers,
     });
   }
 

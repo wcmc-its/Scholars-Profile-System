@@ -107,7 +107,7 @@ The home-page section is in `components/home/spotlight-section.tsx`, fed by `get
 - **Per-paper drop**: papers with zero WCM-resolved authors are hidden.
 - **Per-spotlight drop**: spotlights whose papers all dropped are hidden.
 - **Sparse-state hide**: if fewer than `SPOTLIGHT_FLOOR` (= 6) spotlights survive, the entire section hides. Floor and target constants live in `lib/api/home.ts`.
-- **Display sampling**: the component renders a random 8 of N spotlights and a random 3 of M papers per spotlight on each pageload (constants in `components/home/spotlight-section.tsx`). Auto-advances every 10 s, pauses on hover/focus.
+- **Display sampling**: the component renders a random `DISPLAY_LIMIT_SPOTLIGHTS` (8) of N spotlights on each pageload, auto-advancing every 10 s (pauses on hover/focus). The 3 papers shown per spotlight are **not** random per pageload — `getSpotlights()` seeded-samples them from the artifact pool (issue #286), keyed on `artifactVersion` + `subtopicId`, so the choice is stable within a publish cycle and rotates across cycles. See `lib/spotlight-sampling.ts`.
 - **Counts**: `publicationCount` and `scholarCount` per spotlight are aggregated in the DAL via raw SQL over `publication_topic` JOIN `scholar` (year ≥ 2020 floor, active non-deleted scholars). Grants are intentionally absent (no topic linkage in the schema).
 - **Link layout (Plan 09-04 spec)**: subtopic name → `/topics/{parent}?subtopic={sub}`, parent kicker → `/topics/{parent}`, publications count → `…#publications`, scholars count → `…#top-scholars`. The topic page has matching id anchors with `scroll-mt-20`.
 
@@ -140,7 +140,8 @@ Open issue tracking voice rules: [wcmc-its/ReciterAI#2](https://github.com/wcmc-
 | `SPOTLIGHT_TARGET` | 10 | `lib/api/home.ts` |
 | `RECITERAI_YEAR_FLOOR` | 2020 (D-15) | `lib/api/home.ts` |
 | `DISPLAY_LIMIT_SPOTLIGHTS` | 8 | `components/home/spotlight-section.tsx` |
-| `DISPLAY_LIMIT_PAPERS` | 3 | `components/home/spotlight-section.tsx` |
+| `SAMPLE_SIZE` (papers shown per spotlight) | 3 | `lib/spotlight-sampling.ts` |
+| `MAX_REROLLS` (author-collision re-roll cap) | 3 | `lib/spotlight-sampling.ts` |
 | `AUTHOR_DISPLAY_CAP` | 4 (then "+N more") | `components/home/spotlight-section.tsx` |
 | `AUTO_ADVANCE_MS` | 10 000 | `components/home/spotlight-section.tsx` |
 
