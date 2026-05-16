@@ -40,6 +40,12 @@
  * projection silently blanked every subtopic page, so the guard now
  * fails the run loudly instead of reporting a hollow success.
  *
+ * Issue #348 — Block 2's per-record mapping moves to a pure, unit-tested
+ * module (./publication-topic-mapper.ts), and it stops dropping rows with
+ * an empty author_position: ReCiterAI emits "" on ~52% of TOPIC# items,
+ * and discarding them built publication_topic from only ~half the data.
+ * Such rows now land with authorPosition="".
+ *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
  *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai)
@@ -52,6 +58,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
+import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -103,11 +110,6 @@ type ImpactRecord = {
   model?: string;
   [key: string]: unknown;
 };
-
-/** Strip the DynamoDB-specific "cwid_" prefix from a faculty_uid / SK fragment. */
-function stripCwidPrefix(raw: string): string {
-  return raw.startsWith("cwid_") ? raw.slice("cwid_".length) : raw;
-}
 
 async function main() {
   const start = Date.now();
@@ -179,9 +181,7 @@ async function main() {
     const topicCount = await prisma.topic.count();
     console.log(`topic table count: ${topicCount} (expected 67 for taxonomy_v2)`);
     if (topicCount !== 67) {
-      console.warn(
-        `WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`,
-      );
+      console.warn(`WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`);
     }
 
     // ===================================================================
@@ -235,95 +235,25 @@ async function main() {
     }
     console.log(`Found ${topicItems.length} TOPIC# records (expected ~78,103 per probe).`);
 
-    // Map → upsert. Skip rows where:
-    //   - cwid not in our scholar table (FK would reject)
-    //   - parent_topic_id not in our topic catalog (FK would reject)
-    //   - required scalars missing (pmid, score, year, author_position)
-    // Log the skip reasons by category so the ETL bookkeeping is auditable.
-    let skippedMissingScholar = 0;
-    let skippedMissingTopic = 0;
-    let skippedMissingPublication = 0;
-    let skippedMissingFields = 0;
+    // Map TOPIC# records to publication_topic writes. The per-record
+    // classification — FK guards, the required-field check, and the #348
+    // empty-author_position relax — is pure and unit-tested; see
+    // ./publication-topic-mapper.ts. Skip reasons are tallied by category
+    // so the ETL bookkeeping stays auditable.
+    const mapResult = buildPublicationTopicWrites(topicItems, {
+      knownTopicIds,
+      ourCwidSet,
+      knownPmidSet,
+    });
+    const writes = mapResult.writes;
     let pubTopicRowsUpserted = 0;
-
-    type PubTopicWrite = {
-      pmid: string;
-      cwid: string;
-      parentTopicId: string;
-      primarySubtopicId: string | null;
-      subtopicIds: Prisma.InputJsonValue | typeof Prisma.JsonNull;
-      subtopicConfidences: Prisma.InputJsonValue | typeof Prisma.JsonNull;
-      score: Prisma.Decimal;
-      rationale: string | null;
-      // synopsis intentionally absent — moved to Publication per #329.
-      // Block 2c below collapses one value per pmid and writes there.
-      authorPosition: string;
-      year: number;
-    };
-
-    const writes: PubTopicWrite[] = [];
-    for (const it of topicItems) {
-      const parentTopicId = it.PK.replace("TOPIC#", "");
-      if (!parentTopicId || !knownTopicIds.has(parentTopicId)) {
-        skippedMissingTopic += 1;
-        continue;
-      }
-
-      const rawCwid = typeof it.faculty_uid === "string" ? stripCwidPrefix(it.faculty_uid) : "";
-      if (!rawCwid || !ourCwidSet.has(rawCwid)) {
-        skippedMissingScholar += 1;
-        continue;
-      }
-
-      // pmid is numeric in DDB (TOPIC# items) but stored as VARCHAR(32) in MySQL
-      // to FK-relate to the existing publication.pmid (String @id). Stringify.
-      const pmidStr =
-        typeof it.pmid === "number" && Number.isFinite(it.pmid)
-          ? String(it.pmid)
-          : typeof it.pmid === "string" && /^\d+$/.test(it.pmid.trim())
-            ? it.pmid.trim()
-            : "";
-      const score = typeof it.score === "number" ? it.score : NaN;
-      const yearNum = typeof it.year === "number" ? it.year : NaN;
-      const authorPosition = typeof it.author_position === "string" ? it.author_position : "";
-
-      if (!pmidStr || !Number.isFinite(score) || !Number.isFinite(yearNum) || !authorPosition) {
-        skippedMissingFields += 1;
-        continue;
-      }
-
-      if (!knownPmidSet.has(pmidStr)) {
-        skippedMissingPublication += 1;
-        continue;
-      }
-
-      writes.push({
-        pmid: pmidStr,
-        cwid: rawCwid,
-        parentTopicId,
-        primarySubtopicId:
-          typeof it.primary_subtopic_id === "string" ? it.primary_subtopic_id : null,
-        subtopicIds:
-          it.subtopic_ids !== undefined && it.subtopic_ids !== null
-            ? (it.subtopic_ids as Prisma.InputJsonValue)
-            : Prisma.JsonNull,
-        subtopicConfidences:
-          it.subtopic_confidences !== undefined && it.subtopic_confidences !== null
-            ? (it.subtopic_confidences as Prisma.InputJsonValue)
-            : Prisma.JsonNull,
-        score: new Prisma.Decimal(score),
-        // it.impact_score is intentionally not persisted to publication_topic;
-        // the mirror column was dropped in #316 PR-B-finalize. The IMPACT#
-        // Block 4 below writes the canonical value to Publication.impactScore.
-        rationale: typeof it.rationale === "string" && it.rationale ? it.rationale : null,
-        // synopsis is per-pmid, not per-(pmid, cwid, topic) — moved to
-        // Publication in #329; Block 2c below collapses and writes there.
-        authorPosition,
-        year: yearNum,
-      });
-    }
     console.log(
-      `publication_topic candidates: ${writes.length} (skipped: ${skippedMissingScholar} missing scholar, ${skippedMissingTopic} missing parent topic, ${skippedMissingPublication} missing publication, ${skippedMissingFields} missing required fields).`,
+      `publication_topic candidates: ${writes.length} (skipped: ` +
+        `${mapResult.skippedMissingScholar} missing scholar, ` +
+        `${mapResult.skippedMissingTopic} missing parent topic, ` +
+        `${mapResult.skippedMissingPublication} missing publication, ` +
+        `${mapResult.skippedMissingFields} missing required fields; ` +
+        `${mapResult.emptyAuthorPosition} landed with empty author_position).`,
     );
 
     // Idempotent upsert keyed on the composite (pmid, cwid, parentTopicId).
@@ -368,7 +298,9 @@ async function main() {
       );
       pubTopicRowsUpserted += chunk.length;
       if ((i / BATCH) % 50 === 0) {
-        console.log(`  ...upserted ${pubTopicRowsUpserted}/${writes.length} publication_topic rows`);
+        console.log(
+          `  ...upserted ${pubTopicRowsUpserted}/${writes.length} publication_topic rows`,
+        );
       }
     }
     console.log(`publication_topic upserts complete: ${pubTopicRowsUpserted} rows.`);
@@ -653,7 +585,9 @@ async function main() {
       );
       impactRowsUpserted += chunk.length;
       if ((i / IMPACT_BATCH) % 20 === 0) {
-        console.log(`  ...updated ${impactRowsUpserted}/${impactWrites.length} publication impact rows`);
+        console.log(
+          `  ...updated ${impactRowsUpserted}/${impactWrites.length} publication impact rows`,
+        );
       }
     }
     const avgJustificationLen =
