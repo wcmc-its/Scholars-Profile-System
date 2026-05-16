@@ -28,6 +28,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
+import { htmlToPlainText } from "@/lib/utils";
 
 /** Hardcoded ceiling for Phase 1; spec §7.1 hard cap is 30,000. */
 export const EXPORT_MAX_LIMIT = 5000;
@@ -81,6 +82,15 @@ const STRIP_RE = /[\])}[{(]/g;
 function stripBrackets(s: string | null): string {
   if (!s) return "";
   return s.replace(STRIP_RE, "");
+}
+
+/** PubMed titles carry inline HTML (`<i>BRCA1</i>`, `H<sub>2</sub>O`).
+ *  CSV consumers expect plain text, so strip every tag before emitting
+ *  the cell. `htmlToPlainText` also decodes the handful of HTML entities
+ *  PubMed emits (`&amp;` → `&`). Truncation is disabled; a 500-char
+ *  title is rare but legitimate. (#331) */
+function plainTitleForCsv(title: string): string {
+  return htmlToPlainText(title, Number.POSITIVE_INFINITY);
 }
 
 /**
@@ -223,7 +233,7 @@ export async function fetchAuthorshipRows(
         firstName: first,
         primaryDepartment: a.scholar.primaryDepartment,
         pmid: pub.pmid,
-        title: pub.title,
+        title: plainTitleForCsv(pub.title),
         year: pub.year,
         journal: pub.journal,
         doi: pub.doi,
@@ -271,7 +281,7 @@ export async function fetchArticleRows(
     if (!pub) continue;
     rows.push({
       pmid: pub.pmid,
-      title: pub.title,
+      title: plainTitleForCsv(pub.title),
       year: pub.year,
       journal: pub.journal,
       doi: pub.doi,

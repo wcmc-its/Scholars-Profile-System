@@ -44,6 +44,7 @@ import {
 } from "@/lib/search";
 import type { PublicationsFilters, PublicationsSort } from "@/lib/api/search";
 import { displayPublicationType } from "@/lib/publication-types";
+import { buildPubmedRuns } from "@/lib/pubmed-runs";
 
 /** Word's per-export ceiling — lower than CSV's 5,000 because each docx
  *  citation costs more to render and a 5,000-citation bibliography is
@@ -191,64 +192,6 @@ type PubForCitation = {
   pmcid: string | null;
 };
 
-/** Replace smart quotes / dashes with their straight ASCII equivalents
- *  for citation consistency. PubMed records inherit publisher-supplied
- *  punctuation; bibliographies look uneven when half the titles have
- *  curly quotes and half don't. */
-function normalizeCitationPunctuation(s: string): string {
-  return s
-    .replace(/[‘’‚‛]/g, "'") // curly singles → '
-    .replace(/[“”„‟]/g, '"') // curly doubles → "
-    .replace(/–/g, "-") // en dash → hyphen (page ranges)
-    .replace(/—/g, "--"); // em dash
-}
-
-/** Parse PubMed-style inline tags (`<i>`, `<sup>`, `<sub>`, case-
- *  insensitive) in an article title and emit appropriate runs. Anything
- *  outside a recognized tag is plain text. Smart quotes are normalized
- *  in the same pass. Unknown tags are stripped (rare; PubMed publishes
- *  a small fixed set). */
-function buildTitleRuns(title: string): TextRun[] {
-  const runs: TextRun[] = [];
-  // Tag tokens we recognize. `<sub>` / `<sup>` map to baseline shifts;
-  // `<i>` to italic. We don't render `<b>`/`<u>` in titles — Vancouver
-  // titles are sentence case, plain.
-  const tokenRe = /<\/?(i|sup|sub|b|u)>/gi;
-  let lastIndex = 0;
-  const stack: Array<"i" | "sup" | "sub"> = [];
-  const flush = (text: string) => {
-    if (!text) return;
-    const cleanText = normalizeCitationPunctuation(text);
-    runs.push(
-      new TextRun({
-        text: cleanText,
-        ...(stack.includes("i") ? { italics: true } : {}),
-        ...(stack.includes("sup") ? { superScript: true } : {}),
-        ...(stack.includes("sub") ? { subScript: true } : {}),
-      }),
-    );
-  };
-  for (const m of title.matchAll(tokenRe)) {
-    const start = m.index ?? 0;
-    if (start > lastIndex) flush(title.slice(lastIndex, start));
-    const tag = (m[1] ?? "").toLowerCase();
-    const isClose = m[0]!.startsWith("</");
-    if (tag === "i" || tag === "sup" || tag === "sub") {
-      if (isClose) {
-        const idx = stack.lastIndexOf(tag);
-        if (idx >= 0) stack.splice(idx, 1);
-      } else {
-        stack.push(tag);
-      }
-    }
-    // <b>/<u> tokens are silently dropped per Vancouver title styling.
-    lastIndex = start + m[0]!.length;
-  }
-  if (lastIndex < title.length) flush(title.slice(lastIndex));
-  if (runs.length === 0) flush(title);
-  return runs;
-}
-
 /** Build the volume/issue/pages segment in NLM punctuation. Output:
  *  ";Vol(Issue):Pages." with each piece omitted gracefully when null.
  *  Returns "" when all three are null so the citation skips the block. */
@@ -284,7 +227,8 @@ function buildCitationParagraph(
   // Title strips a single trailing period (PubMed inconsistency); we
   // always re-emit one after the title so spacing is uniform.
   const titleClean = pub.title.replace(/\.+$/, "");
-  const titleRuns = buildTitleRuns(titleClean);
+  // Vancouver titles stay sentence-case plain — bold tags are dropped.
+  const titleRuns = buildPubmedRuns(titleClean);
 
   // PMID/PMCID assemble as one block joined by ; (NLM convention) with
   // a single trailing period after the whole block.
