@@ -21,9 +21,19 @@ export function sanitizeVIVOHtml(html: string): string {
 }
 
 /**
- * Convert an HTML string (potentially from VIVO) to plain text suitable for
- * excerpts and search snippets. Strips tags, collapses whitespace, decodes
- * the handful of HTML entities that appear in VIVO data.
+ * Convert an HTML string (potentially from VIVO or PubMed) to plain text
+ * suitable for excerpts, search snippets, and CSV cells. Strips tags,
+ * collapses whitespace, decodes the handful of HTML entities that appear
+ * in VIVO data.
+ *
+ * PubMed inline whitelist tags (`<i>`, `<em>`, `<b>`, `<strong>`,
+ * `<sup>`, `<sub>`) are stripped with NO replacement so chemical
+ * formulas like `H<sub>2</sub>O` stay readable as `H2O` rather than
+ * breaking into `H 2 O`. All other tags collapse to a single space so
+ * adjacent block content doesn't run together.
+ *
+ * Pass `Number.POSITIVE_INFINITY` as `maxLength` to disable the
+ * 200-char excerpt truncation (CSV exports want the full string).
  */
 export function htmlToPlainText(html: string, maxLength = 200): string {
   const decoded = sanitizeVIVOHtml(html)
@@ -34,7 +44,13 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&[a-z]+;/g, " "); // catch remaining named entities
-  const plain = decoded.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const plain = decoded
+    // Inline scientific markup → no replacement (preserve `H2O`).
+    .replace(/<\/?(?:i|em|b|strong|sup|sub)\b[^>]*>/gi, "")
+    // Everything else (block tags, unknown markup) → single space.
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (plain.length <= maxLength) return plain;
   return plain.slice(0, maxLength).replace(/\s+\S*$/, "") + "…";
 }
@@ -48,11 +64,20 @@ export function htmlToPlainText(html: string, maxLength = 200): string {
  * and chemical formulae (`H<sub>2</sub>O`, `CO<sup>2</sup>`). Honor those
  * but strip anything else — no attributes, no scripts, no other tags. The
  * tag set is intentionally narrow because PubMed never emits anything else.
+ *
+ * Whitelisted tags are normalized to their bare form so attributes never
+ * leak through (`<i class="foo">x</i>` → `<i>x</i>`). Any tag outside the
+ * whitelist — including the orphaned closer of an attributed tag — is
+ * removed entirely.
  */
 export function sanitizePubmedHtml(input: string): string {
-  return input.replace(/<\/?[a-z][^>]*>/gi, (m) =>
-    /^<\/?(?:i|em|b|strong|sup|sub)>$/i.test(m) ? m : "",
-  );
+  return input.replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash, raw) => {
+    const name = (raw as string).toLowerCase();
+    if (/^(?:i|em|b|strong|sup|sub)$/.test(name)) {
+      return slash ? `</${name}>` : `<${name}>`;
+    }
+    return "";
+  });
 }
 
 /** @deprecated Renamed to {@link sanitizePubmedHtml} — kept for back-compat. */

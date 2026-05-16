@@ -29,6 +29,8 @@ import {
   type CoPublicationFull,
 } from "@/lib/api/mentoring";
 import { toCsv } from "@/lib/csv";
+import { htmlToPlainText } from "@/lib/utils";
+import { buildPubmedRuns } from "@/lib/pubmed-runs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -101,7 +103,9 @@ function renderCsv(pubs: CoPublicationFull[]): string {
     String(p.pmid),
     p.year,
     p.journal ?? "",
-    p.title,
+    // PubMed titles carry inline HTML (`<i>`, `<sup>`); strip for CSV so
+    // spreadsheets don't show literal `<sup>+</sup>` (#331).
+    htmlToPlainText(p.title, Number.POSITIVE_INFINITY),
     p.authors.map(authorToVancouverToken).join("; "),
   ]);
   return toCsv([...CSV_HEADERS], rows);
@@ -204,6 +208,9 @@ function buildCitationParagraph(
   });
 
   const titleClean = (pub.title ?? "").replace(/\.+$/, "");
+  // Honor inline PubMed markup (`<i>`, `<sup>`, `<sub>`) so titles like
+  // `H<sub>2</sub>O` render with real subscript runs (#331).
+  const titleRuns = buildPubmedRuns(titleClean);
   const journal = pub.journal ?? "";
   const volIssuePages = formatVolIssuePages(pub.volume, pub.issue, pub.pages);
 
@@ -229,7 +236,7 @@ function buildCitationParagraph(
     new TextRun({ text: `${index + 1}. ` }),
     ...authorRuns,
     new TextRun({ text: ". " }),
-    new TextRun({ text: titleClean }),
+    ...titleRuns,
     new TextRun({ text: ". " }),
     ...(journal ? [new TextRun({ text: `${journal}. ` })] : []),
     ...(pub.year !== null
