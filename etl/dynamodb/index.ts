@@ -45,6 +45,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
+import { resolveTopTopicByPmid } from "./top-topic-resolver";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -77,6 +78,11 @@ type TopicRecord = {
   impact_score?: number;
   rationale?: string; // issue #316: per-topic "why this paper maps here" — persisted to publication_topic.rationale
   synopsis?: string; // issue #316: one-line plain-language synopsis — persisted to publication_topic.synopsis
+  /// issue #325: per-paper argmax of the topic-score vector (above the
+  /// 0.3 floor; deterministic tiebreak upstream). Denormalized across
+  /// the N TOPIC# rows for one pmid; the same value is expected on
+  /// every row. Persisted once per pmid to publication.top_topic_id.
+  top_topic_id?: string;
   author_position?: string;
   year?: number;
   [key: string]: unknown;
@@ -360,6 +366,55 @@ async function main() {
       }
     }
     console.log(`publication_topic upserts complete: ${pubTopicRowsUpserted} rows.`);
+
+    // ===================================================================
+    // Block 2b: TOPIC#.top_topic_id → publication.top_topic_id  (issue #325)
+    // ===================================================================
+    // ReciterAI #68 lands `top_topic_id` on every TOPIC# row — argmax of the
+    // per-paper topic-score vector among topics above the 0.3 floor (deterministic
+    // tiebreak upstream). The value is per-paper; producer denormalizes across
+    // the N TOPIC# rows for one pmid. We collapse to first-non-empty per pmid
+    // and write once to publication.top_topic_id. Forward-compatible: if some
+    // pmids haven't been backfilled yet (the field is missing on their rows),
+    // those publications keep top_topic_id=NULL until the next producer rebuild.
+    //
+    // Pure resolution lives in `./top-topic-resolver.ts` so the per-pmid
+    // collapse + FK guards can be unit-tested without a DDB scan.
+    const {
+      byPmid: topTopicByPmid,
+      skippedUnknownTopic: topTopicSkippedUnknown,
+      perPmidConflicts: topTopicConflicts,
+    } = resolveTopTopicByPmid(topicItems, knownPmidSet, knownTopicIds);
+
+    // Group by topTopicId so each updateMany batches all pmids that share a
+    // value (cuts the round-trip count from O(pmids) to O(distinct_top_topics)).
+    let topTopicPmidsUpdated = 0;
+    const groupsByTopTopic = new Map<string, string[]>();
+    for (const [pmid, tt] of topTopicByPmid) {
+      const arr = groupsByTopTopic.get(tt) ?? [];
+      arr.push(pmid);
+      groupsByTopTopic.set(tt, arr);
+    }
+    const TOP_TOPIC_BATCH = 1000;
+    for (const [tt, pmids] of groupsByTopTopic) {
+      for (let i = 0; i < pmids.length; i += TOP_TOPIC_BATCH) {
+        const chunk = pmids.slice(i, i + TOP_TOPIC_BATCH);
+        const res = await prisma.publication.updateMany({
+          where: { pmid: { in: chunk } },
+          data: { topTopicId: tt },
+        });
+        topTopicPmidsUpdated += res.count;
+      }
+    }
+    console.log(
+      `top_topic_id updates: ${topTopicPmidsUpdated} pmids set across ${groupsByTopTopic.size} target topics ` +
+        `(skipped ${topTopicSkippedUnknown} unknown topic ids; ${topTopicConflicts} per-pmid conflicts).`,
+    );
+    if (topTopicByPmid.size === 0 && topTopicSkippedUnknown === 0) {
+      console.warn(
+        "WARN: zero TOPIC# rows carried top_topic_id — producer rollout (ReciterAI #68) may not have reached this dataset yet.",
+      );
+    }
 
     // ===================================================================
     // Block 3: FACULTY# → topic_assignment  (existing Q6 minimal projection)

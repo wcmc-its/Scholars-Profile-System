@@ -64,6 +64,13 @@ interface SubtopicDef {
 
 interface TopicEntry {
   subtopics: SubtopicDef[];
+  /// Issue #325 / ReciterAI #69 — per-topic display threshold (above the
+  /// 0.3 score_floor). Optional in the artifact: untuned topics omit the
+  /// field, the consumer falls back to 0.5. Forward-compatible — the
+  /// current published artifact (v2026-05-13) predates RA#69 so the field
+  /// is missing on every topic; the next producer publish carries it for
+  /// tuned topics, untuned topics will continue to omit.
+  display_threshold?: number;
 }
 
 interface ExcludedTopicEntry {
@@ -390,6 +397,53 @@ async function main(): Promise<void> {
       version: manifest.version,
       taxonomy_version: manifest.taxonomy_version,
       sha256: manifest.sha256.slice(0, 12) + "…",
+    })}`
+  );
+
+  // Step 8: Issue #325 — write per-topic `display_threshold` to Topic.
+  //
+  // The hierarchy artifact carries `display_threshold` per ReciterAI #69 — a
+  // second threshold above the 0.3 `score_floor` driving the two-tier display
+  // on /topics/<slug> (#326 PR-1). Untuned topics omit the field; we write
+  // null so the consumer falls back to the spec default (0.5) via
+  // `topic.displayThreshold ?? 0.5`. Storing null (rather than defaulting at
+  // the column) keeps "untuned" distinguishable from "tuned to 0.5" for the
+  // tuning workstream tracker.
+  //
+  // FK guard: the Topic catalog is owned by the DynamoDB ETL Block 1 (TAXONOMY#)
+  // which runs after this ETL per etl/orchestrate.ts. On a fresh database the
+  // Topic table may not exist yet on the first run; we tolerate that by skipping
+  // unknown topic ids and logging the count.
+  const knownTopicIds = new Set(
+    parentTopics.map((t) => t.id), // parentTopics already loaded above for editorial check
+  );
+  let thresholdsSet = 0;
+  let thresholdsCleared = 0;
+  let thresholdsSkippedUnknown = 0;
+  for (const [topicId, topicEntry] of Object.entries(hierarchy.topics)) {
+    if (!knownTopicIds.has(topicId)) {
+      thresholdsSkippedUnknown++;
+      continue;
+    }
+    const value =
+      typeof topicEntry.display_threshold === "number" &&
+      Number.isFinite(topicEntry.display_threshold)
+        ? topicEntry.display_threshold
+        : null;
+    await prisma.topic.update({
+      where: { id: topicId },
+      data: { displayThreshold: value },
+    });
+    if (value !== null) thresholdsSet++;
+    else thresholdsCleared++;
+  }
+  console.log(
+    `[Hierarchy] ${JSON.stringify({
+      event: "display_threshold_complete",
+      ts: Date.now(),
+      tuned: thresholdsSet,
+      untuned: thresholdsCleared,
+      skipped_unknown_topic: thresholdsSkippedUnknown,
     })}`
   );
 
