@@ -434,6 +434,25 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
 
 export type TopicPublicationSort = "newest" | "most_cited" | "by_impact";
 export type TopicPublicationFilter = "research_articles_only" | "all";
+/**
+ * Issue #326 — two-tier display on /topics/<slug>. Partitions the
+ * floor-clearing PublicationTopic rows by `score` against the topic's
+ * `displayThreshold` (sourced from hierarchy.json per ReciterAI #69,
+ * fallback 0.5 per the #325 ETL contract):
+ *
+ *   - "strongly" — `score >= (topic.displayThreshold ?? 0.5)`
+ *   - "also"     — `score <  (topic.displayThreshold ?? 0.5)`
+ *
+ * Omitted → no tier filter applied (returns every row above the 0.3
+ * upstream `score_floor`, same as pre-#326 behavior; used by tests and
+ * any future caller that wants the union).
+ */
+export type TopicPublicationTier = "strongly" | "also";
+/** Default per the #325 ETL probe contract: topics with no tuned
+ *  `display_threshold` in hierarchy.json land as NULL in MariaDB; consumer
+ *  falls back to 0.5. Kept as a named constant so the test surface and the
+ *  query path agree. */
+export const TOPIC_PUBLICATIONS_DEFAULT_DISPLAY_THRESHOLD = 0.5;
 
 export type TopicPublicationHit = {
   pmid: string;
@@ -483,6 +502,18 @@ export type TopicPublicationHit = {
    *  Null when the publication has no abstract. Rendered inline via
    *  `<AbstractDisclosure>` in the topic publication feed. */
   abstract: string | null;
+  /**
+   * Issue #327 — paper's argmax topic (`Publication.topTopicId`) and its
+   * human-readable catalog label, surfaced inline on the citation row as
+   * `Top topic: <label>` linking to `/topics/<id>`. Null when:
+   *   - the paper has no `top_topic_id` set (older records / ETL gap), OR
+   *   - the paper's top topic IS the current page's topic (the label is
+   *     redundant — server filters this out so the UI doesn't have to).
+   * The label is resolved through the `Publication.topTopic` FK relation,
+   * so deprecated topic ids that no longer exist in the catalog resolve to
+   * null automatically (Prisma `SetNull` onDelete + relation include).
+   */
+  topTopic: { id: string; label: string } | null;
 };
 
 export type TopicPublicationsResult = {
@@ -496,6 +527,16 @@ export type TopicPublicationsResult = {
    */
   totalAllTypes: number;
   totalResearchOnly: number;
+  /**
+   * Issue #326 — counts within the active filter scope (publication-type
+   * filter + subtopic if set) partitioned by tier. Surfaced regardless of
+   * which `tier` was requested so the client can decide whether to render
+   * the "View additional articles that are relevant" toggle (shown only
+   * when `tierTotals.also > 0`). Sum of strongly + also equals `total`
+   * when no tier filter is in effect; matches the active-tier total
+   * otherwise.
+   */
+  tierTotals: { strongly: number; also: number };
   page: number;
   pageSize: number;
 };
@@ -530,7 +571,19 @@ const HARD_EXCLUDE_TYPES = [...FEED_EXCLUDED_TYPES];
  */
 export async function getTopicPublications(
   topicSlug: string,
-  opts: { sort: TopicPublicationSort; subtopic?: string; page?: number; filter?: TopicPublicationFilter },
+  opts: {
+    sort: TopicPublicationSort;
+    subtopic?: string;
+    page?: number;
+    filter?: TopicPublicationFilter;
+    /**
+     * Issue #326 — partition the floor-clearing rows by
+     * `score >= topic.displayThreshold ?? 0.5`. `strongly` = above the
+     * threshold; `also` = below. Omitted = no tier filter (test surface +
+     * any caller that wants the full union).
+     */
+    tier?: TopicPublicationTier;
+  },
   now: Date = new Date(),
 ): Promise<TopicPublicationsResult | null> {
   const topic = await prisma.topic.findUnique({ where: { id: topicSlug } });
@@ -544,11 +597,26 @@ export async function getTopicPublications(
   const page = Math.max(0, opts.page ?? 0);
   const filter = opts.filter ?? "research_articles_only";
   const subtopicFilter = opts.subtopic && opts.subtopic.length > 0 ? opts.subtopic : undefined;
+  // Issue #326 — `displayThreshold` is nullable in the catalog (NULL =
+  // untuned upstream); per the #325 ETL contract the consumer falls back
+  // to 0.5. Resolve once and reuse for both the row filter and the tier
+  // totals so the toggle-visibility decision agrees with what's rendered.
+  const displayThreshold =
+    topic.displayThreshold ?? TOPIC_PUBLICATIONS_DEFAULT_DISPLAY_THRESHOLD;
 
   const baseWhere: Record<string, unknown> = { parentTopicId: topicSlug };
   if (subtopicFilter) baseWhere.primarySubtopicId = subtopicFilter;
   if (filter === "research_articles_only") {
     baseWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
+  }
+  // Tier filter applies to the visible row set (page query + `total`) only.
+  // The tierTotals counts below intentionally ignore opts.tier so the
+  // client always knows how many also-relevant rows exist regardless of
+  // which tier was requested.
+  if (opts.tier === "strongly") {
+    baseWhere.score = { gte: displayThreshold };
+  } else if (opts.tier === "also") {
+    baseWhere.score = { lt: displayThreshold };
   }
 
   // Same scope as `baseWhere` but with publicationType filters fixed to
@@ -559,6 +627,25 @@ export async function getTopicPublications(
   const baseWhereResearchOnly: Record<string, unknown> = {
     ...baseWhereAllTypes,
     publication: { publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+  };
+
+  // Issue #326 — tier totals are scoped to the active filter (publication
+  // type + subtopic) but ignore opts.tier so the response always tells
+  // the client whether the "Also relevant" toggle should render. Sharing
+  // `baseWhereFiltered` with the page query keeps the count consistent
+  // with what the user can paginate through.
+  const baseWhereFiltered: Record<string, unknown> = { parentTopicId: topicSlug };
+  if (subtopicFilter) baseWhereFiltered.primarySubtopicId = subtopicFilter;
+  if (filter === "research_articles_only") {
+    baseWhereFiltered.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
+  }
+  const tierStronglyWhere = {
+    ...baseWhereFiltered,
+    score: { gte: displayThreshold },
+  };
+  const tierAlsoWhere = {
+    ...baseWhereFiltered,
+    score: { lt: displayThreshold },
   };
 
   // All three sorts are SQL-direct — by_impact previously routed through the
@@ -605,21 +692,28 @@ export async function getTopicPublications(
     impactJustification: true,
     // Inline abstract disclosure (issue #288 PR-A).
     abstract: true,
+    // Issue #327 — paper-level top topic (`Publication.topTopicId` + its
+    // FK relation). The mapper drops the field when it matches the
+    // current page's topic so the redundant inline label never renders.
+    topTopic: { select: { id: true, label: true } },
   } as const;
-  const [rows, total, totalAllTypes, totalResearchOnly] = await prisma.$transaction([
-    prisma.publicationTopic.findMany({
-      where: baseWhere,
-      skip,
-      take: TOPIC_PUBLICATIONS_PAGE_SIZE,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      orderBy: orderBy as any,
-      distinct: ["pmid"],
-      include: { publication: { select: pubSelectFields } },
-    }),
-    prisma.publicationTopic.count({ where: baseWhere }),
-    prisma.publicationTopic.count({ where: baseWhereAllTypes }),
-    prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
-  ]);
+  const [rows, total, totalAllTypes, totalResearchOnly, tierStronglyCount, tierAlsoCount] =
+    await prisma.$transaction([
+      prisma.publicationTopic.findMany({
+        where: baseWhere,
+        skip,
+        take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        orderBy: orderBy as any,
+        distinct: ["pmid"],
+        include: { publication: { select: pubSelectFields } },
+      }),
+      prisma.publicationTopic.count({ where: baseWhere }),
+      prisma.publicationTopic.count({ where: baseWhereAllTypes }),
+      prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
+      prisma.publicationTopic.count({ where: tierStronglyWhere }),
+      prisma.publicationTopic.count({ where: tierAlsoWhere }),
+    ]);
   const pmids = rows.map((r) => r.pmid);
   const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
   // `now` parameter is preserved for backwards compatibility with callers but
@@ -628,11 +722,12 @@ export async function getTopicPublications(
   return {
     hits: (rows as Array<{ pmid: string }>).map((r) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact),
+      mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact, topicSlug),
     ),
     total,
     totalAllTypes,
     totalResearchOnly,
+    tierTotals: { strongly: tierStronglyCount, also: tierAlsoCount },
     page,
     pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
   };
@@ -658,6 +753,7 @@ function mapToTopicPublicationHit(
   r: any,
   wcmAuthors: TopicPublicationHit["authors"] | undefined,
   includeImpact: boolean,
+  currentTopicSlug: string,
 ): TopicPublicationHit {
   // Prisma Decimal | number | null from the include. Convert via Number();
   // defense-in-depth against non-finite values from a future schema change.
@@ -680,6 +776,22 @@ function mapToTopicPublicationHit(
       impactJustification = r.publication.impactJustification;
     }
   }
+  // Issue #327 — `topTopic` is rendered as an inline "Top topic: …" affordance
+  // on the citation row. Drop the field when it points back at the current
+  // page's topic (label would just say "Top topic: <this page>") and when
+  // the publication has no `top_topic_id` set or the FK no longer resolves
+  // (deprecated topic). Server-side filtering means the UI doesn't have to
+  // know the current topic id.
+  let topTopic: TopicPublicationHit["topTopic"] = null;
+  const rawTopTopic = r.publication.topTopic;
+  if (
+    rawTopTopic &&
+    typeof rawTopTopic.id === "string" &&
+    typeof rawTopTopic.label === "string" &&
+    rawTopTopic.id !== currentTopicSlug
+  ) {
+    topTopic = { id: rawTopTopic.id, label: rawTopTopic.label };
+  }
   return {
     pmid: r.pmid,
     title: r.publication.title ?? "",
@@ -694,6 +806,7 @@ function mapToTopicPublicationHit(
     impactJustification,
     authors: wcmAuthors ?? [],
     abstract: r.publication.abstract ?? null,
+    topTopic,
   };
 }
 

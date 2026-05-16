@@ -12,6 +12,7 @@
  *   T-03-05-04 path traversal → TOPIC_SLUG_RE
  *   T-03-05-05 DoS via page → MAX_PAGE clamp
  *   T-03-05-06 input echo → static error strings only
+ *   T-03-05-07 tier bypass (issue #326) → TIER_ALLOWLIST
  *
  * Does NOT add CORS headers (same-origin only, matching all other /api/* routes).
  * Does NOT log request URL or param values (silent rejection per T-03-05-06).
@@ -21,6 +22,7 @@ import {
   getTopicPublications,
   type TopicPublicationSort,
   type TopicPublicationFilter,
+  type TopicPublicationTier,
 } from "@/lib/api/topics";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +35,10 @@ const SORT_ALLOWLIST: ReadonlySet<TopicPublicationSort> = new Set([
 const FILTER_ALLOWLIST: ReadonlySet<TopicPublicationFilter> = new Set([
   "research_articles_only",
   "all",
+]);
+const TIER_ALLOWLIST: ReadonlySet<TopicPublicationTier> = new Set([
+  "strongly",
+  "also",
 ]);
 const SUBTOPIC_RE = /^[a-z0-9_]+$/;
 const TOPIC_SLUG_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -70,6 +76,17 @@ export async function GET(
     subtopic = subtopicRaw;
   }
 
+  // Issue #326 — optional. Omitted = no tier partition (returns every
+  // floor-clearing row). Allowed values: "strongly" | "also".
+  let tier: TopicPublicationTier | undefined;
+  const tierRaw = sp.get("tier");
+  if (tierRaw !== null) {
+    if (!TIER_ALLOWLIST.has(tierRaw as TopicPublicationTier)) {
+      return NextResponse.json({ error: "invalid tier" }, { status: 400 });
+    }
+    tier = tierRaw as TopicPublicationTier;
+  }
+
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
@@ -78,7 +95,7 @@ export async function GET(
   // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
   const page = Math.min(pageNum, MAX_PAGE) - 1;
 
-  const result = await getTopicPublications(slug, { sort, subtopic, page, filter });
+  const result = await getTopicPublications(slug, { sort, subtopic, page, filter, tier });
   if (result === null) {
     return NextResponse.json({ error: "topic not found" }, { status: 404 });
   }

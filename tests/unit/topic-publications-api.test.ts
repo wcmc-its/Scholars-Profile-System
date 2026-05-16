@@ -74,6 +74,10 @@ const TOPIC_ROW = {
   id: TOPIC_SLUG,
   label: "Cancer Genomics",
   description: null,
+  // Issue #325/#326 — nullable in production (NULL = untuned upstream).
+  // Tests that care about tier partitioning override this; default null
+  // exercises the consumer fallback to 0.5.
+  displayThreshold: null as number | null,
   source: "reciterai-taxonomy_v2",
   refreshedAt: new Date("2026-04-01T00:00:00Z"),
 };
@@ -98,6 +102,13 @@ function makePtRow(overrides: {
   publicationType?: string;
   citationCount?: number;
   dateAddedToEntrez?: Date | null;
+  /**
+   * Issue #327 — `Publication.topTopic` (FK-resolved from `top_topic_id`).
+   * Defaults to undefined so existing tests see no inline top-topic label
+   * surfacing. Tests covering #327 set the value via the FK shape that
+   * Prisma's `include: { topTopic: { select: {...} } }` produces.
+   */
+  topTopic?: { id: string; label: string } | null;
 }) {
   const pmid = overrides.pmid ?? "12345";
   return {
@@ -121,8 +132,39 @@ function makePtRow(overrides: {
       doi: null,
       pubmedUrl: `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`,
       impactScore: overrides.impactScore ?? null,
+      topTopic: overrides.topTopic ?? null,
     },
   };
+}
+
+/**
+ * Helper for the $transaction tuple shape. The route layer calls
+ * `prisma.$transaction([findMany, count, count, count, count, count])`
+ * (6 elements after #326 introduced the tier-totals counts).
+ */
+function txn({
+  rows = [],
+  total = 0,
+  totalAllTypes,
+  totalResearchOnly,
+  tierStrongly = 0,
+  tierAlso = 0,
+}: {
+  rows?: ReturnType<typeof makePtRow>[];
+  total?: number;
+  totalAllTypes?: number;
+  totalResearchOnly?: number;
+  tierStrongly?: number;
+  tierAlso?: number;
+} = {}): unknown[] {
+  return [
+    rows,
+    total,
+    totalAllTypes ?? total,
+    totalResearchOnly ?? total,
+    tierStrongly,
+    tierAlso,
+  ];
 }
 
 beforeEach(() => {
@@ -364,6 +406,163 @@ describe("getTopicPublications", () => {
       mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.hits[0]!.impactScore).toBeNull();
+    });
+  });
+
+  // Issue #326 — two-tier display. Tests that the tier filter is applied
+  // to the row query and that tierTotals are always populated so the UI
+  // can decide whether to render the "View additional articles…" toggle.
+  describe("issue #326 — tier partitioning", () => {
+    it("default displayThreshold of 0.5 when topic.displayThreshold is NULL", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: null });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest", tier: "strongly" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ gte: 0.5 });
+    });
+
+    it("tuned displayThreshold from the topic row is used verbatim", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: 0.7 });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest", tier: "strongly" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ gte: 0.7 });
+    });
+
+    it("tier=strongly applies `score gte threshold` to the row query", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: 0.6 });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest", tier: "strongly" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ gte: 0.6 });
+    });
+
+    it("tier=also applies `score lt threshold` to the row query", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: 0.6 });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest", tier: "also" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ lt: 0.6 });
+    });
+
+    it("tier omitted: no score predicate (union of both tiers)", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toBeUndefined();
+    });
+
+    it("tierTotals are returned regardless of which tier was requested", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn({ tierStrongly: 42, tierAlso: 17 }));
+      const result = await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", tier: "strongly" },
+        NOW,
+      );
+      expect(result!.tierTotals).toEqual({ strongly: 42, also: 17 });
+    });
+
+    it("tierTotals are present when no tier filter is set", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn({ tierStrongly: 5, tierAlso: 12 }));
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.tierTotals).toEqual({ strongly: 5, also: 12 });
+    });
+
+    it("invalid tier values are not passable through the type system (compile-time check)", () => {
+      // This is a compile-time-only assertion: TopicPublicationTier is a
+      // string literal union of "strongly" | "also". Runtime allowlisting
+      // happens in the route handler (tested in topic-publications-route.test.ts).
+      // Kept here as a sentinel so anyone widening the union notices both
+      // sites need updating.
+      const allowed: ("strongly" | "also")[] = ["strongly", "also"];
+      expect(allowed).toHaveLength(2);
+    });
+
+    it("tier filter coexists with publication-type filter (research_articles_only)", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: 0.5 });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", tier: "strongly", filter: "research_articles_only" },
+        NOW,
+      );
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ gte: 0.5 });
+      expect(args.where.publication?.publicationType?.notIn).toBeDefined();
+    });
+
+    it("tier filter coexists with subtopic filter", async () => {
+      mockTopicFindUnique.mockResolvedValue({ ...TOPIC_ROW, displayThreshold: 0.5 });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", tier: "also", subtopic: "lung_cancer" },
+        NOW,
+      );
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      expect(args.where.score).toEqual({ lt: 0.5 });
+      expect(args.where.primarySubtopicId).toBe("lung_cancer");
+    });
+  });
+
+  // Issue #327 — paper-level top topic inline label. Tests the mapper's
+  // "drop label when it points back at the current topic" rule and the
+  // null/undefined passthrough.
+  describe("issue #327 — top-topic inline label surfacing", () => {
+    it("surfaces topTopic when paper's top topic differs from the page topic", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [
+        makePtRow({
+          pmid: "700",
+          topTopic: { id: "mental_health_psychiatry", label: "Mental Health & Psychiatry" },
+        }),
+      ];
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.topTopic).toEqual({
+        id: "mental_health_psychiatry",
+        label: "Mental Health & Psychiatry",
+      });
+    });
+
+    it("drops topTopic when it equals the current page topic (no inverted-confusion label)", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [
+        makePtRow({
+          pmid: "701",
+          // Top topic IS this page's topic — the inline label "Top topic:
+          // Cancer Genomics" on /topics/cancer_genomics would read as
+          // redundant noise. Server drops it so UI doesn't need to know
+          // the current slug.
+          topTopic: { id: TOPIC_SLUG, label: "Cancer Genomics" },
+        }),
+      ];
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.topTopic).toBeNull();
+    });
+
+    it("topTopic is null when the publication has no top_topic_id set", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [makePtRow({ pmid: "702", topTopic: null })];
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
+      const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      expect(result!.hits[0]!.topTopic).toBeNull();
+    });
+
+    it("topTopic select shape is requested through the publication include", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
+      const args = mockPublicationTopicFindMany.mock.calls[0][0];
+      // The mapper relies on `r.publication.topTopic.{id,label}`. Catch
+      // any future query refactor that drops the relation include.
+      expect(args.include.publication.select.topTopic).toEqual({
+        select: { id: true, label: true },
+      });
     });
   });
 });

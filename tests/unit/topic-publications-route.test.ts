@@ -176,4 +176,86 @@ describe("/api/topics/[slug]/publications route", () => {
     expect(serialized).not.toContain("OR 1=1");
     expect(serialized).not.toContain(maliciousSort);
   });
+
+  // Issue #326 — tier query parameter validation (T-03-05-07).
+  describe("tier param (issue #326)", () => {
+    it("rejects invalid tier value with 400", async () => {
+      const res = await GET(
+        makeReq("http://localhost/api/topics/cancer_genomics/publications?sort=newest&tier=BOGUS"),
+        { params: Promise.resolve({ slug: "cancer_genomics" }) },
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("invalid tier");
+      expect(mockGetTopicPublications).not.toHaveBeenCalled();
+    });
+
+    it("accepts tier=strongly", async () => {
+      mockGetTopicPublications.mockResolvedValue({
+        hits: [],
+        total: 0,
+        page: 0,
+        pageSize: 20,
+        tierTotals: { strongly: 0, also: 0 },
+      });
+      const res = await GET(
+        makeReq("http://localhost/api/topics/cancer_genomics/publications?sort=newest&tier=strongly"),
+        { params: Promise.resolve({ slug: "cancer_genomics" }) },
+      );
+      expect(res.status).toBe(200);
+      expect(mockGetTopicPublications).toHaveBeenCalledWith(
+        "cancer_genomics",
+        expect.objectContaining({ tier: "strongly" }),
+      );
+    });
+
+    it("accepts tier=also", async () => {
+      mockGetTopicPublications.mockResolvedValue({
+        hits: [],
+        total: 0,
+        page: 0,
+        pageSize: 20,
+        tierTotals: { strongly: 0, also: 0 },
+      });
+      const res = await GET(
+        makeReq("http://localhost/api/topics/cancer_genomics/publications?sort=newest&tier=also"),
+        { params: Promise.resolve({ slug: "cancer_genomics" }) },
+      );
+      expect(res.status).toBe(200);
+      expect(mockGetTopicPublications).toHaveBeenCalledWith(
+        "cancer_genomics",
+        expect.objectContaining({ tier: "also" }),
+      );
+    });
+
+    it("omits tier when query param absent (forwarded as undefined)", async () => {
+      mockGetTopicPublications.mockResolvedValue({
+        hits: [],
+        total: 0,
+        page: 0,
+        pageSize: 20,
+        tierTotals: { strongly: 0, also: 0 },
+      });
+      const res = await GET(
+        makeReq("http://localhost/api/topics/cancer_genomics/publications?sort=newest"),
+        { params: Promise.resolve({ slug: "cancer_genomics" }) },
+      );
+      expect(res.status).toBe(200);
+      const callArgs = mockGetTopicPublications.mock.calls[0][1];
+      expect(callArgs.tier).toBeUndefined();
+    });
+
+    it("tier validation does not echo user input on rejection", async () => {
+      const malicious = "'; DROP TABLE topic--";
+      const res = await GET(
+        makeReq(
+          `http://localhost/api/topics/cancer_genomics/publications?sort=newest&tier=${encodeURIComponent(malicious)}`,
+        ),
+        { params: Promise.resolve({ slug: "cancer_genomics" }) },
+      );
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(JSON.stringify(body)).not.toContain("DROP TABLE");
+    });
+  });
 });
