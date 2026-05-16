@@ -132,6 +132,34 @@ Open issue tracking voice rules: [wcmc-its/ReciterAI#2](https://github.com/wcmc-
 | Counts wrong | Raw aggregation in `getSpotlights()` queries `publication_topic` with `year >= 2020` (D-15 floor). If counts seem low, verify the year floor isn't masking older work the user is expecting to see. |
 | Browse-link 404 | Should be `/topics/{parent}?subtopic={sub}` not `/topics/{sub}`. Subtopic IDs are not first-class routes; they're query params on the parent topic page. |
 
+## Measuring CTR (#286 success metric)
+
+#286's success metric is **CTR uplift on slots 1–2 relative to slot 0, across publish cycles** — does rotating the dominant paper out of the lead slot lift engagement on the lower slots. Spotlight paper clicks emit a `spotlight_paper_click` analytics beacon (`lib/api/analytics.ts`, added in #343 / PR #344) carrying `pmid`, `slot` (0–2), `cycleId` (the `artifactVersion`), and `subtopicId`. Each beacon is one structured JSON line on stdout → CloudWatch Logs in production.
+
+There is no analytics database — by design (see `docs/search.md`: "need analytics warehouse first"). Querying the metric means a **CloudWatch Logs Insights** query against the app log group:
+
+```
+filter event = "spotlight_paper_click"
+| stats sum(slot = 0) as slot0_clicks,
+        sum(slot = 1) as slot1_clicks,
+        sum(slot = 2) as slot2_clicks,
+        count(*)      as total
+  by cycleId
+| sort cycleId asc
+```
+
+Read it per cycle: uplift on slot N = `slotN_clicks / slot0_clicks`. The metric is the **trend across consecutive cycles**, not any single cycle — within one cycle the seeded triple is fixed, so rotation only becomes visible once 2–3 cycles have accumulated.
+
+**Why click counts alone suffice (no impression data).** When a spotlight is the active card all 3 of its papers render together, so each slot gets exactly one impression per view — per-slot impressions are equal within a spotlight. The *relative* metric (slot N vs slot 0) cancels that equal denominator, so relative click counts *are* relative CTR. An *absolute* CTR would need a separate impression beacon; #286 deliberately scoped the metric as relative.
+
+**Caveats.**
+
+- **Pools < 3** — spotlights with fewer than 3 papers render fewer slots, so those cycles contribute no `slot=2` (or `slot=1`) clicks and have no denominator for that slot. Exclude them when reading slot-2 uplift.
+- **No data before launch** — the query returns nothing until production is live and accumulating cycles (`PRODUCTION_BACKLOG.md` B22 — CloudWatch log retention).
+- **Author concentration** — #286's *other* metric — is not in these logs; compute it offline from the published artifact + sampler output.
+
+Drill down by adding `subtopicId` (per-spotlight) or `pmid` (which paper drew the clicks) to the `by` clause.
+
 ## Key constants
 
 | Constant | Value | Lives in |
@@ -152,4 +180,5 @@ Open issue tracking voice rules: [wcmc-its/ReciterAI#2](https://github.com/wcmc-
 - SPS coding-agent brief: `~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md`
 - Launch handoff: `~/Dropbox/GitHub/ReciterAI/docs/spotlight-launch-handoff.md`
 - Voice-rule issue: [wcmc-its/ReciterAI#2](https://github.com/wcmc-its/ReciterAI/issues/2)
+- CTR metric: instrumentation [#343](https://github.com/wcmc-its/Scholars-Profile-System/issues/343) / PR #344, aggregation query [#345](https://github.com/wcmc-its/Scholars-Profile-System/issues/345)
 - Mockup: `.planning/source-docs/spotlight-mockup.html` (gitignored)
