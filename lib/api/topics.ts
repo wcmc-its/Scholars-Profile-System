@@ -530,13 +530,22 @@ export type TopicPublicationsResult = {
   /**
    * Issue #326 — counts within the active filter scope (publication-type
    * filter + subtopic if set) partitioned by tier. Surfaced regardless of
-   * which `tier` was requested so the client can decide whether to render
-   * the "View additional articles that are relevant" toggle (shown only
-   * when `tierTotals.also > 0`). Sum of strongly + also equals `total`
-   * when no tier filter is in effect; matches the active-tier total
-   * otherwise.
+   * which `tier` was requested so the client can populate the option
+   * labels of the top-of-list scope select with in-scope counts. Sum of
+   * strongly + also equals `total` when no tier filter is in effect;
+   * matches the active-tier total otherwise.
    */
   tierTotals: { strongly: number; also: number };
+  /**
+   * Issue #326 refinement — parent-topic-scope tier totals: ignores the
+   * subtopic filter but RESPECTS the publication-type filter. Used by
+   * the client to keep the scope select visible on subtopic views whose
+   * own also-count happens to be zero, when the parent topic has
+   * also-tier papers in the active pub-type filter. Prevents the topic
+   * → subtopic UX inconsistency where the control disappears whenever
+   * a paper's `primarySubtopicId` distribution skews to a few buckets.
+   */
+  parentTierTotals: { strongly: number; also: number };
   page: number;
   pageSize: number;
 };
@@ -648,6 +657,23 @@ export async function getTopicPublications(
     score: { lt: displayThreshold },
   };
 
+  // Parent-scope tier totals — ignores subtopic filter so the client can
+  // keep the scope select visible on subtopic views whose own also-count
+  // is zero (#326 refinement). Pub-type filter is respected so the
+  // visibility decision tracks what the user could actually see.
+  const parentScopeWhere: Record<string, unknown> = { parentTopicId: topicSlug };
+  if (filter === "research_articles_only") {
+    parentScopeWhere.publication = { publicationType: { notIn: HARD_EXCLUDE_TYPES } };
+  }
+  const parentTierStronglyWhere = {
+    ...parentScopeWhere,
+    score: { gte: displayThreshold },
+  };
+  const parentTierAlsoWhere = {
+    ...parentScopeWhere,
+    score: { lt: displayThreshold },
+  };
+
   // All three sorts are SQL-direct — by_impact previously routed through the
   // Variant B in-process scorer (lib/ranking.ts) but the user-facing expectation
   // is strict DESC on the visible Impact: NN number. Recency-weighted scoring
@@ -697,23 +723,33 @@ export async function getTopicPublications(
     // current page's topic so the redundant inline label never renders.
     topTopic: { select: { id: true, label: true } },
   } as const;
-  const [rows, total, totalAllTypes, totalResearchOnly, tierStronglyCount, tierAlsoCount] =
-    await prisma.$transaction([
-      prisma.publicationTopic.findMany({
-        where: baseWhere,
-        skip,
-        take: TOPIC_PUBLICATIONS_PAGE_SIZE,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        orderBy: orderBy as any,
-        distinct: ["pmid"],
-        include: { publication: { select: pubSelectFields } },
-      }),
-      prisma.publicationTopic.count({ where: baseWhere }),
-      prisma.publicationTopic.count({ where: baseWhereAllTypes }),
-      prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
-      prisma.publicationTopic.count({ where: tierStronglyWhere }),
-      prisma.publicationTopic.count({ where: tierAlsoWhere }),
-    ]);
+  const [
+    rows,
+    total,
+    totalAllTypes,
+    totalResearchOnly,
+    tierStronglyCount,
+    tierAlsoCount,
+    parentTierStronglyCount,
+    parentTierAlsoCount,
+  ] = await prisma.$transaction([
+    prisma.publicationTopic.findMany({
+      where: baseWhere,
+      skip,
+      take: TOPIC_PUBLICATIONS_PAGE_SIZE,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      orderBy: orderBy as any,
+      distinct: ["pmid"],
+      include: { publication: { select: pubSelectFields } },
+    }),
+    prisma.publicationTopic.count({ where: baseWhere }),
+    prisma.publicationTopic.count({ where: baseWhereAllTypes }),
+    prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
+    prisma.publicationTopic.count({ where: tierStronglyWhere }),
+    prisma.publicationTopic.count({ where: tierAlsoWhere }),
+    prisma.publicationTopic.count({ where: parentTierStronglyWhere }),
+    prisma.publicationTopic.count({ where: parentTierAlsoWhere }),
+  ]);
   const pmids = rows.map((r) => r.pmid);
   const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
   // `now` parameter is preserved for backwards compatibility with callers but
@@ -728,6 +764,10 @@ export async function getTopicPublications(
     totalAllTypes,
     totalResearchOnly,
     tierTotals: { strongly: tierStronglyCount, also: tierAlsoCount },
+    parentTierTotals: {
+      strongly: parentTierStronglyCount,
+      also: parentTierAlsoCount,
+    },
     page,
     pageSize: TOPIC_PUBLICATIONS_PAGE_SIZE,
   };
