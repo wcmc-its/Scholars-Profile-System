@@ -156,6 +156,10 @@ export type SpotlightCard = {
   // Up to 3 representative WCM publications, seeded-sampled per publish cycle
   // from the artifact pool by `sampleSpotlightPapers` (#286).
   papers: SpotlightPaperCard[];
+  // Publish-cycle ID (the artifact version that also seeds the #286 sample).
+  // Surfaced to the client so Spotlight paper-click telemetry can attribute
+  // CTR per cycle — the #286 success metric depends on it (#343).
+  artifactVersion: string;
 };
 
 export type HomeStats = {
@@ -696,6 +700,7 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       publicationCount: counts.pubs,
       scholarCount: counts.scholars,
       papers: sampledPapers,
+      artifactVersion: row.artifactVersion,
     });
   }
 

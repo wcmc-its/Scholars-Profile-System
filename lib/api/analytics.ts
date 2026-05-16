@@ -13,12 +13,16 @@
  *  - search_click: result clicks on /search (Phase 6 / ANALYTICS-02).
  *  - mentoring_copubs_open: scholar profile co-pubs popover opened (#181).
  *  - person_popover_open / person_popover_action: PersonPopover open + primary
- *    action click events (#242). */
+ *    action click events (#242).
+ *  - spotlight_paper_click: representative-paper clicks in the home Spotlight
+ *    section, carrying PMID + publish-cycle ID so the #286 CTR success metric
+ *    can be attributed across rotation cycles (#343). */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
   "person_popover_open",
   "person_popover_action",
+  "spotlight_paper_click",
 ]);
 
 /**
@@ -77,6 +81,11 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       contextTopicSlug:
         typeof p.contextTopicSlug === "string" ? p.contextTopicSlug : null,
       action: typeof p.action === "string" ? p.action : null,
+      // spotlight_paper_click fields (#343). Null for other events.
+      pmid: typeof p.pmid === "string" ? p.pmid : null,
+      slot: typeof p.slot === "number" ? p.slot : null,
+      cycleId: typeof p.cycleId === "string" ? p.cycleId : null,
+      subtopicId: typeof p.subtopicId === "string" ? p.subtopicId : null,
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),
