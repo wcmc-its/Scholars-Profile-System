@@ -446,6 +446,16 @@ model Publication {
   /// when the upstream model bumps.
   impactScoreModel    String?   @map("impact_score_model") @db.VarChar(64)
   impactRefreshedAt   DateTime? @map("impact_refreshed_at")
+  /// Issue #325 — per-paper "top topic" (argmax of the topic-score vector
+  /// among topics above the 0.3 floor; deterministic tiebreak upstream).
+  /// Sourced from DynamoDB TOPIC# `top_topic_id`. Per-paper, not
+  /// per-(pmid, cwid, topic) — denormalized across TOPIC# rows by the
+  /// producer; the ETL reads any one row's value and writes once here.
+  /// NULL when the upstream hasn't backfilled this pmid yet (rare post
+  /// ReciterAI #68 rollout). Consumed by #327's inline "Top topic: X"
+  /// label on /topics/<slug> citations.
+  topTopicId          String?   @map("top_topic_id") @db.VarChar(128)
+  topTopic            Topic?    @relation("PublicationTopTopic", fields: [topTopicId], references: [id], onDelete: SetNull)
   source              String    @default("ReCiter") @db.VarChar(32)
   lastRefreshedAt     DateTime  @default(now()) @map("last_refreshed_at")
 
@@ -456,6 +466,7 @@ model Publication {
 
   @@index([year])
   @@index([dateAddedToEntrez])
+  @@index([topTopicId])
   @@map("publication")
 }
 
@@ -534,14 +545,25 @@ model TopicAssignment {
 /// 67 rows. Subtopics are NOT modeled as Topic rows under D-02 candidate (e);
 /// they live as embedded fields on PublicationTopic. See 02-SCHEMA-DECISION.md.
 model Topic {
-  id          String   @id @db.VarChar(128) // slug, e.g. "cancer_genomics"
-  label       String   @db.VarChar(255) // from TAXONOMY#.topics[].label
-  description String?  @db.Text // from TAXONOMY#.topics[].description
-  source      String   @db.VarChar(64) // "reciterai-taxonomy_v2"
-  refreshedAt DateTime @default(now()) @map("refreshed_at")
+  id               String   @id @db.VarChar(128) // slug, e.g. "cancer_genomics"
+  label            String   @db.VarChar(255) // from TAXONOMY#.topics[].label
+  description      String?  @db.Text // from TAXONOMY#.topics[].description
+  /// Issue #325 — per-topic second threshold above the 0.3 score_floor.
+  /// Sourced from `hierarchy.json` topic node `display_threshold` (per
+  /// ReciterAI #69). Papers with `score >= displayThreshold` render in
+  /// the "Strongly relevant" tier on /topics/<id>; papers between the
+  /// floor and this threshold render in the collapsible "Also relevant"
+  /// tier (#326 PR-1). NULL = untuned; consumer falls back to the spec
+  /// default of 0.5 via `topic.displayThreshold ?? 0.5`. Storing NULL
+  /// (rather than defaulting at the column level) keeps "untuned" and
+  /// "tuned to 0.5" distinguishable for the upstream tuning workstream.
+  displayThreshold Float?   @map("display_threshold")
+  source           String   @db.VarChar(64) // "reciterai-taxonomy_v2"
+  refreshedAt      DateTime @default(now()) @map("refreshed_at")
 
-  publications PublicationTopic[]
-  subtopics    Subtopic[]
+  publications           PublicationTopic[]
+  subtopics              Subtopic[]
+  publicationsAsTopTopic Publication[]      @relation("PublicationTopTopic")
 
   @@map("topic")
 }
