@@ -138,9 +138,14 @@ function makePtRow(overrides: {
 }
 
 /**
- * Helper for the $transaction tuple shape. The route layer calls
- * `prisma.$transaction([findMany, count, count, count, count, count])`
- * (6 elements after #326 introduced the tier-totals counts).
+ * Helper for the $transaction tuple shape. The service calls
+ * `prisma.$transaction([findMany, count×7])` — 8 elements: rows, total,
+ * totalAllTypes, totalResearchOnly, tierStrongly, tierAlso,
+ * parentTierStrongly, parentTierAlso. The last two were added in the
+ * #326 subtopic-consistency refinement (parent-scope tier totals
+ * surfaced to the client). Defaults treat parent counts as identical
+ * to in-scope counts — the no-subtopic-filter case — so existing tests
+ * remain valid without explicit overrides.
  */
 function txn({
   rows = [],
@@ -149,6 +154,8 @@ function txn({
   totalResearchOnly,
   tierStrongly = 0,
   tierAlso = 0,
+  parentTierStrongly,
+  parentTierAlso,
 }: {
   rows?: ReturnType<typeof makePtRow>[];
   total?: number;
@@ -156,6 +163,8 @@ function txn({
   totalResearchOnly?: number;
   tierStrongly?: number;
   tierAlso?: number;
+  parentTierStrongly?: number;
+  parentTierAlso?: number;
 } = {}): unknown[] {
   return [
     rows,
@@ -164,6 +173,8 @@ function txn({
     totalResearchOnly ?? total,
     tierStrongly,
     tierAlso,
+    parentTierStrongly ?? tierStrongly,
+    parentTierAlso ?? tierAlso,
   ];
 }
 
@@ -505,6 +516,75 @@ describe("getTopicPublications", () => {
       const args = mockPublicationTopicFindMany.mock.calls[0][0];
       expect(args.where.score).toEqual({ lt: 0.5 });
       expect(args.where.primarySubtopicId).toBe("lung_cancer");
+    });
+
+    it("parentTierTotals are returned in the response shape", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      mockTransaction.mockResolvedValue(
+        txn({
+          tierStrongly: 25,
+          tierAlso: 0,
+          parentTierStrongly: 134,
+          parentTierAlso: 38,
+        }),
+      );
+      const result = await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", subtopic: "gi_pancreatic" },
+        NOW,
+      );
+      expect(result!.tierTotals).toEqual({ strongly: 25, also: 0 });
+      expect(result!.parentTierTotals).toEqual({ strongly: 134, also: 38 });
+    });
+
+    it("parentTierTotals count query ignores subtopic filter", async () => {
+      mockTopicFindUnique.mockResolvedValue({
+        ...TOPIC_ROW,
+        displayThreshold: 0.5,
+      });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", subtopic: "gi_pancreatic" },
+        NOW,
+      );
+      // The 7th and 8th count() calls are the parent-scope tier counts.
+      // Their `where` must NOT contain `primarySubtopicId` so the parent
+      // counts span the whole topic regardless of subtopic selection.
+      const parentStronglyArgs = mockPublicationTopicCount.mock.calls.at(-2)?.[0];
+      const parentAlsoArgs = mockPublicationTopicCount.mock.calls.at(-1)?.[0];
+      expect(parentStronglyArgs.where.primarySubtopicId).toBeUndefined();
+      expect(parentStronglyArgs.where.score).toEqual({ gte: 0.5 });
+      expect(parentAlsoArgs.where.primarySubtopicId).toBeUndefined();
+      expect(parentAlsoArgs.where.score).toEqual({ lt: 0.5 });
+    });
+
+    it("parentTierTotals count query respects the publication-type filter", async () => {
+      mockTopicFindUnique.mockResolvedValue({
+        ...TOPIC_ROW,
+        displayThreshold: 0.5,
+      });
+      mockTransaction.mockResolvedValue(txn());
+      await getTopicPublications(
+        TOPIC_SLUG,
+        {
+          sort: "newest",
+          subtopic: "gi_pancreatic",
+          filter: "research_articles_only",
+        },
+        NOW,
+      );
+      const parentStronglyArgs = mockPublicationTopicCount.mock.calls.at(-2)?.[0];
+      const parentAlsoArgs = mockPublicationTopicCount.mock.calls.at(-1)?.[0];
+      // Pub-type filter SHOULD propagate into parent-scope counts so the
+      // select-visibility decision matches what the user could see under
+      // the active filter.
+      expect(
+        parentStronglyArgs.where.publication?.publicationType?.notIn,
+      ).toBeDefined();
+      expect(
+        parentAlsoArgs.where.publication?.publicationType?.notIn,
+      ).toBeDefined();
     });
   });
 

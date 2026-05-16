@@ -31,7 +31,7 @@ test.describe("Topic detail page Layout B", () => {
       test.skip(true, `Local DB does not have topic slug "${TEST_TOPIC_SLUG}"`);
       return;
     }
-    await page.getByRole("combobox").first().click();
+    await page.getByRole("combobox", { name: "Sort by" }).click();
     await page.getByRole("option", { name: "Most cited" }).click();
     await expect(page.getByText("Curated", { exact: true })).not.toBeVisible({ timeout: 5000 });
   });
@@ -42,10 +42,10 @@ test.describe("Topic detail page Layout B", () => {
       test.skip(true, `Local DB does not have topic slug "${TEST_TOPIC_SLUG}"`);
       return;
     }
-    await page.getByRole("combobox").first().click();
+    await page.getByRole("combobox", { name: "Sort by" }).click();
     await page.getByRole("option", { name: "By impact (ReCiterAI)" }).click();
     await expect(page.getByText("Curated", { exact: true })).toBeVisible();
-    await page.getByRole("combobox").first().click();
+    await page.getByRole("combobox", { name: "Sort by" }).click();
     await page.getByRole("option", { name: "Curated by ReCiterAI" }).click();
     await expect(page.getByText("Curated", { exact: true })).toBeVisible();
   });

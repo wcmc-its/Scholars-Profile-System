@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Compass } from "lucide-react";
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
@@ -28,6 +29,13 @@ import { sanitizePubTitle } from "@/lib/utils";
 type Sort = "newest" | "most_cited" | "by_impact";
 type Filter = "research_articles_only" | "all";
 type Tier = "strongly" | "also";
+/**
+ * Issue #326 refinement — top-of-list scope control. Replaces the prior
+ * bottom "View additional articles…" disclosure button. "strongly" shows
+ * the strongly-relevant tier only (default); "all" stacks the also-relevant
+ * tier below it, divided by the "Also relevant" h3.
+ */
+type ShowTier = "strongly" | "all";
 
 type Hit = {
   pmid: string;
@@ -65,10 +73,11 @@ type Hit = {
    *  has no abstract; the disclosure component returns null in that case. */
   abstract: string | null;
   /**
-   * Issue #327 — paper-level top topic for the inline "Top topic: X"
-   * affordance below the title. Server filters out the self-reference
-   * (paper's top topic == current page's topic) so a non-null value here
-   * always means "this paper belongs more centrally somewhere else".
+   * Issue #327 — paper's argmax topic, surfaced inline as "Best fit: X"
+   * on its own row below the bibliographic line. Server filters out the
+   * self-reference (paper's top topic == current page's topic) so a
+   * non-null value here always means "this paper belongs more centrally
+   * somewhere else".
    */
   topTopic: { id: string; label: string } | null;
 };
@@ -82,9 +91,19 @@ type FeedResponse = {
    * Issue #326 — counts within the active filter scope partitioned by
    * tier (`score >= displayThreshold` vs `<`). Always present; the
    * `tier` query param controls only which rows fill `hits`. Used to
-   * decide whether to render the "View additional articles…" toggle.
+   * populate the option-label counts on the top-of-list "Show" select
+   * (subtopic-scoped counts, so the labels reflect what's actually in
+   * view).
    */
   tierTotals: { strongly: number; also: number };
+  /**
+   * Issue #326 refinement — parent-topic-scope tier totals: ignores
+   * subtopic filter, respects pub-type filter. Used to decide whether
+   * the scope select renders at all, keeping the control visible on
+   * subtopic views whose own also-count is 0 so the topic → subtopic
+   * UX stays consistent.
+   */
+  parentTierTotals: { strongly: number; also: number };
   page: number;
   pageSize: number;
 };
@@ -100,19 +119,25 @@ type FeedResponse = {
  *      heading — these are the papers the user expects to see.
  *
  *   2. "Also relevant" — papers between the 0.3 upstream `score_floor`
- *      and `displayThreshold`. Hidden behind a collapsible toggle:
- *      *"View additional articles that are relevant"*. Toggle resets to
- *      collapsed on every mount (no localStorage / URL persistence per
- *      #324 open Q2 spec lean).
+ *      and `displayThreshold`. Hidden behind a top-of-list scope control
+ *      (`Show: [Strongly relevant ▼]`) that toggles between strongly-only
+ *      and stacked-with-also views. Defaults to "Strongly relevant" on
+ *      every mount (no localStorage / URL persistence per #324 open Q2).
+ *      The select supersedes the prior bottom "View additional articles…"
+ *      disclosure — same affordance, single discoverable location
+ *      parallel to `Sort by`.
  *
  * Edge cases:
- *   - Also-tier is empty in the active filter scope → toggle hidden.
+ *   - Also-tier is empty in the active filter scope → select hidden.
  *   - Strongly-tier is empty in the active filter scope but Also-tier
- *     has results → render the Also-tier list directly without a toggle.
- *     Rare today (default 0.5 threshold; some topics may tune higher).
+ *     has results → render the Also-tier list inline without the select
+ *     (the strongly-only option would be misleading). Rare today (default
+ *     0.5 threshold; some topics may tune higher).
  *
  * Sort / filter / subtopic changes re-fetch both tiers and reset their
- * page counters to 1 independently.
+ * page counters to 1 independently. The scope control state survives
+ * sort/filter/subtopic changes — switching mode is a separate concern
+ * from re-ordering within the current scope.
  */
 export function PublicationFeed({
   topicSlug,
@@ -137,9 +162,9 @@ export function PublicationFeed({
   const [filter, setFilter] = useState<Filter>("research_articles_only");
   const [stronglyPage, setStronglyPage] = useState(1);
   const [alsoPage, setAlsoPage] = useState(1);
-  // Toggle defaults to collapsed on every mount (#326 acceptance criteria —
-  // page reload resets to collapsed). No localStorage / URL param.
-  const [alsoOpen, setAlsoOpen] = useState(false);
+  // Scope control defaults to "strongly" on every mount (#326 acceptance
+  // criterion — page reload resets the scope). No localStorage / URL param.
+  const [showTier, setShowTier] = useState<ShowTier>("strongly");
 
   const isCuratedSort = sort === "by_impact";
   const heading =
@@ -155,11 +180,11 @@ export function PublicationFeed({
     setAlsoPage(1);
   }, [sort, activeSubtopic, filter]);
 
-  // Reset the Also-tier page when the toggle reopens — restarts pagination
-  // at page 1 each time the user re-expands the section.
+  // Reset the Also-tier page each time the user switches into the stacked
+  // "All relevant" scope — restart pagination at page 1.
   useEffect(() => {
-    if (alsoOpen) setAlsoPage(1);
-  }, [alsoOpen]);
+    if (showTier === "all") setAlsoPage(1);
+  }, [showTier]);
 
   const strongly = useTierFetch({
     topicSlug,
@@ -172,9 +197,9 @@ export function PublicationFeed({
   });
 
   // The Also-tier fetch fires under either:
-  //   (a) the user opened the toggle, OR
+  //   (a) the user switched the scope control to "all", OR
   //   (b) the strongly tier has 0 results in the current scope but Also has
-  //       some — we surface them directly so the page isn't blank.
+  //       some — we surface them inline so the page isn't blank.
   const stronglyEmpty =
     strongly.data !== null && (strongly.data.tierTotals.strongly ?? 0) === 0;
   const alsoAvailable =
@@ -187,24 +212,38 @@ export function PublicationFeed({
     filter,
     tier: "also",
     page: alsoPage,
-    enabled: alsoOpen || renderAlsoInline,
+    enabled: showTier === "all" || renderAlsoInline,
   });
 
   const tierTotals = strongly.data?.tierTotals ?? null;
-  // Toggle only appears when there are results to reveal AND the strongly
-  // tier has at least one entry of its own. When strongly is empty we
-  // render the Also list directly (`renderAlsoInline` above), so the
-  // toggle would be redundant.
-  const showAlsoToggle =
-    tierTotals !== null && tierTotals.strongly > 0 && tierTotals.also > 0;
+  const parentTierTotals = strongly.data?.parentTierTotals ?? null;
+  // The scope select appears when:
+  //   1. The parent topic has also-tier papers under the active pub-type
+  //      filter — i.e., switching to "All relevant" could plausibly reveal
+  //      more papers, even if the current subtopic happens to have 0
+  //      also-tier rows. (Keeps UI consistent across topic → subtopic.)
+  //   2. The current scope has at least one strongly-tier row — when
+  //      strongly is empty we render the Also list inline via
+  //      `renderAlsoInline`, so the "Strongly relevant" option would be
+  //      misleading.
+  // The option-label counts use `tierTotals` (subtopic-scoped) so the
+  // user sees what's actually in view — if subtopic also=0, both options
+  // show the same count and the user can tell switching is a no-op.
+  const showTierSelect =
+    parentTierTotals !== null &&
+    parentTierTotals.also > 0 &&
+    tierTotals !== null &&
+    tierTotals.strongly > 0;
 
-  // Sort-row count: prefer the strongly tier's total when it has results;
-  // otherwise fall back to the also count so the displayed number always
-  // reflects what the user is looking at.
+  // Sort-row count: reflect what the user is actually looking at. In
+  // "All relevant" the count is the combined tier total so it doesn't
+  // read as "12 results" while 25 rows are on screen.
   const sortRowCount = strongly.data
     ? renderAlsoInline
       ? also.data?.total ?? null
-      : strongly.data.total
+      : showTier === "all" && tierTotals
+        ? tierTotals.strongly + tierTotals.also
+        : strongly.data.total
     : null;
   const sortRowLabel =
     sortRowCount !== null ? `${sortRowCount.toLocaleString()} results` : null;
@@ -237,9 +276,31 @@ export function PublicationFeed({
           </div>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {showTierSelect && tierTotals && (
+            <>
+              <span className="text-sm text-muted-foreground">Show</span>
+              <Select
+                value={showTier}
+                onValueChange={(v) => setShowTier(v as ShowTier)}
+              >
+                <SelectTrigger className="w-[200px]" aria-label="Show">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="strongly">
+                    Strongly relevant ({tierTotals.strongly.toLocaleString()})
+                  </SelectItem>
+                  <SelectItem value="all">
+                    All relevant (
+                    {(tierTotals.strongly + tierTotals.also).toLocaleString()})
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </>
+          )}
           <span className="text-sm text-muted-foreground">Sort by</span>
           <Select value={sort} onValueChange={(v) => setSort(v as Sort)}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px]" aria-label="Sort by">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -275,28 +336,7 @@ export function PublicationFeed({
         />
       )}
 
-      {showAlsoToggle && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setAlsoOpen((s) => !s)}
-            aria-expanded={alsoOpen}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-          >
-            <span
-              aria-hidden="true"
-              className={`inline-block transition-transform ${alsoOpen ? "rotate-90" : ""}`}
-            >
-              ▸
-            </span>
-            {alsoOpen
-              ? "Hide additional articles"
-              : `View additional articles that are relevant (${tierTotals.also.toLocaleString()})`}
-          </button>
-        </div>
-      )}
-
-      {(alsoOpen || renderAlsoInline) && (
+      {(showTier === "all" || renderAlsoInline) && (
         <div className={renderAlsoInline ? "" : "mt-2 border-t border-border pt-4"}>
           {!renderAlsoInline && (
             <h3 className="mb-3 text-base font-semibold">Also relevant</h3>
@@ -432,7 +472,6 @@ function TierSection({
 function PubRow({ hit, topicSlug }: { hit: Hit; topicSlug: string }) {
   const { open: openModal } = usePublicationModal();
   const titleHtml = sanitizePubTitle(hit.title);
-  const hasMetaRow = Boolean(hit.journal || hit.year || hit.topTopic);
   return (
     <li className="py-4">
       <div className="line-clamp-2 font-semibold leading-snug">
@@ -443,7 +482,7 @@ function PubRow({ hit, topicSlug }: { hit: Hit; topicSlug: string }) {
           dangerouslySetInnerHTML={{ __html: titleHtml }}
         />
       </div>
-      {hasMetaRow && (
+      {(hit.journal || hit.year) && (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           {hit.journal && (
             <span
@@ -453,23 +492,24 @@ function PubRow({ hit, topicSlug }: { hit: Hit; topicSlug: string }) {
           )}
           {hit.journal && hit.year ? <span aria-hidden="true">·</span> : null}
           {hit.year ? <span>{hit.year}</span> : null}
-          {hit.topTopic && (
-            <>
-              {(hit.journal || hit.year) && <span aria-hidden="true">·</span>}
-              {/* Issue #327 — inline label appears only when the paper's
-                  top topic differs from the current page's topic (server
-                  enforces that invariant; UI just renders what it gets). */}
-              <span>
-                Top topic:{" "}
-                <Link
-                  href={`/topics/${hit.topTopic.id}`}
-                  className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
-                >
-                  {hit.topTopic.label}
-                </Link>
-              </span>
-            </>
-          )}
+        </div>
+      )}
+      {/* Issue #327 — paper's argmax topic when it differs from the current
+          page's topic (server filters out the self-reference). Lives on its
+          own line below the bibliographic row with a leading Compass icon
+          so it reads as a cross-listing signal, not as journal metadata. */}
+      {hit.topTopic && (
+        <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+          <Compass className="h-3 w-3" aria-hidden="true" />
+          <span>
+            Best fit:{" "}
+            <Link
+              href={`/topics/${hit.topTopic.id}`}
+              className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
+            >
+              {hit.topTopic.label}
+            </Link>
+          </span>
         </div>
       )}
       <AuthorChipRow authors={hit.authors} pmid={hit.pmid} />
