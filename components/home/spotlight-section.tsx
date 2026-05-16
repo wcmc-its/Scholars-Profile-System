@@ -36,7 +36,6 @@ import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 const AUTO_ADVANCE_MS = 10_000;
 const AUTHOR_DISPLAY_CAP = 4;
 const DISPLAY_LIMIT_SPOTLIGHTS = 8; // surface 8 of however many DAL returned
-const DISPLAY_LIMIT_PAPERS = 3;     // surface up to 3 papers per spotlight
 
 function shuffle<T>(arr: readonly T[]): T[] {
   const a = [...arr];
@@ -48,26 +47,24 @@ function shuffle<T>(arr: readonly T[]): T[] {
 }
 
 /**
- * Stable, deterministic SSR slice — first DISPLAY_LIMIT_SPOTLIGHTS items, first
- * DISPLAY_LIMIT_PAPERS papers each. Picked at server render to avoid hydration
- * mismatch; replaced with a random sample on mount via useEffect.
+ * Stable, deterministic SSR slice — first DISPLAY_LIMIT_SPOTLIGHTS spotlights.
+ * Papers within each spotlight arrive already seeded-sampled to 3 from
+ * `getSpotlights()` (#286), so this slices only at the spotlight level.
+ * Picked at server render to avoid a hydration mismatch; replaced with a
+ * random spotlight sample on mount via useEffect.
  */
 function ssrSlice(items: SpotlightCard[]): SpotlightCard[] {
-  return items.slice(0, DISPLAY_LIMIT_SPOTLIGHTS).map((card) => ({
-    ...card,
-    papers: card.papers.slice(0, DISPLAY_LIMIT_PAPERS),
-  }));
+  return items.slice(0, DISPLAY_LIMIT_SPOTLIGHTS);
 }
 
 function randomSample(items: SpotlightCard[]): SpotlightCard[] {
-  return shuffle(items)
-    .slice(0, DISPLAY_LIMIT_SPOTLIGHTS)
-    .map((card) => ({ ...card, papers: shuffle(card.papers).slice(0, DISPLAY_LIMIT_PAPERS) }));
+  return shuffle(items).slice(0, DISPLAY_LIMIT_SPOTLIGHTS);
 }
 
 export function SpotlightSection({ items }: { items: SpotlightCard[] }) {
   // Stable SSR slice on first paint; randomSample takes over after mount so
-  // each pageload sees a fresh 6-of-N selection with random 2-of-M papers.
+  // each pageload sees a fresh selection of spotlights. Papers within each
+  // spotlight are seeded-sampled server-side per publish cycle (#286).
   const [display, setDisplay] = useState<SpotlightCard[]>(() => ssrSlice(items));
   const [activeIdx, setActiveIdx] = useState(0);
   const [paused, setPaused] = useState(false);

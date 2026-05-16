@@ -2,6 +2,8 @@
 
 **Status (2026-05-08):** Plans 09-01 through 09-04 shipped. 09-05 collapsed into 09-03 (resolved: `personIdentifier` IS the WCM CWID). 09-06 (hierarchy bucket flip) and 09-07 (cleanup) are open. Operator runbook: [`spotlight-runbook.md`](spotlight-runbook.md).
 
+**Amendment (2026-05-16, issue #286):** the artifact now ships up to 7 representative publications per spotlight (ReciterAI #49); the home-page section seeded-samples 3 of them per publish cycle (`lib/spotlight-sampling.ts`, consumed in `getSpotlights()`). References to "2–3 representative publications" below describe the original Phase 9 v1 contract and are superseded on the paper count.
+
 Consume the ReciterAI spotlight artifact and replace the home page **Selected research** carousel with the new 2-column interactive spotlight component. Suppress **Recent contributions**.
 
 **Authoritative upstream contract:** `~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md`

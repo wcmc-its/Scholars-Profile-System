@@ -608,6 +608,56 @@ describe("getSpotlights (Phase 9 SPOTLIGHT-03)", () => {
     const authors = result![0].papers[0].authors;
     expect(authors.map((a) => a.displayName)).toEqual(["Alpha", "Echo", "Indigo"]);
   });
+
+  it("seeded-samples a 7-paper artifact pool down to 3, deterministically (#286)", async () => {
+    // Six spotlights so the floor (6) is met. The first ships a 7-paper pool;
+    // getSpotlights() must seeded-sample it to exactly 3. The other five ship
+    // a single paper and pass through the sampler untouched.
+    const bigPmids = Array.from({ length: 7 }, (_, i) => `${8001 + i}`);
+    const smallPmids = Array.from({ length: 5 }, (_, i) => `${9001 + i}`);
+    mockSpotlightFindMany.mockResolvedValue([
+      makeSpotlightRow({
+        subtopicId: "sub_big",
+        parentTopicId: "parent_0",
+        pmids: bigPmids,
+      }),
+      ...smallPmids.map((pmid, i) =>
+        makeSpotlightRow({
+          subtopicId: `sub_${i + 1}`,
+          parentTopicId: `parent_${i + 1}`,
+          pmids: [pmid],
+        }),
+      ),
+    ]);
+    mockTopicFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({ id: `parent_${i}`, label: `Parent ${i}` })),
+    );
+    // One distinct WCM author per pmid — nothing drops, no author collisions.
+    mockPublicationAuthorFindMany.mockResolvedValue(
+      [...bigPmids, ...smallPmids].map((pmid, i) =>
+        makeAuthorRow({ pmid, cwid: `cw${i}`, position: 1 }),
+      ),
+    );
+
+    const first = await getSpotlights();
+    expect(first).not.toBeNull();
+    const bigCard = first!.find((card) => card.subtopicId === "sub_big")!;
+    // 7-paper pool sampled down to exactly 3, each drawn from the pool.
+    expect(bigCard.papers).toHaveLength(3);
+    expect(new Set(bigCard.papers.map((p) => p.pmid)).size).toBe(3);
+    for (const p of bigCard.papers) expect(bigPmids).toContain(p.pmid);
+    // Pools of 3 or fewer pass through untouched.
+    for (const card of first!.filter((c) => c.subtopicId !== "sub_big")) {
+      expect(card.papers).toHaveLength(1);
+    }
+
+    // Deterministic: a second call yields the identical sampled triple.
+    const second = await getSpotlights();
+    const bigCard2 = second!.find((card) => card.subtopicId === "sub_big")!;
+    expect(bigCard2.papers.map((p) => p.pmid)).toEqual(
+      bigCard.papers.map((p) => p.pmid),
+    );
+  });
 });
 
 describe("getBrowseAllResearchAreas (HOME-03)", () => {
