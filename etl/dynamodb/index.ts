@@ -35,6 +35,11 @@
  * to Publication.impactScore; PublicationTopic.impactScore continues to be
  * populated as a denormalized mirror during the transition.
  *
+ * Issue #91 — Block 2 gains a post-write regression guard
+ * (./publication-topic-guard.ts): an empty TOPIC# -> publication_topic
+ * projection silently blanked every subtopic page, so the guard now
+ * fails the run loudly instead of reporting a hollow success.
+ *
  * Env:
  *   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION (or AWS_REGION)
  *   SCHOLARS_DYNAMODB_TABLE  (default: reciterai)
@@ -46,6 +51,7 @@ import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { prisma } from "../../lib/db";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
+import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -366,6 +372,23 @@ async function main() {
       }
     }
     console.log(`publication_topic upserts complete: ${pubTopicRowsUpserted} rows.`);
+
+    // ----- Block 2 regression guard (issue #91) ------------------------
+    // Issue #91 shipped only an operational fix (re-run the ETL) and left
+    // publication_topic able to silently land empty again. This gate
+    // fails the run loudly when the table would leave every subtopic page
+    // blank — see ./publication-topic-guard.ts for the two failure modes.
+    // Throwing here marks etl_run `failed`, exits non-zero, and surfaces
+    // as FAIL in the daily orchestrator. Blocks 2b/2c/3/4 are skipped:
+    // 2b/2c derive from the same TOPIC# scan and are equally suspect, and
+    // 3/4 are idempotent — they refresh on the next cycle.
+    const pubTopicTableCount = await prisma.publicationTopic.count();
+    assertPublicationTopicPopulated({
+      tableCount: pubTopicTableCount,
+      scannedCount: topicItems.length,
+      upsertedCount: pubTopicRowsUpserted,
+    });
+    console.log(`publication_topic guard OK: ${pubTopicTableCount} total rows.`);
 
     // ===================================================================
     // Block 2b: TOPIC#.top_topic_id → publication.top_topic_id  (issue #325)
