@@ -64,9 +64,8 @@ export type PublicationDetailPayload = {
     doi: string | null;
     pubmedUrl: string | null;
     meshTerms: Array<{ ui: string | null; label: string }>;
-    /** One-line plain-language synopsis per pmid. Pre-#329: collapsed via
-     *  MAX(synopsis) over publication_topic. Post-#329: read from
-     *  publication.synopsis directly. Empty / null when no synopsis exists. */
+    /** One-line plain-language synopsis per pmid (#329). Read from
+     *  `Publication.synopsis`. Null when no synopsis exists. */
     synopsis: string | null;
   };
   topics: PublicationDetailTopic[];
@@ -136,6 +135,7 @@ export async function getPublicationDetail(
       doi: true,
       pubmedUrl: true,
       meshTerms: true,
+      synopsis: true,
       publicationTopics: {
         select: {
           parentTopicId: true,
@@ -143,7 +143,6 @@ export async function getPublicationDetail(
           primarySubtopicId: true,
           subtopicIds: true,
           subtopicConfidences: true,
-          synopsis: true,
           topic: { select: { id: true, label: true } },
         },
       },
@@ -152,9 +151,10 @@ export async function getPublicationDetail(
   if (!pub) return null;
 
   // Collapse multi-author rows into one row per parent topic by MAX(score).
-  // The score is per-paper in practice (#329 is moving the synopsis to
-  // Publication for the same reason); the cwid dimension on publication_topic
-  // is a denormalization artifact left over from the DDB TOPIC# key.
+  // The score column is per-(pmid, cwid, topic) on PublicationTopic but the
+  // value is per-paper in practice; the cwid dimension is a denormalization
+  // artifact left over from the DDB TOPIC# key. Synopsis already moved to
+  // Publication in #329 — read directly off `pub.synopsis`.
   const byTopic = new Map<
     string,
     {
@@ -166,7 +166,6 @@ export async function getPublicationDetail(
       subtopicConfidences: SubtopicConfidences;
     }
   >();
-  let synopsis: string | null = null;
   for (const row of pub.publicationTopics) {
     if (!row.topic) continue;
     const score = Number(row.score);
@@ -180,13 +179,6 @@ export async function getPublicationDetail(
         subtopicIds: parseSubtopicIds(row.subtopicIds),
         subtopicConfidences: parseSubtopicConfidences(row.subtopicConfidences),
       });
-    }
-    // TODO(#329): once `publication.synopsis` lands, read from there in the
-    // outer select and drop this MAX() fallback. Behavior here matches the
-    // backfill SQL in #329 — pick any non-null synopsis, deterministic enough
-    // for v1 since the per-(pmid, cwid, topic) rows carry the same text.
-    if (row.synopsis && (synopsis === null || row.synopsis > synopsis)) {
-      synopsis = row.synopsis;
     }
   }
 
@@ -314,7 +306,7 @@ export async function getPublicationDetail(
       doi: pub.doi,
       pubmedUrl: pub.pubmedUrl,
       meshTerms: normalizeMeshTerms(pub.meshTerms),
-      synopsis,
+      synopsis: pub.synopsis && pub.synopsis.length > 0 ? pub.synopsis : null,
     },
     topics,
     citingPubs,

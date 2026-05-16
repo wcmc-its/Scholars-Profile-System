@@ -431,6 +431,15 @@ model Publication {
   /// recall (issue #21). Nullable — many older publications and many
   /// non-research article types have no abstract.
   abstract            String?   @db.Text
+  /// Issue #329 — one-line plain-language synopsis from DynamoDB
+  /// TOPIC#.synopsis. Lives on `Publication` because the value is per-pmid;
+  /// the upstream denormalizes it across the N TOPIC# rows for one pmid
+  /// (same anti-pattern that #325 avoided for `top_topic_id`). The DDB ETL
+  /// reads any one row's value and writes once here. Surfaced in the
+  /// publication detail modal (#288 PR-B) as the "Plain-language synopsis"
+  /// section. Distinct from `abstract` (raw PubMed text); synopsis is a
+  /// GPT-generated reader-facing summary.
+  synopsis            String?   @db.Text
   /// ReCiterAI per-publication impact score (0-100, GPT-rubric). Sourced from
   /// DynamoDB `IMPACT#pmid_<pmid>` records by the DynamoDB ETL (issue #316).
   /// Global per-pmid — no scholar or topic dimension. `PublicationTopic.impactScore`
@@ -782,10 +791,6 @@ model PublicationTopic {
   /// `Publication.impactJustification`. Surfaced in topic-chip tooltips by
   /// PR-C of issue #316.
   rationale           String? @db.Text
-  /// One-line plain-language synopsis from TOPIC#.synopsis (separate from the
-  /// per-publication `Publication.abstract`, which is the raw PubMed abstract).
-  /// Reserved for tooltip / list-row use; surface wiring deferred to PR-C.
-  synopsis            String? @db.Text
   authorPosition      String  @map("author_position") @db.VarChar(16)
   year                Int     @db.SmallInt
 

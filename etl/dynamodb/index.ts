@@ -249,7 +249,8 @@ async function main() {
       subtopicConfidences: Prisma.InputJsonValue | typeof Prisma.JsonNull;
       score: Prisma.Decimal;
       rationale: string | null;
-      synopsis: string | null;
+      // synopsis intentionally absent — moved to Publication per #329.
+      // Block 2c below collapses one value per pmid and writes there.
       authorPosition: string;
       year: number;
     };
@@ -309,7 +310,8 @@ async function main() {
         // the mirror column was dropped in #316 PR-B-finalize. The IMPACT#
         // Block 4 below writes the canonical value to Publication.impactScore.
         rationale: typeof it.rationale === "string" && it.rationale ? it.rationale : null,
-        synopsis: typeof it.synopsis === "string" && it.synopsis ? it.synopsis : null,
+        // synopsis is per-pmid, not per-(pmid, cwid, topic) — moved to
+        // Publication in #329; Block 2c below collapses and writes there.
         authorPosition,
         year: yearNum,
       });
@@ -343,7 +345,6 @@ async function main() {
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
               rationale: w.rationale,
-              synopsis: w.synopsis,
               authorPosition: w.authorPosition,
               year: w.year,
             },
@@ -353,7 +354,6 @@ async function main() {
               subtopicConfidences: w.subtopicConfidences,
               score: w.score,
               rationale: w.rationale,
-              synopsis: w.synopsis,
               authorPosition: w.authorPosition,
               year: w.year,
             },
@@ -415,6 +415,49 @@ async function main() {
         "WARN: zero TOPIC# rows carried top_topic_id — producer rollout (ReciterAI #68) may not have reached this dataset yet.",
       );
     }
+
+    // ===================================================================
+    // Block 2c: TOPIC#.synopsis → publication.synopsis  (issue #329)
+    // ===================================================================
+    // Same shape as Block 2b: TOPIC#.synopsis is per-paper, denormalized
+    // across the N TOPIC# rows for one pmid. The migration moved the column
+    // off `publication_topic` (per-(pmid,cwid,topic)) onto `publication`
+    // (per-pmid). Collapse to first-non-empty per pmid and write once.
+    const synopsisByPmid = new Map<string, string>();
+    for (const it of topicItems) {
+      const s = typeof it.synopsis === "string" && it.synopsis ? it.synopsis : "";
+      if (!s) continue;
+      const pmidStr =
+        typeof it.pmid === "number" && Number.isFinite(it.pmid)
+          ? String(it.pmid)
+          : typeof it.pmid === "string" && /^\d+$/.test(it.pmid.trim())
+            ? it.pmid.trim()
+            : "";
+      if (!pmidStr || !knownPmidSet.has(pmidStr)) continue;
+      if (!synopsisByPmid.has(pmidStr)) synopsisByPmid.set(pmidStr, s);
+      // Producer invariant says all TOPIC# rows for one pmid carry the same
+      // synopsis. First-seen wins — same convention as top_topic_id.
+    }
+
+    let synopsisRowsUpdated = 0;
+    const SYNOPSIS_BATCH = 500;
+    const synopsisEntries = [...synopsisByPmid.entries()];
+    for (let i = 0; i < synopsisEntries.length; i += SYNOPSIS_BATCH) {
+      const chunk = synopsisEntries.slice(i, i + SYNOPSIS_BATCH);
+      // updateMany doesn't support per-row data, and synopsis text differs
+      // per pmid. One round-trip per pmid in the chunk; Promise.all bounds
+      // the open connection count via the existing connection pool.
+      await Promise.all(
+        chunk.map(([pmid, synopsis]) =>
+          prisma.publication.updateMany({
+            where: { pmid },
+            data: { synopsis },
+          }),
+        ),
+      );
+      synopsisRowsUpdated += chunk.length;
+    }
+    console.log(`synopsis updates: ${synopsisRowsUpdated} pmids set on publication.`);
 
     // ===================================================================
     // Block 3: FACULTY# → topic_assignment  (existing Q6 minimal projection)

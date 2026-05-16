@@ -7,7 +7,7 @@
  *   - collapses multi-author publication_topic rows by MAX(score)
  *   - resolves subtopics to display names
  *   - sorts topics by score desc; subtopics by primary → confidence
- *   - chooses MAX(synopsis) across rows for the #329-fallback path
+ *   - reads synopsis directly off Publication.synopsis (#329)
  *   - returns citingPubs from reciterdb ordered by date desc
  *   - soft-fails citingPubs to null when reciterdb throws
  */
@@ -93,6 +93,7 @@ describe("getPublicationDetail — topic collapse", () => {
       doi: null,
       pubmedUrl: null,
       meshTerms: [],
+      synopsis: null, // #329 — now read directly off Publication.
       publicationTopics: [],
       ...overrides,
     };
@@ -108,7 +109,6 @@ describe("getPublicationDetail — topic collapse", () => {
             primarySubtopicId: null,
             subtopicIds: [],
             subtopicConfidences: null,
-            synopsis: null,
             topic: { id: "oncology", label: "Oncology" },
           },
           {
@@ -117,7 +117,6 @@ describe("getPublicationDetail — topic collapse", () => {
             primarySubtopicId: null,
             subtopicIds: [],
             subtopicConfidences: null,
-            synopsis: null,
             topic: { id: "oncology", label: "Oncology" },
           },
           {
@@ -126,7 +125,6 @@ describe("getPublicationDetail — topic collapse", () => {
             primarySubtopicId: null,
             subtopicIds: [],
             subtopicConfidences: null,
-            synopsis: null,
             topic: { id: "immunology", label: "Immunology" },
           },
         ],
@@ -141,38 +139,22 @@ describe("getPublicationDetail — topic collapse", () => {
     expect(r?.topics[1].topicSlug).toBe("immunology");
   });
 
-  it("collapses synopsis via MAX-style dedupe across rows (pre-#329)", async () => {
+  it("reads synopsis directly off Publication.synopsis (#329)", async () => {
     mocks.publicationFindUnique.mockResolvedValueOnce(
-      basePub({
-        publicationTopics: [
-          {
-            parentTopicId: "t1",
-            score: 0.5,
-            primarySubtopicId: null,
-            subtopicIds: [],
-            subtopicConfidences: null,
-            synopsis: "synopsis A",
-            topic: { id: "t1", label: "T1" },
-          },
-          {
-            parentTopicId: "t2",
-            score: 0.4,
-            primarySubtopicId: null,
-            subtopicIds: [],
-            subtopicConfidences: null,
-            synopsis: "synopsis B",
-            topic: { id: "t2", label: "T2" },
-          },
-        ],
-      }),
+      basePub({ synopsis: "Per-pmid plain-language summary." }),
     );
     const r = await getPublicationDetail("12345");
-    // MAX(string) → "synopsis B"
-    expect(r?.pub.synopsis).toBe("synopsis B");
+    expect(r?.pub.synopsis).toBe("Per-pmid plain-language summary.");
   });
 
-  it("returns null synopsis when no rows have one", async () => {
+  it("returns null synopsis when Publication.synopsis is null", async () => {
     mocks.publicationFindUnique.mockResolvedValueOnce(basePub());
+    const r = await getPublicationDetail("12345");
+    expect(r?.pub.synopsis).toBeNull();
+  });
+
+  it("treats empty-string synopsis as null", async () => {
+    mocks.publicationFindUnique.mockResolvedValueOnce(basePub({ synopsis: "" }));
     const r = await getPublicationDetail("12345");
     expect(r?.pub.synopsis).toBeNull();
   });
@@ -187,7 +169,6 @@ describe("getPublicationDetail — topic collapse", () => {
             primarySubtopicId: "onc_breast",
             subtopicIds: ["onc_breast", "onc_lung", "onc_skin"],
             subtopicConfidences: { onc_lung: 0.8, onc_breast: 0.4, onc_skin: 0.6 },
-            synopsis: null,
             topic: { id: "onc", label: "Oncology" },
           },
         ],
