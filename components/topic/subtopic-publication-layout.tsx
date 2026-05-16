@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { SubtopicRail, type SubtopicRailItem } from "@/components/topic/subtopic-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
 import { SubtopicScholarsRow } from "@/components/topic/subtopic-scholars-row";
+import { ScrollFade } from "@/components/ui/scroll-fade";
 
 export function SubtopicPublicationLayout(props: {
   topicSlug: string;
@@ -60,12 +61,14 @@ function SubtopicPublicationLayoutInner({
       <hr className="mb-10 border-border" />
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       {hasSubtopics && (
-        <div className="lg:w-[280px] lg:shrink-0 lg:sticky lg:top-[84px] lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
-          <SubtopicRail
-            subtopics={subtopics}
-            activeSubtopic={activeSubtopic}
-            onSelect={setActiveSubtopic}
-          />
+        <div className="lg:w-[280px] lg:shrink-0 lg:self-start lg:sticky lg:top-[84px]">
+          <ScrollFade viewportClassName="lg:max-h-[calc(100vh-84px)] lg:overflow-y-auto">
+            <SubtopicRail
+              subtopics={subtopics}
+              activeSubtopic={activeSubtopic}
+              onSelect={setActiveSubtopic}
+            />
+          </ScrollFade>
         </div>
       )}
       {/* Issue #172 — right panel reads heading → description → researchers

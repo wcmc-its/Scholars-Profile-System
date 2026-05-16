@@ -9,6 +9,7 @@ import { getMenteesForMentor, type MenteeSort } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { ScrollFade } from "@/components/ui/scroll-fade";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -172,138 +173,140 @@ export default async function ScholarProfilePage({
       />
       <main className="mx-auto grid max-w-[1100px] grid-cols-1 gap-10 px-6 py-10 md:grid-cols-[280px_1fr] md:py-12">
         {/* ============== Sidebar ============== */}
-        <aside className="md:sticky md:top-[calc(var(--header-h,60px)+24px)] md:self-start md:max-h-[calc(100vh-var(--header-h,60px)-32px)] md:overflow-y-auto">
-          <div className="mb-5 text-center">
-            <div className="mb-3 flex justify-center">
-              <HeadshotAvatar
-                size="lg"
-                cwid={profile.cwid}
-                preferredName={profile.preferredName}
-                identityImageEndpoint={profile.identityImageEndpoint}
-              />
-            </div>
-            <h1 className="page-title text-[36px] font-bold leading-[1.05] tracking-tight">{profile.publishedName}</h1>
-            {profile.primaryTitle ? (
-              <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
-                {profile.primaryTitle}
-              </div>
-            ) : null}
-            {profile.primaryDepartment ? (
-              <div className="text-muted-foreground mt-2 text-sm">
-                {/* Issue #167 — render "<Division> (<Department>)" when the
-                    scholar has a division; otherwise dept-only. */}
-                {profile.division
-                  ? `${profile.division} (${profile.primaryDepartment})`
-                  : profile.primaryDepartment}
-              </div>
-            ) : null}
-          </div>
-
-          {profile.email || profile.hasClinicalProfile ? (
-            <SidebarCard title="Contact">
-              <ul className="flex flex-col gap-2">
-                {profile.email ? (
-                  <li>
-                    <a
-                      href={`mailto:${profile.email}`}
-                      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-                    >
-                      {profile.email}
-                    </a>
-                  </li>
-                ) : null}
-                {profile.hasClinicalProfile ? (
-                  <li>
-                    <a
-                      // Issue #165 — prefer the exact ED-sourced URL when
-                      // present; fall back to a surname search so scholars
-                      // whose ED record is missing labeledURI;pops still
-                      // get a working link.
-                      href={
-                        profile.clinicalProfileUrl ??
-                        `https://weillcornell.org/doctors-directory?searchVal=${encodeURIComponent(
-                          profile.preferredName.split(/\s+/).pop() || profile.preferredName,
-                        )}`
-                      }
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
-                    >
-                      Clinical profile →
-                    </a>
-                  </li>
-                ) : null}
-              </ul>
-            </SidebarCard>
-          ) : null}
-
-          {profile.postdoctoralMentor ? (
-            <SidebarCard title="Postdoctoral Mentor">
-              <a
-                href={`/scholars/${profile.postdoctoralMentor.slug}`}
-                className="flex items-center gap-3 rounded-md bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/60"
-              >
+        <aside className="md:sticky md:top-[calc(var(--header-h,60px)+24px)] md:self-start">
+          <ScrollFade viewportClassName="md:max-h-[calc(100vh-var(--header-h,60px)-32px)] md:overflow-y-auto">
+            <div className="mb-5 text-center">
+              <div className="mb-3 flex justify-center">
                 <HeadshotAvatar
-                  size="sm"
-                  cwid={profile.postdoctoralMentor.cwid}
-                  preferredName={profile.postdoctoralMentor.publishedName}
-                  identityImageEndpoint={
-                    profile.postdoctoralMentor.identityImageEndpoint
-                  }
+                  size="lg"
+                  cwid={profile.cwid}
+                  preferredName={profile.preferredName}
+                  identityImageEndpoint={profile.identityImageEndpoint}
                 />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">
-                    {profile.postdoctoralMentor.publishedName}
-                  </div>
-                  {profile.postdoctoralMentor.primaryTitle ? (
-                    <div className="truncate text-xs text-muted-foreground">
-                      {profile.postdoctoralMentor.primaryTitle}
-                    </div>
-                  ) : null}
+              </div>
+              <h1 className="page-title text-[36px] font-bold leading-[1.05] tracking-tight">{profile.publishedName}</h1>
+              {profile.primaryTitle ? (
+                <div className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">
+                  {profile.primaryTitle}
                 </div>
-              </a>
-            </SidebarCard>
-          ) : null}
+              ) : null}
+              {profile.primaryDepartment ? (
+                <div className="text-muted-foreground mt-2 text-sm">
+                  {/* Issue #167 — render "<Division> (<Department>)" when the
+                      scholar has a division; otherwise dept-only. */}
+                  {profile.division
+                    ? `${profile.division} (${profile.primaryDepartment})`
+                    : profile.primaryDepartment}
+                </div>
+              ) : null}
+            </div>
 
-          {activeAppointments.length > 0 ? (
-            <SidebarCard title="Appointments">
-              <ul className="flex flex-col gap-3">
-                {activeAppointments.map((a, i) => (
-                  <li key={i} className="leading-snug">
-                    <div className="font-semibold">
-                      {a.title}
-                      {a.isPrimary ? (
-                        <Badge variant="secondary" className="ml-2 align-middle">Primary</Badge>
-                      ) : null}
-                    </div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
-                      {a.organization}
-                      {a.startDate ? ` · ${a.startDate.slice(0, 4)}–` : ""}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </SidebarCard>
-          ) : null}
+            {profile.email || profile.hasClinicalProfile ? (
+              <SidebarCard title="Contact">
+                <ul className="flex flex-col gap-2">
+                  {profile.email ? (
+                    <li>
+                      <a
+                        href={`mailto:${profile.email}`}
+                        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                      >
+                        {profile.email}
+                      </a>
+                    </li>
+                  ) : null}
+                  {profile.hasClinicalProfile ? (
+                    <li>
+                      <a
+                        // Issue #165 — prefer the exact ED-sourced URL when
+                        // present; fall back to a surname search so scholars
+                        // whose ED record is missing labeledURI;pops still
+                        // get a working link.
+                        href={
+                          profile.clinicalProfileUrl ??
+                          `https://weillcornell.org/doctors-directory?searchVal=${encodeURIComponent(
+                            profile.preferredName.split(/\s+/).pop() || profile.preferredName,
+                          )}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                      >
+                        Clinical profile →
+                      </a>
+                    </li>
+                  ) : null}
+                </ul>
+              </SidebarCard>
+            ) : null}
 
-          {profile.educations.length > 0 ? (
-            <SidebarCard title="Education">
-              <ul className="flex flex-col gap-3">
-                {profile.educations.map((e, i) => (
-                  <li key={i} className="leading-snug">
-                    <div className="font-semibold">
-                      {e.degree}
-                      {e.field ? `, ${e.field}` : ""}
+            {profile.postdoctoralMentor ? (
+              <SidebarCard title="Postdoctoral Mentor">
+                <a
+                  href={`/scholars/${profile.postdoctoralMentor.slug}`}
+                  className="flex items-center gap-3 rounded-md bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/60"
+                >
+                  <HeadshotAvatar
+                    size="sm"
+                    cwid={profile.postdoctoralMentor.cwid}
+                    preferredName={profile.postdoctoralMentor.publishedName}
+                    identityImageEndpoint={
+                      profile.postdoctoralMentor.identityImageEndpoint
+                    }
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">
+                      {profile.postdoctoralMentor.publishedName}
                     </div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
-                      {e.institution}
-                      {e.year ? `, ${e.year}` : ""}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </SidebarCard>
-          ) : null}
+                    {profile.postdoctoralMentor.primaryTitle ? (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {profile.postdoctoralMentor.primaryTitle}
+                      </div>
+                    ) : null}
+                  </div>
+                </a>
+              </SidebarCard>
+            ) : null}
+
+            {activeAppointments.length > 0 ? (
+              <SidebarCard title="Appointments">
+                <ul className="flex flex-col gap-3">
+                  {activeAppointments.map((a, i) => (
+                    <li key={i} className="leading-snug">
+                      <div className="font-semibold">
+                        {a.title}
+                        {a.isPrimary ? (
+                          <Badge variant="secondary" className="ml-2 align-middle">Primary</Badge>
+                        ) : null}
+                      </div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">
+                        {a.organization}
+                        {a.startDate ? ` · ${a.startDate.slice(0, 4)}–` : ""}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </SidebarCard>
+            ) : null}
+
+            {profile.educations.length > 0 ? (
+              <SidebarCard title="Education">
+                <ul className="flex flex-col gap-3">
+                  {profile.educations.map((e, i) => (
+                    <li key={i} className="leading-snug">
+                      <div className="font-semibold">
+                        {e.degree}
+                        {e.field ? `, ${e.field}` : ""}
+                      </div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">
+                        {e.institution}
+                        {e.year ? `, ${e.year}` : ""}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </SidebarCard>
+            ) : null}
+          </ScrollFade>
         </aside>
 
         {/* ============== Main column ============== */}
