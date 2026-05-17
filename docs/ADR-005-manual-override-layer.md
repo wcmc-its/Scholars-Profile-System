@@ -1,6 +1,6 @@
 # docs/ADR-005 — Manual-override layer
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-05-16
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
@@ -108,13 +108,13 @@ Unblocking them is a **prerequisite ETL refactor, not part of this ADR's mechani
 
 Scholar suppression is a partial exception, because the read enforcement already exists. The `suppression` table is the source of truth for **every** entity type including `scholar` — it is where `reason`, `created-by`, and revocation live, which a bare enum cannot hold. But for `entityType='scholar'`, the write path **additionally sets `Scholar.status`** (`'suppressed'` / `'active'`) in the same transaction.
 
-`Scholar.status` is therefore a **denormalized projection** of the `suppression` table, not a competing mechanism. The reason to keep it: ~20 `lib/api/*` read functions, `lib/url-resolver.ts`, and `etl/search-index` already filter `status='active'`. Re-plumbing all of them to join the `suppression` table — changing working, tested code — is needless regression risk immediately before launch. Writing one extra column in the same transaction is not. There is exactly one writer of `status` for suppression purposes (the manual-layer write path) and the ETL writes neither table nor column, so the projection cannot drift except by the regression guarded below.
+`Scholar.status` is therefore a **denormalized projection** of the `suppression` table, not a competing mechanism. The reason to keep it: ~20 `lib/api/*` read functions, `lib/url-resolver.ts`, and `etl/search-index` already filter `status='active'`. Re-plumbing all of them to join the `suppression` table — changing working, tested code — is needless regression risk immediately before launch. Writing one extra column in the same transaction is not. There is exactly one writer of `status` for suppression purposes (the manual-layer write path) and the ETL writes neither table nor column, so the projection cannot drift except by the regression guarded below. That single-writer claim is guarded *asymmetrically* — the regression test below covers the ETL, and the branded `Merged<T>` types (§ Consequences) cover the read side — but a future **app-layer** write to `status` (a maintenance script, or a developer reaching for the Prisma column directly) is caught by neither. In v1 that rests on convention and PR review, since no code outside the manual-layer write path has any reason to set `status`; the airtight version — a branded *write* type mirroring the read-side discipline, or the DAL wrapper noted in § Consequences — is scoped post-launch.
 
 Consequence: **scholar suppression's read side is already complete** (Aurora reads, URL resolution, and the search index all honour `status`). Only the write path is new. Publication suppression, by contrast, needs both a new read-merge and a new build-time search filter.
 
 Two invariants make the projection sound:
 
-- **`Scholar.status` is manual-only.** No ETL writes it — verified 2026-05-16 across all eight scholar write sites (six ETL, two seed): `etl/ed`'s scholar `update` writes profile fields (name, titles, department, email, …) and `status` is not among them; `create` relies on the column `@default('active')`. v1 locks this with a regression test (run the ED scholar-update against a `status='suppressed'` fixture, assert it survives) and a schema-migration PR-checklist line. If an ETL ever adds `status` to a scholar payload, suppressed scholars silently un-suppress — the drift audit query below is the detection net.
+- **`Scholar.status` is manual-only.** No ETL writes it — verified 2026-05-16 across all eight scholar write sites (six ETL, two seed): `etl/ed`'s scholar `update` writes profile fields (name, titles, department, email, …) and `status` is not among them; `create` relies on the column `@default('active')`. v1 locks this with a regression test (run the ED scholar-update against a `status='suppressed'` fixture, assert it survives) and a line in the **Schema migration checklist** of [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md) — "no ETL scholar `create`/`update` payload writes `Scholar.status`". If an ETL ever adds `status` to a scholar payload, suppressed scholars silently un-suppress — the drift audit query below is the detection net.
 - **Revoke is synchronous and deterministic.** Revoking a suppression sets `status='active'` in the *same transaction* as the revoke — gated on no other un-revoked `suppression` row remaining for that scholar. There is no prior status to restore: `status`'s domain is `{active, suppressed}` and nothing produces any other value (departed/inactive scholars are carried by the orthogonal `deletedAt`, which revoke does not touch). So revoke needs no `previous_status` snapshot — the pre-suppression state is always `active`.
 
 ### Publication suppression: per-author rows and derived visibility
@@ -148,8 +148,8 @@ A self-edit or suppression action is **one MySQL transaction**:
 
 OpenSearch cannot join a MySQL transaction, so search reflection is layered:
 
-1. **Fast path** — after the transaction commits, the write path issues a targeted OpenSearch write (a delete for a whole-entity suppression, a document update for per-contributor). Near-instant in the normal case; best-effort.
-2. **Durable guarantee** — a short-interval reconciler worker (order of minutes) brings the live `scholars` index into line with the `suppression` table. Because the `suppression` table is committed *inside* the MySQL transaction, it already **is** the durable work queue — no separate outbox table is needed. This worker, not the fast-path write, is the contract: suppression search-staleness is bounded by the reconciler interval, durably, even if the fast-path write is lost to a process crash or an OpenSearch outage.
+1. **Fast path** — after the transaction commits, the write path issues a targeted OpenSearch write. The shape depends on the action: a whole-entity *suppress* is a document delete; a per-contributor suppress or revoke is a document update in place; a whole-entity *revoke* is a **re-add** — the document is reconstructed from Aurora and upserted, because the index has no document to mutate. Near-instant in the normal case; best-effort.
+2. **Durable guarantee** — a short-interval reconciler worker brings the live `scholars` index into line with the `suppression` table, **in both directions**: it deletes the index document for any target newly suppressed, and — symmetrically — reconstructs the document from Aurora and upserts it for any target whose suppression was revoked (*table says `active`, index has no document → rebuild from Aurora and upsert*). The re-add is the heavier direction and is explicitly in the worker's contract, not just deletion. Because the `suppression` table is committed *inside* the MySQL transaction, it already **is** the durable work queue — no separate outbox table is needed. This worker, not the fast-path write, is the contract: **v1 targets a reconciliation lag of ≤ 5 minutes, with an operational alarm when the lag — the age of the oldest `suppression` write, an insert or a revoke, not yet reflected in the index — exceeds 15 minutes.** That bound is what makes the urgency split sound, durably, even if the fast-path write is lost to a process crash or an OpenSearch outage.
 3. **Full backstop** — the nightly `etl/search-index` rebuild reconciles the entire index from Aurora.
 
 For **suppression**, all three layers apply: its trigger cases (retraction, FERPA/HIPAA exposure, harassment) make a *durable, sub-cycle* staleness bound mandatory — "best-effort" alone would degrade to the ~24h lag the urgency split exists to prevent. For **self-edit field changes**, the nightly rebuild alone suffices; no fast-path write or reconciler entry is needed.
@@ -200,7 +200,7 @@ The script is one-shot and idempotent-safe: it **inserts** with skip-on-conflict
 - **Read-path discipline is the real long-term cost, and a CI grep is only a backstop.** A grep catches `prisma.scholar.findUnique` in `app/` but not the subtle regressions — a new aggregation that counts suppressed rows, a facet that does not filter, an export that bypasses the helper. The primary mechanism is the **type system**: `lib/api/*` entity-read functions return a *branded* post-merge type (e.g. `Merged<Scholar>`) that only the merge helpers can construct; a raw Prisma result does not satisfy it, so a read path that skips the merge fails to compile. The ~6 files that currently bypass `lib/api/*` with direct `prisma` calls (`co-pubs` pages and exports, `search/page.tsx` facet reads, `sitemap.ts`) are routed through `lib/api/*` or the helpers. The airtight end state — a DAL wrapper that makes `prisma.scholar.*` physically unreachable outside the manual-layer module — is larger, overlaps ADR-001's DAL boundary, and is scoped as separate work; branded types are the v1 mechanism, the grep is the cheap backstop.
 - **Grant / Education / Appointment suppression is deferred** behind the ETL stable-key refactor. v1 covers Scholar, Publication, and (Publication, author).
 - **`Scholar.status` is a denormalized projection** — a small, bounded, single-writer consistency surface, held safe by the manual-only invariant (no ETL writes it) and its regression test, with the drift audit query as the detection net.
-- **Derived counts and facets must honour the merge** — #160 requires People counts, topic/center publication counts, and author/investigator lists to reflect suppression. The merge helpers must make every aggregate, not just the primary listing, easy to get right.
+- **Derived counts and facets must honour the merge** — #160 requires People counts, topic/center publication counts, and author/investigator lists to reflect suppression. The merge helpers must make every aggregate, not just the primary listing, easy to get right. The **per-author** publication model raises this cost specifically: because whole-publication visibility is *derived* (shown iff ≥ 1 displayed author remains), a publication count cannot be a flat `COUNT(*) … WHERE NOT suppressed` — each candidate row must first have per-author suppression applied and the displayed-author predicate evaluated before it is counted, so aggregates carry more work than a single whole-row suppression boolean would. The self-healing property (§ Publication suppression) is worth that cost; it is still a real cost the merge helpers must absorb.
 
 ### Operational implications
 
@@ -250,6 +250,17 @@ SELECT sc.cwid, sc.status,
                  AND s.contributor_cwid IS NULL AND s.revoked_at IS NULL) AS table_suppressed
 FROM scholar sc
 HAVING (sc.status = 'suppressed') <> table_suppressed;
+
+-- Reconciler health (search-side): scholar CWIDs that MUST NOT have a document in
+-- the live `scholars` OpenSearch index. The MySQL half of a cross-store check — a
+-- monitoring job queries the index for each cwid below; any hit is a reconciler miss
+-- (the fast-path write was lost AND the reconciler has not yet caught up). Pairs with
+-- the projection-drift query above, which covers the Aurora side.
+SELECT s.entity_id AS suppressed_cwid, MIN(s.created_at) AS suppressed_since
+FROM suppression s
+WHERE s.entity_type = 'scholar' AND s.contributor_cwid IS NULL
+  AND s.revoked_at IS NULL
+GROUP BY s.entity_id;
 ```
 
 ## Alternatives considered
@@ -277,7 +288,7 @@ HAVING (sc.status = 'suppressed') <> table_suppressed;
 
 ## Open questions
 
-1. **Self-edit field set** — this ADR cannot move from Proposed to Accepted until the self-edit SPEC enumerates the v1 `field_override.fieldName` domain.
+1. **Self-edit field set** — **Resolved (2026-05-17).** [`self-edit-spec.md`](./self-edit-spec.md) § "The v1 editable-field set" enumerates the `field_override.fieldName` domain as `{ 'overview', 'slug' }`. This ADR is Accepted on that basis.
 2. **Stable-key refactor scheduling** — Grant/Education/Appointment suppression is blocked on it, and it should precede B08 (#107). Filed as #352; confirm it is scheduled before the ETL freeze.
 
 ## Implementation
@@ -297,6 +308,7 @@ HAVING (sc.status = 'suppressed') <> table_suppressed;
 
 ## References
 
+- [`self-edit-spec.md`](./self-edit-spec.md) — the self-edit feature SPEC: enumerates the `field_override.fieldName` domain (resolving Open Question #1) and owns the write path, surfaces, authorization, and per-field validation built on this layer.
 - [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) — slug policy review; [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) — suppression controls; [#28](https://github.com/wcmc-its/Scholars-Profile-System/issues/28) — scholar name source (closed).
 - [ADR-001](./ADR-001-runtime-dal-vs-etl-transform.md) — runtime DAL is MySQL + OpenSearch; the `/api/edit` Phase 7 OpenSearch-write pattern.
 - [ADR-002](./ADR-002-division-chiefs.md), [ADR-003](./ADR-003-center-membership.md) — the existing file-based manual-curation precedent.
