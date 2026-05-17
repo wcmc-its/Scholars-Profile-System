@@ -15,3 +15,4 @@ Required when this PR touches `prisma/schema.prisma`. Delete this section if no 
 - [ ] New app version still works against the old schema until the migration runs.
 - [ ] If a backfill is needed, script is in `scripts/backfills/`.
 - [ ] If this is the contract step of an expand-contract, the expand has been live for at least the backup retention window.
+- [ ] No ETL scholar `create`/`update` payload writes `Scholar.status` — the manual-only invariant ([ADR-005](../docs/ADR-005-manual-override-layer.md)).
