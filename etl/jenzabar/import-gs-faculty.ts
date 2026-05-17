@@ -31,6 +31,8 @@
  */
 import { prisma } from "../../lib/db";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
+import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { appointmentContentKey } from "@/lib/etl/content-keys";
 
 const VIEW = "[TmsEPly].[dbo].[WCN_vw_GS_Faculty_LR]";
 const SOURCE = "JENZABAR-GSFACULTY";
@@ -183,9 +185,10 @@ async function main() {
     const importable = candidates.filter((c) => knownScholars.has(c.cwid));
     console.log(`Importable rows after scholar match: ${importable.length}.`);
 
-    // Build Appointment inserts.
+    // Build Appointment inserts. No explicit `id` — Prisma's @default(uuid())
+    // applies on create, and the reconcile below updates existing rows in
+    // place, so a row's PK is never regenerated (issue #352).
     const inserts = importable.map((c) => ({
-      id: crypto.randomUUID(),
       cwid: c.cwid,
       title: c.title,
       organization: `${SCHOOL_LABEL} — ${c.program}`,
@@ -197,30 +200,66 @@ async function main() {
       source: SOURCE,
     }));
 
-    // Hard delete-and-replace under the JENZABAR-GSFACULTY source. ED-source
-    // and NYP-source rows untouched.
-    console.log(`Deleting existing ${SOURCE} appointments...`);
-    const deleted = await prisma.appointment.deleteMany({ where: { source: SOURCE } });
-    console.log(`Deleted ${deleted.count} stale rows.`);
+    // Issue #352 — reconcile by externalId (JENZABAR-GSFACULTY-{jid}) instead
+    // of delete-and-replace, so each row keeps its uuid PK across runs for the
+    // manual-override layer (ADR-005). Scoped to source JENZABAR-GSFACULTY —
+    // ED and ED-NYP appointment rows are untouched.
+    const existing = await prisma.appointment.findMany({
+      where: { source: SOURCE },
+      select: {
+        externalId: true, cwid: true, title: true, organization: true,
+        startDate: true, endDate: true, isPrimary: true, isInterim: true,
+        source: true,
+      },
+    });
+    const plan = classifyByExternalId({
+      incoming: inserts,
+      existing,
+      contentKey: appointmentContentKey,
+    });
+    if (plan.duplicateExternalIds.length > 0) {
+      console.warn(
+        `[Jenzabar-GS-Faculty] ${plan.duplicateExternalIds.length} duplicate ` +
+          `externalId(s) in source rows — last occurrence wins: ` +
+          plan.duplicateExternalIds.slice(0, 10).join(", "),
+      );
+    }
 
-    console.log(`Inserting ${inserts.length} fresh rows...`);
-    let inserted = 0;
-    for (const batch of chunks(inserts, INSERT_BATCH)) {
-      const res = await prisma.appointment.createMany({
-        data: batch,
-        skipDuplicates: true,
+    console.log(
+      `Reconciling ${SOURCE} appointments: ${plan.toCreate.length} new, ` +
+        `${plan.toUpdate.length} changed, ${plan.staleExternalIds.length} stale...`,
+    );
+    for (const batch of chunks(plan.toCreate, INSERT_BATCH)) {
+      await prisma.appointment.createMany({ data: batch });
+    }
+    for (const a of plan.toUpdate) {
+      await prisma.appointment.update({
+        where: { externalId: a.externalId },
+        data: { ...a, lastRefreshedAt: new Date() },
       });
-      inserted += res.count;
+    }
+    let tombstoned = 0;
+    if (plan.staleExternalIds.length > 0) {
+      tombstoned = (
+        await prisma.appointment.deleteMany({
+          where: { source: SOURCE, externalId: { in: plan.staleExternalIds } },
+        })
+      ).count;
     }
 
     await prisma.etlRun.update({
       where: { id: run.id },
-      data: { status: "success", completedAt: new Date(), rowsProcessed: inserted },
+      data: {
+        status: "success",
+        completedAt: new Date(),
+        rowsProcessed: inserts.length,
+      },
     });
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `Jenzabar GS Faculty ETL complete in ${elapsed}s: deleted=${deleted.count} inserted=${inserted}.`,
+      `Jenzabar GS Faculty ETL complete in ${elapsed}s: ` +
+        `+${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}.`,
     );
   } catch (err) {
     await prisma.etlRun.update({

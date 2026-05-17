@@ -28,6 +28,8 @@ import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
+import { classifyByExternalId } from "@/lib/etl/reconcile";
+import { appointmentContentKey } from "@/lib/etl/content-keys";
 import {
   collapseEmployeeRecordsByCwid,
   type EdFacultyAppointment,
@@ -178,24 +180,49 @@ async function refreshEdAppointments(
   cwid: string,
   appts: EdFacultyAppointment[],
 ): Promise<void> {
-  await prisma.appointment.deleteMany({
+  // Issue #352 — reconcile this scholar's ED appointments by externalId
+  // (ED-FACULTY-{SORID}) instead of delete-and-recreate, so each row keeps its
+  // uuid PK across runs for the manual-override layer (ADR-005). Scoped to
+  // {cwid, source:"ED"}: a scholar not processed this run keeps their rows,
+  // and the ED-NYP / Jenzabar appointment sources are untouched.
+  const incoming = appts.map((a) => ({
+    cwid: a.cwid,
+    title: a.title,
+    organization: a.organization ?? "Weill Cornell Medicine",
+    startDate: a.startDate,
+    endDate: a.endDate,
+    isPrimary: a.isPrimary,
+    isInterim: false,
+    externalId: a.externalId,
+    source: "ED",
+  }));
+  const existing = await prisma.appointment.findMany({
     where: { cwid, source: "ED" },
+    select: {
+      externalId: true, cwid: true, title: true, organization: true,
+      startDate: true, endDate: true, isPrimary: true, isInterim: true,
+      source: true,
+    },
   });
-  if (appts.length === 0) return;
-
-  await prisma.appointment.createMany({
-    data: appts.map((a) => ({
-      cwid: a.cwid,
-      title: a.title,
-      organization: a.organization ?? "Weill Cornell Medicine",
-      startDate: a.startDate,
-      endDate: a.endDate,
-      isPrimary: a.isPrimary,
-      isInterim: false,
-      externalId: a.externalId,
-      source: "ED",
-    })),
+  const plan = classifyByExternalId({
+    incoming,
+    existing,
+    contentKey: appointmentContentKey,
   });
+  if (plan.toCreate.length > 0) {
+    await prisma.appointment.createMany({ data: plan.toCreate });
+  }
+  for (const a of plan.toUpdate) {
+    await prisma.appointment.update({
+      where: { externalId: a.externalId },
+      data: { ...a, lastRefreshedAt: new Date() },
+    });
+  }
+  if (plan.staleExternalIds.length > 0) {
+    await prisma.appointment.deleteMany({
+      where: { cwid, source: "ED", externalId: { in: plan.staleExternalIds } },
+    });
+  }
 }
 
 /** NYP affiliate organization label shown on the profile sidebar. The title
@@ -221,15 +248,16 @@ const NYP_APPOINTMENT_SOURCE = "ED-NYP";
 async function refreshNypAffiliateAppointments(
   rows: EdNypAffiliateTitle[],
   knownCwids: Set<string>,
-): Promise<{ written: number; skippedUnknownCwid: number }> {
-  await prisma.appointment.deleteMany({
-    where: { source: NYP_APPOINTMENT_SOURCE },
-  });
-  if (rows.length === 0) return { written: 0, skippedUnknownCwid: 0 };
-
+): Promise<{
+  written: number;
+  created: number;
+  updated: number;
+  tombstoned: number;
+  skippedUnknownCwid: number;
+}> {
   let skippedUnknownCwid = 0;
   const seen = new Set<string>();
-  const toCreate: {
+  const incoming: {
     cwid: string;
     title: string;
     organization: string;
@@ -248,7 +276,7 @@ async function refreshNypAffiliateAppointments(
     const key = `${r.cwid}|${r.title.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    toCreate.push({
+    incoming.push({
       cwid: r.cwid,
       title: r.title,
       organization: NYP_ORG_DISPLAY,
@@ -261,10 +289,50 @@ async function refreshNypAffiliateAppointments(
       source: NYP_APPOINTMENT_SOURCE,
     });
   }
-  if (toCreate.length > 0) {
-    await prisma.appointment.createMany({ data: toCreate });
+
+  // Issue #352 — reconcile by externalId instead of delete-and-recreate so NYP
+  // rows keep their uuid PK across runs (ADR-005). The (cwid, lowercased-title)
+  // dedupe above still runs first, so the classifier sees a clean key set.
+  const existing = await prisma.appointment.findMany({
+    where: { source: NYP_APPOINTMENT_SOURCE },
+    select: {
+      externalId: true, cwid: true, title: true, organization: true,
+      startDate: true, endDate: true, isPrimary: true, isInterim: true,
+      source: true,
+    },
+  });
+  const plan = classifyByExternalId({
+    incoming,
+    existing,
+    contentKey: appointmentContentKey,
+  });
+  if (plan.toCreate.length > 0) {
+    await prisma.appointment.createMany({ data: plan.toCreate });
   }
-  return { written: toCreate.length, skippedUnknownCwid };
+  for (const a of plan.toUpdate) {
+    await prisma.appointment.update({
+      where: { externalId: a.externalId },
+      data: { ...a, lastRefreshedAt: new Date() },
+    });
+  }
+  let tombstoned = 0;
+  if (plan.staleExternalIds.length > 0) {
+    tombstoned = (
+      await prisma.appointment.deleteMany({
+        where: {
+          source: NYP_APPOINTMENT_SOURCE,
+          externalId: { in: plan.staleExternalIds },
+        },
+      })
+    ).count;
+  }
+  return {
+    written: incoming.length,
+    created: plan.toCreate.length,
+    updated: plan.toUpdate.length,
+    tombstoned,
+    skippedUnknownCwid,
+  };
 }
 
 async function main() {
@@ -752,8 +820,9 @@ async function main() {
         activeCwids,
       );
       console.log(
-        `[ED] NYP affiliate titles: wrote ${nypResult.written} appointment row(s) ` +
-          `(skipped ${nypResult.skippedUnknownCwid} for unknown CWID)`,
+        `[ED] NYP affiliate titles: ${nypResult.written} appointment row(s) ` +
+          `(+${nypResult.created} ~${nypResult.updated} -${nypResult.tombstoned}; ` +
+          `skipped ${nypResult.skippedUnknownCwid} for unknown CWID)`,
       );
     } else {
       console.log(`[ED] NYP affiliate titles: refresh skipped (fetch failed)`);
