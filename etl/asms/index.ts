@@ -18,6 +18,7 @@
  */
 import { prisma } from "../../lib/db";
 import { closeAsmsPool, getAsmsPool } from "@/lib/sources/mssql-asms";
+import { classifyByExternalId } from "@/lib/etl/reconcile";
 
 type EducationRow = {
   cwid: string;
@@ -80,10 +81,6 @@ async function main() {
 
     console.log(`Got ${educationRows.length} education rows.`);
 
-    // Truncate and bulk-insert.
-    console.log("Resetting education table...");
-    await prisma.education.deleteMany();
-
     const inserts = educationRows
       .filter((r) => ourCwidSet.has(r.cwid))
       .map((r) => ({
@@ -96,15 +93,58 @@ async function main() {
         source: "ASMS",
       }));
 
-    console.log(`Inserting ${inserts.length} education rows...`);
-    let inserted = 0;
-    for (const batch of chunks(inserts, INSERT_BATCH)) {
-      await prisma.education.createMany({ data: batch, skipDuplicates: true });
-      inserted += batch.length;
-      if (inserted % (INSERT_BATCH * 10) === 0) {
-        console.log(`  ...${inserted}/${inserts.length}`);
-      }
+    // Issue #352 — reconcile education rows by externalId
+    // (ASMS-{wcmc_person_school.id}) instead of truncating the whole table, so
+    // each row keeps its uuid PK across runs for the manual-override layer
+    // (ADR-005).
+    const existingEducation = await prisma.education.findMany({
+      where: { source: "ASMS" },
+      select: {
+        externalId: true, cwid: true, degree: true, institution: true,
+        year: true, field: true, source: true,
+      },
+    });
+    const plan = classifyByExternalId({
+      incoming: inserts,
+      existing: existingEducation,
+      contentKey: (e) =>
+        JSON.stringify([
+          e.cwid, e.degree, e.institution, e.year, e.field, e.source,
+        ]),
+    });
+    if (plan.duplicateExternalIds.length > 0) {
+      console.warn(
+        `[ASMS] ${plan.duplicateExternalIds.length} duplicate externalId(s) in ` +
+          `source rows — last occurrence wins: ${plan.duplicateExternalIds
+            .slice(0, 10)
+            .join(", ")}`,
+      );
     }
+
+    console.log(
+      `Reconciling education: ${plan.toCreate.length} new, ${plan.toUpdate.length} ` +
+        `changed, ${plan.staleExternalIds.length} stale...`,
+    );
+    for (const batch of chunks(plan.toCreate, INSERT_BATCH)) {
+      await prisma.education.createMany({ data: batch });
+    }
+    for (const e of plan.toUpdate) {
+      await prisma.education.update({
+        where: { externalId: e.externalId },
+        data: { ...e, lastRefreshedAt: new Date() },
+      });
+    }
+    let tombstoned = 0;
+    if (plan.staleExternalIds.length > 0) {
+      tombstoned = (
+        await prisma.education.deleteMany({
+          where: { source: "ASMS", externalId: { in: plan.staleExternalIds } },
+        })
+      ).count;
+    }
+    console.log(
+      `Education reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
+    );
 
     await prisma.etlRun.update({
       where: { id: run.id },

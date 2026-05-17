@@ -110,7 +110,7 @@ model Appointment {
   endDate         DateTime? @map("end_date") @db.Date // NULL = current
   isPrimary       Boolean   @default(false) @map("is_primary")
   isInterim       Boolean   @default(false) @map("is_interim")
-  externalId      String?   @map("external_id") @db.VarChar(128) // ED appointment ID for upsert
+  externalId      String    @unique @map("external_id") @db.VarChar(128) // ED appointment ID; #352 reconcile key
   source          String    @default("ED") @db.VarChar(32)
   lastRefreshedAt DateTime  @default(now()) @map("last_refreshed_at")
 
@@ -128,7 +128,7 @@ model Education {
   institution     String   @db.VarChar(255)
   year            Int?
   field           String?  @db.VarChar(255)
-  externalId      String?  @map("external_id") @db.VarChar(128)
+  externalId      String   @unique @map("external_id") @db.VarChar(128)
   source          String   @default("ASMS") @db.VarChar(32)
   lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
 
@@ -311,7 +311,7 @@ model Grant {
   funder          String   @db.VarChar(255)
   startDate       DateTime @map("start_date") @db.Date
   endDate         DateTime @map("end_date") @db.Date
-  externalId      String?  @map("external_id") @db.VarChar(128)
+  externalId      String   @unique @map("external_id") @db.VarChar(128)
   /// Sponsor-issued award number (e.g. NIH "R01 AG067497"). Nullable —
   /// many grants don't have one (industry contracts, internal awards).
   /// Populated from InfoEd CONSOLIDATED_QUERY's Award_Number column.
