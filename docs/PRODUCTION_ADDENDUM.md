@@ -10,7 +10,7 @@ Companion to [`PRODUCTION.md`](./PRODUCTION.md). Three sections that close the l
 
 The endpoint must not be cached. CloudFront behavior for `/api/edit*` and `/edit/*`: `CachingDisabled`, `AllViewer` origin request policy (forwards cookies, headers, query string).
 
-Authentication uses WCM SSO — Shibboleth or Entra OIDC, matching whatever myAccount and the other internal apps use rather than introducing a new IdP for this app. The session cookie is HttpOnly, Secure, SameSite=Lax, scoped to `scholars.weill.cornell.edu`. The session is validated server-side on every `/api/edit*` request; there is no token in the URL, ever.
+Authentication uses WCM SSO via **Shibboleth SAML** — confirmed 2026-05-17 as the IdP `myAccount` and the other internal apps use; this app integrates as a SAML 2.0 service provider rather than introducing a new IdP. The session cookie is HttpOnly, Secure, SameSite=Lax, scoped to `scholars.weill.cornell.edu`. The session is validated server-side on every `/api/edit*` request; there is no token in the URL, ever.
 
 Authorization is two-tier:
 
@@ -19,7 +19,7 @@ Authorization is two-tier:
 
 Anything else returns 403 with `event: "edit_authz_denied"` in the log line — alarmable as a signal of either a bug in the predicate or actual probing.
 
-Every successful edit writes an append-only audit row: `{actor_cwid, scholar_cwid, fields_changed, before_values, after_values, row_hash, ts, request_id}`. `before_values` and `after_values` are JSON capturing the actual values of the changed fields — that's the artefact a reviewer needs ("what did the dean's office change about Smith's appointment last March?"). `row_hash` is a hash over the row's payload for tamper-evidence on the row itself, not a substitute for the values. The audit table lives in a separate schema with no `DELETE` or `UPDATE` grant for the app role. This is the artefact any future review will ask for; building it after the fact is materially harder.
+Every successful edit writes an append-only audit row: `{actor_cwid, target_entity_type, target_entity_id, action, fields_changed, before_values, after_values, row_hash, ts, request_id}` — #102's shape, generalized by #354 so it records suppression events and publication targets, not only scholar field-diffs. `before_values` and `after_values` are JSON capturing the actual values of the changed fields — that's the artefact a reviewer needs ("what did the dean's office change about Smith's appointment last March?"). `row_hash` is a hash over the row's payload for tamper-evidence on the row itself, not a substitute for the values. The audit table lives in a separate database (`scholars_audit`) on the same Aurora cluster, with an `INSERT`-only grant for the app role and no `UPDATE` / `DELETE`. Schema and write contract: [`docs/b03-audit-log.md`](./b03-audit-log.md). This is the artefact any future review will ask for; building it after the fact is materially harder.
 
 ### `/api/revalidate`
 
