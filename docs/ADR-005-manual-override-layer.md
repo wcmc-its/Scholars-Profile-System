@@ -117,6 +117,14 @@ Two invariants make the projection sound:
 - **`Scholar.status` is manual-only.** No ETL writes it — verified 2026-05-16 across all eight scholar write sites (six ETL, two seed): `etl/ed`'s scholar `update` writes profile fields (name, titles, department, email, …) and `status` is not among them; `create` relies on the column `@default('active')`. v1 locks this with a regression test (run the ED scholar-update against a `status='suppressed'` fixture, assert it survives) and a schema-migration PR-checklist line. If an ETL ever adds `status` to a scholar payload, suppressed scholars silently un-suppress — the drift audit query below is the detection net.
 - **Revoke is synchronous and deterministic.** Revoking a suppression sets `status='active'` in the *same transaction* as the revoke — gated on no other un-revoked `suppression` row remaining for that scholar. There is no prior status to restore: `status`'s domain is `{active, suppressed}` and nothing produces any other value (departed/inactive scholars are carried by the orthogonal `deletedAt`, which revoke does not touch). So revoke needs no `previous_status` snapshot — the pre-suppression state is always `active`.
 
+### Publication suppression: per-author rows and derived visibility
+
+A self-editing scholar hides a publication from a single action on their own profile. Rather than the write path choosing whole-publication vs per-author suppression at click time, it **always writes a per-author row** (`contributorCwid = self`), and publication visibility is **derived** at read time: a publication is shown iff at least one displayed author remains — a displayed author being a confirmed, site-visible WCM-scholar authorship — after per-author suppressions are applied.
+
+The sole-author case is then the degenerate one: the only displayed WCM author hides the publication, zero displayed authors remain, and it is hidden site-wide. This derivation self-heals — if ReCiter later attributes the publication to a new WCM co-author it reappears on its own, and if several co-authors hide it over time it goes dark exactly when the last one does. Neither is true of a static whole-publication row written at first click.
+
+An explicit whole-publication suppression (`contributorCwid = NULL`) is reserved for the **editorial / superuser** case — a retraction or compliance takedown — independent of authorship. So a publication is hidden iff *either* an explicit whole-publication suppression exists *or* it has zero displayed authors.
+
 ### Where the merge happens
 
 The manual layer is applied at **two points**, matching the system's two read surfaces:
@@ -125,6 +133,8 @@ The manual layer is applied at **two points**, matching the system's two read su
 - **OpenSearch (`etl/search-index`): build-time.** The index builder already excludes rows at document-build time (`status: 'active'`, `NEVER_DISPLAY_TYPES`); scholar suppression rides that filter unchanged. Publication suppression and field overrides are applied in the same place when building the People / Publications / Funding documents.
 
 Build-time alone means an OpenSearch change lags by up to one ETL cycle (~24h). That is acceptable for self-edit field changes — a corrected bio tolerates the lag. It is **not** acceptable for suppression: its trigger cases are retractions, FERPA/HIPAA exposure, and harassment vectors, where "still visible in search for 24h" is the exact failure the feature exists to prevent. The suppression write path therefore also issues an immediate targeted OpenSearch write — see the failure model below.
+
+**One read-path exception.** The self-edit surface (`/api/edit*`, `/edit/*`) reads a scholar's *own* record with the suppression filter **off**. A scholar who has self-suppressed must still be able to load their edit page and lift the suppression; if the edit surface reused the normal `status`-filtered read it would lock them out of their own profile.
 
 ### Write-path failure model
 
@@ -216,6 +226,8 @@ The script is one-shot and idempotent-safe: it **inserts** with skip-on-conflict
 | 12 | Any ETL runs after a scholar is suppressed | `status` preserved — no ETL writes `Scholar.status` (the manual-only invariant). The regression test guards it; the drift audit query is the detection net if it ever regresses. |
 | 13 | Fast-path OpenSearch write fails after the MySQL commit | The reconciler worker applies it within its interval (minutes); Aurora reads were already correct at commit. Bounded and durable — not a 24h degradation. |
 | 14 | Self-edit during the reciter→dynamodb consistency window (B19 #118) | Independent — `field_override` does not touch `publication`/`publication_topic`. |
+| 15 | Sole displayed WCM author hides their own publication | Self-edit writes a per-author row; zero displayed authors remain, so the publication is hidden site-wide (derived). Self-applied — the scholar can revoke it and the publication reappears. |
+| 16 | One author of a co-authored publication hides it | Self-edit writes a per-author row; that author drops off the publication's displayed author list everywhere it renders; the publication is kept for the remaining displayed authors. |
 
 ## Audit queries
 
@@ -254,7 +266,7 @@ HAVING (sc.status = 'suppressed') <> table_suppressed;
 
 ## Non-goals
 
-- **Admin-edit authorization** — v1 is self-edit only (`session.cwid == scholar.cwid`); the `scholars-admins` tier (B02 #101) is a deferred fast-follow.
+- **Broad admin field-editing** — editing arbitrary scholars' fields via the `scholars-admins` tier (B02 #101) is a deferred fast-follow. **Suppression is carved out:** superuser suppression ships in v1 alongside self-edit suppression, because the deceased and FERPA/compliance cases cannot be self-served (a dead scholar cannot log in). v1 therefore needs the `scholars-admins` group claim on the SSO session and a "superuser may suppress any v1-supported entity" predicate — a scoped slice of B02, not its full admin-edit surface.
 - **The self-edit editable-field set** — owned by the self-edit SPEC. This ADR provides the `field_override` mechanism; the SPEC enumerates valid `fieldName`s (at minimum `slug`).
 - **Per-field validation** — each editable field's validation lives in the write-path code the self-edit SPEC owns (the slug validator, for instance, checks `scholar.slug @unique`). This ADR provides storage and precedence, not a generic validation framework.
 - **Structured (non-scalar) `field_override` values** — v1 `value` is `Text`, sufficient for slug and bio. A field needing structured data (e.g. a curated affiliations list) will need a documented JSON-in-`Text` convention or a `value_type` discriminator; deferred until such a field exists.
@@ -266,7 +278,7 @@ HAVING (sc.status = 'suppressed') <> table_suppressed;
 ## Open questions
 
 1. **Self-edit field set** — this ADR cannot move from Proposed to Accepted until the self-edit SPEC enumerates the v1 `field_override.fieldName` domain.
-2. **Stable-key refactor scheduling** — Grant/Education/Appointment suppression is blocked on it, and it should precede B08 (#107). Confirm it is scheduled before the ETL freeze.
+2. **Stable-key refactor scheduling** — Grant/Education/Appointment suppression is blocked on it, and it should precede B08 (#107). Filed as #352; confirm it is scheduled before the ETL freeze.
 
 ## Implementation
 
