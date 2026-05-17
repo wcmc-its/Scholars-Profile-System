@@ -16,7 +16,7 @@
 
 ADR-005 settled the *mechanism* — two ETL-immune tables (`field_override`, `suppression`) merged at read time. This SPEC defines the *feature* on top of that mechanism: which fields a scholar may edit, what the suppression controls do, who is allowed to do what, and how each write commits. It does not reopen ADR-005.
 
-This SPEC is the document ADR-005's Open Question #1 waits on. Its central deliverable — [the v1 editable-field set](#the-v1-editable-field-set) — enumerates the `field_override.fieldName` domain; once that is ratified, ADR-005 can move from *Proposed* to *Accepted*.
+This SPEC is the document ADR-005's Open Question #1 was waiting on. Its central deliverable — [the v1 editable-field set](#the-v1-editable-field-set) — enumerates the `field_override.fieldName` domain; enumerating that domain resolved ADR-005's Open Question #1 and moved the ADR from *Proposed* to *Accepted*.
 
 *Terminology.* **Self-editing scholar** — a signed-in scholar acting on `scholar.cwid == session.cwid`. **Superuser** — a session whose SSO claims include the `scholars-admins` group. **Displayed author** — ADR-005's term: a confirmed, site-visible WCM-scholar authorship on a publication. "Override" denotes read-time precedence over ETL-projected data (ADR-005 § Context).
 
@@ -358,4 +358,4 @@ The concrete file map for this feature. ADR-005's Implementation table lists `ap
 
 ---
 
-> **On ratification:** with the `field_override.fieldName` domain enumerated as `{ 'overview', 'slug' }` ([The v1 editable-field set](#the-v1-editable-field-set)), ADR-005's Open Question #1 is answered. Once this field set is ratified, **ADR-005 can move Proposed → Accepted.**
+> **On ratification:** with the `field_override.fieldName` domain enumerated as `{ 'overview', 'slug' }` ([The v1 editable-field set](#the-v1-editable-field-set)), ADR-005's Open Question #1 is answered — and on that basis **ADR-005 is now Accepted** (ADR-005 § Open questions).
