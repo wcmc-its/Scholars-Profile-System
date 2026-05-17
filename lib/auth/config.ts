@@ -141,3 +141,23 @@ export function getSamlEnv(): SamlEnv {
 export function getDefaultReturnPath(): string {
   return optionalEnv("SAML_DEFAULT_RETURN_PATH") ?? "/edit";
 }
+
+export interface SuperuserConfig {
+  /**
+   * DN of the AD/Entra `scholars-admins` group that confers the superuser
+   * tier (B02 #101). `undefined` until the WCM identity team provisions the
+   * group — `isSuperuser()` then resolves `false` for everyone, leaving the
+   * admin features dormant rather than erroring.
+   */
+  adminGroupDn: string | undefined;
+}
+
+/**
+ * Superuser-tier config. The `SCHOLARS_LDAP_*` bind itself is read by
+ * `lib/sources/ldap.ts`; this getter adds only the group DN B02 needs. The
+ * mapping is plain `process.env`, but its only consumer — `lib/auth/superuser.ts`
+ * — is Node-only for the LDAP query.
+ */
+export function getSuperuserConfig(): SuperuserConfig {
+  return { adminGroupDn: optionalEnv("SCHOLARS_ADMIN_GROUP_DN") };
+}
