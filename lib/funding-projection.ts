@@ -65,6 +65,11 @@ export type GrantRowForIndex = {
    *  picks the first non-null value across the project's rows; for a
    *  given coreProjectNum all rows share the same applId. */
   applId?: number | null;
+  /** Issue #291 — RePORTER project keywords (the `Grant.keywords` JSON
+   *  column). A `string[]` in practice; typed `unknown` because it is a JSON
+   *  column. `projectFromRows` normalizes and unions it across the project's
+   *  rows. */
+  keywords?: unknown;
 };
 
 export type FundingDoc = {
@@ -107,6 +112,14 @@ export type FundingDoc = {
    *  'cdmrp', 'gates'. Drives the small "Source: …" attribution shown
    *  beneath the abstract in expanded grant rows. Null when no abstract. */
   abstractSource: string | null;
+  /** Issue #291 — NIH RePORTER project keywords, unioned + de-duped across
+   *  the project's grant rows. Indexed as a `keyword` field for exact-value
+   *  lookups and facet aggregations. Empty array when the project has none. */
+  keywords: string[];
+  /** Issue #291 — the same keywords joined into one string, indexed as
+   *  analyzed `text` so a topical query contributes to relevance ranking
+   *  alongside `abstract`. Empty string when the project has no keywords. */
+  keywordsText: string;
   /** Issue #86 — count of DISTINCT pmids attributed to the project across
    *  all its scholar rows. Drives the pubCount sort and the inline pub
    *  count on the result row. */
@@ -204,6 +217,18 @@ function buildSponsorText(args: {
     if (raw && raw !== short) parts.add(raw);
   }
   return Array.from(parts).join(" ");
+}
+
+/** Coerce a `Grant.keywords` JSON value to a clean `string[]` — non-array or
+ *  malformed input yields `[]`. Mirrors `extractMeshLabels` on the pub side:
+ *  a JSON column is `unknown`-shaped at the type level, so narrow defensively. */
+function normalizeKeywords(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item === "string" && item.length > 0) out.push(item);
+  }
+  return out;
 }
 
 /**
@@ -366,6 +391,20 @@ export function projectFromRows(
   const abstractSource = abstractRow?.abstractSource ?? null;
   const applId = rows.find((r) => r.applId)?.applId ?? null;
 
+  // Keywords: union across every grant row in the project, de-duped, in
+  // first-seen order. All rows for one coreProjectNum normally share the same
+  // RePORTER project and therefore the same keywords, but unioning is safe
+  // (and correct for the rare project whose rows diverge) — issue #291.
+  const keywordSeen = new Set<string>();
+  const keywords: string[] = [];
+  for (const r of rows) {
+    for (const kw of normalizeKeywords(r.keywords)) {
+      if (keywordSeen.has(kw)) continue;
+      keywordSeen.add(kw);
+      keywords.push(kw);
+    }
+  }
+
   // Date range: union across the group. With coreProjectNum-based
   // grouping (etl/search-index/index.ts), one project may cover
   // multiple InfoEd Account_Numbers for renewals, no-cost extensions,
@@ -406,6 +445,8 @@ export function projectFromRows(
     wcmInvestigatorCwids: people.map((p) => p.cwid),
     abstract,
     abstractSource,
+    keywords,
+    keywordsText: keywords.join(" "),
     pubCount: pubsByPmid.size,
     applId,
     publications: publicationsList,

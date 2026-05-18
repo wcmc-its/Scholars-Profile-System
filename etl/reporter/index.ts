@@ -31,13 +31,17 @@
  * Usage: `npm run etl:reporter`
  */
 import { prisma } from "../../lib/db";
+import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
+import { parseReporterTerms } from "@/lib/reporter-terms";
 
 type ReporterRow = {
   core_project_num: string;
   appl_id: number;
   abstract_text: string | null;
+  project_terms: string | null;
+  pref_terms: string | null;
 };
 
 const UPDATE_BATCH = 200;
@@ -71,7 +75,9 @@ async function step1_GrantAbstracts() {
       SELECT
         p.core_project_num,
         p.appl_id,
-        p.abstract_text
+        p.abstract_text,
+        p.project_terms,
+        p.pref_terms
       FROM grant_reporter_project p
       INNER JOIN (
         SELECT core_project_num, MAX(appl_id) AS max_appl_id
@@ -93,12 +99,23 @@ async function step1_GrantAbstracts() {
   console.log("Loading WCM grants from Postgres...");
   const grants = await prisma.grant.findMany({
     where: { awardNumber: { not: null } },
-    select: { id: true, awardNumber: true, applId: true, abstract: true },
+    select: {
+      id: true,
+      awardNumber: true,
+      applId: true,
+      abstract: true,
+      keywords: true,
+    },
   });
   console.log(`${grants.length} grants with non-null awardNumber.`);
 
   let matched = 0;
-  const toUpdate: Array<{ id: string; applId: number; abstract: string | null }> = [];
+  const toUpdate: Array<{
+    id: string;
+    applId: number;
+    abstract: string | null;
+    keywords: string[] | null;
+  }> = [];
   let unparsable = 0;
   let unmatched = 0;
 
@@ -114,10 +131,23 @@ async function step1_GrantAbstracts() {
       continue;
     }
     matched++;
+    const keywords = parseReporterTerms(r.pref_terms, r.project_terms);
     // Only update when something actually changed — avoids churning
-    // abstractFetchedAt on no-op runs.
-    if (g.applId !== r.appl_id || g.abstract !== r.abstract_text) {
-      toUpdate.push({ id: g.id, applId: r.appl_id, abstract: r.abstract_text });
+    // abstractFetchedAt / keywordsFetchedAt on no-op runs. `keywords` is an
+    // array; compare by canonical JSON since parseReporterTerms is deterministic.
+    const keywordsChanged =
+      JSON.stringify(g.keywords ?? null) !== JSON.stringify(keywords);
+    if (
+      g.applId !== r.appl_id ||
+      g.abstract !== r.abstract_text ||
+      keywordsChanged
+    ) {
+      toUpdate.push({
+        id: g.id,
+        applId: r.appl_id,
+        abstract: r.abstract_text,
+        keywords,
+      });
     }
   }
 
@@ -145,6 +175,9 @@ async function step1_GrantAbstracts() {
             abstract: u.abstract,
             abstractFetchedAt: fetchedAt,
             abstractSource: u.abstract == null ? null : "reporter",
+            keywords: u.keywords ?? Prisma.DbNull,
+            keywordsSource: u.keywords == null ? null : "reporter",
+            keywordsFetchedAt: fetchedAt,
           },
         })
       )

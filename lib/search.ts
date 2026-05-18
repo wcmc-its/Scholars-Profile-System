@@ -310,6 +310,12 @@ export const fundingIndexMapping = {
       // facet/eq lookups; surfaced as small "Source: NSF" attribution
       // under the expanded abstract.
       abstractSource: { type: "keyword" },
+      // Issue #291 — NIH RePORTER project keywords. `keyword` (multi-valued)
+      // for exact-value lookups and facet aggregations; `keywordsText` is the
+      // analyzed form so a topical query contributes to relevance alongside
+      // `abstract`. Both populated from `grant.keywords`.
+      keywords: { type: "keyword" },
+      keywordsText: { type: "text", analyzer: "funding_text" },
       // Issue #86 — RePORTER application ID; outbound deep-link target
       // from the expanded result row.
       applId: { type: "integer" },
@@ -360,6 +366,10 @@ export const FUNDING_FIELD_BOOSTS: ReadonlyArray<string> = [
   // Issue #86 — abstract-only matches are valuable but lower-signal than
   // a title hit. Boost 1 keeps it in the multi_match without dominating.
   "abstract^1",
+  // Issue #291 — NIH RePORTER project keywords. Same low boost as abstract:
+  // a topical keyword hit contributes to relevance without outranking a
+  // direct title match.
+  "keywordsText^1",
 ];
 
 /**
