@@ -2,7 +2,7 @@
  * Tests for app/api/revalidate/route.ts — Phase 2 Wave 4 ETL → ISR webhook.
  *
  * Threat coverage (Phase 2 Plan 09 threat register):
- *   - T-02-09-01 Spoofing — auth gate via `x-revalidate-token` header
+ *   - T-02-09-01 Spoofing — auth gate via `Authorization: Bearer` token
  *   - T-02-09-02 Tampering — path traversal / injection rejected by whitelist
  *   - T-02-09-03 Information disclosure — token never echoed in error body
  *
@@ -21,12 +21,26 @@ vi.mock("next/cache", () => ({
 
 import { POST } from "@/app/api/revalidate/route";
 import { NextRequest } from "next/server";
+import { resetRevalidateTokenCache } from "@/lib/revalidate-auth";
 
-function makeRequest(opts: { path?: string; token?: string; method?: string } = {}): NextRequest {
+function makeRequest(
+  opts: {
+    path?: string;
+    /** Wrapped as `Authorization: Bearer <token>`. */
+    token?: string;
+    /** Raw `Authorization` header value, for malformed-header cases. */
+    authorization?: string;
+    method?: string;
+  } = {},
+): NextRequest {
   const url = new URL("http://localhost/api/revalidate");
   if (opts.path !== undefined) url.searchParams.set("path", opts.path);
   const headers = new Headers();
-  if (opts.token !== undefined) headers.set("x-revalidate-token", opts.token);
+  if (opts.authorization !== undefined) {
+    headers.set("authorization", opts.authorization);
+  } else if (opts.token !== undefined) {
+    headers.set("authorization", `Bearer ${opts.token}`);
+  }
   return new NextRequest(url, { method: opts.method ?? "POST", headers });
 }
 
@@ -34,6 +48,8 @@ describe("POST /api/revalidate", () => {
   beforeEach(() => {
     mockRevalidatePath.mockReset();
     process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
   });
 
   it("401 when token missing", async () => {
@@ -145,6 +161,8 @@ describe("POST /api/revalidate — Phase 5 sitemap path", () => {
   beforeEach(() => {
     mockRevalidatePath.mockReset();
     process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
   });
 
   it("200 + revalidates /sitemap.xml (D-07 — ETL triggers sitemap ISR)", async () => {
@@ -170,6 +188,8 @@ describe("POST /api/revalidate — Phase 3 department paths", () => {
   beforeEach(() => {
     mockRevalidatePath.mockReset();
     process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
   });
 
   it("200 + revalidates /departments/{slug}", async () => {
@@ -219,6 +239,8 @@ describe("POST /api/revalidate — Phase 5 sitemap revalidation (SEO-01)", () =>
   beforeEach(() => {
     mockRevalidatePath.mockReset();
     process.env.SCHOLARS_REVALIDATE_TOKEN = "test-token-abc";
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
   });
 
   it("200 + revalidates /sitemap.xml when ETL calls after run", async () => {
@@ -242,5 +264,92 @@ describe("POST /api/revalidate — Phase 5 sitemap revalidation (SEO-01)", () =>
     const resp = await POST(req);
     expect(resp.status).toBe(401);
     expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/revalidate — bearer auth + rotation (#103 / B04)", () => {
+  beforeEach(() => {
+    mockRevalidatePath.mockReset();
+    process.env.SCHOLARS_REVALIDATE_TOKEN = "current-token";
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
+  });
+
+  it("401 when the Authorization header is absent", async () => {
+    const resp = await POST(makeRequest({ path: "/" }));
+    expect(resp.status).toBe(401);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("401 on a non-Bearer Authorization scheme", async () => {
+    const resp = await POST(
+      makeRequest({ path: "/", authorization: "Basic dXNlcjpwYXNz" }),
+    );
+    expect(resp.status).toBe(401);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("401 on a Bearer header with an empty token", async () => {
+    const resp = await POST(makeRequest({ path: "/", authorization: "Bearer " }));
+    expect(resp.status).toBe(401);
+  });
+
+  it("401 on the raw token sent without the Bearer scheme", async () => {
+    const resp = await POST(
+      makeRequest({ path: "/", authorization: "current-token" }),
+    );
+    expect(resp.status).toBe(401);
+  });
+
+  it("200 with the current token", async () => {
+    const resp = await POST(makeRequest({ path: "/", token: "current-token" }));
+    expect(resp.status).toBe(200);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/");
+  });
+
+  it("accepts a case-insensitive Bearer scheme", async () => {
+    const resp = await POST(
+      makeRequest({ path: "/", authorization: "bearer current-token" }),
+    );
+    expect(resp.status).toBe(200);
+  });
+
+  it("200 with the previous token during a rotation window", async () => {
+    process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS = "previous-token";
+    resetRevalidateTokenCache();
+    const resp = await POST(makeRequest({ path: "/", token: "previous-token" }));
+    expect(resp.status).toBe(200);
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/");
+  });
+
+  it("401 for a token that is neither current nor previous", async () => {
+    process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS = "previous-token";
+    resetRevalidateTokenCache();
+    const resp = await POST(
+      makeRequest({ path: "/", token: "two-rotations-ago" }),
+    );
+    expect(resp.status).toBe(401);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("500 when no token is configured at all", async () => {
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN;
+    delete process.env.SCHOLARS_REVALIDATE_TOKEN_PREVIOUS;
+    resetRevalidateTokenCache();
+    const resp = await POST(makeRequest({ path: "/", token: "current-token" }));
+    expect(resp.status).toBe(500);
+    const body = await resp.json();
+    expect(body.error).toMatch(/misconfigured/i);
+    expect(mockRevalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("does not echo the presented token in the 401 body", async () => {
+    const resp = await POST(
+      makeRequest({ path: "/", token: "leaked-attempt-xyz" }),
+    );
+    expect(resp.status).toBe(401);
+    const serialized = JSON.stringify(await resp.json());
+    expect(serialized).not.toContain("leaked-attempt-xyz");
+    expect(serialized).not.toContain("current-token");
   });
 });
