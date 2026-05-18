@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 
@@ -61,11 +61,7 @@ export function InvestigatorFacet({
   }, [unselected, query, sort]);
 
   const hasQuery = query.trim().length > 0;
-  const visibleCap = hasQuery
-    ? EXPANDED_VISIBLE
-    : showAll
-      ? EXPANDED_VISIBLE
-      : TOP_VISIBLE;
+  const visibleCap = hasQuery ? EXPANDED_VISIBLE : showAll ? EXPANDED_VISIBLE : TOP_VISIBLE;
   const visible = filtered.slice(0, visibleCap);
   const hiddenCount = Math.max(0, filtered.length - visible.length);
 
@@ -74,7 +70,7 @@ export function InvestigatorFacet({
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold text-[#1a1a1a]">
           Investigator{" "}
-          <span className="ml-1 text-[12px] font-normal tabular-nums text-[#757575]">
+          <span className="ml-1 text-[12px] font-normal text-[#757575] tabular-nums">
             {totalDistinct.toLocaleString()}
           </span>
         </h3>
@@ -118,9 +114,7 @@ export function InvestigatorFacet({
       </ul>
 
       {visible.length === 0 && hasQuery ? (
-        <div className="px-1 py-1 text-[12px] text-[#9a9890]">
-          No matching investigators
-        </div>
+        <div className="px-1 py-1 text-[12px] text-[#9a9890]">No matching investigators</div>
       ) : null}
 
       {!hasQuery && !showAll && hiddenCount > 0 ? (
@@ -168,7 +162,7 @@ function InvestigatorRow({ investigator }: { investigator: InvestigatorFacetItem
         <span className="min-w-0 flex-1 truncate" title={investigator.displayName}>
           {investigator.displayName}
         </span>
-        <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+        <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
           {investigator.count.toLocaleString()}
         </span>
       </Link>

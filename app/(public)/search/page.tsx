@@ -1,5 +1,9 @@
 import * as React from "react";
-import Link from "next/link";
+import NextLink from "next/link";
+import {
+  SearchTransitionProvider,
+  TransitionLink as Link,
+} from "@/components/search/transition-link";
 import type { Metadata } from "next";
 import { ChevronDown } from "lucide-react";
 import { SortLinks } from "@/components/search/sort-links";
@@ -121,39 +125,28 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const pi: PiFilter | undefined =
     rawPi === "any" || rawPi === "active" || rawPi === "multi" ? rawPi : undefined;
   const rawPiMin = parseOptionalInt(sp.pi_min);
-  const piMin = Math.min(
-    PI_MIN_CEILING,
-    Math.max(PI_MIN_FLOOR, rawPiMin ?? PI_MIN_FLOOR),
-  );
+  const piMin = Math.min(PI_MIN_CEILING, Math.max(PI_MIN_FLOOR, rawPiMin ?? PI_MIN_FLOOR));
 
   // Funding filters (issue #78 Wave D — multi-select repeated params).
   const fundingFilters: FundingFilters = {
     funder: parseList(sp.funder).length > 0 ? parseList(sp.funder) : undefined,
-    directFunder:
-      parseList(sp.directFunder).length > 0 ? parseList(sp.directFunder) : undefined,
-    programType:
-      parseList(sp.programType).length > 0 ? parseList(sp.programType) : undefined,
-    mechanism:
-      parseList(sp.mechanism).length > 0 ? parseList(sp.mechanism) : undefined,
-    status: (parseList(sp.status).filter(
-      (s): s is FundingStatus =>
-        s === "active" || s === "ending_soon" || s === "recently_ended",
-    ) as FundingStatus[]) as FundingStatus[],
-    department:
-      parseList(sp.department).length > 0 ? parseList(sp.department) : undefined,
+    directFunder: parseList(sp.directFunder).length > 0 ? parseList(sp.directFunder) : undefined,
+    programType: parseList(sp.programType).length > 0 ? parseList(sp.programType) : undefined,
+    mechanism: parseList(sp.mechanism).length > 0 ? parseList(sp.mechanism) : undefined,
+    status: parseList(sp.status).filter(
+      (s): s is FundingStatus => s === "active" || s === "ending_soon" || s === "recently_ended",
+    ) as FundingStatus[] as FundingStatus[],
+    department: parseList(sp.department).length > 0 ? parseList(sp.department) : undefined,
     role: parseList(sp.role).filter(
-      (r): r is FundingRoleBucket =>
-        r === "PI" || r === "Multi-PI" || r === "Co-I",
+      (r): r is FundingRoleBucket => r === "PI" || r === "Multi-PI" || r === "Co-I",
     ) as FundingRoleBucket[],
-    investigator:
-      parseList(sp.investigator).length > 0 ? parseList(sp.investigator) : undefined,
+    investigator: parseList(sp.investigator).length > 0 ? parseList(sp.investigator) : undefined,
   };
   // Empty arrays should collapse to undefined so the API treats them as
   // "no filter" rather than "match nothing".
   if (fundingFilters.status && fundingFilters.status.length === 0)
     fundingFilters.status = undefined;
-  if (fundingFilters.role && fundingFilters.role.length === 0)
-    fundingFilters.role = undefined;
+  if (fundingFilters.role && fundingFilters.role.length === 0) fundingFilters.role = undefined;
 
   // Pub filters.
   const yearMin = parseOptionalInt(sp.yearMin);
@@ -162,8 +155,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (Array.isArray(sp.publicationType) ? sp.publicationType[0] : sp.publicationType) ?? "";
   const journal = parseList(sp.journal);
   const wcmAuthorRole = parseList(sp.wcmAuthorRole).filter(
-    (r): r is "first" | "senior" | "middle" =>
-      r === "first" || r === "senior" || r === "middle",
+    (r): r is "first" | "senior" | "middle" => r === "first" || r === "senior" || r === "middle",
   );
   const wcmAuthor = parseList(sp.wcmAuthor);
   // Mentoring activity facet — multi-select on mentee program at time of
@@ -245,8 +237,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     // active shape gates on the resolved concept. `concept_expanded`
     // doesn't gate (admission via top-level should), so it's excluded —
     // expanded mode falls through to the generic empty state instead.
-    (pubsResult.queryShape === "concept_filtered" ||
-      pubsResult.queryShape === "concept_fallback")
+    (pubsResult.queryShape === "concept_filtered" || pubsResult.queryShape === "concept_fallback")
   ) {
     const broad = await searchPublications({
       q,
@@ -331,58 +322,60 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           </div>
         </div>
       ) : null}
-      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
-        {type === "publications" ? (
-          <PublicationsResults
-            q={q}
-            page={page}
-            sort={sort as PublicationsSort}
-            yearMin={yearMin}
-            yearMax={yearMax}
-            publicationType={publicationType || undefined}
-            journal={journal}
-            wcmAuthorRole={wcmAuthorRole}
-            wcmAuthor={wcmAuthor}
-            mentoringProgram={mentoringProgram}
-            result={pubsResult}
-            conceptEmpty={
-              effectiveMeshResolution &&
-              pubsResult.total === 0 &&
-              // SPEC §6.1 row 2 — suppress the concept-aware empty state
-              // under default expanded mode; concept_expanded won't return
-              // 0 unless `mesh=off` would also. Fall through to the
-              // generic empty state in that case.
-              chipMode !== "expanded_default"
-                ? {
-                    descriptorName: effectiveMeshResolution.name,
-                    broadCount: conceptEmptyBroadCount,
-                    broadenHref: buildMeshHref(sp, "off"),
-                  }
-                : null
-            }
-          />
-        ) : type === "funding" ? (
-          <FundingResults
-            q={q}
-            page={page}
-            sort={sort as FundingSort}
-            filters={fundingFilters}
-            result={fundingResult}
-          />
-        ) : (
-          <PeopleResults
-            q={q}
-            page={page}
-            sort={sort as PeopleSort}
-            deptDiv={deptDiv}
-            personType={personType}
-            activity={activity}
-            pi={pi}
-            piMin={piMin}
-            result={peopleResult}
-          />
-        )}
-      </div>
+      <SearchTransitionProvider>
+        <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
+          {type === "publications" ? (
+            <PublicationsResults
+              q={q}
+              page={page}
+              sort={sort as PublicationsSort}
+              yearMin={yearMin}
+              yearMax={yearMax}
+              publicationType={publicationType || undefined}
+              journal={journal}
+              wcmAuthorRole={wcmAuthorRole}
+              wcmAuthor={wcmAuthor}
+              mentoringProgram={mentoringProgram}
+              result={pubsResult}
+              conceptEmpty={
+                effectiveMeshResolution &&
+                pubsResult.total === 0 &&
+                // SPEC §6.1 row 2 — suppress the concept-aware empty state
+                // under default expanded mode; concept_expanded won't return
+                // 0 unless `mesh=off` would also. Fall through to the
+                // generic empty state in that case.
+                chipMode !== "expanded_default"
+                  ? {
+                      descriptorName: effectiveMeshResolution.name,
+                      broadCount: conceptEmptyBroadCount,
+                      broadenHref: buildMeshHref(sp, "off"),
+                    }
+                  : null
+              }
+            />
+          ) : type === "funding" ? (
+            <FundingResults
+              q={q}
+              page={page}
+              sort={sort as FundingSort}
+              filters={fundingFilters}
+              result={fundingResult}
+            />
+          ) : (
+            <PeopleResults
+              q={q}
+              page={page}
+              sort={sort as PeopleSort}
+              deptDiv={deptDiv}
+              personType={personType}
+              activity={activity}
+              pi={pi}
+              piMin={piMin}
+              result={peopleResult}
+            />
+          )}
+        </div>
+      </SearchTransitionProvider>
     </main>
   );
 }
@@ -431,11 +424,15 @@ function SearchMeta({
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
-      <h1 className="page-title mb-1 text-[28px] font-bold leading-tight tracking-[-0.01em]">
+      <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
         {q ? (
           <>
             Results for{" "}
-            <span className="font-bold text-[#2c4f6e]">{"“"}{q}{"”"}</span>
+            <span className="font-bold text-[#2c4f6e]">
+              {"“"}
+              {q}
+              {"”"}
+            </span>
           </>
         ) : (
           "Browse"
@@ -443,8 +440,7 @@ function SearchMeta({
       </h1>
       <div className="text-[13px] text-[#757575]">
         {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
-        {pubCount.toLocaleString()} publications ·{" "}
-        {fundingCount.toLocaleString()} funding
+        {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
       </div>
     </div>
   );
@@ -471,9 +467,24 @@ function ModeTabs({
   const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   return (
     <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
-      <ModeTab href={peopleHref} label="Scholars" count={peopleCount} active={activeType === "people"} />
-      <ModeTab href={pubHref} label="Publications" count={pubCount} active={activeType === "publications"} />
-      <ModeTab href={fundingHref} label="Funding" count={fundingCount} active={activeType === "funding"} />
+      <ModeTab
+        href={peopleHref}
+        label="Scholars"
+        count={peopleCount}
+        active={activeType === "people"}
+      />
+      <ModeTab
+        href={pubHref}
+        label="Publications"
+        count={pubCount}
+        active={activeType === "publications"}
+      />
+      <ModeTab
+        href={fundingHref}
+        label="Funding"
+        count={fundingCount}
+        active={activeType === "funding"}
+      />
     </nav>
   );
 }
@@ -490,7 +501,7 @@ function ModeTab({
   active: boolean;
 }) {
   return (
-    <Link
+    <NextLink
       href={href}
       className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
         active
@@ -506,7 +517,7 @@ function ModeTab({
       >
         {count.toLocaleString()}
       </span>
-    </Link>
+    </NextLink>
   );
 }
 
@@ -690,9 +701,7 @@ async function PeopleResults({
         hasActiveFilters={hasActiveFilters}
       />
       <section>
-        {chips.length > 0 ? (
-          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
-        ) : null}
+        {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
           tab="people"
           total={result.total}
@@ -710,7 +719,11 @@ async function PeopleResults({
         {result.hits.length === 0 ? (
           <EmptyState
             query={q}
-            tip={hasActiveFilters ? "Try clearing filters." : "Try a broader search term, or browse by department."}
+            tip={
+              hasActiveFilters
+                ? "Try clearing filters."
+                : "Try a broader search term, or browse by department."
+            }
           />
         ) : (
           <ul className="flex flex-col">
@@ -865,9 +878,7 @@ async function PublicationsResults({
   // bucket list (which always includes active selections, even when
   // their count dropped to 0). Falls back to the bare CWID if a selected
   // author is missing from the result set entirely (e.g. soft-deleted).
-  const authorNameByCwid = new Map(
-    result.facets.wcmAuthors.map((a) => [a.cwid, a.displayName]),
-  );
+  const authorNameByCwid = new Map(result.facets.wcmAuthors.map((a) => [a.cwid, a.displayName]));
   for (const v of wcmAuthor) {
     chips.push({
       label: authorNameByCwid.get(v) ?? v,
@@ -877,10 +888,7 @@ async function PublicationsResults({
   for (const v of journal) {
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
-  const MENTORING_PROGRAM_LABEL: Record<
-    "md" | "mdphd" | "phd" | "postdoc" | "ecr",
-    string
-  > = {
+  const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", string> = {
     md: "MD mentee",
     mdphd: "MD-PhD mentee",
     phd: "PhD mentee",
@@ -941,19 +949,19 @@ async function PublicationsResults({
         activeMentoringProgram={mentoringProgram}
         mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
-        buildHref={(overrides) => buildUrl((sp) => {
-          for (const [k, v] of Object.entries(overrides)) {
-            if (v === "") sp.delete(k);
-            else sp.set(k, v);
-          }
-        })}
+        buildHref={(overrides) =>
+          buildUrl((sp) => {
+            for (const [k, v] of Object.entries(overrides)) {
+              if (v === "") sp.delete(k);
+              else sp.set(k, v);
+            }
+          })
+        }
         hasActiveFilters={chips.length > 0}
         clearAllHref={clearAllHref}
       />
       <section>
-        {chips.length > 0 ? (
-          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
-        ) : null}
+        {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
           tab="publications"
           total={result.total}
@@ -1086,12 +1094,16 @@ async function FundingResults({
     });
 
   const clearAllHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
-  const hasActiveFilters =
-    !!(filters.funder?.length || filters.directFunder?.length ||
-      filters.programType?.length ||
-      filters.mechanism?.length || filters.status?.length ||
-      filters.department?.length || filters.role?.length ||
-      filters.investigator?.length);
+  const hasActiveFilters = !!(
+    filters.funder?.length ||
+    filters.directFunder?.length ||
+    filters.programType?.length ||
+    filters.mechanism?.length ||
+    filters.status?.length ||
+    filters.department?.length ||
+    filters.role?.length ||
+    filters.investigator?.length
+  );
 
   // Issue #80 item 3 — chip strip mirrors the People + Publications tabs.
   // Funder + mechanism chips render in verbose form (full sponsor name,
@@ -1177,9 +1189,7 @@ async function FundingResults({
         investigatorTotalDistinct={result.facets.investigatorsTotal}
       />
       <section className="min-w-0">
-        {chips.length > 0 ? (
-          <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} />
-        ) : null}
+        {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[13px] text-[#757575]">
             {result.total === 0
@@ -1282,7 +1292,7 @@ function FacetSidebarFunding({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -1309,25 +1319,22 @@ function FacetSidebarFunding({
           search with a known PI), so it sits at the top of the rail
           right after Status. */}
       {investigatorItems.length > 0 ? (
-        <InvestigatorFacet
-          items={investigatorItems}
-          totalDistinct={investigatorTotalDistinct}
-        />
+        <InvestigatorFacet items={investigatorItems} totalDistinct={investigatorTotalDistinct} />
       ) : null}
 
       {facets.funders.length > 0 || facets.directFunders.length > 0 ? (
         <FunderFacet
-          items={sortActiveFirst(facets.funders, (f) =>
-            activeFunder.includes(f.value),
-          ).map((f) => ({
-            value: f.value,
-            short: f.label,
-            full: expandSponsor(f.value),
-            aliases: collectAliases(f.value),
-            count: f.count,
-            isActive: activeFunder.includes(f.value),
-            href: toggleHref("funder", f.value),
-          }))}
+          items={sortActiveFirst(facets.funders, (f) => activeFunder.includes(f.value)).map(
+            (f) => ({
+              value: f.value,
+              short: f.label,
+              full: expandSponsor(f.value),
+              aliases: collectAliases(f.value),
+              count: f.count,
+              isActive: activeFunder.includes(f.value),
+              href: toggleHref("funder", f.value),
+            }),
+          )}
           directItems={facets.directFunders.map((f) => ({
             value: f.value,
             short: f.label,
@@ -1342,25 +1349,23 @@ function FacetSidebarFunding({
 
       {facets.programTypes.length > 0 ? (
         <FacetGroup label="Type" collapseAfter={6}>
-          {sortActiveFirst(facets.programTypes, (p) =>
-            activeProgramType.includes(p.value),
-          ).map((p) => (
-            <FacetCheckbox
-              key={p.value}
-              label={PROGRAM_TYPE_LABEL[p.value] ?? p.value}
-              count={p.count}
-              isActive={activeProgramType.includes(p.value)}
-              href={toggleHref("programType", p.value)}
-            />
-          ))}
+          {sortActiveFirst(facets.programTypes, (p) => activeProgramType.includes(p.value)).map(
+            (p) => (
+              <FacetCheckbox
+                key={p.value}
+                label={PROGRAM_TYPE_LABEL[p.value] ?? p.value}
+                count={p.count}
+                isActive={activeProgramType.includes(p.value)}
+                href={toggleHref("programType", p.value)}
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 
       {facets.mechanisms.length > 0 ? (
         <FacetGroup label="Mechanism (NIH)" collapseAfter={6}>
-          {sortActiveFirst(facets.mechanisms, (m) =>
-            activeMechanism.includes(m.value),
-          ).map((m) => {
+          {sortActiveFirst(facets.mechanisms, (m) => activeMechanism.includes(m.value)).map((m) => {
             const desc = mechanismDescriptor(m.value);
             return (
               <FacetCheckbox
@@ -1387,18 +1392,18 @@ function FacetSidebarFunding({
 
       {facets.departments.length > 0 ? (
         <FacetGroup label="Department" collapseAfter={6}>
-          {sortActiveFirst(facets.departments, (d) =>
-            activeDepartment.includes(d.value),
-          ).map((d) => (
-            <FacetCheckbox
-              key={d.value}
-              label={d.value}
-              count={d.count}
-              isActive={activeDepartment.includes(d.value)}
-              href={toggleHref("department", d.value)}
-              wrap
-            />
-          ))}
+          {sortActiveFirst(facets.departments, (d) => activeDepartment.includes(d.value)).map(
+            (d) => (
+              <FacetCheckbox
+                key={d.value}
+                label={d.value}
+                count={d.count}
+                isActive={activeDepartment.includes(d.value)}
+                href={toggleHref("department", d.value)}
+                wrap
+              />
+            ),
+          )}
         </FacetGroup>
       ) : null}
 
@@ -1481,24 +1486,22 @@ function ActiveFilterChips({
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       {chips.map((c, i) => {
-        const aria =
-          c.ariaLabel ??
-          (typeof c.label === "string" ? c.label : "filter");
+        const aria = c.ariaLabel ?? (typeof c.label === "string" ? c.label : "filter");
         return (
-        <Link
-          key={`${aria}-${c.removeHref}-${i}`}
-          href={c.removeHref}
-          aria-label={`Remove filter: ${aria}`}
-          className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pl-3 pr-1.5 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
-        >
-          <span>{c.label}</span>
-          <span
-            aria-hidden="true"
-            className="ml-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-[14px] leading-none text-[#2c4f6e] hover:bg-[#2c4f6e]/15"
+          <Link
+            key={`${aria}-${c.removeHref}-${i}`}
+            href={c.removeHref}
+            aria-label={`Remove filter: ${aria}`}
+            className="inline-flex h-7 items-center gap-1 rounded-full border border-[#c5d3df] bg-[#eaf0f5] py-0 pr-1.5 pl-3 text-xs font-medium text-[#2c4f6e] no-underline transition-colors hover:border-[#9fb6c9] hover:bg-[#dde7f0] hover:no-underline"
           >
-            ×
-          </span>
-        </Link>
+            <span>{c.label}</span>
+            <span
+              aria-hidden="true"
+              className="ml-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full text-[14px] leading-none text-[#2c4f6e] hover:bg-[#2c4f6e]/15"
+            >
+              ×
+            </span>
+          </Link>
         );
       })}
       <Link href={clearAllHref} className="ml-1 text-xs text-[#757575] hover:text-[#2c4f6e]">
@@ -1535,9 +1538,10 @@ function ResultsToolbar({
   const end = Math.min(total, (page + 1) * pageSize);
   // "matching filters" only when at least one facet is active. Without
   // filters, the qualifier reads like the count is filtered when it isn't.
-  const noun = tab === "people"
-    ? `${total === 1 ? "scholar" : "scholars"}${hasActiveFilters ? " matching filters" : ""}`
-    : "publications";
+  const noun =
+    tab === "people"
+      ? `${total === 1 ? "scholar" : "scholars"}${hasActiveFilters ? " matching filters" : ""}`
+      : "publications";
 
   const peopleOpts: Array<{ value: PeopleSort; label: string }> = [
     { value: "relevance", label: "Relevance" },
@@ -1586,7 +1590,9 @@ function ResultsToolbar({
           {showAboutImpact ? (
             <>
               {" "}
-              <span aria-hidden="true" className="text-muted-foreground/60">·</span>{" "}
+              <span aria-hidden="true" className="text-muted-foreground/60">
+                ·
+              </span>{" "}
               <Link
                 href={methodologyHref("impact")}
                 className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-accent-slate)]"
@@ -1649,7 +1655,7 @@ function FacetSidebar({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -1773,7 +1779,7 @@ function PiMinStepper({
   const buttonActive = "bg-white text-[#1a1a1a] hover:border-[#2c4f6e]";
   const buttonMuted = "bg-[#f4f4f4] text-[#bdbdbd] cursor-default";
   return (
-    <li className="ml-6 mt-1 flex items-center gap-2 py-1 leading-[1.4]">
+    <li className="mt-1 ml-6 flex items-center gap-2 py-1 leading-[1.4]">
       <span className="text-[12.5px] text-[#5a5a5a]">Min active grants:</span>
       {decDisabled ? (
         <span className={`${buttonBase} ${buttonMuted}`} aria-disabled="true">
@@ -1843,7 +1849,7 @@ function FacetSidebarPubs({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-[#757575]">
+        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -1978,8 +1984,7 @@ function FacetGroup({
   collapseAfter?: number;
 }) {
   const items = React.Children.toArray(children);
-  const shouldCollapse =
-    collapseAfter !== undefined && items.length > collapseAfter;
+  const shouldCollapse = collapseAfter !== undefined && items.length > collapseAfter;
   const head = shouldCollapse ? items.slice(0, collapseAfter!) : items;
   const tail = shouldCollapse ? items.slice(collapseAfter!) : [];
   return (
@@ -1991,9 +1996,7 @@ function FacetGroup({
         // variants (`[&[open]_.x]:hidden`) compile to
         // `details[open] .x { display: none }` and let the open/closed
         // labels swap without any client JS.
-        <details
-          className="mt-1 [&[open]_.fg-show]:hidden [&:not([open])_.fg-hide]:hidden [&[open]_.fg-chevron]:rotate-180"
-        >
+        <details className="mt-1 [&:not([open])_.fg-hide]:hidden [&[open]_.fg-chevron]:rotate-180 [&[open]_.fg-show]:hidden">
           <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12.5px] font-medium text-[#2c4f6e] hover:underline [&::-webkit-details-marker]:hidden">
             <ChevronDown
               aria-hidden
@@ -2065,7 +2068,7 @@ function FacetCheckbox({
               />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               {count !== undefined ? (
-                <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+                <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
                   {count.toLocaleString()}
                 </span>
               ) : null}
@@ -2076,8 +2079,7 @@ function FacetCheckbox({
       </li>
     );
   }
-  const fallbackTitle =
-    tooltip ?? (typeof label === "string" ? label : undefined);
+  const fallbackTitle = tooltip ?? (typeof label === "string" ? label : undefined);
   const wrapInTooltip = (children: React.ReactNode) =>
     tooltip ? <HoverTooltip text={tooltip}>{children}</HoverTooltip> : children;
   if (wrap) {
@@ -2099,7 +2101,7 @@ function FacetCheckbox({
             />
             <span className="min-w-0 flex-1 break-words">{label}</span>
             {count !== undefined ? (
-              <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+              <span className="mt-[1px] shrink-0 text-[12px] text-[#757575] tabular-nums">
                 {count.toLocaleString()}
               </span>
             ) : null}
@@ -2111,30 +2113,30 @@ function FacetCheckbox({
   return (
     <li className="flex items-center gap-2 py-1 leading-[1.4]">
       {wrapInTooltip(
-      <Link
-        href={href}
-        title={tooltip ? undefined : fallbackTitle}
-        className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
-      >
-        {/* readOnly input: state lives in the URL; the link toggles it. */}
-        <input
-          type={inputType}
-          readOnly
-          checked={!!isActive}
-          tabIndex={-1}
-          aria-hidden="true"
-          className="cursor-pointer accent-[#2c4f6e]"
-        />
-        {/* Truncate keeps the count column straight when names are short
+        <Link
+          href={href}
+          title={tooltip ? undefined : fallbackTitle}
+          className="flex flex-1 items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+        >
+          {/* readOnly input: state lives in the URL; the link toggles it. */}
+          <input
+            type={inputType}
+            readOnly
+            checked={!!isActive}
+            tabIndex={-1}
+            aria-hidden="true"
+            className="cursor-pointer accent-[#2c4f6e]"
+          />
+          {/* Truncate keeps the count column straight when names are short
             and predictable. The title attribute surfaces the full label
             on hover for the rare overflow. */}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        {count !== undefined ? (
-          <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
-            {count.toLocaleString()}
-          </span>
-        ) : null}
-      </Link>,
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {count !== undefined ? (
+            <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
+              {count.toLocaleString()}
+            </span>
+          ) : null}
+        </Link>,
       )}
     </li>
   );
@@ -2189,14 +2191,8 @@ function Pagination({
   }
 
   return (
-    <nav
-      className="mt-8 flex items-center justify-center gap-1 pt-6"
-      aria-label="Pagination"
-    >
-      <PaginationButton
-        href={page > 0 ? buildHref(page - 1) : null}
-        label="‹ Prev"
-      />
+    <nav className="mt-8 flex items-center justify-center gap-1 pt-6" aria-label="Pagination">
+      <PaginationButton href={page > 0 ? buildHref(page - 1) : null} label="‹ Prev" />
       {cells.map((c) =>
         c.kind === "ellipsis" ? (
           <span key={c.key} className="px-1 text-[13px] text-[#757575]">
@@ -2211,10 +2207,7 @@ function Pagination({
           />
         ),
       )}
-      <PaginationButton
-        href={page < totalPages - 1 ? buildHref(page + 1) : null}
-        label="Next ›"
-      />
+      <PaginationButton href={page < totalPages - 1 ? buildHref(page + 1) : null} label="Next ›" />
     </nav>
   );
 }

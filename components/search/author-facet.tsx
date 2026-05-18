@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
@@ -71,11 +71,7 @@ export function AuthorFacet({
   const hasQuery = query.trim().length > 0;
   // Show-all unconditionally expands; with a query, the search itself
   // narrows so we hide the Show-all toggle (per spec §"Search/typeahead").
-  const visibleCap = hasQuery
-    ? EXPANDED_VISIBLE
-    : showAll
-      ? EXPANDED_VISIBLE
-      : TOP_VISIBLE;
+  const visibleCap = hasQuery ? EXPANDED_VISIBLE : showAll ? EXPANDED_VISIBLE : TOP_VISIBLE;
   const visible = filtered.slice(0, visibleCap);
   const hiddenCount = Math.max(0, filtered.length - visible.length);
 
@@ -84,7 +80,7 @@ export function AuthorFacet({
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold text-[#1a1a1a]">
           Author{" "}
-          <span className="ml-1 text-[12px] font-normal tabular-nums text-[#757575]">
+          <span className="ml-1 text-[12px] font-normal text-[#757575] tabular-nums">
             {totalDistinct.toLocaleString()}
           </span>
         </h3>
@@ -128,9 +124,7 @@ export function AuthorFacet({
       </ul>
 
       {visible.length === 0 && hasQuery ? (
-        <div className="px-1 py-1 text-[12px] text-[#9a9890]">
-          No matching authors
-        </div>
+        <div className="px-1 py-1 text-[12px] text-[#9a9890]">No matching authors</div>
       ) : null}
 
       {!hasQuery && !showAll && hiddenCount > 0 ? (
@@ -193,7 +187,7 @@ function AuthorRow({ author }: { author: AuthorFacetItem }) {
           <span className="min-w-0 flex-1 truncate" title={author.displayName}>
             {author.displayName}
           </span>
-          <span className="shrink-0 text-[12px] tabular-nums text-[#757575]">
+          <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
             {author.count.toLocaleString()}
           </span>
         </Link>
