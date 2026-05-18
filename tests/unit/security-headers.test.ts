@@ -73,4 +73,11 @@ describe("buildContentSecurityPolicy", () => {
     expect(csp["connect-src"]).toContain("ws:");
     expect(csp["connect-src"]).toContain("wss:");
   });
+
+  it("routes violation reports to the in-app /api/csp-report collector", () => {
+    const prod = parseCsp(buildContentSecurityPolicy({ isProduction: true }));
+    const dev = parseCsp(buildContentSecurityPolicy({ isProduction: false }));
+    expect(prod["report-uri"]).toBe("/api/csp-report");
+    expect(dev["report-uri"]).toBe("/api/csp-report");
+  });
 });

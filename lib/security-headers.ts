@@ -60,6 +60,9 @@ export function buildContentSecurityPolicy(opts: {
     "style-src": "'self' 'unsafe-inline'",
     // Every client fetch targets a same-origin route handler.
     "connect-src": connectSrc.join(" "),
+    // Violations POST to the in-app collector, which logs them as structured
+    // lines — the sink for the report-only observation window (#374).
+    "report-uri": "/api/csp-report",
   };
 
   return Object.entries(directives)
