@@ -207,3 +207,45 @@ describe("ANALYTICS-02 (server) — search_query structured log (publications br
     expect(parsed.filters.yearMax).toBe(2023);
   });
 });
+
+// Issue #294 PR-5 — the GET response carries a Server-Timing header so the
+// resolver / search latencies show per-request in browser DevTools.
+describe("Issue #294 PR-5 — Server-Timing response header", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleSpy.mockRestore();
+    vi.clearAllMocks();
+  });
+
+  it("attaches a Server-Timing header on the people branch", async () => {
+    const { GET } = await import("@/app/api/search/route");
+    const res = await GET(
+      new NextRequest(
+        new URL("http://localhost/api/search?q=cancer&type=people"),
+      ),
+    );
+    const header = res.headers.get("Server-Timing");
+    expect(header).toBeTruthy();
+    expect(header).toContain("taxonomy;dur=");
+    expect(header).toContain("search;dur=");
+    expect(header).toContain('desc="searchPeople"');
+  });
+
+  it("attaches a Server-Timing header on the publications branch", async () => {
+    const { GET } = await import("@/app/api/search/route");
+    const res = await GET(
+      new NextRequest(
+        new URL("http://localhost/api/search?q=cancer&type=publications"),
+      ),
+    );
+    const header = res.headers.get("Server-Timing");
+    expect(header).toBeTruthy();
+    expect(header).toContain("taxonomy;dur=");
+    expect(header).toContain('desc="searchPublications"');
+  });
+});

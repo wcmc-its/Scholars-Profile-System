@@ -41,6 +41,7 @@ import { FundingResultsList } from "@/components/search/funding-results-list";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { timed } from "@/lib/api/search-timing";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
 import { displayPublicationType } from "@/lib/publication-types";
@@ -82,12 +83,20 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const sort = rawSort ?? (q === "" && type === "publications" ? emptyPubDefault : "relevance");
 
   const showAZ = q === "" && type === "people";
-  const [azBuckets, taxonomyMatch] = await Promise.all([
+  // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
+  // when q is under 3 chars: the resolver call is skipped entirely, so the
+  // log records "skipped" rather than a misleading ~0ms measurement.
+  const [azBuckets, taxonomyTimed] = await Promise.all([
     showAZ ? getAZBuckets() : Promise.resolve(null),
     q.trim().length >= 3
-      ? matchQueryToTaxonomy(q)
-      : Promise.resolve({ state: "none" as const, meshResolution: null }),
+      ? timed(() => matchQueryToTaxonomy(q))
+      : Promise.resolve({
+          result: { state: "none" as const, meshResolution: null },
+          ms: null,
+        }),
   ]);
+  const taxonomyMatch = taxonomyTimed.result;
+  const taxonomyMatchMs = taxonomyTimed.ms;
 
   // Issue #259 §1.11 / §6.2 — `?mesh` URL contract. Three states:
   //   absent     → default expanded mode (chip renders narrow + broaden affordances)
@@ -169,6 +178,12 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // Issue #8 item 1: the subhead "{n} people · {n} publications · {n} funding"
   // needs all counts regardless of which tab is active. Run lightweight
   // counts for the inactive tabs in parallel.
+  //
+  // Issue #294 PR-5 — `searchesMs` is the wall time of this parallel
+  // Promise.all (≈ the slowest of the three searches) — the search phase the
+  // user actually waits on. Per-function p50/p95 comes from the /api/search
+  // route handler, which runs one search per request.
+  const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
       q,
@@ -221,6 +236,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       meshResolution: effectiveMeshResolution,
     }),
   ]);
+  const searchesMs = Math.round(performance.now() - searchesStart);
 
   // Issue #274 — when the pub-tab concept search lands on zero hits, we
   // want to offer the broad-text count as a concrete affordance. Run the
@@ -229,6 +245,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // This is a single extra OS query, paid only on the dead-end pages
   // where the user is otherwise stuck staring at "no results".
   let conceptEmptyBroadCount: number | null = null;
+  // Issue #294 PR-5 — `broadCountMs` times the #274 dead-end fallback count
+  // when it runs; null on every render where the fallback does not fire.
+  let broadCountMs: number | null = null;
   if (
     type === "publications" &&
     effectiveMeshResolution &&
@@ -239,6 +258,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     // expanded mode falls through to the generic empty state instead.
     (pubsResult.queryShape === "concept_filtered" || pubsResult.queryShape === "concept_fallback")
   ) {
+    const broadStart = performance.now();
     const broad = await searchPublications({
       q,
       page: 0,
@@ -257,7 +277,39 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       meshResolution: null,
     });
     conceptEmptyBroadCount = broad.total;
+    broadCountMs = Math.round(performance.now() - broadStart);
   }
+
+  // Issue #294 PR-5 — structured render-timing log. The /search page is a
+  // Server Component and cannot set a Server-Timing response header (the
+  // route handler does); this log is the audit's "or equivalent" and is what
+  // aggregates into p50/p95.
+  console.log(
+    JSON.stringify({
+      event: "search_page_render",
+      q,
+      type,
+      page,
+      sort,
+      peopleCount: peopleResult.total,
+      pubCount: pubsResult.total,
+      fundingCount: fundingResult.total,
+      // Timing, whole ms. `taxonomyMatchMs` is null when q < 3 chars (the
+      // resolver is skipped); `searchesMs` is the parallel wall time of the
+      // three searches; `broadCountMs` is null unless the #274 fallback ran.
+      taxonomyMatchMs,
+      searchesMs,
+      broadCountMs,
+      // MeSH-resolution context — same field names as the route handler's
+      // `search_query` log so the two streams join cleanly.
+      meshResolutionDescriptorUi: taxonomyMatch.meshResolution?.descriptorUi ?? null,
+      meshResolutionConfidence: taxonomyMatch.meshResolution?.confidence ?? null,
+      meshOff,
+      meshStrict,
+      conceptMode,
+      ts: new Date().toISOString(),
+    }),
+  );
 
   return (
     <main>

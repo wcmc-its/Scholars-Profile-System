@@ -20,6 +20,7 @@ import {
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
+import { serverTimingHeader } from "@/lib/api/search-timing";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,11 @@ export async function GET(request: NextRequest) {
     // the handler) so the funding query can add its OR-of-evidence clause
     // under SEARCH_FUNDING_TAB_CONCEPT=on. `effectiveMeshResolution` honors
     // `?mesh=off`, mirroring the publications branch.
+    // Issue #294 PR-5 — funding-search latency. #259's split-scope timing
+    // (`taxonomyMatchMs` resolver-only, `searchLatencyMs` for the search)
+    // reached the people / publications branches but never funding; this
+    // closes the gap so all three branches log a comparable `searchLatencyMs`.
+    const searchStart = Date.now();
     const result = await searchFunding({
       q,
       page,
@@ -94,6 +100,7 @@ export async function GET(request: NextRequest) {
       filters,
       meshResolution: effectiveMeshResolution,
     });
+    const searchLatencyMs = Date.now() - searchStart;
     // Issue #295 — true when the funding concept clause actually fired (flag
     // on AND a descriptor resolved with a non-empty descendant set), so the
     // flag rollout is observable in the query log.
@@ -115,10 +122,13 @@ export async function GET(request: NextRequest) {
         // SPEC §7.5 — resolver scope. Logged on every branch so a resolver
         // regression (orthogonal to the rebalance) is observable here too.
         taxonomyMatchMs,
+        // Issue #294 PR-5 — funding-search latency, mirroring the
+        // people / publications branches' `searchLatencyMs`.
+        searchLatencyMs,
         ts: new Date().toISOString(),
       }),
     );
-    return NextResponse.json(result);
+    return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchFunding");
   }
 
   if (type === "publications") {
@@ -210,7 +220,7 @@ export async function GET(request: NextRequest) {
         ts: new Date().toISOString(),
       }),
     );
-    return NextResponse.json(result);
+    return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchPublications");
   }
 
   const sort = (params.get("sort") ?? "relevance") as PeopleSort;
@@ -314,9 +324,29 @@ export async function GET(request: NextRequest) {
       ts: new Date().toISOString(),
     }),
   );
-  return NextResponse.json(result);
+  return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchPeople");
 }
 
 function orUndefined<T>(arr: T[]): T[] | undefined {
   return arr.length > 0 ? arr : undefined;
+}
+
+// Issue #294 PR-5 — JSON response carrying a `Server-Timing` header so the
+// resolver and search latencies show per-request in browser DevTools. The
+// same split-scope numbers as the `search_query` log above (`taxonomyMatchMs`
+// / `searchLatencyMs`), in the form DevTools and RUM tools parse natively.
+function jsonWithTiming<T>(
+  body: T,
+  taxonomyMatchMs: number,
+  searchLatencyMs: number,
+  searchLabel: string,
+) {
+  return NextResponse.json(body, {
+    headers: {
+      "Server-Timing": serverTimingHeader([
+        { name: "taxonomy", ms: taxonomyMatchMs, desc: "matchQueryToTaxonomy" },
+        { name: "search", ms: searchLatencyMs, desc: searchLabel },
+      ]),
+    },
+  });
 }
