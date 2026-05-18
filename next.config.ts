@@ -5,7 +5,14 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,
+  // ADR-006: headshots render as a native <img> via the Radix Avatar
+  // primitive, not next/image. `unoptimized` is a forward-guard — if a
+  // <Image> component is ever added it will not route through the
+  // request-time `/_next/image` sharp optimizer, which on the 1-vCPU
+  // Fargate task would compete with Prisma for CPU (docs/PRODUCTION.md
+  // § Database connection pooling).
   images: {
+    unoptimized: true,
     remotePatterns: [
       {
         protocol: "https",
