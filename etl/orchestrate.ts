@@ -153,10 +153,10 @@ async function main() {
 
 /**
  * POST /api/revalidate?path={p} with the shared SCHOLARS_REVALIDATE_TOKEN
- * header. Best-effort: failures are warned, never thrown — see ADR-008 ISR
- * fallback. Token is the only auth barrier per Plan 09 threat register
- * (T-02-09-01); base URL defaults to localhost for the prototype but is
- * overridable via SCHOLARS_BASE_URL for AWS deployment.
+ * sent as an `Authorization: Bearer` token. Best-effort: failures are warned,
+ * never thrown — see ADR-008 ISR fallback. Token is the only auth barrier per
+ * Plan 09 threat register (T-02-09-01); base URL defaults to localhost for the
+ * prototype but is overridable via SCHOLARS_BASE_URL for AWS deployment.
  */
 const ALLOWED_BASE_ORIGINS = [
   "http://localhost:3000",
@@ -181,7 +181,7 @@ async function revalidatePath(p: string): Promise<void> {
   try {
     const resp = await fetch(`${baseUrl}/api/revalidate?path=${encodeURIComponent(p)}`, {
       method: "POST",
-      headers: { "x-revalidate-token": token },
+      headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) {
       console.warn(`[Revalidate] ${p} → ${resp.status} ${resp.statusText}`);
