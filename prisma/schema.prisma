@@ -368,6 +368,18 @@ model Grant {
   /// expanded grant view.
   abstractSource    String?   @map("abstract_source") @db.VarChar(32)
 
+  /// Issue #291 — NIH-curated project keywords from RePORTER, parsed from the
+  /// project's `pref_terms` (preferred) or `terms`. A `string[]`; null for
+  /// non-NIH grants and NIH grants RePORTER returns no terms for. Indexed in
+  /// OpenSearch (`keywords` facet + `keywordsText`) as a topical search
+  /// signal, parallel to MeSH descriptors on publications.
+  keywords          Json?     @map("keywords")
+  /// Issue #291 — provenance of `keywords`. 'reporter' for now; extensible to
+  /// 'nlm-tagger' / 'extracted' if NLP-derived keywords are added later.
+  keywordsSource    String?   @map("keywords_source") @db.VarChar(32)
+  /// Issue #291 — when `keywords` was last written. Mirrors `abstractFetchedAt`.
+  keywordsFetchedAt DateTime? @map("keywords_fetched_at")
+
   publications GrantPublication[]
 
   @@index([cwid])

@@ -759,6 +759,8 @@ async function indexFunding() {
       abstract: true,
       abstractSource: true,
       applId: true,
+      // Issue #291 — RePORTER project keywords, indexed as a topical signal.
+      keywords: true,
       publications: {
         select: {
           pmid: true,
@@ -975,6 +977,28 @@ async function assertFundingIndexHealth(
   const total = await client.count({ index: FUNDING_INDEX });
   if (total.body.count === 0) {
     throw new Error("[smoke] scholars-funding index is empty after indexFunding()");
+  }
+
+  // Issue #291 — keyword-coverage check. A soft warning, not a throw:
+  // `grant.keywords` is populated only after ReCiterDB's retrieveReporter.py
+  // captures the term columns (cross-repo — issue #291 PR A) and the reporter
+  // ETL re-runs against the refreshed reciterdb. Until that pipeline is live,
+  // 0 docs carry keywords and that is expected — warn so the signal is visible
+  // without bricking the index build. Promote to a throw once keyword data is
+  // established (cf. the meshTerms hard assertion on the publications index).
+  const withKeywords = await client.count({
+    index: FUNDING_INDEX,
+    body: { query: { exists: { field: "keywords" } } },
+  });
+  if (withKeywords.body.count === 0) {
+    console.warn(
+      `[smoke] scholars-funding: 0/${total.body.count} docs carry keywords — ` +
+        `expected until issue #291's RePORTER term pipeline is live`,
+    );
+  } else {
+    console.log(
+      `[smoke] scholars-funding: ${withKeywords.body.count}/${total.body.count} docs carry keywords`,
+    );
   }
 }
 

@@ -262,4 +262,60 @@ describe("projectFromRows", () => {
     expect(doc.isMultiPi).toBe(true);
     expect(doc.roles).toContain("Multi-PI");
   });
+
+  // Issue #291 — RePORTER project keywords.
+  it("defaults keywords to an empty array / string when no row carries any", () => {
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+    ])!;
+    expect(doc.keywords).toEqual([]);
+    expect(doc.keywordsText).toBe("");
+  });
+
+  it("projects a single row's keywords through to the doc", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        keywords: ["adult", "rna splicing"],
+      }),
+    ])!;
+    expect(doc.keywords).toEqual(["adult", "rna splicing"]);
+    expect(doc.keywordsText).toBe("adult rna splicing");
+  });
+
+  it("unions keywords across the project's rows, de-duped in first-seen order", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+        keywords: ["adult", "rna"],
+      }),
+      makeRow({
+        cwid: "bob",
+        role: "Co-I",
+        scholar: SCHOLAR_B,
+        externalId: "INFOED-ACC-001-bob",
+        keywords: ["rna", "chromatin"],
+      }),
+    ])!;
+    expect(doc.keywords).toEqual(["adult", "rna", "chromatin"]);
+    expect(doc.keywordsText).toBe("adult rna chromatin");
+  });
+
+  it("treats a non-array / malformed keywords value as no keywords", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        keywords: "not-an-array",
+      }),
+    ])!;
+    expect(doc.keywords).toEqual([]);
+    expect(doc.keywordsText).toBe("");
+  });
 });
