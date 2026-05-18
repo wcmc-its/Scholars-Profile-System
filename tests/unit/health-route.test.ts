@@ -7,7 +7,15 @@
  * Mock setup: prisma.etlRun.findFirst and prisma.completenessSnapshot.findFirst
  * are mocked. The route iterates 7 sources × 2 findFirst calls = 14 calls.
  */
-import { describe, expect, it, vi, beforeEach, type Mock } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -23,6 +31,13 @@ import { GET } from "@/app/api/health/refresh-status/route";
 /** Build a minimal NextRequest for use in tests (no auth token set in env). */
 function makeRequest(): NextRequest {
   return new NextRequest("http://localhost/api/health/refresh-status");
+}
+
+/** Build a NextRequest carrying an `Authorization` header (null = omit it). */
+function makeAuthedRequest(authHeader: string | null): NextRequest {
+  return new NextRequest("http://localhost/api/health/refresh-status", {
+    headers: authHeader === null ? {} : { authorization: authHeader },
+  });
 }
 
 const RECENT_RUN = {
@@ -45,6 +60,12 @@ beforeEach(() => {
   (prisma.etlRun.findFirst as Mock).mockResolvedValue(RECENT_RUN);
   // Default: no snapshot
   (prisma.completenessSnapshot.findFirst as Mock).mockResolvedValue(null);
+});
+
+// Keep every test independent of an ambient SCHOLARS_HEALTH_TOKEN (and stop
+// the bearer-auth cases below from leaking the token to a sibling test file).
+afterEach(() => {
+  delete process.env.SCHOLARS_HEALTH_TOKEN;
 });
 
 describe("GET /api/health/refresh-status", () => {
@@ -128,5 +149,38 @@ describe("GET /api/health/refresh-status", () => {
     // completenessPercent and belowThreshold are additive fields (null when no snapshot)
     expect(Object.keys(body)).toContain("completenessPercent");
     expect(Object.keys(body)).toContain("belowThreshold");
+  });
+});
+
+/**
+ * #375 — the SCHOLARS_HEALTH_TOKEN stopgap auth. The token is compared in
+ * constant time via isAuthorizedBearer; these cases lock in the 401/200
+ * contract and the RFC 7235 case-insensitive scheme match.
+ */
+describe("GET /api/health/refresh-status — bearer auth", () => {
+  const HEALTH_TOKEN = "test-health-token-0123456789";
+
+  it("401s when the token is set but no Authorization header is sent", async () => {
+    process.env.SCHOLARS_HEALTH_TOKEN = HEALTH_TOKEN;
+    const resp = await GET(makeAuthedRequest(null));
+    expect(resp.status).toBe(401);
+  });
+
+  it("401s when the bearer token does not match", async () => {
+    process.env.SCHOLARS_HEALTH_TOKEN = HEALTH_TOKEN;
+    const resp = await GET(makeAuthedRequest("Bearer wrong-token"));
+    expect(resp.status).toBe(401);
+  });
+
+  it("200s when the bearer token matches", async () => {
+    process.env.SCHOLARS_HEALTH_TOKEN = HEALTH_TOKEN;
+    const resp = await GET(makeAuthedRequest(`Bearer ${HEALTH_TOKEN}`));
+    expect(resp.status).toBe(200);
+  });
+
+  it("accepts a case-insensitive Bearer scheme (RFC 7235)", async () => {
+    process.env.SCHOLARS_HEALTH_TOKEN = HEALTH_TOKEN;
+    const resp = await GET(makeAuthedRequest(`bearer ${HEALTH_TOKEN}`));
+    expect(resp.status).toBe(200);
   });
 });
