@@ -8,7 +8,8 @@
  * Strategy:
  *   1. Read active CWIDs from local DB
  *   2. Batched IN-clause query against ASMS for education rows
- *   3. Truncate education table; bulk-insert fresh rows
+ *   3. Reconcile the education table by externalId (create new / update
+ *      changed / tombstone stale) — each row keeps its uuid PK across runs (#352)
  *
  * MSSQL note: the `mssql` driver doesn't have native array-IN binding, so we
  * generate parameter placeholders dynamically (@p0,@p1,...). Batch size 500

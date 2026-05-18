@@ -22,10 +22,11 @@
  * Permission caveat: the `IDM_JZBR` principal has SELECT denied on
  * column `Degree_Code`. The query enumerates only the columns we need.
  *
- * Idempotent: every run wipes `Appointment` rows with source
- * `JENZABAR-GSFACULTY` and re-inserts the current set. Faculty no
- * longer in the view (or no longer WCGS-active) lose their row on the
- * next run.
+ * Idempotent: every run reconciles `Appointment` rows with source
+ * `JENZABAR-GSFACULTY` by externalId — create new / update changed /
+ * tombstone stale — so each row keeps its uuid PK across runs (#352).
+ * Faculty no longer in the view (or no longer WCGS-active) lose their
+ * row on the next run.
  *
  * Usage: `npm run etl:jenzabar:import-gs-faculty`
  */
