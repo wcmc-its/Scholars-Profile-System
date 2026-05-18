@@ -761,6 +761,8 @@ async function indexFunding() {
       applId: true,
       // Issue #291 — RePORTER project keywords, indexed as a topical signal.
       keywords: true,
+      // Issue #295 — RePORTER keywords resolved to NLM MeSH descriptor UIs.
+      meshDescriptorUis: true,
       publications: {
         select: {
           pmid: true,
@@ -998,6 +1000,26 @@ async function assertFundingIndexHealth(
   } else {
     console.log(
       `[smoke] scholars-funding: ${withKeywords.body.count}/${total.body.count} docs carry keywords`,
+    );
+  }
+
+  // Issue #295 — meshDescriptorUi coverage. Soft warning, same rationale as
+  // the keyword check above: the field populates only after the reporter
+  // ETL's MeSH resolution pass (step 3) runs and the funding index is
+  // rebuilt. Promote to a throw once a green resolver + reindex cycle is
+  // established (cf. the meshTerms hard assertion on the publications index).
+  const withMeshUi = await client.count({
+    index: FUNDING_INDEX,
+    body: { query: { exists: { field: "meshDescriptorUi" } } },
+  });
+  if (withMeshUi.body.count === 0) {
+    console.warn(
+      `[smoke] scholars-funding: 0/${total.body.count} docs carry meshDescriptorUi — ` +
+        `expected until issue #295's MeSH resolution pass has run + reindexed`,
+    );
+  } else {
+    console.log(
+      `[smoke] scholars-funding: ${withMeshUi.body.count}/${total.body.count} docs carry meshDescriptorUi`,
     );
   }
 }

@@ -380,6 +380,19 @@ model Grant {
   /// Issue #291 — when `keywords` was last written. Mirrors `abstractFetchedAt`.
   keywordsFetchedAt DateTime? @map("keywords_fetched_at")
 
+  /// Issue #295 — `keywords` resolved to NLM MeSH descriptor UIs (Dnnnnnnn).
+  /// A `string[]`; null when `keywords` is null/empty or no term resolves.
+  /// Indexed in OpenSearch (`meshDescriptorUi`) so a resolved-MeSH query
+  /// matches NIH grants by descriptor, mirroring the publications index.
+  meshDescriptorUis      Json?     @map("mesh_descriptor_uis")
+  /// Issue #295 — resolved-term count / deduped-post-normalization input
+  /// count (stopwords excluded from both). For resolution-rate monitoring;
+  /// null when the grant has no non-stopword keyword.
+  meshResolutionCoverage Float?    @map("mesh_resolution_coverage")
+  /// Issue #295 — when the MeSH resolver pass last wrote this grant.
+  /// Mirrors `keywordsFetchedAt`.
+  meshResolvedAt         DateTime? @map("mesh_resolved_at")
+
   publications GrantPublication[]
 
   @@index([cwid])

@@ -318,4 +318,56 @@ describe("projectFromRows", () => {
     expect(doc.keywords).toEqual([]);
     expect(doc.keywordsText).toBe("");
   });
+
+  // Issue #295 — RePORTER keywords resolved to MeSH descriptor UIs.
+  it("defaults meshDescriptorUi to an empty array when no row carries any", () => {
+    const doc = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+    ])!;
+    expect(doc.meshDescriptorUi).toEqual([]);
+  });
+
+  it("projects a single row's meshDescriptorUis through to the doc", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        meshDescriptorUis: ["D009369", "D015415"],
+      }),
+    ])!;
+    expect(doc.meshDescriptorUi).toEqual(["D009369", "D015415"]);
+  });
+
+  it("unions meshDescriptorUi across the project's rows, de-duped in first-seen order", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        externalId: "INFOED-ACC-001-alice",
+        meshDescriptorUis: ["D009369", "D007249"],
+      }),
+      makeRow({
+        cwid: "bob",
+        role: "Co-I",
+        scholar: SCHOLAR_B,
+        externalId: "INFOED-ACC-001-bob",
+        meshDescriptorUis: ["D007249", "D015415"],
+      }),
+    ])!;
+    expect(doc.meshDescriptorUi).toEqual(["D009369", "D007249", "D015415"]);
+  });
+
+  it("treats a non-array / malformed meshDescriptorUis value as none", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        meshDescriptorUis: "not-an-array",
+      }),
+    ])!;
+    expect(doc.meshDescriptorUi).toEqual([]);
+  });
 });
