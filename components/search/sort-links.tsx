@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { ChevronDown } from "lucide-react";
 
 /**
@@ -53,8 +53,7 @@ export function SortLinks({
     };
   }, [open]);
 
-  const activeLabel =
-    options.find((o) => o.value === current)?.label ?? options[0].label;
+  const activeLabel = options.find((o) => o.value === current)?.label ?? options[0].label;
 
   return (
     <div ref={rootRef} className="relative">
@@ -66,16 +65,12 @@ export function SortLinks({
         className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e]"
       >
         {activeLabel}
-        <ChevronDown
-          aria-hidden
-          className="h-3.5 w-3.5 text-[#757575]"
-          strokeWidth={2}
-        />
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 text-[#757575]" strokeWidth={2} />
       </button>
       {open ? (
         <ul
           role="listbox"
-          className="absolute right-0 top-full z-20 mt-1 min-w-[180px] rounded-md border border-[#e3e2dd] bg-white py-1 shadow-md"
+          className="absolute top-full right-0 z-20 mt-1 min-w-[180px] rounded-md border border-[#e3e2dd] bg-white py-1 shadow-md"
         >
           {options.map((o) => (
             <li key={o.value} role="option" aria-selected={o.value === current}>
@@ -83,9 +78,7 @@ export function SortLinks({
                 href={o.href}
                 onClick={() => setOpen(false)}
                 className={`block px-3 py-1.5 text-[13px] hover:bg-[#fafaf8] ${
-                  o.value === current
-                    ? "font-semibold text-[#2c4f6e]"
-                    : "text-[#1a1a1a]"
+                  o.value === current ? "font-semibold text-[#2c4f6e]" : "text-[#1a1a1a]"
                 }`}
               >
                 {o.label}

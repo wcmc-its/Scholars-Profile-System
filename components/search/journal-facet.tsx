@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { ChevronDown, Search } from "lucide-react";
 
 const TOP_VISIBLE = 8;
@@ -65,7 +65,7 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
                 className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
               />
               <span className="min-w-0 flex-1 break-words">{j.value}</span>
-              <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+              <span className="mt-[1px] shrink-0 text-[12px] text-[#757575] tabular-nums">
                 {j.count.toLocaleString()}
               </span>
             </Link>
@@ -73,7 +73,9 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
         ))}
       </ul>
       {visible.length === 0 && query ? (
-        <div className="px-1 py-1 text-[12px] text-[#9a9890]">No journals match &ldquo;{query}&rdquo;</div>
+        <div className="px-1 py-1 text-[12px] text-[#9a9890]">
+          No journals match &ldquo;{query}&rdquo;
+        </div>
       ) : null}
       {!query && hiddenCount > 0 ? (
         <button

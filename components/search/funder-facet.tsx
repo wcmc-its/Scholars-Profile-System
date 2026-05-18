@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { ChevronDown } from "lucide-react";
 
 /**
@@ -71,8 +71,7 @@ export function FunderFacet({ items, directItems, collapseAfter = 6 }: Props) {
     return directItems.filter((d) => d.isActive || matches(d, trimmed));
   }, [directItems, trimmed]);
 
-  const showCollapse =
-    !trimmed && filtered.length > collapseAfter;
+  const showCollapse = !trimmed && filtered.length > collapseAfter;
   const head = showCollapse ? filtered.slice(0, collapseAfter) : filtered;
   const tail = showCollapse ? filtered.slice(collapseAfter) : [];
 
@@ -96,7 +95,7 @@ export function FunderFacet({ items, directItems, collapseAfter = 6 }: Props) {
         ))}
       </ul>
       {tail.length > 0 ? (
-        <details className="mt-1 [&[open]_.fg-show]:hidden [&:not([open])_.fg-hide]:hidden [&[open]_.fg-chevron]:rotate-180">
+        <details className="mt-1 [&:not([open])_.fg-hide]:hidden [&[open]_.fg-chevron]:rotate-180 [&[open]_.fg-show]:hidden">
           <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12.5px] font-medium text-[#2c4f6e] hover:underline [&::-webkit-details-marker]:hidden">
             <ChevronDown
               aria-hidden
@@ -114,7 +113,7 @@ export function FunderFacet({ items, directItems, collapseAfter = 6 }: Props) {
         </details>
       ) : null}
       {directMatches.length > 0 ? (
-        <ul className="m-0 mt-2 flex list-none flex-col gap-1 border-t border-[#e3e2dd] pt-2 p-0">
+        <ul className="m-0 mt-2 flex list-none flex-col gap-1 border-t border-[#e3e2dd] p-0 pt-2">
           {directMatches.map((it) => (
             <FunderRow key={`d-${it.value}`} item={it} via />
           ))}
@@ -148,7 +147,7 @@ function FunderRow({ item, via }: { item: FunderFacetItem; via?: boolean }) {
           {via ? <span className="text-[#757575]">via </span> : null}
           {display}
         </span>
-        <span className="mt-[1px] shrink-0 text-[12px] tabular-nums text-[#757575]">
+        <span className="mt-[1px] shrink-0 text-[12px] text-[#757575] tabular-nums">
           {item.count.toLocaleString()}
         </span>
       </Link>
