@@ -425,7 +425,11 @@ function TierSection({
    *  fallback is taking over, and for the Also tier inside the toggle). */
   emptyState: boolean;
 }) {
-  if (loading) {
+  // Issue #294 — show the skeleton only on first load (no data yet). On
+  // sort / filter / page refetches `data` is still populated, so keep the
+  // prior results visible (stale-while-revalidate) rather than flashing
+  // the table to a skeleton on every change.
+  if (loading && data === null) {
     return (
       <div className="flex flex-col gap-4">
         {[0, 1, 2].map((i) => (
