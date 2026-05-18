@@ -1063,11 +1063,21 @@ async function main() {
   console.log(`Indexed ${parts.join(", ")}.`);
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// Run the indexer only when this file is executed as a script — never when
+// it is imported. The pure helpers above (`extractMeshDescriptorUis`,
+// `extractMeshLabels`, `buildReciterParentTopicIdField`, `buildPubImpactFields`)
+// are imported by unit tests; without this guard `main()` fires inside the
+// vitest worker, hits a refused OpenSearch connection, and `process.exit(1)`
+// kills the worker mid-run — the flaky `ERR_IPC_CHANNEL_CLOSED` failures in
+// CI, which has a MySQL service but no OpenSearch. Vitest sets `VITEST`; a
+// normal `tsx etl/search-index/index.ts` run does not.
+if (!process.env.VITEST) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
