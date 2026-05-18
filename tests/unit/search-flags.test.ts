@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   parseMeshParam,
   resolveConceptMode,
+  resolveFundingConceptEnabled,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -99,5 +100,35 @@ describe("parseMeshParam (§6.2 precedence)", () => {
       meshOff: false,
       meshStrict: false,
     });
+  });
+});
+
+describe("resolveFundingConceptEnabled (#295)", () => {
+  const original = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    else process.env.SEARCH_FUNDING_TAB_CONCEPT = original;
+  });
+
+  it("defaults to false when the env is unset", () => {
+    expect(resolveFundingConceptEnabled()).toBe(false);
+  });
+
+  it("is true only for exactly 'on'", () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    expect(resolveFundingConceptEnabled()).toBe(true);
+  });
+
+  it("is false for any other value (off / casing / truthy strings)", () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "off";
+    expect(resolveFundingConceptEnabled()).toBe(false);
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "ON";
+    expect(resolveFundingConceptEnabled()).toBe(false);
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
+    expect(resolveFundingConceptEnabled()).toBe(false);
   });
 });
