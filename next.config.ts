@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { buildSecurityHeaders } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -12,6 +13,19 @@ const nextConfig: NextConfig = {
         pathname: "/**",
       },
     ],
+  },
+  // Security headers on every response — issue #120 (B21). The CSP is
+  // report-only; see lib/security-headers.ts. `serverActions.allowedOrigins`
+  // is intentionally absent — the codebase uses no server actions.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: buildSecurityHeaders({
+          isProduction: process.env.NODE_ENV === "production",
+        }),
+      },
+    ];
   },
 };
 
