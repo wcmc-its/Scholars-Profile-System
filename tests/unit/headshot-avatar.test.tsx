@@ -49,7 +49,7 @@ describe("HeadshotAvatar", () => {
     const root = getRoot(container);
     // In jsdom the image never resolves to "loaded"; it transitions to either
     // "loading" or "fallback" (when Radix's primitive surfaces an error event
-    // for the next/image wrapper). Both are valid runtime states; "image" is
+    // for the underlying <img>). Both are valid runtime states; "image" is
     // not reachable without a real browser network stack.
     const state = root.getAttribute("data-headshot-state");
     expect(["loading", "fallback"]).toContain(state);

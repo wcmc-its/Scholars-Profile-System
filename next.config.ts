@@ -5,14 +5,13 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,
+  // No server-side image optimization — see docs/ADR-006. The app uses
+  // next/image nowhere; headshots render as plain <img> (Radix Avatar)
+  // straight from directory.weill.cornell.edu. `unoptimized` is a guardrail:
+  // if an <Image> is ever added it will not spin up sharp on the 1-vCPU
+  // Fargate task.
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "directory.weill.cornell.edu",
-        pathname: "/**",
-      },
-    ],
+    unoptimized: true,
   },
   // Security headers on every response — issue #120 (B21). The CSP is
   // report-only; see lib/security-headers.ts. `serverActions.allowedOrigins`

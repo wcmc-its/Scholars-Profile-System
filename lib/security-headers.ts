@@ -52,9 +52,10 @@ export function buildContentSecurityPolicy(opts: {
     "form-action": "'self'",
     // next/font self-hosts Inter; no font CDN is contacted at runtime.
     "font-src": "'self'",
-    // Headshots come from directory.weill.cornell.edu, which matches
-    // images.remotePatterns in next.config.ts. data:/blob: cover the
-    // next/image placeholders and any client-rendered previews.
+    // Headshots load from directory.weill.cornell.edu as plain <img>
+    // elements (Radix Avatar — the app uses next/image nowhere; see
+    // ADR-006). data:/blob: stay allowed for inline and client-generated
+    // image data.
     "img-src": "'self' data: blob: https://directory.weill.cornell.edu",
     "script-src": scriptSrc.join(" "),
     "style-src": "'self' 'unsafe-inline'",
