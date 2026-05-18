@@ -51,3 +51,17 @@ export function parseMeshParam(
   const meshStrict = !meshOff && values.includes("strict");
   return { meshOff, meshStrict };
 }
+
+/**
+ * Issue #295 — funding-tab concept clause. When `on`, `searchFunding` adds a
+ * resolved-MeSH OR-of-evidence clause so a concept query also matches NIH
+ * grants by descriptor. Default `off`: it stays off until the funding index
+ * has been rebuilt with the `meshDescriptorUi` field (issue #295 PR 1).
+ *
+ * Deliberately a separate flag from `SEARCH_PUB_TAB_CONCEPT_MODE` — the two
+ * surfaces have independent rollback triggers, the same reason
+ * `PUBLICATIONS_RESTRUCTURED_MSM` is defined apart from its people-tab twin.
+ */
+export function resolveFundingConceptEnabled(): boolean {
+  return process.env.SEARCH_FUNDING_TAB_CONCEPT === "on";
+}

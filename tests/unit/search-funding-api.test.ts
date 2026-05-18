@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 /**
  * Verifies the OpenSearch query body the funding port emits — multi-select
@@ -285,5 +286,92 @@ describe("searchFunding (OpenSearch)", () => {
     expect(sort).toHaveLength(2);
     expect(sort[0]).toHaveProperty("_script");
     expect(sort[1]).toEqual({ endDate: "asc" });
+  });
+});
+
+describe("searchFunding — issue #295 MeSH concept clause", () => {
+  const original = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    else process.env.SEARCH_FUNDING_TAB_CONCEPT = original;
+  });
+
+  const NEOPLASMS: MeshResolution = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    matchedForm: "neoplasms",
+    confidence: "exact",
+    scopeNote: null,
+    entryTerms: [],
+    curatedTopicAnchors: [],
+    descendantUis: ["D009369", "D001943"],
+  };
+
+  const textClause = {
+    multi_match: {
+      query: "cancer",
+      fields: ["title^4", "sponsorText^2", "peopleNames^1"],
+      type: "best_fields",
+    },
+  };
+
+  const mustOf = () =>
+    (lastRequest!.body.query as { bool: { must: unknown[] } }).bool.must;
+
+  it("wraps the text clause in an OR-of-evidence bool when the flag is on and q resolves", async () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const must = mustOf();
+    expect(must).toHaveLength(1);
+    expect(must[0]).toEqual({
+      bool: {
+        should: [
+          textClause,
+          { terms: { meshDescriptorUi: ["D009369", "D001943"], boost: 4 } },
+        ],
+        minimum_should_match: 1,
+      },
+    });
+  });
+
+  it("leaves the query text-only when the flag is off (default)", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    expect(mustOf()).toEqual([textClause]);
+  });
+
+  it("leaves the query text-only when the flag is on but q does not resolve", async () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    await runSearch({ q: "cancer", meshResolution: null });
+    expect(mustOf()).toEqual([textClause]);
+  });
+
+  it("leaves the query text-only when the resolution's descendant set is empty", async () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    await runSearch({
+      q: "cancer",
+      meshResolution: { ...NEOPLASMS, descendantUis: [] },
+    });
+    expect(mustOf()).toEqual([textClause]);
+  });
+
+  it("propagates the concept clause into the excluding-self facet aggregations", async () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    await runSearch({
+      q: "cancer",
+      meshResolution: NEOPLASMS,
+      filters: { funder: ["NCI"] },
+    });
+    // The funder agg re-applies the main `must` (now concept-wrapped) so its
+    // admission count matches the main query — the reason the clause stays
+    // inside `must` rather than a top-level should.
+    const aggs = lastRequest!.body.aggs as Record<
+      string,
+      { filter: { bool: { must: unknown[] } } }
+    >;
+    expect(aggs.funders.filter.bool.must).toHaveLength(1);
+    expect(aggs.funders.filter.bool.must[0]).toHaveProperty("bool");
   });
 });

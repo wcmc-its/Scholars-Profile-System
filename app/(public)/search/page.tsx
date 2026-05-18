@@ -222,6 +222,11 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       page: type === "funding" ? page : 0,
       sort: type === "funding" ? (sort as FundingSort) : "relevance",
       filters: fundingFilters,
+      // Issue #295 — forward the MeSH resolution so the funding query gains
+      // its OR-of-evidence clause under SEARCH_FUNDING_TAB_CONCEPT=on. Same
+      // `effectiveMeshResolution` (honors `?mesh=off`) passed to
+      // searchPublications above.
+      meshResolution: effectiveMeshResolution,
     }),
   ]);
 

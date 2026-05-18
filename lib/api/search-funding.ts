@@ -29,6 +29,8 @@ import {
   searchClient,
 } from "@/lib/search";
 import { coreProjectNum } from "@/lib/award-number";
+import { resolveFundingConceptEnabled } from "@/lib/api/search-flags";
+import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const PAGE_SIZE = 20;
 
@@ -222,6 +224,14 @@ export async function searchFunding(opts: {
   page?: number;
   sort?: FundingSort;
   filters?: FundingFilters;
+  /**
+   * Issue #295 — MeSH resolution for `q`, computed once by the route handler
+   * / SSR page (the same value passed to `searchPublications`). When
+   * `SEARCH_FUNDING_TAB_CONCEPT=on` and this resolves to a descriptor, the
+   * funding query gains an OR-of-evidence clause matching grants by
+   * `meshDescriptorUi`. Null/undefined → today's text-only query.
+   */
+  meshResolution?: MeshResolution | null;
 }): Promise<FundingSearchResult> {
   const { q } = opts;
   const page = Math.max(0, opts.page ?? 0);
@@ -230,20 +240,51 @@ export async function searchFunding(opts: {
   const trimmed = q.trim();
   const now = new Date();
 
-  // Main query — text-only. User-axis filters live in post_filter so
-  // each per-facet aggregation can re-apply only the OTHER axes and
-  // produce correct excluding-self counts.
-  const must: Record<string, unknown>[] = [];
-  if (trimmed.length > 0) {
-    must.push({
-      multi_match: {
-        query: trimmed,
-        fields: [...FUNDING_FIELD_BOOSTS],
-        type: "best_fields",
+  // Main query. The text clause matches title / sponsor / people / abstract /
+  // keywords via multi_match. User-axis filters live in post_filter so each
+  // per-facet aggregation can re-apply only the OTHER axes and produce correct
+  // excluding-self counts.
+  const textClause: Record<string, unknown> =
+    trimmed.length > 0
+      ? {
+          multi_match: {
+            query: trimmed,
+            fields: [...FUNDING_FIELD_BOOSTS],
+            type: "best_fields",
+          },
+        }
+      : { match_all: {} };
+
+  // Issue #295 — OR-of-evidence. When the funding concept flag is on and `q`
+  // resolved to a MeSH descriptor, wrap the text clause so a grant tagged
+  // with the resolved descriptor (or a tree descendant) is admitted even
+  // without a text hit. Kept INSIDE `must` (rather than promoted to a
+  // top-level should + msm, as the pub tab does for its SPEC §5.2
+  // byte-identical body): `must` stays non-empty, so the excluding-self
+  // aggregations below — `{ bool: { must, filter } }` — need no shape change.
+  // Flag off / no resolution / empty descendant set → text-only, byte-
+  // identical to the pre-#295 query.
+  const meshResolution = opts.meshResolution ?? null;
+  const must: Record<string, unknown>[] = [textClause];
+  if (
+    resolveFundingConceptEnabled() &&
+    meshResolution !== null &&
+    meshResolution.descendantUis.length > 0
+  ) {
+    must[0] = {
+      bool: {
+        should: [
+          textClause,
+          {
+            terms: {
+              meshDescriptorUi: meshResolution.descendantUis,
+              boost: 4,
+            },
+          },
+        ],
+        minimum_should_match: 1,
       },
-    });
-  } else {
-    must.push({ match_all: {} });
+    };
   }
 
   // Named filter clauses — built once, re-used for post_filter and for
