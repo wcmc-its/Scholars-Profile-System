@@ -328,7 +328,11 @@ async function main() {
     await step1_GrantAbstracts();
     await step2_GrantPublications();
   } finally {
+    // Close both connection pools so the process exits cleanly. Without the
+    // Prisma disconnect the adapter's pool keeps the event loop alive and the
+    // script hangs after "Done in …s." rather than exiting.
     await closeReciterPool();
+    await prisma.$disconnect();
   }
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }
