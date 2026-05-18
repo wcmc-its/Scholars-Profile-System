@@ -14,6 +14,8 @@ import {
 } from "@/lib/api/search-funding";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { parseMeshParam, resolveConceptMode } from "@/lib/api/search-flags";
+import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
+import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 
 export const dynamic = "force-dynamic";
 
@@ -218,6 +220,32 @@ export async function GET(request: NextRequest) {
     topic = topicRaw;
   }
 
+  // Issue #308 §6.1.1 — lexical query-shape classifier. PR-1 logs the
+  // classified shape for telemetry (SPEC §9); it does NOT route ranking.
+  // SEARCH_PEOPLE_RELEVANCE_MODE is plumbed but gates nothing until SPEC
+  // PR-2 (#309); an unrecognized value falls back to "legacy".
+  const rawRelevanceMode = process.env.SEARCH_PEOPLE_RELEVANCE_MODE;
+  if (
+    rawRelevanceMode &&
+    rawRelevanceMode !== "legacy" &&
+    rawRelevanceMode !== "v3"
+  ) {
+    console.warn(
+      `[search] ignoring unrecognized SEARCH_PEOPLE_RELEVANCE_MODE=` +
+        `"${rawRelevanceMode}"; using "legacy"`,
+    );
+  }
+  const appliedRelevanceMode = rawRelevanceMode === "v3" ? "v3" : "legacy";
+  const classifierSets = await getPeopleClassifierSets();
+  const queryShape = classifyPeopleQuery({
+    query: q,
+    meshResolved: taxonomyMatch.meshResolution != null,
+    knownCwids: classifierSets.cwids,
+    knownSurnames: classifierSets.surnames,
+    knownDepartments: classifierSets.departments,
+  });
+
+  const searchStart = Date.now();
   const result = await searchPeople({
     q,
     page,
@@ -230,21 +258,36 @@ export async function GET(request: NextRequest) {
     },
     topic,
   });
+  const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
-  // Issue #259 §1.1 — queryShape attributes result-count and ranking
-  // changes to the code path that served the request. Reserved enum
-  // values name future §1.6 shapes up front (see PeopleQueryShape).
+  // Issue #308 §9 — `queryShape` is now the lexical query classification
+  // (cwid / name / department / topic / hybrid / unclassified / empty),
+  // no longer the #259 OpenSearch-body label; log archives from before
+  // this deploy are not comparable on this field.
   console.log(
     JSON.stringify({
       event: "search_query",
       q,
       type: "people",
       resultCount: result.total,
-      queryShape: result.queryShape,
+      queryShape,
+      appliedRelevanceMode,
       filters: { deptDiv, personType, activity, includeIncomplete },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
+      // SPEC §9 — resolved MeSH descendant-set size; null when the query
+      // did not resolve to a descriptor.
+      meshDescendantSetSize:
+        taxonomyMatch.meshResolution?.descendantUis.length ?? null,
+      // SPEC §9 — null in PR-1: the §6.1.3 attribution boost this reports
+      // on does not exist until SPEC PR-3 (#310).
+      attributionBoostFired: null,
       taxonomyMatchMs,
+      searchLatencyMs,
+      // SPEC §9 — top-3 result slugs + person types let the post-flip eval
+      // backtest Recall@3 and per-cohort effects from production traffic.
+      top3ResultSlugs: result.hits.slice(0, 3).map((h) => h.slug),
+      top3PersonTypes: result.hits.slice(0, 3).map((h) => h.roleCategory),
       ts: new Date().toISOString(),
     }),
   );
