@@ -1,8 +1,8 @@
 /**
  * Issue #308 — unit tests for the People-tab classifier lookup-set cache.
- * Surnames come from an OpenSearch aggregation, departments from Prisma; both
- * are mocked here. Covers the build, the lowercasing, the TTL cache hit, and
- * graceful degradation on a failed refresh.
+ * Surnames come from an OpenSearch aggregation; cwids and departments from
+ * Prisma; all are mocked here. Covers the build, the lowercasing, the TTL
+ * cache hit, and graceful degradation on a failed refresh.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,11 +40,11 @@ describe("getPeopleClassifierSets", () => {
     vi.resetModules(); // fresh module-level cache per test
   });
 
-  it("builds lowercased surname + department sets from OpenSearch and Prisma", async () => {
+  it("builds lowercased surname, cwid, and department sets", async () => {
     osSearch.mockResolvedValue(osResponse(["Cantley", "WONG"]));
     findMany.mockResolvedValue([
-      { primaryDepartment: "Cardiology" },
-      { primaryDepartment: "Pediatrics" },
+      { cwid: "abc1001", primaryDepartment: "Cardiology" },
+      { cwid: "def2002", primaryDepartment: "Pediatrics" },
     ]);
 
     const { getPeopleClassifierSets } = await import(
@@ -53,12 +53,15 @@ describe("getPeopleClassifierSets", () => {
     const sets = await getPeopleClassifierSets();
 
     expect([...sets.surnames].sort()).toEqual(["cantley", "wong"]);
+    expect([...sets.cwids].sort()).toEqual(["abc1001", "def2002"]);
     expect([...sets.departments].sort()).toEqual(["cardiology", "pediatrics"]);
   });
 
   it("caches — a second call within the TTL does not re-query", async () => {
     osSearch.mockResolvedValue(osResponse(["smith"]));
-    findMany.mockResolvedValue([{ primaryDepartment: "Medicine" }]);
+    findMany.mockResolvedValue([
+      { cwid: "ghi3003", primaryDepartment: "Medicine" },
+    ]);
 
     const { getPeopleClassifierSets } = await import(
       "@/lib/api/people-classifier-sets"
@@ -73,13 +76,16 @@ describe("getPeopleClassifierSets", () => {
   it("degrades to empty sets on a failed refresh, and does not cache the failure", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     osSearch.mockRejectedValueOnce(new Error("scholars-people index missing"));
-    findMany.mockResolvedValue([{ primaryDepartment: "Medicine" }]);
+    findMany.mockResolvedValue([
+      { cwid: "jkl4004", primaryDepartment: "Medicine" },
+    ]);
 
     const { getPeopleClassifierSets } = await import(
       "@/lib/api/people-classifier-sets"
     );
     const first = await getPeopleClassifierSets();
     expect(first.surnames.size).toBe(0);
+    expect(first.cwids.size).toBe(0);
     expect(first.departments.size).toBe(0);
 
     // The failure was not cached — a retry now succeeds.

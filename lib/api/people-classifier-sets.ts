@@ -33,12 +33,15 @@ const SURNAME_AGG_SIZE = 20000;
 export interface PeopleClassifierSets {
   /** Lowercased `lastNameSort` values from the people index. */
   surnames: ReadonlySet<string>;
+  /** Lowercased `Scholar.cwid` values — for exact CWID detection. */
+  cwids: ReadonlySet<string>;
   /** Lowercased distinct `Scholar.primaryDepartment` values. */
   departments: ReadonlySet<string>;
 }
 
 const EMPTY_SETS: PeopleClassifierSets = {
   surnames: new Set(),
+  cwids: new Set(),
   departments: new Set(),
 };
 
@@ -63,26 +66,34 @@ async function loadSurnames(): Promise<Set<string>> {
   return new Set(buckets.map((b) => b.key.toLowerCase()));
 }
 
-/** Distinct non-null `Scholar.primaryDepartment` for active scholars, lowercased. */
-async function loadDepartments(): Promise<Set<string>> {
+/**
+ * `Scholar.cwid` and distinct `Scholar.primaryDepartment` for active scholars,
+ * lowercased. One Prisma query yields both — `cwid` is the PK so every active
+ * scholar is one row and no `distinct` is needed; the Sets dedupe departments.
+ */
+async function loadCwidsAndDepartments(): Promise<{
+  cwids: Set<string>;
+  departments: Set<string>;
+}> {
   const rows = await prisma.scholar.findMany({
-    where: { deletedAt: null, status: "active", primaryDepartment: { not: null } },
-    select: { primaryDepartment: true },
-    distinct: ["primaryDepartment"],
+    where: { deletedAt: null, status: "active" },
+    select: { cwid: true, primaryDepartment: true },
   });
+  const cwids = new Set<string>();
   const departments = new Set<string>();
   for (const row of rows) {
+    cwids.add(row.cwid.toLowerCase());
     if (row.primaryDepartment) departments.add(row.primaryDepartment.toLowerCase());
   }
-  return departments;
+  return { cwids, departments };
 }
 
 async function refresh(): Promise<PeopleClassifierSets> {
-  const [surnames, departments] = await Promise.all([
+  const [surnames, cwidsAndDepartments] = await Promise.all([
     loadSurnames(),
-    loadDepartments(),
+    loadCwidsAndDepartments(),
   ]);
-  return { surnames, departments };
+  return { surnames, ...cwidsAndDepartments };
 }
 
 /**

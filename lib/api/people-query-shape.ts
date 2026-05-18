@@ -34,19 +34,6 @@ export type PeopleQueryShape =
   | "empty";
 
 /**
- * Single-token CWID detector. The common WCM CWID form is three letters
- * followed by four digits (e.g. `abc4001`, `lcc2010`). All-letter CWIDs exist
- * (e.g. `rgcryst`) but are lexically indistinguishable from ordinary words and
- * surnames, so they are deliberately NOT detected here — they fall through to
- * `name` / `unclassified`. That is acceptable: `searchPeople`'s always-on
- * `cwid` term boost still surfaces the exact scholar regardless of the
- * classified shape, and PR-1's shape is telemetry-only. There is no existing
- * CWID detector in the codebase to inherit — the short-circuit just appends a
- * `cwid` term clause unconditionally, never classifying the query.
- */
-const CWID_RE = /^[a-z]{3}[0-9]{4}$/;
-
-/**
  * Words dropped from a department-prefix leftover before the
  * pure-department-vs-hybrid test, so e.g. "cardiology department" reads as a
  * pure department rather than a department plus a stray topic token.
@@ -72,6 +59,12 @@ export interface ClassifyPeopleQueryInput {
    * `searchPeople` already computes the resolution; pass `resolution != null`.
    */
   meshResolved: boolean;
+  /**
+   * Lowercased `Scholar.cwid` values. CWID detection is exact set membership —
+   * `scholar.cwid` is the PK, so this catches all-letter CWIDs (`rgcryst`)
+   * that no format regex could, with zero false positives.
+   */
+  knownCwids: ReadonlySet<string>;
   /**
    * Lowercased surname tokens — the OpenSearch `lastNameSort` value set, built
    * and cached by `people-classifier-sets.ts`. `lastNameSort` is an index
@@ -126,8 +119,9 @@ export function classifyPeopleQuery(
 
   const tokens = trimmed.toLowerCase().split(/\s+/);
 
-  // 2. CWID — a single token shaped like a WCM CWID.
-  if (tokens.length === 1 && CWID_RE.test(tokens[0])) return "cwid";
+  // 2. CWID — a single token that is a known scholar CWID (exact set
+  // membership; catches all-letter CWIDs, no false positives).
+  if (tokens.length === 1 && input.knownCwids.has(tokens[0])) return "cwid";
 
   // Surname anchor — the first OR last token is a known surname. Both ends, so
   // "lewis cantley" (given surname) and "cantley lewis" / "cantley l"

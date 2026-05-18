@@ -240,6 +240,7 @@ export async function GET(request: NextRequest) {
   const queryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
+    knownCwids: classifierSets.cwids,
     knownSurnames: classifierSets.surnames,
     knownDepartments: classifierSets.departments,
   });

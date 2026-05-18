@@ -12,6 +12,7 @@ import {
 
 // Fixture sets — lowercased, as the real cached sets will be.
 const SURNAMES: ReadonlySet<string> = new Set(["cantley", "wong", "smith"]);
+const CWIDS: ReadonlySet<string> = new Set(["lcc2010", "rgcryst"]);
 const DEPARTMENTS: ReadonlySet<string> = new Set([
   "cardiology",
   "pediatrics",
@@ -22,6 +23,7 @@ function classify(query: string, meshResolved = false): PeopleQueryShape {
   return classifyPeopleQuery({
     query,
     meshResolved,
+    knownCwids: CWIDS,
     knownSurnames: SURNAMES,
     knownDepartments: DEPARTMENTS,
   });
@@ -66,8 +68,12 @@ describe("classifyPeopleQuery — SPEC §10 matrix", () => {
     expect(classify("lcc2010")).toBe("cwid");
   });
 
-  it("all-letter CWID (e.g. rgcryst) is not lexically detectable -> unclassified", () => {
-    expect(classify("rgcryst")).toBe("unclassified");
+  it("all-letter CWID (e.g. rgcryst) is detected by set membership -> cwid", () => {
+    expect(classify("rgcryst")).toBe("cwid");
+  });
+
+  it("a cwid-shaped token that is not a known CWID -> not cwid", () => {
+    expect(classify("zzz9999")).toBe("unclassified");
   });
 
   it("9-10. empty and whitespace-only -> empty", () => {
