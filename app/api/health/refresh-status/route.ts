@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { isAuthorizedBearer } from "@/lib/revalidate-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +11,16 @@ export const dynamic = "force-dynamic";
  *
  * Auth: Phase 7 will gate this behind admin SAML (T-07-health-auth).
  * Stopgap: if SCHOLARS_HEALTH_TOKEN is set, require a matching
- * `Authorization: Bearer <token>` header (consistent with SCHOLARS_REVALIDATE_TOKEN).
+ * `Authorization: Bearer <token>` header. The token is compared in constant
+ * time via isAuthorizedBearer (lib/revalidate-auth.ts), the same helper
+ * /api/revalidate uses — though SCHOLARS_HEALTH_TOKEN stays a distinct secret.
  */
 export async function GET(request: NextRequest) {
-  const healthToken = process.env.SCHOLARS_HEALTH_TOKEN;
+  const healthToken = process.env.SCHOLARS_HEALTH_TOKEN?.trim();
   if (healthToken) {
-    const authHeader = request.headers.get("authorization") ?? "";
-    if (authHeader !== `Bearer ${healthToken}`) {
+    if (
+      !isAuthorizedBearer(request.headers.get("authorization"), [healthToken])
+    ) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }
