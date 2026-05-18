@@ -144,20 +144,20 @@ export function getDefaultReturnPath(): string {
 
 export interface SuperuserConfig {
   /**
-   * DN of the AD/Entra `scholars-admins` group that confers the superuser
-   * tier (B02 #101). `undefined` until the WCM identity team provisions the
-   * group — `isSuperuser()` then resolves `false` for everyone, leaving the
-   * admin features dormant rather than erroring.
+   * cn of the Enterprise Directory group that confers the superuser tier
+   * (B02 #101) — e.g. `ITS:Library:Scholars/superuser-role`. `undefined` until
+   * the group is provisioned; `isSuperuser()` then resolves `false` for
+   * everyone, leaving the admin features dormant rather than erroring.
    */
-  adminGroupDn: string | undefined;
+  groupCn: string | undefined;
 }
 
 /**
  * Superuser-tier config. The `SCHOLARS_LDAP_*` bind itself is read by
- * `lib/sources/ldap.ts`; this getter adds only the group DN B02 needs. The
+ * `lib/sources/ldap.ts`; this getter adds only the group cn B02 needs. The
  * mapping is plain `process.env`, but its only consumer — `lib/auth/superuser.ts`
  * — is Node-only for the LDAP query.
  */
 export function getSuperuserConfig(): SuperuserConfig {
-  return { adminGroupDn: optionalEnv("SCHOLARS_ADMIN_GROUP_DN") };
+  return { groupCn: optionalEnv("SCHOLARS_SUPERUSER_GROUP_CN") };
 }

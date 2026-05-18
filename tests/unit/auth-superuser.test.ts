@@ -15,8 +15,8 @@ import { getEditSession, isSuperuser } from "@/lib/auth/superuser";
 import { openLdap } from "@/lib/sources/ldap";
 import { getSession } from "@/lib/auth/session-server";
 
-const GROUP_DN = "cn=scholars-admins,ou=groups,dc=weill,dc=cornell,dc=edu";
-const PEOPLE_BASE = "ou=people,dc=weill,dc=cornell,dc=edu";
+const GROUP_CN = "ITS:Library:Scholars/superuser-role";
+const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
 
 const mockedOpenLdap = vi.mocked(openLdap);
 const mockedGetSession = vi.mocked(getSession);
@@ -26,7 +26,7 @@ type SearchImpl = (
   options: { scope: string; filter: string; attributes: string[] },
 ) => Promise<{ searchEntries: unknown[] }>;
 
-/** A stand-in ldapts client whose membership `search` is scripted per test. */
+/** A stand-in ldapts client whose group `search` is scripted per test. */
 function fakeClient(search: SearchImpl) {
   return { search: vi.fn(search), unbind: vi.fn(async (): Promise<void> => {}) };
 }
@@ -36,39 +36,37 @@ function asClient(c: ReturnType<typeof fakeClient>) {
   return c as unknown as Awaited<ReturnType<typeof openLdap>>;
 }
 
-/** A search result carrying `n` matching person entries. */
+/** A search result carrying `n` matching group entries. */
 function entries(n: number): { searchEntries: unknown[] } {
-  return { searchEntries: Array.from({ length: n }, (_, i) => ({ dn: `dn-${i}` })) };
+  return { searchEntries: Array.from({ length: n }, () => ({ cn: GROUP_CN })) };
 }
 
 beforeEach(() => {
   vi.resetAllMocks();
-  process.env.SCHOLARS_ADMIN_GROUP_DN = GROUP_DN;
+  process.env.SCHOLARS_SUPERUSER_GROUP_CN = GROUP_CN;
   delete process.env.SCHOLARS_LDAP_SEARCH_BASE;
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 describe("isSuperuser", () => {
-  it("is true when the membership search returns an entry", async () => {
+  it("is true when the group lists the CWID as a member", async () => {
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(1))));
     expect(await isSuperuser("abc1234")).toBe(true);
   });
 
-  it("is false when the membership search returns no entry", async () => {
-    // Covers both a non-member and a CWID with no directory entry — the
-    // single `(&(uid=...)(memberOf=...))` filter yields nothing for either.
+  it("is false when the group does not list the CWID", async () => {
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
     expect(await isSuperuser("abc1234")).toBe(false);
   });
 
-  it("queries the people base with a memberOf filter, asking for `dn` only", async () => {
+  it("searches ou=Groups for the group cn carrying the member DN, asking for `cn` only", async () => {
     const client = fakeClient(async () => entries(1));
     mockedOpenLdap.mockResolvedValue(asClient(client));
     await isSuperuser("abc1234");
-    expect(client.search).toHaveBeenCalledWith(PEOPLE_BASE, {
+    expect(client.search).toHaveBeenCalledWith(GROUPS_BASE, {
       scope: "sub",
-      filter: `(&(uid=abc1234)(memberOf=${GROUP_DN}))`,
-      attributes: ["dn"],
+      filter: `(&(cn=${GROUP_CN})(member=uid=abc1234,ou=people,dc=weill,dc=cornell,dc=edu))`,
+      attributes: ["cn"],
     });
   });
 
@@ -77,9 +75,9 @@ describe("isSuperuser", () => {
     mockedOpenLdap.mockResolvedValue(asClient(client));
     await isSuperuser("a*b)(uid=*");
     expect(client.search).toHaveBeenCalledWith(
-      PEOPLE_BASE,
+      GROUPS_BASE,
       expect.objectContaining({
-        filter: `(&(uid=a\\2ab\\29\\28uid=\\2a)(memberOf=${GROUP_DN}))`,
+        filter: `(&(cn=${GROUP_CN})(member=uid=a\\2ab\\29\\28uid=\\2a,ou=people,dc=weill,dc=cornell,dc=edu))`,
       }),
     );
   });
@@ -109,8 +107,8 @@ describe("isSuperuser", () => {
     expect(await isSuperuser("abc1234")).toBe(false);
   });
 
-  it("is false and never touches LDAP when the group DN is unset", async () => {
-    delete process.env.SCHOLARS_ADMIN_GROUP_DN;
+  it("is false and never touches LDAP when the group cn is unset", async () => {
+    delete process.env.SCHOLARS_SUPERUSER_GROUP_CN;
     expect(await isSuperuser("abc1234")).toBe(false);
     expect(mockedOpenLdap).not.toHaveBeenCalled();
   });
@@ -128,13 +126,13 @@ describe("getEditSession", () => {
     expect(mockedOpenLdap).not.toHaveBeenCalled();
   });
 
-  it("pairs the CWID with isSuperuser=true for an admin", async () => {
+  it("pairs the CWID with isSuperuser=true for a superuser", async () => {
     mockedGetSession.mockResolvedValue({ cwid: "adm1001", iat: 1, exp: 2 });
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(1))));
     expect(await getEditSession()).toEqual({ cwid: "adm1001", isSuperuser: true });
   });
 
-  it("pairs the CWID with isSuperuser=false for a non-admin", async () => {
+  it("pairs the CWID with isSuperuser=false for a non-superuser", async () => {
     mockedGetSession.mockResolvedValue({ cwid: "usr2002", iat: 1, exp: 2 });
     mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
     expect(await getEditSession()).toEqual({ cwid: "usr2002", isSuperuser: false });

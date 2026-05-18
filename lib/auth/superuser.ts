@@ -1,24 +1,33 @@
 /**
  * B02 — superuser resolution (issue #101).
  *
- * `isSuperuser(cwid)` answers "is this CWID a member of the `scholars-admins`
- * group?" with a live LDAPS query against the WCM Enterprise Directory —
- * re-evaluated per request, never cached (`self-edit-spec.md` § Authorization;
- * B01's cookie is identity-only by design). `getEditSession()` pairs B01's
- * identity session with that answer as `{ cwid, isSuperuser }`, the shape the
- * `/edit/*` pages and `/api/edit/*` handlers (#356) consume.
+ * `isSuperuser(cwid)` answers "is this CWID a member of the superuser group?"
+ * with a live LDAPS query against the WCM Enterprise Directory — re-evaluated
+ * per request, never cached (`self-edit-spec.md` § Authorization; B01's cookie
+ * is identity-only by design). `getEditSession()` pairs B01's identity session
+ * with that answer as `{ cwid, isSuperuser }`, the shape the `/edit/*` pages
+ * and `/api/edit/*` handlers (#356) consume.
+ *
+ * The superuser group is a real Enterprise Directory group object under
+ * `ou=Groups` (cn `ITS:Library:Scholars/superuser-role`); membership is the
+ * group's `member` attribute, which lists person DNs (`uid=<cwid>,ou=people,…`).
+ * The check is one subtree search under `ou=Groups`: does the named group
+ * carry this CWID's person DN in `member`?
  *
  * Node-runtime only. Reuses `lib/sources/ldap.ts` (`ldapts` — Node sockets and
  * TLS): this module, and anything importing it, must never be pulled into the
  * Edge middleware bundle — the same constraint `lib/auth/saml.ts` carries.
  *
- * The check is **fail-closed**: a missing group DN, an unreachable directory,
+ * The check is **fail-closed**: a missing group cn, an unreachable directory,
  * a bind failure, or a search error all resolve to "not a superuser". A
  * directory problem can never *grant* the admin tier.
  */
 import { getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
+
+/** The Enterprise Directory container holding group objects. */
+const GROUPS_BASE = "ou=Groups,dc=weill,dc=cornell,dc=edu";
 
 /** B01 identity (`cwid`) paired with the live B02 superuser verdict. */
 export interface EditSession {
@@ -56,14 +65,15 @@ function logCheckFailed(cwid: string, reason: string): void {
 }
 
 /**
- * Whether `cwid` is a member of the `scholars-admins` group, by a live LDAPS
- * membership search. Never throws — every failure mode resolves to `false`.
+ * Whether `cwid` is a member of the superuser group, by a live LDAPS search of
+ * the group's `member` attribute. Never throws — every failure mode resolves
+ * to `false`.
  */
 export async function isSuperuser(cwid: string): Promise<boolean> {
   if (!cwid) return false;
-  const { adminGroupDn } = getSuperuserConfig();
-  // Group not provisioned yet — the admin tier is dormant, not broken.
-  if (!adminGroupDn) return false;
+  const { groupCn } = getSuperuserConfig();
+  // Group cn not configured yet — the admin tier is dormant, not broken.
+  if (!groupCn) return false;
 
   let client: Awaited<ReturnType<typeof openLdap>>;
   try {
@@ -75,15 +85,16 @@ export async function isSuperuser(cwid: string): Promise<boolean> {
   }
 
   try {
-    const base = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
-    // One minimal query: does a person entry for this CWID also carry the
-    // admin group in `memberOf`? `dn` only — existence is the whole answer,
-    // and an authorization probe has no business reading person attributes.
-    const filter = `(&(uid=${escapeLdapFilterValue(cwid)})(memberOf=${adminGroupDn}))`;
-    const { searchEntries } = await client.search(base, {
+    const peopleBase =
+      process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+    const userDn = `uid=${escapeLdapFilterValue(cwid)},${peopleBase}`;
+    // One subtree search under ou=Groups: the named group, carrying this
+    // person's DN in `member`. `cn` only — existence is the whole answer.
+    const filter = `(&(cn=${escapeLdapFilterValue(groupCn)})(member=${userDn}))`;
+    const { searchEntries } = await client.search(GROUPS_BASE, {
       scope: "sub",
       filter,
-      attributes: ["dn"],
+      attributes: ["cn"],
     });
     return searchEntries.length > 0;
   } catch {
