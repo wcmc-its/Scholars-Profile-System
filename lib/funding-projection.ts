@@ -70,6 +70,11 @@ export type GrantRowForIndex = {
    *  column. `projectFromRows` normalizes and unions it across the project's
    *  rows. */
   keywords?: unknown;
+  /** Issue #295 — `Grant.meshDescriptorUis` JSON column: RePORTER keywords
+   *  resolved to NLM MeSH descriptor UIs. A `string[]` in practice, typed
+   *  `unknown` like `keywords` because it is a JSON column. `projectFromRows`
+   *  unions it across the project's rows into `FundingDoc.meshDescriptorUi`. */
+  meshDescriptorUis?: unknown;
 };
 
 export type FundingDoc = {
@@ -120,6 +125,11 @@ export type FundingDoc = {
    *  analyzed `text` so a topical query contributes to relevance ranking
    *  alongside `abstract`. Empty string when the project has no keywords. */
   keywordsText: string;
+  /** Issue #295 — `keywords` resolved to NLM MeSH descriptor UIs, unioned +
+   *  de-duped across the project's grant rows. Indexed as a `keyword` field
+   *  named to match the publications index, so one `terms` template hits
+   *  both. Empty array when no keyword on the project resolved. */
+  meshDescriptorUi: string[];
   /** Issue #86 — count of DISTINCT pmids attributed to the project across
    *  all its scholar rows. Drives the pubCount sort and the inline pub
    *  count on the result row. */
@@ -405,6 +415,21 @@ export function projectFromRows(
     }
   }
 
+  // MeSH descriptor UIs: same union-across-rows + de-dupe pattern as
+  // `keywords` — issue #295. All rows of one project normally carry the same
+  // resolved set; unioning is safe for the rare project whose rows diverge.
+  // `normalizeKeywords` is a generic JSON-array → string[] coercion, reused
+  // here for the `meshDescriptorUis` JSON column.
+  const meshUiSeen = new Set<string>();
+  const meshDescriptorUi: string[] = [];
+  for (const r of rows) {
+    for (const ui of normalizeKeywords(r.meshDescriptorUis)) {
+      if (meshUiSeen.has(ui)) continue;
+      meshUiSeen.add(ui);
+      meshDescriptorUi.push(ui);
+    }
+  }
+
   // Date range: union across the group. With coreProjectNum-based
   // grouping (etl/search-index/index.ts), one project may cover
   // multiple InfoEd Account_Numbers for renewals, no-cost extensions,
@@ -447,6 +472,7 @@ export function projectFromRows(
     abstractSource,
     keywords,
     keywordsText: keywords.join(" "),
+    meshDescriptorUi,
     pubCount: pubsByPmid.size,
     applId,
     publications: publicationsList,

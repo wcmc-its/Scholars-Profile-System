@@ -35,6 +35,7 @@ import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
 import { parseReporterTerms } from "@/lib/reporter-terms";
+import { resolveGrantKeywords } from "./mesh";
 
 type ReporterRow = {
   core_project_num: string;
@@ -322,11 +323,91 @@ async function step2_GrantPublications() {
   console.log(`Inserted ${inserted} rows.`);
 }
 
+async function step3_ResolveMeshDescriptors() {
+  console.log("\n=== Step 3: MeSH descriptor resolution (issue #295) ===");
+
+  // Load every grant; resolve only those carrying RePORTER keywords. The
+  // table is small (~10K rows) so a full load + JS filter is simpler and
+  // safer than a JSON-column WHERE clause.
+  console.log("Loading grants from Postgres...");
+  const grants = await prisma.grant.findMany({
+    select: {
+      id: true,
+      keywords: true,
+      meshDescriptorUis: true,
+      meshResolutionCoverage: true,
+    },
+  });
+  const withKeywords = grants.filter(
+    (g) => Array.isArray(g.keywords) && (g.keywords as unknown[]).length > 0,
+  );
+  console.log(`${grants.length} grants, ${withKeywords.length} with keywords.`);
+
+  let grantsWithDescriptors = 0;
+  const toUpdate: Array<{
+    id: string;
+    meshDescriptorUis: string[] | null;
+    meshResolutionCoverage: number | null;
+  }> = [];
+
+  for (const g of withKeywords) {
+    const keywords = (g.keywords as unknown[]).filter(
+      (x): x is string => typeof x === "string",
+    );
+    const next = await resolveGrantKeywords(keywords);
+    if (next.meshDescriptorUis) grantsWithDescriptors++;
+    // Diff-only write — skip when neither column changed, so a no-op re-run
+    // touches 0 rows and does not advance `meshResolvedAt` (idempotency).
+    const uisChanged =
+      JSON.stringify(g.meshDescriptorUis ?? null) !==
+      JSON.stringify(next.meshDescriptorUis);
+    const coverageChanged =
+      g.meshResolutionCoverage !== next.meshResolutionCoverage;
+    if (uisChanged || coverageChanged) {
+      toUpdate.push({ id: g.id, ...next });
+    }
+  }
+
+  console.log(
+    `${grantsWithDescriptors}/${withKeywords.length} grants resolved to ≥1 descriptor. ` +
+      `${toUpdate.length} need update.`,
+  );
+
+  if (toUpdate.length === 0) {
+    console.log("Nothing to write.");
+    return;
+  }
+
+  console.log(`Updating ${toUpdate.length} grant rows...`);
+  const resolvedAt = new Date();
+  let updated = 0;
+  for (const batch of chunks(toUpdate, UPDATE_BATCH)) {
+    await prisma.$transaction(
+      batch.map((u) =>
+        prisma.grant.update({
+          where: { id: u.id },
+          data: {
+            meshDescriptorUis: u.meshDescriptorUis ?? Prisma.DbNull,
+            meshResolutionCoverage: u.meshResolutionCoverage,
+            meshResolvedAt: resolvedAt,
+          },
+        }),
+      ),
+    );
+    updated += batch.length;
+    if (updated % (UPDATE_BATCH * 5) === 0) {
+      console.log(`  ...${updated}/${toUpdate.length}`);
+    }
+  }
+  console.log(`Updated ${updated} grant rows.`);
+}
+
 async function main() {
   const start = Date.now();
   try {
     await step1_GrantAbstracts();
     await step2_GrantPublications();
+    await step3_ResolveMeshDescriptors();
   } finally {
     // Close both connection pools so the process exits cleanly. Without the
     // Prisma disconnect the adapter's pool keeps the event loop alive and the

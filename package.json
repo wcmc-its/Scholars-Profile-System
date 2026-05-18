@@ -38,6 +38,7 @@
     "etl:jenzabar:probe-gs-faculty": "tsx etl/jenzabar/probe-gs-faculty.ts",
     "etl:jenzabar:import-gs-faculty": "tsx etl/jenzabar/import-gs-faculty.ts",
     "etl:jenzabar": "tsx etl/jenzabar/index.ts",
+    "etl:reporter:probe": "tsx etl/reporter/mesh-probe.ts",
     "etl:reporter": "tsx etl/reporter/index.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",

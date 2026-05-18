@@ -316,6 +316,11 @@ export const fundingIndexMapping = {
       // `abstract`. Both populated from `grant.keywords`.
       keywords: { type: "keyword" },
       keywordsText: { type: "text", analyzer: "funding_text" },
+      // Issue #295 — `keywords` resolved to NLM MeSH descriptor UIs. `keyword`
+      // (multi-valued); deliberately the same field name as the publications
+      // index so one `terms` query template hits both. Queried via `terms`,
+      // never aggregated as a facet.
+      meshDescriptorUi: { type: "keyword" },
       // Issue #86 — RePORTER application ID; outbound deep-link target
       // from the expanded result row.
       applId: { type: "integer" },
