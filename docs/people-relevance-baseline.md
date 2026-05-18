@@ -366,6 +366,39 @@ and its sign-off is the eval owner's. It is PR-2's hard rollback target.
 Frozen here, never refreshed (SPEC §4). A v3 flag-flip that fails to beat the
 name-shape number is reverted; a regression on another shape is a review flag.
 
+### Provisional dry-run (2026-05-18) — NOT the frozen baseline
+
+A provisional Recall@3 was measured ahead of owner sign-off, to sanity-check the
+candidate labeled set. The `scholars-people` index was rebuilt (8,937 active
+scholars) and the 12 queries were run through `searchPeople()` directly under the
+current ("legacy") ranking via `scripts/people-relevance-dryrun.ts`.
+
+| Shape | Recall@3 (provisional) | Notes |
+| --- | --- | --- |
+| Name | 3/6 = 0.50 | #1–3 (unique surnames) all rank-1; #4 `wong` 0/3 |
+| Topic | 0/9 = 0.00 | labeled scholars absent from top-3 of 78–769-result sets |
+| Department | 0/6 = 0.00 | labeled scholars absent from top-3 of 878–1,362-result sets |
+| Hybrid | 1/4 = 0.25 | `iadecola stroke` ✓; `medicine cardiology` ✗ |
+| **Overall** | **4/25 = 0.16** | mean rank of labeled scholars appearing on page 1: 8.4 (n=13) |
+
+**Provisional and unfrozen — the eval owner still captures and signs the official
+§4 baseline above.** Three findings for that review:
+
+- **Exact-name lookup works** (#1–3, #11 → rank 1): the index and `searchPeople`
+  are verified functional, so the low topic/department numbers are a *ranking*
+  result, not a data bug.
+- **Topic/department 0.00 needs interpretation.** It is consistent with SPEC §1's
+  thesis — legacy ranking carries no prominence/topical-fit signal, so prominent
+  scholars sink in 400–1,400-result sets (large v3 headroom). It is *also*
+  consistent with the candidate labeled set's topic/dept picks (chosen by raw
+  `publication_topic` / pub-count rank) not matching what good ranking surfaces —
+  see §6's open judgment calls and §5 finding 2. Resolve which before freezing.
+- **#4 `wong`** returned arbitrary Wongs, not the labeled prominent three —
+  confirming §6's flagged concern that a bare shared surname cannot disambiguate
+  namesakes (and §6.1.2's name template will not either). Re-decide #4.
+
+Harness: `scripts/people-relevance-dryrun.ts` — re-runnable once §6 is frozen.
+
 ---
 
 ## 8. Deferred — revisit when telemetry accrues
