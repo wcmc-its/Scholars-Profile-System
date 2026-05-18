@@ -66,6 +66,10 @@ describe("classifyPeopleQuery — SPEC §10 matrix", () => {
     expect(classify("lcc2010")).toBe("cwid");
   });
 
+  it("all-letter CWID (e.g. rgcryst) is not lexically detectable -> unclassified", () => {
+    expect(classify("rgcryst")).toBe("unclassified");
+  });
+
   it("9-10. empty and whitespace-only -> empty", () => {
     expect(classify("")).toBe("empty");
     expect(classify("   ")).toBe("empty");

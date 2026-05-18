@@ -34,16 +34,17 @@ export type PeopleQueryShape =
   | "empty";
 
 /**
- * Single-token CWID detector.
- *
- * PROVISIONAL — the WCM CWID format must be confirmed against the live
- * `scholar.cwid` column before this ships (tracked under #362). `lcc2010`-style
- * 3-letters + 4-digits is the common form, but a 2-letter or 7-digit variant
- * may exist. There is no existing CWID *detector* in the codebase to inherit:
- * `searchPeople`'s short-circuit unconditionally appends a `cwid` term clause
- * without ever classifying the query.
+ * Single-token CWID detector. The common WCM CWID form is three letters
+ * followed by four digits (e.g. `abc4001`, `lcc2010`). All-letter CWIDs exist
+ * (e.g. `rgcryst`) but are lexically indistinguishable from ordinary words and
+ * surnames, so they are deliberately NOT detected here — they fall through to
+ * `name` / `unclassified`. That is acceptable: `searchPeople`'s always-on
+ * `cwid` term boost still surfaces the exact scholar regardless of the
+ * classified shape, and PR-1's shape is telemetry-only. There is no existing
+ * CWID detector in the codebase to inherit — the short-circuit just appends a
+ * `cwid` term clause unconditionally, never classifying the query.
  */
-const CWID_RE = /^[a-z]{2,3}[0-9]{4,}$/;
+const CWID_RE = /^[a-z]{3}[0-9]{4}$/;
 
 /**
  * Words dropped from a department-prefix leftover before the
