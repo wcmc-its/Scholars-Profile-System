@@ -940,3 +940,62 @@ model Spotlight {
   @@index([parentTopicId])
   @@map("spotlight")
 }
+
+// Manual-override layer (ADR-005) — two ETL-immune tables holding human-entered
+// data, keyed on stable entity identifiers and merged into responses at read
+// time. The ETL never writes either table, so the manual layer survives every
+// rebuild by construction. See docs/ADR-005-manual-override-layer.md. The B03
+// audit log (#102) is a separate artefact in a separate schema and is
+// deliberately NOT a Prisma model.
+
+/// Stable entity identifiers the manual layer can target. A Prisma enum — not a
+/// bare string — so a typo is a compile error, not a silently-unread row. v1
+/// uses only `scholar` and `publication` (plus the (publication, author) pair);
+/// grant/education/appointment are reserved but blocked on the ETL stable-key
+/// refactor (#352).
+enum EntityType {
+  scholar
+  publication
+  grant
+  education
+  appointment
+}
+
+/// Manual scalar-field overrides applied over ETL-managed data at read time.
+/// One row per (entity, field): the current value, upserted in place. Change
+/// history is the B03 audit log's responsibility, not this table's. No FK to
+/// the entity tables — a slug override must be settable before the scholar's
+/// ED record exists (#29 reservation case).
+model FieldOverride {
+  id         String     @id @default(uuid()) @db.VarChar(64)
+  entityType EntityType @map("entity_type")
+  entityId   String     @map("entity_id") @db.VarChar(64) // Scholar.cwid for v1
+  fieldName  String     @map("field_name") @db.VarChar(64) // 'overview' | 'slug' — self-edit SPEC allowlist
+  value      String     @db.Text // scalar text; structured values are an ADR-005 non-goal
+  actorCwid  String     @map("actor_cwid") @db.VarChar(32)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@unique([entityType, entityId, fieldName])
+  @@map("field_override")
+}
+
+/// Manual suppression of an entity, or of one contributor on a record.
+/// Revocable, never deleted: a target is suppressed iff a matching row exists
+/// with revokedAt IS NULL, so re-suppressing after a revoke is legitimate and
+/// the table carries no uniqueness constraint. No FK, so a suppression row can
+/// outlive a hard-deleted target.
+model Suppression {
+  id              String     @id @default(uuid()) @db.VarChar(64)
+  entityType      EntityType @map("entity_type")
+  entityId        String     @map("entity_id") @db.VarChar(64) // stable identifier — see ADR-005 § Keying
+  contributorCwid String?    @map("contributor_cwid") @db.VarChar(32) // NULL = whole entity; CWID = one contributor
+  reason          String     @db.Text
+  createdBy       String     @map("created_by") @db.VarChar(32)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  revokedBy       String?    @map("revoked_by") @db.VarChar(32)
+  revokedAt       DateTime?  @map("revoked_at")
+
+  @@index([entityType, entityId])
+  @@map("suppression")
+}

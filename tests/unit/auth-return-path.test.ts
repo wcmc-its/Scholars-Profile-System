@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { isSafeReturnPath, safeReturnPath } from "@/lib/auth/return-path";
+
+describe("isSafeReturnPath", () => {
+  it("accepts paths on the /edit surface", () => {
+    expect(isSafeReturnPath("/edit")).toBe(true);
+    expect(isSafeReturnPath("/edit/scholar/abc1234")).toBe(true);
+    expect(isSafeReturnPath("/edit/publication/12345678")).toBe(true);
+    expect(isSafeReturnPath("/edit?tab=overview")).toBe(true);
+    expect(isSafeReturnPath("/edit#section")).toBe(true);
+  });
+
+  it("rejects paths outside the /edit surface", () => {
+    expect(isSafeReturnPath("/")).toBe(false);
+    expect(isSafeReturnPath("/admin")).toBe(false);
+    expect(isSafeReturnPath("/scholars/jane-smith")).toBe(false);
+    expect(isSafeReturnPath("/editfoo")).toBe(false); // prefix match, not the surface
+  });
+
+  it("rejects absolute and protocol-relative URLs (open-redirect vectors)", () => {
+    expect(isSafeReturnPath("https://evil.com/edit")).toBe(false);
+    expect(isSafeReturnPath("http://evil.com")).toBe(false);
+    expect(isSafeReturnPath("//evil.com")).toBe(false);
+    expect(isSafeReturnPath("/\\evil.com")).toBe(false);
+  });
+
+  it("rejects path traversal", () => {
+    expect(isSafeReturnPath("/edit/../admin")).toBe(false);
+    expect(isSafeReturnPath("/edit/..%2fadmin")).toBe(false); // any ".." substring is rejected, conservatively
+  });
+
+  it("rejects control characters and over-long input", () => {
+    expect(isSafeReturnPath("/edit/\u0000")).toBe(false);
+    expect(isSafeReturnPath("/edit/\n")).toBe(false);
+    expect(isSafeReturnPath("/edit/" + "x".repeat(600))).toBe(false);
+  });
+
+  it("rejects empty and nullish input", () => {
+    expect(isSafeReturnPath("")).toBe(false);
+    expect(isSafeReturnPath(null)).toBe(false);
+    expect(isSafeReturnPath(undefined)).toBe(false);
+  });
+});
+
+describe("safeReturnPath", () => {
+  it("returns the path when it is safe", () => {
+    expect(safeReturnPath("/edit/scholar/abc", "/edit")).toBe("/edit/scholar/abc");
+  });
+
+  it("falls back when the path is unsafe or absent", () => {
+    expect(safeReturnPath("https://evil.com", "/edit")).toBe("/edit");
+    expect(safeReturnPath(null, "/edit")).toBe("/edit");
+    expect(safeReturnPath(undefined, "/edit")).toBe("/edit");
+  });
+});

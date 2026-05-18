@@ -18,11 +18,12 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 |---|---|---|---|---|---|
 | 1 | `/api/edit*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | Writer route. Forwards all cookies, headers, query string. Does not yet exist in code (lands with B01 #100 + B02 #101). |
 | 2 | `/edit/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Writer page route. Same auth as `/api/edit*`. Does not yet exist in code (lands with B01). |
-| 3 | `/api/revalidate*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST | Mutating endpoint reachable only from the internal-only ALB listener (B05 #104). Behavior exists for defense-in-depth so a misconfigured origin cannot accidentally be cached at the edge. |
-| 4 | `/api/health/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Operational endpoint; staleness here would mask outages. Origin already sets `force-dynamic`. |
-| 5 | `/api/analytics` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, POST | Telemetry POST. CloudFront does not cache POST regardless, but explicit behavior keeps the cache key from being computed against forwarded cookies. |
-| 6 | `/api/export/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | On-demand CSV/Excel export. Origin sets `Cache-Control: no-store`. Behavior is belt-and-suspenders. |
-| 7 | `*` (default) | `CachingOptimized` | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All cacheable routes — pages, read-only API, sitemap, OG images. See §Cache key for the included query strings and headers. |
+| 3 | `/api/auth/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, POST | SSO endpoints (B01 #100) — SAML login redirect, ACS callback (POST), SP metadata, logout (POST). Forwards all cookies; the session cookie is set here, so these responses must never be edge-cached. Pairs with the `/api/edit*` and `/edit/*` writer behaviors above. |
+| 4 | `/api/revalidate*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST | Mutating endpoint reachable only from the internal-only ALB listener (B05 #104). Behavior exists for defense-in-depth so a misconfigured origin cannot accidentally be cached at the edge. |
+| 5 | `/api/health/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Operational endpoint; staleness here would mask outages. Origin already sets `force-dynamic`. |
+| 6 | `/api/analytics` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, POST | Telemetry POST. CloudFront does not cache POST regardless, but explicit behavior keeps the cache key from being computed against forwarded cookies. |
+| 7 | `/api/export/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | On-demand CSV/Excel export. Origin sets `Cache-Control: no-store`. Behavior is belt-and-suspenders. |
+| 8 | `*` (default) | `CachingOptimized` | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All cacheable routes — pages, read-only API, sitemap, OG images. See §Cache key for the included query strings and headers. |
 
 `AllViewer` is AWS-managed origin request policy `Managed-AllViewer` (`216adef6-5c7f-47e4-b989-5492eafa07d3`). `CachingDisabled` and `CachingOptimized` are `Managed-CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`) and `Managed-CachingOptimized` (`658327ea-f89d-4fab-a63d-7e88639e58f6`) respectively. If a custom policy is needed for the cacheable default (see §Cache key), define it once and reuse.
 
@@ -55,7 +56,7 @@ Default TTL is 24 h to match the `revalidate = 86400` declaration on `/scholars/
 
 Acceptance criteria for B07 #106:
 
-1. **Distribution has at least two behaviors** — the table above defines seven; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
+1. **Distribution has at least two behaviors** — the table above defines eight; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
 2. **Cache key inspector test** — same URL with two different `Cookie:` values produces the same cache key for any path covered by the default behavior. Run from the CloudFront console: Distribution → Behaviors → Default → Cache Policy → "Test cache policy."
 3. **Writer route forwards cookies** — `curl -v https://<staging-domain>/api/edit/ping --cookie "session=test"` and confirm the origin access log records `session=test` in the request headers.
 4. **End-to-end edit smoke test** — once B01 #100 (SSO) and B02 #101 (authz predicate) land, perform a full self-edit through CloudFront and confirm the write reaches Aurora and the audit log captures it. Blocked on those issues.
