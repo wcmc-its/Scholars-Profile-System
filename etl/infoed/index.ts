@@ -8,7 +8,9 @@
  *      expired / in-process awards.
  *   2. Filter result set to currently-active scholars in our local DB and
  *      drop rows with null start/end dates (per spec line 125).
- *   3. Truncate Grant table; bulk-insert.
+ *   3. Reconcile the Grant table by externalId (create new / update
+ *      changed / tombstone stale) — each row keeps its uuid PK, and the
+ *      abstract/applId enrichment columns survive the run (#352).
  *
  * Role mapping from the query's Role column to our Grant.role values:
  *   PrincipalInvestigatorRole         -> 'PI'
