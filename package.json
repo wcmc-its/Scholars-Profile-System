@@ -60,6 +60,7 @@
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudfront": "^3.1049.0",
     "@aws-sdk/client-dynamodb": "^3.1039.0",
     "@aws-sdk/client-s3": "^3.1044.0",
     "@aws-sdk/lib-dynamodb": "^3.1039.0",

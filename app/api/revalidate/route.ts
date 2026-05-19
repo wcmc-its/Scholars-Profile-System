@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getRevalidateTokens, isAuthorizedBearer } from "@/lib/revalidate-auth";
+import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
 
 /**
  * POST /api/revalidate?path={p}
@@ -29,31 +30,8 @@ import { getRevalidateTokens, isAuthorizedBearer } from "@/lib/revalidate-auth";
  *   - T-02-09-03 Info disclosure — 401 body never echoes the received token
  */
 
-const ALLOWED_EXACT = new Set<string>([
-  "/",
-  "/about",
-  "/about/methodology",
-  "/browse", // Phase 4 — Browse hub ISR revalidation
-  "/sitemap.xml", // Phase 5 — ETL-triggered sitemap revalidation (SEO-01)
-]);
-
-// Slug = alnum start, alnum end, hyphens only in interior. No dots, no
-// slashes, no whitespace, no trailing hyphens.
-// Anchored to prevent prefix-match attacks. Matches Next.js dynamic-segment
-// shape used by `/scholars/[slug]` and `/topics/[slug]`.
-const SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
-const ALLOWED_PATTERNS: RegExp[] = [
-  new RegExp(`^/scholars/${SLUG_RE_SOURCE}$`),
-  new RegExp(`^/topics/${SLUG_RE_SOURCE}$`),
-  // Phase 3 — D-01 / D-11: department and nested division paths
-  new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
-  new RegExp(`^/departments/${SLUG_RE_SOURCE}/divisions/${SLUG_RE_SOURCE}$`),
-];
-
-function isAllowedPath(p: string): boolean {
-  if (ALLOWED_EXACT.has(p)) return true;
-  return ALLOWED_PATTERNS.some((re) => re.test(p));
-}
+// The path allow-list lives in lib/revalidate-allowlist.ts — one constant
+// shared with the self-edit write path (lib/edit/revalidation.ts, #356).
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const acceptedTokens = getRevalidateTokens();
@@ -78,7 +56,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "missing path" }, { status: 400 });
   }
 
-  if (!isAllowedPath(path)) {
+  if (!isAllowedRevalidatePath(path)) {
     return NextResponse.json({ error: "path not allowed" }, { status: 400 });
   }
 
