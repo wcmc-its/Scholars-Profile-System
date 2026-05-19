@@ -28,6 +28,11 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
+import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 export type CoPublication = {
   pmid: number;
@@ -517,6 +522,18 @@ export async function getCoPublications(
       typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
     );
 
+    // #356 — publication suppression. The co-pub list is ReciterDB-sourced;
+    // the local suppression table is consulted here so a taken-down or
+    // derived-dark publication drops, and a per-author-hidden co-author is
+    // omitted from the chips, on these public, titled, exportable pages.
+    const pmidStrings = pmids.map((p) => String(p));
+    const suppressions = await loadPublicationSuppressions(pmidStrings, prisma);
+    const darkPmids = await resolveDarkPmids(pmidStrings, suppressions, prisma);
+    const visibleArticleRows = articleRows.filter(
+      (r) => !darkPmids.has(String(r.pmid)),
+    );
+    if (visibleArticleRows.length === 0) return [];
+
     // Step 2: full author list per pmid (one round-trip, batched).
     type AuthorRow = {
       pmid: number | bigint;
@@ -546,7 +563,7 @@ export async function getCoPublications(
       authorsByPmid.set(pmid, list);
     }
 
-    return articleRows.map<CoPublicationFull>((r) => {
+    return visibleArticleRows.map<CoPublicationFull>((r) => {
       const pmid = typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid;
       return {
         pmid,
@@ -560,7 +577,12 @@ export async function getCoPublications(
         pages: r.pages,
         citationCount: r.citationCount ?? 0,
         abstract: r.abstract ?? null,
-        authors: authorsByPmid.get(pmid) ?? [],
+        // #356 — drop the chip of a co-author who hid this publication.
+        authors: (authorsByPmid.get(pmid) ?? []).filter(
+          (a) =>
+            a.personIdentifier === null ||
+            !isAuthorHidden(suppressions, String(pmid), a.personIdentifier),
+        ),
       };
     });
   });
