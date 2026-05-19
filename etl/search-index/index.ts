@@ -27,6 +27,7 @@
  */
 import { prisma } from "../../lib/db";
 import { coreProjectNum } from "@/lib/award-number";
+import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
 import {
   FUNDING_INDEX,
@@ -109,6 +110,12 @@ async function indexPeople() {
 
 async function indexPublications() {
   const client = searchClient();
+  // Phase 4b C3 — load the active publication-suppression set once per run.
+  // `loadAllPublicationSuppressions` is whole-table by contract
+  // (lib/api/manual-layer.ts); the build is a single batch over the corpus
+  // with no per-request staleness concern, so reading the whole `suppression`
+  // table here is correct — and explicitly fenced from the per-request path.
+  const sup = await loadAllPublicationSuppressions(prisma);
   const PUB_PAGE = 2000;
   let cursor: string | undefined;
   let totalIndexed = 0;
@@ -132,7 +139,8 @@ async function indexPublications() {
 
     const docs: Array<{ pmid: string; doc: Record<string, unknown> }> = [];
     for (const p of pubs) {
-      docs.push({ pmid: p.pmid, doc: buildPublicationDoc(p) });
+      const doc = buildPublicationDoc(p, sup);
+      if (doc !== null) docs.push({ pmid: p.pmid, doc });
     }
 
     if (docs.length === 0) {

@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { PublicationSuppressions } from "@/lib/api/manual-layer";
 import {
   buildPeopleDoc,
   buildPublicationDoc,
   type PublicationForIndex,
   type ScholarForIndex,
 } from "@/lib/search-index-docs";
+
+// Empty suppression set — the C2 baseline assumption is "no suppressions";
+// the C3-updated builder signature requires it explicitly. With empty sup
+// the suppression logic is a no-op, so the C2 snapshots must NOT change.
+const NO_SUP: PublicationSuppressions = {
+  darkPmids: new Set(),
+  hiddenAuthorsByPmid: new Map(),
+};
 
 /**
  * C2 doc-diff harness — golden snapshots for the OpenSearch document shapes
@@ -119,7 +128,7 @@ describe("buildPublicationDoc — golden snapshots", () => {
         { parentTopicId: "topic-mi" },
       ],
     };
-    expect(buildPublicationDoc(p as PublicationForIndex)).toMatchSnapshot();
+    expect(buildPublicationDoc(p as PublicationForIndex, NO_SUP)).toMatchSnapshot();
   });
 
   it("captures the omit-on-empty branches (no topics, null impact, blank mesh)", () => {
@@ -160,7 +169,7 @@ describe("buildPublicationDoc — golden snapshots", () => {
       ] as unknown as PublicationForIndex["authors"],
       publicationTopics: [],
     };
-    expect(buildPublicationDoc(p as PublicationForIndex)).toMatchSnapshot();
+    expect(buildPublicationDoc(p as PublicationForIndex, NO_SUP)).toMatchSnapshot();
   });
 
   it("filters wcmAuthors to ACTIVE non-deleted scholars (deleted coauthor dropped)", () => {
@@ -219,7 +228,7 @@ describe("buildPublicationDoc — golden snapshots", () => {
       ] as unknown as PublicationForIndex["authors"],
       publicationTopics: [],
     };
-    const doc = buildPublicationDoc(p as PublicationForIndex);
+    const doc = buildPublicationDoc(p as PublicationForIndex, NO_SUP);
     expect(doc).toMatchSnapshot();
     // Spot-assertion outside the snapshot — the deleted coauthor is filtered.
     expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual(["ann1234"]);

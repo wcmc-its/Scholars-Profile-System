@@ -22,6 +22,11 @@
  */
 import type { Prisma, PrismaClient } from "@/lib/generated/prisma/client";
 
+import {
+  isAuthorHidden,
+  isPublicationDark,
+  type PublicationSuppressions,
+} from "@/lib/api/manual-layer";
 import { isFundingActive } from "@/lib/api/search-funding";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -359,23 +364,58 @@ export type ScholarForIndex = Prisma.ScholarGetPayload<{
 // ---------------------------------------------------------------------------
 
 /**
- * Build the OpenSearch publication `_source` for `p`. Pure — given the row,
- * the output is deterministic. The caller wraps as
- * `{ pmid: p.pmid, doc: buildPublicationDoc(p) }` for the bulk-index action;
+ * Build the OpenSearch publication `_source` for `p`. Pure — given the row
+ * and the loaded suppression set, the output is deterministic.
+ *
+ * Returns `null` when the publication is dark — an explicit whole-pub
+ * takedown OR derived-dark (every confirmed, site-visible WCM author has
+ * a per-author hide), per ADR-005 / `self-edit-spec.md` audit query B. The
+ * caller skips emitting a `null` doc; on a from-scratch rebuild
+ * (`ensureIndex` drops + recreates) the dark pmid simply never enters the
+ * index. The caller wraps non-null as
+ * `{ pmid: p.pmid, doc: buildPublicationDoc(p, sup) }` for the bulk action;
  * `_id` is set by the caller.
  *
- * C2 — pure relocation of the inline body from `indexPublications`. No
- * suppression filtering; C3 will add `loadAllPublicationSuppressions` plus
- * `isAuthorHidden` / `isPublicationDark` integration here.
+ * Phase 4b C3 — the publication-suppression integration is here:
+ *   - drops per-author-hidden cwids from `wcmAuthorRows` (chips / facets);
+ *   - returns `null` for dark pmids (whole-pub or derived-dark).
  */
-export function buildPublicationDoc(p: PublicationForIndex): Record<string, unknown> {
+export function buildPublicationDoc(
+  p: PublicationForIndex,
+  sup: PublicationSuppressions,
+): Record<string, unknown> | null {
+  // Derived-dark gate (ADR-005 / self-edit-spec.md audit query B).
+  //
+  // `confirmedWcmCwids` is the publication's confirmed, site-visible WCM
+  // author set — `isConfirmed`-filtered. It is DELIBERATELY different from
+  // `wcmAuthorRows` below, which keeps its existing non-`isConfirmed`
+  // membership: the rendered chips / facets have always carried WCM authors
+  // regardless of authorship-confirmation state, and 4b is additive (the
+  // spike §4 Additivity principle — existing filters stay; suppression is
+  // layered on). The dark-gate contract is over CONFIRMED-WCM authors only;
+  // the chip contract is broader. The two sets are not the same set.
+  const confirmedWcmCwids = p.authors
+    .filter(
+      (a) =>
+        a.isConfirmed &&
+        a.scholar &&
+        !a.scholar.deletedAt &&
+        a.scholar.status === "active",
+    )
+    .map((a) => a.scholar!.cwid);
+  if (isPublicationDark(sup, p.pmid, confirmedWcmCwids)) return null;
+
   const authorNames = p.authors
     .map((a) => a.externalName ?? a.scholar?.preferredName ?? "")
     .filter(Boolean)
     .join(", ");
 
   const wcmAuthorRows = p.authors.filter(
-    (a) => a.scholar && !a.scholar.deletedAt && a.scholar.status === "active",
+    (a) =>
+      a.scholar &&
+      !a.scholar.deletedAt &&
+      a.scholar.status === "active" &&
+      !isAuthorHidden(sup, p.pmid, a.scholar.cwid),
   );
   const wcmAuthors = wcmAuthorRows.map((a) => ({
     cwid: a.scholar!.cwid,
