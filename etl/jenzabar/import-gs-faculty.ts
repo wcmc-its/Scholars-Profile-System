@@ -30,7 +30,7 @@
  *
  * Usage: `npm run etl:jenzabar:import-gs-faculty`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
@@ -83,7 +83,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { id: crypto.randomUUID(), source: "Jenzabar-GS-Faculty", status: "running" },
   });
 
@@ -165,7 +165,7 @@ async function main() {
     const candidateCwids = [...new Set(candidates.map((c) => c.cwid))];
     const knownScholars = new Set(
       (
-        await prisma.scholar.findMany({
+        await db.write.scholar.findMany({
           where: {
             cwid: { in: candidateCwids },
             deletedAt: null,
@@ -205,7 +205,7 @@ async function main() {
     // of delete-and-replace, so each row keeps its uuid PK across runs for the
     // manual-override layer (ADR-005). Scoped to source JENZABAR-GSFACULTY —
     // ED and ED-NYP appointment rows are untouched.
-    const existing = await prisma.appointment.findMany({
+    const existing = await db.write.appointment.findMany({
       where: { source: SOURCE },
       select: {
         externalId: true, cwid: true, title: true, organization: true,
@@ -231,10 +231,10 @@ async function main() {
         `${plan.toUpdate.length} changed, ${plan.staleExternalIds.length} stale...`,
     );
     for (const batch of chunks(plan.toCreate, INSERT_BATCH)) {
-      await prisma.appointment.createMany({ data: batch });
+      await db.write.appointment.createMany({ data: batch });
     }
     for (const a of plan.toUpdate) {
-      await prisma.appointment.update({
+      await db.write.appointment.update({
         where: { externalId: a.externalId },
         data: { ...a, lastRefreshedAt: new Date() },
       });
@@ -242,13 +242,13 @@ async function main() {
     let tombstoned = 0;
     if (plan.staleExternalIds.length > 0) {
       tombstoned = (
-        await prisma.appointment.deleteMany({
+        await db.write.appointment.deleteMany({
           where: { source: SOURCE, externalId: { in: plan.staleExternalIds } },
         })
       ).count;
     }
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -263,7 +263,7 @@ async function main() {
         `+${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}.`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -274,7 +274,7 @@ async function main() {
     throw err;
   } finally {
     await closeJenzabarPool();
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   }
 }
 

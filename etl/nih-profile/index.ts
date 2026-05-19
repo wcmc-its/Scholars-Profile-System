@@ -32,7 +32,7 @@
  *
  * Usage: `npm run etl:nih-profile [--full]`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { coreProjectNum } from "@/lib/award-number";
 import {
   iterateWcmProjects,
@@ -72,7 +72,7 @@ function parseFirstLast(fullName: string): { firstName: string; lastName: string
 }
 
 async function loadGrantsByCoreProjectNum(): Promise<Map<string, GrantRowForResolution[]>> {
-  const rows = await prisma.grant.findMany({
+  const rows = await db.write.grant.findMany({
     where: { awardNumber: { not: null }, scholar: { deletedAt: null } },
     select: {
       cwid: true,
@@ -95,7 +95,7 @@ async function loadGrantsByCoreProjectNum(): Promise<Map<string, GrantRowForReso
 /** Pool of scholars with at least one NIH grant — used for the
  *  global name-match fallback. */
 async function loadNihScholarPool(): Promise<GrantRowForResolution[]> {
-  const rows = await prisma.grant.findMany({
+  const rows = await db.write.grant.findMany({
     where: {
       awardNumber: { not: null },
       scholar: { deletedAt: null, status: "active" },
@@ -244,7 +244,7 @@ async function main() {
     // rejects them, even though they're literal SQL. Function form runs
     // statements sequentially against a held connection without that
     // validation pass.
-    await prisma.$transaction(async (tx) => {
+    await db.write.$transaction(async (tx) => {
       // Clear is_preferred on every existing row for this scholar; the
       // upserts below set the new winner. Avoids a unique-violation
       // hazard if we ever convert is_preferred to a per-cwid unique
@@ -278,9 +278,9 @@ async function main() {
 }
 
 main()
-  .then(() => prisma.$disconnect())
+  .then(() => db.write.$disconnect())
   .catch(async (err) => {
     console.error(err);
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     process.exit(1);
   });

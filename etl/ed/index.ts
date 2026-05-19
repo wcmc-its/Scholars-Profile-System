@@ -23,7 +23,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
@@ -196,7 +196,7 @@ async function refreshEdAppointments(
     externalId: a.externalId,
     source: "ED",
   }));
-  const existing = await prisma.appointment.findMany({
+  const existing = await db.write.appointment.findMany({
     where: { cwid, source: "ED" },
     select: {
       externalId: true, cwid: true, title: true, organization: true,
@@ -210,16 +210,16 @@ async function refreshEdAppointments(
     contentKey: appointmentContentKey,
   });
   if (plan.toCreate.length > 0) {
-    await prisma.appointment.createMany({ data: plan.toCreate });
+    await db.write.appointment.createMany({ data: plan.toCreate });
   }
   for (const a of plan.toUpdate) {
-    await prisma.appointment.update({
+    await db.write.appointment.update({
       where: { externalId: a.externalId },
       data: { ...a, lastRefreshedAt: new Date() },
     });
   }
   if (plan.staleExternalIds.length > 0) {
-    await prisma.appointment.deleteMany({
+    await db.write.appointment.deleteMany({
       where: { cwid, source: "ED", externalId: { in: plan.staleExternalIds } },
     });
   }
@@ -293,7 +293,7 @@ async function refreshNypAffiliateAppointments(
   // Issue #352 — reconcile by externalId instead of delete-and-recreate so NYP
   // rows keep their uuid PK across runs (ADR-005). The (cwid, lowercased-title)
   // dedupe above still runs first, so the classifier sees a clean key set.
-  const existing = await prisma.appointment.findMany({
+  const existing = await db.write.appointment.findMany({
     where: { source: NYP_APPOINTMENT_SOURCE },
     select: {
       externalId: true, cwid: true, title: true, organization: true,
@@ -307,10 +307,10 @@ async function refreshNypAffiliateAppointments(
     contentKey: appointmentContentKey,
   });
   if (plan.toCreate.length > 0) {
-    await prisma.appointment.createMany({ data: plan.toCreate });
+    await db.write.appointment.createMany({ data: plan.toCreate });
   }
   for (const a of plan.toUpdate) {
-    await prisma.appointment.update({
+    await db.write.appointment.update({
       where: { externalId: a.externalId },
       data: { ...a, lastRefreshedAt: new Date() },
     });
@@ -318,7 +318,7 @@ async function refreshNypAffiliateAppointments(
   let tombstoned = 0;
   if (plan.staleExternalIds.length > 0) {
     tombstoned = (
-      await prisma.appointment.deleteMany({
+      await db.write.appointment.deleteMany({
         where: {
           source: NYP_APPOINTMENT_SOURCE,
           externalId: { in: plan.staleExternalIds },
@@ -337,7 +337,7 @@ async function refreshNypAffiliateAppointments(
 
 async function main() {
   const start = new Date();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { source: "ED", status: "running" },
   });
 
@@ -424,7 +424,7 @@ async function main() {
     allEntries.sort((a, b) => a.cwid.localeCompare(b.cwid));
 
     // Existing scholars and slugs from the DB.
-    const existing = await prisma.scholar.findMany({
+    const existing = await db.write.scholar.findMany({
       select: { cwid: true, slug: true, deletedAt: true, createdAt: true },
     });
     const existingByCwid = new Map(existing.map((s) => [s.cwid, s]));
@@ -650,7 +650,7 @@ async function main() {
       }
       usedDeptSlugs.add(slug);
       const seedCategory = DEPARTMENT_CATEGORIES[dept.code] ?? "clinical";
-      await prisma.department.upsert({
+      await db.write.department.upsert({
         where: { code: dept.code },
         create: {
           code: dept.code,
@@ -679,7 +679,7 @@ async function main() {
         slug = `${slug}-${div.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
       }
       usedDivSlugs.add(slug);
-      await prisma.division.upsert({
+      await db.write.division.upsert({
         where: { code: div.code },
         create: {
           code: div.code,
@@ -724,7 +724,7 @@ async function main() {
       if (existingScholar) {
         // Update in place; reactivate if soft-deleted.
         const wasDeleted = !!existingScholar.deletedAt;
-        await prisma.scholar.update({
+        await db.write.scholar.update({
           where: { cwid: f.cwid },
           data: {
             preferredName: f.preferredName,
@@ -758,7 +758,7 @@ async function main() {
         const slug = nextAvailableSlug(baseSlug, existingSlugs);
         existingSlugs.add(slug);
 
-        await prisma.scholar.create({
+        await db.write.scholar.create({
           data: {
             cwid: f.cwid,
             preferredName: f.preferredName,
@@ -794,7 +794,7 @@ async function main() {
     );
     let softDeleted = 0;
     for (const s of departed) {
-      await prisma.scholar.update({
+      await db.write.scholar.update({
         where: { cwid: s.cwid },
         data: { deletedAt: new Date() },
       });
@@ -809,7 +809,7 @@ async function main() {
     if (nypFetchSucceeded) {
       const activeCwids = new Set(
         (
-          await prisma.scholar.findMany({
+          await db.write.scholar.findMany({
             where: { deletedAt: null, status: "active" },
             select: { cwid: true },
           })
@@ -863,7 +863,7 @@ async function main() {
       // Look up category so we know whether to match "Chair of X" or
       // "Director of X". Falls back to "clinical" for depts the seed file
       // doesn't know about; same default the upsert step uses.
-      const persisted = await prisma.department.findUnique({
+      const persisted = await db.write.department.findUnique({
         where: { code: dept.code },
         select: { category: true },
       });
@@ -889,7 +889,7 @@ async function main() {
           { title: { contains: "Assistant Director" } },
         );
       }
-      const candidate = await prisma.appointment.findFirst({
+      const candidate = await db.write.appointment.findFirst({
         where: {
           scholar: { deletedAt: null, status: "active" },
           OR: [
@@ -909,7 +909,7 @@ async function main() {
       // Ensure we always clear stale assignments first — if no candidate
       // matches this run, the dept gets chair_cwid=null instead of keeping
       // the wrong scholar from a prior run.
-      await prisma.department.update({
+      await db.write.department.update({
         where: { code: dept.code },
         data: { chairCwid: candidate?.cwid ?? null },
       });
@@ -932,13 +932,13 @@ async function main() {
     };
     let adminOverridesApplied = 0;
     for (const [code, cwid] of Object.entries(ADMIN_DEPT_LEADER_OVERRIDES)) {
-      const dept = await prisma.department.findUnique({
+      const dept = await db.write.department.findUnique({
         where: { code },
         select: { code: true, category: true, chairCwid: true },
       });
       if (!dept || dept.category !== "administrative") continue;
       if (dept.chairCwid) continue;
-      const scholar = await prisma.scholar.findUnique({
+      const scholar = await db.write.scholar.findUnique({
         where: { cwid },
         select: { cwid: true, deletedAt: true, status: true },
       });
@@ -948,7 +948,7 @@ async function main() {
         );
         continue;
       }
-      await prisma.department.update({
+      await db.write.department.update({
         where: { code },
         data: { chairCwid: cwid },
       });
@@ -962,13 +962,13 @@ async function main() {
     // when the value is null — so a postdoc whose mentor changes (or
     // graduates out) gets the field cleared on the next run.
     {
-      const postdocs = await prisma.scholar.findMany({
+      const postdocs = await db.write.scholar.findMany({
         where: { roleCategory: "postdoc", deletedAt: null, status: "active" },
         select: { cwid: true },
       });
       const knownCwids = new Set(
         (
-          await prisma.scholar.findMany({
+          await db.write.scholar.findMany({
             where: { deletedAt: null, status: "active" },
             select: { cwid: true },
           })
@@ -984,7 +984,7 @@ async function main() {
         } else if (managerCwid) {
           mentorOrphans += 1;
         }
-        await prisma.scholar.update({
+        await db.write.scholar.update({
           where: { cwid: p.cwid },
           data: { postdoctoralMentorCwid: nextMentorCwid },
         });
@@ -992,7 +992,7 @@ async function main() {
       }
       // Clear stale mentor pointers on non-postdocs in case roleCategory
       // flipped postdoc → faculty between runs.
-      const cleared = await prisma.scholar.updateMany({
+      const cleared = await db.write.scholar.updateMany({
         where: {
           NOT: { roleCategory: "postdoc" },
           postdoctoralMentorCwid: { not: null },
@@ -1065,7 +1065,7 @@ async function main() {
         const allMenteeCwids = Array.from(new Set(withMentor.map((r) => r.cwid)));
         const scholarsByCwid = new Map(
           (
-            await prisma.scholar.findMany({
+            await db.write.scholar.findMany({
               where: { cwid: { in: allMenteeCwids } },
               select: { cwid: true, preferredName: true, fullName: true },
             })
@@ -1119,7 +1119,7 @@ async function main() {
           const externalId = `ED-POSTDOC-${r.sorId}`;
           seenExternalIds.add(externalId);
           const name = nameByCwid.get(r.cwid);
-          await prisma.postdocMentorRelationship.upsert({
+          await db.write.postdocMentorRelationship.upsert({
             where: { externalId },
             create: {
               externalId,
@@ -1153,7 +1153,7 @@ async function main() {
         // was NOT in this LDAP pass is deleted. Matches the Jenzabar
         // PhD source's "what's in the SOR is canonical" stance — we don't
         // retain rows for roles ED has removed.
-        const existing = await prisma.postdocMentorRelationship.findMany({
+        const existing = await db.write.postdocMentorRelationship.findMany({
           select: { externalId: true },
         });
         const stale = existing
@@ -1161,7 +1161,7 @@ async function main() {
           .filter((eid) => !seenExternalIds.has(eid));
         let deleted = 0;
         if (stale.length > 0) {
-          const res = await prisma.postdocMentorRelationship.deleteMany({
+          const res = await db.write.postdocMentorRelationship.deleteMany({
             where: { externalId: { in: stale } },
           });
           deleted = res.count;
@@ -1214,11 +1214,11 @@ async function main() {
       divisionMembers.set(a.divCode, set);
     }
 
-    const divisionsForChief = await prisma.division.findMany({
+    const divisionsForChief = await db.write.division.findMany({
       select: { code: true, deptCode: true },
     });
     const deptChairs = new Map<string, string | null>();
-    for (const d of await prisma.department.findMany({
+    for (const d of await db.write.department.findMany({
       select: { code: true, chairCwid: true },
     })) {
       deptChairs.set(d.code, d.chairCwid);
@@ -1243,7 +1243,7 @@ async function main() {
         // Threshold gate: only HIGH and MEDIUM auto-write the pick.
         // LOW/NONE/GAP all clear to null — the override file (Path C) is
         // the escape hatch for divisions Path B can't decide on.
-        await prisma.division.update({
+        await db.write.division.update({
           where: { code: div.code },
           data: { chiefCwid: result.valueToWrite },
         });
@@ -1265,7 +1265,7 @@ async function main() {
       // Even when Path B is skipped, clear stale chief assignments before
       // the override pass writes — keeps the table consistent with intent.
       if (!chiefDetectionDisabled) {
-        await prisma.division.updateMany({ data: { chiefCwid: null } });
+        await db.write.division.updateMany({ data: { chiefCwid: null } });
       }
     }
 
@@ -1301,7 +1301,7 @@ async function main() {
     if (overrideRows.length > 0) {
       const knownDivCodes = new Set(divisionsForChief.map((d) => d.code));
       const knownScholarCwids = new Set(
-        (await prisma.scholar.findMany({ select: { cwid: true } })).map(
+        (await db.write.scholar.findMany({ select: { cwid: true } })).map(
           (s) => s.cwid,
         ),
       );
@@ -1322,7 +1322,7 @@ async function main() {
           overrideSkipped += 1;
           continue;
         }
-        await prisma.division.update({
+        await db.write.division.update({
           where: { code: row.divCode },
           data: { chiefCwid: row.cwid },
         });
@@ -1341,22 +1341,22 @@ async function main() {
     // to anymore after a picker change — get scholar_count=0 and qualify
     // for the prune step below. Without this, the prior-run counts persist
     // forever and the orphans never get cleaned up.
-    const allDepts = await prisma.department.findMany({ select: { code: true } });
+    const allDepts = await db.write.department.findMany({ select: { code: true } });
     for (const dept of allDepts) {
-      const count = await prisma.scholar.count({
+      const count = await db.write.scholar.count({
         where: { deptCode: dept.code, deletedAt: null, status: "active" },
       });
-      await prisma.department.update({
+      await db.write.department.update({
         where: { code: dept.code },
         data: { scholarCount: count },
       });
     }
-    const allDivs = await prisma.division.findMany({ select: { code: true } });
+    const allDivs = await db.write.division.findMany({ select: { code: true } });
     for (const div of allDivs) {
-      const count = await prisma.scholar.count({
+      const count = await db.write.scholar.count({
         where: { divCode: div.code, deletedAt: null, status: "active" },
       });
-      await prisma.division.update({
+      await db.write.division.update({
         where: { code: div.code },
         data: { scholarCount: count },
       });
@@ -1369,7 +1369,7 @@ async function main() {
       const aliasedCodes = Array.from(deptAlias.keys());
       // Divisions whose parent was aliased had deptCode rewritten in the
       // pre-pass; only the dept rows themselves need deleting.
-      const deletedDepts = await prisma.department.deleteMany({
+      const deletedDepts = await db.write.department.deleteMany({
         where: { code: { in: aliasedCodes } },
       });
       console.log(
@@ -1378,17 +1378,17 @@ async function main() {
     }
     // Belt + suspenders: any dept or division row with zero scholars referencing
     // it after the refresh is dead weight.
-    const orphanDepts = await prisma.department.deleteMany({
+    const orphanDepts = await db.write.department.deleteMany({
       where: { scholarCount: 0, source: "ED" },
     });
-    const orphanDivs = await prisma.division.deleteMany({
+    const orphanDivs = await db.write.division.deleteMany({
       where: { scholarCount: 0, source: "ED" },
     });
     console.log(
       `[ED] pruned ${orphanDepts.count} empty depts, ${orphanDivs.count} empty divisions`,
     );
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -1402,7 +1402,7 @@ async function main() {
       `ED ETL complete in ${elapsed}s: created=${created}, updated=${updated}, reactivated=${reactivated}, soft-deleted=${softDeleted}`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -1430,7 +1430,7 @@ async function maybeUpdatedSlug(
   if (newSlug === currentSlug) return {};
 
   // Record the old slug in history; emit the new slug.
-  await prisma.slugHistory.upsert({
+  await db.write.slugHistory.upsert({
     where: { oldSlug: currentSlug },
     update: { currentCwid: cwid },
     create: { oldSlug: currentSlug, currentCwid: cwid },
@@ -1446,5 +1446,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

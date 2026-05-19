@@ -17,7 +17,7 @@
  *   - `totalScholars === 0` returns 0% but `belowThreshold = false`
  *     (no spurious escalation during DB bootstrap or test fixtures)
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 
 /** Phase 6 escalation threshold. CloudWatch alarm fires when below. */
 export const COMPLETENESS_THRESHOLD = 70;
@@ -39,11 +39,11 @@ export type CompletenessResult = {
  * the daily ETL chain (Pitfall 3).
  */
 export async function computeCompletenessSnapshot(): Promise<CompletenessResult> {
-  const totalScholars = await prisma.scholar.count({
+  const totalScholars = await db.write.scholar.count({
     where: { deletedAt: null, status: "active" },
   });
 
-  const completeCount = await prisma.scholar.count({
+  const completeCount = await db.write.scholar.count({
     where: {
       deletedAt: null,
       status: "active",
@@ -57,7 +57,7 @@ export async function computeCompletenessSnapshot(): Promise<CompletenessResult>
   const belowThreshold =
     totalScholars > 0 && completenessPercent < COMPLETENESS_THRESHOLD;
 
-  await prisma.completenessSnapshot.create({
+  await db.write.completenessSnapshot.create({
     data: {
       totalScholars,
       completeCount,

@@ -8,7 +8,7 @@
  * The seed only inserts grants that pass the filter (no need to demonstrate
  * exclusion in Phase 2; the Phase 4 ETL will exercise that logic).
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 
 type GrantSpec = {
   cwid: string;
@@ -97,7 +97,7 @@ const grants: GrantSpec[] = [
 
 export async function seedGrants() {
   for (const g of grants) {
-    await prisma.grant.create({
+    await db.write.grant.create({
       data: g,
     });
   }

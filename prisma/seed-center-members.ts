@@ -16,15 +16,7 @@
 import "dotenv/config";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma/client";
-
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
-const prisma = new PrismaClient({ adapter: new PrismaMariaDb(url) });
+import { db } from "../lib/db";
 
 const MEMBERS_DIR = path.join(process.cwd(), "data", "center-members");
 
@@ -50,7 +42,7 @@ async function main() {
     return;
   }
 
-  const allActiveCwids = (await prisma.scholar.findMany({
+  const allActiveCwids = (await db.write.scholar.findMany({
     where: { deletedAt: null },
     select: { cwid: true },
   })) as Array<{ cwid: string }>;
@@ -58,7 +50,7 @@ async function main() {
 
   for (const file of txtFiles) {
     const slug = file.replace(/\.txt$/, "");
-    const center = await prisma.center.findUnique({ where: { slug } });
+    const center = await db.write.center.findUnique({ where: { slug } });
     if (!center) {
       console.warn(`SKIP ${file}: no center with slug "${slug}"`);
       continue;
@@ -84,9 +76,9 @@ async function main() {
 
     // Idempotent insert: clear+repopulate keeps the table in sync with the
     // file (so removing a CWID from the file removes it on next run).
-    await prisma.centerMembership.deleteMany({ where: { centerCode: center.code } });
+    await db.write.centerMembership.deleteMany({ where: { centerCode: center.code } });
     if (matched.length > 0) {
-      await prisma.centerMembership.createMany({
+      await db.write.centerMembership.createMany({
         data: matched.map((cwid) => ({
           centerCode: center.code,
           cwid,
@@ -94,7 +86,7 @@ async function main() {
         })),
       });
     }
-    await prisma.center.update({
+    await db.write.center.update({
       where: { code: center.code },
       data: { scholarCount: matched.length, refreshedAt: new Date() },
     });
@@ -113,4 +105,4 @@ main()
     console.error(e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => db.write.$disconnect());

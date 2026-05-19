@@ -20,7 +20,7 @@
  *
  * Usage: `npm run etl:gates`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { gatesGrantId } from "@/lib/award-number";
 import { fetchGatesGrants } from "./fetcher";
 
@@ -60,7 +60,7 @@ async function main() {
   console.log(`Indexed ${byId.size} grants by canonical Gates id.`);
 
   console.log("Loading WCM grants from Postgres...");
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     where: { awardNumber: { not: null } },
     select: {
       id: true,
@@ -116,7 +116,7 @@ async function main() {
       unchanged++;
       continue;
     }
-    await prisma.grant.update({
+    await db.write.grant.update({
       where: { id: g.id },
       data: {
         abstract: csvHit.purpose,
@@ -147,5 +147,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

@@ -9,19 +9,11 @@
  * Usage: npx tsx scripts/backfill-department-categories.ts
  */
 import "dotenv/config";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma/client";
+import { db } from "../lib/db";
 import { DEPARTMENT_CATEGORIES } from "../lib/department-categories";
 
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
-const prisma = new PrismaClient({ adapter: new PrismaMariaDb(url) });
-
 async function main() {
-  const depts = await prisma.department.findMany({
+  const depts = await db.write.department.findMany({
     select: { code: true, name: true, category: true },
   });
 
@@ -40,7 +32,7 @@ async function main() {
       alreadyCorrect += 1;
       continue;
     }
-    await prisma.department.update({
+    await db.write.department.update({
       where: { code: d.code },
       data: { category: target },
     });
@@ -51,7 +43,7 @@ async function main() {
   console.log(
     `\nDone. ${updated} updated, ${alreadyCorrect} already correct, ${skippedMissingFromMap} missing from seed map.`,
   );
-  await prisma.$disconnect();
+  await db.write.$disconnect();
 }
 
 main().catch((err) => {

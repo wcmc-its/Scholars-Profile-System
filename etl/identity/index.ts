@@ -31,7 +31,7 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 
 const TABLE = process.env.SCHOLARS_IDENTITY_TABLE ?? "Identity";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -47,7 +47,7 @@ type IdentityRow = {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { source: "Identity-orcid", status: "running" },
   });
 
@@ -76,7 +76,7 @@ async function main() {
 
     // Pre-load active Scholar cwids so we don't issue updates for rows that
     // would no-op (and so we can report unmatched Identity records).
-    const ourScholars = await prisma.scholar.findMany({
+    const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null },
       select: { cwid: true, orcid: true },
     });
@@ -103,7 +103,7 @@ async function main() {
         unchanged += 1;
         continue;
       }
-      await prisma.scholar.update({
+      await db.write.scholar.update({
         where: { cwid: uid },
         data: { orcid },
       });
@@ -115,7 +115,7 @@ async function main() {
       `Identity ETL complete in ${took}s: ${updated} updated, ${unchanged} unchanged, ${invalidFormat} invalid, ${noScholar} no-scholar-row.`,
     );
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -125,7 +125,7 @@ async function main() {
     });
   } catch (err) {
     console.error("Identity ETL failed:", err);
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -135,7 +135,7 @@ async function main() {
     });
     process.exitCode = 1;
   } finally {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   }
 }
 

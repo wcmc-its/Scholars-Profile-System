@@ -3,7 +3,7 @@
  * Targeted update — only writes pmcid; doesn't touch any other columns. Safe
  * to re-run; idempotent UPDATE with WHERE clause to avoid no-op writes.
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 const IN_BATCH = 500;
@@ -16,7 +16,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 async function main() {
   console.log("Loading publication pmids from local DB...");
-  const pubs = await prisma.publication.findMany({ select: { pmid: true } });
+  const pubs = await db.write.publication.findMany({ select: { pmid: true } });
   const pmids = pubs.map((p) => Number(p.pmid)).filter((n) => Number.isFinite(n));
   console.log(`Got ${pmids.length} pmids.`);
 
@@ -36,7 +36,7 @@ async function main() {
 
   let updated = 0;
   for (const [pmid, pmcid] of pmcidByPmid.entries()) {
-    await prisma.publication.update({
+    await db.write.publication.update({
       where: { pmid },
       data: { pmcid },
     });
@@ -52,6 +52,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeReciterPool();
   });

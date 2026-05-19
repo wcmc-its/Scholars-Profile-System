@@ -26,7 +26,7 @@
  */
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import Ajv from "ajv/dist/2020"; // ajv v8+ with JSON Schema 2020-12 support
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — use AWS SDK default credential chain; do NOT
@@ -125,7 +125,7 @@ async function recordRun(args: {
   manifest?: HierarchyManifest;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.etlRun.create({
+  await db.write.etlRun.create({
     data: {
       source: "Hierarchy",
       status: args.status,
@@ -165,7 +165,7 @@ async function main(): Promise<void> {
   );
 
   // Step 3a: Find the prior successful Hierarchy run.
-  const lastRun = await prisma.etlRun.findFirst({
+  const lastRun = await db.write.etlRun.findFirst({
     where: { source: "Hierarchy", status: "success" },
     orderBy: { completedAt: "desc" },
   });
@@ -283,7 +283,7 @@ async function main(): Promise<void> {
   // under parent "Neurodegenerative Disease"). Violations are logged as WARN
   // and the row is still upserted — same posture as taxonomy_version drift.
   // Surfacing the count in the run log gives an early signal to fix upstream.
-  const parentTopics = await prisma.topic.findMany({ select: { id: true, label: true } });
+  const parentTopics = await db.write.topic.findMany({ select: { id: true, label: true } });
   const parentWordsByTopicId = new Map<string, Set<string>>();
   for (const t of parentTopics) {
     parentWordsByTopicId.set(
@@ -359,7 +359,7 @@ async function main(): Promise<void> {
   let upserted = 0;
   for (const [topicId, topicEntry] of Object.entries(hierarchy.topics)) {
     for (const subtopic of topicEntry.subtopics) {
-      await prisma.subtopic.upsert({
+      await db.write.subtopic.upsert({
         where: { id: subtopic.id },
         create: {
           id:               subtopic.id,
@@ -430,7 +430,7 @@ async function main(): Promise<void> {
       Number.isFinite(topicEntry.display_threshold)
         ? topicEntry.display_threshold
         : null;
-    await prisma.topic.update({
+    await db.write.topic.update({
       where: { id: topicId },
       data: { displayThreshold: value },
     });
@@ -471,5 +471,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

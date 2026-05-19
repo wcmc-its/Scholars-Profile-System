@@ -24,7 +24,7 @@
  *
  * Usage: `npm run etl:infoed`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeInfoedPool, getInfoedPool } from "@/lib/sources/mssql-infoed";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { parseNihAward } from "@/lib/award-number";
@@ -173,13 +173,13 @@ ORDER BY v.CWID, v.Account_Number;
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { source: "InfoEd", status: "running" },
   });
 
   try {
     console.log("Loading active CWIDs from local DB...");
-    const ourScholars = await prisma.scholar.findMany({
+    const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null, status: "active" },
       select: { cwid: true },
     });
@@ -253,7 +253,7 @@ async function main() {
     // override layer (ADR-005) can key on it. Updating in place also preserves
     // the abstract / applId enrichment columns written by the gates / nsf /
     // reporter ETLs — the old deleteMany wiped them on every run.
-    const existingGrants = await prisma.grant.findMany({
+    const existingGrants = await db.write.grant.findMany({
       where: { source: "InfoEd" },
       select: {
         externalId: true, cwid: true, title: true, role: true, funder: true,
@@ -290,10 +290,10 @@ async function main() {
         `changed, ${plan.staleExternalIds.length} stale...`,
     );
     for (const batch of chunks(plan.toCreate, INSERT_BATCH)) {
-      await prisma.grant.createMany({ data: batch });
+      await db.write.grant.createMany({ data: batch });
     }
     for (const g of plan.toUpdate) {
-      await prisma.grant.update({
+      await db.write.grant.update({
         where: { externalId: g.externalId },
         data: { ...g, lastRefreshedAt: new Date() },
       });
@@ -301,7 +301,7 @@ async function main() {
     let tombstoned = 0;
     if (plan.staleExternalIds.length > 0) {
       tombstoned = (
-        await prisma.grant.deleteMany({
+        await db.write.grant.deleteMany({
           where: { source: "InfoEd", externalId: { in: plan.staleExternalIds } },
         })
       ).count;
@@ -310,7 +310,7 @@ async function main() {
       `Grant reconcile complete: +${plan.toCreate.length} ~${plan.toUpdate.length} -${tombstoned}`,
     );
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -322,7 +322,7 @@ async function main() {
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(`InfoEd ETL complete in ${elapsed}s: grants=${inserts.length}`);
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -340,6 +340,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeInfoedPool();
   });

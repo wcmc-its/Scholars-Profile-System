@@ -18,7 +18,7 @@
  *
  * Usage: `npm run etl:jenzabar`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeJenzabarPool, getJenzabarPool } from "@/lib/sources/mssql-jenzabar";
 
 const VIEW = "[TmsEPly].[dbo].[WCN_IDM_GS_ADVISOR_ADVISEE_View]";
@@ -61,7 +61,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { id: crypto.randomUUID(), source: "Jenzabar", status: "running" },
   });
 
@@ -86,7 +86,7 @@ async function main() {
     const menteeCwids = [...new Set(rows.map((r) => r.CWID!.trim()))];
     const mdphdSet = new Set(
       (
-        await prisma.scholar.findMany({
+        await db.write.scholar.findMany({
           where: {
             cwid: { in: menteeCwids },
             roleCategory: "doctoral_student_mdphd",
@@ -124,19 +124,19 @@ async function main() {
     });
 
     console.log("Truncating phd_mentor_relationship...");
-    await prisma.phdMentorRelationship.deleteMany();
+    await db.write.phdMentorRelationship.deleteMany();
 
     console.log(`Inserting ${inserts.length} rows...`);
     let inserted = 0;
     for (const batch of chunks(inserts, INSERT_BATCH)) {
-      await prisma.phdMentorRelationship.createMany({
+      await db.write.phdMentorRelationship.createMany({
         data: batch,
         skipDuplicates: true,
       });
       inserted += batch.length;
     }
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: inserts.length },
     });
@@ -146,7 +146,7 @@ async function main() {
       `Jenzabar ETL complete in ${elapsed}s: rows=${inserts.length} (PhD=${inserts.filter((i) => i.programType === "PhD").length}, MD-PhD=${inserts.filter((i) => i.programType === "MD-PhD").length})`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -164,6 +164,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeJenzabarPool();
   });

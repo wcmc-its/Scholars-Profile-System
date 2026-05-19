@@ -9,7 +9,7 @@
  * Publication scores are the ReCiterAI minimal-projection field from Q6.
  */
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 
 type AuthorSpec =
   | { cwid: string; position: number }
@@ -247,7 +247,7 @@ const topicsByCwid: Record<string, Array<{ topic: string; score: number }>> = {
 
 export async function seedPublications() {
   for (const p of pubs) {
-    await prisma.publication.create({
+    await db.write.publication.create({
       data: {
         pmid: p.pmid,
         title: p.title,
@@ -278,7 +278,7 @@ export async function seedPublications() {
   // Topic assignments (Q6 minimal projection, source = ReCiterAI DynamoDB).
   for (const [cwid, topics] of Object.entries(topicsByCwid)) {
     for (const t of topics) {
-      await prisma.topicAssignment.create({
+      await db.write.topicAssignment.create({
         data: {
           cwid,
           topic: t.topic,
@@ -297,7 +297,7 @@ export async function seedPublications() {
       let score = 0.4;
       if (a.position === 1 || a.position === p.authors.length) score = 0.85;
       else if (a.position === p.authors.length - 1 && p.authors.length > 2) score = 0.6;
-      await prisma.publicationScore.create({
+      await db.write.publicationScore.create({
         data: { cwid: a.cwid, pmid: p.pmid, score },
       });
     }

@@ -16,15 +16,7 @@
  * Run: npx tsx prisma/seed-departments.ts
  */
 import "dotenv/config";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma/client";
-
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
-const prisma = new PrismaClient({ adapter: new PrismaMariaDb(url) });
+import { db } from "../lib/db";
 
 const MIN_SCHOLAR_COUNT = 30;
 
@@ -58,7 +50,7 @@ function toSlug(name: string): string {
 async function main() {
   // 1. Aggregate distinct primary_department + counts of active scholars.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (await (prisma.scholar.groupBy as any)({
+  const rows = (await (db.write.scholar.groupBy as any)({
     by: ["primaryDepartment"],
     where: {
       deletedAt: null,
@@ -92,10 +84,10 @@ async function main() {
   let inserted = 0;
   let updated = 0;
   for (const c of candidates) {
-    const existing = await prisma.department.findUnique({
+    const existing = await db.write.department.findUnique({
       where: { code: c.code },
     });
-    await prisma.department.upsert({
+    await db.write.department.upsert({
       where: { code: c.code },
       create: {
         code: c.code,
@@ -120,7 +112,7 @@ async function main() {
   const codeByName = new Map(candidates.map((c) => [c.name, c.code]));
   let backfilled = 0;
   for (const [name, code] of codeByName) {
-    const result = await prisma.scholar.updateMany({
+    const result = await db.write.scholar.updateMany({
       where: {
         primaryDepartment: name,
         deletedAt: null,
@@ -139,4 +131,4 @@ main()
     console.error(e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => db.write.$disconnect());

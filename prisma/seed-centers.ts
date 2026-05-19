@@ -10,15 +10,7 @@
  *     Meyer Cancer Center)
  */
 import "dotenv/config";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma/client";
-
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
-const prisma = new PrismaClient({ adapter: new PrismaMariaDb(url) });
+import { db } from "../lib/db";
 
 type Seed = {
   code: string;
@@ -108,8 +100,8 @@ async function main() {
   let inserted = 0;
   let updated = 0;
   for (const c of CENTERS) {
-    const existing = await prisma.center.findUnique({ where: { code: c.code } });
-    await prisma.center.upsert({
+    const existing = await db.write.center.findUnique({ where: { code: c.code } });
+    await db.write.center.upsert({
       where: { code: c.code },
       create: {
         code: c.code,
@@ -138,4 +130,4 @@ main()
     console.error(e);
     process.exit(1);
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => db.write.$disconnect());

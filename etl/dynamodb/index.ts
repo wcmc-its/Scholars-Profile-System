@@ -55,7 +55,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
@@ -113,7 +113,7 @@ type ImpactRecord = {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { source: "ReCiterAI-projection", status: "running" },
   });
 
@@ -157,7 +157,7 @@ async function main() {
       // for FK targets used by the TOPIC# block below.
       for (const t of topics) {
         if (!t || typeof t.id !== "string" || typeof t.label !== "string") continue;
-        await prisma.topic.upsert({
+        await db.write.topic.upsert({
           where: { id: t.id },
           create: {
             id: t.id,
@@ -178,7 +178,7 @@ async function main() {
     }
     console.log(`Topic upserts complete: ${topicRowsUpserted} rows.`);
 
-    const topicCount = await prisma.topic.count();
+    const topicCount = await db.write.topic.count();
     console.log(`topic table count: ${topicCount} (expected 67 for taxonomy_v2)`);
     if (topicCount !== 67) {
       console.warn(`WARN: topic count ${topicCount} != 67 — investigate TAXONOMY# probe output.`);
@@ -191,7 +191,7 @@ async function main() {
     // publication_topic.cwid → scholar.cwid FK (rather than failing the whole ETL).
     // Filter matches the existing FACULTY# block below (deletedAt: null + status: active)
     // so both projections agree on which scholars are in scope.
-    const ourScholars = await prisma.scholar.findMany({
+    const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null, status: "active" },
       select: { cwid: true },
     });
@@ -200,7 +200,7 @@ async function main() {
     // Pre-load the topic id set for the TOPIC# parent_topic_id FK precheck. Any
     // TOPIC# row referencing a parent that is no longer in TAXONOMY# would also
     // violate FK; rare but worth defending against.
-    const knownTopics = await prisma.topic.findMany({ select: { id: true } });
+    const knownTopics = await db.write.topic.findMany({ select: { id: true } });
     const knownTopicIds = new Set(knownTopics.map((t) => t.id));
 
     // Pre-load known publication PMIDs. ReCiterAI's TOPIC# scope can include
@@ -208,7 +208,7 @@ async function main() {
     // PubMed ETL runs separately); upserting those would violate
     // publication_topic.pmid → publication.pmid FK. Skip them with a counted
     // log line, same pattern as the scholar/parent-topic guards.
-    const knownPubs = await prisma.publication.findMany({ select: { pmid: true } });
+    const knownPubs = await db.write.publication.findMany({ select: { pmid: true } });
     const knownPmidSet = new Set(knownPubs.map((p) => p.pmid));
 
     console.log(`Scanning ${TABLE} for TOPIC# records (paginated)...`);
@@ -264,7 +264,7 @@ async function main() {
       const chunk = writes.slice(i, i + BATCH);
       await Promise.all(
         chunk.map((w) =>
-          prisma.publicationTopic.upsert({
+          db.write.publicationTopic.upsert({
             where: {
               pmid_cwid_parentTopicId: {
                 pmid: w.pmid,
@@ -314,7 +314,7 @@ async function main() {
     // as FAIL in the daily orchestrator. Blocks 2b/2c/3/4 are skipped:
     // 2b/2c derive from the same TOPIC# scan and are equally suspect, and
     // 3/4 are idempotent — they refresh on the next cycle.
-    const pubTopicTableCount = await prisma.publicationTopic.count();
+    const pubTopicTableCount = await db.write.publicationTopic.count();
     assertPublicationTopicPopulated({
       tableCount: pubTopicTableCount,
       scannedCount: topicItems.length,
@@ -354,7 +354,7 @@ async function main() {
     for (const [tt, pmids] of groupsByTopTopic) {
       for (let i = 0; i < pmids.length; i += TOP_TOPIC_BATCH) {
         const chunk = pmids.slice(i, i + TOP_TOPIC_BATCH);
-        const res = await prisma.publication.updateMany({
+        const res = await db.write.publication.updateMany({
           where: { pmid: { in: chunk } },
           data: { topTopicId: tt },
         });
@@ -404,7 +404,7 @@ async function main() {
       // the open connection count via the existing connection pool.
       await Promise.all(
         chunk.map(([pmid, synopsis]) =>
-          prisma.publication.updateMany({
+          db.write.publication.updateMany({
             where: { pmid },
             data: { synopsis },
           }),
@@ -471,12 +471,12 @@ async function main() {
     console.log(`Built ${rows.length} topic_assignment rows.`);
 
     console.log("Resetting topic_assignment table...");
-    await prisma.topicAssignment.deleteMany();
+    await db.write.topicAssignment.deleteMany();
 
     console.log(`Inserting ${rows.length}...`);
     const FACULTY_BATCH = 1000;
     for (let i = 0; i < rows.length; i += FACULTY_BATCH) {
-      await prisma.topicAssignment.createMany({
+      await db.write.topicAssignment.createMany({
         data: rows.slice(i, i + FACULTY_BATCH).map((r) => ({
           cwid: r.cwid,
           topic: r.topic,
@@ -572,7 +572,7 @@ async function main() {
       const chunk = impactWrites.slice(i, i + IMPACT_BATCH);
       await Promise.all(
         chunk.map((w) =>
-          prisma.publication.updateMany({
+          db.write.publication.updateMany({
             where: { pmid: w.pmid },
             data: {
               impactScore: w.impactScore,
@@ -603,7 +603,7 @@ async function main() {
     // ===================================================================
     const totalRowsProcessed =
       topicRowsUpserted + pubTopicRowsUpserted + rows.length + impactRowsUpserted;
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
     });
@@ -613,7 +613,7 @@ async function main() {
       `DynamoDB ETL complete in ${elapsed}s: topic=${topicRowsUpserted}, publication_topic=${pubTopicRowsUpserted}, topic_assignment=${rows.length}, publication_impact=${impactRowsUpserted}`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -631,5 +631,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

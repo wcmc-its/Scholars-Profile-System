@@ -9,7 +9,7 @@
  *
  * Usage: `npx tsx etl/reciter/backfill-abstracts.ts`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AbstractRow = { pmid: number; abstractVarchar: string | null };
@@ -26,7 +26,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 async function main() {
   const start = Date.now();
   console.log("Loading existing publication PMIDs...");
-  const pubs = await prisma.publication.findMany({ select: { pmid: true } });
+  const pubs = await db.write.publication.findMany({ select: { pmid: true } });
   const pmids = pubs.map((p) => Number(p.pmid)).filter((n) => Number.isFinite(n));
   console.log(`${pmids.length} pmids to backfill.`);
 
@@ -56,9 +56,9 @@ async function main() {
   let updated = 0;
   const entries = Array.from(abstractByPmid.entries());
   for (const batch of chunks(entries, UPDATE_BATCH)) {
-    await prisma.$transaction(
+    await db.write.$transaction(
       batch.map(([pmid, abstract]) =>
-        prisma.publication.update({
+        db.write.publication.update({
           where: { pmid: String(pmid) },
           data: { abstract },
         }),
@@ -80,6 +80,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeReciterPool();
   });

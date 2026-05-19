@@ -36,7 +36,7 @@ import { createHash } from "node:crypto";
 import { Readable, PassThrough } from "node:stream";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { parseMeshXmlStream, type ParsedDescriptor } from "./parser";
 import { buildSynonyms } from "./synonyms";
 
@@ -113,7 +113,7 @@ async function recordRun(args: {
   year?: string;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.etlRun.create({
+  await db.write.etlRun.create({
     data: {
       source: "MeSH",
       status: args.status,
@@ -150,7 +150,7 @@ async function replaceTable(rows: ParsedDescriptor[]): Promise<number> {
 
   // Bump the transaction timeout — default 5s is far too short for a
   // 30k-row replace. 5min ceiling matches the longest other ETL upserts.
-  await prisma.$transaction(
+  await db.write.$transaction(
     async (tx) => {
       await tx.meshDescriptor.deleteMany({});
       for (const batch of chunks) {
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
   }
 
   // Step 3: sha256 short-circuit against last successful run.
-  const lastRun = await prisma.etlRun.findFirst({
+  const lastRun = await db.write.etlRun.findFirst({
     where: { source: "MeSH", status: "success" },
     orderBy: { completedAt: "desc" },
   });
@@ -292,5 +292,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

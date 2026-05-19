@@ -40,7 +40,7 @@
  * Usage: `npm run etl:reciter`
  */
 import { Prisma } from "@/lib/generated/prisma/client";
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -161,14 +161,14 @@ function countAuthors(authorsString: string | null): number {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: { source: "ReCiter", status: "running" },
   });
 
   try {
     // 1. Active scholar CWIDs from our DB
     console.log("Loading active CWIDs from local DB...");
-    const ourScholars = await prisma.scholar.findMany({
+    const ourScholars = await db.write.scholar.findMany({
       where: { deletedAt: null, status: "active" },
       select: { cwid: true },
     });
@@ -348,7 +348,7 @@ async function main() {
     //    the ReCiterAI-projection ETL). PublicationScore is still safe to wipe
     //    because nothing FKs to it.
     console.log("Wiping publication_score (no inbound FK)...");
-    await prisma.publicationScore.deleteMany();
+    await db.write.publicationScore.deleteMany();
 
     const pubRows = Array.from(articleByPmid.values()).map((a) => {
       const authorsString = authorsStringByPmid.get(Number(a.pmid)) ?? null;
@@ -385,7 +385,7 @@ async function main() {
       await Promise.all(
         batch.map((p) => {
           const { pmid, ...rest } = p;
-          return prisma.publication.upsert({
+          return db.write.publication.upsert({
             where: { pmid },
             create: { pmid, ...rest, lastRefreshedAt: new Date() },
             update: { ...rest, lastRefreshedAt: new Date() },
@@ -447,13 +447,13 @@ async function main() {
 
     console.log(`Clearing prior WCM authorship rows for ${sourcePmids.length} source PMIDs...`);
     for (const batch of chunks(sourcePmids, IN_BATCH)) {
-      await prisma.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
+      await db.write.publicationAuthor.deleteMany({ where: { pmid: { in: batch } } });
     }
 
     console.log(`Inserting ${authorshipRows.length} WCM authorship rows...`);
     let authInserted = 0;
     for (const batch of chunks(authorshipRows, INSERT_BATCH)) {
-      await prisma.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
+      await db.write.publicationAuthor.createMany({ data: batch, skipDuplicates: true });
       authInserted += batch.length;
       if (authInserted % (INSERT_BATCH * 20) === 0) {
         console.log(`  ...${authInserted}/${authorshipRows.length}`);
@@ -466,7 +466,7 @@ async function main() {
     //    a genuinely-removed PMID should not leave dangling projections.
     console.log("Computing orphan publications (in DB but not in ReCiter source)...");
     const existingPmids = (
-      await prisma.publication.findMany({ select: { pmid: true } })
+      await db.write.publication.findMany({ select: { pmid: true } })
     ).map((p) => p.pmid);
     const orphanPmids = existingPmids.filter((pmid) => !sourcePmidsSet.has(pmid));
     if (orphanPmids.length > 0) {
@@ -476,7 +476,7 @@ async function main() {
       );
       let orphanDeleted = 0;
       for (const batch of chunks(orphanPmids, IN_BATCH)) {
-        await prisma.publication.deleteMany({ where: { pmid: { in: batch } } });
+        await db.write.publication.deleteMany({ where: { pmid: { in: batch } } });
         orphanDeleted += batch.length;
       }
       console.log(`  ...deleted ${orphanDeleted} orphan publications.`);
@@ -484,7 +484,7 @@ async function main() {
       console.log("No orphan publications.");
     }
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -498,7 +498,7 @@ async function main() {
       `ReciterDB ETL complete in ${elapsed}s: publications=${pubRows.length}, authorships=${authorshipRows.length}`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -516,6 +516,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeReciterPool();
   });
