@@ -7,8 +7,8 @@
  * external API endpoint would call the same function.
  */
 import { prisma } from "@/lib/db";
+import { getEffectiveOverview } from "@/lib/api/manual-layer";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { sanitizeVIVOHtml } from "@/lib/utils";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -439,6 +439,15 @@ export async function getScholarFullProfileBySlug(
   });
   if (!scholar) return null;
 
+  // The effective `overview` merges a manual `field_override` over the ETL
+  // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
+  // sanitized on write, so it is rendered as-is.
+  const effectiveOverview = await getEffectiveOverview(
+    scholar.cwid,
+    scholar.overview,
+    prisma,
+  );
+
   // Authorships for this scholar — drives the publications list. Pull author rows
   // for every publication so coauthor chips can be rendered. Issue #63: drop
   // Retraction / Erratum rows at fetch time so the list, header counts, and
@@ -621,7 +630,7 @@ export async function getScholarFullProfileBySlug(
     hasClinicalProfile: scholar.hasClinicalProfile,
     clinicalProfileUrl: scholar.clinicalProfileUrl,
     orcid: scholar.orcid,
-    overview: scholar.overview ? sanitizeVIVOHtml(scholar.overview) : null,
+    overview: effectiveOverview,
     appointments: collapseToSingleVisiblePrimary(annotatedAppointments).map((a) => ({
       title: a.title,
       organization: a.organization,

@@ -46,6 +46,10 @@ vi.mock("@/lib/db", () => ({
         coiActivities: [],
       })),
     },
+    fieldOverride: {
+      // #356 — getScholarFullProfileBySlug now merges an overview override.
+      findUnique: vi.fn(async () => null),
+    },
     publicationAuthor: {
       findMany: vi.fn(async () => []),
     },
