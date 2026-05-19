@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   spotlightFindMany: vi.fn(),
   scholarFindMany: vi.fn(),
   publicationAuthorFindMany: vi.fn(),
+  suppressionFindMany: vi.fn().mockResolvedValue([]),
   queryRaw: vi.fn(),
 }));
 const {
@@ -63,6 +64,9 @@ vi.mock("@/lib/db", () => ({
     },
     publicationAuthor: {
       findMany: mocks.publicationAuthorFindMany,
+    },
+    suppression: {
+      findMany: mocks.suppressionFindMany,
     },
     $queryRaw: mocks.queryRaw,
     $queryRawUnsafe: mocks.queryRaw,

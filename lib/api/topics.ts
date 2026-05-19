@@ -36,7 +36,11 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
-import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-layer";
+import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -751,13 +755,21 @@ export async function getTopicPublications(
     prisma.publicationTopic.count({ where: parentTierStronglyWhere }),
     prisma.publicationTopic.count({ where: parentTierAlsoWhere }),
   ]);
-  const pmids = rows.map((r) => r.pmid);
+  // #356 — drop publications taken down or derived-dark from the feed. The
+  // publication_topic-keyed `total` / tier counts are left as-is: a per-author
+  // hide never changes them, and a whole-pub takedown is a rare superuser
+  // action (D5.1 — the `groupBy`/`count` aggregates are a deferred follow-on).
+  const pagePmids = rows.map((r) => r.pmid);
+  const suppressions = await loadPublicationSuppressions(pagePmids, prisma);
+  const darkPmids = await resolveDarkPmids(pagePmids, suppressions, prisma);
+  const visibleRows = rows.filter((r) => !darkPmids.has(r.pmid));
+  const pmids = visibleRows.map((r) => r.pmid);
   const authorsByPmid = await fetchWcmAuthorsForPmids(pmids);
   // `now` parameter is preserved for backwards compatibility with callers but
   // is unused since the Variant B scoring path was retired in favor of SQL sort.
   void now;
   return {
-    hits: (rows as Array<{ pmid: string }>).map((r) =>
+    hits: (visibleRows as Array<{ pmid: string }>).map((r) =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mapToTopicPublicationHit(r as any, authorsByPmid.get(r.pmid), includeImpact, topicSlug),
     ),

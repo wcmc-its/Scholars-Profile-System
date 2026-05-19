@@ -242,6 +242,26 @@ describe("getTopicPublications", () => {
     });
   });
 
+  describe("#356 — publication suppression", () => {
+    it("drops a taken-down publication from the feed", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [
+        makePtRow({ pmid: "1", year: 2024 }),
+        makePtRow({ pmid: "2", year: 2023 }),
+      ];
+      mockTransaction.mockResolvedValue([rows, 2]);
+      mockSuppressionFindMany.mockResolvedValue([
+        { entityId: "2", contributorCwid: null },
+      ]);
+      const result = await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", page: 0 },
+        NOW,
+      );
+      expect(result!.hits.map((h) => h.pmid)).toEqual(["1"]);
+    });
+  });
+
   describe("sort=most_cited orders by citationCount DESC NULLs LAST", () => {
     it("calls $transaction (SQL-direct path, not scorePublication)", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
