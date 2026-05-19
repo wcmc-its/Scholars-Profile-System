@@ -914,6 +914,19 @@ model EtlRun {
   @@map("etl_run")
 }
 
+/// Cross-ETL coordination state — a single row (id = 1).
+/// `last_topic_rebuild_at`: set by etl/reciter at run start, cleared by
+/// etl/dynamodb on success. Drives the profile "topics updating" placeholder
+/// during the reciter→dynamodb consistency window (#118 / B19). The window
+/// also auto-expires 30 min after the rebuild start if dynamodb never clears it.
+model EtlState {
+  id                 Int       @id @default(1)
+  lastTopicRebuildAt DateTime? @map("last_topic_rebuild_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@map("etl_state")
+}
+
 /// Phase 6 ANALYTICS-03 — weekly profile completeness snapshot.
 /// One row per weekly cron run (D-03). Historical rows kept for trending.
 /// `belowThreshold` = true when completenessPercent < COMPLETENESS_THRESHOLD (70).
