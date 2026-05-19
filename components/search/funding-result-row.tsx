@@ -6,7 +6,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SponsorAbbr } from "@/components/ui/sponsor-abbr";
 import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
-import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { PersonPopover } from "@/components/scholar/person-popover";
 import { sanitizePubTitle } from "@/lib/utils";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
@@ -43,23 +43,6 @@ function programTypeLabel(programType: string): string | null {
 function awardSerial(awardNumber: string, mechanism: string): string {
   const re = new RegExp(`^\\s*[1-9]?\\s*${mechanism}\\s*`, "i");
   return awardNumber.replace(re, "").trim();
-}
-
-/**
- * Issue #96 — expand the indexed role short form for the hover tooltip.
- * Falls back to the raw value for unknown role strings (defensive: future
- * roles in InfoEd shouldn't break the chip).
- */
-const ROLE_LABEL: Record<string, string> = {
-  PI: "Principal Investigator",
-  "Multi-PI": "Multiple PI",
-  "Sub-PI": "PI on subaward",
-  "Co-I": "Co-Investigator",
-  KP: "Key Personnel",
-};
-
-function roleLabel(role: string): string {
-  return ROLE_LABEL[role] ?? role;
 }
 
 export function FundingResultRow({
@@ -128,7 +111,18 @@ export function FundingResultRow({
         {/* People row + inline pills. */}
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           {visiblePeople.map((p) => (
-            <HoverTooltip key={p.cwid} text={roleLabel(p.role)}>
+            <PersonPopover
+              key={p.cwid}
+              cwid={p.cwid}
+              surface="grant-investigator"
+              contextGrant={{
+                projectId: hit.projectId,
+                role: p.role,
+                startYear: Number(startYear),
+                endYear: Number(endYear),
+                isMultiPi: hit.isMultiPi,
+              }}
+            >
               <Link
                 href={`/scholars/${p.slug}`}
                 onClick={() => trackClick(p.cwid)}
@@ -142,7 +136,7 @@ export function FundingResultRow({
                 />
                 <span>{p.preferredName}</span>
               </Link>
-            </HoverTooltip>
+            </PersonPopover>
           ))}
           {remainder > 0 ? (
             <span className="text-[13px] text-[#757575]">

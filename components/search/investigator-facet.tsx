@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { PersonPopover } from "@/components/scholar/person-popover";
 
 const TOP_VISIBLE = 10;
 const EXPANDED_VISIBLE = 50;
@@ -139,33 +140,50 @@ function lastNameKey(displayName: string): string {
 }
 
 function InvestigatorRow({ investigator }: { investigator: InvestigatorFacetItem }) {
+  const lastNameForAction = lastNameKey(investigator.displayName);
+  const primaryLabel = investigator.isActive
+    ? `Remove ${lastNameForAction || "filter"}`
+    : `Filter by ${capitalize(lastNameForAction) || "investigator"}`;
   return (
     <li className="py-1 leading-[1.4]">
-      <Link
-        href={investigator.toggleHref}
-        className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+      <PersonPopover
+        cwid={investigator.cwid}
+        surface="grant-facet"
+        filterMatchCount={investigator.count}
+        primaryActionHref={investigator.toggleHref}
+        primaryActionLabel={primaryLabel}
       >
-        <input
-          type="checkbox"
-          readOnly
-          checked={investigator.isActive}
-          tabIndex={-1}
-          aria-hidden="true"
-          className="cursor-pointer accent-[#2c4f6e]"
-        />
-        <HeadshotAvatar
-          size="sm"
-          cwid={investigator.cwid}
-          preferredName={investigator.displayName}
-          identityImageEndpoint={investigator.identityImageEndpoint}
-        />
-        <span className="min-w-0 flex-1 truncate" title={investigator.displayName}>
-          {investigator.displayName}
-        </span>
-        <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
-          {investigator.count.toLocaleString()}
-        </span>
-      </Link>
+        <Link
+          href={investigator.toggleHref}
+          className="flex items-center gap-2 text-[#1a1a1a] no-underline hover:no-underline"
+        >
+          <input
+            type="checkbox"
+            readOnly
+            checked={investigator.isActive}
+            tabIndex={-1}
+            aria-hidden="true"
+            className="cursor-pointer accent-[#2c4f6e]"
+          />
+          <HeadshotAvatar
+            size="sm"
+            cwid={investigator.cwid}
+            preferredName={investigator.displayName}
+            identityImageEndpoint={investigator.identityImageEndpoint}
+          />
+          <span className="min-w-0 flex-1 truncate" title={investigator.displayName}>
+            {investigator.displayName}
+          </span>
+          <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
+            {investigator.count.toLocaleString()}
+          </span>
+        </Link>
+      </PersonPopover>
     </li>
   );
+}
+
+function capitalize(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
