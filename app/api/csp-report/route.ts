@@ -4,13 +4,20 @@ import { NextRequest, NextResponse } from "next/server";
  * CSP violation report collector — issue #374 (follow-on to #120 / B21).
  *
  * `lib/security-headers.ts` ships the Content-Security-Policy in report-only
- * mode with a `report-uri /api/csp-report` directive: when a page violates the
- * policy the browser POSTs a JSON report here. This route is the
- * observation-window sink — every report is written to the server log as one
- * structured line (`event: "csp-violation"`, the shape the search route logs),
- * so CloudWatch ingests it once a production environment exists (#99) and Logs
- * Insights can aggregate it. Promoting the policy from report-only to
- * enforcing depends on that aggregated data coming back clean.
+ * mode with both reporting directives pointed here:
+ *   - `report-uri /api/csp-report` — sent by every current browser as a
+ *     single `{ "csp-report": { … } }` object, content-type
+ *     `application/csp-report`.
+ *   - `report-to csp-endpoint` — the Reporting-API successor, sent as an
+ *     array of `{ type, body }` entries, content-type
+ *     `application/reports+json`.
+ *
+ * This route is the observation-window sink: every violation, in either
+ * format, is written to the server log as one structured `csp-violation`
+ * line (the shape the search route logs), so CloudWatch ingests them once a
+ * production environment exists (#99) and Logs Insights can aggregate them.
+ * The decision to keep `'unsafe-inline'` rather than adopt a nonce, and to
+ * promote the policy to enforcing later, is recorded in docs/ADR-007.
  *
  * The endpoint is intentionally public and unauthenticated — browsers send
  * violation reports with no credentials — so it is written defensively: it
@@ -25,6 +32,15 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** Cap any single logged field so a crafted report cannot bloat a log line. */
 const MAX_FIELD_LENGTH = 1024;
 
+/**
+ * Content-types accepted: the legacy `report-uri` payload and the
+ * Reporting-API `report-to` payload, respectively.
+ */
+const REPORT_CONTENT_TYPES = [
+  "application/csp-report",
+  "application/reports+json",
+];
+
 /** Coerce an unknown report field to a length-capped string, or undefined. */
 function field(value: unknown): string | undefined {
   if (typeof value === "string") return value.slice(0, MAX_FIELD_LENGTH);
@@ -32,11 +48,62 @@ function field(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Reduce either payload shape to a flat list of violation bodies:
+ *   - `report-uri`:   `{ "csp-report": { … } }`             → `[ { … } ]`
+ *   - Reporting-API:  `[ { type: "csp-violation", body } ]` → `[ body, … ]`
+ * Anything that does not match is dropped — the result is always an array.
+ */
+function extractViolations(parsed: unknown): Record<string, unknown>[] {
+  // Reporting-API `report-to`: an array of report objects; keep the CSP ones.
+  if (Array.isArray(parsed)) {
+    const out: Record<string, unknown>[] = [];
+    for (const entry of parsed) {
+      if (!entry || typeof entry !== "object") continue;
+      const { type, body } = entry as { type?: unknown; body?: unknown };
+      if (type === "csp-violation" && body && typeof body === "object") {
+        out.push(body as Record<string, unknown>);
+      }
+    }
+    return out;
+  }
+  // Legacy `report-uri`: a single `{ "csp-report": { … } }` envelope.
+  if (parsed && typeof parsed === "object") {
+    const report = (parsed as { "csp-report"?: unknown })["csp-report"];
+    if (report && typeof report === "object") {
+      return [report as Record<string, unknown>];
+    }
+  }
+  return [];
+}
+
+/**
+ * One structured log line per violation. Each field is read under both its
+ * `report-uri` (kebab-case) and Reporting-API (camelCase) key, since the two
+ * payload formats name the same fields differently.
+ */
+function violationLine(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    event: "csp-violation",
+    documentUri: field(body["document-uri"] ?? body["documentURL"]),
+    violatedDirective: field(
+      body["violated-directive"] ?? body["violatedDirective"],
+    ),
+    effectiveDirective: field(
+      body["effective-directive"] ?? body["effectiveDirective"],
+    ),
+    blockedUri: field(body["blocked-uri"] ?? body["blockedURL"]),
+    disposition: field(body["disposition"]),
+    sourceFile: field(body["source-file"] ?? body["sourceFile"]),
+    lineNumber: field(body["line-number"] ?? body["lineNumber"]),
+  };
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // `report-uri` violations arrive as `application/csp-report`. Reject anything
-  // else without reading the body — it is not a CSP report.
+  // A CSP report arrives as `application/csp-report` or
+  // `application/reports+json`. Reject anything else without reading the body.
   const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
-  if (!contentType.includes("application/csp-report")) {
+  if (!REPORT_CONTENT_TYPES.some((type) => contentType.includes(type))) {
     return new NextResponse(null, { status: 415 });
   }
 
@@ -46,40 +113,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return new NextResponse(null, { status: 413 });
   }
 
-  let report: Record<string, unknown> | undefined;
+  let violations: Record<string, unknown>[] = [];
   try {
     const raw = await request.text();
     // Backstop in case Content-Length was absent or understated.
     if (raw.length > MAX_BODY_BYTES) {
       return new NextResponse(null, { status: 413 });
     }
-    // The browser POSTs `{ "csp-report": { ... } }`; every field inside is
-    // attacker-controllable and is coerced below, never trusted.
-    const envelope = JSON.parse(raw) as {
-      "csp-report"?: Record<string, unknown>;
-    };
-    report = envelope?.["csp-report"];
+    violations = extractViolations(JSON.parse(raw));
   } catch {
     // Unreadable body or malformed JSON — a probe or a broken client. Swallow
     // it: 204, no log noise, nothing persisted.
     return new NextResponse(null, { status: 204 });
   }
 
-  if (report && typeof report === "object") {
-    // One structured line per violation; `csp-violation` is the grep anchor
-    // and the fields are what Logs Insights groups the observation window on.
-    console.warn(
-      JSON.stringify({
-        event: "csp-violation",
-        documentUri: field(report["document-uri"]),
-        violatedDirective: field(report["violated-directive"]),
-        effectiveDirective: field(report["effective-directive"]),
-        blockedUri: field(report["blocked-uri"]),
-        disposition: field(report["disposition"]),
-        sourceFile: field(report["source-file"]),
-        lineNumber: field(report["line-number"]),
-      }),
-    );
+  // `csp-violation` is the grep anchor; the fields are what Logs Insights
+  // groups the observation window on.
+  for (const violation of violations) {
+    console.warn(JSON.stringify(violationLine(violation)));
   }
 
   return new NextResponse(null, { status: 204 });

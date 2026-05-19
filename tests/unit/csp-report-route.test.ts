@@ -88,4 +88,45 @@ describe("POST /api/csp-report", () => {
     expect(resp.status).toBe(204);
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it("accepts a Reporting-API (application/reports+json) violation array", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const body = JSON.stringify([
+      {
+        type: "csp-violation",
+        age: 10,
+        url: "https://scholars.example.edu/",
+        body: {
+          documentURL: "https://scholars.example.edu/",
+          effectiveDirective: "script-src",
+          blockedURL: "https://evil.example.com/x.js",
+          disposition: "report",
+        },
+      },
+    ]);
+    const resp = await POST(post(body, "application/reports+json"));
+    expect(resp.status).toBe(204);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(warn.mock.calls[0][0] as string);
+    expect(logged.event).toBe("csp-violation");
+    expect(logged.blockedUri).toBe("https://evil.example.com/x.js");
+    expect(logged.effectiveDirective).toBe("script-src");
+  });
+
+  it("ignores non-csp-violation entries in a reports+json array", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const body = JSON.stringify([
+      { type: "deprecation", body: { id: "old-api" } },
+      {
+        type: "csp-violation",
+        body: { blockedURL: "https://evil.example.com/y.js" },
+      },
+    ]);
+    const resp = await POST(post(body, "application/reports+json"));
+    expect(resp.status).toBe(204);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(warn.mock.calls[0][0] as string).blockedUri).toBe(
+      "https://evil.example.com/y.js",
+    );
+  });
 });
