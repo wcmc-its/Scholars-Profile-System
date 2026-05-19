@@ -1,0 +1,306 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Phase 4b C5 — `reflectSearchSuppression` (the OpenSearch suppression
+ * fast-path) unit tests. Mocks `@/lib/db` (Prisma reader) and `@/lib/search`
+ * (the OpenSearch client) at the module boundary; asserts the `bulk` body
+ * per the asymmetric D4b.1 fan-out:
+ *
+ *   - scholar suppress (findFirst → null per PEOPLE_INDEX_WHERE) →
+ *       single delete on PEOPLE_INDEX.
+ *   - publication per-author hide → re-index pub doc + re-index the
+ *       contributor's people doc (bulk body has BOTH ops).
+ *   - publication takedown going derived-dark → DELETE pub doc + re-index
+ *       every confirmed WCM co-author's people doc.
+ *   - bulk throws → `edit_search_reflect_failed` logged, no throw.
+ */
+
+const hoisted = vi.hoisted(() => ({
+  mockScholarFindFirst: vi.fn(),
+  mockCenterMembershipFindMany: vi.fn(),
+  mockPublicationFindFirst: vi.fn(),
+  mockPublicationAuthorFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
+  mockBulk: vi.fn(),
+}));
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {
+      scholar: { findFirst: hoisted.mockScholarFindFirst },
+      centerMembership: { findMany: hoisted.mockCenterMembershipFindMany },
+      publication: { findFirst: hoisted.mockPublicationFindFirst },
+      publicationAuthor: { findMany: hoisted.mockPublicationAuthorFindMany },
+      suppression: { findMany: hoisted.mockSuppressionFindMany },
+    },
+  },
+}));
+
+vi.mock("@/lib/search", () => ({
+  PEOPLE_INDEX: "scholars-people",
+  PUBLICATIONS_INDEX: "scholars-publications",
+  searchClient: () => ({ bulk: hoisted.mockBulk }),
+}));
+
+import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
+
+const OK_BULK_RESPONSE = { body: { errors: false, items: [] } };
+
+function activeScholarRow(cwid: string) {
+  return {
+    cwid,
+    slug: cwid,
+    preferredName: cwid,
+    fullName: cwid,
+    postnominal: null,
+    primaryTitle: null,
+    primaryDepartment: null,
+    overview: null,
+    roleCategory: "faculty",
+    deptCode: null,
+    divCode: null,
+    department: null,
+    division: null,
+    topicAssignments: [],
+    grants: [],
+    authorships: [],
+  };
+}
+
+function publicationRow(
+  pmid: string,
+  authors: ReadonlyArray<{ cwid: string; isFirst?: boolean }>,
+) {
+  return {
+    pmid,
+    title: `Title ${pmid}`,
+    journal: "J",
+    year: 2024,
+    publicationType: "Journal Article",
+    citationCount: 0,
+    dateAddedToEntrez: null,
+    doi: null,
+    pmcid: null,
+    pubmedUrl: null,
+    abstract: null,
+    impactScore: null,
+    impactJustification: null,
+    meshTerms: [],
+    authors: authors.map((a, i) => ({
+      pmid,
+      cwid: a.cwid,
+      externalName: null,
+      isConfirmed: true,
+      isFirst: a.isFirst ?? false,
+      isLast: false,
+      isPenultimate: false,
+      position: i + 1,
+      totalAuthors: authors.length,
+      scholar: {
+        cwid: a.cwid,
+        slug: a.cwid,
+        preferredName: a.cwid,
+        deletedAt: null,
+        status: "active",
+      },
+    })),
+    publicationTopics: [],
+  };
+}
+
+beforeEach(() => {
+  for (const m of Object.values(hoisted)) m.mockReset();
+  // Default: bulk succeeds with no errors.
+  hoisted.mockBulk.mockResolvedValue(OK_BULK_RESPONSE);
+  // Default: no suppression rows, no publication-author rows, no center memberships.
+  hoisted.mockSuppressionFindMany.mockResolvedValue([]);
+  hoisted.mockPublicationAuthorFindMany.mockResolvedValue([]);
+  hoisted.mockCenterMembershipFindMany.mockResolvedValue([]);
+});
+
+describe("reflectSearchSuppression — scholar suppress", () => {
+  it("emits a single people-doc delete (scholar fails PEOPLE_INDEX_WHERE)", async () => {
+    // Suppressed scholar (status !== 'active') → findFirst returns null.
+    hoisted.mockScholarFindFirst.mockResolvedValue(null);
+
+    await reflectSearchSuppression({
+      entityType: "scholar",
+      entityId: "ann1234",
+      contributorCwid: null,
+    });
+
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockBulk).toHaveBeenCalledWith({
+      refresh: true,
+      body: [{ delete: { _index: "scholars-people", _id: "ann1234" } }],
+    });
+  });
+});
+
+describe("reflectSearchSuppression — publication per-author hide", () => {
+  it("re-indexes the pub doc PLUS re-indexes the contributor's people doc", async () => {
+    // The pub stays displayed (co-author 'bob' remains).
+    hoisted.mockPublicationFindFirst.mockResolvedValue(
+      publicationRow("12345", [
+        { cwid: "ann", isFirst: true },
+        { cwid: "bob" },
+      ]),
+    );
+    // loadPublicationSuppressions returns the per-author hide row.
+    hoisted.mockSuppressionFindMany.mockResolvedValueOnce([
+      { entityId: "12345", contributorCwid: "ann" },
+    ]);
+    // The contributor's people doc is re-indexed via buildScholarOps.
+    hoisted.mockScholarFindFirst.mockResolvedValue(activeScholarRow("ann"));
+
+    await reflectSearchSuppression({
+      entityType: "publication",
+      entityId: "12345",
+      contributorCwid: "ann",
+    });
+
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
+    const body = hoisted.mockBulk.mock.calls[0][0].body as Array<
+      Record<string, unknown>
+    >;
+    // Body: [pub index action, pub doc, scholar index action, scholar doc].
+    expect(body[0]).toEqual({
+      index: { _index: "scholars-publications", _id: "12345" },
+    });
+    expect((body[1] as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual(["bob"]);
+    expect(body[2]).toEqual({
+      index: { _index: "scholars-people", _id: "ann" },
+    });
+    expect((body[3] as { cwid: string }).cwid).toBe("ann");
+  });
+});
+
+describe("reflectSearchSuppression — publication whole-pub takedown", () => {
+  it("DELETES the pub doc and re-indexes every confirmed WCM co-author's people doc", async () => {
+    // Affected cwid set comes from publicationAuthor.findMany (takedown path —
+    // contributorCwid is null).
+    hoisted.mockPublicationAuthorFindMany.mockResolvedValueOnce([
+      { cwid: "ann" },
+      { cwid: "bob" },
+    ]);
+    hoisted.mockPublicationFindFirst.mockResolvedValue(
+      publicationRow("12345", [
+        { cwid: "ann", isFirst: true },
+        { cwid: "bob" },
+      ]),
+    );
+    // loadPublicationSuppressions for the pub returns the explicit takedown.
+    hoisted.mockSuppressionFindMany.mockResolvedValueOnce([
+      { entityId: "12345", contributorCwid: null },
+    ]);
+    // Each co-author's people doc re-index reads the scholar row.
+    hoisted.mockScholarFindFirst
+      .mockResolvedValueOnce(activeScholarRow("ann"))
+      .mockResolvedValueOnce(activeScholarRow("bob"));
+
+    await reflectSearchSuppression({
+      entityType: "publication",
+      entityId: "12345",
+      contributorCwid: null,
+    });
+
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
+    const body = hoisted.mockBulk.mock.calls[0][0].body as Array<
+      Record<string, unknown>
+    >;
+    // First op: delete the pub doc (the pub is dark).
+    expect(body[0]).toEqual({
+      delete: { _index: "scholars-publications", _id: "12345" },
+    });
+    // Followed by two people-doc index ops, one per affected co-author.
+    const peopleActions = body.filter(
+      (b) => "index" in b && (b.index as { _index: string })._index === "scholars-people",
+    );
+    expect(peopleActions).toHaveLength(2);
+    const peopleIds = peopleActions.map(
+      (b) => (b.index as { _id: string })._id,
+    );
+    expect(peopleIds).toEqual(expect.arrayContaining(["ann", "bob"]));
+  });
+});
+
+describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", () => {
+  it("logs edit_search_reflect_failed and does NOT throw when bulk rejects", async () => {
+    hoisted.mockScholarFindFirst.mockResolvedValue(null);
+    hoisted.mockBulk.mockRejectedValue(new Error("OpenSearch unreachable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      reflectSearchSuppression({
+        entityType: "scholar",
+        entityId: "ann1234",
+        contributorCwid: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(consoleError.mock.calls[0][0] as string);
+    expect(logged.event).toBe("edit_search_reflect_failed");
+    expect(logged.entityType).toBe("scholar");
+    expect(logged.entityId).toBe("ann1234");
+    expect(logged.contributorCwid).toBeNull();
+    expect(typeof logged.error).toBe("string");
+
+    consoleError.mockRestore();
+  });
+
+  it("logs per-item bulk errors (non-404) without throwing", async () => {
+    hoisted.mockScholarFindFirst.mockResolvedValue(null);
+    hoisted.mockBulk.mockResolvedValue({
+      body: {
+        errors: true,
+        items: [
+          { delete: { error: { type: "version_conflict" }, status: 409 } },
+        ],
+      },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await reflectSearchSuppression({
+      entityType: "scholar",
+      entityId: "ann1234",
+      contributorCwid: null,
+    });
+
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("does NOT log when bulk returns only 404-on-delete (idempotent missing doc)", async () => {
+    hoisted.mockScholarFindFirst.mockResolvedValue(null);
+    hoisted.mockBulk.mockResolvedValue({
+      body: {
+        errors: true,
+        items: [
+          { delete: { error: { type: "not_found" }, status: 404 } },
+        ],
+      },
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await reflectSearchSuppression({
+      entityType: "scholar",
+      entityId: "ann1234",
+      contributorCwid: null,
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});
+
+describe("reflectSearchSuppression — unknown entity type", () => {
+  it("is a no-op (no bulk call) — out-of-v1-scope types (grant, education, appointment)", async () => {
+    await reflectSearchSuppression({
+      entityType: "grant",
+      entityId: "g1",
+      contributorCwid: null,
+    });
+    expect(hoisted.mockBulk).not.toHaveBeenCalled();
+  });
+});

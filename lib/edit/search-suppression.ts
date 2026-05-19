@@ -1,0 +1,220 @@
+/**
+ * Self-edit v1 #356 Phase 4b — OpenSearch suppression fast-path.
+ *
+ * Reflects a suppress / revoke commit into the OpenSearch index
+ * synchronously, alongside the ISR + CloudFront reflection in
+ * `revalidation.ts`. Closes ADR-005 failure-model layer 1 — the
+ * search-staleness gap between a suppress write and the nightly
+ * `etl/search-index` rebuild (the D5.2 "Risk B" gap that ran ~24h until
+ * Phase 4b).
+ *
+ * Best-effort by contract: failures are logged via
+ * `edit_search_reflect_failed` and NEVER thrown. The suppress / revoke
+ * endpoint must not roll back on a failed index write; the nightly
+ * rebuild (layer 2) is the correctness backstop, and the durable
+ * reconciler (layer 3 — #393) is the recovery for fast-path writes lost
+ * to a crash or a `bulk` partial failure. **A failed fast-path is not
+ * recoverable by user retry** — the suppress endpoint's idempotency
+ * early-return (route.ts:92) means re-submitting no-ops before reaching
+ * this module.
+ *
+ * Asymmetric fan-out (Phase 4b plan §3, D4b.1):
+ *   - scholar suppress: delete the people doc for cwid.
+ *   - scholar revoke:   re-index the people doc (or delete if the
+ *                       scholar is no longer indexable per
+ *                       PEOPLE_INDEX_WHERE).
+ *   - publication per-author hide / its revoke:
+ *       re-index the pub doc (delete if `buildPublicationDoc` returns
+ *       null) PLUS re-index the contributor's people doc.
+ *   - publication whole-pub takedown / its revoke:
+ *       re-index the pub doc (delete if dark) PLUS re-index every
+ *       confirmed WCM co-author's people doc.
+ *
+ * The publication-side people-doc set === `resolveAffectedProfileSlugs`'s
+ * fan-out in `revalidation.ts`: contributor on a per-author hide; every
+ * confirmed WCM co-author on a takedown. Bounded by the publication's
+ * author count.
+ *
+ * All index operations for one `reflectSearchSuppression` call are sent
+ * as a single `client.bulk` request — one round trip, not N.
+ *
+ * Latency budget: the common path (scholar suppress, per-author
+ * self-hide) is <1s p95 — one or two Prisma reads + one OpenSearch bulk.
+ * Takedown fan-out scales with the publication's confirmed-WCM-author
+ * count; acceptable as a rare, superuser-only action. Missing the
+ * common-path budget is the signal to move the fast-path async — which
+ * is the reconciler.
+ *
+ * Dormant-safe: `searchClient()` targets `OPENSEARCH_NODE`. If the
+ * cluster is unreachable (local dev without the docker container,
+ * pre-launch), the `bulk` call throws and we log + swallow — exactly
+ * as `invalidateCloudFront` is dormant without its distribution ID.
+ */
+import { loadPublicationSuppressions } from "@/lib/api/manual-layer";
+import { db } from "@/lib/db";
+import {
+  PEOPLE_INDEX,
+  PUBLICATIONS_INDEX,
+  searchClient,
+} from "@/lib/search";
+import {
+  PEOPLE_INDEX_SELECT,
+  PEOPLE_INDEX_WHERE,
+  PUBLICATION_INDEX_INCLUDE,
+  PUBLICATION_INDEX_WHERE,
+  buildPeopleDoc,
+  buildPublicationDoc,
+} from "@/lib/search-index-docs";
+
+/** The descriptor the suppress / revoke endpoints already hold post-commit. */
+export type ReflectSearchSuppressionArgs = {
+  entityType: string;
+  entityId: string;
+  contributorCwid: string | null;
+};
+
+type Op =
+  | { type: "delete"; index: string; id: string }
+  | { type: "index"; index: string; id: string; doc: Record<string, unknown> };
+
+type BulkItem = {
+  delete?: { error?: unknown; status?: number };
+  index?: { error?: unknown };
+};
+
+export async function reflectSearchSuppression(
+  args: ReflectSearchSuppressionArgs,
+): Promise<void> {
+  try {
+    const ops = await buildReflectionOps(args);
+    if (ops.length === 0) return;
+    const client = searchClient();
+    const body: Array<Record<string, unknown>> = [];
+    for (const op of ops) {
+      if (op.type === "delete") {
+        body.push({ delete: { _index: op.index, _id: op.id } });
+      } else {
+        body.push({ index: { _index: op.index, _id: op.id } });
+        body.push(op.doc);
+      }
+    }
+    const resp = await client.bulk({ refresh: true, body });
+    if (resp.body.errors) {
+      // OpenSearch 404 on a `delete` is fine — the doc may already be
+      // absent on a stale rebuild or a never-built index. Surface any
+      // OTHER per-item error.
+      const failed = (resp.body.items as BulkItem[]).filter((it) => {
+        if (it.delete?.error && it.delete?.status !== 404) return true;
+        if (it.index?.error) return true;
+        return false;
+      });
+      if (failed.length > 0) {
+        logReflectFailure(args, failed);
+      }
+    }
+  } catch (err) {
+    logReflectFailure(args, err);
+  }
+}
+
+async function buildReflectionOps(
+  args: ReflectSearchSuppressionArgs,
+): Promise<Op[]> {
+  if (args.entityType === "scholar") {
+    return buildScholarOps(args.entityId);
+  }
+  if (args.entityType === "publication") {
+    return buildPublicationOps(args.entityId, args.contributorCwid);
+  }
+  // Other entity types are out of v1 scope (Grant / Education / Appointment
+  // — blocked on #352).
+  return [];
+}
+
+async function buildScholarOps(cwid: string): Promise<Op[]> {
+  // PEOPLE_INDEX_WHERE excludes suppressed / deleted scholars at the query
+  // layer. A suppressed scholar's findFirst returns null → we issue a
+  // delete; a revoked-to-active scholar returns the row → we re-index.
+  const scholar = await db.read.scholar.findFirst({
+    where: { cwid, ...PEOPLE_INDEX_WHERE },
+    select: PEOPLE_INDEX_SELECT,
+  });
+  if (!scholar) {
+    return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
+  }
+  const centerRows = await db.read.centerMembership.findMany({
+    where: { cwid },
+    select: { centerCode: true },
+  });
+  const centerCodes = centerRows.map((r) => r.centerCode);
+  // Per-request, pmid-scoped — honors the manual-layer.ts contract.
+  const sup = await loadPublicationSuppressions(
+    scholar.authorships.map((a) => a.pmid),
+    db.read,
+  );
+  const doc = await buildPeopleDoc(scholar, centerCodes, db.read, sup);
+  return [{ type: "index", index: PEOPLE_INDEX, id: cwid, doc }];
+}
+
+async function buildPublicationOps(
+  pmid: string,
+  contributorCwid: string | null,
+): Promise<Op[]> {
+  // Affected people-doc set === `resolveAffectedProfileSlugs`'s fan-out
+  // (revalidation.ts): contributor on a per-author hide; every confirmed
+  // WCM co-author on a takedown.
+  const affectedCwids =
+    contributorCwid !== null
+      ? [contributorCwid]
+      : await db.read.publicationAuthor
+          .findMany({
+            where: { pmid, cwid: { not: null }, isConfirmed: true },
+            select: { cwid: true },
+          })
+          .then((rows) => rows.flatMap((r) => (r.cwid ? [r.cwid] : [])));
+
+  const ops: Op[] = [];
+
+  const pub = await db.read.publication.findFirst({
+    where: { pmid, ...PUBLICATION_INDEX_WHERE },
+    include: PUBLICATION_INDEX_INCLUDE,
+  });
+  if (!pub) {
+    // Not in the index (filtered Retraction / Erratum, or row removed) —
+    // issue a best-effort delete; a top-level 404 is swallowed.
+    ops.push({ type: "delete", index: PUBLICATIONS_INDEX, id: pmid });
+  } else {
+    const supForPub = await loadPublicationSuppressions([pmid], db.read);
+    const doc = buildPublicationDoc(pub, supForPub);
+    if (doc === null) {
+      ops.push({ type: "delete", index: PUBLICATIONS_INDEX, id: pmid });
+    } else {
+      ops.push({ type: "index", index: PUBLICATIONS_INDEX, id: pmid, doc });
+    }
+  }
+
+  // Re-index the affected people docs in parallel (bounded by the pub's
+  // co-author count). Each `buildScholarOps` opens its own per-scholar
+  // queries; for a takedown of ~5-20 co-authors that's ≤80 reads, then
+  // one bulk write.
+  const scholarOpsArrays = await Promise.all(
+    affectedCwids.map((c) => buildScholarOps(c)),
+  );
+  for (const arr of scholarOpsArrays) ops.push(...arr);
+  return ops;
+}
+
+function logReflectFailure(
+  args: ReflectSearchSuppressionArgs,
+  error: unknown,
+): void {
+  console.error(
+    JSON.stringify({
+      event: "edit_search_reflect_failed",
+      entityType: args.entityType,
+      entityId: args.entityId,
+      contributorCwid: args.contributorCwid,
+      error: error instanceof Error ? error.message : error,
+    }),
+  );
+}
