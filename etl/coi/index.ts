@@ -7,7 +7,7 @@
  *
  * Usage: `npm run etl:coi`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { closeCoiPool, withCoiConnection } from "@/lib/sources/mysql-coi";
 
 type Row = {
@@ -33,11 +33,11 @@ function chunks<T>(a: T[], n: number): T[][] {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({ data: { source: "COI", status: "running" } });
+  const run = await db.write.etlRun.create({ data: { source: "COI", status: "running" } });
 
   try {
     console.log("Loading active CWIDs...");
-    const ours = await prisma.scholar.findMany({
+    const ours = await db.write.scholar.findMany({
       where: { deletedAt: null, status: "active" },
       select: { cwid: true },
     });
@@ -61,7 +61,7 @@ async function main() {
     console.log(`After filter to active scholars: ${filtered.length} rows.`);
 
     console.log("Resetting coi_activity table...");
-    await prisma.coiActivity.deleteMany();
+    await db.write.coiActivity.deleteMany();
 
     const inserts = filtered.map((r) => ({
       cwid: r.cwid!,
@@ -80,14 +80,14 @@ async function main() {
     console.log(`Inserting ${inserts.length} disclosures...`);
     let inserted = 0;
     for (const batch of chunks(inserts, INSERT_BATCH)) {
-      await prisma.coiActivity.createMany({ data: batch, skipDuplicates: true });
+      await db.write.coiActivity.createMany({ data: batch, skipDuplicates: true });
       inserted += batch.length;
       if (inserted % (INSERT_BATCH * 10) === 0) {
         console.log(`  ...${inserted}/${inserts.length}`);
       }
     }
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: inserts.length },
     });
@@ -95,7 +95,7 @@ async function main() {
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(`COI ETL complete in ${elapsed}s: disclosures=${inserts.length}`);
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -113,6 +113,6 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
     await closeCoiPool();
   });

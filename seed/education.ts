@@ -2,7 +2,7 @@
  * Synthetic education and training entries (per spec lines 51-53: degree,
  * institution, year, field).
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 
 type EducationSpec = {
   cwid: string;
@@ -47,7 +47,7 @@ const education: EducationSpec[] = [
 
 export async function seedEducation() {
   for (const e of education) {
-    await prisma.education.create({
+    await db.write.education.create({
       data: e,
     });
   }

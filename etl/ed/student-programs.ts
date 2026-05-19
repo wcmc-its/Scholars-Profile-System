@@ -12,7 +12,7 @@
  *
  * Usage: `npm run etl:ed:student-programs`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import {
   collapsePhdStudentProgramRecords,
   fetchPhdStudentProgramRecords,
@@ -29,7 +29,7 @@ function chunks<T>(arr: T[], size: number): T[][] {
 
 async function main() {
   const start = Date.now();
-  const run = await prisma.etlRun.create({
+  const run = await db.write.etlRun.create({
     data: {
       id: crypto.randomUUID(),
       source: "ED-Student-Programs",
@@ -58,17 +58,17 @@ async function main() {
     }));
 
     console.log("Truncating student_phd_program...");
-    await prisma.studentPhdProgram.deleteMany();
+    await db.write.studentPhdProgram.deleteMany();
 
     console.log(`Inserting ${rows.length} rows...`);
     for (const batch of chunks(rows, INSERT_BATCH)) {
-      await prisma.studentPhdProgram.createMany({
+      await db.write.studentPhdProgram.createMany({
         data: batch,
         skipDuplicates: true,
       });
     }
 
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "success",
@@ -84,7 +84,7 @@ async function main() {
       `ED student-programs ETL complete in ${elapsed}s: rows=${rows.length} (active=${active}, expired/alumni=${expired})`,
     );
   } catch (err) {
-    await prisma.etlRun.update({
+    await db.write.etlRun.update({
       where: { id: run.id },
       data: {
         status: "failed",
@@ -104,5 +104,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

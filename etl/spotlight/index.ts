@@ -28,7 +28,7 @@
  */
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import Ajv from "ajv/dist/2020"; // ajv v8+ with JSON Schema 2020-12 support
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — use AWS SDK default credential chain; do NOT
@@ -123,7 +123,7 @@ async function recordRun(args: {
   manifest?: SpotlightManifest;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.etlRun.create({
+  await db.write.etlRun.create({
     data: {
       source: "Spotlight",
       status: args.status,
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   );
 
   // Step 3a: Find the prior successful Spotlight run.
-  const lastRun = await prisma.etlRun.findFirst({
+  const lastRun = await db.write.etlRun.findFirst({
     where: { source: "Spotlight", status: "success" },
     orderBy: { completedAt: "desc" },
   });
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
   const refreshedAt = new Date();
   let upserted = 0;
   for (const spotlight of artifact.spotlights) {
-    await prisma.spotlight.upsert({
+    await db.write.spotlight.upsert({
       where: { subtopicId: spotlight.subtopic_id },
       create: {
         subtopicId:       spotlight.subtopic_id,
@@ -266,7 +266,7 @@ async function main(): Promise<void> {
   // Step 8: Drop any rows left over from a prior publish whose subtopic_id
   // was not in this artifact. Full-replacement semantics: the table reflects
   // exactly the current artifact's `spotlights[]`.
-  const stale = await prisma.spotlight.deleteMany({
+  const stale = await db.write.spotlight.deleteMany({
     where: { artifactVersion: { not: manifest.version } },
   });
 
@@ -305,5 +305,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

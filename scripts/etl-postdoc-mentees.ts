@@ -15,7 +15,7 @@
  *
  * Usage: `npx tsx scripts/etl-postdoc-mentees.ts`
  */
-import { prisma } from "../lib/db";
+import { db } from "../lib/db";
 import {
   type EdPostdocEmploymentRecord,
   fetchAllPostdocEmploymentRecords,
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   const allMenteeCwids = Array.from(new Set(withMentor.map((r) => r.cwid)));
   const scholarsByCwid = new Map(
     (
-      await prisma.scholar.findMany({
+      await db.write.scholar.findMany({
         where: { cwid: { in: allMenteeCwids } },
         select: { cwid: true, preferredName: true, fullName: true },
       })
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     const externalId = `ED-POSTDOC-${r.sorId}`;
     seenExternalIds.add(externalId);
     const name = nameByCwid.get(r.cwid);
-    await prisma.postdocMentorRelationship.upsert({
+    await db.write.postdocMentorRelationship.upsert({
       where: { externalId },
       create: {
         externalId,
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
     upserted += 1;
   }
 
-  const existing = await prisma.postdocMentorRelationship.findMany({
+  const existing = await db.write.postdocMentorRelationship.findMany({
     select: { externalId: true },
   });
   const stale = existing
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
     .filter((eid) => !seenExternalIds.has(eid));
   let deleted = 0;
   if (stale.length > 0) {
-    const res = await prisma.postdocMentorRelationship.deleteMany({
+    const res = await db.write.postdocMentorRelationship.deleteMany({
       where: { externalId: { in: stale } },
     });
     deleted = res.count;
@@ -158,11 +158,11 @@ async function main(): Promise<void> {
       `${deleted} stale rows tombstoned)`,
   );
 
-  await prisma.$disconnect();
+  await db.write.$disconnect();
 }
 
 main().catch(async (err) => {
   console.error("FATAL", err);
-  await prisma.$disconnect();
+  await db.write.$disconnect();
   process.exit(1);
 });

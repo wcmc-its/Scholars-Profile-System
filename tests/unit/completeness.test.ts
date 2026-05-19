@@ -12,13 +12,15 @@
 import { describe, expect, it, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("@/lib/db", () => ({
-  prisma: {
-    scholar: { count: vi.fn() },
-    completenessSnapshot: { create: vi.fn(async () => ({})) },
+  db: {
+    write: {
+      scholar: { count: vi.fn() },
+      completenessSnapshot: { create: vi.fn(async () => ({})) },
+    },
   },
 }));
 
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   computeCompletenessSnapshot,
   COMPLETENESS_THRESHOLD,
@@ -30,7 +32,7 @@ beforeEach(() => {
 
 describe("computeCompletenessSnapshot", () => {
   it("Test A: 100/100 = 100% above threshold", async () => {
-    (prisma.scholar.count as Mock)
+    (db.write.scholar.count as Mock)
       .mockResolvedValueOnce(100) // totalScholars
       .mockResolvedValueOnce(100); // completeCount
 
@@ -42,7 +44,7 @@ describe("computeCompletenessSnapshot", () => {
       completenessPercent: 100,
       belowThreshold: false,
     });
-    expect(prisma.completenessSnapshot.create).toHaveBeenCalledWith({
+    expect(db.write.completenessSnapshot.create).toHaveBeenCalledWith({
       data: {
         totalScholars: 100,
         completeCount: 100,
@@ -53,7 +55,7 @@ describe("computeCompletenessSnapshot", () => {
   });
 
   it("Test B: 65/100 = 65% below threshold", async () => {
-    (prisma.scholar.count as Mock)
+    (db.write.scholar.count as Mock)
       .mockResolvedValueOnce(100)
       .mockResolvedValueOnce(65);
 
@@ -64,7 +66,7 @@ describe("computeCompletenessSnapshot", () => {
   });
 
   it("Test C: 70/100 = 70% NOT below threshold (boundary — strict < 70)", async () => {
-    (prisma.scholar.count as Mock)
+    (db.write.scholar.count as Mock)
       .mockResolvedValueOnce(100)
       .mockResolvedValueOnce(70);
 
@@ -75,7 +77,7 @@ describe("computeCompletenessSnapshot", () => {
   });
 
   it("Test D: 0/0 = 0% NOT below threshold (no spurious alarm on empty DB)", async () => {
-    (prisma.scholar.count as Mock)
+    (db.write.scholar.count as Mock)
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(0);
 
@@ -86,13 +88,13 @@ describe("computeCompletenessSnapshot", () => {
   });
 
   it("Test E: first count uses active-scholars where clause; second uses completeness where clause", async () => {
-    (prisma.scholar.count as Mock)
+    (db.write.scholar.count as Mock)
       .mockResolvedValueOnce(10)
       .mockResolvedValueOnce(8);
 
     await computeCompletenessSnapshot();
 
-    const calls = (prisma.scholar.count as Mock).mock.calls;
+    const calls = (db.write.scholar.count as Mock).mock.calls;
     expect(calls).toHaveLength(2);
 
     // First call: total active scholars

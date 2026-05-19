@@ -4,7 +4,7 @@
  *
  * Usage: `npm run seed`
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { seedScholars } from "./scholars";
 import { seedPublications } from "./publications";
 import { seedGrants } from "./grants";
@@ -12,16 +12,16 @@ import { seedEducation } from "./education";
 
 async function reset() {
   // Order matters: child tables first, parent tables last.
-  await prisma.publicationScore.deleteMany();
-  await prisma.topicAssignment.deleteMany();
-  await prisma.publicationAuthor.deleteMany();
-  await prisma.publication.deleteMany();
-  await prisma.grant.deleteMany();
-  await prisma.education.deleteMany();
-  await prisma.appointment.deleteMany();
-  await prisma.cwidAlias.deleteMany();
-  await prisma.slugHistory.deleteMany();
-  await prisma.scholar.deleteMany();
+  await db.write.publicationScore.deleteMany();
+  await db.write.topicAssignment.deleteMany();
+  await db.write.publicationAuthor.deleteMany();
+  await db.write.publication.deleteMany();
+  await db.write.grant.deleteMany();
+  await db.write.education.deleteMany();
+  await db.write.appointment.deleteMany();
+  await db.write.cwidAlias.deleteMany();
+  await db.write.slugHistory.deleteMany();
+  await db.write.scholar.deleteMany();
 }
 
 async function main() {
@@ -41,16 +41,16 @@ async function main() {
   await seedPublications();
 
   const counts = {
-    scholars: await prisma.scholar.count(),
-    appointments: await prisma.appointment.count(),
-    publications: await prisma.publication.count(),
-    publicationAuthors: await prisma.publicationAuthor.count(),
-    topicAssignments: await prisma.topicAssignment.count(),
-    publicationScores: await prisma.publicationScore.count(),
-    grants: await prisma.grant.count(),
-    education: await prisma.education.count(),
-    slugHistory: await prisma.slugHistory.count(),
-    cwidAliases: await prisma.cwidAlias.count(),
+    scholars: await db.write.scholar.count(),
+    appointments: await db.write.appointment.count(),
+    publications: await db.write.publication.count(),
+    publicationAuthors: await db.write.publicationAuthor.count(),
+    topicAssignments: await db.write.topicAssignment.count(),
+    publicationScores: await db.write.publicationScore.count(),
+    grants: await db.write.grant.count(),
+    education: await db.write.education.count(),
+    slugHistory: await db.write.slugHistory.count(),
+    cwidAliases: await db.write.cwidAlias.count(),
   };
 
   console.log("Seed complete:", counts);
@@ -62,5 +62,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

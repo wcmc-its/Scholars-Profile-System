@@ -30,7 +30,7 @@
  *
  * Usage: `npm run etl:reporter`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 import { coreProjectNum } from "@/lib/award-number";
@@ -98,7 +98,7 @@ async function step1_GrantAbstracts() {
   console.log(`Loaded ${reporterByCoreProject.size} distinct core_project_num records from RePORTER.`);
 
   console.log("Loading WCM grants from Postgres...");
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     where: { awardNumber: { not: null } },
     select: {
       id: true,
@@ -167,9 +167,9 @@ async function step1_GrantAbstracts() {
   const fetchedAt = new Date();
   let updated = 0;
   for (const batch of chunks(toUpdate, UPDATE_BATCH)) {
-    await prisma.$transaction(
+    await db.write.$transaction(
       batch.map((u) =>
-        prisma.grant.update({
+        db.write.grant.update({
           where: { id: u.id },
           data: {
             applId: u.applId,
@@ -198,7 +198,7 @@ async function step2_GrantPublications() {
   // the join key). Index by (cwid, core_project_num) since that's the
   // composite key used in grant_provenance.
   console.log("Loading WCM grants for join...");
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     where: { awardNumber: { not: null } },
     select: { id: true, cwid: true, awardNumber: true },
   });
@@ -217,7 +217,7 @@ async function step2_GrantPublications() {
   // materialize linkages for pubs the Scholars system actually knows
   // about (Postgres FK on pmid).
   console.log("Loading publication PMIDs...");
-  const pubs = await prisma.publication.findMany({ select: { pmid: true } });
+  const pubs = await db.write.publication.findMany({ select: { pmid: true } });
   const ourPmids = new Set(pubs.map((p) => p.pmid));
   console.log(`${ourPmids.size} publications in our DB.`);
 
@@ -299,7 +299,7 @@ async function step2_GrantPublications() {
   const allGrantIds = grants.map((g) => g.id);
   let deleted = 0;
   for (const batch of chunks(allGrantIds, 1000)) {
-    const r = await prisma.grantPublication.deleteMany({
+    const r = await db.write.grantPublication.deleteMany({
       where: { grantId: { in: batch } },
     });
     deleted += r.count;
@@ -314,7 +314,7 @@ async function step2_GrantPublications() {
   console.log(`Inserting ${toInsert.length} grant_publication rows...`);
   let inserted = 0;
   for (const batch of chunks(toInsert, 1000)) {
-    await prisma.grantPublication.createMany({ data: batch });
+    await db.write.grantPublication.createMany({ data: batch });
     inserted += batch.length;
     if (inserted % 5000 === 0) {
       console.log(`  ...${inserted}/${toInsert.length}`);
@@ -330,7 +330,7 @@ async function step3_ResolveMeshDescriptors() {
   // table is small (~10K rows) so a full load + JS filter is simpler and
   // safer than a JSON-column WHERE clause.
   console.log("Loading grants from Postgres...");
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     select: {
       id: true,
       keywords: true,
@@ -382,9 +382,9 @@ async function step3_ResolveMeshDescriptors() {
   const resolvedAt = new Date();
   let updated = 0;
   for (const batch of chunks(toUpdate, UPDATE_BATCH)) {
-    await prisma.$transaction(
+    await db.write.$transaction(
       batch.map((u) =>
-        prisma.grant.update({
+        db.write.grant.update({
           where: { id: u.id },
           data: {
             meshDescriptorUis: u.meshDescriptorUis ?? Prisma.DbNull,
@@ -413,7 +413,7 @@ async function main() {
     // Prisma disconnect the adapter's pool keeps the event loop alive and the
     // script hangs after "Done in …s." rather than exiting.
     await closeReciterPool();
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   }
   console.log(`\nDone in ${((Date.now() - start) / 1000).toFixed(1)}s.`);
 }

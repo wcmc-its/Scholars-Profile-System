@@ -23,21 +23,13 @@
  * Usage: npx tsx scripts/recanonicalize-sponsors.ts [--dry-run]
  */
 import "dotenv/config";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma/client";
+import { db } from "../lib/db";
 import { canonicalizeSponsor } from "../lib/sponsor-canonicalize";
-
-const url = process.env.DATABASE_URL;
-if (!url) {
-  console.error("DATABASE_URL not set");
-  process.exit(1);
-}
-const prisma = new PrismaClient({ adapter: new PrismaMariaDb(url) });
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
 async function main() {
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     select: {
       id: true,
       primeSponsor: true,
@@ -109,7 +101,7 @@ async function main() {
     if (Object.keys(update).length === 0) continue;
 
     if (!DRY_RUN) {
-      await prisma.grant.update({
+      await db.write.grant.update({
         where: { id: g.id },
         data: update,
       });
@@ -122,7 +114,7 @@ async function main() {
       `  Direct : ${directUpdated} updated, ${directUnchanged} unchanged, ${directUnresolved} still unresolved\n` +
       `  isSubaward flag flipped on ${isSubawardFlipped} rows`,
   );
-  await prisma.$disconnect();
+  await db.write.$disconnect();
 }
 
 main().catch((err) => {

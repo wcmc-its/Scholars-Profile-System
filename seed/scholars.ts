@@ -14,7 +14,7 @@
  *
  * NO real WCM data. All names, CWIDs, and content are fictional.
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { deriveSlug } from "@/lib/slug";
 
 type SeedScholar = {
@@ -211,7 +211,7 @@ export async function seedScholars() {
     const showcase = ["jas2001", "mao2004", "lim2006", "sjo2008", "dpa2010"].includes(s.cwid);
     const wantsPastAppointments = showcase && yearsSinceJoin > 5;
 
-    await prisma.scholar.create({
+    await db.write.scholar.create({
       data: {
         cwid: s.cwid,
         preferredName: s.preferredName,
@@ -254,7 +254,7 @@ export async function seedScholars() {
   }
 
   // Sarah Johnson was previously "sarah-davies" — name change recorded in slug_history.
-  await prisma.slugHistory.create({
+  await db.write.slugHistory.create({
     data: {
       oldSlug: "sarah-davies",
       currentCwid: "sjo2008",
@@ -263,7 +263,7 @@ export async function seedScholars() {
   });
 
   // Diana Patel's old CWID was dpa1010 (replacement_cwid signal from ED).
-  await prisma.cwidAlias.create({
+  await db.write.cwidAlias.create({
     data: {
       oldCwid: "dpa1010",
       currentCwid: "dpa2010",

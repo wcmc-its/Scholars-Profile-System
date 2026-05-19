@@ -23,7 +23,7 @@
  * serving the previous load until its next 1h refresh tick. A partial
  * UPDATE rollback is invisible to readers.
  */
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { percentiles } from "../mesh-anchors/derive";
 
 async function recordRun(args: {
@@ -31,7 +31,7 @@ async function recordRun(args: {
   rowsProcessed: number;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.etlRun.create({
+  await db.write.etlRun.create({
     data: {
       source: "MeshCoverage",
       status: args.status,
@@ -55,7 +55,7 @@ async function recordRun(args: {
  * `mesh_descriptor` row count, not just descriptors with tagged pubs.
  */
 async function updateAllCoverages(): Promise<number> {
-  const affected = await prisma.$executeRaw`
+  const affected = await db.write.$executeRaw`
     UPDATE mesh_descriptor md
     LEFT JOIN (
       SELECT jt.ui AS descriptor_ui, COUNT(DISTINCT p.pmid) AS n_pubs
@@ -78,7 +78,7 @@ async function updateAllCoverages(): Promise<number> {
 }
 
 async function loadCoverageDistribution(): Promise<number[]> {
-  const rows = await prisma.$queryRaw<{ cov: number | null }[]>`
+  const rows = await db.write.$queryRaw<{ cov: number | null }[]>`
     SELECT local_pub_coverage AS cov
     FROM mesh_descriptor
     WHERE local_pub_coverage IS NOT NULL
@@ -129,5 +129,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

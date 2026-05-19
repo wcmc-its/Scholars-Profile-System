@@ -28,7 +28,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { prisma } from "@/lib/db";
+import { db } from "@/lib/db";
 import { parseCuratedCsv } from "./csv";
 import { filterDerived, mergeAnchors, percentiles } from "./derive";
 import type { AnchorRow, DerivedRowRaw } from "./types";
@@ -43,7 +43,7 @@ async function recordRun(args: {
   rowsProcessed: number;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.etlRun.create({
+  await db.write.etlRun.create({
     data: {
       source: "MeshAnchor",
       status: args.status,
@@ -79,7 +79,7 @@ async function loadDerivedRaw(): Promise<DerivedRowRaw[]> {
   // poorly through JSON.stringify if left raw (Decimal → quoted string,
   // bigint → TypeError). Coerce once here so DerivedRowRaw's declared
   // `number` shape is honest.
-  const raw = await prisma.$queryRaw<
+  const raw = await db.write.$queryRaw<
     { descriptor_ui: string; parent_topic_id: string; ratio: unknown; n_both: unknown; n_desc: unknown }[]
   >`
     WITH pub_descriptors AS (
@@ -134,7 +134,7 @@ async function loadDerivedRaw(): Promise<DerivedRowRaw[]> {
  * the same JSON_TABLE expansion.
  */
 async function loadDescriptorTotals(): Promise<number[]> {
-  const rows = await prisma.$queryRaw<{ n_desc: bigint | number }[]>`
+  const rows = await db.write.$queryRaw<{ n_desc: bigint | number }[]>`
     WITH pub_descriptors AS (
       SELECT p.pmid, jt.ui AS descriptor_ui
       FROM publication p
@@ -158,7 +158,7 @@ async function replaceAnchors(anchors: AnchorRow[]): Promise<void> {
   // until the next 1h refresh tick, so an aborted run causes no visible
   // breakage.
   const CHUNK = 500;
-  await prisma.$transaction(
+  await db.write.$transaction(
     async (tx) => {
       await tx.meshCuratedTopicAnchor.deleteMany({});
       for (let i = 0; i < anchors.length; i += CHUNK) {
@@ -275,5 +275,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });

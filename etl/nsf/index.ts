@@ -24,7 +24,7 @@
  *
  * Usage: `npm run etl:nsf`
  */
-import { prisma } from "../../lib/db";
+import { db } from "../../lib/db";
 import { nsfAwardId } from "@/lib/award-number";
 import { fetchNsfAward, sleepBetweenRequests } from "./fetcher";
 
@@ -53,7 +53,7 @@ async function main() {
   console.log("=== NSF abstracts ETL ===");
 
   console.log("Loading WCM grants from Postgres...");
-  const grants = await prisma.grant.findMany({
+  const grants = await db.write.grant.findMany({
     where: { awardNumber: { not: null } },
     select: {
       id: true,
@@ -154,7 +154,7 @@ async function main() {
       if (award.abstractText === c.currentAbstract && c.currentSource === "nsf") {
         unchanged++;
       } else {
-        await prisma.grant.update({
+        await db.write.grant.update({
           where: { id: c.id },
           data: {
             abstract: award.abstractText,
@@ -186,5 +186,5 @@ main()
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await db.write.$disconnect();
   });
