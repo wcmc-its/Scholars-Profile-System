@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
@@ -12,6 +12,7 @@ import {
 } from "@/components/profile/author-position-badge";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
+import { TopicsUpdatingPlaceholder } from "@/components/profile/topics-updating-placeholder";
 
 const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new Set([
   "first",
@@ -161,9 +162,30 @@ function ProfilePubsClusterInner({
 
   const filterActive = selectedUis.length > 0 || positions.length > 0;
 
+  // #118 — the reciter→dynamodb consistency window. Fetched client-side
+  // because the 30-min window can't be baked into the 24h-ISR profile page.
+  // While open, the Topics pills would be transiently incomplete, so the
+  // section shows a placeholder instead. A fetch failure leaves the
+  // placeholder hidden (fail-open to the normal Topics view).
+  const [topicWindowOpen, setTopicWindowOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/topic-rebuild-window")
+      .then((r) => (r.ok ? r.json() : { open: false }))
+      .then((d: { open?: boolean }) => {
+        if (!cancelled) setTopicWindowOpen(d.open === true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <>
-      {keywords.length > 0 ? (
+      {topicWindowOpen ? (
+        <TopicsUpdatingPlaceholder />
+      ) : keywords.length > 0 ? (
         <TopicsSection
           keywords={keywords}
           totalAcceptedPubs={totalAcceptedPubs}
