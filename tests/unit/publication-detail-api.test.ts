@@ -16,6 +16,8 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   publicationFindUnique: vi.fn(),
   subtopicFindMany: vi.fn().mockResolvedValue([]),
+  suppressionFindMany: vi.fn().mockResolvedValue([]),
+  publicationAuthorFindMany: vi.fn().mockResolvedValue([]),
   withReciterConnection: vi.fn(),
 }));
 
@@ -23,6 +25,8 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     publication: { findUnique: mocks.publicationFindUnique },
     subtopic: { findMany: mocks.subtopicFindMany },
+    suppression: { findMany: mocks.suppressionFindMany },
+    publicationAuthor: { findMany: mocks.publicationAuthorFindMany },
   },
 }));
 
@@ -40,6 +44,8 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.subtopicFindMany.mockResolvedValue([]);
+  mocks.suppressionFindMany.mockResolvedValue([]);
+  mocks.publicationAuthorFindMany.mockResolvedValue([]);
   mocks.withReciterConnection.mockImplementation(
     async (fn: (conn: unknown) => Promise<unknown>) => {
       const conn = {
@@ -71,6 +77,19 @@ describe("getPublicationDetail — pmid validation", () => {
     mocks.publicationFindUnique.mockResolvedValueOnce(null);
     const r = await getPublicationDetail("12345");
     expect(r).toBeNull();
+  });
+});
+
+describe("getPublicationDetail — publication suppression (#356)", () => {
+  it("returns null for a whole-publication takedown", async () => {
+    mocks.publicationFindUnique.mockResolvedValueOnce({
+      pmid: "12345",
+      publicationTopics: [],
+    });
+    mocks.suppressionFindMany.mockResolvedValueOnce([
+      { entityId: "12345", contributorCwid: null },
+    ]);
+    expect(await getPublicationDetail("12345")).toBeNull();
   });
 });
 
