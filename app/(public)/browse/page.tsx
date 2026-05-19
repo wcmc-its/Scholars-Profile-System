@@ -7,7 +7,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { getBrowseData } from "@/lib/api/browse";
+import { getBrowseData, type BrowseData } from "@/lib/api/browse";
 import { BrowseHero } from "@/components/browse/browse-hero";
 import { BrowseAnchorStrip } from "@/components/browse/browse-anchor-strip";
 import { DepartmentsGrid } from "@/components/browse/departments-grid";
@@ -34,7 +34,14 @@ export const metadata: Metadata = {
 };
 
 export default async function BrowsePage() {
-  const data = await getBrowseData();
+  // Pre-render against the DB when reachable. In a build environment without
+  // a database (CI on a fresh checkout, `docker build`), fall back to empty
+  // grids; the ISR revalidate above and the /api/revalidate webhook
+  // repopulate the hub on the first production render. Mirrors the guards in
+  // app/sitemap.ts and app/llms.txt/route.ts.
+  const data = await getBrowseData().catch(
+    (): BrowseData => ({ departments: [], centers: [] }),
+  );
 
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
