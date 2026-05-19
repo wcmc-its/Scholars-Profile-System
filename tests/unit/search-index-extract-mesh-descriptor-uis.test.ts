@@ -13,7 +13,7 @@
  *   - `label` is irrelevant to this extractor; absence does not affect UI emit.
  */
 import { describe, it, expect } from "vitest";
-import { extractMeshDescriptorUis } from "@/etl/search-index/index";
+import { extractMeshDescriptorUis } from "@/lib/search-index-docs";
 
 describe("extractMeshDescriptorUis", () => {
   it("returns [] for null / undefined / non-array input", () => {

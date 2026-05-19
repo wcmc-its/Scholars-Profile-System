@@ -22,7 +22,7 @@ vi.mock("next/cache", () => ({ revalidatePath: mockRevalidatePath }));
 import {
   reflectOverviewEdit,
   reflectVisibilityChange,
-  resolveAffectedProfileSlugs,
+  resolveAffectedProfiles,
 } from "@/lib/edit/revalidation";
 
 beforeEach(() => {
@@ -30,31 +30,35 @@ beforeEach(() => {
   delete process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID;
 });
 
-describe("resolveAffectedProfileSlugs", () => {
-  it("resolves a scholar target to that scholar's slug", async () => {
-    mockScholarFindUnique.mockResolvedValue({ slug: "jane-smith" });
-    expect(await resolveAffectedProfileSlugs("scholar", "cwid1", null)).toEqual(["jane-smith"]);
+describe("resolveAffectedProfiles", () => {
+  it("resolves a scholar target to that scholar's slug + cwid", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "jane-smith", cwid: "cwid1" });
+    expect(await resolveAffectedProfiles("scholar", "cwid1", null)).toEqual([
+      { slug: "jane-smith", cwid: "cwid1" },
+    ]);
   });
 
   it("returns nothing for a scholar with no row", async () => {
     mockScholarFindUnique.mockResolvedValue(null);
-    expect(await resolveAffectedProfileSlugs("scholar", "cwid1", null)).toEqual([]);
+    expect(await resolveAffectedProfiles("scholar", "cwid1", null)).toEqual([]);
   });
 
-  it("resolves a per-author publication suppression to the contributor's slug", async () => {
-    mockScholarFindUnique.mockResolvedValue({ slug: "bob-jones" });
-    expect(await resolveAffectedProfileSlugs("publication", "999", "cwid2")).toEqual(["bob-jones"]);
-  });
-
-  it("resolves a whole-publication takedown to every confirmed WCM author's slug", async () => {
-    mockPublicationAuthorFindMany.mockResolvedValue([
-      { scholar: { slug: "a-one" } },
-      { scholar: { slug: "b-two" } },
-      { scholar: null },
+  it("resolves a per-author publication suppression to the contributor's slug + cwid", async () => {
+    mockScholarFindUnique.mockResolvedValue({ slug: "bob-jones", cwid: "cwid2" });
+    expect(await resolveAffectedProfiles("publication", "999", "cwid2")).toEqual([
+      { slug: "bob-jones", cwid: "cwid2" },
     ]);
-    expect(await resolveAffectedProfileSlugs("publication", "999", null)).toEqual([
-      "a-one",
-      "b-two",
+  });
+
+  it("resolves a whole-publication takedown to every confirmed WCM author's slug + cwid", async () => {
+    mockPublicationAuthorFindMany.mockResolvedValue([
+      { cwid: "a", scholar: { slug: "a-one" } },
+      { cwid: "b", scholar: { slug: "b-two" } },
+      { cwid: "c", scholar: null },
+    ]);
+    expect(await resolveAffectedProfiles("publication", "999", null)).toEqual([
+      { slug: "a-one", cwid: "a" },
+      { slug: "b-two", cwid: "b" },
     ]);
   });
 });

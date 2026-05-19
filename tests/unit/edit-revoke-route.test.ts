@@ -10,7 +10,7 @@ const {
   mockScholarUpdateMany,
   mockExecuteRaw,
   mockReflectVisibilityChange,
-  mockResolveSlugs,
+  mockResolveProfiles,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -20,7 +20,7 @@ const {
   mockScholarUpdateMany: vi.fn(),
   mockExecuteRaw: vi.fn(),
   mockReflectVisibilityChange: vi.fn(),
-  mockResolveSlugs: vi.fn(),
+  mockResolveProfiles: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -32,7 +32,10 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/edit/revalidation", () => ({
   reflectVisibilityChange: mockReflectVisibilityChange,
-  resolveAffectedProfileSlugs: mockResolveSlugs,
+  resolveAffectedProfiles: mockResolveProfiles,
+}));
+vi.mock("@/lib/edit/search-suppression", () => ({
+  reflectSearchSuppression: vi.fn(),
 }));
 
 import { POST } from "@/app/api/edit/revoke/route";
@@ -74,7 +77,7 @@ beforeEach(() => {
   mockSuppressionCount.mockResolvedValue(0);
   mockScholarUpdateMany.mockResolvedValue({ count: 1 });
   mockExecuteRaw.mockResolvedValue(1);
-  mockResolveSlugs.mockResolvedValue(["self01-slug"]);
+  mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
 });
 
 describe("POST /api/edit/revoke", () => {

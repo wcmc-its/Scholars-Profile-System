@@ -11,7 +11,7 @@ const {
   mockFieldOverrideFindFirst,
   mockSlugHistoryFindFirst,
   mockReflectOverviewEdit,
-  mockResolveSlugs,
+  mockResolveProfiles,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -22,7 +22,7 @@ const {
   mockFieldOverrideFindFirst: vi.fn(),
   mockSlugHistoryFindFirst: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
-  mockResolveSlugs: vi.fn(),
+  mockResolveProfiles: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -38,7 +38,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/edit/revalidation", () => ({
   reflectOverviewEdit: mockReflectOverviewEdit,
-  resolveAffectedProfileSlugs: mockResolveSlugs,
+  resolveAffectedProfiles: mockResolveProfiles,
 }));
 
 import { POST } from "@/app/api/edit/field/route";
@@ -71,7 +71,7 @@ beforeEach(() => {
   mockScholarFindFirst.mockResolvedValue(null);
   mockFieldOverrideFindFirst.mockResolvedValue(null);
   mockSlugHistoryFindFirst.mockResolvedValue(null);
-  mockResolveSlugs.mockResolvedValue(["self01-slug"]);
+  mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
 });
 
 describe("POST /api/edit/field", () => {

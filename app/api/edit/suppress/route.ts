@@ -14,7 +14,8 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
-import { reflectVisibilityChange, resolveAffectedProfileSlugs } from "@/lib/edit/revalidation";
+import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
+import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import { publicationAuthorshipExists } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/suppress";
@@ -148,8 +149,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }),
     );
   }
-  const slugs = await resolveAffectedProfileSlugs(entityType, entityId, contributor);
-  await reflectVisibilityChange(slugs);
+  const affected = await resolveAffectedProfiles(entityType, entityId, contributor);
+  await reflectVisibilityChange(affected.map((a) => a.slug));
+  // Phase 4b C6 — OpenSearch fast-path (lib/edit/search-suppression.ts).
+  // Best-effort: failures are logged inside the reflector and never thrown,
+  // so they cannot roll back the already-committed write. `affectedCwids` is
+  // the cwid half of the same `resolveAffectedProfiles` query — one upstream
+  // Prisma read feeds both reflections (plan §3 tightening C7).
+  await reflectSearchSuppression({
+    entityType,
+    entityId,
+    contributorCwid: contributor,
+    affectedCwids: affected.map((a) => a.cwid),
+  });
 
   return editOk({ suppressionId });
 }

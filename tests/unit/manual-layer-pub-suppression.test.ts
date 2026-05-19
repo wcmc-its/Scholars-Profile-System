@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   isAuthorHidden,
   isPublicationDark,
+  loadAllPublicationSuppressions,
   loadPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 
@@ -114,5 +115,44 @@ describe("isPublicationDark", () => {
   it("an explicit takedown darkens regardless of the displayed-author set", async () => {
     const sup = await load([{ entityId: "111", contributorCwid: null }]);
     expect(isPublicationDark(sup, "111", ["a", "b"])).toBe(true);
+  });
+});
+
+describe("loadAllPublicationSuppressions", () => {
+  it("returns empty sets when no active suppression rows exist", async () => {
+    const { client } = clientReturning([]);
+    const sup = await loadAllPublicationSuppressions(client);
+    expect(sup.darkPmids.size).toBe(0);
+    expect(sup.hiddenAuthorsByPmid.size).toBe(0);
+  });
+
+  it("collects takedowns and per-author hides across many pmids in one pass", async () => {
+    const { client } = clientReturning([
+      { entityId: "111", contributorCwid: null }, // whole-pub takedown
+      { entityId: "222", contributorCwid: "abc1234" }, // per-author
+      { entityId: "222", contributorCwid: "xyz9999" }, // per-author, same pmid
+      { entityId: "333", contributorCwid: "def5678" }, // per-author
+    ]);
+    const sup = await loadAllPublicationSuppressions(client);
+    expect(sup.darkPmids.has("111")).toBe(true);
+    expect(sup.darkPmids.size).toBe(1);
+    expect(isAuthorHidden(sup, "222", "abc1234")).toBe(true);
+    expect(isAuthorHidden(sup, "222", "xyz9999")).toBe(true);
+    expect(isAuthorHidden(sup, "333", "def5678")).toBe(true);
+  });
+
+  it("queries the whole publication-suppression table, un-revoked only — no entityId filter", async () => {
+    const { client, findMany } = clientReturning([]);
+    await loadAllPublicationSuppressions(client);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    const call = findMany.mock.calls[0][0];
+    expect(call.where).toEqual({
+      entityType: "publication",
+      revokedAt: null,
+    });
+    // Specifically: no `entityId` clause — the batch ETL build needs the whole
+    // table, not a pmid-scoped slice. This is the contract that distinguishes
+    // it from `loadPublicationSuppressions`.
+    expect(call.where).not.toHaveProperty("entityId");
   });
 });

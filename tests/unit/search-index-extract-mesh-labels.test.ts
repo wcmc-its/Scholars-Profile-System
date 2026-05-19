@@ -9,7 +9,7 @@
  * a partial migration on the source side doesn't lose terms again.
  */
 import { describe, it, expect } from "vitest";
-import { extractMeshLabels } from "@/etl/search-index/index";
+import { extractMeshLabels } from "@/lib/search-index-docs";
 
 describe("extractMeshLabels", () => {
   it("returns [] for null / undefined / non-array input", () => {

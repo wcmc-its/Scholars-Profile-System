@@ -130,6 +130,42 @@ export async function loadPublicationSuppressions(
 }
 
 /**
+ * Load every active publication suppression in the table — **for the batch ETL
+ * build only.**
+ *
+ * `etl/search-index` processes the whole corpus in one batch and has no
+ * per-request staleness concern, so reading the whole `suppression` table in a
+ * single round trip is correct and cheap (the active set is small).
+ *
+ * The per-request query path **must not** use this loader. ADR-005 makes the
+ * Aurora suppression merge query-time and immediate — reversible with no
+ * rebuild — and a process- or request-scope cache of the whole table would
+ * reintroduce exactly the staleness window suppression exists to close.
+ * Per-request reads must call the pmid-scoped {@link loadPublicationSuppressions}.
+ */
+export async function loadAllPublicationSuppressions(
+  client: SuppressionReadClient,
+): Promise<PublicationSuppressions> {
+  const rows = await client.suppression.findMany({
+    where: { entityType: "publication", revokedAt: null },
+    select: { entityId: true, contributorCwid: true },
+  });
+  if (rows.length === 0) return NO_PUBLICATION_SUPPRESSIONS;
+  const darkPmids = new Set<string>();
+  const hiddenAuthorsByPmid = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.contributorCwid === null) {
+      darkPmids.add(row.entityId);
+    } else {
+      const hidden = hiddenAuthorsByPmid.get(row.entityId) ?? new Set<string>();
+      hidden.add(row.contributorCwid);
+      hiddenAuthorsByPmid.set(row.entityId, hidden);
+    }
+  }
+  return { darkPmids, hiddenAuthorsByPmid };
+}
+
+/**
  * True when this `(pmid, cwid)` WCM authorship is hidden by an active per-author
  * suppression — the scholar must then be omitted from that publication's
  * rendered author chips, profile links, and author-derived counts
