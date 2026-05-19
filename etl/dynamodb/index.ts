@@ -56,6 +56,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { clearTopicRebuildWindow } from "../../lib/etl-state";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
@@ -607,6 +608,11 @@ async function main() {
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },
     });
+
+    // #118 — topic edges are rebuilt; close the reciter→dynamodb consistency
+    // window so the profile placeholder clears. A failed run (catch below)
+    // deliberately leaves it open for the 30-minute auto-expiry.
+    await clearTopicRebuildWindow();
 
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
