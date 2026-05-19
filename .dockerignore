@@ -1,0 +1,42 @@
+# Dependencies and build output — reinstalled / rebuilt inside the image
+node_modules
+.next
+out
+build
+lib/generated
+
+# Version control and CI
+.git
+.github
+.gitignore
+
+# Infrastructure — a separate project, not part of the app image (ADR-008)
+cdk
+
+# Local AI-workflow, planning, and editor artifacts
+.claude
+.planning
+.superpowers
+.vscode
+.idea
+.screenshots
+.playwright-mcp
+
+# Tests and coverage reports
+coverage
+playwright-report
+test-results
+
+# Environment files — never copy credentials into an image
+.env
+.env.*
+
+# Docker and Compose
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Logs and OS noise
+*.log
+npm-debug.log*
+.DS_Store
