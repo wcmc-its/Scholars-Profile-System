@@ -2,6 +2,14 @@ import type { NextConfig } from "next";
 import { buildSecurityHeaders } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
+  // ADR-008: emit a standalone server bundle for the production container
+  // image (see Dockerfile) — only traced dependencies are included.
+  output: "standalone",
+  // Pin the file-tracing root so the standalone bundle lands at a stable
+  // path (.next/standalone/server.js). Without this, Next infers the root
+  // from the nearest lockfile, which is ambiguous when the build runs from
+  // a nested checkout.
+  outputFileTracingRoot: process.cwd(),
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,
