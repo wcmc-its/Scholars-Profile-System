@@ -308,3 +308,105 @@ export async function fetchAuthorshipOnPub(
     lastCount,
   };
 }
+
+/**
+ * Active grant for the recent-grants list on the grant-investigator popover
+ * (#257). `endYear` is always populated — `Grant.end_date` is non-null.
+ */
+export type RecentGrant = {
+  id: string;
+  title: string;
+  sponsor: string | null;
+  endYear: number;
+};
+
+/** 12-month NCE grace beyond end_date — mirrors NCE_GRACE_MS in
+ *  lib/api/search-funding.ts (a grant counts as active until end_date + 365d). */
+const NCE_GRACE_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** Account number embedded in a `Grant.externalId` (`INFOED-{accountNumber}-{cwid}`,
+ *  per parseExternalId in lib/funding-projection.ts) — used to drop the hovered
+ *  project from the recent-grants list. */
+function accountNumberFromExternalId(externalId: string): string | null {
+  const m = externalId.match(/^INFOED-(.+)-([^-]+)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The scholar's most recently-ending *active* grants — the optional bottom
+ * list on the grant-investigator popover. `excludeProjectId` drops the grant
+ * the user is hovering so the card doesn't echo its own row.
+ */
+export async function fetchRecentActiveGrants(
+  cwid: string,
+  opts: { limit?: number; excludeProjectId?: string } = {},
+): Promise<RecentGrant[]> {
+  if (!cwid) return [];
+  const limit = opts.limit ?? 2;
+  const cutoff = new Date(Date.now() - NCE_GRACE_MS);
+  const rows = await prisma.grant
+    .findMany({
+      where: { cwid, endDate: { gt: cutoff } },
+      orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+      take: limit + 1, // headroom to drop the hovered project
+      select: {
+        id: true,
+        title: true,
+        externalId: true,
+        endDate: true,
+        primeSponsor: true,
+        primeSponsorRaw: true,
+      },
+    })
+    .catch(() => []);
+  const out: RecentGrant[] = [];
+  for (const r of rows) {
+    if (
+      opts.excludeProjectId &&
+      accountNumberFromExternalId(r.externalId) === opts.excludeProjectId
+    ) {
+      continue;
+    }
+    out.push({
+      id: r.id,
+      title: r.title,
+      sponsor: r.primeSponsor ?? r.primeSponsorRaw,
+      endYear: r.endDate.getUTCFullYear(),
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * The investigator's most frequent prime sponsor across all their grants —
+ * the "top in {sponsor}" tail on the grant-facet popover line. All-time, not
+ * filter-aware (a filter-aware version is a #257 v1.1 follow-up).
+ */
+export async function fetchInvestigatorTopSponsor(
+  cwid: string,
+): Promise<string | null> {
+  if (!cwid) return null;
+  const rows = await prisma.grant
+    .findMany({
+      where: { cwid },
+      select: { primeSponsor: true, primeSponsorRaw: true },
+    })
+    .catch(() => []);
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const sponsor = r.primeSponsor ?? r.primeSponsorRaw;
+    if (!sponsor) continue;
+    counts.set(sponsor, (counts.get(sponsor) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [sponsor, n] of counts) {
+    // Most frequent; ties broken alphabetically for a stable result.
+    if (n > bestN || (n === bestN && best !== null && sponsor < best)) {
+      best = sponsor;
+      bestN = n;
+    }
+  }
+  return best;
+}

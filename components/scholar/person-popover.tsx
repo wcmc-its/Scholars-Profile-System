@@ -32,13 +32,16 @@ import {
   authorshipRoleFromFlags,
   type AuthorshipRole,
 } from "@/components/scholar/person-card-role-pill";
+import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill";
 
 export type PersonPopoverSurface =
   | "facet"
   | "pub-chip"
   | "co-author"
   | "mentee"
-  | "top-scholar";
+  | "top-scholar"
+  | "grant-investigator"
+  | "grant-facet";
 
 type ApiResponse = {
   header: {
@@ -70,6 +73,13 @@ type ApiResponse = {
     recent: Array<{ pmid: string; title: string; year: number | null }>;
   } | null;
   recentPubs: Array<{ pmid: string; title: string; year: number | null }>;
+  recentGrants: Array<{
+    id: string;
+    title: string;
+    sponsor: string | null;
+    endYear: number;
+  }>;
+  topSponsor: string | null;
 };
 
 export type PersonPopoverProps = {
@@ -110,6 +120,16 @@ export type PersonPopoverProps = {
   primaryActionHref?: string;
   /** Optional label for the primary action; if omitted, derived from surface. */
   primaryActionLabel?: string;
+  /** Grant context for the grant-investigator surface — drives the role pill
+   *  and the "Funded …" line, and excludes the hovered grant from the recent
+   *  list. All values are already on the FundingHit (no API round-trip). */
+  contextGrant?: {
+    projectId: string;
+    role: string;
+    startYear: number | null;
+    endYear: number | null;
+    isMultiPi: boolean;
+  };
 };
 
 const ROLE_FROM_FLAGS = (
@@ -135,6 +155,7 @@ export function PersonPopover({
   filterTopTopic,
   primaryActionHref,
   primaryActionLabel,
+  contextGrant,
 }: PersonPopoverProps) {
   const [data, setData] = React.useState<ApiResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -142,7 +163,7 @@ export function PersonPopover({
   const abortRef = React.useRef<AbortController | null>(null);
   const fetchedKeyRef = React.useRef<string | null>(null);
 
-  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}`;
+  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}`;
 
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
@@ -162,6 +183,7 @@ export function PersonPopover({
             contextScholarCwid,
             contextPubPmid,
             contextTopicSlug,
+            contextGrantProjectId: contextGrant?.projectId,
             ts: Date.now(),
           }),
         );
@@ -181,6 +203,8 @@ export function PersonPopover({
       if (contextScholarCwid) params.set("contextScholarCwid", contextScholarCwid);
       if (contextPubPmid) params.set("contextPubPmid", contextPubPmid);
       if (contextTopicSlug) params.set("contextTopicSlug", contextTopicSlug);
+      if (contextGrant?.projectId)
+        params.set("contextGrantProjectId", contextGrant.projectId);
 
       fetch(`/api/scholars/${cwid}/popover-context?${params.toString()}`, {
         signal: ctl.signal,
@@ -205,6 +229,7 @@ export function PersonPopover({
       contextScholarCwid,
       contextPubPmid,
       contextTopicSlug,
+      contextGrant?.projectId,
       fetchKey,
       data,
     ],
@@ -234,6 +259,7 @@ export function PersonPopover({
             data={data}
             surface={surface}
             isSelf={isSelf}
+            contextGrant={contextGrant}
             contextScholarName={contextScholarName}
             contextTopicLabel={contextTopicLabel}
             contextTopicRank={contextTopicRank}
@@ -252,6 +278,7 @@ function PersonPopoverBody({
   data,
   surface,
   isSelf,
+  contextGrant,
   contextScholarName,
   contextTopicLabel,
   contextTopicRank,
@@ -263,6 +290,7 @@ function PersonPopoverBody({
   data: ApiResponse;
   surface: PersonPopoverSurface;
   isSelf: boolean;
+  contextGrant?: PersonPopoverProps["contextGrant"];
   contextScholarName?: string;
   contextTopicLabel?: string;
   contextTopicRank?: number;
@@ -276,9 +304,11 @@ function PersonPopoverBody({
     ? `${header.preferredName}, ${header.postnominal}`
     : header.preferredName;
 
-  // Authorship role pill (pub-chip / co-author surfaces only).
-  const rolePill =
-    data.authorship && (surface === "pub-chip" || surface === "co-author") ? (
+  // Role pill — the authorship pill on pub-chip / co-author surfaces, the
+  // grant role pill on grant-investigator.
+  let rolePill: React.ReactNode = null;
+  if (data.authorship && (surface === "pub-chip" || surface === "co-author")) {
+    rolePill = (
       <PersonCardRolePill
         role={ROLE_FROM_FLAGS(
           data.authorship.isFirst,
@@ -288,7 +318,16 @@ function PersonPopoverBody({
         )}
         onPub
       />
-    ) : null;
+    );
+  } else if (surface === "grant-investigator" && contextGrant) {
+    rolePill = (
+      <GrantRolePill
+        role={contextGrant.role}
+        isMultiPi={contextGrant.isMultiPi}
+        onGrant
+      />
+    );
+  }
 
   // Bottom contextual line — surface-specific.
   const contextLine = isSelf ? (
@@ -297,6 +336,7 @@ function PersonPopoverBody({
     <SurfaceContextLine
       surface={surface}
       data={data}
+      contextGrant={contextGrant}
       contextScholarName={contextScholarName}
       contextTopicRank={contextTopicRank}
       filterMatchCount={filterMatchCount}
@@ -391,6 +431,7 @@ function SelfNote() {
 function SurfaceContextLine({
   surface,
   data,
+  contextGrant,
   contextScholarName,
   contextTopicRank,
   filterMatchCount,
@@ -398,6 +439,7 @@ function SurfaceContextLine({
 }: {
   surface: PersonPopoverSurface;
   data: ApiResponse;
+  contextGrant?: PersonPopoverProps["contextGrant"];
   contextScholarName?: string;
   contextTopicRank?: number;
   filterMatchCount?: number;
@@ -489,6 +531,53 @@ function SurfaceContextLine({
     );
   }
 
+  if (surface === "grant-investigator") {
+    if (!contextGrant) return null;
+    const { startYear, endYear } = contextGrant;
+    if (startYear == null && endYear == null) return null;
+    const range =
+      startYear != null && endYear != null
+        ? `${startYear}–${endYear}`
+        : `${startYear ?? endYear}`;
+    return (
+      <div className="mt-3 border-t border-border pt-2.5 text-[11.5px] leading-snug text-muted-foreground">
+        Funded <strong className="font-semibold text-foreground">{range}</strong>
+      </div>
+    );
+  }
+
+  if (surface === "grant-facet") {
+    const n = filterMatchCount;
+    const m = header.totalGrantCount;
+    if (n == null && m === 0) return null;
+    return (
+      <div className="mt-3 border-t border-border pt-2.5 text-[11.5px] leading-snug text-muted-foreground">
+        {n != null ? (
+          <>
+            <strong className="font-semibold text-foreground">{n}</strong>
+            {m > 0 ? (
+              <>
+                {" "}of <strong className="font-semibold text-foreground">{m}</strong> grants match your filters
+              </>
+            ) : (
+              <> grants match your filters</>
+            )}
+          </>
+        ) : (
+          <>
+            <strong className="font-semibold text-foreground">{m}</strong> grants total
+          </>
+        )}
+        {data.topSponsor ? (
+          <>
+            {" · top in "}
+            <strong className="font-semibold text-foreground">{data.topSponsor}</strong>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   // pub-chip: no contextual count line beyond the role pill (which is rendered above).
   return null;
 }
@@ -533,6 +622,28 @@ function SurfaceRecentList({
   data: ApiResponse;
   contextTopicLabel?: string;
 }) {
+  if (surface === "grant-investigator") {
+    const grants = data.recentGrants;
+    if (grants.length === 0) return null;
+    return (
+      <div className="mt-3 border-t border-border pt-2.5">
+        <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+          Recent active grants
+        </div>
+        <ul className="m-0 list-none space-y-1.5 p-0">
+          {grants.map((g) => (
+            <li key={g.id} className="text-[12px] leading-snug">
+              <span className="line-clamp-2">{g.title}</span>
+              <span className="ml-1 text-[11px] text-muted-foreground">
+                {g.sponsor ? `${g.sponsor} · ${g.endYear}` : g.endYear}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
   const rows =
     surface === "top-scholar" && data.topicRank
       ? data.topicRank.recent
@@ -561,6 +672,15 @@ function SurfaceRecentList({
       </ul>
     </div>
   );
+}
+
+/** Last-name token from a display name — drops a postnominal suffix and takes
+ *  the final whitespace-separated token. Mirrors the facet components'
+ *  lastNameKey, but preserves case for display ("…grants by Author"). */
+function lastNameFromDisplay(displayName: string): string {
+  const noPostnom = displayName.split(/,\s*/)[0] ?? displayName;
+  const tokens = noPostnom.trim().split(/\s+/);
+  return tokens[tokens.length - 1] ?? "";
 }
 
 function derivePrimaryAction({
@@ -605,6 +725,17 @@ function derivePrimaryAction({
       href: profileHref,
       label: `See ${data.topicRank.topicPubCount} topic pubs →`,
       eventKey: "topic_pubs",
+    };
+  }
+
+  if (surface === "grant-investigator") {
+    const n = data.header.totalGrantCount;
+    if (n < 1) return null;
+    const lastName = lastNameFromDisplay(data.header.preferredName);
+    return {
+      href: `/search?type=funding&investigator=${encodeURIComponent(data.header.cwid)}`,
+      label: `See ${n} grant${n === 1 ? "" : "s"} by ${lastName} →`,
+      eventKey: "grant_investigator_grants",
     };
   }
 

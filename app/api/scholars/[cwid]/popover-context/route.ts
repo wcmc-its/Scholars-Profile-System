@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   fetchAuthorshipOnPub,
   fetchCoPubsSummary,
+  fetchInvestigatorTopSponsor,
   fetchPopoverHeader,
+  fetchRecentActiveGrants,
   fetchRecentPubs,
   fetchTopicRank,
 } from "@/lib/api/popover-context";
@@ -27,6 +29,7 @@ export async function GET(
   const contextScholarCwid = sp.get("contextScholarCwid") || undefined;
   const contextPubPmid = sp.get("contextPubPmid") || undefined;
   const contextTopicSlug = sp.get("contextTopicSlug") || undefined;
+  const contextGrantProjectId = sp.get("contextGrantProjectId") || undefined;
 
   const header = await fetchPopoverHeader(cwid);
   if (!header) {
@@ -44,13 +47,20 @@ export async function GET(
     surface === "pub-chip" ||
     surface === "co-author" ||
     (surface === "top-scholar" && !contextTopicSlug);
+  const wantsRecentGrants = surface === "grant-investigator";
+  const wantsTopSponsor = surface === "grant-facet";
 
-  const [authorshipR, coPubsR, topicRankR, recentR] = await Promise.allSettled([
-    wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
-    wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
-    wantsTopicRank ? fetchTopicRank(cwid, contextTopicSlug!) : Promise.resolve(null),
-    wantsRecentPubs ? fetchRecentPubs(cwid, 2) : Promise.resolve([]),
-  ]);
+  const [authorshipR, coPubsR, topicRankR, recentR, recentGrantsR, topSponsorR] =
+    await Promise.allSettled([
+      wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
+      wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
+      wantsTopicRank ? fetchTopicRank(cwid, contextTopicSlug!) : Promise.resolve(null),
+      wantsRecentPubs ? fetchRecentPubs(cwid, 2) : Promise.resolve([]),
+      wantsRecentGrants
+        ? fetchRecentActiveGrants(cwid, { limit: 2, excludeProjectId: contextGrantProjectId })
+        : Promise.resolve([]),
+      wantsTopSponsor ? fetchInvestigatorTopSponsor(cwid) : Promise.resolve(null),
+    ]);
   const unwrap = <T>(r: PromiseSettledResult<T>, fb: T): T =>
     r.status === "fulfilled" ? r.value : fb;
 
@@ -60,5 +70,7 @@ export async function GET(
     coPubs: unwrap(coPubsR, null),
     topicRank: unwrap(topicRankR, null),
     recentPubs: unwrap(recentR, []),
+    recentGrants: unwrap(recentGrantsR, []),
+    topSponsor: unwrap(topSponsorR, null),
   });
 }
