@@ -49,6 +49,9 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      - name: Audit DB writes
+        run: npm run audit:db-writes
+
       - name: Unit tests
         run: npm test
 
