@@ -60,6 +60,8 @@ RDS Proxy with read-write splitting is the heavier path. It adds a hop on every 
 
 It is also legitimate to launch with one client on the writer endpoint and split as a P1, since launch traffic is well within writer capacity. If that's the chosen path, record the decision explicitly and remove the `app-ro` secret until the split actually ships — having an unused secret around invites someone to wire it in halfway.
 
+**Status (#115):** implemented — the explicit two-client path. `lib/db.ts` exports `db.read` / `db.write`; ETL, seed, and scripts write through `db.write`, and `npm run audit:db-writes` (CI-gated) proves no write hits the read client. `db.read` falls back to the writer until `DATABASE_URL_RO` is set, so the reader endpoint activates by configuration with no code change.
+
 ### Cookies and the cache key
 
 Cacheable routes (`/`, `/scholars/*`, `/topics/*`, `/departments/*`, `/centers/*`, `/sitemap.xml`): forward **no cookies**, do not include cookies in the cache key. These pages don't read session state and any forwarded cookie fragments the cache per user.
