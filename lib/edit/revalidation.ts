@@ -2,17 +2,29 @@
  * Self-edit v1 — post-commit reflection (#356, `self-edit-spec.md` § Post-commit
  * reflection).
  *
- * After an `/api/edit/*` write commits, the affected pages are refreshed:
+ * After an `/api/edit/*` write commits, three caches are refreshed in the
+ * request path:
  *
- *   - `revalidatePath()` busts the Next.js ISR cache so the origin regenerates.
- *   - A **suppression** additionally needs a CloudFront `CreateInvalidation` —
- *     `revalidatePath()` does not purge the CDN, which keeps its own copy up to
- *     its 24h default TTL. A ≤24h edge-cache window on a suppressed page
- *     reintroduces exactly the staleness the urgency split exists to eliminate.
+ *   - **Next.js ISR** — `revalidatePath()` busts the per-route cache so the
+ *     origin regenerates the affected pages.
+ *   - **CloudFront CDN** — a `CreateInvalidation` purges the edge copy, since
+ *     `revalidatePath()` does not. A ≤24h edge-cache window on a suppressed
+ *     page reintroduces exactly the staleness the urgency split exists to
+ *     eliminate. Dormant pre-launch (no `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID`).
+ *   - **OpenSearch index** — `reflectSearchSuppression` (Phase 4b C5,
+ *     `lib/edit/search-suppression.ts`) writes the synchronous fast-path —
+ *     ADR-005 failure-model layer 1. Closes the ≤24h gap between a
+ *     suppress / revoke and the nightly `etl/search-index` rebuild.
  *
- * All reflection is **best-effort**: a failure is logged, never thrown, so it
- * cannot roll back the already-committed write. The durable retry/outbox for a
- * failed CloudFront invalidation is #353.
+ * All three are **best-effort**: failures are logged, never thrown, so they
+ * cannot roll back the already-committed write. The durable retry / outbox
+ * for a failed CloudFront invalidation is #353; the equivalent for a failed
+ * OpenSearch write is #393 (the reconciler — ADR-005 failure-model layer 3).
+ *
+ * This file owns the ISR + CloudFront half (`reflectVisibilityChange` and
+ * `resolveAffectedProfileSlugs`). The OpenSearch fast-path lives in its own
+ * module (`search-suppression.ts`), called from the suppress / revoke
+ * endpoints alongside `reflectVisibilityChange`.
  *
  * v1 reflects the profile page and the browse hub. The wider department /
  * division / center / topic listing fan-out (`self-edit-spec.md`) is a

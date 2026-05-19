@@ -14,6 +14,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeRevoke, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectVisibilityChange, resolveAffectedProfileSlugs } from "@/lib/edit/revalidation";
+import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 
 const PATH = "/api/edit/revoke";
 
@@ -112,6 +113,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     suppression.contributorCwid,
   );
   await reflectVisibilityChange(slugs);
+  // Phase 4b C6 — OpenSearch fast-path (lib/edit/search-suppression.ts).
+  // Best-effort: failures are logged inside the reflector and never thrown.
+  await reflectSearchSuppression({
+    entityType: suppression.entityType,
+    entityId: suppression.entityId,
+    contributorCwid: suppression.contributorCwid,
+  });
 
   return editOk({ suppressionId });
 }

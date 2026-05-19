@@ -15,6 +15,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectVisibilityChange, resolveAffectedProfileSlugs } from "@/lib/edit/revalidation";
+import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import { publicationAuthorshipExists } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/suppress";
@@ -150,6 +151,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const slugs = await resolveAffectedProfileSlugs(entityType, entityId, contributor);
   await reflectVisibilityChange(slugs);
+  // Phase 4b C6 — OpenSearch fast-path (lib/edit/search-suppression.ts).
+  // Best-effort: failures are logged inside the reflector and never thrown,
+  // so they cannot roll back the already-committed write.
+  await reflectSearchSuppression({
+    entityType,
+    entityId,
+    contributorCwid: contributor,
+  });
 
   return editOk({ suppressionId });
 }
