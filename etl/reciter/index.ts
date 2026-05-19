@@ -41,6 +41,7 @@
  */
 import { Prisma } from "@/lib/generated/prisma/client";
 import { db } from "../../lib/db";
+import { markTopicRebuildStarted } from "../../lib/etl-state";
 import { closeReciterPool, withReciterConnection } from "@/lib/sources/reciterdb";
 
 type AuthorRow = {
@@ -164,6 +165,11 @@ async function main() {
   const run = await db.write.etlRun.create({
     data: { source: "ReCiter", status: "running" },
   });
+
+  // #118 — open the reciter→dynamodb consistency window. The publication
+  // rewrite below leaves topic data transiently incomplete until the dynamodb
+  // ETL finishes; the profile Topics section masks it with a placeholder.
+  await markTopicRebuildStarted();
 
   try {
     // 1. Active scholar CWIDs from our DB
