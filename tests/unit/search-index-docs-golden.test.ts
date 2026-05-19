@@ -318,6 +318,7 @@ describe("buildPeopleDoc — golden snapshots", () => {
         new Date("2023-01-01T00:00:00.000Z"),
         null,
       ]),
+      NO_SUP,
     );
     expect(doc).toMatchSnapshot();
   });
@@ -357,7 +358,12 @@ describe("buildPeopleDoc — golden snapshots", () => {
         },
       ] as unknown as ScholarForIndex["authorships"],
     };
-    const doc = await buildPeopleDoc(s as ScholarForIndex, [], mockPeopleClient([null]));
+    const doc = await buildPeopleDoc(
+      s as ScholarForIndex,
+      [],
+      mockPeopleClient([null]),
+      NO_SUP,
+    );
     expect(doc).toMatchSnapshot();
   });
 });

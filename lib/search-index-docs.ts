@@ -499,25 +499,39 @@ export function buildPublicationDoc(
 }
 
 /**
- * Build the OpenSearch people `_source` for `s`. Carries a per-scholar
- * `mostRecentPubDate` query (issue: an inline N+1 in the build loop —
- * see plan §2.2 for why it is not consolidated into the `s.authorships`
- * join: the two queries have different `publicationType` filters), hence
- * the `client` parameter and the non-purity. The suppression-application
- * that C4 adds is itself pure and unit-testable with a mocked client.
+ * Build the OpenSearch people `_source` for `s`. Applies the
+ * publication-suppression delta to the scholar's authorship rollup —
+ * self-hidden authorships (`isAuthorHidden(sup, pmid, s.cwid)`) and dark
+ * pmids (`sup.darkPmids`) are skipped from `publicationTitles` /
+ * `publicationMesh` / `publicationAbstracts` (the search-matched content
+ * fields), from `publicationCount` and `isComplete`, and from
+ * `mostRecentPubDate`.
+ *
+ * No derived-dark check is needed here (people side): if the scholar is a
+ * displayed author the pub isn't derived-dark from their authorship; if
+ * they hid it the per-author rule already skips. Same reasoning as the
+ * 4a plan §4 profile.ts own-list.
+ *
+ * Carries a per-scholar `mostRecentPubDate` query — an inline N+1 in the
+ * build loop. Plan §2.2: it is NOT consolidated into the `s.authorships`
+ * join because the two queries have different `publicationType` filters
+ * (consolidating would change `mostRecentPubDate` for scholars whose
+ * latest pub is a retraction — a behavior change, not a refactor). Hence
+ * the `client` parameter and the non-purity; the suppression filter
+ * inside that query is pure.
  *
  * `centerCodes` is the scholar's center memberships, pre-loaded by the
  * caller (the batch indexer loads a `centerCodesByCwid` map once before
  * the scholar loop; the C5 fast-path queries the single scholar's
  * memberships).
  *
- * C2 — pure relocation of the inline body from `indexPeople`. No
- * suppression filtering yet.
+ * Phase 4b C4 — publication-suppression integration on the people side.
  */
 export async function buildPeopleDoc(
   s: ScholarForIndex,
   centerCodes: readonly string[],
   client: Pick<PrismaClient, "publicationAuthor">,
+  sup: PublicationSuppressions,
 ): Promise<Record<string, unknown>> {
   // Title-field repetition by authorship position.
   const titleParts: string[] = [];
@@ -532,7 +546,18 @@ export async function buildPeopleDoc(
   const abstractParts: string[] = [];
   const seenAbstractPmids = new Set<string>();
 
+  let kept = 0;
   for (const a of s.authorships) {
+    // Phase 4b C4 — skip pubs the scholar hid + dark pmids. Both keep this
+    // authorship out of every content rollup (publicationTitles / Mesh /
+    // Abstracts) AND out of publicationCount / isComplete / mostRecentPubDate.
+    // No derived-dark check is needed on the people side: if the scholar is
+    // a displayed author the pub isn't derived-dark from their authorship;
+    // if they hid it the per-author rule already skips. Same reasoning as
+    // the 4a plan §4 profile.ts own-list.
+    if (isAuthorHidden(sup, a.pmid, s.cwid) || sup.darkPmids.has(a.pmid)) continue;
+    kept += 1;
+
     const kind = classifyAuthorship(a);
     const weight = AUTHORSHIP_WEIGHTS[kind];
 
@@ -581,8 +606,7 @@ export async function buildPeopleDoc(
     if (isTrainingOnlyGrant(g)) return n;
     return n + 1;
   }, 0);
-  const isComplete =
-    !!s.overview && s.authorships.length >= 3 && hasActiveGrants ? true : false;
+  const isComplete = !!s.overview && kept >= 3 && hasActiveGrants ? true : false;
   // Phase 2 — sourced from ED ETL derivation (lib/eligibility.ts RoleCategory).
   // "unknown" only fires for scholars whose ED ETL has not yet backfilled
   // role_category (transitional state during the first refresh after migration).
@@ -591,13 +615,19 @@ export async function buildPeopleDoc(
   const aoi = s.topicAssignments.map((t) => t.topic).join(" ");
 
   // Most recent publication date for the "Most recent publication" sort
-  // option (spec line 194). Pull from authorships; null-safe.
+  // option (spec line 194). Pull from authorships; null-safe. Phase 4b C4
+  // filters hidden/dark pmids out of the candidate set with the same
+  // predicate as the loop above — `pmid` is added to the `select` to make
+  // the filter possible.
   const pubDates = await client.publicationAuthor.findMany({
     where: { cwid: s.cwid, isConfirmed: true },
-    select: { publication: { select: { dateAddedToEntrez: true } } },
+    select: { pmid: true, publication: { select: { dateAddedToEntrez: true } } },
   });
   const mostRecentPubDate =
     pubDates
+      .filter(
+        (p) => !isAuthorHidden(sup, p.pmid, s.cwid) && !sup.darkPmids.has(p.pmid),
+      )
       .map((p) => p.publication.dateAddedToEntrez)
       .filter((d): d is Date => d !== null)
       .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
@@ -704,7 +734,7 @@ export async function buildPeopleDoc(
     activePiGrantCount,
     isComplete,
     personType,
-    publicationCount: s.authorships.length,
+    publicationCount: kept,
     grantCount: s.grants.length,
     mostRecentPubDate,
   };

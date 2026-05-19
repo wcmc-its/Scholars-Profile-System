@@ -58,6 +58,9 @@ async function ensureIndex(name: string, body: unknown) {
 
 async function indexPeople() {
   const client = searchClient();
+  // Phase 4b C4 — load the active publication-suppression set once per run
+  // (same contract as the indexPublications load — see comment there).
+  const sup = await loadAllPublicationSuppressions(prisma);
   const scholars = await prisma.scholar.findMany({
     where: PEOPLE_INDEX_WHERE,
     select: PEOPLE_INDEX_SELECT,
@@ -79,7 +82,12 @@ async function indexPeople() {
 
   const docs: Array<{ cwid: string; doc: Record<string, unknown> }> = [];
   for (const s of scholars) {
-    const doc = await buildPeopleDoc(s, centerCodesByCwid.get(s.cwid) ?? [], prisma);
+    const doc = await buildPeopleDoc(
+      s,
+      centerCodesByCwid.get(s.cwid) ?? [],
+      prisma,
+      sup,
+    );
     docs.push({ cwid: s.cwid, doc });
   }
 
