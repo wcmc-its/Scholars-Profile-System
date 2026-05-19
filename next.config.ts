@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   // from the nearest lockfile, which is ambiguous when the build runs from
   // a nested checkout.
   outputFileTracingRoot: process.cwd(),
+  // Issue #391 — keep jsdom (pulled in by isomorphic-dompurify in
+  // lib/edit/validators.ts) external to the server bundle. jsdom reads
+  // browser/default-stylesheet.css via a module-relative path at runtime;
+  // bundling drops that asset, so `next build` fails collecting page data
+  // for the /api/edit/* routes.
+  serverExternalPackages: ["isomorphic-dompurify", "jsdom"],
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,
