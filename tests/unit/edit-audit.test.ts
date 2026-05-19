@@ -50,6 +50,20 @@ describe("computeRowHash", () => {
       computeRowHash({ ...BASE_ROW, fieldsChanged: [] }),
     );
   });
+
+  it("is independent of object-key order in before/after values", () => {
+    // MySQL JSON columns re-sort object keys on storage; the digest must stay
+    // reproducible from the stored row regardless. (Security review, #356.)
+    const a = computeRowHash({
+      ...BASE_ROW,
+      afterValues: { alpha: "1", beta: "2", gamma: "3" },
+    });
+    const b = computeRowHash({
+      ...BASE_ROW,
+      afterValues: { gamma: "3", alpha: "1", beta: "2" },
+    });
+    expect(a).toBe(b);
+  });
 });
 
 // ---------------------------------------------------------------------------

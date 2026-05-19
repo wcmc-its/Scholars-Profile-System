@@ -11,11 +11,13 @@
  * `$executeRaw` against the fully-qualified name; the application role is
  * granted `INSERT` and nothing else (`scripts/sql/audit-log.sql`).
  *
- * `row_hash` is row-level tamper-evidence (#102): a SHA-256 over the row's
- * canonical content. The recipe (`docs/b03-audit-log.md` § row_hash) is a
- * **JSON array — positional, fixed order** — so object-key ordering cannot
- * change the digest. Callers MUST build the `before`/`after` JSON values
- * deterministically; `id` is excluded — the DB assigns it after the hash.
+ * `row_hash` is row-level tamper-evidence (#102): a SHA-256 over a **canonical**
+ * JSON serialization of the row (`docs/b03-audit-log.md` § row_hash) — a
+ * positional array whose nested objects have their keys sorted recursively, so
+ * the digest is independent of object-key order. That matters because MySQL
+ * `JSON` columns re-sort object keys on storage: hashing insertion-order JSON
+ * would leave a row un-verifiable from its own stored columns. `id` is excluded
+ * — the DB assigns it after the hash.
  */
 import { createHash } from "node:crypto";
 
@@ -53,23 +55,47 @@ export interface AuditRow {
 }
 
 /**
+ * Recursively sort object keys so a JSON serialization is independent of key
+ * order. MySQL `JSON` columns normalize (re-sort) object keys on storage, so a
+ * digest taken over insertion-order JSON could not be reproduced from the
+ * stored row; canonicalizing the value on both the write-time hash and the
+ * verify-time recompute keeps `row_hash` storage-engine-independent. Array
+ * element order is preserved.
+ */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalize((value as Record<string, unknown>)[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
  * The B03 `row_hash` (`docs/b03-audit-log.md` § row_hash recipe): SHA-256 hex
- * over a fixed-order JSON array of the row's content. `ts` enters the hash as
- * its ISO-8601 string with milliseconds. To verify a stored row, recompute
- * over its columns (the `ts` column reconstructed as ISO-8601) and compare.
+ * over a canonical JSON serialization of the row — a positional array with all
+ * nested object keys sorted recursively (`canonicalize`), so the digest does
+ * not depend on key order. `ts` enters the hash as its ISO-8601 string with
+ * milliseconds. To verify a stored row, rebuild the array from its columns (the
+ * `ts` column reconstructed as ISO-8601) and recompute with `canonicalize`.
  */
 export function computeRowHash(row: AuditRow): string {
-  const canonical = JSON.stringify([
-    row.actorCwid,
-    row.targetEntityType,
-    row.targetEntityId,
-    row.action,
-    row.fieldsChanged,
-    row.beforeValues,
-    row.afterValues,
-    row.ts.toISOString(),
-    row.requestId,
-  ]);
+  const canonical = JSON.stringify(
+    canonicalize([
+      row.actorCwid,
+      row.targetEntityType,
+      row.targetEntityId,
+      row.action,
+      row.fieldsChanged,
+      row.beforeValues,
+      row.afterValues,
+      row.ts.toISOString(),
+      row.requestId,
+    ]),
+  );
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
