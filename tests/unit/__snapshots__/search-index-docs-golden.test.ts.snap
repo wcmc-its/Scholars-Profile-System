@@ -1,0 +1,244 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildPeopleDoc — golden snapshots > captures a fully-populated scholar (active PI, dept + division + center) 1`] = `
+{
+  "activePiGrantCount": 1,
+  "areasOfInterest": "cardiology",
+  "cwid": "ann1234",
+  "deptCode": "MED",
+  "deptDivKey": [
+    "MED",
+    "MED--CARD",
+    "center:ASCVD-CENTER",
+  ],
+  "deptName": "Medicine",
+  "divCode": "CARD",
+  "divisionName": "Cardiology",
+  "fullName": "Ann Marie Researcher, MD",
+  "grantCount": 1,
+  "hasActiveGrants": true,
+  "isComplete": true,
+  "lastNameSort": "researcher",
+  "mostRecentPubDate": 2024-06-01T00:00:00.000Z,
+  "nameSuggest": [
+    {
+      "input": "Ann M. Researcher, MD",
+      "weight": 100,
+    },
+    {
+      "input": "ann1234",
+      "weight": 99,
+    },
+    {
+      "input": "M. Researcher",
+      "weight": 95,
+    },
+    {
+      "input": "Researcher",
+      "weight": 95,
+    },
+    {
+      "input": "Ann Researcher",
+      "weight": 92,
+    },
+    {
+      "input": "Researcher, Ann M. Researcher",
+      "weight": 90,
+    },
+    {
+      "input": "Ann M. Researcher, MD — Associate Professor",
+      "weight": 80,
+    },
+  ],
+  "overview": "<p>Bio.</p>",
+  "personType": "faculty",
+  "piRoleEver": true,
+  "preferredName": "Ann M. Researcher, MD",
+  "primaryDepartment": "Department of Medicine",
+  "primaryTitle": "Associate Professor",
+  "publicationAbstracts": "Abstract one. Abstract two.",
+  "publicationCount": 3,
+  "publicationMesh": "Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha Term Alpha",
+  "publicationTitles": "First paper First paper First paper First paper First paper First paper First paper First paper First paper First paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Second paper Third paper",
+  "slug": "ann-researcher",
+}
+`;
+
+exports[`buildPeopleDoc — golden snapshots > captures a sparse scholar (isComplete=false, no center, no division, no postnominal) 1`] = `
+{
+  "activePiGrantCount": 0,
+  "areasOfInterest": "",
+  "cwid": "junior42",
+  "deptCode": null,
+  "deptDivKey": [
+    "name:Department of Misc",
+  ],
+  "deptName": "Department of Misc",
+  "divCode": null,
+  "divisionName": null,
+  "fullName": "Junior Faculty",
+  "grantCount": 0,
+  "hasActiveGrants": false,
+  "isComplete": false,
+  "lastNameSort": "faculty",
+  "mostRecentPubDate": null,
+  "nameSuggest": [
+    {
+      "input": "Junior Faculty",
+      "weight": 100,
+    },
+    {
+      "input": "junior42",
+      "weight": 99,
+    },
+    {
+      "input": "Faculty",
+      "weight": 95,
+    },
+    {
+      "input": "Faculty, Junior Faculty",
+      "weight": 90,
+    },
+    {
+      "input": "Junior Faculty — Assistant Professor",
+      "weight": 80,
+    },
+  ],
+  "overview": null,
+  "personType": "faculty",
+  "piRoleEver": false,
+  "preferredName": "Junior Faculty",
+  "primaryDepartment": "Department of Misc",
+  "primaryTitle": "Assistant Professor",
+  "publicationAbstracts": "",
+  "publicationCount": 1,
+  "publicationMesh": "",
+  "publicationTitles": "Lone paper Lone paper Lone paper Lone paper Lone paper Lone paper Lone paper Lone paper Lone paper Lone paper",
+  "slug": "junior-faculty",
+}
+`;
+
+exports[`buildPublicationDoc — golden snapshots > captures a fully-populated publication (every optional field set) 1`] = `
+{
+  "abstract": "We study cardiac repair following acute MI.",
+  "authorNames": "Ann Researcher, External Coauthor, Bob Senior",
+  "citationCount": 17,
+  "dateAddedToEntrez": 2024-06-15T00:00:00.000Z,
+  "doi": "10.1234/jcard.2024.001",
+  "impactJustification": "First-author paper in a Q1 cardiology journal.",
+  "impactScore": 0.87,
+  "journal": "Journal of Cardiology",
+  "meshDescriptorUi": [
+    "D006333",
+    "D009203",
+  ],
+  "meshTerms": "Heart Myocardial Infarction",
+  "pmcid": "PMC12345678",
+  "pmid": "12345",
+  "publicationType": "Journal Article",
+  "pubmedUrl": "https://pubmed.ncbi.nlm.nih.gov/12345/",
+  "reciterParentTopicId": [
+    "topic-heart",
+    "topic-mi",
+  ],
+  "title": "Cardiac repair after myocardial infarction",
+  "topicImpacts": [
+    {
+      "impactScore": 0.87,
+      "parentTopicId": "topic-heart",
+    },
+    {
+      "impactScore": 0.87,
+      "parentTopicId": "topic-mi",
+    },
+  ],
+  "wcmAuthorCwids": [
+    "ann1234",
+    "bob5678",
+  ],
+  "wcmAuthorPositions": [
+    "first",
+    "senior",
+  ],
+  "wcmAuthors": [
+    {
+      "cwid": "ann1234",
+      "position": 1,
+      "preferredName": "Ann Researcher",
+      "slug": "ann-pi",
+    },
+    {
+      "cwid": "bob5678",
+      "position": 3,
+      "preferredName": "Bob Senior",
+      "slug": "bob-senior",
+    },
+  ],
+  "year": 2024,
+}
+`;
+
+exports[`buildPublicationDoc — golden snapshots > captures the omit-on-empty branches (no topics, null impact, blank mesh) 1`] = `
+{
+  "abstract": "",
+  "authorNames": "Ann Researcher",
+  "citationCount": 0,
+  "dateAddedToEntrez": null,
+  "doi": null,
+  "journal": "Some Journal",
+  "meshTerms": "",
+  "pmcid": null,
+  "pmid": "99999",
+  "publicationType": "Editorial",
+  "pubmedUrl": null,
+  "title": "Editorial",
+  "wcmAuthorCwids": [
+    "ann1234",
+  ],
+  "wcmAuthorPositions": [
+    "first",
+    "senior",
+  ],
+  "wcmAuthors": [
+    {
+      "cwid": "ann1234",
+      "position": 1,
+      "preferredName": "Ann Researcher",
+      "slug": "ann-pi",
+    },
+  ],
+  "year": 2020,
+}
+`;
+
+exports[`buildPublicationDoc — golden snapshots > filters wcmAuthors to ACTIVE non-deleted scholars (deleted coauthor dropped) 1`] = `
+{
+  "abstract": "",
+  "authorNames": "Ann, Deleted Coauthor",
+  "citationCount": 0,
+  "dateAddedToEntrez": null,
+  "doi": null,
+  "journal": "J",
+  "meshTerms": "",
+  "pmcid": null,
+  "pmid": "44444",
+  "publicationType": "Journal Article",
+  "pubmedUrl": null,
+  "title": "Paper with a deleted coauthor",
+  "wcmAuthorCwids": [
+    "ann1234",
+  ],
+  "wcmAuthorPositions": [
+    "first",
+  ],
+  "wcmAuthors": [
+    {
+      "cwid": "ann1234",
+      "position": 1,
+      "preferredName": "Ann",
+      "slug": "ann",
+    },
+  ],
+  "year": 2024,
+}
+`;

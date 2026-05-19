@@ -11,7 +11,7 @@
  *     handling is needed in the helper.
  */
 import { describe, it, expect } from "vitest";
-import { buildReciterParentTopicIdField } from "@/etl/search-index/index";
+import { buildReciterParentTopicIdField } from "@/lib/search-index-docs";
 
 describe("buildReciterParentTopicIdField (§1.6 dedup + omit-on-empty)", () => {
   it("zero rows → omits the field (returns empty object for spreading)", () => {

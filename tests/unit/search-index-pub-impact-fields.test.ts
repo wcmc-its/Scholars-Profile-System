@@ -14,7 +14,7 @@
  *   - Non-finite publicationImpactScore is skipped (defensive guard).
  */
 import { describe, it, expect } from "vitest";
-import { buildPubImpactFields } from "@/etl/search-index/index";
+import { buildPubImpactFields } from "@/lib/search-index-docs";
 
 // Lightweight Decimal stand-in matching the runtime shape Prisma returns
 // for Decimal columns. The real Prisma client returns instances of
