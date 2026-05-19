@@ -38,6 +38,12 @@ describe("buildSecurityHeaders", () => {
     expect(valueOf("Content-Security-Policy")).toBeUndefined();
   });
 
+  it("names the csp-report collector via the Reporting-Endpoints header", () => {
+    expect(valueOf("Reporting-Endpoints")).toBe(
+      'csp-endpoint="/api/csp-report"',
+    );
+  });
+
   it("has no duplicate header keys", () => {
     const keys = headers.map((header) => header.key);
     expect(keys.length).toBe(new Set(keys).size);
@@ -79,5 +85,14 @@ describe("buildContentSecurityPolicy", () => {
     const dev = parseCsp(buildContentSecurityPolicy({ isProduction: false }));
     expect(prod["report-uri"]).toBe("/api/csp-report");
     expect(dev["report-uri"]).toBe("/api/csp-report");
+    expect(prod["report-to"]).toBe("csp-endpoint");
+    expect(dev["report-to"]).toBe("csp-endpoint");
+  });
+
+  it("blocks inline event-handler attributes with script-src-attr 'none'", () => {
+    const prod = parseCsp(buildContentSecurityPolicy({ isProduction: true }));
+    const dev = parseCsp(buildContentSecurityPolicy({ isProduction: false }));
+    expect(prod["script-src-attr"]).toBe("'none'");
+    expect(dev["script-src-attr"]).toBe("'none'");
   });
 });
