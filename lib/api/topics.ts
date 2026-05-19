@@ -36,6 +36,7 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
 import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
+import { isAuthorHidden, loadPublicationSuppressions } from "@/lib/api/manual-layer";
 
 // Sparse-state floors and target counts (sourced from 02-UI-SPEC.md §States table
 // + plan acceptance criteria). Top scholars: 7 chips, hide if <3.
@@ -865,30 +866,41 @@ export type WcmAuthorChip = {
  * authors in ascending PubMed author position (first author first, senior
  * (last) author last, middle authors in between). Used by the publication
  * search and topic feed surfaces to render author chips with headshots.
+ *
+ * A per-author suppression (#356) drops that scholar from the chip list; the
+ * publication is still returned for its remaining authors. Dropping a
+ * publication that has gone fully dark is the caller's responsibility.
  */
 export async function fetchWcmAuthorsForPmids(
   pmids: string[],
 ): Promise<Map<string, WcmAuthorChip[]>> {
   if (pmids.length === 0) return new Map();
-  const rows = await prisma.publicationAuthor.findMany({
-    where: {
-      pmid: { in: pmids },
-      isConfirmed: true,
-      cwid: { not: null },
-      scholar: { deletedAt: null, status: "active" },
-    },
-    // Standard citation order: first → middle → last, by listed position. (#18)
-    orderBy: [{ position: "asc" }],
-    select: {
-      pmid: true,
-      isFirst: true,
-      isLast: true,
-      scholar: { select: { cwid: true, slug: true, preferredName: true } },
-    },
-  });
+  const [rows, suppressions] = await Promise.all([
+    prisma.publicationAuthor.findMany({
+      where: {
+        pmid: { in: pmids },
+        isConfirmed: true,
+        cwid: { not: null },
+        scholar: { deletedAt: null, status: "active" },
+      },
+      // Standard citation order: first → middle → last, by listed position. (#18)
+      orderBy: [{ position: "asc" }],
+      select: {
+        pmid: true,
+        isFirst: true,
+        isLast: true,
+        scholar: { select: { cwid: true, slug: true, preferredName: true } },
+      },
+    }),
+    loadPublicationSuppressions(pmids, prisma),
+  ]);
   const byPmid = new Map<string, WcmAuthorChip[]>();
   for (const row of rows) {
     if (!row.scholar) continue;
+    // #356 — a per-author hide removes the scholar from this publication's
+    // author chips across every surface this resolver feeds (topic feed,
+    // publication search, spotlight).
+    if (isAuthorHidden(suppressions, row.pmid, row.scholar.cwid)) continue;
     const arr = byPmid.get(row.pmid) ?? [];
     arr.push({
       name: row.scholar.preferredName,

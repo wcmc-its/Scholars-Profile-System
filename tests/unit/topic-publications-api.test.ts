@@ -28,6 +28,7 @@ const {
   mockSubtopicFindMany,
   mockPublicationTopicGroupBy,
   mockPublicationAuthorFindMany,
+  mockSuppressionFindMany,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockTopicFindUnique: vi.fn(),
@@ -36,6 +37,7 @@ const {
   mockSubtopicFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
   mockTransaction: vi.fn(),
 }));
 
@@ -49,6 +51,7 @@ vi.mock("@/lib/db", () => ({
       groupBy: mockPublicationTopicGroupBy,
     },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    suppression: { findMany: mockSuppressionFindMany },
     $transaction: mockTransaction,
   },
 }));
@@ -189,6 +192,10 @@ beforeEach(() => {
   // authors — they assert on ordering / scoring / pagination). Tests that care
   // about author enrichment override this in-line.
   mockPublicationAuthorFindMany.mockResolvedValue([]);
+  // #356 — fetchWcmAuthorsForPmids now also loads publication suppressions;
+  // default to none so existing feed tests are unaffected.
+  mockSuppressionFindMany.mockReset();
+  mockSuppressionFindMany.mockResolvedValue([]);
   mockTransaction.mockReset();
   mockScorePublication.mockReset();
   mockScorePublication.mockReturnValue(1.0);
