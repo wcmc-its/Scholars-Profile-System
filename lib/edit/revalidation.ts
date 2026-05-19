@@ -111,34 +111,49 @@ export async function reflectVisibilityChange(
   await invalidateCloudFront(paths);
 }
 
+/** The slug + cwid pair for one profile a suppression or revoke touches. */
+export type AffectedProfile = {
+  readonly slug: string;
+  readonly cwid: string;
+};
+
 /**
- * The `/scholars/{slug}` pages a suppression or revoke touches: the suppressed
- * scholar, the hidden contributor of a per-author publication hide, or every
- * confirmed WCM author of a whole-publication takedown.
+ * The profiles a suppression or revoke touches — the suppressed scholar, the
+ * hidden contributor of a per-author publication hide, or every confirmed WCM
+ * author of a whole-publication takedown.
+ *
+ * Returns `{ slug, cwid }` rather than slugs only so both reflections walk an
+ * identical author set from a single Prisma query: `reflectVisibilityChange`
+ * (ISR + CloudFront) reads `.slug`, `reflectSearchSuppression` (OpenSearch
+ * fast-path) reads `.cwid`. Sibling resolvers would risk drift the next time
+ * someone adds (e.g.) a `scholar: { deletedAt: null }` filter to one and
+ * forgets the other (Phase 4b plan §3 tightening C7).
  */
-export async function resolveAffectedProfileSlugs(
+export async function resolveAffectedProfiles(
   entityType: string,
   entityId: string,
   contributorCwid: string | null,
-): Promise<string[]> {
+): Promise<AffectedProfile[]> {
   if (entityType === "scholar") {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: entityId },
-      select: { slug: true },
+      select: { slug: true, cwid: true },
     });
-    return scholar ? [scholar.slug] : [];
+    return scholar ? [{ slug: scholar.slug, cwid: scholar.cwid }] : [];
   }
   if (contributorCwid) {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: contributorCwid },
-      select: { slug: true },
+      select: { slug: true, cwid: true },
     });
-    return scholar ? [scholar.slug] : [];
+    return scholar ? [{ slug: scholar.slug, cwid: scholar.cwid }] : [];
   }
   // Whole-publication takedown — every confirmed WCM author's profile.
   const authors = await db.read.publicationAuthor.findMany({
     where: { pmid: entityId, cwid: { not: null }, isConfirmed: true },
-    select: { scholar: { select: { slug: true } } },
+    select: { cwid: true, scholar: { select: { slug: true } } },
   });
-  return authors.flatMap((a) => (a.scholar ? [a.scholar.slug] : []));
+  return authors.flatMap((a) =>
+    a.scholar && a.cwid ? [{ slug: a.scholar.slug, cwid: a.cwid }] : [],
+  );
 }

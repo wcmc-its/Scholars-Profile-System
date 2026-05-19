@@ -66,29 +66,17 @@ async function indexPeople() {
     select: PEOPLE_INDEX_SELECT,
   });
 
-  // Center memberships per cwid (Center has no back-relation on Scholar,
-  // so this is a separate batched query). Folded into deptDivKey so the
-  // sidebar's dept/div/center facet matches scholars whose center
-  // membership the user clicks.
-  const centerRows = await prisma.centerMembership.findMany({
-    select: { cwid: true, centerCode: true },
-  });
-  const centerCodesByCwid = new Map<string, string[]>();
-  for (const m of centerRows) {
-    const arr = centerCodesByCwid.get(m.cwid) ?? [];
-    arr.push(m.centerCode);
-    centerCodesByCwid.set(m.cwid, arr);
-  }
-
+  // Phase 4b C2 alignment — `buildPeopleDoc` now queries each scholar's
+  // `centerMembership` rows itself via the passed-in client (D4b.3 sidecar
+  // model). The prior whole-table `centerCodesByCwid` preload is dropped:
+  // the batch trades one preload for N small indexed queries (one per
+  // scholar) in exchange for the fast-path getting the one-cwid variant
+  // naturally and for `buildPeopleDoc`'s extra-data surface being fully
+  // closed-over by `(s, client, sup)`.
   const docs: Array<{ cwid: string; doc: Record<string, unknown> }> = [];
   for (const s of scholars) {
-    const doc = await buildPeopleDoc(
-      s,
-      centerCodesByCwid.get(s.cwid) ?? [],
-      prisma,
-      sup,
-    );
-    docs.push({ cwid: s.cwid, doc });
+    const doc = await buildPeopleDoc(s, prisma, sup);
+    if (doc !== null) docs.push({ cwid: s.cwid, doc });
   }
 
   if (docs.length === 0) return 0;

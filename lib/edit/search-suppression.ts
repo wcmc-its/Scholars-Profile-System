@@ -30,10 +30,10 @@
  *       re-index the pub doc (delete if dark) PLUS re-index every
  *       confirmed WCM co-author's people doc.
  *
- * The publication-side people-doc set === `resolveAffectedProfileSlugs`'s
- * fan-out in `revalidation.ts`: contributor on a per-author hide; every
- * confirmed WCM co-author on a takedown. Bounded by the publication's
- * author count.
+ * The publication-side people-doc set is supplied by the caller as
+ * `affectedCwids` — the cwid half of `resolveAffectedProfiles`'s result
+ * (`revalidation.ts`): contributor on a per-author hide; every confirmed
+ * WCM co-author on a takedown. Bounded by the publication's author count.
  *
  * All index operations for one `reflectSearchSuppression` call are sent
  * as a single `client.bulk` request — one round trip, not N.
@@ -66,11 +66,21 @@ import {
   buildPublicationDoc,
 } from "@/lib/search-index-docs";
 
-/** The descriptor the suppress / revoke endpoints already hold post-commit. */
+/**
+ * The descriptor the suppress / revoke endpoints already hold post-commit.
+ *
+ * `affectedCwids` is the cwid half of `resolveAffectedProfiles`'s result, passed
+ * through so the fast-path and ISR/CloudFront reflection walk an identical
+ * author set from one Prisma query (plan §3 tightening C7). For scholar
+ * entityType it is `[entityId]`; for publication per-author hide it is
+ * `[contributorCwid]`; for a publication takedown it is every confirmed WCM
+ * co-author's cwid.
+ */
 export type ReflectSearchSuppressionArgs = {
   entityType: string;
   entityId: string;
   contributorCwid: string | null;
+  affectedCwids: readonly string[];
 };
 
 type Op =
@@ -124,7 +134,7 @@ async function buildReflectionOps(
     return buildScholarOps(args.entityId);
   }
   if (args.entityType === "publication") {
-    return buildPublicationOps(args.entityId, args.contributorCwid);
+    return buildPublicationOps(args.entityId, args.affectedCwids);
   }
   // Other entity types are out of v1 scope (Grant / Education / Appointment
   // — blocked on #352).
@@ -142,37 +152,32 @@ async function buildScholarOps(cwid: string): Promise<Op[]> {
   if (!scholar) {
     return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
   }
-  const centerRows = await db.read.centerMembership.findMany({
-    where: { cwid },
-    select: { centerCode: true },
-  });
-  const centerCodes = centerRows.map((r) => r.centerCode);
   // Per-request, pmid-scoped — honors the manual-layer.ts contract.
   const sup = await loadPublicationSuppressions(
     scholar.authorships.map((a) => a.pmid),
     db.read,
   );
-  const doc = await buildPeopleDoc(scholar, centerCodes, db.read, sup);
+  // `buildPeopleDoc` issues the `centerMembership` and `mostRecentPubDate`
+  // sidecar queries itself via the same client (lib/search-index-docs.ts —
+  // D4b.3 sidecar model). Forward-compat null handling: with current
+  // `PEOPLE_INDEX_WHERE`-filtered input the builder never returns null,
+  // but the type permits it so a future builder-internal gate doesn't
+  // require widening the fast-path's contract.
+  const doc = await buildPeopleDoc(scholar, db.read, sup);
+  if (doc === null) {
+    return [{ type: "delete", index: PEOPLE_INDEX, id: cwid }];
+  }
   return [{ type: "index", index: PEOPLE_INDEX, id: cwid, doc }];
 }
 
 async function buildPublicationOps(
   pmid: string,
-  contributorCwid: string | null,
+  affectedCwids: readonly string[],
 ): Promise<Op[]> {
-  // Affected people-doc set === `resolveAffectedProfileSlugs`'s fan-out
-  // (revalidation.ts): contributor on a per-author hide; every confirmed
-  // WCM co-author on a takedown.
-  const affectedCwids =
-    contributorCwid !== null
-      ? [contributorCwid]
-      : await db.read.publicationAuthor
-          .findMany({
-            where: { pmid, cwid: { not: null }, isConfirmed: true },
-            select: { cwid: true },
-          })
-          .then((rows) => rows.flatMap((r) => (r.cwid ? [r.cwid] : [])));
-
+  // `affectedCwids` is `resolveAffectedProfiles`'s cwid set, supplied by the
+  // caller (plan §3 tightening C7): contributor on a per-author hide; every
+  // confirmed WCM co-author on a takedown. One Prisma query upstream feeds
+  // both this fast-path and the ISR/CloudFront slug reflection.
   const ops: Op[] = [];
 
   const pub = await db.read.publication.findFirst({

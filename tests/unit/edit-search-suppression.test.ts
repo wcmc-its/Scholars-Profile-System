@@ -127,6 +127,7 @@ describe("reflectSearchSuppression — scholar suppress", () => {
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
+      affectedCwids: ["ann1234"],
     });
 
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
@@ -157,6 +158,7 @@ describe("reflectSearchSuppression — publication per-author hide", () => {
       entityType: "publication",
       entityId: "12345",
       contributorCwid: "ann",
+      affectedCwids: ["ann"],
     });
 
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
@@ -177,12 +179,9 @@ describe("reflectSearchSuppression — publication per-author hide", () => {
 
 describe("reflectSearchSuppression — publication whole-pub takedown", () => {
   it("DELETES the pub doc and re-indexes every confirmed WCM co-author's people doc", async () => {
-    // Affected cwid set comes from publicationAuthor.findMany (takedown path —
-    // contributorCwid is null).
-    hoisted.mockPublicationAuthorFindMany.mockResolvedValueOnce([
-      { cwid: "ann" },
-      { cwid: "bob" },
-    ]);
+    // Affected cwid set comes from the caller (plan §3 tightening C7) — the
+    // endpoint passes it from the same resolveAffectedProfiles query used by
+    // the ISR/CloudFront reflection.
     hoisted.mockPublicationFindFirst.mockResolvedValue(
       publicationRow("12345", [
         { cwid: "ann", isFirst: true },
@@ -202,6 +201,7 @@ describe("reflectSearchSuppression — publication whole-pub takedown", () => {
       entityType: "publication",
       entityId: "12345",
       contributorCwid: null,
+      affectedCwids: ["ann", "bob"],
     });
 
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
@@ -235,6 +235,7 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
         entityType: "scholar",
         entityId: "ann1234",
         contributorCwid: null,
+        affectedCwids: ["ann1234"],
       }),
     ).resolves.toBeUndefined();
 
@@ -265,6 +266,7 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
+      affectedCwids: ["ann1234"],
     });
 
     expect(consoleError).toHaveBeenCalled();
@@ -287,6 +289,7 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
+      affectedCwids: ["ann1234"],
     });
 
     expect(consoleError).not.toHaveBeenCalled();
@@ -300,6 +303,7 @@ describe("reflectSearchSuppression — unknown entity type", () => {
       entityType: "grant",
       entityId: "g1",
       contributorCwid: null,
+      affectedCwids: [],
     });
     expect(hoisted.mockBulk).not.toHaveBeenCalled();
   });

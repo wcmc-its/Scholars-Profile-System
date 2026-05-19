@@ -161,6 +161,7 @@ describe("buildPublicationDoc — suppression integration (C3)", () => {
 describe("buildPeopleDoc — suppression integration (C4)", () => {
   function mockClient(rows: ReadonlyArray<{ pmid: string; date: Date | null }>) {
     return {
+      centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
       publicationAuthor: {
         findMany: vi
           .fn()
@@ -171,7 +172,7 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
             })),
           ),
       },
-    } as unknown as Parameters<typeof buildPeopleDoc>[2];
+    } as unknown as Parameters<typeof buildPeopleDoc>[1];
   }
 
   function scholarWithAuthorships(
@@ -231,7 +232,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([
         { pmid: "1", date: new Date("2024-01-01T00:00:00.000Z") },
         { pmid: "2", date: new Date("2024-06-01T00:00:00.000Z") },
@@ -257,7 +257,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([
         { pmid: "1", date: null },
         { pmid: "2", date: null },
@@ -281,7 +280,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([
         { pmid: "1", date: new Date("2023-01-01T00:00:00.000Z") },
         { pmid: "2", date: new Date("2024-06-01T00:00:00.000Z") }, // newer, hidden
@@ -319,7 +317,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([
         { pmid: "1", date: null },
         { pmid: "2", date: null },
@@ -342,7 +339,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([
         { pmid: "1", date: null },
         { pmid: "2", date: null },
@@ -362,7 +358,6 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
     };
     const doc = await buildPeopleDoc(
       s,
-      [],
       mockClient([{ pmid: "1", date: null }]),
       sup,
     );

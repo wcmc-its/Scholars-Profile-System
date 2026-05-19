@@ -32,11 +32,18 @@ const NO_SUP: PublicationSuppressions = {
  * client supplies the per-scholar `mostRecentPubDate` query result.
  */
 
-// Mock client whose mostRecentPubDate query returns the given dates.
+// Mock client whose mostRecentPubDate query returns the given dates and whose
+// centerMembership lookup returns the given center codes.
 function mockPeopleClient(
   pubDates: ReadonlyArray<Date | null>,
-): Parameters<typeof buildPeopleDoc>[2] {
+  centerCodes: ReadonlyArray<string> = [],
+): Parameters<typeof buildPeopleDoc>[1] {
   return {
+    centerMembership: {
+      findMany: vi
+        .fn()
+        .mockResolvedValue(centerCodes.map((c) => ({ centerCode: c }))),
+    },
     publicationAuthor: {
       findMany: vi
         .fn()
@@ -44,7 +51,7 @@ function mockPeopleClient(
           pubDates.map((d) => ({ publication: { dateAddedToEntrez: d } })),
         ),
     },
-  } as unknown as Parameters<typeof buildPeopleDoc>[2];
+  } as unknown as Parameters<typeof buildPeopleDoc>[1];
 }
 
 // Fixed endDate well in the future — keeps `hasActiveGrants` /
@@ -312,12 +319,14 @@ describe("buildPeopleDoc — golden snapshots", () => {
     };
     const doc = await buildPeopleDoc(
       s as ScholarForIndex,
-      ["ASCVD-CENTER"],
-      mockPeopleClient([
-        new Date("2024-06-01T00:00:00.000Z"),
-        new Date("2023-01-01T00:00:00.000Z"),
-        null,
-      ]),
+      mockPeopleClient(
+        [
+          new Date("2024-06-01T00:00:00.000Z"),
+          new Date("2023-01-01T00:00:00.000Z"),
+          null,
+        ],
+        ["ASCVD-CENTER"],
+      ),
       NO_SUP,
     );
     expect(doc).toMatchSnapshot();
@@ -360,7 +369,6 @@ describe("buildPeopleDoc — golden snapshots", () => {
     };
     const doc = await buildPeopleDoc(
       s as ScholarForIndex,
-      [],
       mockPeopleClient([null]),
       NO_SUP,
     );

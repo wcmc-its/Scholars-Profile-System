@@ -13,7 +13,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeRevoke, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
-import { reflectVisibilityChange, resolveAffectedProfileSlugs } from "@/lib/edit/revalidation";
+import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 
 const PATH = "/api/edit/revoke";
@@ -107,18 +107,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // --- post-commit reflection ---
-  const slugs = await resolveAffectedProfileSlugs(
+  const affected = await resolveAffectedProfiles(
     suppression.entityType,
     suppression.entityId,
     suppression.contributorCwid,
   );
-  await reflectVisibilityChange(slugs);
+  await reflectVisibilityChange(affected.map((a) => a.slug));
   // Phase 4b C6 — OpenSearch fast-path (lib/edit/search-suppression.ts).
   // Best-effort: failures are logged inside the reflector and never thrown.
+  // `affectedCwids` shares the same `resolveAffectedProfiles` query as the
+  // slug fan-out above (plan §3 tightening C7).
   await reflectSearchSuppression({
     entityType: suppression.entityType,
     entityId: suppression.entityId,
     contributorCwid: suppression.contributorCwid,
+    affectedCwids: affected.map((a) => a.cwid),
   });
 
   return editOk({ suppressionId });

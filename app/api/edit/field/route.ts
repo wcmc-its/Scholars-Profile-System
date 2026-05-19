@@ -13,7 +13,7 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeFieldEdit, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
-import { reflectOverviewEdit, resolveAffectedProfileSlugs } from "@/lib/edit/revalidation";
+import { reflectOverviewEdit, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import {
   checkSlugCollision,
   isEditableField,
@@ -111,8 +111,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // An overview edit busts the profile page; a slug override changes nothing
   // until etl/ed consumes it, so it reflects nothing at write time.
   if (fieldName === "overview") {
-    const [slug] = await resolveAffectedProfileSlugs("scholar", entityId, null);
-    if (slug) reflectOverviewEdit(slug);
+    const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
+    if (profile) reflectOverviewEdit(profile.slug);
   }
 
   return editOk({ fieldName, value: storedValue });

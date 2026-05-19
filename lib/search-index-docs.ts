@@ -504,35 +504,40 @@ export function buildPublicationDoc(
  * self-hidden authorships (`isAuthorHidden(sup, pmid, s.cwid)`) and dark
  * pmids (`sup.darkPmids`) are skipped from `publicationTitles` /
  * `publicationMesh` / `publicationAbstracts` (the search-matched content
- * fields), from `publicationCount` and `isComplete`, and from
- * `mostRecentPubDate`.
+ * fields), from `publicationCount` and `isComplete` (one filtered count
+ * shared between the two), and from `mostRecentPubDate`.
  *
  * No derived-dark check is needed here (people side): if the scholar is a
  * displayed author the pub isn't derived-dark from their authorship; if
  * they hid it the per-author rule already skips. Same reasoning as the
  * 4a plan §4 profile.ts own-list.
  *
- * Carries a per-scholar `mostRecentPubDate` query — an inline N+1 in the
- * build loop. Plan §2.2: it is NOT consolidated into the `s.authorships`
- * join because the two queries have different `publicationType` filters
- * (consolidating would change `mostRecentPubDate` for scholars whose
- * latest pub is a retraction — a behavior change, not a refactor). Hence
- * the `client` parameter and the non-purity; the suppression filter
- * inside that query is pure.
+ * Two sidecar queries are issued via the same `client` (the complete
+ * extra-data surface — `PEOPLE_INDEX_SELECT` alone is not sufficient):
  *
- * `centerCodes` is the scholar's center memberships, pre-loaded by the
- * caller (the batch indexer loads a `centerCodesByCwid` map once before
- * the scholar loop; the C5 fast-path queries the single scholar's
- * memberships).
+ *   - **`mostRecentPubDate`** (`index.ts:406`-style query) — an inline
+ *     N+1; plan §2.2 records why it is NOT consolidated into the
+ *     `s.authorships` join (the two queries have different
+ *     `publicationType` filters; consolidating would change behavior for
+ *     scholars whose latest pub is a retraction).
+ *   - **`centerCodes`** — the scholar's `centerMembership` rows
+ *     (`index.ts:486`-style fold into `deptDivKey`). The batch indexer
+ *     accepts N per-scholar queries here in exchange for the fast-path
+ *     getting the one-cwid variant naturally; the prior whole-table
+ *     `centerCodesByCwid` preload is dropped.
+ *
+ * Returns `null` when the scholar is not indexable (forward-compat: with
+ * current callers the scholar row is always `PEOPLE_INDEX_WHERE`-filtered,
+ * so the path is never hit at runtime — but the return type lets a future
+ * caller centralize the delete-vs-reindex decision in the builder).
  *
  * Phase 4b C4 — publication-suppression integration on the people side.
  */
 export async function buildPeopleDoc(
   s: ScholarForIndex,
-  centerCodes: readonly string[],
-  client: Pick<PrismaClient, "publicationAuthor">,
+  client: Pick<PrismaClient, "centerMembership" | "publicationAuthor">,
   sup: PublicationSuppressions,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> | null> {
   // Title-field repetition by authorship position.
   const titleParts: string[] = [];
   // Per-term aggregation for the min-evidence threshold.
@@ -703,8 +708,15 @@ export async function buildPeopleDoc(
     // as the key so the facet stays useful during the ED-backfill window.
     deptDivKeys.push(`name:${deptName}`);
   }
-  for (const code of centerCodes) {
-    deptDivKeys.push(`center:${code}`);
+  // Per-scholar center memberships — sidecar query (see JSDoc). The batch
+  // indexer now issues N of these instead of one whole-table preload; the
+  // fast-path gets the one-cwid variant for free.
+  const centerRows = await client.centerMembership.findMany({
+    where: { cwid: s.cwid },
+    select: { centerCode: true },
+  });
+  for (const row of centerRows) {
+    deptDivKeys.push(`center:${row.centerCode}`);
   }
   void divisionName; // retained for potential future enrichment
 
