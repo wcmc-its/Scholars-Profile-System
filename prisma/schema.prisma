@@ -1014,6 +1014,14 @@ model FieldOverride {
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @updatedAt @map("updated_at")
 
+  /// DB-managed uniqueness guard for slug overrides — a STORED generated column
+  /// holding the override `value` for (scholar, slug) rows and NULL elsewhere,
+  /// with a UNIQUE index, so two CWIDs cannot hold the same slug override (the
+  /// application collision check is not atomic). See migration
+  /// add_slug_override_uniqueness_guard. @ignore keeps it out of the Prisma
+  /// client — application code must never write a generated column.
+  slugGuard  String?    @map("slug_guard") @db.VarChar(64) @unique @ignore
+
   @@unique([entityType, entityId, fieldName])
   @@map("field_override")
 }

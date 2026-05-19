@@ -1,0 +1,187 @@
+/**
+ * Self-edit v1 — the per-action authorization predicate (#356,
+ * `self-edit-spec.md` § Authorization).
+ *
+ * B01 supplies the identity session; B02 (`lib/auth/superuser.ts`) supplies the
+ * live `isSuperuser` verdict, paired as `EditSession` `{ cwid, isSuperuser }`.
+ * This module is the *rules*: given an `EditSession` and a described action,
+ * may it proceed? Every predicate here is **pure and synchronous** — the only
+ * DB-backed gate, "is this CWID a confirmed author of this pmid", is a `400`
+ * validation (`publicationAuthorshipExists`, `lib/edit/validators.ts`), not a
+ * `403`, and lives there.
+ *
+ * `isSuperuser` must be re-evaluated on every `/edit/*` GET and every
+ * `/api/edit*` POST (never cached for the session) — that is the caller's
+ * responsibility via `getEditSession()`; this module consumes the result.
+ *
+ * A denied request emits one `edit_authz_denied` line via `logEditDenial()`,
+ * which wraps B02's `logAuthzDenied()`.
+ */
+import { logAuthzDenied } from "@/lib/auth/authz-events";
+import type { EditSession } from "@/lib/auth/superuser";
+
+/** Stable denial reasons — the `reason` field of an `edit_authz_denied` event. */
+export type AuthzDenialReason =
+  /** a self-only action attempted against another CWID */
+  | "not_self"
+  /** a superuser-only action by a non-superuser */
+  | "not_superuser"
+  /** a revoke of a suppression the actor did not create */
+  | "not_owner";
+
+export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
+
+const ALLOW: AuthzResult = { ok: true };
+
+// ---------------------------------------------------------------------------
+// per-action predicates  (self-edit-spec.md § Authorization, the rules table)
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /api/edit/field`. `overview` is **self only** — a superuser does not
+ * inherit it (broad admin field-editing is deferred). `slug` is superuser-only.
+ */
+export function authorizeFieldEdit(
+  session: EditSession,
+  target: { entityId: string; fieldName: "overview" | "slug" },
+): AuthzResult {
+  if (target.fieldName === "overview") {
+    return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
+  }
+  return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };
+}
+
+/**
+ * `POST /api/edit/suppress`:
+ *   - scholar, whole-entity     → the scholar themselves, or a superuser
+ *   - publication, per-author   → the actor suppressing *themselves* as a
+ *                                 contributor, or a superuser
+ *   - publication, whole-entity → superuser only (retraction / takedown)
+ *
+ * A scholar suppression never carries a `contributorCwid`. The per-author
+ * authorship-existence check is a separate `400` validation, not part of this
+ * `403` predicate.
+ */
+export function authorizeSuppress(
+  session: EditSession,
+  target: {
+    entityType: "scholar" | "publication";
+    entityId: string;
+    contributorCwid?: string | null;
+  },
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+
+  if (target.entityType === "scholar") {
+    return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
+  }
+
+  // publication
+  const contributor = target.contributorCwid ?? null;
+  if (contributor === null) {
+    // whole-publication takedown — superuser only (handled above)
+    return { ok: false, reason: "not_superuser" };
+  }
+  // per-author hide — a scholar may suppress only themselves as a contributor
+  return session.cwid === contributor ? ALLOW : { ok: false, reason: "not_self" };
+}
+
+/**
+ * `POST /api/edit/revoke`. A scholar may lift only a suppression they applied
+ * themselves (`created_by == session.cwid`); a superuser may lift any.
+ */
+export function authorizeRevoke(
+  session: EditSession,
+  suppression: { createdBy: string },
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  return session.cwid === suppression.createdBy
+    ? ALLOW
+    : { ok: false, reason: "not_owner" };
+}
+
+// ---------------------------------------------------------------------------
+// page-access predicates  (the GET-time superuser re-check)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /edit/scholar/[cwid]`: the scholar themselves (renders exactly `/edit`)
+ * or a superuser. The superuser GET pages read with the suppression filter OFF,
+ * so this re-check on the page load — not only on the POST — closes the data-
+ * exposure window when a user loses `scholars-admins` mid-session (edge 15).
+ */
+export function canAccessScholarEditPage(
+  session: EditSession,
+  targetCwid: string,
+): boolean {
+  return session.cwid === targetCwid || session.isSuperuser;
+}
+
+/** `GET /edit/publication/[pmid]`: superuser only. */
+export function canAccessPublicationEditPage(session: EditSession): boolean {
+  return session.isSuperuser;
+}
+
+// ---------------------------------------------------------------------------
+// request-origin guard  (defense in depth beyond SameSite=Lax)
+// ---------------------------------------------------------------------------
+
+export type OriginCheckResult =
+  | { ok: true }
+  | { ok: false; reason: "bad_content_type" | "cross_origin" };
+
+/** The minimal request surface `verifyRequestOrigin` reads — a `Request` satisfies it. */
+type HeaderCarrier = { headers: { get(name: string): string | null } };
+
+/**
+ * An `/api/edit/*` POST must be `application/json` AND same-origin
+ * (`self-edit-spec.md` § Authorization — "a cross-site HTML form cannot satisfy
+ * both"). `Sec-Fetch-Site` is the primary signal; an older client lacking it
+ * falls back to comparing the `Origin` host against `Host`. When neither can
+ * be verified the request is rejected — a same-origin `fetch` POST from our
+ * own JS always sends `Origin`.
+ */
+export function verifyRequestOrigin(request: HeaderCarrier): OriginCheckResult {
+  const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return { ok: false, reason: "bad_content_type" };
+  }
+
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite) {
+    return fetchSite === "same-origin" ? { ok: true } : { ok: false, reason: "cross_origin" };
+  }
+
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+  if (origin && host) {
+    try {
+      if (new URL(origin).host === host) return { ok: true };
+    } catch {
+      /* malformed Origin header — fall through to reject */
+    }
+  }
+  return { ok: false, reason: "cross_origin" };
+}
+
+// ---------------------------------------------------------------------------
+// denial telemetry
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit one `edit_authz_denied` line for a `403` on the edit surface (B02). The
+ * route calls this whenever a predicate above returns `{ ok: false }`.
+ */
+export function logEditDenial(params: {
+  actorCwid: string;
+  targetCwid: string;
+  path: string;
+  reason: string;
+}): void {
+  logAuthzDenied({
+    actor_cwid: params.actorCwid,
+    target_cwid: params.targetCwid,
+    path: params.path,
+    reason: params.reason,
+  });
+}
