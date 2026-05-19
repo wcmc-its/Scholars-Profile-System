@@ -28,6 +28,7 @@ const {
   mockSubtopicFindMany,
   mockPublicationTopicGroupBy,
   mockPublicationAuthorFindMany,
+  mockSuppressionFindMany,
   mockTransaction,
 } = vi.hoisted(() => ({
   mockTopicFindUnique: vi.fn(),
@@ -36,6 +37,7 @@ const {
   mockSubtopicFindMany: vi.fn(),
   mockPublicationTopicGroupBy: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
   mockTransaction: vi.fn(),
 }));
 
@@ -49,6 +51,7 @@ vi.mock("@/lib/db", () => ({
       groupBy: mockPublicationTopicGroupBy,
     },
     publicationAuthor: { findMany: mockPublicationAuthorFindMany },
+    suppression: { findMany: mockSuppressionFindMany },
     $transaction: mockTransaction,
   },
 }));
@@ -189,6 +192,10 @@ beforeEach(() => {
   // authors — they assert on ordering / scoring / pagination). Tests that care
   // about author enrichment override this in-line.
   mockPublicationAuthorFindMany.mockResolvedValue([]);
+  // #356 — fetchWcmAuthorsForPmids now also loads publication suppressions;
+  // default to none so existing feed tests are unaffected.
+  mockSuppressionFindMany.mockReset();
+  mockSuppressionFindMany.mockResolvedValue([]);
   mockTransaction.mockReset();
   mockScorePublication.mockReset();
   mockScorePublication.mockReturnValue(1.0);
@@ -232,6 +239,26 @@ describe("getTopicPublications", () => {
       expect(result!.page).toBe(0);
       expect(result!.pageSize).toBe(20);
       expect(result!.hits).toHaveLength(2);
+    });
+  });
+
+  describe("#356 — publication suppression", () => {
+    it("drops a taken-down publication from the feed", async () => {
+      mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
+      const rows = [
+        makePtRow({ pmid: "1", year: 2024 }),
+        makePtRow({ pmid: "2", year: 2023 }),
+      ];
+      mockTransaction.mockResolvedValue([rows, 2]);
+      mockSuppressionFindMany.mockResolvedValue([
+        { entityId: "2", contributorCwid: null },
+      ]);
+      const result = await getTopicPublications(
+        TOPIC_SLUG,
+        { sort: "newest", page: 0 },
+        NOW,
+      );
+      expect(result!.hits.map((h) => h.pmid)).toEqual(["1"]);
     });
   });
 

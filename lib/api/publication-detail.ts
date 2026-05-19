@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 import { normalizeMeshTerms } from "@/lib/api/profile";
+import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 
 const CITING_PUBS_CAP = 500;
 const CITING_PUBS_CSV_CAP = 50_000;
@@ -149,6 +150,13 @@ export async function getPublicationDetail(
     },
   });
   if (!pub) return null;
+
+  // #356 — a whole-publication takedown, or a derived-dark publication (every
+  // confirmed WCM author per-author-hidden), must not be reachable by direct
+  // URL: the detail modal returns null exactly as it does for an unknown pmid.
+  const suppressions = await loadPublicationSuppressions([pmid], prisma);
+  const darkPmids = await resolveDarkPmids([pmid], suppressions, prisma);
+  if (darkPmids.has(pmid)) return null;
 
   // Collapse multi-author rows into one row per parent topic by MAX(score).
   // The score column is per-(pmid, cwid, topic) on PublicationTopic but the

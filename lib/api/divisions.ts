@@ -27,6 +27,12 @@ import type {
 } from "@/lib/api/dept-lists";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
 import { formatRoleCategory } from "@/lib/role-display";
+import {
+  isAuthorHidden,
+  loadHiddenAuthorshipCounts,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
@@ -132,13 +138,20 @@ export async function getDivision(
   const [pubCount, grantCount] = await Promise.all([
     memberCwids.length === 0
       ? Promise.resolve(0)
-      : prisma.publicationAuthor
-          .findMany({
-            where: { isConfirmed: true, cwid: { in: memberCwids } },
-            select: { pmid: true },
-            distinct: ["pmid"],
-          })
-          .then((rows) => rows.length),
+      : (async () => {
+          // #356 — count only publications still visible (not taken down or
+          // derived-dark).
+          const poolPmids = (
+            await prisma.publicationAuthor.findMany({
+              where: { isConfirmed: true, cwid: { in: memberCwids } },
+              select: { pmid: true },
+              distinct: ["pmid"],
+            })
+          ).map((r) => r.pmid);
+          const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+          const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+          return poolPmids.filter((p) => !darkPmids.has(p)).length;
+        })(),
     memberCwids.length === 0
       ? Promise.resolve(0)
       : prisma.grant
@@ -329,7 +342,14 @@ export async function getDivisionFaculty(
           orderBy: { cwid: "asc" },
         }),
   ]);
-  const pubByCwid = new Map(pubCounts.map((r) => [r.cwid, r._count._all]));
+  // #356 — subtract each scholar's per-author hides from their pub count.
+  const hiddenCounts = await loadHiddenAuthorshipCounts(cwids, prisma);
+  const pubByCwid = new Map(
+    pubCounts.map((r) => [
+      r.cwid,
+      Math.max(0, r._count._all - (hiddenCounts.get(r.cwid) ?? 0)),
+    ]),
+  );
   const grantByCwid = new Map(grantCounts.map((r) => [r.cwid, r._count._all]));
 
   type RowWithRelations = (typeof allRows)[number] & {
@@ -371,13 +391,17 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
   }
 
   // Top 3 publications by citationCount × recency among member-authored work.
-  const memberPmids = await prisma.publicationAuthor
+  const poolPmids = await prisma.publicationAuthor
     .findMany({
       where: { isConfirmed: true, cwid: { in: memberCwids } },
       select: { pmid: true },
       distinct: ["pmid"],
     })
     .then((r) => r.map((x) => x.pmid));
+  // #356 — exclude publications taken down or derived-dark from the pool.
+  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+  const memberPmids = poolPmids.filter((p) => !darkPmids.has(p));
 
   const pubs = await prisma.publication.findMany({
     where: { pmid: { in: memberPmids } },
@@ -423,7 +447,8 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
-        if (!s) return null;
+        // #356 — drop the chip of a co-author who hid this publication.
+        if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
         return {
           name: s.preferredName,
           cwid: s.cwid,
@@ -552,7 +577,11 @@ export async function getDivisionPublicationsList(
     select: { pmid: true },
     distinct: ["pmid"],
   })) as Array<{ pmid: string }>;
-  const allPmids = memberPmidRows.map((r) => r.pmid);
+  const poolPmids = memberPmidRows.map((r) => r.pmid);
+  // #356 — drop taken-down / derived-dark publications before paginating.
+  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
   const total = allPmids.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
@@ -608,7 +637,8 @@ export async function getDivisionPublicationsList(
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
-        if (!s) return null;
+        // #356 — drop the chip of a co-author who hid this publication.
+        if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
         return {
           name: s.preferredName,
           cwid: s.cwid,

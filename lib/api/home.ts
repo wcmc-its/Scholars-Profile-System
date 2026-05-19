@@ -27,6 +27,11 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
+import {
   scorePublication,
   type RankablePublication,
 } from "@/lib/ranking";
@@ -586,6 +591,9 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       ),
     ),
   );
+  // #356 — publication suppression for the home Spotlight papers.
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const darkPmids = await resolveDarkPmids(pmids, suppressions, prisma);
   const authorRows =
     pmids.length > 0
       ? await prisma.publicationAuthor.findMany({
@@ -602,7 +610,9 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       : [];
   const authorsByPmid = new Map<string, SpotlightAuthor[]>();
   for (const row of authorRows) {
-    if (!row.scholar) continue;
+    // #356 — a per-author hide drops the scholar from the Spotlight paper.
+    if (!row.scholar || isAuthorHidden(suppressions, row.pmid, row.scholar.cwid))
+      continue;
     const list = authorsByPmid.get(row.pmid) ?? [];
     list.push({
       cwid: row.scholar.cwid,
@@ -662,7 +672,8 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
     const papers: SpotlightPaperCard[] = [];
     for (const p of artifactPapers) {
       const authors = authorsByPmid.get(p.pmid) ?? [];
-      if (authors.length === 0) continue;
+      // #356 — drop a paper taken down whole, or with zero displayed authors.
+      if (authors.length === 0 || darkPmids.has(p.pmid)) continue;
       papers.push({
         pmid: p.pmid,
         title: p.title,

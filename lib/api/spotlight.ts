@@ -29,6 +29,7 @@
  */
 import { prisma } from "@/lib/db";
 import { fetchWcmAuthorsForPmids, type WcmAuthorChip } from "@/lib/api/topics";
+import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 
 const RECITERAI_YEAR_FLOOR = 2020;
 const HIGHLIGHTS_IMPACT_FLOOR = 40;
@@ -249,7 +250,12 @@ async function fillTier2(
     });
   }
 
-  return sortTier2(candidates).slice(0, need);
+  // #356 — exclude taken-down / derived-dark publications from the top-up.
+  const candidatePmids = candidates.map((c) => c.pmid);
+  const suppressions = await loadPublicationSuppressions(candidatePmids, prisma);
+  const darkPmids = await resolveDarkPmids(candidatePmids, suppressions, prisma);
+  const visible = candidates.filter((c) => !darkPmids.has(c.pmid));
+  return sortTier2(visible).slice(0, need);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +312,12 @@ export async function getSpotlightCardsForTopic(
     impactScore: Number(r.publication.impactScore),
     position: null,
   }));
-  let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+  // #356 — a taken-down or derived-dark publication is never a Spotlight card.
+  const candidatePmids = normalized.map((r) => r.pmid);
+  const suppressions = await loadPublicationSuppressions(candidatePmids, prisma);
+  const darkPmids = await resolveDarkPmids(candidatePmids, suppressions, prisma);
+  const visible = normalized.filter((r) => !darkPmids.has(r.pmid));
+  let top = sortForSpotlight(dedupeByPmid(visible)).slice(0, SPOTLIGHT_TARGET);
 
   // Issue #68 — top up sparse topic surfaces with middle-author publications.
   if (top.length < SPOTLIGHT_TARGET) {
@@ -422,7 +433,12 @@ async function getSpotlightCardsForEntity(
     impactScore: Number(r.publication.impactScore),
     position: null,
   }));
-  let top = sortForSpotlight(dedupeByPmid(normalized)).slice(0, SPOTLIGHT_TARGET);
+  // #356 — a taken-down or derived-dark publication is never a Spotlight card.
+  const candidatePmids = normalized.map((r) => r.pmid);
+  const suppressions = await loadPublicationSuppressions(candidatePmids, prisma);
+  const darkPmids = await resolveDarkPmids(candidatePmids, suppressions, prisma);
+  const visible = normalized.filter((r) => !darkPmids.has(r.pmid));
+  let top = sortForSpotlight(dedupeByPmid(visible)).slice(0, SPOTLIGHT_TARGET);
 
   // Issue #68 — top up sparse entity Spotlights (Library is the canonical
   // case) with middle-author publications. The tier-2 sort favors high

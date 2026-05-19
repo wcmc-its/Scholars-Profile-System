@@ -7,7 +7,11 @@
  * external API endpoint would call the same function.
  */
 import { prisma } from "@/lib/db";
-import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import {
+  getEffectiveOverview,
+  isAuthorHidden,
+  loadPublicationSuppressions,
+} from "@/lib/api/manual-layer";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
@@ -484,7 +488,26 @@ export async function getScholarFullProfileBySlug(
     },
   });
 
-  const rankablePubs = authorships.map((a) => {
+  // #356 — publication suppression. A publication this scholar has hidden
+  // (a per-author suppression on their own cwid), or one taken down whole,
+  // drops from their record entirely: the publications list, Selected
+  // highlights, and the keyword cloud all derive from `visibleAuthorships`.
+  // The grant-linked publications in the Funding section are filtered the same
+  // way below, so every profile pmid is covered by this one suppression load.
+  const grantPmids = scholar.grants.flatMap((g) =>
+    g.publications.map((gp) => gp.publication.pmid),
+  );
+  const suppressions = await loadPublicationSuppressions(
+    [...authorships.map((a) => a.publication.pmid), ...grantPmids],
+    prisma,
+  );
+  const visibleAuthorships = authorships.filter(
+    (a) =>
+      !isAuthorHidden(suppressions, a.publication.pmid, scholar.cwid) &&
+      !suppressions.darkPmids.has(a.publication.pmid),
+  );
+
+  const rankablePubs = visibleAuthorships.map((a) => {
     // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
     // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
     // (currently empty in prototype — populated by a future per-(cwid, pmid)
@@ -531,7 +554,9 @@ export async function getScholarFullProfileBySlug(
           (au) =>
             au.scholar &&
             !au.scholar.deletedAt &&
-            au.scholar.status === "active",
+            au.scholar.status === "active" &&
+            // #356 — a co-author who hid this publication drops from its chips.
+            !isAuthorHidden(suppressions, a.publication.pmid, au.scholar.cwid),
         )
         .map((au) => ({
           name: au.scholar!.preferredName,
@@ -550,12 +575,13 @@ export async function getScholarFullProfileBySlug(
   const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
 
   // Issue #73 — aggregate keywords from this scholar's accepted publications.
-  // Operates over `authorships` (which includes `publication.meshTerms` via the
-  // earlier include) so we don't re-query. Excludes Retraction/Erratum types
+  // Operates over `visibleAuthorships` (which includes `publication.meshTerms`
+  // via the earlier include) so we don't re-query, and so a suppressed
+  // publication contributes no keywords. Excludes Retraction/Erratum types
   // from per-keyword counts unconditionally, ahead of issue #63 fully landing
   // the same exclusion in the publications list.
   const keywords: ProfileKeywords = aggregateKeywords(
-    authorships.map((a) => ({
+    visibleAuthorships.map((a) => ({
       publicationType: a.publication.publicationType,
       publication: { meshTerms: a.publication.meshTerms },
     })),
@@ -655,6 +681,13 @@ export async function getScholarFullProfileBySlug(
       const lowerConfidenceCutoff = new Date(now);
       lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
       const pubs = g.publications
+        // #356 — drop a publication this scholar has hidden, or one taken
+        // down whole, from the grant's publication list too.
+        .filter(
+          (gp) =>
+            !isAuthorHidden(suppressions, gp.publication.pmid, scholar.cwid) &&
+            !suppressions.darkPmids.has(gp.publication.pmid),
+        )
         .map((gp) => ({
           pmid: gp.publication.pmid,
           title: gp.publication.title,

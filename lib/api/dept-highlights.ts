@@ -22,6 +22,11 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import type { AuthorChip } from "@/components/publication/author-chip-row";
+import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 export type DeptPublicationCard = {
   pmid: string;
@@ -85,7 +90,11 @@ export async function getDeptRecentPublications(
     distinct: ["pmid"],
     take: DEPT_PUB_POOL_SIZE * 4,
   })) as Array<{ pmid: string }>;
-  const poolPmids = poolRaw.map((r) => r.pmid);
+  const candidatePmids = poolRaw.map((r) => r.pmid);
+  // #356 — exclude publications taken down or derived-dark from the pool.
+  const suppressions = await loadPublicationSuppressions(candidatePmids, prisma);
+  const darkPmids = await resolveDarkPmids(candidatePmids, suppressions, prisma);
+  const poolPmids = candidatePmids.filter((p) => !darkPmids.has(p));
   if (poolPmids.length === 0) return [];
 
   // Fetch publication metadata + ALL confirmed authors (WCM + dept overlap)
@@ -148,7 +157,8 @@ export async function getDeptRecentPublications(
       authors: p.authors
         .map((a) => {
           const s = scholars.get(a.cwid!);
-          if (!s) return null;
+          // #356 — drop the chip of a co-author who hid this publication.
+          if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
           return {
             name: s.preferredName,
             cwid: s.cwid,
