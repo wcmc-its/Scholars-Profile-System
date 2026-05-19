@@ -21,7 +21,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { resolveDarkPmids, type PublicationSuppressions } from "@/lib/api/manual-layer";
+import {
+  loadHiddenAuthorshipCounts,
+  resolveDarkPmids,
+  type PublicationSuppressions,
+} from "@/lib/api/manual-layer";
 import { getDeptPublicationsList } from "@/lib/api/dept-lists";
 
 type PaClient = Parameters<typeof resolveDarkPmids>[2];
@@ -143,5 +147,39 @@ describe("getDeptPublicationsList — publication suppression", () => {
     const result = await getDeptPublicationsList("DEPT");
     expect(result.hits.map((h) => h.pmid)).toEqual(["100"]);
     expect(result.hits[0].authors.map((a) => a.cwid)).toEqual(["owner"]);
+  });
+});
+
+describe("loadHiddenAuthorshipCounts", () => {
+  function supClient(rows: Array<{ contributorCwid: string | null }>) {
+    return {
+      suppression: { findMany: vi.fn().mockResolvedValue(rows) },
+    } as unknown as Parameters<typeof loadHiddenAuthorshipCounts>[1];
+  }
+
+  it("tallies active per-author hides per cwid", async () => {
+    const counts = await loadHiddenAuthorshipCounts(
+      ["a", "b"],
+      supClient([
+        { contributorCwid: "a" },
+        { contributorCwid: "a" },
+        { contributorCwid: "b" },
+      ]),
+    );
+    expect(counts.get("a")).toBe(2);
+    expect(counts.get("b")).toBe(1);
+  });
+
+  it("ignores whole-publication takedown rows (null contributor)", async () => {
+    const counts = await loadHiddenAuthorshipCounts(
+      ["a"],
+      supClient([{ contributorCwid: null }, { contributorCwid: "a" }]),
+    );
+    expect(counts.get("a")).toBe(1);
+  });
+
+  it("returns an empty map when given no cwids", async () => {
+    const counts = await loadHiddenAuthorshipCounts([], supClient([]));
+    expect(counts.size).toBe(0);
   });
 });

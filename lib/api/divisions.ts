@@ -29,6 +29,7 @@ import type { AuthorChip } from "@/components/publication/author-chip-row";
 import { formatRoleCategory } from "@/lib/role-display";
 import {
   isAuthorHidden,
+  loadHiddenAuthorshipCounts,
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
@@ -341,7 +342,14 @@ export async function getDivisionFaculty(
           orderBy: { cwid: "asc" },
         }),
   ]);
-  const pubByCwid = new Map(pubCounts.map((r) => [r.cwid, r._count._all]));
+  // #356 — subtract each scholar's per-author hides from their pub count.
+  const hiddenCounts = await loadHiddenAuthorshipCounts(cwids, prisma);
+  const pubByCwid = new Map(
+    pubCounts.map((r) => [
+      r.cwid,
+      Math.max(0, r._count._all - (hiddenCounts.get(r.cwid) ?? 0)),
+    ]),
+  );
   const grantByCwid = new Map(grantCounts.map((r) => [r.cwid, r._count._all]));
 
   type RowWithRelations = (typeof allRows)[number] & {

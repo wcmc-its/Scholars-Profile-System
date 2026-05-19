@@ -215,3 +215,35 @@ export async function resolveDarkPmids(
   }
   return dark;
 }
+
+/**
+ * Per-cwid count of active per-author publication hides — for adjusting a
+ * scholar's publication-count badge. Each active per-author `suppression` row
+ * is one confirmed authorship the scholar removed from public view, so a
+ * count aggregated over `publication_author` overcounts by this much
+ * (`self-edit-spec.md` § Hide a publication — counts update site-wide).
+ *
+ * A whole-publication takedown also lowers a scholar's count, but rarely
+ * (superuser-only) and accounting for it needs an author join — deferred with
+ * the other `publicationTopic`-keyed secondary counts (D5.1).
+ */
+export async function loadHiddenAuthorshipCounts(
+  cwids: readonly string[],
+  client: SuppressionReadClient,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (cwids.length === 0) return counts;
+  const rows = await client.suppression.findMany({
+    where: {
+      entityType: "publication",
+      contributorCwid: { in: [...new Set(cwids)] },
+      revokedAt: null,
+    },
+    select: { contributorCwid: true },
+  });
+  for (const row of rows) {
+    if (row.contributorCwid === null) continue;
+    counts.set(row.contributorCwid, (counts.get(row.contributorCwid) ?? 0) + 1);
+  }
+  return counts;
+}

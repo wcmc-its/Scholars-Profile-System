@@ -11,6 +11,7 @@
  */
 import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
+import { loadHiddenAuthorshipCounts } from "@/lib/api/manual-layer";
 
 export type PopoverContextHeader = {
   cwid: string;
@@ -85,6 +86,10 @@ export async function fetchPopoverHeader(
   if (!scholar) return null;
   if (scholar.deletedAt) return null;
 
+  // #356 — a per-author hide lowers the scholar's public publication count.
+  const hiddenPubs =
+    (await loadHiddenAuthorshipCounts([cwid], prisma)).get(cwid) ?? 0;
+
   // Resolve the topic slug to its human-readable label so the popover doesn't
   // render the slug verbatim ("melanoma_skin_cancer" → "Melanoma & Skin Cancer").
   let topTopicLabel: string | null = null;
@@ -105,7 +110,7 @@ export async function fetchPopoverHeader(
     primaryDepartment: scholar.primaryDepartment,
     slug: scholar.status === "active" ? scholar.slug : null,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
-    totalPubCount: scholar._count.authorships,
+    totalPubCount: Math.max(0, scholar._count.authorships - hiddenPubs),
     totalGrantCount: scholar._count.grants,
     topTopic: topTopicLabel,
   };

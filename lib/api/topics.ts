@@ -38,6 +38,7 @@ import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isAuthorHidden,
+  loadHiddenAuthorshipCounts,
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
@@ -342,9 +343,16 @@ export async function getSubtopicScholars(
   for (const r of subtopicCounts) {
     if (r.cwid) subtopicCountByCwid.set(r.cwid, r._count.pmid);
   }
+  // #356 — a per-author hide drops the publication from the scholar's count.
+  const hiddenCounts = await loadHiddenAuthorshipCounts(cwids, prisma);
   const totalCountByCwid = new Map<string, number>();
   for (const r of totalCounts) {
-    if (r.cwid) totalCountByCwid.set(r.cwid, r._count.pmid);
+    if (r.cwid) {
+      totalCountByCwid.set(
+        r.cwid,
+        Math.max(0, r._count.pmid - (hiddenCounts.get(r.cwid) ?? 0)),
+      );
+    }
   }
 
   return top.map((e, i) => ({
