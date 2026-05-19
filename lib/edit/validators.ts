@@ -116,6 +116,26 @@ export type SanitizeResult =
   | { ok: false; error: "too_long"; length: number };
 
 /**
+ * The core `overview` HTML sanitize — DOMPurify with the v1 tag/attribute
+ * allowlist, scheme-restricted `href`, and `rel`/`target` link hardening.
+ * `sanitizeOverview` wraps this with the write-path length / empty-result
+ * checks; the read-merge (`lib/api/manual-layer.ts` `getEffectiveOverview`)
+ * calls it bare, re-sanitizing a stored override as defense-in-depth before
+ * the public profile's raw `dangerouslySetInnerHTML` render.
+ */
+export function sanitizeOverviewHtml(input: string): string {
+  // Add the link-hardening hook only for the span of this synchronous call,
+  // then remove it — no lasting global DOMPurify state. `sanitize()` is
+  // synchronous, so no other call can interleave between add and remove.
+  DOMPurify.addHook("afterSanitizeAttributes", hardenLinks);
+  try {
+    return DOMPurify.sanitize(normalizeBoldItalic(input), OVERVIEW_CONFIG);
+  } finally {
+    DOMPurify.removeHook("afterSanitizeAttributes");
+  }
+}
+
+/**
  * Sanitize an `overview` submission to the v1 contract: the tag allowlist,
  * `href`-only-on-`<a>` with an `https`/`http`/`mailto` scheme, `rel`/`target`
  * link hardening, `b`→`strong` / `i`→`em` normalization, and the 20,000-char
@@ -130,16 +150,7 @@ export function sanitizeOverview(input: string): SanitizeResult {
     return { ok: false, error: "too_long", length: input.length };
   }
 
-  // Add the link-hardening hook only for the span of this synchronous call,
-  // then remove it — no lasting global DOMPurify state. `sanitize()` is
-  // synchronous, so no other call can interleave between add and remove.
-  DOMPurify.addHook("afterSanitizeAttributes", hardenLinks);
-  let sanitized: string;
-  try {
-    sanitized = DOMPurify.sanitize(normalizeBoldItalic(input), OVERVIEW_CONFIG);
-  } finally {
-    DOMPurify.removeHook("afterSanitizeAttributes");
-  }
+  const sanitized = sanitizeOverviewHtml(input);
 
   if (stripTags(sanitized).trim() === "") {
     return { ok: true, value: "" };

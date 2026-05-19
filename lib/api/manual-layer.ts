@@ -19,6 +19,7 @@
  *    Prisma `where`; it is loaded per request, scoped to the pmids in hand, and
  *    applied in code.
  */
+import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
@@ -31,10 +32,11 @@ type OverrideReadClient = Pick<PrismaClient, "fieldOverride">;
  * If a `field_override(scholar, cwid, 'overview')` row exists it is
  * **authoritative** — including an empty value, which is the scholar
  * deliberately clearing their bio; the ETL seed is not shown in that case.
- * The override value was sanitized on write (`lib/edit/validators.ts`
- * `sanitizeOverview`), so it is returned as-is — the public render's existing
- * raw `dangerouslySetInnerHTML` path needs no change (`self-edit-spec.md`
- * § The v1 editable-field set).
+ * The override was sanitized on write (`lib/edit/validators.ts`
+ * `sanitizeOverview`); it is **re-sanitized here on read** (`sanitizeOverviewHtml`)
+ * as defense-in-depth — the public profile renders this value through a raw
+ * `dangerouslySetInnerHTML`, so a value that ever reached the column
+ * unsanitized (a second writer, a migration, direct SQL) must not pass through.
  *
  * With no override, the ETL-managed `Scholar.overview` column is used, cleaned
  * of legacy VIVO serializer artifacts.
@@ -58,7 +60,11 @@ export async function getEffectiveOverview(
     select: { value: true },
   });
   if (override) {
-    return override.value === "" ? null : override.value;
+    // Empty value — the scholar deliberately cleared their bio.
+    if (override.value === "") return null;
+    // Re-sanitize on read (defense-in-depth) — see the function doc above.
+    const clean = sanitizeOverviewHtml(override.value);
+    return clean === "" ? null : clean;
   }
   return etlOverview ? sanitizeVIVOHtml(etlOverview) : null;
 }
