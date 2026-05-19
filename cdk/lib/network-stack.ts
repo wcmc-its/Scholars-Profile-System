@@ -1,0 +1,105 @@
+import { CfnOutput, Stack, type StackProps } from "aws-cdk-lib";
+import * as ec2 from "aws-cdk-lib/aws-ec2";
+import { type Construct } from "constructs";
+import { type SpsEnvConfig } from "./config";
+
+/** Props for {@link NetworkStack}. */
+export interface NetworkStackProps extends StackProps {
+  /** Resolved per-environment configuration. */
+  readonly envConfig: SpsEnvConfig;
+}
+
+/**
+ * NetworkStack — the VPC and security groups for the Scholars Profile System.
+ *
+ * Stack 1 of the six defined in ADR-008. It owns the network substrate every
+ * other stack attaches to: a two-AZ VPC with public and private-with-egress
+ * subnets, and the three security groups that define reachability between the
+ * ECS application tasks, the ETL Lambdas, and the load balancer.
+ *
+ * Phase 0 creates the security groups with no ingress rules — default-deny.
+ * The security-group-to-security-group ingress (ALB → app, and ETL → the
+ * internal `/api/revalidate` listener; B05) is added in Phase 2 / Phase 3,
+ * when the load balancer and its listeners exist. VPC endpoints (B17) are
+ * added to this stack in Phase 4. The groups are exposed as readonly
+ * properties so the later stacks reference them across stack boundaries.
+ */
+export class NetworkStack extends Stack {
+  /** The VPC every Scholars Profile System workload runs in. */
+  public readonly vpc: ec2.Vpc;
+
+  /** Security group for the ECS application tasks. */
+  public readonly appSecurityGroup: ec2.SecurityGroup;
+
+  /** Security group for the ETL Lambdas. */
+  public readonly etlSecurityGroup: ec2.SecurityGroup;
+
+  /** Security group for the Application Load Balancer. */
+  public readonly albSecurityGroup: ec2.SecurityGroup;
+
+  constructor(scope: Construct, id: string, props: NetworkStackProps) {
+    super(scope, id, props);
+
+    const { envConfig } = props;
+
+    // Two AZs — enough for an ALB and a Multi-AZ Aurora cluster, no more than
+    // the workload needs. Public subnets carry the ALB and the NAT gateways;
+    // private-with-egress subnets carry the ECS tasks, Aurora, OpenSearch, and
+    // the ETL Lambdas — unreachable from the internet, able only to reach out
+    // through the NAT gateway.
+    this.vpc = new ec2.Vpc(this, "Vpc", {
+      ipAddresses: ec2.IpAddresses.cidr(envConfig.vpcCidr),
+      maxAzs: envConfig.maxAzs,
+      natGateways: envConfig.natGateways,
+      subnetConfiguration: [
+        { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
+        {
+          name: "private",
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+          cidrMask: 22,
+        },
+      ],
+    });
+
+    // Security groups. Each is created with egress allowed and no ingress
+    // rules; the SG-to-SG ingress that defines reachability is added by the
+    // stacks that own the listeners and services (ADR-008, B05). Defining the
+    // groups here keeps the network topology in one reviewable place.
+    this.albSecurityGroup = new ec2.SecurityGroup(this, "AlbSecurityGroup", {
+      vpc: this.vpc,
+      description: `SPS Application Load Balancer (${envConfig.envName})`,
+      allowAllOutbound: true,
+    });
+
+    this.appSecurityGroup = new ec2.SecurityGroup(this, "AppSecurityGroup", {
+      vpc: this.vpc,
+      description: `SPS ECS application tasks (${envConfig.envName})`,
+      allowAllOutbound: true,
+    });
+
+    this.etlSecurityGroup = new ec2.SecurityGroup(this, "EtlSecurityGroup", {
+      vpc: this.vpc,
+      description: `SPS ETL Lambdas (${envConfig.envName})`,
+      allowAllOutbound: true,
+    });
+
+    // Outputs — surfaced so the `cdk diff` / deploy review (ADR-008's
+    // verification model) and the later stacks have stable references.
+    new CfnOutput(this, "VpcId", {
+      value: this.vpc.vpcId,
+      description: "SPS VPC id",
+    });
+    new CfnOutput(this, "AppSecurityGroupId", {
+      value: this.appSecurityGroup.securityGroupId,
+      description: "SPS application-tier security group id",
+    });
+    new CfnOutput(this, "EtlSecurityGroupId", {
+      value: this.etlSecurityGroup.securityGroupId,
+      description: "SPS ETL security group id",
+    });
+    new CfnOutput(this, "AlbSecurityGroupId", {
+      value: this.albSecurityGroup.securityGroupId,
+      description: "SPS load-balancer security group id",
+    });
+  }
+}

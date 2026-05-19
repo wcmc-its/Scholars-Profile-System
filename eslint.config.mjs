@@ -18,6 +18,8 @@ const eslintConfig = [
       "playwright-report/**",
       "test-results/**",
       "next-env.d.ts",
+      // cdk/ is a standalone CDK project with its own ESLint config (ADR-008).
+      "cdk/**",
     ],
   },
 ];
