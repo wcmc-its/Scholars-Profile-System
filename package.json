@@ -48,6 +48,7 @@
     "etl:nih-profile": "tsx etl/nih-profile/index.ts",
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
+    "etl:dynamodb:probe-synopsis": "tsx etl/dynamodb/probe-synopsis.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:identity": "tsx etl/identity/index.ts",
     "etl:hierarchy": "tsx etl/hierarchy/index.ts",
