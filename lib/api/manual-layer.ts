@@ -166,3 +166,52 @@ export function isPublicationDark(
     isAuthorHidden(suppressions, pmid, cwid),
   );
 }
+
+/**
+ * The subset of `pmids` that are dark — a whole-publication takedown, or every
+ * confirmed site-visible WCM author per-author-hidden (`isPublicationDark`).
+ *
+ * The derived-dark branch needs each candidate's confirmed WCM author set; that
+ * is queried only for pmids that actually carry a per-author hide — typically
+ * none — so this adds at most one bounded query. For the member-scoped listing
+ * surfaces (center / department / division), whose pool query yields pmids
+ * without author sets, this resolves pool darkness before pagination.
+ */
+export async function resolveDarkPmids(
+  pmids: readonly string[],
+  suppressions: PublicationSuppressions,
+  client: Pick<PrismaClient, "publicationAuthor">,
+): Promise<Set<string>> {
+  const dark = new Set<string>();
+  for (const pmid of pmids) {
+    if (suppressions.darkPmids.has(pmid)) dark.add(pmid);
+  }
+  // Only a pmid carrying a per-author hide can be derived-dark. `suppressions`
+  // was loaded for `pmids`, so these keys are already a subset of `pmids`.
+  const candidates = [...suppressions.hiddenAuthorsByPmid.keys()].filter(
+    (pmid) => !dark.has(pmid),
+  );
+  if (candidates.length === 0) return dark;
+  const rows = await client.publicationAuthor.findMany({
+    where: {
+      pmid: { in: candidates },
+      isConfirmed: true,
+      cwid: { not: null },
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: { pmid: true, cwid: true },
+  });
+  const authorCwidsByPmid = new Map<string, string[]>();
+  for (const row of rows) {
+    if (row.cwid === null) continue;
+    const arr = authorCwidsByPmid.get(row.pmid) ?? [];
+    arr.push(row.cwid);
+    authorCwidsByPmid.set(row.pmid, arr);
+  }
+  for (const pmid of candidates) {
+    if (isPublicationDark(suppressions, pmid, authorCwidsByPmid.get(pmid) ?? [])) {
+      dark.add(pmid);
+    }
+  }
+  return dark;
+}

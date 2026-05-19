@@ -26,6 +26,11 @@ import type {
   DeptListPubResult,
   DeptListGrantResult,
 } from "@/lib/api/dept-lists";
+import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 export type CenterDetail = {
   code: string;
@@ -217,7 +222,11 @@ export async function getCenterPublicationsList(
     select: { pmid: true },
     distinct: ["pmid"],
   })) as Array<{ pmid: string }>;
-  const allPmids = pmidRows.map((r) => r.pmid);
+  const poolPmids = pmidRows.map((r) => r.pmid);
+  // #356 — drop taken-down / derived-dark publications before paginating.
+  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
   const total = allPmids.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
@@ -273,7 +282,8 @@ export async function getCenterPublicationsList(
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
-        if (!s) return null;
+        // #356 — drop the chip of a co-author who hid this publication.
+        if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
         return {
           name: s.preferredName,
           cwid: s.cwid,
@@ -356,13 +366,17 @@ export async function getCenterHighlights(
   }
 
   // Top 3 publications by citation × recency among member-authored work.
-  const memberPmids = await prisma.publicationAuthor
+  const poolPmids = await prisma.publicationAuthor
     .findMany({
       where: { isConfirmed: true, cwid: { in: memberCwids } },
       select: { pmid: true },
       distinct: ["pmid"],
     })
     .then((r) => r.map((x) => x.pmid));
+  // #356 — exclude publications taken down or derived-dark from the pool.
+  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+  const memberPmids = poolPmids.filter((p) => !darkPmids.has(p));
 
   const pubs = await prisma.publication.findMany({
     where: { pmid: { in: memberPmids } },
@@ -408,7 +422,8 @@ export async function getCenterHighlights(
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
-        if (!s) return null;
+        // #356 — drop the chip of a co-author who hid this publication.
+        if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
         return {
           name: s.preferredName,
           cwid: s.cwid,

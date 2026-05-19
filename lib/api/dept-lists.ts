@@ -20,6 +20,11 @@ import type {
   DeptPublicationCard,
   DeptGrantCard,
 } from "@/lib/api/dept-highlights";
+import {
+  isAuthorHidden,
+  loadPublicationSuppressions,
+  resolveDarkPmids,
+} from "@/lib/api/manual-layer";
 
 const PAGE_SIZE = 20;
 
@@ -55,7 +60,12 @@ export async function getDeptPublicationsList(
     select: { pmid: true },
     distinct: ["pmid"],
   })) as Array<{ pmid: string }>;
-  const allPmids = pmidRows.map((r) => r.pmid);
+  const poolPmids = pmidRows.map((r) => r.pmid);
+  // #356 — drop taken-down / derived-dark publications before paginating, so
+  // `total` and the page window are computed over the visible set.
+  const suppressions = await loadPublicationSuppressions(poolPmids, prisma);
+  const darkPmids = await resolveDarkPmids(poolPmids, suppressions, prisma);
+  const allPmids = poolPmids.filter((p) => !darkPmids.has(p));
   const total = allPmids.length;
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PAGE_SIZE };
@@ -116,7 +126,8 @@ export async function getDeptPublicationsList(
     authors: p.authors
       .map((a) => {
         const s = scholarMap.get(a.cwid!);
-        if (!s) return null;
+        // #356 — drop the chip of a co-author who hid this publication.
+        if (!s || isAuthorHidden(suppressions, p.pmid, a.cwid!)) return null;
         return {
           name: s.preferredName,
           cwid: s.cwid,
