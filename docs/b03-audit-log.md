@@ -56,23 +56,23 @@ Two indexes — `(target_entity_type, target_entity_id, ts)` and `(actor_cwid, t
 
 `row_hash` detects mutation of a single row (#102: "tamper-evidence on the row itself"). It is **not** a hash chain — chaining is a possible future hardening, not v1.
 
-The write path computes it, before the `INSERT`, as:
+The write path computes it, before the `INSERT`, as a SHA-256 over a **canonical** JSON serialization — a positional array, with every nested object's keys sorted recursively so the digest never depends on key order:
 
 ```
-row_hash = sha256_hex( JSON.stringify([
+row_hash = sha256_hex( canonicalJSON([
   actor_cwid,            // string
   target_entity_type,    // string
   target_entity_id,      // string
   action,                // string
-  fields_changed,        // array | null
-  before_values,         // object | null
-  after_values,          // object | null
+  fields_changed,        // array | null   — element order preserved
+  before_values,         // object | null  — keys sorted recursively
+  after_values,          // object | null  — keys sorted recursively
   ts,                    // ISO-8601 with milliseconds, e.g. "2026-05-17T14:03:01.234Z"
   request_id             // string | null
 ]) )
 ```
 
-A JSON **array** (positional, fixed order) avoids any object-key-ordering ambiguity; the nested JSON values must themselves be built deterministically by the write path. `id` is excluded — it is assigned by the DB after the hash is computed. To verify a row, recompute over its stored columns and compare (see the query below).
+`canonicalJSON` sorts object keys at every depth, then `JSON.stringify`s — it is `canonicalize` in `lib/edit/audit.ts`. The canonical form is **load-bearing**: MySQL `JSON` columns normalize (re-sort) object keys on storage, so a digest taken over insertion-order JSON could not be reproduced from the stored `before_values` / `after_values`. `id` is excluded — it is assigned by the DB after the hash is computed. To verify a row, rebuild the array from its stored columns and recompute with the *same* `canonicalJSON` (the `ts` column reconstructed as its ISO-8601 string), then compare (see the query below).
 
 ## INSERT-only grant and retention
 

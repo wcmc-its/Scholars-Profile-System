@@ -21,11 +21,24 @@ describe("getEffectiveOverview", () => {
     expect(result).toBe("<p>my edited bio</p>");
   });
 
-  it("returns the override value verbatim — it was sanitized on write, not re-cleaned", async () => {
-    // A VIVO-artifact string would be altered by sanitizeVIVOHtml; the override
-    // branch must not run it, so the value comes back unchanged.
-    const stored = "<p>bio with a \\r\\n literal</p>";
+  it("does not apply the VIVO cleanup to an override value", async () => {
+    // The override branch must not run sanitizeVIVOHtml — that ETL-artifact
+    // cleanup is for the ETL column, not a value the scholar deliberately wrote.
+    const stored = "<p>bio with allowed <strong>emphasis</strong></p>";
     expect(await getEffectiveOverview("cwid1", null, client({ value: stored }))).toBe(stored);
+  });
+
+  it("re-sanitizes the override value at read as defense-in-depth", async () => {
+    // The write path sanitizes, but the public profile renders this value via
+    // raw dangerouslySetInnerHTML — re-sanitizing on read is a second net
+    // against a value that reached the column unsanitized. (Security review, #356.)
+    const result = await getEffectiveOverview(
+      "cwid1",
+      null,
+      client({ value: "<p>safe</p><script>alert(1)</script>" }),
+    );
+    expect(result).not.toContain("<script");
+    expect(result).toContain("<p>safe</p>");
   });
 
   it("treats an empty override as a deliberately-cleared bio (suppresses the ETL seed)", async () => {
