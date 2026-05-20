@@ -85,6 +85,14 @@ jobs:
         run: npm run typecheck
         working-directory: cdk
 
-      - name: Synth
-        run: npm run synth
+      - name: Test
+        run: npm test
+        working-directory: cdk
+
+      - name: Synth (staging)
+        run: npm run synth -- -c env=staging
+        working-directory: cdk
+
+      - name: Synth (prod)
+        run: npm run synth -- -c env=prod
         working-directory: cdk
