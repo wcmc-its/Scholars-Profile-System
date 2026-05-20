@@ -148,6 +148,58 @@ describe("DataStack", () => {
       });
     });
 
+    describe("EC2 property character-set safety", () => {
+      // EC2 validates resource descriptions against this set at deploy time
+      // (NOT at synth time). `cdk-assertions` snapshots don't catch
+      // violations either — the only way to be sure is to scan the synth
+      // output. Two prior hotfixes (PRs #401 and a follow-up) both burned
+      // a deploy attempt to the same lines because the original `→` was
+      // replaced with `->` (still contains the banned `>`). This test
+      // makes the next regression a synth-time failure, not a deploy
+      // failure. (~20 minutes saved per bad description.)
+      //
+      // See AWS Security Group rule description constraint, EC2 API:
+      //   "Up to 256 characters in length, allowed:
+      //    a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*"
+      const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
+
+      it("every AWS::EC2::SecurityGroupIngress Description uses only EC2's allowed character set", () => {
+        const ingress = template.findResources(
+          "AWS::EC2::SecurityGroupIngress",
+        );
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(ingress)) {
+          const desc = resource.Properties?.Description;
+          if (typeof desc === "string" && !EC2_DESCRIPTION_ALLOWED.test(desc)) {
+            const bad = [...desc].filter(
+              (c) => !EC2_DESCRIPTION_ALLOWED.test(c),
+            );
+            violations.push(
+              `${id}: ${JSON.stringify(desc)} — banned chars: ${JSON.stringify(bad.join(""))}`,
+            );
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+
+      it("every AWS::EC2::SecurityGroup GroupDescription uses only EC2's allowed character set", () => {
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(sgs)) {
+          const desc = resource.Properties?.GroupDescription;
+          if (typeof desc === "string" && !EC2_DESCRIPTION_ALLOWED.test(desc)) {
+            const bad = [...desc].filter(
+              (c) => !EC2_DESCRIPTION_ALLOWED.test(c),
+            );
+            violations.push(
+              `${id}: ${JSON.stringify(desc)} — banned chars: ${JSON.stringify(bad.join(""))}`,
+            );
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+    });
+
     describe("Security groups", () => {
       it("Aurora SG admits the app and ETL SGs on 3306", () => {
         // We declare two ingress rules explicitly (app + ETL). The Secrets

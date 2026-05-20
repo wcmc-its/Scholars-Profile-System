@@ -80,12 +80,12 @@ export class DataStack extends Stack {
     auroraSecurityGroup.addIngressRule(
       appSecurityGroup,
       ec2.Port.tcp(3306),
-      "ECS app tasks -> Aurora writer/reader endpoints",
+      "ECS app tasks to Aurora writer/reader endpoints",
     );
     auroraSecurityGroup.addIngressRule(
       etlSecurityGroup,
       ec2.Port.tcp(3306),
-      "ETL Lambdas -> Aurora writer/reader endpoints",
+      "ETL Lambdas to Aurora writer/reader endpoints",
     );
     // The Secrets Manager RDS rotation Lambda's SG ingress is added by
     // `cluster.addRotationSingleUser()` below — CDK creates the Lambda + a
@@ -104,12 +104,12 @@ export class DataStack extends Stack {
     opensearchSecurityGroup.addIngressRule(
       appSecurityGroup,
       ec2.Port.tcp(443),
-      "ECS app tasks -> OpenSearch HTTPS",
+      "ECS app tasks to OpenSearch HTTPS",
     );
     opensearchSecurityGroup.addIngressRule(
       etlSecurityGroup,
       ec2.Port.tcp(443),
-      "ETL Lambdas -> OpenSearch HTTPS (index writes + suggest)",
+      "ETL Lambdas to OpenSearch HTTPS (index writes + suggest)",
     );
 
     // ------------------------------------------------------------------
