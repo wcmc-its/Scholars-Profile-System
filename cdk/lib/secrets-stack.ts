@@ -65,46 +65,54 @@ export class SecretsStack extends Stack {
     // EtlStack for revalidate-token; the SAML SP key is already pre-staged
     // in prod per the project's SAML SP wiring notes and CDK takes over the
     // ARN from this PR forward).
+    // Secret-name convention: `scholars/{env}/...`. Env in the path because
+    // account `665083158573` hosts both staging and prod (one-account
+    // deviation from ADR-008). Without env-prefixing, the two stacks
+    // collide on Secrets Manager's per-region-per-account name uniqueness.
+    // The SAML SP key keeps its pre-existing pattern (env between
+    // `saml-sp` and `private-key`) so the prod-side `cdk import` of the
+    // pre-staged key (per [[saml-sp-wiring]]) matches its current ARN.
+    const env = envConfig.envName;
     const specs: ReadonlyArray<SecretSpec> = [
       {
         constructId: "AppRw",
-        name: "scholars/db/app-rw",
+        name: `scholars/${env}/db/app-rw`,
         description:
           "SPS app writer DSN — used by /api/edit and one-shot prisma migrate deploy (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "AppRo",
-        name: "scholars/db/app-ro",
+        name: `scholars/${env}/db/app-ro`,
         description:
           "SPS app reader DSN — backs the db.read PrismaClient (PRODUCTION_ADDENDUM § Reader/writer split).",
       },
       {
         constructId: "Etl",
-        name: "scholars/db/etl",
+        name: `scholars/${env}/db/etl`,
         description: "SPS ETL writer DSN (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "OpensearchApp",
-        name: "scholars/opensearch/app",
+        name: `scholars/${env}/opensearch/app`,
         description:
           "SPS OpenSearch app user — read + suggest only (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "OpensearchEtl",
-        name: "scholars/opensearch/etl",
+        name: `scholars/${env}/opensearch/etl`,
         description:
           "SPS OpenSearch ETL user — read + write (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "RevalidateToken",
-        name: "scholars/revalidate-token",
+        name: `scholars/${env}/revalidate-token`,
         description:
           "SPS /api/revalidate shared bearer (B04). Quarterly calendar rotation per docs/revalidate-token-rotation.md.",
       },
       {
         constructId: "SamlSpPrivateKey",
-        name: `scholars/saml-sp/${envConfig.envName}/private-key`,
-        description: `SPS SAML SP private key (${envConfig.envName}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
+        name: `scholars/saml-sp/${env}/private-key`,
+        description: `SPS SAML SP private key (${env}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
       },
     ];
 

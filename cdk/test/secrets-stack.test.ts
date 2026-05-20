@@ -15,22 +15,22 @@ function buildSecretsStack(envName: "staging" | "prod"): {
 }
 
 const EXPECTED_SECRETS_PROD = [
-  "scholars/db/app-rw",
-  "scholars/db/app-ro",
-  "scholars/db/etl",
-  "scholars/opensearch/app",
-  "scholars/opensearch/etl",
-  "scholars/revalidate-token",
+  "scholars/prod/db/app-rw",
+  "scholars/prod/db/app-ro",
+  "scholars/prod/db/etl",
+  "scholars/prod/opensearch/app",
+  "scholars/prod/opensearch/etl",
+  "scholars/prod/revalidate-token",
   "scholars/saml-sp/prod/private-key",
 ];
 
 const EXPECTED_SECRETS_STAGING = [
-  "scholars/db/app-rw",
-  "scholars/db/app-ro",
-  "scholars/db/etl",
-  "scholars/opensearch/app",
-  "scholars/opensearch/etl",
-  "scholars/revalidate-token",
+  "scholars/staging/db/app-rw",
+  "scholars/staging/db/app-ro",
+  "scholars/staging/db/etl",
+  "scholars/staging/opensearch/app",
+  "scholars/staging/opensearch/etl",
+  "scholars/staging/revalidate-token",
   "scholars/saml-sp/staging/private-key",
 ];
 
