@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { App, type Environment, Tags } from "aws-cdk-lib";
 import { resolveEnvConfig } from "../lib/config";
+import { DataStack } from "../lib/data-stack";
+import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { NetworkStack } from "../lib/network-stack";
+import { SecretsStack } from "../lib/secrets-stack";
 
 const app = new App();
 
@@ -16,11 +19,43 @@ const account = app.node.tryGetContext(`${envConfig.envName}Account`) as
   | string
   | undefined;
 const env: Environment = { account, region: envConfig.region };
+const drEnv: Environment = { account, region: envConfig.drRegion };
 
-new NetworkStack(app, `Sps-Network-${envConfig.envName}`, {
+const networkStack = new NetworkStack(app, `Sps-Network-${envConfig.envName}`, {
   env,
   envConfig,
   description: `SPS network — VPC and security groups, ${envConfig.envName} (ADR-008).`,
+});
+
+// DR-region BackupVault — referenced cross-region by DataStack's BackupPlan
+// copyAction (B10). `crossRegionReferences: true` on both stacks lets CDK
+// wire the dependency via SSM parameter export/import.
+const drBackupVaultStack = new DrBackupVaultStack(
+  app,
+  `Sps-DrBackupVault-${envConfig.envName}`,
+  {
+    env: drEnv,
+    envConfig,
+    crossRegionReferences: true,
+    description: `SPS DR BackupVault — ${envConfig.drRegion}, ${envConfig.envName} (ADR-008 B10).`,
+  },
+);
+
+new DataStack(app, `Sps-Data-${envConfig.envName}`, {
+  env,
+  envConfig,
+  crossRegionReferences: true,
+  vpc: networkStack.vpc,
+  appSecurityGroup: networkStack.appSecurityGroup,
+  etlSecurityGroup: networkStack.etlSecurityGroup,
+  drBackupVault: drBackupVaultStack.vault,
+  description: `SPS data — Aurora MySQL, OpenSearch, AWS Backup, ${envConfig.envName} (ADR-008).`,
+});
+
+new SecretsStack(app, `Sps-Secrets-${envConfig.envName}`, {
+  env,
+  envConfig,
+  description: `SPS secrets — empty Secrets Manager entries, ${envConfig.envName} (ADR-008).`,
 });
 
 // Tag every resource for cost allocation and ownership clarity.

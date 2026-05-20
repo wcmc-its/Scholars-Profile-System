@@ -16,28 +16,85 @@ export interface SpsEnvConfig {
   readonly envName: EnvName;
   /** Primary AWS region (ADR-008). */
   readonly region: string;
+  /** Disaster-recovery region for B10's cross-region snapshot copy (ADR-008). */
+  readonly drRegion: string;
   /** IPv4 CIDR block for the VPC; distinct per environment. */
   readonly vpcCidr: string;
   /** Number of Availability Zones the VPC spans. */
   readonly maxAzs: number;
   /** Number of NAT gateways — one per AZ in production, one in staging. */
   readonly natGateways: number;
+
+  // --- DataStack (Phase 1) ---
+
+  /** Aurora Serverless v2 minimum capacity (ACUs). */
+  readonly auroraMinCapacity: number;
+  /** Aurora Serverless v2 maximum capacity (ACUs). */
+  readonly auroraMaxCapacity: number;
+  /**
+   * Number of Aurora reader instances in addition to the writer. Zero in
+   * staging (writer-only); one in production (reader endpoint backs the
+   * `db.read` PrismaClient per PRODUCTION_ADDENDUM.md § Reader/writer split).
+   */
+  readonly auroraReaderCount: number;
+  /**
+   * Aurora backup retention in days — drives the PITR window and native
+   * automated snapshot retention (Aurora ties them). B10 §1 sets the PITR
+   * window at 14 days; AWS Backup (below) provides the longer 35-day
+   * archive that the same B10 row asks for.
+   */
+  readonly auroraBackupRetentionDays: number;
+  /**
+   * Number of OpenSearch data nodes. One in staging (single-AZ); two in
+   * production (multi-AZ across the VPC's two AZs — the multi-AZ-with-standby
+   * mode that AWS recommends needs three AZs, which would require bumping
+   * NetworkStack from two AZs to three and is out of scope for this phase).
+   */
+  readonly opensearchDataNodes: number;
+  /** OpenSearch data-node instance type. */
+  readonly opensearchDataNodeInstanceType: string;
+
+  // --- AWS Backup (B10) ---
+
+  /**
+   * AWS Backup vault retention in days for the daily plan. Longer than the
+   * Aurora native backup window — this is the archive layer that gives B10
+   * its 35-day target in prod while keeping the Aurora retention at the
+   * documented 14 days.
+   */
+  readonly awsBackupRetentionDays: number;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
   staging: {
     envName: "staging",
     region: "us-east-1",
+    drRegion: "us-west-2",
     vpcCidr: "10.20.0.0/16",
     maxAzs: 2,
     natGateways: 1,
+    auroraMinCapacity: 0.5,
+    auroraMaxCapacity: 2,
+    auroraReaderCount: 0,
+    auroraBackupRetentionDays: 14,
+    opensearchDataNodes: 1,
+    opensearchDataNodeInstanceType: "t3.small.search",
+    awsBackupRetentionDays: 14,
   },
   prod: {
     envName: "prod",
     region: "us-east-1",
+    drRegion: "us-west-2",
     vpcCidr: "10.10.0.0/16",
     maxAzs: 2,
     natGateways: 2,
+    auroraMinCapacity: 1,
+    auroraMaxCapacity: 8,
+    auroraReaderCount: 1,
+    auroraBackupRetentionDays: 14,
+    opensearchDataNodes: 2,
+    opensearchDataNodeInstanceType: "m6g.large.search",
+    awsBackupRetentionDays: 35,
   },
 };
 

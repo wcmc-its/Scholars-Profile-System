@@ -1,0 +1,848 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`DataStack prod matches the snapshot 1`] = `
+{
+  "Mappings": {
+    "AuroraClusterRotationSingleUserSARMapping96A1A66E": {
+      "aws": {
+        "applicationId": "arn:aws:serverlessrepo:us-east-1:297356227824:applications/SecretsManagerRDSMySQLRotationSingleUser",
+        "semanticVersion": "1.1.618",
+      },
+      "aws-cn": {
+        "applicationId": "arn:aws-cn:serverlessrepo:cn-north-1:193023089310:applications/SecretsManagerRDSMySQLRotationSingleUser",
+        "semanticVersion": "1.1.237",
+      },
+      "aws-us-gov": {
+        "applicationId": "arn:aws-us-gov:serverlessrepo:us-gov-west-1:023102451235:applications/SecretsManagerRDSMySQLRotationSingleUser",
+        "semanticVersion": "1.1.213",
+      },
+    },
+  },
+  "Outputs": {
+    "AuroraClusterArn": {
+      "Description": "SPS Aurora cluster ARN",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "arn:",
+            {
+              "Ref": "AWS::Partition",
+            },
+            ":rds:us-east-1:123456789012:cluster:",
+            {
+              "Ref": "AuroraCluster23D869C0",
+            },
+          ],
+        ],
+      },
+    },
+    "AuroraClusterEndpoint": {
+      "Description": "SPS Aurora writer endpoint hostname",
+      "Value": {
+        "Fn::GetAtt": [
+          "AuroraCluster23D869C0",
+          "Endpoint.Address",
+        ],
+      },
+    },
+    "AuroraMasterSecretArn": {
+      "Description": "SPS Aurora master Secrets Manager secret ARN",
+      "Value": {
+        "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+      },
+    },
+    "AuroraReaderEndpoint": {
+      "Description": "SPS Aurora reader endpoint hostname",
+      "Value": {
+        "Fn::GetAtt": [
+          "AuroraCluster23D869C0",
+          "ReadEndpoint.Address",
+        ],
+      },
+    },
+    "BackupPlanArn": {
+      "Description": "SPS AWS Backup plan ARN (B10)",
+      "Value": {
+        "Fn::GetAtt": [
+          "BackupPlanA8F64793",
+          "BackupPlanArn",
+        ],
+      },
+    },
+    "BackupVaultArn": {
+      "Description": "SPS AWS Backup source vault ARN (primary region)",
+      "Value": {
+        "Fn::GetAtt": [
+          "BackupVault3A9C5852",
+          "BackupVaultArn",
+        ],
+      },
+    },
+    "OpenSearchDomainArn": {
+      "Description": "SPS OpenSearch domain ARN",
+      "Value": {
+        "Fn::GetAtt": [
+          "OpenSearch587998CD",
+          "Arn",
+        ],
+      },
+    },
+    "OpenSearchDomainEndpoint": {
+      "Description": "SPS OpenSearch domain endpoint",
+      "Value": {
+        "Fn::GetAtt": [
+          "OpenSearch587998CD",
+          "DomainEndpoint",
+        ],
+      },
+    },
+    "OpenSearchMasterRoleArn": {
+      "Description": "SPS OpenSearch FGAC master role ARN — assume to administer",
+      "Value": {
+        "Fn::GetAtt": [
+          "OpensearchMasterRoleB011908B",
+          "Arn",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AuroraCluster23D869C0": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BackupRetentionPeriod": 14,
+        "CopyTagsToSnapshot": true,
+        "DBClusterParameterGroupName": "default.aurora-mysql8.0",
+        "DBSubnetGroupName": {
+          "Ref": "AuroraClusterSubnetsF3E9E6AD",
+        },
+        "DatabaseName": "scholars",
+        "DeletionProtection": true,
+        "EnableIAMDatabaseAuthentication": false,
+        "Engine": "aurora-mysql",
+        "EngineVersion": "8.0.mysql_aurora.3.08.0",
+        "MasterUserPassword": {
+          "Fn::Join": [
+            "",
+            [
+              "{{resolve:secretsmanager:",
+              {
+                "Ref": "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb",
+              },
+              ":SecretString:password::}}",
+            ],
+          ],
+        },
+        "MasterUsername": "scholars_admin",
+        "PreferredBackupWindow": "03:00-04:00",
+        "ServerlessV2ScalingConfiguration": {
+          "MaxCapacity": 8,
+          "MinCapacity": 1,
+        },
+        "StorageEncrypted": true,
+        "VpcSecurityGroupIds": [
+          {
+            "Fn::GetAtt": [
+              "AuroraSecurityGroup75F699F6",
+              "GroupId",
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::RDS::DBCluster",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraClusterReader1C65EE150": {
+      "DeletionPolicy": "Retain",
+      "DependsOn": [
+        "AuroraClusterWriterAA1AB06C",
+      ],
+      "Properties": {
+        "DBClusterIdentifier": {
+          "Ref": "AuroraCluster23D869C0",
+        },
+        "DBInstanceClass": "db.serverless",
+        "Engine": "aurora-mysql",
+        "PromotionTier": 1,
+        "PubliclyAccessible": false,
+      },
+      "Type": "AWS::RDS::DBInstance",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraClusterRotationSingleUser4929C514": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "Location": {
+          "ApplicationId": {
+            "Fn::FindInMap": [
+              "AuroraClusterRotationSingleUserSARMapping96A1A66E",
+              {
+                "Ref": "AWS::Partition",
+              },
+              "applicationId",
+            ],
+          },
+          "SemanticVersion": {
+            "Fn::FindInMap": [
+              "AuroraClusterRotationSingleUserSARMapping96A1A66E",
+              {
+                "Ref": "AWS::Partition",
+              },
+              "semanticVersion",
+            ],
+          },
+        },
+        "Parameters": {
+          "endpoint": {
+            "Fn::Join": [
+              "",
+              [
+                "https://secretsmanager.us-east-1.",
+                {
+                  "Ref": "AWS::URLSuffix",
+                },
+              ],
+            ],
+          },
+          "excludeCharacters": ""@/\\",
+          "functionName": "SpsDataprodAuroraClusterRotationSingleUserA9357BCD",
+          "vpcSecurityGroupIds": {
+            "Fn::GetAtt": [
+              "AuroraClusterRotationSingleUserSecurityGroup11853B5C",
+              "GroupId",
+            ],
+          },
+          "vpcSubnetIds": {
+            "Fn::Join": [
+              "",
+              [
+                {
+                  "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+                },
+                ",",
+                {
+                  "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+                },
+              ],
+            ],
+          },
+        },
+      },
+      "Type": "AWS::Serverless::Application",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AuroraClusterRotationSingleUserSecurityGroup11853B5C": {
+      "Properties": {
+        "GroupDescription": "Sps-Data-prod/AuroraCluster/RotationSingleUser/SecurityGroup",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "AuroraClusterSecretAttachmentDB8032DA": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "SecretId": {
+          "Ref": "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb",
+        },
+        "TargetId": {
+          "Ref": "AuroraCluster23D869C0",
+        },
+        "TargetType": "AWS::RDS::DBCluster",
+      },
+      "Type": "AWS::SecretsManager::SecretTargetAttachment",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraClusterSecretAttachmentPolicyE50AF2E1": {
+      "Properties": {
+        "ResourcePolicy": {
+          "Statement": [
+            {
+              "Action": "secretsmanager:DeleteSecret",
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":iam::123456789012:root",
+                    ],
+                  ],
+                },
+              },
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "SecretId": {
+          "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+        },
+      },
+      "Type": "AWS::SecretsManager::ResourcePolicy",
+    },
+    "AuroraClusterSecretAttachmentRotationSchedule22140883": {
+      "Properties": {
+        "RotationLambdaARN": {
+          "Fn::GetAtt": [
+            "AuroraClusterRotationSingleUser4929C514",
+            "Outputs.RotationLambdaARN",
+          ],
+        },
+        "RotationRules": {
+          "ScheduleExpression": "rate(30 days)",
+        },
+        "SecretId": {
+          "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+        },
+      },
+      "Type": "AWS::SecretsManager::RotationSchedule",
+    },
+    "AuroraClusterSubnetsF3E9E6AD": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "DBSubnetGroupDescription": "Subnets for AuroraCluster database",
+        "SubnetIds": [
+          {
+            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+          },
+          {
+            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+          },
+        ],
+      },
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraClusterWriterAA1AB06C": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "DBClusterIdentifier": {
+          "Ref": "AuroraCluster23D869C0",
+        },
+        "DBInstanceClass": "db.serverless",
+        "Engine": "aurora-mysql",
+        "PromotionTier": 0,
+        "PubliclyAccessible": false,
+      },
+      "Type": "AWS::RDS::DBInstance",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AuroraSecurityGroup75F699F6": {
+      "Properties": {
+        "GroupDescription": "SPS Aurora MySQL (prod)",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "255.255.255.255/32",
+            "Description": "Disallow all traffic",
+            "FromPort": 252,
+            "IpProtocol": "icmp",
+            "ToPort": 86,
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "AuroraSecurityGroupfromSpsDataprodAuroraClusterRotationSingleUserSecurityGroup628F0F23IndirectPort40AAF812": {
+      "Properties": {
+        "Description": "from SpsDataprodAuroraClusterRotationSingleUserSecurityGroup628F0F23:{IndirectPort}",
+        "FromPort": {
+          "Fn::GetAtt": [
+            "AuroraCluster23D869C0",
+            "Endpoint.Port",
+          ],
+        },
+        "GroupId": {
+          "Fn::GetAtt": [
+            "AuroraSecurityGroup75F699F6",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "AuroraClusterRotationSingleUserSecurityGroup11853B5C",
+            "GroupId",
+          ],
+        },
+        "ToPort": {
+          "Fn::GetAtt": [
+            "AuroraCluster23D869C0",
+            "Endpoint.Port",
+          ],
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "AuroraSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3063306972DA0A5": {
+      "Properties": {
+        "Description": "ECS app tasks → Aurora writer/reader endpoints",
+        "FromPort": 3306,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "AuroraSecurityGroup75F699F6",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+        },
+        "ToPort": 3306,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "AuroraSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D330656C705F4": {
+      "Properties": {
+        "Description": "ETL Lambdas → Aurora writer/reader endpoints",
+        "FromPort": 3306,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "AuroraSecurityGroup75F699F6",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+        },
+        "ToPort": 3306,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "BackupPlanA8F64793": {
+      "Properties": {
+        "BackupPlan": {
+          "BackupPlanName": "sps-aurora-daily-prod",
+          "BackupPlanRule": [
+            {
+              "CopyActions": [
+                {
+                  "DestinationBackupVaultArn": {
+                    "Fn::GetAtt": [
+                      "ExportsReader8B249524",
+                      "/cdk/exports/Sps-Data-prod/SpsDrBackupVaultproduswest2FnGetAttDrBackupVaultAFD1B5C0BackupVaultArn9E005C06",
+                    ],
+                  },
+                  "Lifecycle": {
+                    "DeleteAfterDays": 35,
+                  },
+                },
+              ],
+              "Lifecycle": {
+                "DeleteAfterDays": 35,
+              },
+              "RuleName": "daily",
+              "ScheduleExpression": "cron(0 5 * * ? *)",
+              "TargetBackupVault": {
+                "Fn::GetAtt": [
+                  "BackupVault3A9C5852",
+                  "BackupVaultName",
+                ],
+              },
+            },
+          ],
+        },
+      },
+      "Type": "AWS::Backup::BackupPlan",
+    },
+    "BackupPlanAuroraSelection9AA4891A": {
+      "Properties": {
+        "BackupPlanId": {
+          "Fn::GetAtt": [
+            "BackupPlanA8F64793",
+            "BackupPlanId",
+          ],
+        },
+        "BackupSelection": {
+          "IamRoleArn": {
+            "Fn::GetAtt": [
+              "BackupPlanAuroraSelectionRoleC43A3779",
+              "Arn",
+            ],
+          },
+          "Resources": [
+            {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":rds:us-east-1:123456789012:cluster:",
+                  {
+                    "Ref": "AuroraCluster23D869C0",
+                  },
+                ],
+              ],
+            },
+          ],
+          "SelectionName": "AuroraSelection",
+        },
+      },
+      "Type": "AWS::Backup::BackupSelection",
+    },
+    "BackupPlanAuroraSelectionRoleC43A3779": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "backup.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "BackupVault3A9C5852": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BackupVaultName": "sps-backup-vault-prod",
+      },
+      "Type": "AWS::Backup::BackupVault",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68": {
+      "DependsOn": [
+        "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "f06f7035054cb2aada184c7c251ec5cb31fb6b5e975284939b9ff097603ea769.zip",
+        },
+        "Handler": "__entrypoint__.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "ssm:AddTagsToResource",
+                    "ssm:RemoveTagsFromResource",
+                    "ssm:GetParameters",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":ssm:us-east-1:123456789012:parameter/cdk/exports/Sps-Data-prod/*",
+                      ],
+                    ],
+                  },
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "Inline",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "ExportsReader8B249524": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "ReaderProps": {
+          "imports": {
+            "/cdk/exports/Sps-Data-prod/SpsDrBackupVaultproduswest2FnGetAttDrBackupVaultAFD1B5C0BackupVaultArn9E005C06": "{{resolve:ssm:/cdk/exports/Sps-Data-prod/SpsDrBackupVaultproduswest2FnGetAttDrBackupVaultAFD1B5C0BackupVaultArn9E005C06}}",
+          },
+          "prefix": "Sps-Data-prod",
+          "region": "us-east-1",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::CrossRegionExportReader",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OpenSearch587998CD": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AdvancedSecurityOptions": {
+          "Enabled": true,
+          "InternalUserDatabaseEnabled": false,
+          "MasterUserOptions": {
+            "MasterUserARN": {
+              "Fn::GetAtt": [
+                "OpensearchMasterRoleB011908B",
+                "Arn",
+              ],
+            },
+          },
+        },
+        "ClusterConfig": {
+          "DedicatedMasterEnabled": false,
+          "InstanceCount": 2,
+          "InstanceType": "m6g.large.search",
+          "MultiAZWithStandbyEnabled": false,
+          "ZoneAwarenessConfig": {
+            "AvailabilityZoneCount": 2,
+          },
+          "ZoneAwarenessEnabled": true,
+        },
+        "DomainEndpointOptions": {
+          "EnforceHTTPS": true,
+          "TLSSecurityPolicy": "Policy-Min-TLS-1-2-PFS-2023-10",
+        },
+        "EBSOptions": {
+          "EBSEnabled": true,
+          "VolumeSize": 10,
+          "VolumeType": "gp2",
+        },
+        "EncryptionAtRestOptions": {
+          "Enabled": true,
+        },
+        "EngineVersion": "OpenSearch_2.19",
+        "LogPublishingOptions": {},
+        "NodeToNodeEncryptionOptions": {
+          "Enabled": true,
+        },
+        "SoftwareUpdateOptions": {
+          "AutoSoftwareUpdateEnabled": true,
+        },
+        "VPCOptions": {
+          "SecurityGroupIds": [
+            {
+              "Fn::GetAtt": [
+                "OpenSearchSecurityGroup5212DDD0",
+                "GroupId",
+              ],
+            },
+          ],
+          "SubnetIds": [
+            {
+              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+            },
+            {
+              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+            },
+          ],
+        },
+      },
+      "Type": "AWS::OpenSearchService::Domain",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "OpenSearchSecurityGroup5212DDD0": {
+      "Properties": {
+        "GroupDescription": "SPS OpenSearch domain (prod)",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "255.255.255.255/32",
+            "Description": "Disallow all traffic",
+            "FromPort": 252,
+            "IpProtocol": "icmp",
+            "ToPort": 86,
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
+    },
+    "OpenSearchSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3064430924CAB2": {
+      "Properties": {
+        "Description": "ECS app tasks → OpenSearch HTTPS",
+        "FromPort": 443,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "OpenSearchSecurityGroup5212DDD0",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttAppSecurityGroupC396D536GroupId4ECD26A6",
+        },
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "OpenSearchSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D443B9C259F7": {
+      "Properties": {
+        "Description": "ETL Lambdas → OpenSearch HTTPS (index writes + suggest)",
+        "FromPort": 443,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "OpenSearchSecurityGroup5212DDD0",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
+        },
+        "ToPort": 443,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
+    "OpensearchMasterRoleB011908B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":iam::123456789012:root",
+                    ],
+                  ],
+                },
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS OpenSearch fine-grained access control master (prod). Assume from a workstation to administer the domain.",
+        "RoleName": "sps-opensearch-master-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "Description": {
+          "Fn::Join": [
+            "",
+            [
+              "Generated by the CDK for stack: ",
+              {
+                "Ref": "AWS::StackName",
+              },
+            ],
+          ],
+        },
+        "GenerateSecretString": {
+          "ExcludeCharacters": " %+~\`#$&*()|[]{}:;<>?!'/@"\\",
+          "GenerateStringKey": "password",
+          "PasswordLength": 30,
+          "SecretStringTemplate": "{"username":"scholars_admin"}",
+        },
+        "Name": "scholars/db/master",
+      },
+      "Type": "AWS::SecretsManager::Secret",
+      "UpdateReplacePolicy": "Delete",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+  "Transform": "AWS::Serverless-2016-10-31",
+}
+`;
