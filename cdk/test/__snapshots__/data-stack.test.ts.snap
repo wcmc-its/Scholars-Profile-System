@@ -256,7 +256,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Type": "AWS::EC2::SecurityGroup",
     },
     "AuroraClusterSecretAttachmentDB8032DA": {
-      "DeletionPolicy": "Retain",
       "Properties": {
         "SecretId": {
           "Ref": "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb",
@@ -267,7 +266,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "TargetType": "AWS::RDS::DBCluster",
       },
       "Type": "AWS::SecretsManager::SecretTargetAttachment",
-      "UpdateReplacePolicy": "Retain",
     },
     "AuroraClusterSecretAttachmentPolicyE50AF2E1": {
       "Properties": {
@@ -791,7 +789,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Type": "AWS::IAM::Role",
     },
     "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb": {
-      "DeletionPolicy": "Delete",
+      "DeletionPolicy": "Retain",
       "Properties": {
         "Description": {
           "Fn::Join": [
@@ -813,7 +811,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "Name": "scholars/prod/db/master",
       },
       "Type": "AWS::SecretsManager::Secret",
-      "UpdateReplacePolicy": "Delete",
+      "UpdateReplacePolicy": "Retain",
     },
   },
   "Rules": {

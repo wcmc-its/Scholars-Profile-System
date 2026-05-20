@@ -167,15 +167,26 @@ export class DataStack extends Stack {
     });
     // The auto-generated master secret. Retain on cluster delete so the
     // recovery procedure can read the credentials from Secrets Manager even
-    // if the cluster has been replaced from a snapshot.
+    // if the cluster has been replaced from a snapshot. RETAIN on
+    // UpdateReplacePolicy is equally critical: a Name change triggers a
+    // CFN replace (Name is replace-required for AWS::SecretsManager::Secret),
+    // and without RETAIN the OLD secret holding the cluster's live password
+    // is deleted. `cluster.secret` resolves through a SecretTargetAttachment
+    // whose `node.defaultChild` is that attachment, not the underlying
+    // Secret — so calling `applyRemovalPolicy` on it (the original shape of
+    // this code) only set the policy on the attachment. Walk into the
+    // construct tree directly so the policy lands on the real CfnSecret.
     if (!this.auroraCluster.secret) {
       throw new Error(
         "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
       );
     }
     this.auroraMasterSecret = this.auroraCluster.secret;
+    const masterSecretConstruct = this.auroraCluster.node.findChild(
+      "Secret",
+    ) as secretsmanager.Secret;
     (
-      this.auroraMasterSecret.node.defaultChild as secretsmanager.CfnSecret
+      masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
     ).applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     // RDS rotation for the Aurora master credentials (B06 secrets half).

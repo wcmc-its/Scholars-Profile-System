@@ -93,6 +93,26 @@ describe("DataStack", () => {
         expect(json).not.toMatch(/PasswordValue/);
         expect(json).not.toMatch(/scholars_admin_password/);
       });
+
+      it("the master secret retains on BOTH delete and replace (a Name change must not delete the cluster's live credentials)", () => {
+        // Regression guard. The previous implementation applied
+        // RemovalPolicy.RETAIN to `cluster.secret.node.defaultChild`, which
+        // resolves to the SecretTargetAttachment — leaving the actual
+        // Secret with the CFN default `UpdateReplacePolicy: Delete`. The
+        // env-scope rename in #404 would have wiped the staging cluster's
+        // password value off AWS entirely on the next deploy.
+        const masterSecretResources = Object.entries(
+          template.findResources("AWS::SecretsManager::Secret"),
+        ).filter(
+          ([, r]) =>
+            typeof r.Properties?.Name === "string" &&
+            r.Properties.Name.endsWith("/db/master"),
+        );
+        expect(masterSecretResources).toHaveLength(1);
+        const [, masterSecret] = masterSecretResources[0]!;
+        expect(masterSecret.DeletionPolicy).toBe("Retain");
+        expect(masterSecret.UpdateReplacePolicy).toBe("Retain");
+      });
     });
 
     describe("OpenSearch", () => {
