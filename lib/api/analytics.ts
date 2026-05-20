@@ -16,13 +16,17 @@
  *    action click events (#242).
  *  - spotlight_paper_click: representative-paper clicks in the home Spotlight
  *    section, carrying PMID + publish-cycle ID so the #286 CTR success metric
- *    can be attributed across rotation cycles (#343). */
+ *    can be attributed across rotation cycles (#343).
+ *  - search_popover_opened / search_popover_mesh_browser_clicked: Search
+ *    interpretation popover open + NLM-browser-link click events (#265). */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
   "person_popover_open",
   "person_popover_action",
   "spotlight_paper_click",
+  "search_popover_opened",
+  "search_popover_mesh_browser_clicked",
 ]);
 
 /**
@@ -86,6 +90,9 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       slot: typeof p.slot === "number" ? p.slot : null,
       cycleId: typeof p.cycleId === "string" ? p.cycleId : null,
       subtopicId: typeof p.subtopicId === "string" ? p.subtopicId : null,
+      // search_popover_* fields (#265). Null for other events.
+      mode: typeof p.mode === "string" ? p.mode : null,
+      descriptorId: typeof p.descriptorId === "string" ? p.descriptorId : null,
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),

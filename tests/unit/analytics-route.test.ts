@@ -147,7 +147,9 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("person_popover_open")).toBe(true);
     expect(VALID_EVENTS.has("person_popover_action")).toBe(true);
     expect(VALID_EVENTS.has("spotlight_paper_click")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(5);
+    expect(VALID_EVENTS.has("search_popover_opened")).toBe(true);
+    expect(VALID_EVENTS.has("search_popover_mesh_browser_clicked")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(7);
   });
 });
 
@@ -241,5 +243,82 @@ describe("handleAnalyticsBeacon mentoring_copubs_open", () => {
     expect(logged.mentorCwid).toBeNull();
     expect(logged.menteeCwid).toBeNull();
     expect(logged.n).toBeNull();
+  });
+});
+
+describe("handleAnalyticsBeacon search_popover_* (#265)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("logs mode + descriptorId on search_popover_opened (mesh-expanded)", () => {
+    handleAnalyticsBeacon({
+      event: "search_popover_opened",
+      q: "electronic health records",
+      mode: "mesh-expanded",
+      descriptorId: "D057286",
+      ts: 1700000002000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.event).toBe("search_popover_opened");
+    expect(logged.q).toBe("electronic health records");
+    expect(logged.mode).toBe("mesh-expanded");
+    expect(logged.descriptorId).toBe("D057286");
+    expect(logged.ts).toBe(1700000002000);
+  });
+
+  it("permits a null descriptorId on free-text open without dropping the event", () => {
+    handleAnalyticsBeacon({
+      event: "search_popover_opened",
+      q: "sprezzatura",
+      mode: "free-text",
+      descriptorId: null,
+      ts: 1700000003000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.mode).toBe("free-text");
+    expect(logged.descriptorId).toBeNull();
+  });
+
+  it("logs q + descriptorId on search_popover_mesh_browser_clicked", () => {
+    handleAnalyticsBeacon({
+      event: "search_popover_mesh_browser_clicked",
+      q: "EHR",
+      descriptorId: "D057286",
+      ts: 1700000004000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.event).toBe("search_popover_mesh_browser_clicked");
+    expect(logged.q).toBe("EHR");
+    expect(logged.descriptorId).toBe("D057286");
+  });
+
+  it("nulls out wrong-typed mode / descriptorId (T-06-02-01)", () => {
+    handleAnalyticsBeacon({
+      event: "search_popover_opened",
+      q: "cancer",
+      mode: 42,
+      descriptorId: { ui: "D000" },
+      ts: 1700000005000,
+    });
+    expect(console.log).toHaveBeenCalledTimes(1);
+    const logged = JSON.parse(
+      (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0] as string,
+    );
+    expect(logged.mode).toBeNull();
+    expect(logged.descriptorId).toBeNull();
   });
 });
