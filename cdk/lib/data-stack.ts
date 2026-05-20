@@ -214,10 +214,23 @@ export class DataStack extends Stack {
     });
 
     const opensearchMultiAz = envConfig.opensearchDataNodes > 1;
+    // OpenSearch validates `len(VPCOptions.SubnetIds) == zone-awareness AZ
+    // count` at create time. Default `vpcSubnets` selection on a 2-AZ VPC
+    // returns both private subnets, which the API rejects for a single-AZ
+    // domain ("You must specify exactly one subnet"). Pick the exact subnet
+    // count the topology calls for: 1 for single-AZ staging, N for the
+    // multi-AZ envs.
+    const allPrivateSubnets = vpc.selectSubnets({
+      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+    }).subnets;
+    const opensearchSubnets = allPrivateSubnets.slice(
+      0,
+      envConfig.opensearchDataNodes,
+    );
     this.opensearchDomain = new opensearchservice.Domain(this, "OpenSearch", {
       version: opensearchservice.EngineVersion.OPENSEARCH_2_19,
       vpc,
-      vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
+      vpcSubnets: [{ subnets: opensearchSubnets }],
       securityGroups: [opensearchSecurityGroup],
       capacity: {
         dataNodes: envConfig.opensearchDataNodes,

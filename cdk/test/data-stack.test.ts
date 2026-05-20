@@ -120,6 +120,19 @@ describe("DataStack", () => {
         });
       });
 
+      it("the OpenSearch VPCOptions subnet count matches the data-node count", () => {
+        // OpenSearch validates `len(VPCOptions.SubnetIds) == data-node AZ
+        // count` at create time. A mismatch was the root cause of the v5
+        // deploy failure for `Sps-Data-staging`. Locked in synth-time.
+        const domain = Object.values(
+          template.findResources("AWS::OpenSearchService::Domain"),
+        )[0];
+        const subnetIds: unknown =
+          domain?.Properties?.VPCOptions?.SubnetIds ?? [];
+        expect(Array.isArray(subnetIds)).toBe(true);
+        expect((subnetIds as unknown[]).length).toBe(2);
+      });
+
       it("uses prod capacity (2 data nodes, m6g.large.search, zone-aware)", () => {
         template.hasResourceProperties("AWS::OpenSearchService::Domain", {
           ClusterConfig: Match.objectLike({
@@ -303,6 +316,16 @@ describe("DataStack", () => {
           ZoneAwarenessEnabled: false,
         }),
       });
+    });
+
+    it("the staging OpenSearch VPCOptions has exactly 1 subnet (single-AZ)", () => {
+      const domain = Object.values(
+        template.findResources("AWS::OpenSearchService::Domain"),
+      )[0];
+      const subnetIds: unknown =
+        domain?.Properties?.VPCOptions?.SubnetIds ?? [];
+      expect(Array.isArray(subnetIds)).toBe(true);
+      expect((subnetIds as unknown[]).length).toBe(1);
     });
 
     it("uses 14-day backup retention for the AWS Backup plan", () => {
