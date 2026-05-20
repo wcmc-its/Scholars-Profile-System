@@ -209,3 +209,50 @@ describe("OverviewCard — onDirtyChange propagation", () => {
     await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7 — readOnly arm (the superuser surface render of another scholar's bio)
+// ---------------------------------------------------------------------------
+
+describe("OverviewCard — readOnly arm (Phase 7)", () => {
+  it("renders the bio as sanitized HTML in a prose container", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>Hi I am Alex.</p>" readOnly />);
+    const readonly = document.querySelector('[data-slot="overview-readonly"]');
+    expect(readonly).not.toBeNull();
+    expect((readonly as HTMLElement).innerHTML).toBe("<p>Hi I am Alex.</p>");
+    expect((readonly as HTMLElement).className).toContain("prose");
+  });
+
+  it("renders 'No bio yet.' when initialHtml is empty", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" readOnly />);
+    const empty = document.querySelector('[data-slot="overview-readonly-empty"]');
+    expect(empty).not.toBeNull();
+    expect((empty as HTMLElement).textContent).toBe("No bio yet.");
+  });
+
+  it("renders the read-only CardDescription explaining why the bio is uneditable", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
+    expect(screen.getByText("Only the profile owner can edit the bio.")).toBeTruthy();
+  });
+
+  it("does NOT mount the editor, toolbar, Save button, or counter in readOnly mode", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
+    expect(screen.queryByTestId("mock-editor")).toBeNull();
+    expect(screen.queryByTestId("overview-save")).toBeNull();
+    expect(screen.queryByText(/\/20,000$/)).toBeNull();
+  });
+
+  it("treats a whitespace-only initialHtml as empty (renders the placeholder)", () => {
+    render(<OverviewCard cwid={CWID} initialHtml={"   \n\t  "} readOnly />);
+    const container = document.querySelectorAll('[data-slot="overview-card"]');
+    const lastCard = container[container.length - 1] as HTMLElement;
+    expect(lastCard.querySelector('[data-slot="overview-readonly-empty"]')).not.toBeNull();
+    expect(lastCard.querySelector('[data-slot="overview-readonly"]')).toBeNull();
+  });
+
+  it("readOnly=false renders the Phase 6 editor surface unchanged", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly={false} />);
+    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(screen.getByTestId("overview-save")).toBeTruthy();
+  });
+});
