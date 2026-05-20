@@ -196,7 +196,7 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
       "Properties": {
         "DestinationCidrBlock": "0.0.0.0/0",
         "NatGatewayId": {
-          "Ref": "VpcpublicSubnet2NATGateway4A29FD4F",
+          "Ref": "VpcpublicSubnet1NATGatewayA036E8A6",
         },
         "RouteTableId": {
           "Ref": "VpcprivateSubnet2RouteTable4D0FFC8C",
@@ -369,42 +369,6 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::EC2::Route",
-    },
-    "VpcpublicSubnet2EIP811E07A7": {
-      "Properties": {
-        "Domain": "vpc",
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "Sps-Network-prod/Vpc/publicSubnet2",
-          },
-        ],
-      },
-      "Type": "AWS::EC2::EIP",
-    },
-    "VpcpublicSubnet2NATGateway4A29FD4F": {
-      "DependsOn": [
-        "VpcpublicSubnet2DefaultRoute732F0BEB",
-        "VpcpublicSubnet2RouteTableAssociationCCE257FF",
-      ],
-      "Properties": {
-        "AllocationId": {
-          "Fn::GetAtt": [
-            "VpcpublicSubnet2EIP811E07A7",
-            "AllocationId",
-          ],
-        },
-        "SubnetId": {
-          "Ref": "VpcpublicSubnet2SubnetE34B022A",
-        },
-        "Tags": [
-          {
-            "Key": "Name",
-            "Value": "Sps-Network-prod/Vpc/publicSubnet2",
-          },
-        ],
-      },
-      "Type": "AWS::EC2::NatGateway",
     },
     "VpcpublicSubnet2RouteTableAssociationCCE257FF": {
       "Properties": {
