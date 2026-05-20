@@ -115,6 +115,58 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
   },
   "Resources": {
+    "AWS679f53fac002430cb0da5b7982bd22872D164C4C": {
+      "DependsOn": [
+        "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "56f7467bbde8a5efebcf57ae9e460027607099bab9f844669dcf5d800172ee5a.zip",
+        },
+        "Handler": "index.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 120,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
     "AuroraCluster23D869C0": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -703,6 +755,95 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::OpenSearchService::Domain",
       "UpdateReplacePolicy": "Retain",
+    },
+    "OpenSearchAccessPolicy97C4D347": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "OpenSearchAccessPolicyCustomResourcePolicyC1E4D7B9",
+      ],
+      "Properties": {
+        "Create": {
+          "Fn::Join": [
+            "",
+            [
+              "{"action":"updateDomainConfig","service":"OpenSearch","parameters":{"DomainName":"",
+              {
+                "Ref": "OpenSearch587998CD",
+              },
+              "","AccessPolicies":"{\\"Statement\\":[{\\"Action\\":\\"es:ESHttp*\\",\\"Effect\\":\\"Allow\\",\\"Principal\\":{\\"AWS\\":\\"*\\"},\\"Resource\\":\\"",
+              {
+                "Fn::GetAtt": [
+                  "OpenSearch587998CD",
+                  "Arn",
+                ],
+              },
+              "/*\\"}],\\"Version\\":\\"2012-10-17\\"}"},"outputPaths":["DomainConfig.AccessPolicies"],"physicalResourceId":{"id":"",
+              {
+                "Ref": "OpenSearch587998CD",
+              },
+              "AccessPolicy"}}",
+            ],
+          ],
+        },
+        "InstallLatestAwsSdk": false,
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "AWS679f53fac002430cb0da5b7982bd22872D164C4C",
+            "Arn",
+          ],
+        },
+        "Update": {
+          "Fn::Join": [
+            "",
+            [
+              "{"action":"updateDomainConfig","service":"OpenSearch","parameters":{"DomainName":"",
+              {
+                "Ref": "OpenSearch587998CD",
+              },
+              "","AccessPolicies":"{\\"Statement\\":[{\\"Action\\":\\"es:ESHttp*\\",\\"Effect\\":\\"Allow\\",\\"Principal\\":{\\"AWS\\":\\"*\\"},\\"Resource\\":\\"",
+              {
+                "Fn::GetAtt": [
+                  "OpenSearch587998CD",
+                  "Arn",
+                ],
+              },
+              "/*\\"}],\\"Version\\":\\"2012-10-17\\"}"},"outputPaths":["DomainConfig.AccessPolicies"],"physicalResourceId":{"id":"",
+              {
+                "Ref": "OpenSearch587998CD",
+              },
+              "AccessPolicy"}}",
+            ],
+          ],
+        },
+      },
+      "Type": "Custom::OpenSearchAccessPolicy",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "OpenSearchAccessPolicyCustomResourcePolicyC1E4D7B9": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "es:UpdateDomainConfig",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "OpenSearch587998CD",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OpenSearchAccessPolicyCustomResourcePolicyC1E4D7B9",
+        "Roles": [
+          {
+            "Ref": "AWS679f53fac002430cb0da5b7982bd2287ServiceRoleC1EA0FF2",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "OpenSearchSecurityGroup5212DDD0": {
       "Properties": {

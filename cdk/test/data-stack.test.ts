@@ -156,6 +156,29 @@ describe("DataStack", () => {
         expect(opts).not.toHaveProperty("MasterUserPassword");
       });
 
+      it("domain access policy permits es:ESHttp* from any AWS principal (required for HTTP basic auth to reach FGAC)", () => {
+        // With FGAC + internal user database + basic auth, the unsigned
+        // HTTP request hits AWS IAM first. If the access policy doesn't
+        // permit `es:ESHttp*` from `Principal: { AWS: "*" }`, AWS denies
+        // the request as anonymous BEFORE OpenSearch ever runs FGAC.
+        // VPC + SGs are the network gate; FGAC + the internal user DB
+        // are the application gate; anonymous OpenSearch access stays
+        // blocked because `AnonymousAuthEnabled` is false.
+        //
+        // `Domain.addAccessPolicies` materializes the policy as a
+        // `Custom::OpenSearchAccessPolicy` custom resource (a Lambda that
+        // calls `opensearch:UpdateDomainConfig`), not as the CFN
+        // `AccessPolicies` property — so assert on the custom resource.
+        template.resourceCountIs("Custom::OpenSearchAccessPolicy", 1);
+        const policyResources = template.findResources(
+          "Custom::OpenSearchAccessPolicy",
+        );
+        const policyJson = JSON.stringify(policyResources);
+        expect(policyJson).toContain("es:ESHttp*");
+        expect(policyJson).toMatch(/Principal.{1,40}AWS.{1,40}\*/);
+        expect(policyJson).toMatch(/Effect.{1,20}Allow/);
+      });
+
       it("master role has es:ESHttp* on the domain ARN (without it, _security API calls 403 before FGAC sees them)", () => {
         // Match a policy attached to the OS master role that allows
         // es:ESHttp* on the domain ARN. The L2 Domain helper does NOT
