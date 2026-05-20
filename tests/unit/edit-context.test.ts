@@ -18,11 +18,37 @@ type EditContextClient = Parameters<typeof loadEditContext>[1];
 const SELF = "self01";
 
 function fakeClient(): FakeClient {
+  // `fieldOverride.findUnique` is called twice — once for `overview` (Phase 3
+  // read-merge) and once for `slug` (Phase 7 superuser slug-card baseline).
+  // Default both to "no override"; per-test overrides may set values keyed on
+  // the requested fieldName via `mockImplementation`, or simply
+  // `mockResolvedValue` to set both at once.
   return {
     scholar: { findUnique: vi.fn() },
     suppression: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     fieldOverride: { findUnique: vi.fn().mockResolvedValue(null) },
+  };
+}
+
+/**
+ * Build a `fieldOverride.findUnique` implementation that returns the requested
+ * value per `fieldName`. Use when a test sets distinct values for `overview`
+ * and `slug` overrides at once. A `null` map entry is "no override".
+ */
+function fieldOverrideMap(map: { overview?: string | null; slug?: string | null }) {
+  return (args: {
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: string;
+        entityId: string;
+        fieldName: string;
+      };
+    };
+  }) => {
+    const field = args.where.entityType_entityId_fieldName.fieldName;
+    const v = map[field as keyof typeof map];
+    return Promise.resolve(v === undefined || v === null ? null : { value: v });
   };
 }
 
@@ -77,7 +103,7 @@ describe("loadEditContext — overview merge (Phase 3 read-merge)", () => {
   it("returns the field_override value when present", async () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow({ overview: "<p>seed</p>" }));
-    c.fieldOverride.findUnique.mockResolvedValue({ value: "<p>edited</p>" });
+    c.fieldOverride.findUnique.mockImplementation(fieldOverrideMap({ overview: "<p>edited</p>" }));
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.scholar.overview).toBe("<p>edited</p>");
   });
@@ -93,7 +119,7 @@ describe("loadEditContext — overview merge (Phase 3 read-merge)", () => {
   it("returns an empty string when the override is the empty string (cleared bio)", async () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow({ overview: "<p>seed</p>" }));
-    c.fieldOverride.findUnique.mockResolvedValue({ value: "" });
+    c.fieldOverride.findUnique.mockImplementation(fieldOverrideMap({ overview: "" }));
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.scholar.overview).toBe("");
   });
@@ -305,5 +331,80 @@ describe("loadEditContext — isSoleDisplayedAuthor", () => {
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.publications[0].state).toBe("shown");
     expect(ctx!.publications[0].isSoleDisplayedAuthor).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7 — slugOverride baseline (the superuser slug-card)
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — slugOverride (Phase 7 read for the superuser slug-card)", () => {
+  it("returns null when no field_override(slug) row exists", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // Both overview and slug findUnique return null by default.
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.scholar.slugOverride).toBeNull();
+  });
+
+  it("returns the override value when a field_override(slug) row exists", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow({ overview: "<p>seed</p>" }));
+    c.fieldOverride.findUnique.mockImplementation(
+      fieldOverrideMap({ overview: "<p>edited</p>", slug: "custom-handle" }),
+    );
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.scholar.slugOverride).toBe("custom-handle");
+    // overview merge still works alongside the new slug read
+    expect(ctx!.scholar.overview).toBe("<p>edited</p>");
+  });
+
+  it("queries fieldOverride.findUnique with the correct composite key for slug", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    await loadEditContext(SELF, asClient(c));
+    const slugCall = c.fieldOverride.findUnique.mock.calls.find(
+      (args) =>
+        args[0].where.entityType_entityId_fieldName.fieldName === "slug",
+    );
+    expect(slugCall).toBeDefined();
+    expect(slugCall![0].where.entityType_entityId_fieldName).toEqual({
+      entityType: "scholar",
+      entityId: SELF,
+      fieldName: "slug",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7 — arbitrary-cwid read (the superuser surface calls with any cwid)
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — arbitrary-cwid behavior (Phase 7 §2)", () => {
+  it("called with another cwid returns that scholar's data, suppression-OFF", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue({
+      cwid: "other7",
+      slug: "other-slug",
+      preferredName: "Alex Other",
+      fullName: "Alex Other, MD",
+      overview: "<p>other bio</p>",
+      deletedAt: null,
+    });
+    const ctx = await loadEditContext("other7", asClient(c));
+    expect(ctx).not.toBeNull();
+    expect(ctx!.scholar.cwid).toBe("other7");
+    expect(ctx!.scholar.preferredName).toBe("Alex Other");
+    expect(c.scholar.findUnique).toHaveBeenCalledWith({
+      where: { cwid: "other7" },
+      select: expect.anything(),
+    });
+  });
+
+  it("called with a cwid that has no scholar row returns null (page handler renders notFound())", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(null);
+    const ctx = await loadEditContext("missing-cwid", asClient(c));
+    expect(ctx).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   authorizeFieldEdit,
@@ -6,6 +6,7 @@ import {
   authorizeSuppress,
   canAccessPublicationEditPage,
   canAccessScholarEditPage,
+  requireSuperuserGet,
   verifyRequestOrigin,
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
@@ -166,6 +167,50 @@ describe("canAccessPublicationEditPage", () => {
   it("allows only a superuser", () => {
     expect(canAccessPublicationEditPage(ADMIN)).toBe(true);
     expect(canAccessPublicationEditPage(SELF)).toBe(false);
+  });
+});
+
+describe("requireSuperuserGet (Phase 7 §11)", () => {
+  it("returns null for a superuser session and emits no denial log", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(
+      requireSuperuserGet({ session: ADMIN, path: "/edit/scholar/other9", targetId: "other9" }),
+    ).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("returns 'not_superuser' for a non-superuser and emits one edit_authz_denied line", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const result = requireSuperuserGet({
+      session: SELF,
+      path: "/edit/scholar/other9",
+      targetId: "other9",
+    });
+    expect(result).toBe("not_superuser");
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = warn.mock.calls[0][0] as string;
+    const parsed = JSON.parse(line) as Record<string, unknown>;
+    expect(parsed.event).toBe("edit_authz_denied");
+    expect(parsed.path).toBe("/edit/scholar/other9");
+    expect(parsed.actor_cwid).toBe("self01");
+    expect(parsed.target_cwid).toBe("other9");
+    expect(parsed.reason).toBe("not_superuser_get");
+    warn.mockRestore();
+  });
+
+  it("works for the publication path too (the same helper serves both routes)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(
+      requireSuperuserGet({
+        session: SELF,
+        path: "/edit/publication/12345",
+        targetId: "12345",
+      }),
+    ).toBe("not_superuser");
+    const line = warn.mock.calls[0][0] as string;
+    expect(JSON.parse(line).path).toBe("/edit/publication/12345");
+    warn.mockRestore();
   });
 });
 

@@ -122,6 +122,31 @@ export function canAccessPublicationEditPage(session: EditSession): boolean {
   return session.isSuperuser;
 }
 
+/**
+ * Phase 7 § 11 — the GET-time superuser re-check used by
+ * `/edit/scholar/[cwid]` (when `cwid != session.cwid`) and
+ * `/edit/publication/[pmid]`. Returns `null` on allow, or `"not_superuser"`
+ * after emitting one structured `edit_authz_denied` line. Centralises the
+ * denial-log shape so the two routes cannot drift; the page handler responds
+ * with the visible 403 page when this returns non-null (Phase 7 D7.2). The
+ * `not_superuser_get` reason distinguishes a page-GET denial from the
+ * `/api/edit/*` POST `not_superuser` for log triage.
+ */
+export function requireSuperuserGet(params: {
+  session: EditSession;
+  path: string;
+  targetId: string;
+}): "not_superuser" | null {
+  if (params.session.isSuperuser) return null;
+  logEditDenial({
+    actorCwid: params.session.cwid,
+    targetCwid: params.targetId,
+    path: params.path,
+    reason: "not_superuser_get",
+  });
+  return "not_superuser";
+}
+
 // ---------------------------------------------------------------------------
 // request-origin guard  (defense in depth beyond SameSite=Lax)
 // ---------------------------------------------------------------------------
