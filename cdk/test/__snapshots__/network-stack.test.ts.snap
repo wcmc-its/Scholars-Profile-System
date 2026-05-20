@@ -169,7 +169,7 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
     },
     "VpcprivateSubnet1SubnetCEAD3716": {
       "Properties": {
-        "AvailabilityZone": "dummy1a",
+        "AvailabilityZone": "us-east-1a",
         "CidrBlock": "10.10.4.0/22",
         "MapPublicIpOnLaunch": false,
         "Tags": [
@@ -231,7 +231,7 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
     },
     "VpcprivateSubnet2Subnet2DE7549C": {
       "Properties": {
-        "AvailabilityZone": "dummy1b",
+        "AvailabilityZone": "us-east-1b",
         "CidrBlock": "10.10.8.0/22",
         "MapPublicIpOnLaunch": false,
         "Tags": [
@@ -332,7 +332,7 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
     },
     "VpcpublicSubnet1Subnet2BB74ED7": {
       "Properties": {
-        "AvailabilityZone": "dummy1a",
+        "AvailabilityZone": "us-east-1a",
         "CidrBlock": "10.10.0.0/24",
         "MapPublicIpOnLaunch": true,
         "Tags": [
@@ -397,7 +397,7 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
     },
     "VpcpublicSubnet2SubnetE34B022A": {
       "Properties": {
-        "AvailabilityZone": "dummy1b",
+        "AvailabilityZone": "us-east-1b",
         "CidrBlock": "10.10.1.0/24",
         "MapPublicIpOnLaunch": true,
         "Tags": [

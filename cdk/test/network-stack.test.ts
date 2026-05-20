@@ -39,6 +39,18 @@ describe("NetworkStack", () => {
     it("creates no SecurityGroupIngress rules — default-deny in Phase 0", () => {
       template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 0);
     });
+
+    it("synthesizes literal AZ names, not Fn::Select placeholders", () => {
+      const subnets = template.findResources("AWS::EC2::Subnet");
+      const azs = Object.values(subnets).map(
+        (r) => (r as { Properties: { AvailabilityZone: unknown } }).Properties.AvailabilityZone,
+      );
+      expect(azs).toHaveLength(4);
+      for (const az of azs) {
+        expect(typeof az).toBe("string");
+      }
+      expect(new Set(azs)).toEqual(new Set(["us-east-1a", "us-east-1b"]));
+    });
   });
 
   describe("staging", () => {
@@ -51,6 +63,18 @@ describe("NetworkStack", () => {
 
     it("creates exactly one NAT gateway in staging", () => {
       template.resourceCountIs("AWS::EC2::NatGateway", 1);
+    });
+
+    it("synthesizes literal AZ names, not Fn::Select placeholders", () => {
+      const subnets = template.findResources("AWS::EC2::Subnet");
+      const azs = Object.values(subnets).map(
+        (r) => (r as { Properties: { AvailabilityZone: unknown } }).Properties.AvailabilityZone,
+      );
+      expect(azs).toHaveLength(4);
+      for (const az of azs) {
+        expect(typeof az).toBe("string");
+      }
+      expect(new Set(azs)).toEqual(new Set(["us-east-1a", "us-east-1b"]));
     });
   });
 });

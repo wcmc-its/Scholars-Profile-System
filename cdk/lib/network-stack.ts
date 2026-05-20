@@ -49,7 +49,7 @@ export class NetworkStack extends Stack {
     // through the NAT gateway.
     this.vpc = new ec2.Vpc(this, "Vpc", {
       ipAddresses: ec2.IpAddresses.cidr(envConfig.vpcCidr),
-      maxAzs: envConfig.maxAzs,
+      availabilityZones: ["us-east-1a", "us-east-1b"],
       natGateways: envConfig.natGateways,
       subnetConfiguration: [
         { name: "public", subnetType: ec2.SubnetType.PUBLIC, cidrMask: 24 },
