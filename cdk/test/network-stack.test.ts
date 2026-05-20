@@ -19,8 +19,8 @@ describe("NetworkStack", () => {
       template.resourceCountIs("AWS::EC2::VPC", 1);
     });
 
-    it("creates two NAT gateways in prod", () => {
-      template.resourceCountIs("AWS::EC2::NatGateway", 2);
+    it("creates one NAT gateway in prod (EIP-cap-constrained — see config.ts)", () => {
+      template.resourceCountIs("AWS::EC2::NatGateway", 1);
     });
 
     it("creates the three named security groups", () => {

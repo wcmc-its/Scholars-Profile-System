@@ -810,7 +810,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
           "PasswordLength": 30,
           "SecretStringTemplate": "{"username":"scholars_admin"}",
         },
-        "Name": "scholars/db/master",
+        "Name": "scholars/prod/db/master",
       },
       "Type": "AWS::SecretsManager::Secret",
       "UpdateReplacePolicy": "Delete",

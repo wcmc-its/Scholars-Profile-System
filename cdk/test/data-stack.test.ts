@@ -81,7 +81,7 @@ describe("DataStack", () => {
 
       it("creates the master secret with the documented name (no plaintext value)", () => {
         template.hasResourceProperties("AWS::SecretsManager::Secret", {
-          Name: "scholars/db/master",
+          Name: "scholars/prod/db/master",
           GenerateSecretString: Match.objectLike({
             SecretStringTemplate: Match.stringLikeRegexp(
               "\\{\\s*\"username\"\\s*:\\s*\"scholars_admin\"",

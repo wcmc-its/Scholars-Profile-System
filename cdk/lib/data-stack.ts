@@ -123,7 +123,7 @@ export class DataStack extends Stack {
     //   B10's 35-day archive layer is provided by AWS Backup below, not by
     //   stretching the cluster's native retention beyond what we need.
     // - Master credentials live in an auto-generated Secrets Manager secret
-    //   (`scholars/db/master`). SecretsStack attaches RDS rotation; no
+    //   (`scholars/{env}/db/master`). SecretsStack attaches RDS rotation; no
     //   plaintext value ever appears in CDK source (ADR-008 hard rule).
     // ------------------------------------------------------------------
     const readers = Array.from(
@@ -140,7 +140,11 @@ export class DataStack extends Stack {
         version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
       }),
       credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
-        secretName: "scholars/db/master",
+        // Env-prefixed because account `665083158573` hosts both staging and
+        // prod (one-account deviation from ADR-008's separate-accounts
+        // alternative). Without the env in the path, the two stacks collide
+        // on Secrets Manager's per-region-per-account name uniqueness.
+        secretName: `scholars/${envConfig.envName}/db/master`,
       }),
       defaultDatabaseName: "scholars",
       vpc,

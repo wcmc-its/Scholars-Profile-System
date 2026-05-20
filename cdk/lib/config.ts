@@ -87,7 +87,14 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     drRegion: "us-west-2",
     vpcCidr: "10.10.0.0/16",
     maxAzs: 2,
-    natGateways: 2,
+    // One NAT gateway in prod, not two — the account is at its EIP cap
+    // (7 EIPs already in use across ReCiter + staging SPS, allocation
+    // request denied 2026-05-20). A second prod NAT pushes past the cap.
+    // Trade-off accepted at launch: if the NAT's AZ fails, ECS tasks in
+    // the other AZ lose outbound; for a CDN-fronted read-mostly app the
+    // user-visible impact is small. Raise the EIP quota and bump this
+    // to 2 post-launch.
+    natGateways: 1,
     auroraMinCapacity: 1,
     auroraMaxCapacity: 8,
     auroraReaderCount: 1,
