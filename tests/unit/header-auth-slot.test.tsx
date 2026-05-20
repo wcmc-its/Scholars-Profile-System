@@ -3,20 +3,15 @@ import { render, screen } from "@testing-library/react";
 
 // Mock next/navigation before importing the component.
 const mockUsePathname = vi.fn();
-const mockUseSearchParams = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
-  useSearchParams: () => mockUseSearchParams(),
 }));
 
 import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
 
 beforeEach(() => {
   mockUsePathname.mockReset();
-  mockUseSearchParams.mockReset();
-  // Default: behave as if on a plain path with no query.
   mockUsePathname.mockReturnValue("/");
-  mockUseSearchParams.mockReturnValue(new URLSearchParams(""));
 });
 
 describe("HeaderAuthSlot — signed out", () => {
@@ -31,14 +26,14 @@ describe("HeaderAuthSlot — signed out", () => {
     );
   });
 
-  it("preserves the current query string in the return parameter", () => {
+  it("does NOT carry a query string in the return parameter (path-only by design)", () => {
+    // Per the component's JSDoc: useSearchParams() would force a Suspense
+    // boundary, breaking next build's prerender of `/`. Path is the unit.
     mockUsePathname.mockReturnValue("/search");
-    mockUseSearchParams.mockReturnValue(new URLSearchParams("q=mRNA&page=2"));
     render(<HeaderAuthSlot isAuthenticated={false} scholar={null} />);
-
     const link = screen.getByTestId("header-sign-in") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe(
-      "/api/auth/saml/login?return=" + encodeURIComponent("/search?q=mRNA&page=2"),
+      "/api/auth/saml/login?return=" + encodeURIComponent("/search"),
     );
   });
 
