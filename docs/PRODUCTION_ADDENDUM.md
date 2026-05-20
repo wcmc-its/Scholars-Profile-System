@@ -28,7 +28,7 @@ This endpoint exists to invalidate CDN entries after an ETL run. It must be reac
 Two layers:
 
 1. **Network**: an internal-only ALB listener (separate from the public listener) routes `/api/revalidate*` to the same ECS service. ETL Lambdas run in a dedicated security group; the internal listener's security group allows ingress only from the ETL security group, by SG ID. No IP allowlist (NAT egress is shared with anything else in the subnet), no API Gateway, no PrivateLink — just SG-to-SG. CloudFront and the public listener never reach `/api/revalidate*`.
-2. **Shared secret**: the request carries `Authorization: Bearer <token>` where the token lives in `scholars/revalidate-token` in Secrets Manager. The handler reads the expected token at cold start and compares constant-time. Rotate quarterly. Lambdas cache the token at cold start, so a rotation requires either publishing a new Lambda version after the secret update (forces a cold start) or accepting that old tokens keep working until the runtime recycles. The handler accepts both the current and previous token during a rotation window. The step-by-step rotation procedure is [`docs/revalidate-token-rotation.md`](./revalidate-token-rotation.md).
+2. **Shared secret**: the request carries `Authorization: Bearer <token>` where the token lives in `scholars/<env>/revalidate-token` in Secrets Manager. The handler reads the expected token at cold start and compares constant-time. Rotate quarterly. Lambdas cache the token at cold start, so a rotation requires either publishing a new Lambda version after the secret update (forces a cold start) or accepting that old tokens keep working until the runtime recycles. The handler accepts both the current and previous token during a rotation window. The step-by-step rotation procedure is [`docs/revalidate-token-rotation.md`](./revalidate-token-rotation.md).
 
 Either layer alone is enough for correctness; both removes the endpoint from any external attack-surface scan.
 
@@ -36,15 +36,18 @@ Either layer alone is enough for correctness; both removes the endpoint from any
 
 All credentials live in AWS Secrets Manager. The ECS task definition references each by ARN under `secrets:`, never `environment:`.
 
+All names are env-scoped (`scholars/<env>/...`) so staging and prod coexist in one AWS account.
+
 | Secret | Consumer |
 |---|---|
-| `scholars/db/app-rw` | App writer DSN (used by `/api/edit` and migrations only) |
-| `scholars/db/app-ro` | App reader DSN |
-| `scholars/db/etl` | ETL writer DSN |
-| `scholars/opensearch/app` | App user (read + suggest only) |
-| `scholars/opensearch/etl` | ETL user (read + write) |
-| `scholars/revalidate-token` | Shared bearer for `/api/revalidate` |
-| `scholars/etl/{source}` | One per ETL source (LDAP, InfoEd, COI, etc.) |
+| `scholars/<env>/db/app-rw` | App writer DSN (used by `/api/edit` and migrations only) |
+| `scholars/<env>/db/app-ro` | App reader DSN |
+| `scholars/<env>/db/etl` | ETL writer DSN |
+| `scholars/<env>/opensearch/app` | App user (read + suggest only) |
+| `scholars/<env>/opensearch/etl` | ETL user (read + write) |
+| `scholars/<env>/revalidate-token` | Shared bearer for `/api/revalidate` |
+| `scholars/<env>/saml-sp/private-key` | SAML SP private key matching the cert filed with WCM IT |
+| `scholars/<env>/etl/{source}` | One per ETL source (LDAP, InfoEd, COI, etc.) |
 
 The task **execution role** gets `secretsmanager:GetSecretValue` on these ARNs and nothing else. The task **role** (the runtime identity for application code) has no secret access — code only sees secrets as env vars injected at task start. This split matters: a compromised app process cannot enumerate or rotate secrets.
 
@@ -52,7 +55,7 @@ DB credentials rotate via the Secrets Manager rotation Lambda for RDS. OpenSearc
 
 ### Reader/writer split
 
-Two DSN secrets (`db/app-rw`, `db/app-ro`) imply a reader/writer split that a single `DATABASE_URL` does not deliver. Prisma needs to be told.
+Two DSN secrets (`scholars/<env>/db/app-rw`, `scholars/<env>/db/app-ro`) imply a reader/writer split that a single `DATABASE_URL` does not deliver. Prisma needs to be told.
 
 The implementation: two `PrismaClient` instances at module scope — one bound to `app-ro` (Aurora reader endpoint), one to `app-rw` (writer endpoint). A small `db.ts` exports `db.read` and `db.write`; route handlers and server components default to `db.read`, the writer endpoints (`/api/edit*`) and the migration task use `db.write`. `@prisma/extension-read-replicas` is the lighter alternative and acceptable; pick one and don't mix the two patterns in the same codebase.
 
@@ -179,7 +182,7 @@ deploy pipeline:
   3. run migration task
      image:   same image as the new app version
      command: prisma migrate deploy
-     secret:  scholars/db/app-rw
+     secret:  scholars/<env>/db/app-rw
      exit 0 → continue; non-zero → fail the deploy, do not roll the service
   4. update ECS service → rolling deploy of the new image
 ```

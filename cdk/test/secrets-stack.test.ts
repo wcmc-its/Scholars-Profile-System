@@ -15,23 +15,23 @@ function buildSecretsStack(envName: "staging" | "prod"): {
 }
 
 const EXPECTED_SECRETS_PROD = [
-  "scholars/db/app-rw",
-  "scholars/db/app-ro",
-  "scholars/db/etl",
-  "scholars/opensearch/app",
-  "scholars/opensearch/etl",
-  "scholars/revalidate-token",
-  "scholars/saml-sp/prod/private-key",
+  "scholars/prod/db/app-rw",
+  "scholars/prod/db/app-ro",
+  "scholars/prod/db/etl",
+  "scholars/prod/opensearch/app",
+  "scholars/prod/opensearch/etl",
+  "scholars/prod/revalidate-token",
+  "scholars/prod/saml-sp/private-key",
 ];
 
 const EXPECTED_SECRETS_STAGING = [
-  "scholars/db/app-rw",
-  "scholars/db/app-ro",
-  "scholars/db/etl",
-  "scholars/opensearch/app",
-  "scholars/opensearch/etl",
-  "scholars/revalidate-token",
-  "scholars/saml-sp/staging/private-key",
+  "scholars/staging/db/app-rw",
+  "scholars/staging/db/app-ro",
+  "scholars/staging/db/etl",
+  "scholars/staging/opensearch/app",
+  "scholars/staging/opensearch/etl",
+  "scholars/staging/revalidate-token",
+  "scholars/staging/saml-sp/private-key",
 ];
 
 describe("SecretsStack", () => {
@@ -91,12 +91,28 @@ describe("SecretsStack", () => {
       template.resourceCountIs("AWS::Serverless::Application", 0);
       template.resourceCountIs("AWS::Lambda::Function", 0);
     });
+
+    it("every secret Name is env-scoped under `scholars/prod/` (no unscoped collisions in single-account)", () => {
+      // Synth-time guard: catches the failure mode that bit Sps-Secrets-prod
+      // when staging and prod both tried to create the same unscoped names
+      // in one account. Every SecretsStack Name must start with the env.
+      const secrets = template.findResources("AWS::SecretsManager::Secret");
+      const offenders: string[] = [];
+      for (const [id, resource] of Object.entries(secrets)) {
+        const name = resource.Properties?.Name;
+        if (typeof name !== "string" || !name.startsWith("scholars/prod/")) {
+          offenders.push(`${id}: Name=${JSON.stringify(name)}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 
   describe("staging", () => {
     const { template } = buildSecretsStack("staging");
 
-    it("names the SAML SP private-key secret per env", () => {
+    it("creates the seven expected secrets with env-scoped staging names", () => {
+      template.resourceCountIs("AWS::SecretsManager::Secret", 7);
       for (const name of EXPECTED_SECRETS_STAGING) {
         template.hasResourceProperties("AWS::SecretsManager::Secret", {
           Name: name,
@@ -113,5 +129,17 @@ describe("SecretsStack", () => {
         });
       },
     );
+
+    it("every secret Name is env-scoped under `scholars/staging/`", () => {
+      const secrets = template.findResources("AWS::SecretsManager::Secret");
+      const offenders: string[] = [];
+      for (const [id, resource] of Object.entries(secrets)) {
+        const name = resource.Properties?.Name;
+        if (typeof name !== "string" || !name.startsWith("scholars/staging/")) {
+          offenders.push(`${id}: Name=${JSON.stringify(name)}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
   });
 });

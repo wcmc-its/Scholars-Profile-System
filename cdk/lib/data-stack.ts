@@ -123,7 +123,7 @@ export class DataStack extends Stack {
     //   B10's 35-day archive layer is provided by AWS Backup below, not by
     //   stretching the cluster's native retention beyond what we need.
     // - Master credentials live in an auto-generated Secrets Manager secret
-    //   (`scholars/db/master`). SecretsStack attaches RDS rotation; no
+    //   (`scholars/<env>/db/master`). SecretsStack attaches RDS rotation; no
     //   plaintext value ever appears in CDK source (ADR-008 hard rule).
     // ------------------------------------------------------------------
     const readers = Array.from(
@@ -140,7 +140,14 @@ export class DataStack extends Stack {
         version: rds.AuroraMysqlEngineVersion.VER_3_08_0,
       }),
       credentials: rds.Credentials.fromGeneratedSecret("scholars_admin", {
-        secretName: "scholars/db/master",
+        // Env-scoped so staging + prod coexist in one AWS account
+        // (single-account deviation from ADR-008). Renaming after the
+        // staging cluster is live triggers a CFN replace of this secret;
+        // RemovalPolicy.RETAIN on the existing secret keeps the cluster's
+        // live password intact at the orphaned ARN. The post-deploy runbook
+        // copies the value into the new env-scoped ARN so future rotation
+        // reads the live credentials. Prod is greenfield — no migration.
+        secretName: `scholars/${envConfig.envName}/db/master`,
       }),
       defaultDatabaseName: "scholars",
       vpc,
@@ -163,15 +170,26 @@ export class DataStack extends Stack {
     });
     // The auto-generated master secret. Retain on cluster delete so the
     // recovery procedure can read the credentials from Secrets Manager even
-    // if the cluster has been replaced from a snapshot.
+    // if the cluster has been replaced from a snapshot. RETAIN on
+    // UpdateReplacePolicy is equally critical: a Name change triggers a
+    // CFN replace (Name is replace-required), and without RETAIN the OLD
+    // secret holding the cluster's live password is deleted. The previous
+    // implementation called `applyRemovalPolicy` on `cluster.secret`'s
+    // default child, but that resolves to the SecretTargetAttachment, not
+    // the underlying Secret — so the actual Secret kept the default
+    // `UpdateReplacePolicy: Delete`. Reach into the construct tree
+    // directly to set the policy on the CfnSecret itself.
     if (!this.auroraCluster.secret) {
       throw new Error(
         "Aurora cluster did not produce a master secret — Credentials.fromGeneratedSecret should always create one.",
       );
     }
     this.auroraMasterSecret = this.auroraCluster.secret;
+    const masterSecretConstruct = this.auroraCluster.node.findChild(
+      "Secret",
+    ) as secretsmanager.Secret;
     (
-      this.auroraMasterSecret.node.defaultChild as secretsmanager.CfnSecret
+      masterSecretConstruct.node.defaultChild as secretsmanager.CfnSecret
     ).applyRemovalPolicy(RemovalPolicy.RETAIN);
 
     // RDS rotation for the Aurora master credentials (B06 secrets half).

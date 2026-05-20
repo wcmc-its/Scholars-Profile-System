@@ -63,25 +63,29 @@ ADR-008's hard rule, no plaintext secret ever appears in CDK source or in the
 synthesized template. After the first `cdk deploy Sps-Secrets-<env>`, the
 account holder seeds the values out-of-band:
 
-| Secret name                              | How to seed                                                  |
-| ---------------------------------------- | ------------------------------------------------------------ |
-| `scholars/db/app-rw`                     | DSN once the `app_rw` MySQL user exists                       |
-| `scholars/db/app-ro`                     | DSN once the `app_ro` MySQL user exists                       |
-| `scholars/db/etl`                        | DSN once the `etl` MySQL user exists                          |
-| `scholars/opensearch/app`                | OpenSearch user created via the `_security` API               |
-| `scholars/opensearch/etl`                | OpenSearch user created via the `_security` API               |
-| `scholars/revalidate-token`              | `openssl rand -hex 32` — quarterly calendar rotation per [`docs/revalidate-token-rotation.md`](../docs/revalidate-token-rotation.md) |
-| `scholars/saml-sp/<env>/private-key`     | PEM private key matching the SP cert registered with WCM IT   |
+All names are env-scoped (`scholars/<env>/...`) so staging and production
+coexist in one AWS account without `AlreadyExists` collisions. The unscoped
+shape only worked under ADR-008's original separate-accounts model.
+
+| Secret name                                  | How to seed                                                  |
+| -------------------------------------------- | ------------------------------------------------------------ |
+| `scholars/<env>/db/app-rw`                   | DSN once the `app_rw` MySQL user exists                       |
+| `scholars/<env>/db/app-ro`                   | DSN once the `app_ro` MySQL user exists                       |
+| `scholars/<env>/db/etl`                      | DSN once the `etl` MySQL user exists                          |
+| `scholars/<env>/opensearch/app`              | OpenSearch user created via the `_security` API               |
+| `scholars/<env>/opensearch/etl`              | OpenSearch user created via the `_security` API               |
+| `scholars/<env>/revalidate-token`            | `openssl rand -hex 32` — quarterly calendar rotation per [`docs/revalidate-token-rotation.md`](../docs/revalidate-token-rotation.md) |
+| `scholars/<env>/saml-sp/private-key`         | PEM private key matching the SP cert registered with WCM IT   |
 
 Seeding pattern (run by the account holder):
 
 ```sh
 aws secretsmanager put-secret-value \
-  --secret-id scholars/revalidate-token \
+  --secret-id scholars/prod/revalidate-token \
   --secret-string "$(openssl rand -hex 32)"
 ```
 
-The Aurora **master** secret (`scholars/db/master`) is created and
+The Aurora **master** secret (`scholars/<env>/db/master`) is created and
 auto-rotated by `DataStack` on a 30-day cadence; it does not need manual
 seeding. (ADR-008 nominally locates RDS rotation in `SecretsStack`; it
 actually lives in `DataStack` next to the cluster and its auto-generated
@@ -96,8 +100,8 @@ holder** — auto-rotation for app-tier users is out of scope for this phase.
 control. The FGAC master is an IAM role (`sps-opensearch-master-<env>`) with
 an `AccountRootPrincipal` trust policy — there is no master *secret* to seed.
 To administer the domain, an account holder assumes the role and uses the
-`_security` API to create the `scholars/opensearch/app` and
-`scholars/opensearch/etl` internal users, then populates the matching
+`_security` API to create the `scholars/<env>/opensearch/app` and
+`scholars/<env>/opensearch/etl` internal users, then populates the matching
 Secrets Manager entries.
 
 ## Phased rollout
@@ -110,6 +114,6 @@ reviewable PR.
 | 0     | `NetworkStack`, `Dockerfile`, `cdk synth` CI job           | shipped (#386) |
 | 1     | `DataStack`, `SecretsStack`, `DrBackupVaultStack`          | this PR  |
 | 2     | `AppStack` (ECR / ECS / ALB / CloudFront / WAF / migration task) | next |
-| 3     | `EtlStack` (Step Functions + Lambdas) + `scholars/etl/{source}` secrets | — |
+| 3     | `EtlStack` (Step Functions + Lambdas) + `scholars/<env>/etl/{source}` secrets | — |
 | 4     | `NetworkStack` VPC endpoints (B17)                         | —        |
 | 5     | `ObservabilityStack` + staging-environment acceptance      | —        |

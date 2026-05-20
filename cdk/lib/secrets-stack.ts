@@ -55,6 +55,7 @@ export class SecretsStack extends Stack {
     super(scope, id, props);
 
     const { envConfig } = props;
+    const env = envConfig.envName;
 
     // Secrets defined by ARN only — `secretString` and `generateSecretString`
     // are both omitted so neither CDK source nor the synthesized template
@@ -62,49 +63,56 @@ export class SecretsStack extends Stack {
     // revalidate token, and the SAML SP private key all share this shape;
     // the account holder seeds each with `aws secretsmanager put-secret-value`
     // before the consuming stack ships (AppStack for db/* and opensearch/*;
-    // EtlStack for revalidate-token; the SAML SP key is already pre-staged
-    // in prod per the project's SAML SP wiring notes and CDK takes over the
-    // ARN from this PR forward).
+    // EtlStack for revalidate-token).
+    //
+    // Names are env-scoped (`scholars/<env>/...`) so staging and prod can
+    // coexist in one AWS account without `AlreadyExists` collisions. The
+    // unscoped shape only worked under ADR-008's original separate-accounts
+    // model; the single-account deviation surfaced the collision as soon as
+    // Sps-Secrets-prod ran. The SAML SP private key, previously scoped at
+    // `scholars/saml-sp/<env>/private-key`, is folded into the uniform
+    // pattern; the legacy pre-staged value in prod is migrated to the new
+    // ARN via the post-deploy runbook step in the PR description.
     const specs: ReadonlyArray<SecretSpec> = [
       {
         constructId: "AppRw",
-        name: "scholars/db/app-rw",
+        name: `scholars/${env}/db/app-rw`,
         description:
           "SPS app writer DSN — used by /api/edit and one-shot prisma migrate deploy (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "AppRo",
-        name: "scholars/db/app-ro",
+        name: `scholars/${env}/db/app-ro`,
         description:
           "SPS app reader DSN — backs the db.read PrismaClient (PRODUCTION_ADDENDUM § Reader/writer split).",
       },
       {
         constructId: "Etl",
-        name: "scholars/db/etl",
+        name: `scholars/${env}/db/etl`,
         description: "SPS ETL writer DSN (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "OpensearchApp",
-        name: "scholars/opensearch/app",
+        name: `scholars/${env}/opensearch/app`,
         description:
           "SPS OpenSearch app user — read + suggest only (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "OpensearchEtl",
-        name: "scholars/opensearch/etl",
+        name: `scholars/${env}/opensearch/etl`,
         description:
           "SPS OpenSearch ETL user — read + write (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
         constructId: "RevalidateToken",
-        name: "scholars/revalidate-token",
+        name: `scholars/${env}/revalidate-token`,
         description:
           "SPS /api/revalidate shared bearer (B04). Quarterly calendar rotation per docs/revalidate-token-rotation.md.",
       },
       {
         constructId: "SamlSpPrivateKey",
-        name: `scholars/saml-sp/${envConfig.envName}/private-key`,
-        description: `SPS SAML SP private key (${envConfig.envName}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
+        name: `scholars/${env}/saml-sp/private-key`,
+        description: `SPS SAML SP private key (${env}) — matches the SP cert filed with WCM IT. Value migrated from legacy unscoped name post-deploy.`,
       },
     ];
 
