@@ -54,9 +54,13 @@ describe("VisibilityCard — visible state", () => {
     await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
     const [url, opts] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/edit/suppress");
+    // The dialog defaults to the "Information is out of date" preset; that
+    // label is the stored reason (`self-edit-spec.md` § Suppression UX —
+    // "the UI collects ... a preset", the preset IS the reason).
     expect(JSON.parse(opts.body as string)).toEqual({
       entityType: "scholar",
       entityId: CWID,
+      reason: "Information is out of date",
     });
     // After success, the card flips into the hidden-self state.
     await waitFor(() =>

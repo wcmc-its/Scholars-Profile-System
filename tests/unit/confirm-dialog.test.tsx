@@ -56,11 +56,27 @@ describe("ConfirmDialog — reasonMode='optional-preset'", () => {
     expect(screen.queryByLabelText("Other reason")).toBeNull();
   });
 
-  it("Confirm with a non-Other preset fires with reason=null (server defaults)", async () => {
+  it("Confirm with the default preset fires with its label ('Information is out of date')", async () => {
     const d = defaults();
     render(<ConfirmDialog {...d} reasonMode="optional-preset" />);
+    // The default-selected preset is "out-of-date"; its label is what becomes
+    // the stored reason. `self-edit-spec.md` § Suppression UX: the UI collects
+    // "free text, or a preset" — the preset is the reason, not a placeholder.
     fireEvent.click(screen.getByRole("button", { name: "Hide my profile" }));
-    await waitFor(() => expect(d.onConfirm).toHaveBeenCalledWith(null));
+    await waitFor(() =>
+      expect(d.onConfirm).toHaveBeenCalledWith("Information is out of date"),
+    );
+  });
+
+  it("Confirm with 'Personal or privacy reasons' preset fires with that label", async () => {
+    const d = defaults();
+    render(<ConfirmDialog {...d} reasonMode="optional-preset" />);
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByText("Personal or privacy reasons"));
+    fireEvent.click(screen.getByRole("button", { name: "Hide my profile" }));
+    await waitFor(() =>
+      expect(d.onConfirm).toHaveBeenCalledWith("Personal or privacy reasons"),
+    );
   });
 
   it("Confirm with the Other preset + blank textarea fires with reason=null", async () => {

@@ -49,9 +49,11 @@ export type ConfirmDialogProps = {
   /**
    * Fires when the user confirms. The reason argument is:
    *   - `null` for `reasonMode: 'none'`;
-   *   - `null` for `reasonMode: 'optional-preset'` when the preset is the
-   *     "out-of-date" / "privacy" placeholder (the API defaults it server-side),
-   *     and the trimmed "Other" text when the preset is "other";
+   *   - for `reasonMode: 'optional-preset'`: the trimmed "Other" text when
+   *     the preset is "other" (or `null` if that textarea is blank — the
+   *     server's `"Self-suppressed via /edit"` default then applies); the
+   *     preset's display label ("Information is out of date" / "Personal or
+   *     privacy reasons") when a non-"Other" preset is selected;
    *   - the non-empty trimmed text for `reasonMode: 'required-text'`.
    *
    * The handler may be async; the dialog disables Confirm and shows "Working…"
@@ -100,8 +102,15 @@ export function ConfirmDialog({
     } else if (reasonMode === "required-text") {
       reason = trimmedRequired;
     } else {
-      // optional-preset
-      reason = preset === "other" ? (trimmedOther.length > 0 ? trimmedOther : null) : null;
+      // optional-preset — `self-edit-spec.md` § Suppression UX: the UI collects
+      // "free text, or a preset"; a chosen preset IS the stored reason. Only
+      // when the user selects "Other" and leaves the textarea blank does the
+      // server's default ("Self-suppressed via /edit") apply.
+      if (preset === "other") {
+        reason = trimmedOther.length > 0 ? trimmedOther : null;
+      } else {
+        reason = PRESET_REASONS.find((r) => r.value === preset)?.label ?? null;
+      }
     }
     setPending(true);
     try {
