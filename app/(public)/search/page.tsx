@@ -16,6 +16,8 @@ import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import { ConceptChip } from "@/components/search/concept-chip";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
+import { SearchInterpretationPopover } from "@/components/search/search-interpretation-popover";
+import { buildSearchInterpretation } from "@/lib/api/search-interpretation";
 import { buildMeshHref } from "./url-helpers";
 import { parseMeshParam, resolveConceptMode } from "@/lib/api/search-flags";
 import {
@@ -352,6 +354,19 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
               expandHref={buildMeshHref(sp, "clear")}
             />
           )
+        ) : null}
+        {/* Issue #265 Phase 1 — Search interpretation popover. Pub-tab only:
+            Phase 2 introduces author/journal detection, at which point the
+            trigger earns its place on scholars / funding tabs. The strict
+            `?searchMode=mesh-only` filter CTA is carved to #396 pending the
+            MEDLINE-indexed-vs-has-MeSH semantic decision. */}
+        {type === "publications" && q.length > 0 ? (
+          <div className="my-2 flex justify-end">
+            <SearchInterpretationPopover
+              interpretation={buildSearchInterpretation(effectiveMeshResolution)}
+              q={q}
+            />
+          </div>
         ) : null}
       </div>
       <ModeTabs
