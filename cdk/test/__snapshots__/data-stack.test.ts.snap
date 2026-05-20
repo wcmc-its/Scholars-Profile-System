@@ -399,7 +399,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
     "AuroraSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3063306972DA0A5": {
       "Properties": {
-        "Description": "ECS app tasks → Aurora writer/reader endpoints",
+        "Description": "ECS app tasks -> Aurora writer/reader endpoints",
         "FromPort": 3306,
         "GroupId": {
           "Fn::GetAtt": [
@@ -417,7 +417,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
     "AuroraSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D330656C705F4": {
       "Properties": {
-        "Description": "ETL Lambdas → Aurora writer/reader endpoints",
+        "Description": "ETL Lambdas -> Aurora writer/reader endpoints",
         "FromPort": 3306,
         "GroupId": {
           "Fn::GetAtt": [
@@ -726,7 +726,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
     "OpenSearchSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3064430924CAB2": {
       "Properties": {
-        "Description": "ECS app tasks → OpenSearch HTTPS",
+        "Description": "ECS app tasks -> OpenSearch HTTPS",
         "FromPort": 443,
         "GroupId": {
           "Fn::GetAtt": [
@@ -744,7 +744,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
     "OpenSearchSecurityGroupfromSpsNetworkprodEtlSecurityGroupF1A0971D443B9C259F7": {
       "Properties": {
-        "Description": "ETL Lambdas → OpenSearch HTTPS (index writes + suggest)",
+        "Description": "ETL Lambdas -> OpenSearch HTTPS (index writes + suggest)",
         "FromPort": 443,
         "GroupId": {
           "Fn::GetAtt": [
