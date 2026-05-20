@@ -8,3 +8,6 @@ cdk.out
 
 # Jest coverage output
 coverage
+
+# CDK context cache (account-specific AZ / AMI lookups; env-agnostic synth doesn't need it tracked)
+cdk.context.json
