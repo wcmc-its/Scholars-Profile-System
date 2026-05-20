@@ -214,10 +214,20 @@ export class DataStack extends Stack {
     // ------------------------------------------------------------------
     // OpenSearch domain.
     //
-    // Fine-grained access control with an IAM master (no secret-managed
-    // master user — the chosen pattern per Phase 1 sign-off). The role's
-    // trust policy admits the account root; the account holder assumes it
-    // to administer roles/users via the `_security` API after deploy.
+    // Fine-grained access control with an IAM master and the internal user
+    // database enabled. The master is the IAM role below (no master
+    // user/password pair, per Phase 1 sign-off); the internal user database
+    // is on so app and ETL can authenticate via basic auth (the
+    // `scholars/{env}/opensearch/{app,etl}` secrets in SecretsStack — see
+    // PRODUCTION_ADDENDUM § Secrets). With FGAC, AWS supports both
+    // simultaneously: `MasterUserOptions.MasterUserARN` chooses the IAM
+    // master, and `InternalUserDatabaseEnabled=true` lets the master create
+    // basic-auth internal users via the `_security` API after deploy.
+    //
+    // The master role gets `es:ESHttp*` on the domain ARN — required for any
+    // IAM principal to reach the OpenSearch HTTP endpoint (FGAC mapping
+    // alone is necessary but not sufficient; AWS gates the request at the
+    // IAM layer before FGAC sees it).
     //
     // Multi-AZ-without-standby for prod (two AZs match NetworkStack);
     // single-AZ for staging. Encryption at rest + node-to-node + HTTPS-only.
@@ -265,6 +275,32 @@ export class DataStack extends Stack {
       enableAutoSoftwareUpdate: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+
+    // L1 escape hatch: the L2 Domain construct's AdvancedSecurityOptions
+    // type forces an XOR between IAM master and internal-DB master. AWS
+    // OpenSearch itself supports both at once — the IAM master administers,
+    // and InternalUserDatabaseEnabled=true lets that master mint basic-auth
+    // users for the app and ETL roles. Set the missing flag directly on
+    // CfnDomain so the synthesized template carries IAM master +
+    // InternalUserDatabaseEnabled=true together.
+    const cfnOpensearchDomain = this.opensearchDomain.node
+      .defaultChild as opensearchservice.CfnDomain;
+    cfnOpensearchDomain.addPropertyOverride(
+      "AdvancedSecurityOptions.InternalUserDatabaseEnabled",
+      true,
+    );
+
+    // `es:ESHttp*` on the domain ARN. Without this the assumed master role
+    // cannot reach the `_security` API (the IAM gate trips before FGAC
+    // mapping), and the post-deploy bootstrap that creates internal users
+    // fails with `not authorized to perform: es:ESHttpPut`.
+    this.opensearchMasterRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["es:ESHttp*"],
+        resources: [`${this.opensearchDomain.domainArn}/*`],
+      }),
+    );
 
     // ------------------------------------------------------------------
     // AWS Backup — daily plan in this region, cross-region copy to the DR
