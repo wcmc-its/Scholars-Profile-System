@@ -34,7 +34,7 @@ The table is deliberately **not** a Prisma model and not in `prisma/schema.prism
 | `actor_cwid` | `VARCHAR(32)` | The signed-in actor (B01 SSO session subject). |
 | `target_entity_type` | `ENUM(scholar, publication, grant, education, appointment)` | #354 — mirrors ADR-005's `EntityType`. v1 emits only `scholar` / `publication`. |
 | `target_entity_id` | `VARCHAR(64)` | `scholar.cwid` or `publication.pmid`. |
-| `action` | `ENUM(field_override, suppression_create, suppression_revoke)` | #354 discriminator. |
+| `action` | `ENUM(field_override, field_override_clear, suppression_create, suppression_revoke)` | #354 discriminator. `field_override_clear` (#356 Phase 7) is the slug-card "Clear override" — deletes one `field_override` row. |
 | `fields_changed` | `JSON` NULL | Array of field names for `field_override` (e.g. `["overview"]`); `NULL` for a suppression event. |
 | `before_values` | `JSON` NULL | Field override: pre-edit value(s). Suppression: `reason` / `contributor_cwid` / revoke payload. |
 | `after_values` | `JSON` NULL | As above, post-state. |
@@ -49,6 +49,7 @@ Two indexes — `(target_entity_type, target_entity_id, ts)` and `(actor_cwid, t
 | `action` | `target_*` | `fields_changed` | `before_values` / `after_values` |
 |---|---|---|---|
 | `field_override` | `scholar`, cwid | `["overview"]` or `["slug"]` | `{ "<field>": "<old>" }` / `{ "<field>": "<new>" }` — the sanitized values, matching what `field_override.value` stores |
+| `field_override_clear` | `scholar`, cwid | `["slug"]` | `before`: `{ "slug": "<old>" }`. `after`: `{ "slug": null }`. v1 clears only `slug` — clearing `overview` is the existing `field_override` with `""`. |
 | `suppression_create` | the suppressed entity | `NULL` | `before`: `null`. `after`: `{ suppression_id, contributor_cwid, reason }` |
 | `suppression_revoke` | the suppressed entity | `NULL` | `before`: `{ suppression_id, … }`. `after`: `{ revoked_by, revoked_at }` |
 

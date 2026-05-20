@@ -61,8 +61,10 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
-  -- edit; `suppression_create` / `suppression_revoke` are suppression events.
-  `action`             ENUM('field_override','suppression_create','suppression_revoke') NOT NULL,
+  -- edit; `field_override_clear` is a delete of one `field_override` row
+  -- (#356 Phase 7 -- the slug-card "Clear override" action); `suppression_create`
+  -- / `suppression_revoke` are suppression events.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -99,6 +101,26 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 ) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- IDEMPOTENT ENUM EXTENSIONS for existing deploys.
+--
+-- `CREATE TABLE IF NOT EXISTS` above does not modify an existing table, so
+-- when the `action` ENUM grows we must `MODIFY COLUMN` to extend it on
+-- already-installed deployments. The statement is idempotent: MySQL accepts
+-- `MODIFY COLUMN ... ENUM(...)` with an enum set that already matches as a
+-- no-op (no data conversion, no row touched). The full enum is restated each
+-- time so this block always reflects the canonical column definition.
+--
+-- Action history:
+--   Phase 1 (#102/#354): field_override · suppression_create · suppression_revoke
+--   Phase 7 (#356):    + field_override_clear  (slug-card "Clear override")
+-- =============================================================================
+
+ALTER TABLE `scholars_audit`.`manual_edit_audit`
+  MODIFY COLUMN `action`
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke')
+    NOT NULL;
 
 -- =============================================================================
 -- GRANT -- append-only for the application role.
