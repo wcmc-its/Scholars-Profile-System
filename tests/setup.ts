@@ -8,6 +8,12 @@
  * enough — the editor only needs the call to not throw; scroll geometry has no
  * effect in jsdom.
  */
+// Radix Select calls `scrollIntoView` on the focused option when its content
+// portal mounts; jsdom does not implement it. A no-op is enough for tests.
+if (typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.scrollIntoView !== "function") {
+  HTMLElement.prototype.scrollIntoView = function () {};
+}
+
 if (typeof Range !== "undefined") {
   if (typeof Range.prototype.getClientRects !== "function") {
     Range.prototype.getClientRects = function () {
