@@ -37,6 +37,14 @@ export type EditContextScholar = {
   fullName: string;
   /** The effective bio — `field_override(overview) ?? scholar.overview`, sanitized. Empty string = "no overview". */
   overview: string;
+  /**
+   * The active `field_override(slug)` value, or `null` when no override exists.
+   * Read suppression-OFF; only consumed by the Phase 7 superuser slug card —
+   * the self surface does not surface this field (slug is superuser-only,
+   * `self-edit-spec.md` § Authorization). Read in one extra `findUnique` so
+   * the slug card has a server-fetched baseline (no client round-trip).
+   */
+  slugOverride: string | null;
   suppression: {
     /** A self-applied, un-revoked whole-scholar suppression — drives the "Make my profile visible" control. */
     ownRow: { id: string; reason: string } | null;
@@ -93,6 +101,21 @@ export async function loadEditContext(
 
   const effectiveOverview = await getEffectiveOverview(cwid, scholar.overview, client);
 
+  // Phase 7 — the slug-card baseline. `null` = no override; superuser slug card
+  // shows the "no override" state. The self surface does not surface this field
+  // (slug edits are superuser-only, `self-edit-spec.md` § Authorization).
+  const slugOverrideRow = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: "slug",
+      },
+    },
+    select: { value: true },
+  });
+  const slugOverride = slugOverrideRow?.value ?? null;
+
   const scholarSuppressions = await client.suppression.findMany({
     where: {
       entityType: "scholar",
@@ -129,6 +152,7 @@ export async function loadEditContext(
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
         overview: effectiveOverview ?? "",
+        slugOverride,
         suppression: {
           ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
           adminRow: adminRow
@@ -236,6 +260,7 @@ export async function loadEditContext(
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
       overview: effectiveOverview ?? "",
+      slugOverride,
       suppression: {
         ownRow: ownRow ? { id: ownRow.id, reason: ownRow.reason } : null,
         adminRow: adminRow

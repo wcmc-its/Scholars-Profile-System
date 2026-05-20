@@ -1,5 +1,6 @@
 /**
- * The Overview card (#356 Phase 6 C5, UI-SPEC § `/edit` Card 1).
+ * The Overview card (#356 Phase 6 C5 / Phase 7 C3, UI-SPEC § `/edit` Card 1
+ * + § `/edit/scholar/[cwid]` Card 1 superuser arm).
  *
  * Wraps `OverviewEditor`, owns Save, and renders the counter + inline
  * success/failure feedback. POSTs `/api/edit/field` (Phase 2 contract,
@@ -11,6 +12,14 @@
  * the server's *response* value, not what we sent, so a sanitize-time
  * normalization (a dropped href, a whitespace collapse) updates the dirty
  * baseline correctly.
+ *
+ * Phase 7 — the `readOnly` arm. The superuser surface
+ * (`/edit/scholar/[other-cwid]`) renders the merged sanitized HTML through a
+ * `prose prose-sm` div with no toolbar, no Save, no counter, no unsaved-guard.
+ * The read-only branch is a separate sub-component so the editor's hooks /
+ * fetch path never initialize on a surface that doesn't use them, keeping the
+ * non-editor render clean (a future dynamic-import of `OverviewEditor` would
+ * harden the bundle isolation — fast-follow per the Phase 7 plan §12).
  */
 "use client";
 
@@ -39,12 +48,71 @@ export type OverviewCardProps = {
   /**
    * Fires after every state transition that flips the dirty bit:
    * `true` after the first edit, `false` on a successful save or a re-edit
-   * back to the saved value. Drives the unsaved-changes guard (C9).
+   * back to the saved value. Drives the unsaved-changes guard (C9). Ignored
+   * when `readOnly` is true — the read-only arm has no dirty notion.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * The superuser-mode read-only render (#356 Phase 7 C3, UI-SPEC § Card 1
+   * superuser arm). When true, the card displays the merged sanitized bio
+   * with no editor / toolbar / Save / counter / unsaved-guard, and the
+   * description copy explains why the bio is uneditable here.
+   */
+  readOnly?: boolean;
 };
 
-export function OverviewCard({ cwid, initialHtml, onDirtyChange }: OverviewCardProps) {
+export function OverviewCard({
+  cwid,
+  initialHtml,
+  onDirtyChange,
+  readOnly = false,
+}: OverviewCardProps) {
+  if (readOnly) return <OverviewReadOnlyCard initialHtml={initialHtml} />;
+  return (
+    <OverviewEditorCard cwid={cwid} initialHtml={initialHtml} onDirtyChange={onDirtyChange} />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Read-only arm — superuser viewing another scholar's bio.
+// ---------------------------------------------------------------------------
+
+function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
+  // initialHtml arrives from `loadEditContext` → `getEffectiveOverview`, which
+  // re-sanitises the stored override on read via `sanitizeOverviewHtml`
+  // (DOMPurify). This is the same render path the public profile uses; the
+  // dangerouslySetInnerHTML below is the documented trust boundary.
+  const hasBio = initialHtml.trim().length > 0;
+  return (
+    <Card data-slot="overview-card">
+      <CardHeader>
+        <CardTitle>Overview</CardTitle>
+        <CardDescription>Only the profile owner can edit the bio.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {hasBio ? (
+          <div
+            className="prose prose-sm max-w-none rounded-md border border-border bg-background px-4 py-3"
+            dangerouslySetInnerHTML={{ __html: initialHtml }}
+            data-slot="overview-readonly"
+          />
+        ) : (
+          <p className="text-muted-foreground text-sm" data-slot="overview-readonly-empty">
+            No bio yet.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Editor arm — self mode (the Phase 6 surface, unchanged behavior).
+// ---------------------------------------------------------------------------
+
+type OverviewEditorCardProps = Pick<OverviewCardProps, "cwid" | "initialHtml" | "onDirtyChange">;
+
+function OverviewEditorCard({ cwid, initialHtml, onDirtyChange }: OverviewEditorCardProps) {
   const [currentHtml, setCurrentHtml] = React.useState(initialHtml);
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
   const [isSaving, setIsSaving] = React.useState(false);
@@ -54,14 +122,12 @@ export function OverviewCard({ cwid, initialHtml, onDirtyChange }: OverviewCardP
   const dirty = currentHtml !== savedHtml;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
 
-  // Propagate dirty changes upward so the unsaved-changes guard sees them.
   React.useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
   function handleEditorChange(html: string) {
     setCurrentHtml(html);
-    // Any edit clears the "Saved" badge (UI-SPEC § Card 1).
     if (justSaved) setJustSaved(false);
     if (error) setError(null);
   }

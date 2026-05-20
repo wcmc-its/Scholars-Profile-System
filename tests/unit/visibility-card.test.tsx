@@ -155,3 +155,121 @@ describe("VisibilityCard — hidden-both state (edge case 4)", () => {
     ).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 7 — superuser arm
+// ---------------------------------------------------------------------------
+
+describe("VisibilityCard — superuser arm (Phase 7) — visible target", () => {
+  it("renders 'Hide this scholar's profile' and no admin alert", () => {
+    render(
+      <VisibilityCard cwid="other7" suppression={NEITHER} mode="superuser" scholarName="Alex Other" />,
+    );
+    expect(screen.getByText(/This scholar's profile is visible to the public/i)).toBeTruthy();
+    expect(screen.getByTestId("visibility-hide")).toBeTruthy();
+    expect(screen.getByTestId("visibility-hide").textContent).toContain("Hide this scholar");
+  });
+
+  it("Hide → dialog uses required-text, title includes the scholar name; confirm POSTs the reason", async () => {
+    const f = stubFetch({ body: { ok: true, suppressionId: "sup-adm-new" } });
+    render(
+      <VisibilityCard cwid="other7" suppression={NEITHER} mode="superuser" scholarName="Alex Other" />,
+    );
+    fireEvent.click(screen.getByTestId("visibility-hide"));
+    // The dialog title carries the scholar's name.
+    expect(await screen.findByText("Hide Alex Other's profile?")).toBeTruthy();
+    // The dialog renders a required textarea (UI-SPEC § Suppression — superuser
+    // suppression's reason is mandatory).
+    const ta = screen.getByLabelText("Reason") as HTMLTextAreaElement;
+    expect(ta.getAttribute("aria-required")).toBe("true");
+    // The confirm button is disabled with no reason text.
+    const confirm = screen.getByRole("button", { name: "Hide profile" });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    // Enter a reason → confirm enables → POST.
+    fireEvent.change(ta, { target: { value: "compliance ticket SP-2026-019" } });
+    expect(confirm.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/suppress");
+    expect(JSON.parse(opts.body as string)).toEqual({
+      entityType: "scholar",
+      entityId: "other7",
+      reason: "compliance ticket SP-2026-019",
+    });
+    // After success the card flips into the hidden-admin state.
+    await waitFor(() =>
+      expect(screen.getByTestId("visibility-revoke-admin")).toBeTruthy(),
+    );
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("self-hidden-only target: superuser sees a self-hold note + can still add an admin hold", () => {
+    render(
+      <VisibilityCard cwid="other7" suppression={SELF} mode="superuser" scholarName="Alex Other" />,
+    );
+    expect(screen.getByText(/has self-hidden their profile/i)).toBeTruthy();
+    expect(screen.getByTestId("visibility-hide")).toBeTruthy();
+  });
+});
+
+describe("VisibilityCard — superuser arm (Phase 7) — admin-hidden target", () => {
+  it("renders the admin reason + 'Restore this scholar's profile' button", () => {
+    render(
+      <VisibilityCard cwid="other7" suppression={ADMIN} mode="superuser" scholarName="Alex Other" />,
+    );
+    expect(screen.getByText(/administrator hold is in place/i)).toBeTruthy();
+    expect(screen.getByText(/compliance/i)).toBeTruthy();
+    expect(screen.getByTestId("visibility-revoke-admin")).toBeTruthy();
+  });
+
+  it("Restore POSTs /api/edit/revoke with the admin row's id; flips to visible", async () => {
+    const f = stubFetch({ body: { ok: true, suppressionId: "sup-adm" } });
+    render(
+      <VisibilityCard cwid="other7" suppression={ADMIN} mode="superuser" scholarName="Alex Other" />,
+    );
+    fireEvent.click(screen.getByTestId("visibility-revoke-admin"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/revoke");
+    expect(JSON.parse(opts.body as string)).toEqual({ suppressionId: "sup-adm" });
+    await waitFor(() =>
+      expect(screen.getByText(/This scholar's profile is visible/i)).toBeTruthy(),
+    );
+    expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("admin + self: shows the self-hold note alongside the restore control", () => {
+    render(
+      <VisibilityCard cwid="other7" suppression={BOTH} mode="superuser" scholarName="Alex Other" />,
+    );
+    expect(screen.getByText(/administrator hold is in place/i)).toBeTruthy();
+    expect(screen.getByText(/has also self-hidden/i)).toBeTruthy();
+    expect(screen.getByTestId("visibility-revoke-admin")).toBeTruthy();
+  });
+
+  it("restore failure renders the destructive Alert and leaves the admin hold", async () => {
+    stubFetch({ status: 500, body: { ok: false, error: "write_failed" } });
+    render(
+      <VisibilityCard cwid="other7" suppression={ADMIN} mode="superuser" scholarName="Alex Other" />,
+    );
+    fireEvent.click(screen.getByTestId("visibility-revoke-admin"));
+    await waitFor(() =>
+      expect(
+        screen.getByText("We couldn't restore this scholar's profile. Please try again."),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByTestId("visibility-revoke-admin")).toBeTruthy();
+  });
+});
+
+describe("VisibilityCard — props default ('self') is unchanged behavior", () => {
+  it("omitting mode defaults to self — Phase 6 surface", () => {
+    render(<VisibilityCard cwid={CWID} suppression={NEITHER} />);
+    expect(screen.getByText("Your profile is visible to the public.")).toBeTruthy();
+    // The data-mode attribute reflects the default.
+    expect(document.querySelector('[data-slot="visibility-card"]')?.getAttribute("data-mode")).toBe(
+      "self",
+    );
+  });
+});

@@ -1,7 +1,7 @@
 /**
- * `components/edit/edit-page.tsx` — the /edit shell composes the three Phase 6
- * cards (#356 Phase 6 C8). The card internals are tested elsewhere; this is
- * the shell wiring only.
+ * `components/edit/edit-page.tsx` — the /edit shell composes the cards
+ * (#356 Phase 6 C8 / Phase 7 C5). The card internals are tested elsewhere;
+ * this is the shell wiring only.
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -26,6 +26,7 @@ const ctx: EditContext = {
     preferredName: "Alex Self",
     fullName: "Alex Self, MD",
     overview: "<p>Hi.</p>",
+    slugOverride: null,
     suppression: { ownRow: null, adminRow: null },
   },
   publications: [
@@ -41,25 +42,81 @@ const ctx: EditContext = {
   ],
 };
 
-describe("EditPage shell", () => {
-  it("renders the page title and intro", () => {
+describe("EditPage shell — self mode (default)", () => {
+  it("renders the self page title and intro", () => {
     render(<EditPage ctx={ctx} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe("Edit my profile");
     expect(screen.getByText("Changes appear on your public profile.")).toBeTruthy();
   });
 
-  it("renders all three Phase 6 cards", () => {
+  it("renders the three Phase 6 cards (Overview, Visibility, My publications)", () => {
     render(<EditPage ctx={ctx} />);
     expect(screen.getByText("Overview")).toBeTruthy();
     expect(screen.getByText("Profile visibility")).toBeTruthy();
     expect(screen.getByText("My publications")).toBeTruthy();
+    // No slug card, no superuser banner.
+    expect(document.querySelector('[data-slot="slug-card"]')).toBeNull();
+    expect(document.querySelector('[data-slot="superuser-banner"]')).toBeNull();
   });
 
   it("passes the cwid through to the cards (publications POSTs would use it)", () => {
     render(<EditPage ctx={ctx} />);
-    // The publications row should render — its presence is the proof the cwid
-    // and publications prop wired through.
     expect(screen.getByTestId("pub-row-pmid-1")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 7 — superuser shell
+// ---------------------------------------------------------------------------
+
+const superuserCtx: EditContext = {
+  scholar: {
+    cwid: "other7",
+    slug: "alex-other",
+    preferredName: "Alex Other",
+    fullName: "Alex Other, MD",
+    overview: "<p>Other's bio.</p>",
+    slugOverride: "custom-handle",
+    suppression: { ownRow: null, adminRow: null },
+  },
+  publications: [], // not surfaced in superuser mode
+};
+
+describe("EditPage shell — superuser mode (Phase 7)", () => {
+  it("renders the superuser page title naming the target scholar", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading.textContent).toBe("Edit profile — Alex Other");
+    expect(screen.getByText("Changes appear on this scholar's public profile.")).toBeTruthy();
+  });
+
+  it("renders the superuser banner above the cards", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    expect(document.querySelector('[data-slot="superuser-banner"]')).not.toBeNull();
+  });
+
+  it("renders Overview (read-only), Visibility, and Slug — and NOT 'My publications'", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    expect(screen.getByText("Overview")).toBeTruthy();
+    expect(screen.getByText("Profile visibility")).toBeTruthy();
+    // SlugCard wraps a "Profile URL" CardTitle.
+    expect(screen.getByText("Profile URL")).toBeTruthy();
+    expect(screen.queryByText("My publications")).toBeNull();
+  });
+
+  it("the Overview card is in readOnly mode (no editor, no Save button)", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    expect(screen.queryByTestId("mock-editor")).toBeNull();
+    expect(screen.queryByTestId("overview-save")).toBeNull();
+    expect(document.querySelector('[data-slot="overview-readonly"]')).not.toBeNull();
+  });
+
+  it("SlugCard receives the slugOverride from the context", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    // The input is pre-filled with the override value.
+    expect(
+      (screen.getByTestId("slug-card-input") as HTMLInputElement).value,
+    ).toBe("custom-handle");
   });
 });

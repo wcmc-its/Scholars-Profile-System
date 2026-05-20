@@ -24,7 +24,11 @@ import { createHash } from "node:crypto";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The action discriminator (#354). */
-export type AuditAction = "field_override" | "suppression_create" | "suppression_revoke";
+export type AuditAction =
+  | "field_override"
+  | "field_override_clear"
+  | "suppression_create"
+  | "suppression_revoke";
 
 /** The target type — mirrors the table ENUM; v1 emits only `scholar` / `publication`. */
 export type AuditEntityType =
