@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
@@ -8,8 +9,10 @@ import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor, type MenteeSort } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollFade } from "@/components/ui/scroll-fade";
+import { getSession } from "@/lib/auth/session-server";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -120,6 +123,13 @@ export default async function ScholarProfilePage({
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
 
+  // #356 Phase 5 — surface the "Edit my profile" affordance to the signed-in
+  // profile owner only. UI-SPEC § Signing in: the button is rendered by the
+  // server (no client hydration), so it materialises on the post-sign-in
+  // navigation back, not on a client-side session check.
+  const session = await getSession().catch(() => null);
+  const isOwnProfile = session?.cwid === profile.cwid;
+
   // ANALYTICS-01 (D-01): structured page-view log on each ISR render / cache miss.
   console.log(
     JSON.stringify({
@@ -197,6 +207,15 @@ export default async function ScholarProfilePage({
                   {profile.division
                     ? `${profile.division} (${profile.primaryDepartment})`
                     : profile.primaryDepartment}
+                </div>
+              ) : null}
+              {isOwnProfile ? (
+                <div className="mt-4 flex justify-center">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/edit" data-testid="edit-my-profile">
+                      Edit my profile
+                    </Link>
+                  </Button>
                 </div>
               ) : null}
             </div>
