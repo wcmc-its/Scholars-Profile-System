@@ -642,7 +642,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "AdvancedSecurityOptions": {
           "Enabled": true,
-          "InternalUserDatabaseEnabled": false,
+          "InternalUserDatabaseEnabled": true,
           "MasterUserOptions": {
             "MasterUserARN": {
               "Fn::GetAtt": [
@@ -787,6 +787,40 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "RoleName": "sps-opensearch-master-prod",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "OpensearchMasterRoleDefaultPolicyF9FC8702": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "es:ESHttp*",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "OpenSearch587998CD",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OpensearchMasterRoleDefaultPolicyF9FC8702",
+        "Roles": [
+          {
+            "Ref": "OpensearchMasterRoleB011908B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb": {
       "DeletionPolicy": "Retain",

@@ -116,7 +116,7 @@ describe("DataStack", () => {
     });
 
     describe("OpenSearch", () => {
-      it("creates one Domain with encryption + HTTPS + FGAC", () => {
+      it("creates one Domain with encryption + HTTPS + FGAC + internal user DB", () => {
         template.resourceCountIs("AWS::OpenSearchService::Domain", 1);
         template.hasResourceProperties("AWS::OpenSearchService::Domain", {
           EngineVersion: "OpenSearch_2.19",
@@ -128,9 +128,70 @@ describe("DataStack", () => {
           }),
           AdvancedSecurityOptions: Match.objectLike({
             Enabled: true,
-            InternalUserDatabaseEnabled: false,
+            InternalUserDatabaseEnabled: true,
+            MasterUserOptions: Match.objectLike({
+              MasterUserARN: Match.anyValue(),
+            }),
           }),
         });
+      });
+
+      it("AdvancedSecurityOptions does NOT carry MasterUserName/MasterUserPassword (IAM master only; app/ETL internal users seeded out-of-band)", () => {
+        // Phase 1 sign-off: the master credential is the IAM role, not a
+        // basic-auth user. The two `scholars/{env}/opensearch/{app,etl}`
+        // secrets are *internal users* the master creates via the
+        // `_security` API after deploy — none of their values appear in
+        // the synthesized template.
+        const domains = Object.values(
+          template.findResources("AWS::OpenSearchService::Domain"),
+        );
+        expect(domains).toHaveLength(1);
+        const advancedSecurity = (
+          domains[0]?.Properties as { AdvancedSecurityOptions?: unknown }
+        )?.AdvancedSecurityOptions as
+          | { MasterUserOptions?: Record<string, unknown> }
+          | undefined;
+        const opts = advancedSecurity?.MasterUserOptions ?? {};
+        expect(opts).not.toHaveProperty("MasterUserName");
+        expect(opts).not.toHaveProperty("MasterUserPassword");
+      });
+
+      it("master role has es:ESHttp* on the domain ARN (without it, _security API calls 403 before FGAC sees them)", () => {
+        // Match a policy attached to the OS master role that allows
+        // es:ESHttp* on the domain ARN. The L2 Domain helper does NOT
+        // automatically attach this; without it, the assumed master role
+        // gets `not authorized to perform: es:ESHttpPut` at the IAM
+        // gate, which is a deploy-only failure mode.
+        template.hasResourceProperties(
+          "AWS::IAM::Policy",
+          Match.objectLike({
+            Roles: Match.arrayWith([
+              Match.objectLike({ Ref: Match.stringLikeRegexp("OpensearchMasterRole") }),
+            ]),
+            PolicyDocument: Match.objectLike({
+              Statement: Match.arrayWith([
+                Match.objectLike({
+                  Effect: "Allow",
+                  Action: "es:ESHttp*",
+                  Resource: Match.objectLike({
+                    "Fn::Join": Match.arrayWith([
+                      "",
+                      Match.arrayWith([
+                        Match.objectLike({
+                          "Fn::GetAtt": Match.arrayWith([
+                            Match.stringLikeRegexp("OpenSearch"),
+                            "Arn",
+                          ]),
+                        }),
+                        "/*",
+                      ]),
+                    ]),
+                  }),
+                }),
+              ]),
+            }),
+          }),
+        );
       });
 
       it("retains the OpenSearch domain on stack delete", () => {
