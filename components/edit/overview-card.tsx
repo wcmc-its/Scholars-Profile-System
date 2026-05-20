@@ -18,6 +18,7 @@ import * as React from "react";
 import { Check } from "lucide-react";
 
 import { OverviewEditor } from "@/components/edit/overview-editor";
+import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,6 +105,7 @@ export function OverviewCard({ cwid, initialHtml, onDirtyChange }: OverviewCardP
 
   return (
     <Card data-slot="overview-card">
+      <UnsavedChangesGuard dirty={dirty} />
       <CardHeader>
         <CardTitle>Overview</CardTitle>
         <CardDescription>
