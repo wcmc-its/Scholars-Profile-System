@@ -302,6 +302,29 @@ export class DataStack extends Stack {
       }),
     );
 
+    // Domain access policy — allow `es:ESHttp*` from any AWS principal.
+    //
+    // With FGAC + internal user database + HTTP basic auth, the request
+    // arrives at AWS unsigned (the client uses an Authorization: Basic
+    // header rather than SigV4). AWS evaluates the IAM resource policy on
+    // the domain first; if it does not permit the request, AWS denies it
+    // as `User: anonymous is not authorized to perform: es:ESHttpGet` and
+    // OpenSearch never sees the request. To let basic-auth requests reach
+    // FGAC, the domain access policy must permit `es:ESHttp*` from
+    // `Principal: { AWS: "*" }`. This is the AWS-documented pattern for
+    // VPC domains with basic auth — the VPC and the SG ingress rules are
+    // the real network gates; FGAC's username/password is the application
+    // gate. Anonymous access into OpenSearch is still blocked because
+    // `AdvancedSecurityOptions.AnonymousAuthEnabled` is false.
+    this.opensearchDomain.addAccessPolicies(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [new iam.AnyPrincipal()],
+        actions: ["es:ESHttp*"],
+        resources: [`${this.opensearchDomain.domainArn}/*`],
+      }),
+    );
+
     // ------------------------------------------------------------------
     // AWS Backup — daily plan in this region, cross-region copy to the DR
     // vault. B10: PITR 14d (above, via Aurora backup.retention) +
