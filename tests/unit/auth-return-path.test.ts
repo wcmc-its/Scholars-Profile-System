@@ -10,11 +10,40 @@ describe("isSafeReturnPath", () => {
     expect(isSafeReturnPath("/edit#section")).toBe(true);
   });
 
-  it("rejects paths outside the /edit surface", () => {
-    expect(isSafeReturnPath("/")).toBe(false);
+  it("accepts the homepage exactly and the curated public-page prefixes (#356 Phase 5 D5.1)", () => {
+    // Homepage exactly.
+    expect(isSafeReturnPath("/")).toBe(true);
+    // Each curated prefix — exact, followed by /, ?, or #.
+    expect(isSafeReturnPath("/scholars/jane-smith")).toBe(true);
+    expect(isSafeReturnPath("/scholars/jane-smith?tab=publications")).toBe(true);
+    expect(isSafeReturnPath("/scholars/jane-smith#publications")).toBe(true);
+    expect(isSafeReturnPath("/browse")).toBe(true);
+    expect(isSafeReturnPath("/browse?q=cancer")).toBe(true);
+    expect(isSafeReturnPath("/centers/wcm-cardiology")).toBe(true);
+    expect(isSafeReturnPath("/departments/medicine/divisions/cardio")).toBe(true);
+    expect(isSafeReturnPath("/topics/precision-oncology")).toBe(true);
+    expect(isSafeReturnPath("/topics/precision-oncology/scholars")).toBe(true);
+    expect(isSafeReturnPath("/about")).toBe(true);
+    expect(isSafeReturnPath("/about/methodology")).toBe(true);
+    expect(isSafeReturnPath("/search?q=mRNA")).toBe(true);
+  });
+
+  it("rejects paths outside the curated allowlist", () => {
     expect(isSafeReturnPath("/admin")).toBe(false);
-    expect(isSafeReturnPath("/scholars/jane-smith")).toBe(false);
-    expect(isSafeReturnPath("/editfoo")).toBe(false); // prefix match, not the surface
+    expect(isSafeReturnPath("/api/edit/suppress")).toBe(false); // API never a return target
+    expect(isSafeReturnPath("/api/auth/logout")).toBe(false);
+    expect(isSafeReturnPath("/support")).toBe(false); // no /support page exists; pre-existing 404
+  });
+
+  it("rejects prefix-spoofs on every allow-listed entry (the /edit vs /editfoo precedent)", () => {
+    expect(isSafeReturnPath("/editfoo")).toBe(false);
+    expect(isSafeReturnPath("/scholarsfoo")).toBe(false);
+    expect(isSafeReturnPath("/centersfoo")).toBe(false);
+    expect(isSafeReturnPath("/departmentsfoo")).toBe(false);
+    expect(isSafeReturnPath("/topicsfoo")).toBe(false);
+    expect(isSafeReturnPath("/aboutfoo")).toBe(false);
+    expect(isSafeReturnPath("/browsefoo")).toBe(false);
+    expect(isSafeReturnPath("/searchfoo")).toBe(false);
   });
 
   it("rejects absolute and protocol-relative URLs (open-redirect vectors)", () => {

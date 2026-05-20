@@ -78,6 +78,16 @@ vi.mock("next/headers", () => ({
   })),
 }));
 
+// Mock @/lib/auth/session-server — the profile page (#356 Phase 5 C7) consults
+// the session to render the "Edit my profile" affordance for the signed-in
+// owner. The session module imports "server-only", which Vite cannot resolve
+// under the jsdom environment; the analytics test does not exercise the
+// session branch (no signed-in owner in this fixture), so a null-returning
+// mock is sufficient.
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => null),
+}));
+
 describe("ANALYTICS-01 — profile_view structured log", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
