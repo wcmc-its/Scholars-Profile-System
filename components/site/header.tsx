@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { ScrollRevealedSearch } from "@/components/site/scroll-revealed-search";
+import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
+import { getSession } from "@/lib/auth/session-server";
+import { db } from "@/lib/db";
 
-export function SiteHeader({
+export async function SiteHeader({
   showSearch = true,
   revealOnScrollPast,
 }: {
@@ -15,6 +18,20 @@ export function SiteHeader({
    */
   revealOnScrollPast?: string;
 }) {
+  // #356 Phase 5 — session-aware auth slot (Sign in / AccountMenu).
+  // Lookup is opportunistic; a failure here MUST NOT 500 the page since the
+  // header renders on every public surface.
+  const session = await getSession().catch(() => null);
+  let scholar: { slug: string; preferredName: string } | null = null;
+  if (session) {
+    scholar = await db.read.scholar
+      .findUnique({
+        where: { cwid: session.cwid },
+        select: { slug: true, preferredName: true },
+      })
+      .catch(() => null);
+  }
+
   return (
     <header
       className="sticky top-0 z-50 h-[60px] border-b border-black/15"
@@ -61,6 +78,7 @@ export function SiteHeader({
           <Link href="/support" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
             Support
           </Link>
+          <HeaderAuthSlot isAuthenticated={session !== null} scholar={scholar} />
         </nav>
       </div>
     </header>
