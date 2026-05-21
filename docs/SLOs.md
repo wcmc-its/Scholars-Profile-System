@@ -62,7 +62,7 @@ Log groups owned by other stacks (ReCiter, ReciterAI, etc.) are out of scope for
 
 ## Alarm catalog
 
-Eight alarms per env, all defined in `cdk/lib/observability-stack.ts`. Every alarm publishes to `sps-alarms-${env}` SNS topic. Email subscription routes to the operator's work address until [B23](https://github.com/wcmc-its/Scholars-Profile-System/issues/122) swaps in PagerDuty/Opsgenie.
+Eight alarms per env, all defined in `cdk/lib/observability-stack.ts`. Every alarm publishes to the **page** SNS topic `sps-alarms-${env}`, which a Microsoft Teams channel webhook is subscribed to out-of-band. The operator email no longer rides this topic -- it lives on the sibling **notify** topic (`sps-notify-${env}`) used for cost-guardrail fan-out. Teams matches the WCM-native ops pattern (chat surface + ServiceNow tickets + manual Ops phone escalation); a dedicated paging tool was considered and rejected. See [`docs/oncall.md`](./oncall.md) for the full topology, alternates rationale, and the rollout runbook.
 
 | # | Alarm name | Metric source | Threshold | Eval | What it catches |
 |---|---|---|---|---|---|
@@ -85,8 +85,8 @@ Deployed only by `Sps-Observability-prod` (synth-time guard asserts staging cont
 
 | Resource | Threshold | Notification |
 |---|---|---|
-| `sps-monthly-budget` | $600/mo | SNS to `sps-alarms-prod` at 50% **forecast**, 80% **forecast**, 100% **actual** |
-| `sps-anomaly-monitor` | $50 daily impact, dimension=SERVICE | SNS to `sps-alarms-prod`, frequency=DAILY |
+| `sps-monthly-budget` | $600/mo | SNS to `sps-notify-prod` at 50% **forecast**, 80% **forecast**, 100% **actual** |
+| `sps-anomaly-monitor` | $50 daily impact, dimension=SERVICE | SNS to `sps-notify-prod`, frequency=DAILY |
 
 $600/mo is ~40% headroom above the audited Phase 0+1 baseline (~$425/mo combined across both envs). The next two phases (EdgeStack B07+B14, EtlStack B08+B20) will add cost; the budget gets revised when each lands rather than pre-emptively loose-set now.
 
@@ -110,8 +110,10 @@ Review is a written doc-update PR, not a meeting. Each review revises the target
 - **Distributed tracing instrumentation** for trace-driven latency attribution. That is [B24](https://github.com/wcmc-its/Scholars-Profile-System/issues/123) and orthogonal to CloudWatch metric-based alarming.
 - **Per-env cost budgets** via tag allocation. The account is single-tenant for SPS, so the account-wide budget *is* the SPS budget.
 
-## Operational hand-off (until B23)
+## Operational hand-off
 
-- SNS topic ARN published as `AlarmTopicArn` CFN output by each env's `Sps-Observability-${env}` stack. Use it from B23's CDK to attach the PagerDuty/Opsgenie subscriber set.
-- Email subscriptions on `sps-alarms-staging` and `sps-alarms-prod` require manual confirmation. AWS sends the confirmation request to `paa2013@med.cornell.edu` on first deploy of each env's stack. Confirm both within 3 days or the subscription expires and alarms fire into the void.
-- The email destination is intentionally the operator's work address (`paa2013@med.cornell.edu`), not any harness identity. B23 replaces it; until then, this is the single human routing path.
+On-call topology, provider choice (Teams channel webhook; ServiceNow integration as a follow-on), per-env rollout, and the un-subscribe / rollback flow live in [`docs/oncall.md`](./oncall.md). The relevant SLO-side handles are:
+
+- **Page topic** `sps-alarms-${env}` (CFN output `AlarmTopicArn`) -- the eight alarms in the catalog above publish here; a Microsoft Teams channel webhook is subscribed via HTTPS, configured out-of-band per `oncall.md`. No CDK-declared subscriptions on this topic.
+- **Notify topic** `sps-notify-${env}` (CFN output `NotifyTopicArn`) -- account-wide budget thresholds and Cost Anomaly Detection publish here; the operator's work address (`paa2013@med.cornell.edu`) is subscribed by email. The split keeps a forecasted-budget tap off the page channel.
+- Email subscriptions on each env's `sps-notify-${env}` require manual confirmation within 3 days of first deploy; AWS sends the confirmation request to the operator address. An unconfirmed subscription expires and cost notifications fire into the void.
