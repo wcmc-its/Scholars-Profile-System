@@ -90,6 +90,25 @@ export interface SpsEnvConfig {
   readonly migrationTaskCpu: number;
   /** Fargate memory (MiB) for the migration task definition. */
   readonly migrationTaskMemoryMiB: number;
+
+  // --- EtlStack (Phase 3) ---
+
+  /**
+   * Whether the EventBridge schedules that fire the nightly / weekly /
+   * annual state machines are enabled at deploy time. `true` in staging so
+   * the cadence runs immediately after the first deploy; `false` in prod so
+   * the first deploy never auto-starts a run before the runbook is reviewed.
+   * Flipped to `true` post-launch via `aws events enable-rule` (out of band)
+   * or by changing this flag and redeploying.
+   */
+  readonly etlSchedulesEnabled: boolean;
+  /**
+   * Fargate CPU units for the ETL task family. Tunable per-step via
+   * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
+   */
+  readonly etlTaskCpu: number;
+  /** Fargate memory (MiB) for the ETL task family. */
+  readonly etlTaskMemoryMiB: number;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -111,6 +130,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 1024,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    etlSchedulesEnabled: true,
+    etlTaskCpu: 1024,
+    etlTaskMemoryMiB: 2048,
   },
   prod: {
     envName: "prod",
@@ -137,6 +159,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    // Prod schedules ship disabled — first run is operator-driven after
+    // runbook review, then `aws events enable-rule` flips them on (see
+    // PRODUCTION_ADDENDUM § EtlStack).
+    etlSchedulesEnabled: false,
+    etlTaskCpu: 2048,
+    etlTaskMemoryMiB: 4096,
   },
 };
 

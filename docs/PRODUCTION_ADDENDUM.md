@@ -285,3 +285,101 @@ The NetworkStack header comment still reads "VPC endpoints (B17) are added to th
 | `PublicAlbDns` | EdgeStack (B07+B14) | CloudFront origin domain |
 | `InternalAlbDns` | EtlStack (B08+B20) | `/api/revalidate` host |
 | `DeployRoleArn` | B09/B12 workflow | `aws-actions/configure-aws-credentials` |
+
+## Phase 3 — EtlStack (B08 + B20)
+
+Stack 4 of six in ADR-008. Provisions the nightly / weekly / annual Step Functions state machines, the EventBridge schedules that fire them, the SNS topic + six CloudWatch alarms that detect failures, the SG-to-SG ingress that finally makes the internal ALB reachable from the ETL workload, and a single Fargate task family that runs `npm run etl:<source>` against the AppStack ECR image.
+
+### Task integration — ECS RunTask `.sync`, not Lambda (D1 deviation)
+
+The pre-AppStack PRODUCTION_ADDENDUM text and the B08 issue described "Lambda" tasks. The ETL scripts shipped in `etl/*` are Node entrypoints invoked via `npm run etl:<source>` — they read `DATABASE_URL` / `OPENSEARCH_*` / `REVALIDATE_TOKEN` / `ETL_<SOURCE>_SECRET` from env vars exactly as they do locally. Packaging each as a Lambda would multiply the build/CI/maintenance surface and run into the Lambda 15-minute execution cap (`reciter` already runs past 5 minutes today). Instead, every state-machine step is a Step Functions task using the AWS-managed `arn:aws:states:::ecs:runTask.sync` integration against the single `sps-etl-${env}` Fargate task family, with per-step container `command` overrides selecting the source. The image, ECR repo, ECS cluster, and ETL SG are all reused from AppStack — no second image to maintain, and the VPC / endpoint / SG wiring already set up for AppStack's app SG and the ETL SG covers the ETL workload identically.
+
+### Manual-approval gate — `SnsPublish.waitForTaskToken` (D3)
+
+The annual hierarchy state machine ends with a manual-approval gate. Implemented as a single `SnsPublish` task with `integrationPattern: WAIT_FOR_TASK_TOKEN` directly — no bespoke Lambda. The task publishes a message to `etl-failures-${env}` containing the task token; an operator runs:
+
+```
+aws stepfunctions send-task-success --task-token <token> --task-output '{}'
+```
+
+from this runbook to release the execution. A 7-day cap on the approval window auto-fails the execution if no one approves in time. The gate's catch path publishes a follow-up notification before the `Fail` state. Until B23 wires PagerDuty, subscribe an email to `etl-failures-${env}` manually for the first annual run.
+
+### Cadence + status alarms — native Step Functions metrics (D4)
+
+Six CloudWatch alarms total, two per state machine, all targeting the `etl-failures-${env}` SNS topic:
+
+- **Status alarm** (`sps-etl-<cadence>-status-${env}`) — `AWS/States.ExecutionsFailed` `Sum > 0` per state machine over a 1-hour evaluation period. Catches every failed execution including ones that crash before the per-step `Catch` block runs.
+- **Cadence alarm** (`sps-etl-<cadence>-cadence-${env}`) — `AWS/States.ExecutionsStarted` `Sum < 1` over a period slightly longer than the cadence (30 hours / 9 days / 380 days). `treatMissingData: BREACHING` so a total absence of metric data alarms instead of the default of staying NotBreaching, which would silently miss a disabled rule.
+
+The Aurora-derived cadence check the original spec mentioned (Lambda polls `SELECT MAX(started_at) ...`) is intentionally not built in this row — the Step Functions metric covers the same failure mode with fewer moving parts. If a future incident shows a class of failure that slips through Step Functions metrics but is visible in `etl_run`, add it then.
+
+### EventBridge cadences (D7)
+
+| Cadence | Cron (UTC) | Local (US Eastern) | Rationale |
+|---|---|---|---|
+| Nightly | `cron(0 7 * * ? *)` | 02:00–03:00 ET (DST-dependent) | After WCM nightly source feeds settle |
+| Weekly | `cron(0 8 ? * SUN *)` | Sun 03:00–04:00 ET | After the Saturday nightly completes |
+| Annual | `cron(0 9 1 7 ? *)` | 1 Jul 04:00–05:00 ET | Post-academic-year rollover; hierarchy gates on manual approval anyway |
+
+`config.ts.etlSchedulesEnabled` controls whether the EventBridge rules ship enabled on first deploy:
+
+- **Staging:** `true` — rules ramp up immediately so the cadence runs the moment the first deploy lands.
+- **Production:** `false` — first deploy ships rules disabled. Flip them on after the first operator-driven run via:
+  ```
+  aws events enable-rule --name sps-etl-nightly-prod
+  aws events enable-rule --name sps-etl-weekly-prod
+  aws events enable-rule --name sps-etl-annual-prod
+  ```
+
+### Operator runbook — start, skip ahead, re-run from a step
+
+Each state machine begins with a `Choice` state on `$.startFrom`. Operators pass a step id to skip ahead — falls through to the first step when the input is empty:
+
+```
+# Run the nightly chain from the beginning.
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:us-east-1:<acct>:stateMachine:scholars-nightly-${env} \
+  --input '{}'
+
+# Re-run nightly starting from Reciter (skipping the Ed source).
+aws stepfunctions start-execution \
+  --state-machine-arn arn:aws:states:us-east-1:<acct>:stateMachine:scholars-nightly-${env} \
+  --input '{"startFrom":"Reciter"}'
+```
+
+Valid `startFrom` step ids per state machine:
+
+- **Nightly:** `Ed`, `Reciter`, `Asms`, `Infoed`, `Coi`, `SearchIndexNightly`, `RevalidateNightly`.
+- **Weekly:** `Dynamodb`, `Completeness`, `Spotlight`, `SearchIndexWeekly`, `RevalidateWeekly`.
+- **Annual:** `Hierarchy` (followed by the manual-approval gate).
+
+### Per-source secret stubs (D6)
+
+SecretsStack appends eight `scholars/${env}/etl/<source>` stubs in this row. Each is injected into the ETL task as a single env var named `ETL_<SOURCE>_SECRET` so the script reads its credential the same way locally and in prod (`process.env.ETL_ED_SECRET`, etc.). Values are populated out-of-band per the ADR-008 hard rule.
+
+The shared secrets the ETL task family also consumes — `db/etl` (DSN), `opensearch/etl` (user), `revalidate-token` (bearer) — are existing stubs from Phase 1 SecretsStack; the new task-execution role's `secretsmanager:GetSecretValue` resource list enumerates all eleven ARNs exactly, with no `*`.
+
+### Cross-stack handoff
+
+EtlStack receives `vpc`, `etlSecurityGroup`, `ecsCluster`, and `ecrRepository` from AppStack via constructor props (CDK auto-generates the cross-stack export). The internal ALB security group id, which is not exposed as a public field on AppStack, is consumed via `Fn::ImportValue` on AppStack's `Sps-App-${env}-InternalAlbSecurityGroupId` export — one additive `CfnOutput` on AppStack (the only AppStack touch in this row). The SG-to-SG ingress that admits `:80` from the ETL SG to the internal ALB SG lives in EtlStack via `CfnSecurityGroupIngress` so the rule sits in this stack regardless of which SG it modifies (same cycle-break pattern AppStack uses for its own SG ingress).
+
+### `etl_run` write-coverage audit (B20 acceptance)
+
+`prisma.etlRun.create` exists today in every source named in the state machines that performs an external pull (`ed`, `reciter`, `asms`, `infoed`, `coi`, `dynamodb`, `spotlight`, `hierarchy`). The internal post-processing steps reused at the close of nightly + weekly cadences (`mesh-coverage`, `vivo-redirect`, `completeness`) do **not** write `etl_run` today. Filed as follow-on tickets (see the PR description), not blocked here per the plan's B20 acceptance criterion.
+
+### Deploy strategy
+
+```
+cdk deploy --exclusively Sps-Etl-${env} -c env=${env}
+```
+
+1. **Staging first.** Rules ramp up enabled. Smoke test with the smallest external step (`Asms` is good — short run, real external call):
+   ```
+   aws stepfunctions start-execution \
+     --state-machine-arn arn:aws:states:us-east-1:<acct>:stateMachine:scholars-nightly-staging \
+     --input '{"startFrom":"Asms"}'
+   ```
+   Verify the EcsRunTask resolves, the container runs, the SNS topic doesn't fire, and the state machine reaches `Succeeded`.
+2. **Force a failure** for the alarm verification: start the state machine with an obviously broken `startFrom` value or temporarily push an image that exits non-zero. Verify the failure SNS message lands; subscribe an email to `etl-failures-staging` temporarily.
+3. **Production** after staging signoff. Same `--exclusively` deploy. The EventBridge rules ship `Enabled=false` in prod (`etlSchedulesEnabled=false`). Run the first execution manually, then enable each rule via `aws events enable-rule`.
+

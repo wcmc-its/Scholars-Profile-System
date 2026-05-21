@@ -803,6 +803,16 @@ export class AppStack extends Stack {
       value: this.internalAlb.loadBalancerDnsName,
       description: "SPS internal ALB DNS name (consumed by EtlStack)",
     });
+    // Additive output for EtlStack — admits the ETL SG on :80 of the
+    // internal ALB SG via SG-to-SG ingress. Consumed by EtlStack through
+    // `Fn::ImportValue`; declaring it here keeps EtlStack a pure consumer
+    // and avoids hard-coding SG IDs per env.
+    new CfnOutput(this, "InternalAlbSecurityGroupId", {
+      value: internalAlbSecurityGroup.securityGroupId,
+      exportName: `Sps-App-${env}-InternalAlbSecurityGroupId`,
+      description:
+        "SPS internal ALB security group id (consumed by EtlStack ingress).",
+    });
     new CfnOutput(this, "DeployRoleArn", {
       value: this.deployRole.roleArn,
       description: "SPS GitHub Actions deploy role ARN",

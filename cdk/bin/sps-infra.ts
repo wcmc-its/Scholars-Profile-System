@@ -4,6 +4,7 @@ import { AppStack } from "../lib/app-stack";
 import { resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
+import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SecretsStack } from "../lib/secrets-stack";
 
@@ -65,7 +66,7 @@ new SecretsStack(app, `Sps-Secrets-${envConfig.envName}`, {
 // loosely coupled (same pattern NetworkStack -> DataStack uses for SGs
 // is inverted here — AppStack reads SecretsStack's resources by ARN
 // rather than receiving them as constructor props).
-new AppStack(app, `Sps-App-${envConfig.envName}`, {
+const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
@@ -73,6 +74,21 @@ new AppStack(app, `Sps-App-${envConfig.envName}`, {
   etlSecurityGroup: networkStack.etlSecurityGroup,
   albSecurityGroup: networkStack.albSecurityGroup,
   description: `SPS application plane — ECR, ECS Fargate, ALBs, VPC endpoints, ${envConfig.envName} (ADR-008).`,
+});
+
+// EtlStack — Step Functions state machines + cadence/status alarms
+// (B08 + B20). Consumes the AppStack ECS cluster + ECR repo via stack
+// props (CDK auto-wires the cross-stack export). The internal ALB SG id
+// is consumed via Fn::ImportValue of AppStack's `InternalAlbSecurityGroupId`
+// export (one additive output — see plan resolved item #3).
+new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
+  env,
+  envConfig,
+  vpc: networkStack.vpc,
+  etlSecurityGroup: networkStack.etlSecurityGroup,
+  ecsCluster: appStack.ecsCluster,
+  ecrRepository: appStack.ecrRepository,
+  description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 
 // Tag every resource for cost allocation and ownership clarity.

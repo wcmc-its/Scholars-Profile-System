@@ -14,25 +14,33 @@ function buildSecretsStack(envName: "staging" | "prod"): {
   return { template: Template.fromStack(stack), stack };
 }
 
-const EXPECTED_SECRETS_PROD = [
-  "scholars/prod/db/app-rw",
-  "scholars/prod/db/app-ro",
-  "scholars/prod/db/etl",
-  "scholars/prod/opensearch/app",
-  "scholars/prod/opensearch/etl",
-  "scholars/prod/revalidate-token",
-  "scholars/saml-sp/prod/private-key",
-];
+const PER_SOURCE_ETL_NAMES = [
+  "ed",
+  "asms",
+  "infoed",
+  "coi",
+  "reciter",
+  "dynamodb",
+  "spotlight",
+  "hierarchy",
+] as const;
 
-const EXPECTED_SECRETS_STAGING = [
-  "scholars/staging/db/app-rw",
-  "scholars/staging/db/app-ro",
-  "scholars/staging/db/etl",
-  "scholars/staging/opensearch/app",
-  "scholars/staging/opensearch/etl",
-  "scholars/staging/revalidate-token",
-  "scholars/saml-sp/staging/private-key",
-];
+function expectedSecrets(env: "staging" | "prod"): string[] {
+  return [
+    `scholars/${env}/db/app-rw`,
+    `scholars/${env}/db/app-ro`,
+    `scholars/${env}/db/etl`,
+    `scholars/${env}/opensearch/app`,
+    `scholars/${env}/opensearch/etl`,
+    `scholars/${env}/revalidate-token`,
+    `scholars/saml-sp/${env}/private-key`,
+    ...PER_SOURCE_ETL_NAMES.map((s) => `scholars/${env}/etl/${s}`),
+  ];
+}
+
+const EXPECTED_SECRETS_PROD = expectedSecrets("prod");
+const EXPECTED_SECRETS_STAGING = expectedSecrets("staging");
+const EXPECTED_SECRET_COUNT = EXPECTED_SECRETS_PROD.length;
 
 describe("SecretsStack", () => {
   describe("prod", () => {
@@ -42,8 +50,11 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the seven expected secrets by name", () => {
-      template.resourceCountIs("AWS::SecretsManager::Secret", 7);
+    it("creates the expected set of secrets by name (seven core + eight per-source ETL stubs)", () => {
+      template.resourceCountIs(
+        "AWS::SecretsManager::Secret",
+        EXPECTED_SECRET_COUNT,
+      );
       for (const name of EXPECTED_SECRETS_PROD) {
         template.hasResourceProperties("AWS::SecretsManager::Secret", {
           Name: name,
