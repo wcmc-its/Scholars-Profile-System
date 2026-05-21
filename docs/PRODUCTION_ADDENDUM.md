@@ -383,3 +383,41 @@ cdk deploy --exclusively Sps-Etl-${env} -c env=${env}
 2. **Force a failure** for the alarm verification: start the state machine with an obviously broken `startFrom` value or temporarily push an image that exits non-zero. Verify the failure SNS message lands; subscribe an email to `etl-failures-staging` temporarily.
 3. **Production** after staging signoff. Same `--exclusively` deploy. The EventBridge rules ship `Enabled=false` in prod (`etlSchedulesEnabled=false`). Run the first execution manually, then enable each rule via `aws events enable-rule`.
 
+## ObservabilityStack
+
+The alarms and cost guardrails. Provisioned by `cdk/lib/observability-stack.ts` (ADR-008 stack 5 of 6, row `B22`). Per-env (`Sps-Observability-${env}`); receives `appStack` and `dataStack` instances as constructor props and reads the L2 ALB / target group / Aurora / OpenSearch constructs directly rather than via `Fn::ImportValue` strings -- the same cross-stack-via-props pattern AppStack uses for NetworkStack's VPC + SGs.
+
+The full policy half (SLO targets, error-budget burn policy, alarm threshold rationale, log retention convention, review cadence) lives in [`docs/SLOs.md`](./SLOs.md). This section is the operator-facing resource catalog.
+
+### Eight CloudWatch alarms per env
+
+Every alarm publishes to `sps-alarms-${env}` SNS topic, which carries one email subscription (`paa2013@med.cornell.edu`) until B23 (#122) swaps in PagerDuty/Opsgenie. Names + thresholds: see `docs/SLOs.md § Alarm catalog`. Surface coverage: public ALB x3 (5xx rate, unhealthy hosts, latency p99), ECS service x1 (task shortfall vs desired), Aurora x2 (CPU, connections), OpenSearch x2 (JVM memory pressure, cluster red).
+
+The 5xx-rate alarm uses a CloudWatch math expression (`(5xx / IF(reqs > 0, reqs, 1)) * 100`) rather than a raw count so a zero-RPS quiet period does not false-fire on a single error response. The unhealthy-hosts alarm uses 5-of-5 consecutive 1-minute datapoints to absorb the natural ECS rolling-replace window (a new task is briefly unhealthy while the load balancer attaches it) without paging.
+
+### SNS topic + email subscription confirmation
+
+`sps-alarms-${env}` is the integration point B23 re-targets. First deploy of each env's stack sends a SubscriptionConfirmation email to `paa2013@med.cornell.edu`; AWS rejects messages to an unconfirmed subscription, so confirm within 3 days of first deploy or the subscription expires.
+
+The topic ARN is exported as the `AlarmTopicArn` CFN output. B23 reads it via cross-stack props (preferred) or `Fn::ImportValue` (fallback).
+
+### Account-wide cost guardrail (prod stack only)
+
+Budgets and Cost Anomaly Detection are account-scoped AWS resources. Both stacks creating them would collide on the AWS-side name on the second deploy. ObservabilityStack guards their creation behind `if (envConfig.envName === "prod")`; staging synth contains zero `AWS::Budgets::Budget` and zero `AWS::CE::*` resources (asserted in `cdk/test/observability-stack.test.ts`).
+
+| Resource | Threshold | Notification destination |
+|---|---|---|
+| `sps-monthly-budget` (CfnBudget) | $600 USD/mo | SNS to `sps-alarms-prod` at 50% forecast / 80% forecast / 100% actual |
+| `sps-anomaly-monitor` (CfnAnomalyMonitor, dimension=SERVICE) + `sps-anomaly-subscription` (CfnAnomalySubscription, frequency=DAILY) | $50 USD daily impact | SNS to `sps-alarms-prod` |
+
+The budget + anomaly subscriber configurations require the SNS topic's resource policy to grant `Publish` to `budgets.amazonaws.com` and `costalerts.amazonaws.com` respectively. ObservabilityStack does this via `alarmTopic.grantPublish(new iam.ServicePrincipal(...))` in the prod-only branch; without those grants the notifications silently no-op.
+
+### Touched-but-not-modified-behaviorally: AppStack public-readonly addition
+
+ObservabilityStack reads the public-ALB target group via `appStack.publicTargetGroup`. That property is new in AppStack as of this row; the constructor was already creating the construct (`const appTargetGroup = new elbv2.ApplicationTargetGroup(...)`) and the only addition is `this.publicTargetGroup = appTargetGroup;` plus the field declaration. Zero behavior change to AppStack synth output, but it does cross the locked-stack boundary -- recorded here so the next operator touching AppStack knows it's a sanctioned, observability-driven exposure and not drift.
+
+### Outputs surfaced for downstream stacks
+
+| Output | Consumer | What it carries |
+|---|---|---|
+| `AlarmTopicArn` | B23 (on-call routing) | SNS topic that B23 re-targets at PagerDuty/Opsgenie |

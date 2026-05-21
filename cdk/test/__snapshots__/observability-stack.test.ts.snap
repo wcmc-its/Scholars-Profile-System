@@ -1,0 +1,1014 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
+{
+  "Outputs": {
+    "AlarmTopicArn": {
+      "Description": "SNS topic every CloudWatch alarm in this stack publishes to. B23 re-targets the subscription set.",
+      "Value": {
+        "Ref": "AlarmTopicD01E77F9",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AlarmTopicD01E77F9": {
+      "Properties": {
+        "DisplayName": "SPS prod alarms",
+        "TopicName": "sps-alarms-prod",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "AlarmTopicPolicy309DB5F8": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "budgets.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "AlarmTopicD01E77F9",
+              },
+              "Sid": "0",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "costalerts.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "AlarmTopicD01E77F9",
+              },
+              "Sid": "1",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Topics": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+      },
+      "Type": "AWS::SNS::TopicPolicy",
+    },
+    "AlarmTopicpaa2013medcornelleduE4CDC7C5": {
+      "Properties": {
+        "Endpoint": "paa2013@med.cornell.edu",
+        "Protocol": "email",
+        "TopicArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
+    "AnomalyMonitor": {
+      "Properties": {
+        "MonitorDimension": "SERVICE",
+        "MonitorName": "sps-anomaly-monitor",
+        "MonitorType": "DIMENSIONAL",
+      },
+      "Type": "AWS::CE::AnomalyMonitor",
+    },
+    "AnomalySubscription": {
+      "Properties": {
+        "Frequency": "DAILY",
+        "MonitorArnList": [
+          {
+            "Ref": "AnomalyMonitor",
+          },
+        ],
+        "Subscribers": [
+          {
+            "Address": {
+              "Ref": "AlarmTopicD01E77F9",
+            },
+            "Status": "CONFIRMED",
+            "Type": "SNS",
+          },
+        ],
+        "SubscriptionName": "sps-anomaly-subscription",
+        "ThresholdExpression": "{"Dimensions":{"Key":"ANOMALY_TOTAL_IMPACT_ABSOLUTE","MatchOptions":["GREATER_THAN_OR_EQUAL"],"Values":["50"]}}",
+      },
+      "Type": "AWS::CE::AnomalySubscription",
+    },
+    "AuroraConnectionsAlarm320D1F2B": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (prod). Symptom of connection-pool exhaustion or unintended app fan-out.",
+        "AlarmName": "sps-aurora-connections-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "DBClusterIdentifier",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-prod:ExportsOutputRefAuroraCluster23D869C0CA1C7DB5",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "DatabaseConnections",
+        "Namespace": "AWS/RDS",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 80,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AuroraCpuAlarm999C031F": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (prod). Likely a hot query loop or runaway analytic.",
+        "AlarmName": "sps-aurora-cpu-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "DBClusterIdentifier",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-prod:ExportsOutputRefAuroraCluster23D869C0CA1C7DB5",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/RDS",
+        "Period": 300,
+        "Statistic": "Average",
+        "Threshold": 80,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EcsTaskShortfallAlarm951444EC": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (prod). Tasks died and are not being replaced.",
+        "AlarmName": "sps-ecs-task-shortfall-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 5,
+        "EvaluationPeriods": 5,
+        "Metrics": [
+          {
+            "Expression": "desired - running",
+            "Id": "expr_1",
+            "Label": "Desired - Running tasks (5m)",
+            "ReturnData": true,
+          },
+          {
+            "Id": "desired",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "ClusterName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
+                    },
+                  },
+                  {
+                    "Name": "ServiceName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+                    },
+                  },
+                ],
+                "MetricName": "DesiredTaskCount",
+                "Namespace": "AWS/ECS",
+              },
+              "Period": 60,
+              "Stat": "Maximum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "running",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "ClusterName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcsCluster97242B84553A5D8F",
+                    },
+                  },
+                  {
+                    "Name": "ServiceName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+                    },
+                  },
+                ],
+                "MetricName": "RunningTaskCount",
+                "Namespace": "AWS/ECS",
+              },
+              "Period": 60,
+              "Stat": "Minimum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "MonthlyBudget": {
+      "Properties": {
+        "Budget": {
+          "BudgetLimit": {
+            "Amount": 600,
+            "Unit": "USD",
+          },
+          "BudgetName": "sps-monthly-budget",
+          "BudgetType": "COST",
+          "TimeUnit": "MONTHLY",
+        },
+        "NotificationsWithSubscribers": [
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "FORECASTED",
+              "Threshold": 50,
+              "ThresholdType": "PERCENTAGE",
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "AlarmTopicD01E77F9",
+                },
+                "SubscriptionType": "SNS",
+              },
+            ],
+          },
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "FORECASTED",
+              "Threshold": 80,
+              "ThresholdType": "PERCENTAGE",
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "AlarmTopicD01E77F9",
+                },
+                "SubscriptionType": "SNS",
+              },
+            ],
+          },
+          {
+            "Notification": {
+              "ComparisonOperator": "GREATER_THAN",
+              "NotificationType": "ACTUAL",
+              "Threshold": 100,
+              "ThresholdType": "PERCENTAGE",
+            },
+            "Subscribers": [
+              {
+                "Address": {
+                  "Ref": "AlarmTopicD01E77F9",
+                },
+                "SubscriptionType": "SNS",
+              },
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::Budgets::Budget",
+    },
+    "OpenSearchClusterRedAlarm2725A3FB": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "OpenSearch cluster status is RED (prod). Shards unassigned -- searches affected.",
+        "AlarmName": "sps-opensearch-cluster-red-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "ClientId",
+            "Value": "123456789012",
+          },
+          {
+            "Name": "DomainName",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-prod:ExportsOutputRefOpenSearch587998CD05C065EF",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ClusterStatus.red",
+        "Namespace": "AWS/ES",
+        "Period": 60,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpenSearchJvmPressureAlarm9A9BC8E1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (prod). GC pressure will cascade into query latency.",
+        "AlarmName": "sps-opensearch-jvm-pressure-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "ClientId",
+            "Value": "123456789012",
+          },
+          {
+            "Name": "DomainName",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-prod:ExportsOutputRefOpenSearch587998CD05C065EF",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "JVMMemoryPressure",
+        "Namespace": "AWS/ES",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 85,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlb5xxRateAlarmC7D5139D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (prod). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
+        "AlarmName": "sps-alb-5xx-rate-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "Metrics": [
+          {
+            "Expression": "(m5xx / IF(reqs > 0, reqs, 1)) * 100",
+            "Id": "expr_1",
+            "Label": "5xx rate (%) over 5m",
+            "ReturnData": true,
+          },
+          {
+            "Id": "m5xx",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "LoadBalancer",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+                    },
+                  },
+                ],
+                "MetricName": "HTTPCode_Target_5XX_Count",
+                "Namespace": "AWS/ApplicationELB",
+              },
+              "Period": 300,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "reqs",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "LoadBalancer",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+                    },
+                  },
+                ],
+                "MetricName": "RequestCount",
+                "Namespace": "AWS/ApplicationELB",
+              },
+              "Period": 300,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlbLatencyP99AlarmC30883BF": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (prod). Burns the latency SLO budget. See docs/SLOs.md.",
+        "AlarmName": "sps-alb-latency-p99-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "LoadBalancer",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "TargetResponseTime",
+        "Namespace": "AWS/ApplicationELB",
+        "Period": 300,
+        "Threshold": 1.5,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlbUnhealthyHostsAlarm114335BE": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (prod). Circuit-breaker did not catch it -- real outage.",
+        "AlarmName": "sps-alb-unhealthy-hosts-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 5,
+        "Dimensions": [
+          {
+            "Name": "LoadBalancer",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      1,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      2,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              ],
+            },
+          },
+          {
+            "Name": "TargetGroup",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttAppTargetGroup3D716DB6TargetGroupFullName6ECDFE23",
+            },
+          },
+        ],
+        "EvaluationPeriods": 5,
+        "MetricName": "UnHealthyHostCount",
+        "Namespace": "AWS/ApplicationELB",
+        "Period": 60,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
+{
+  "Outputs": {
+    "AlarmTopicArn": {
+      "Description": "SNS topic every CloudWatch alarm in this stack publishes to. B23 re-targets the subscription set.",
+      "Value": {
+        "Ref": "AlarmTopicD01E77F9",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AlarmTopicD01E77F9": {
+      "Properties": {
+        "DisplayName": "SPS staging alarms",
+        "TopicName": "sps-alarms-staging",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "AlarmTopicpaa2013medcornelleduE4CDC7C5": {
+      "Properties": {
+        "Endpoint": "paa2013@med.cornell.edu",
+        "Protocol": "email",
+        "TopicArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
+    "AuroraConnectionsAlarm320D1F2B": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Aurora active connection count > 80 sustained over 5m (staging). Symptom of connection-pool exhaustion or unintended app fan-out.",
+        "AlarmName": "sps-aurora-connections-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "DBClusterIdentifier",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-staging:ExportsOutputRefAuroraCluster23D869C0CA1C7DB5",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "DatabaseConnections",
+        "Namespace": "AWS/RDS",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 80,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "AuroraCpuAlarm999C031F": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Aurora cluster CPU > 80% sustained for 10m (staging). Likely a hot query loop or runaway analytic.",
+        "AlarmName": "sps-aurora-cpu-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "DBClusterIdentifier",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-staging:ExportsOutputRefAuroraCluster23D869C0CA1C7DB5",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "CPUUtilization",
+        "Namespace": "AWS/RDS",
+        "Period": 300,
+        "Statistic": "Average",
+        "Threshold": 80,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EcsTaskShortfallAlarm951444EC": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "ECS service running task count is below desired for 5 consecutive minutes (staging). Tasks died and are not being replaced.",
+        "AlarmName": "sps-ecs-task-shortfall-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 5,
+        "EvaluationPeriods": 5,
+        "Metrics": [
+          {
+            "Expression": "desired - running",
+            "Id": "expr_1",
+            "Label": "Desired - Running tasks (5m)",
+            "ReturnData": true,
+          },
+          {
+            "Id": "desired",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "ClusterName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
+                    },
+                  },
+                  {
+                    "Name": "ServiceName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+                    },
+                  },
+                ],
+                "MetricName": "DesiredTaskCount",
+                "Namespace": "AWS/ECS",
+              },
+              "Period": 60,
+              "Stat": "Maximum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "running",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "ClusterName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcsCluster97242B84553A5D8F",
+                    },
+                  },
+                  {
+                    "Name": "ServiceName",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcsService81FC6EF6Name1D81E5BE",
+                    },
+                  },
+                ],
+                "MetricName": "RunningTaskCount",
+                "Namespace": "AWS/ECS",
+              },
+              "Period": 60,
+              "Stat": "Minimum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpenSearchClusterRedAlarm2725A3FB": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "OpenSearch cluster status is RED (staging). Shards unassigned -- searches affected.",
+        "AlarmName": "sps-opensearch-cluster-red-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "ClientId",
+            "Value": "123456789012",
+          },
+          {
+            "Name": "DomainName",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-staging:ExportsOutputRefOpenSearch587998CD05C065EF",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ClusterStatus.red",
+        "Namespace": "AWS/ES",
+        "Period": 60,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OpenSearchJvmPressureAlarm9A9BC8E1": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "OpenSearch JVM memory pressure > 85% for 15m (staging). GC pressure will cascade into query latency.",
+        "AlarmName": "sps-opensearch-jvm-pressure-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "ClientId",
+            "Value": "123456789012",
+          },
+          {
+            "Name": "DomainName",
+            "Value": {
+              "Fn::ImportValue": "Sps-Data-staging:ExportsOutputRefOpenSearch587998CD05C065EF",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "MetricName": "JVMMemoryPressure",
+        "Namespace": "AWS/ES",
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Threshold": 85,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlb5xxRateAlarmC7D5139D": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB target 5xx rate exceeds 1% over 5m (staging). Burns the 99.5% availability SLO budget. See docs/SLOs.md.",
+        "AlarmName": "sps-alb-5xx-rate-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "Metrics": [
+          {
+            "Expression": "(m5xx / IF(reqs > 0, reqs, 1)) * 100",
+            "Id": "expr_1",
+            "Label": "5xx rate (%) over 5m",
+            "ReturnData": true,
+          },
+          {
+            "Id": "m5xx",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "LoadBalancer",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+                    },
+                  },
+                ],
+                "MetricName": "HTTPCode_Target_5XX_Count",
+                "Namespace": "AWS/ApplicationELB",
+              },
+              "Period": 300,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+          {
+            "Id": "reqs",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "LoadBalancer",
+                    "Value": {
+                      "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+                    },
+                  },
+                ],
+                "MetricName": "RequestCount",
+                "Namespace": "AWS/ApplicationELB",
+              },
+              "Period": 300,
+              "Stat": "Sum",
+            },
+            "ReturnData": false,
+          },
+        ],
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlbLatencyP99AlarmC30883BF": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB target response time p99 > 1500ms over 5m (staging). Burns the latency SLO budget. See docs/SLOs.md.",
+        "AlarmName": "sps-alb-latency-p99-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 3,
+        "Dimensions": [
+          {
+            "Name": "LoadBalancer",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
+            },
+          },
+        ],
+        "EvaluationPeriods": 3,
+        "ExtendedStatistic": "p99",
+        "MetricName": "TargetResponseTime",
+        "Namespace": "AWS/ApplicationELB",
+        "Period": 300,
+        "Threshold": 1.5,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "PublicAlbUnhealthyHostsAlarm114335BE": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Public ALB has zero healthy targets for 5 consecutive minutes (staging). Circuit-breaker did not catch it -- real outage.",
+        "AlarmName": "sps-alb-unhealthy-hosts-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 5,
+        "Dimensions": [
+          {
+            "Name": "LoadBalancer",
+            "Value": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      1,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      2,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefPublicAlbPublicHttpListener8CAA0E9132EB9A1D",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              ],
+            },
+          },
+          {
+            "Name": "TargetGroup",
+            "Value": {
+              "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttAppTargetGroup3D716DB6TargetGroupFullName6ECDFE23",
+            },
+          },
+        ],
+        "EvaluationPeriods": 5,
+        "MetricName": "UnHealthyHostCount",
+        "Namespace": "AWS/ApplicationELB",
+        "Period": 60,
+        "Statistic": "Maximum",
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
