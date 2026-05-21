@@ -79,8 +79,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 8 CloudWatch alarms", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 8);
+    it("creates exactly 9 CloudWatch alarms", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -88,13 +88,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(8);
+      expect(names).toHaveLength(9);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the eight documented surfaces", () => {
+    it("alarm names cover the nine documented surfaces", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -108,6 +108,7 @@ describe("SpsObservabilityStack", () => {
           "sps-aurora-connections-prod",
           "sps-aurora-cpu-prod",
           "sps-ecs-task-shortfall-prod",
+          "sps-edit-authz-denied-prod",
           "sps-opensearch-cluster-red-prod",
           "sps-opensearch-jvm-pressure-prod",
         ].sort(),
@@ -189,7 +190,7 @@ describe("SpsObservabilityStack", () => {
       expect(topicRef).toBe(notifyLogicalId);
     });
 
-    it("page topic carries zero SNS::Subscription resources (PD sub is out-of-band)", () => {
+    it("page topic carries zero SNS::Subscription resources (Teams sub is out-of-band)", () => {
       const subs = template.findResources("AWS::SNS::Subscription");
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
@@ -205,7 +206,7 @@ describe("SpsObservabilityStack", () => {
       expect(pageSubs).toHaveLength(0);
     });
 
-    it("all 8 alarm AlarmActions resolve to the page topic ARN (no cross-wiring)", () => {
+    it("all 9 alarm AlarmActions resolve to the page topic ARN (no cross-wiring)", () => {
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
         ([, r]) =>
@@ -354,6 +355,47 @@ describe("SpsObservabilityStack", () => {
     it("does not introduce any new log groups (AppStack already set retention)", () => {
       template.resourceCountIs("AWS::Logs::LogGroup", 0);
     });
+
+    it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
+      template.resourceCountIs("AWS::Logs::MetricFilter", 1);
+      const filters = template.findResources("AWS::Logs::MetricFilter");
+      const props = Object.values(filters)[0]?.Properties;
+      expect(props?.FilterPattern).toBe('{ $.event = "edit_authz_denied" }');
+      const transforms = props?.MetricTransformations as
+        | Array<{
+            MetricNamespace: string;
+            MetricName: string;
+            MetricValue: string;
+          }>
+        | undefined;
+      expect(transforms).toHaveLength(1);
+      expect(transforms?.[0]?.MetricNamespace).toBe("SPS/Auth");
+      expect(transforms?.[0]?.MetricName).toBe("EditAuthzDenied");
+      // The log group reference resolves to AppStack's app log group via
+      // CloudFormation `Fn::ImportValue`; assert the destination LogGroupName
+      // shape matches the AppStack-owned env-prefixed group.
+      const logGroupName = props?.LogGroupName;
+      expect(logGroupName).toBeDefined();
+    });
+
+    it("the edit_authz_denied alarm has the right threshold and SNS action", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-edit-authz-denied-prod" },
+      });
+      expect(Object.keys(alarms)).toHaveLength(1);
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.Threshold).toBe(10);
+      expect(props?.EvaluationPeriods).toBe(2);
+      expect(props?.DatapointsToAlarm).toBe(2);
+      expect(props?.ComparisonOperator).toBe("GreaterThanThreshold");
+      expect(props?.Statistic).toBe("Sum");
+      expect(props?.Period).toBe(300);
+      expect(props?.Namespace).toBe("SPS/Auth");
+      expect(props?.MetricName).toBe("EditAuthzDenied");
+      expect(props?.TreatMissingData).toBe("notBreaching");
+      const actions = props?.AlarmActions as unknown[] | undefined;
+      expect(actions).toHaveLength(1);
+    });
   });
 
   // ----------------------------------------------------------------------
@@ -366,8 +408,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 8 CloudWatch alarms (same count as prod)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 8);
+    it("creates exactly 9 CloudWatch alarms (same count as prod)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -375,7 +417,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(8);
+      expect(names).toHaveLength(9);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -421,7 +463,7 @@ describe("SpsObservabilityStack", () => {
       expect(sub?.TopicArn?.Ref).toBe(notifyLogicalId);
     });
 
-    it("all 8 staging alarms publish to the page topic ARN", () => {
+    it("all 9 staging alarms publish to the page topic ARN", () => {
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
         ([, r]) =>
@@ -453,6 +495,23 @@ describe("SpsObservabilityStack", () => {
     it("creates NO Cost Anomaly Detection resources (prod-only)", () => {
       template.resourceCountIs("AWS::CE::AnomalyMonitor", 0);
       template.resourceCountIs("AWS::CE::AnomalySubscription", 0);
+    });
+
+    // Unlike the budget/anomaly resources, the B02 metric filter + alarm are
+    // log-group-scoped (per-env) rather than account-wide. They must ship in
+    // both envs so staging traffic exercises the binding before prod.
+    it("creates the B02 edit_authz_denied metric filter in staging (not prod-only)", () => {
+      template.resourceCountIs("AWS::Logs::MetricFilter", 1);
+      template.hasResourceProperties("AWS::Logs::MetricFilter", {
+        FilterPattern: '{ $.event = "edit_authz_denied" }',
+      });
+    });
+
+    it("creates the edit_authz_denied alarm with the staging env name", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        AlarmName: "sps-edit-authz-denied-staging",
+        Threshold: 10,
+      });
     });
 
     it("does not grant cost-publisher service principals on the topic (prod-only)", () => {

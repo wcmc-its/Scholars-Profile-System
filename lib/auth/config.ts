@@ -85,8 +85,13 @@ export function getSessionConfig(): SessionConfig {
 }
 
 export interface SamlEnv {
-  /** IdP signing certificate (PEM) — verifies the SAMLResponse signature. */
-  idpCert: string;
+  /**
+   * IdP signing certificate(s) (PEM) — verifies the SAMLResponse signature.
+   * A single PEM is returned as a string; multiple PEMs concatenated in the
+   * env value (the rollover format — see `parseIdpCert`) come back as an
+   * array. node-saml accepts either shape on `SamlConfig.idpCert`.
+   */
+  idpCert: string | string[];
   /** IdP entityID — verifies the assertion `Issuer`. */
   idpEntityId: string | undefined;
   /** IdP SSO service URL — where the AuthnRequest is sent. */
@@ -113,6 +118,28 @@ export interface SamlEnv {
   nameIdFormat: string | undefined;
 }
 
+const PEM_CERT_PATTERN =
+  /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g;
+
+/**
+ * Parse `SAML_IDP_CERT` as either a single PEM or a list of concatenated PEMs.
+ * Concatenated form is how an IdP rollover is delivered: two (or more)
+ * `-----BEGIN CERTIFICATE----- … -----END CERTIFICATE-----` blocks separated
+ * by whitespace, each trusted as a signing key until the older one expires.
+ * Returns the original input when exactly one block is found (so node-saml
+ * sees the same `string` it always has), an array of trimmed blocks when
+ * more than one is found, and throws if no well-formed block is present.
+ */
+export function parseIdpCert(raw: string): string | string[] {
+  const blocks = raw.match(PEM_CERT_PATTERN);
+  if (!blocks || blocks.length === 0) {
+    throw new Error(
+      "B01 SSO: SAML_IDP_CERT must contain at least one PEM-encoded certificate (-----BEGIN CERTIFICATE----- … -----END CERTIFICATE-----)",
+    );
+  }
+  return blocks.length === 1 ? raw : blocks.map((b) => b.trim());
+}
+
 /**
  * SAML SP/IdP config, consumed by `lib/auth/saml.ts`. Throws if a required
  * `SAML_*` variable is missing — so the SAML routes fail loud on a
@@ -120,7 +147,7 @@ export interface SamlEnv {
  */
 export function getSamlEnv(): SamlEnv {
   return {
-    idpCert: requireEnv("SAML_IDP_CERT"),
+    idpCert: parseIdpCert(requireEnv("SAML_IDP_CERT")),
     idpEntityId: optionalEnv("SAML_IDP_ENTITY_ID"),
     idpSsoUrl: requireEnv("SAML_IDP_SSO_URL"),
     spEntityId: requireEnv("SAML_SP_ENTITY_ID"),

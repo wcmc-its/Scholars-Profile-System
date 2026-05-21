@@ -196,6 +196,45 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudWatch::Alarm",
     },
+    "EditAuthzDeniedAlarm19EBB8B8": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (prod). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
+        "AlarmName": "sps-edit-authz-denied-prod",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "MetricName": "EditAuthzDenied",
+        "Namespace": "SPS/Auth",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 10,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EditAuthzDeniedMetricFilterC5F6CB25": {
+      "Properties": {
+        "FilterName": "sps-edit-authz-denied-prod",
+        "FilterPattern": "{ $.event = "edit_authz_denied" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EditAuthzDenied",
+            "MetricNamespace": "SPS/Auth",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
+    },
     "MonthlyBudget": {
       "Properties": {
         "Budget": {
@@ -750,6 +789,45 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EditAuthzDeniedAlarm19EBB8B8": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "AlarmTopicD01E77F9",
+          },
+        ],
+        "AlarmDescription": "Edit-surface 403 (edit_authz_denied) count > 10 in any 5m window for 2 consecutive windows (staging). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.",
+        "AlarmName": "sps-edit-authz-denied-staging",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "DatapointsToAlarm": 2,
+        "EvaluationPeriods": 2,
+        "MetricName": "EditAuthzDenied",
+        "Namespace": "SPS/Auth",
+        "Period": 300,
+        "Statistic": "Sum",
+        "Threshold": 10,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "EditAuthzDeniedMetricFilterC5F6CB25": {
+      "Properties": {
+        "FilterName": "sps-edit-authz-denied-staging",
+        "FilterPattern": "{ $.event = "edit_authz_denied" }",
+        "LogGroupName": {
+          "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefAppLogGroup7D8CD9527CC48D3E",
+        },
+        "MetricTransformations": [
+          {
+            "DefaultValue": 0,
+            "MetricName": "EditAuthzDenied",
+            "MetricNamespace": "SPS/Auth",
+            "MetricValue": "1",
+          },
+        ],
+      },
+      "Type": "AWS::Logs::MetricFilter",
     },
     "NotifyTopic5FFA0016": {
       "Properties": {

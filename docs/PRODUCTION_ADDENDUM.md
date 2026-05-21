@@ -17,7 +17,7 @@ Authorization is two-tier:
 - **Self-edit**: `session.cwid == scholar.cwid`. The common case.
 - **Admin-edit**: membership in an Enterprise Directory group (`ITS:Library:Scholars/superuser-role`), resolved by an LDAPS lookup of the group's `member` list keyed on the session CWID. The lookup runs **on every `/edit/*` request — each GET page load and each `/api/edit*` POST** — and is never cached in the session: the superuser GET pages (`/edit/scholar/[cwid]`, `/edit/publication/[pmid]`) read their target with the suppression filter off, so a stale admin claim would expose suppressed data, and a suppression's `reason`, for up to the 8-hour session. A user removed from `scholars-admins` therefore loses admin on their **next `/edit/*` request** — GET or POST. The check is fail-closed: a directory error denies, never grants. (B02 #101; the per-action rules are in `self-edit-spec.md` § Authorization. This supersedes an earlier "POST only, not on every page render" phrasing — written before the superuser GET pages were specified.)
 
-Anything else returns 403. Every 403 emits one structured log line — `event: "edit_authz_denied"` with `{ actor_cwid, target_cwid, path, reason }` (B02 #101) — a signal of either a bug in the predicate or actual probing. A CloudWatch metric filter on the app log group (pattern `{ $.event = "edit_authz_denied" }`) feeds an `EditAuthzDenied` count metric; an alarm fires when the rate exceeds N per minute (N tuned in staging) and notifies the same SNS channel as the `etl-failures` alarm. The metric filter and alarm are CDK resources, B07-adjacent; B02 emits the event and owns this spec.
+Anything else returns 403. Every 403 emits one structured log line — `event: "edit_authz_denied"` with `{ actor_cwid, target_cwid, path, reason }` (B02 #101) — a signal of either a bug in the predicate or actual probing. A CloudWatch metric filter on the app log group (pattern `{ $.event = "edit_authz_denied" }`) feeds an `EditAuthzDenied` count metric in the `SPS/Auth` namespace; an alarm named `sps-edit-authz-denied-${env}` fires when the count exceeds **10 in any 5-minute window for two consecutive windows** (Sum statistic) and publishes to the env's `sps-alarms-${env}` SNS topic — the same topic as the eight platform alarms. Threshold tuned for the sustained-rate shape: a normal day is 0 denials; a confused user or fat-fingered link is 1–3 in a row; a misconfigured bot or a predicate regression is the only thing that produces > 10/5m repeating. **Re-tune after the first month of staging traffic** (same loop as `COST_ANOMALY_DAILY_USD`). The metric filter and alarm ship in both envs from `cdk/lib/observability-stack.ts`; the event-name literal in `lib/auth/authz-events.ts` is the binding to the filter pattern — rename them together or the alarm goes silent.
 
 Every successful edit writes an append-only audit row: `{actor_cwid, target_entity_type, target_entity_id, action, fields_changed, before_values, after_values, row_hash, ts, request_id}` — #102's shape, generalized by #354 so it records suppression events and publication targets, not only scholar field-diffs. `before_values` and `after_values` are JSON capturing the actual values of the changed fields — that's the artefact a reviewer needs ("what did the dean's office change about Smith's appointment last March?"). `row_hash` is a hash over the row's payload for tamper-evidence on the row itself, not a substitute for the values. The audit table lives in a separate database (`scholars_audit`) on the same Aurora cluster, with an `INSERT`-only grant for the app role and no `UPDATE` / `DELETE`. Schema and write contract: [`docs/b03-audit-log.md`](./b03-audit-log.md). This is the artefact any future review will ask for; building it after the fact is materially harder.
 
@@ -429,7 +429,7 @@ Originally the stack created one SNS topic (`sps-alarms-${env}`) carrying both t
 
 | Topic | Logical id | Name | Subscribers | What publishes here |
 |---|---|---|---|---|
-| Page | `AlarmTopic` | `sps-alarms-${env}` | Microsoft Teams channel webhook (out-of-band) | All 8 CloudWatch alarm actions |
+| Page | `AlarmTopic` | `sps-alarms-${env}` | Microsoft Teams channel webhook (out-of-band) | All 9 CloudWatch alarm actions (8 from B22 + 1 from B02 `edit_authz_denied` rate) |
 | Notify | `NotifyTopic` | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email) | Budget thresholds + Cost Anomaly Detection (prod only) |
 
 Provider choice -- Teams channel webhook, not a dedicated paging tool. Matches the WCM-native ops pattern: chat surface + ServiceNow incident tickets + manual Ops phone escalation per CI escalation group. The original B23 plan picked PagerDuty; reversed 2026-05-21 mid-PR after confirming WCM app teams don't use third-party paging tools and the off-hours wake-up capability isn't part of how WCM does ops anyway. ServiceNow incident integration with SPS as a registered CI is tracked as a B23 follow-on (not yet sized). See `docs/oncall.md` for full rationale.
@@ -437,7 +437,7 @@ Provider choice -- Teams channel webhook, not a dedicated paging tool. Matches t
 Implementation notes:
 
 - The page topic logical id and AWS-side name (`sps-alarms-${env}`) are unchanged from B22 -- renaming would force a CFN replacement and break the staging-side email-confirmation grant chain that's already in place. Instead the email subscription on the page topic is removed and a new sibling topic is added.
-- All eight `cloudwatch.Alarm.addAlarmAction(new SnsAction(alarmTopic))` calls still point at the page topic; only the cost subscribers and the operator email move. Asserted in `cdk/test/observability-stack.test.ts` ("all 8 alarm AlarmActions resolve to the page topic ARN").
+- All nine `cloudwatch.Alarm.addAlarmAction(new SnsAction(alarmTopic))` calls still point at the page topic; only the cost subscribers and the operator email move. Asserted in `cdk/test/observability-stack.test.ts` ("all 9 alarm AlarmActions resolve to the page topic ARN").
 - `grantPublish` for `budgets.amazonaws.com` and `costalerts.amazonaws.com` now lands on the notify topic. Without that move the budget + anomaly notifications would silently no-op against a topic they can't publish to.
 - CDK does **not** create the Teams HTTPS subscription. The webhook URL is a secret (`scholars/${env}/oncall/teams-webhook-url`) populated out-of-band per ADR-008's "no secret values in CDK source" rule. `docs/oncall.md` is the operator runbook for creating the Teams Workflow, seeding the secret, and running `aws sns subscribe`.
 - Notify-topic email subscription requires AWS SNS confirmation within 3 days of first deploy of the new topic. Same constraint as B22 -- the staging deploy of B23 sends a confirmation email to `paa2013@med.cornell.edu`; alarms-arrival path for cost notifications depends on confirming it.
@@ -446,3 +446,130 @@ Implementation notes:
 Snapshot diff per env: +1 `AWS::SNS::Topic` (notify), +1 `AWS::SNS::Subscription` (email on notify), -1 `AWS::SNS::Subscription` (email previously on page), `AWS::SNS::TopicPolicy` re-targeted at the notify topic, four `Subscribers[*].Address` Refs (three budget + one anomaly) move from `AlarmTopic` -> `NotifyTopic`. Reviewable in one sitting.
 
 See `docs/oncall.md` for the full on-call topology, rollout runbook, diagnostics, and the ServiceNow follow-on direction.
+
+## Phase 4 — EdgeStack (B07 + B14)
+
+CloudFront distribution fronting the `sps-public-${env}` ALB. Eight cache behaviors implementing `docs/cloudfront-cache-spec.md` (one cacheable default + seven uncacheable carve-outs for writer routes, SSO, mutating endpoints, the health probe, telemetry, and on-demand exports), plus the B14 legacy-VIVO redirect layer in `middleware.ts`. WAF (B26 #125) and security headers beyond HSTS (B21 #120) attach to the same distribution / response-headers policy in follow-on rows without restructuring it.
+
+### Cache policy choices (D5)
+
+| Behavior class | Cache policy | Origin request policy | Cookie forwarding |
+|---|---|---|---|
+| Default (`*`) | `Managed-CachingOptimized` | **none** | none -- the single most important knob in the spec |
+| All other (writer / SSO / mutating / etc.) | `Managed-CachingDisabled` | `Managed-AllViewer` | full (cookies, query strings, all viewer headers) |
+
+The spec's documented header allowlist for the default cache key is `Accept, Accept-Language, Accept-Encoding`. `Managed-CachingOptimized` includes only `Accept-Encoding`, but no route in the current app `Vary`s on `Accept` or `Accept-Language` (no content negotiation, no i18n). Swapping to a custom cache policy is a follow-on the first time a route is added that needs them.
+
+### Origin protection: shared-secret custom header (D3)
+
+The public ALB has no TLS today (B05+B06+B09+B17 documented exposure: HTTP-only :80, "one PR cycle"). Without protection, the public ALB DNS becomes a back-door bypass of every cache-behavior decision and any future WAF, since the DNS name is published nowhere but is trivially discoverable.
+
+Mitigation: every CloudFront-originated request carries an `X-Origin-Verify` header injected via `Origin.customHeaders`. The public ALB listener's default action is `fixed-response 403`; a priority-1 listener rule forwards to the app target group only when `X-Origin-Verify` matches the expected value. The secret value lives in SecretsStack at `scholars/${env}/edge/origin-shared-secret` and is referenced by both stacks via the CloudFormation dynamic reference `{{resolve:secretsmanager:...}}` so it never appears in the synthesized template.
+
+**Rotation runbook.** Generate a fresh secret and put it into Secrets Manager, then redeploy AppStack so the listener rule picks up the new value:
+
+```
+aws secretsmanager put-secret-value \
+  --secret-id scholars/${ENV}/edge/origin-shared-secret \
+  --secret-string $(openssl rand -hex 32)
+npx cdk deploy --exclusively Sps-Edge-${ENV} -c env=${ENV}
+npx cdk deploy --exclusively Sps-App-${ENV}  -c env=${ENV}
+```
+
+Order matters: deploy EdgeStack first so CloudFront starts injecting the new header value, then deploy AppStack so the listener admits it. The reverse order produces a brief 403 window because the listener rule rejects the old header while CloudFront is still sending the old value.
+
+### Custom domain bootstrap two-step (D2)
+
+The distribution ships with the `*.cloudfront.net` domain by default. WCM ITS owns the `weill.cornell.edu` zone and the ACM certificate for `scholars.weill.cornell.edu` is provisioned and rotated by them, not by CDK. Two optional context flags attach the alias + viewer cert once the cert ARN is in hand:
+
+```
+npx cdk deploy --exclusively Sps-Edge-${ENV} \
+  -c env=${ENV} \
+  -c edgeCustomDomain=scholars.weill.cornell.edu \
+  -c edgeCertArn=arn:aws:acm:us-east-1:<acct>:certificate/<id>
+```
+
+Both flags must be present for the alias to attach; supplying just one is treated as "still on `*.cloudfront.net`". Route 53 / DNS CNAME / hosted-zone management stays outside this stack -- ITS handles it through their existing change-management process.
+
+### Response-headers policy (D6, B21 follow-on)
+
+`sps-security-headers-${env}` ships with HSTS (`max-age=63072000; includeSubDomains`) and nothing else. The policy is referenced by every behavior on day one so B21 (#120) only has to fill in CSP, X-Frame-Options, Referrer-Policy, and Permissions-Policy -- no plumbing change to the distribution.
+
+### B14: legacy VIVO URL redirect set (#113)
+
+After WCM ITS CNAMEs the legacy VIVO host onto the new CloudFront, legacy URLs of the form `http://vivo.med.cornell.edu/display/cwid-{cwid}` (and the well-known sibling shapes `/individual/cwid-*` and `/profile/cwid-*`) land at `scholars.weill.cornell.edu/<legacy-path>`. The B14 middleware layer rewrites them to the canonical CWID entry point with a single 301:
+
+```
+GET /display/cwid-abc1234     -> 301 -> /scholars/by-cwid/abc1234
+GET /individual/cwid-abc1234  -> 301 -> /scholars/by-cwid/abc1234
+GET /profile/cwid-abc1234     -> 301 -> /scholars/by-cwid/abc1234
+```
+
+The `/scholars/by-cwid/[cwid]` page then chains a second 301 to the current canonical slug via `resolveByCwidOrAlias` (`lib/url-resolver.ts`). The chained pattern keeps slug currency / aliasing in one place rather than baking a slug snapshot into the redirect map.
+
+**Redirect set provenance.** The CWID corpus is generated from WCM Enterprise Directory:
+
+```
+filter: (&(objectClass=weillCornellEduPerson)(weillCornellEduPersonTypeCode=academic-faculty))
+attrs:  ["uid", "labeledURI;vivo"]   # minimal -- never include DOB or other PII
+```
+
+The generator script `scripts/etl/generate-vivo-redirect-set.ts` parses each `labeledURI;vivo` value (e.g. `http://vivo.med.cornell.edu/display/cwid-abc1234`), de-dupes, sorts, and writes `data/vivo-redirects.json`. Run locally before each prod deploy; the JSON is checked in and consumed by middleware as a static import (Set-backed O(1) lookup). CI builds consume the committed JSON -- the script never runs in CI.
+
+```
+npx tsx scripts/etl/generate-vivo-redirect-set.ts
+# Add --filter-loose if the resulting count is suspiciously low
+# (broadens to weillCornellEduPersonTypeCode=academic-faculty*).
+```
+
+**Why middleware, not CloudFront Function.** Three reasons: (a) the CF Function code limit is 10 KB; a 3-4 k entry CWID -> slug object is ~100 KB. (b) Middleware already gates `/edit/*` and `/api/edit/*`; adding three matcher prefixes is a one-line diff. (c) The chained-301 design keeps the redirect map a flat CWID list with no slug snapshot to drift.
+
+**Out of corpus -> 404, not 410.** Retired academics whose CWID is no longer in the academic-faculty set fall through to the existing 404 handler. The spec allows 410 "where no equivalent exists" but Google treats 404 and 410 equivalently after a few crawls. An explicit 410 list lives in a future `data/vivo-retired.json` if signal-from-crawlers demands it; out of scope for B14 v1.
+
+### Verification (acceptance #15 + B14-6)
+
+Two post-deploy spot checks live here so the manual runbook for the cutover lands in one place:
+
+1. **Cache-key smoke test (B07 acceptance #15).** From the CloudFront console: Distribution -> Behaviors -> Default -> Cache Policy -> "Test cache policy." Submit the same path with two different `Cookie:` header values; the inspector must produce the same cache key. The header is excluded from the key by design -- a fragmented cache here means a configuration drift and silently leaks one user's cached HTML to another.
+
+2. **Legacy URL crawler check (B14-6).** After the WCM ITS CNAME cutover, sample 20 CWIDs from `data/vivo-redirects.json`:
+
+   ```
+   shuf -n 20 <(jq -r '.[]' data/vivo-redirects.json) | while read cwid; do
+     curl -sIL "https://scholars.weill.cornell.edu/display/cwid-${cwid}" | \
+       awk 'BEGIN{c=0} /^HTTP/{c++; print c": "$0}'
+   done
+   ```
+
+   Each sampled CWID should produce two `HTTP/2 301` (legacy -> by-cwid, by-cwid -> slug) followed by `HTTP/2 200`. If the chain stops at a single 301 with `Location: /scholars/by-cwid/*` and then a 404, the CWID is in the redirect set but no longer has an active scholar row -- expected for retirees, treat as out-of-corpus signal rather than a regression.
+
+### Outputs surfaced for downstream stacks
+
+| Output | Consumer | What it carries |
+|---|---|---|
+| `DistributionDomainName` | DNS cutover runbook (WCM ITS) | `*.cloudfront.net` domain to CNAME `scholars.weill.cornell.edu` against once the cert is staged |
+| `DistributionId` | manual invalidation runbook | distribution id for `aws cloudfront create-invalidation` |
+| `LogsBucketName` | follow-on analytics / B26 (WAF tuning) | S3 bucket receiving CloudFront standard access logs (`cf/${env}/`, 90-day lifecycle) |
+
+### Deploy strategy
+
+`cdk deploy --exclusively Sps-Edge-${env}` on first deploy. Order matters at first cutover so the public ALB does not start rejecting CloudFront mid-deploy:
+
+1. Seed the shared secret out-of-band:
+   ```
+   aws secretsmanager put-secret-value \
+     --secret-id scholars/${ENV}/edge/origin-shared-secret \
+     --secret-string $(openssl rand -hex 32)
+   ```
+2. `cdk deploy --exclusively Sps-Edge-${ENV}` -- CloudFront begins injecting `X-Origin-Verify`. (CloudFront propagation is up to 15 min; do not roll back on first 5 min of "this looks hung.")
+3. `cdk deploy --exclusively Sps-App-${ENV}` -- public ALB listener flips to deny-by-default plus the header-verified forward rule.
+4. Smoke-test:
+   ```
+   curl -H "X-Origin-Verify: $(aws secretsmanager get-secret-value \
+     --secret-id scholars/${ENV}/edge/origin-shared-secret \
+     --query SecretString --output text)" \
+     http://<public-alb-dns>/api/health      # expect 200
+   curl http://<public-alb-dns>/api/health   # expect 403
+   ```
+
+Cutover from `*.cloudfront.net` to `scholars.weill.cornell.edu` is a separate deploy after WCM ITS issues the cert (see § Custom domain bootstrap two-step). Staging deploys first; prod follows after the staging cert + DNS lifecycle is exercised end-to-end.

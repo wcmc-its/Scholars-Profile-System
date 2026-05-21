@@ -27,5 +27,10 @@ export interface AuthzDenial {
 
 /** Emit one `edit_authz_denied` log line for a 403 on the edit surface. */
 export function logAuthzDenied(denial: AuthzDenial): void {
+  // The literal `"edit_authz_denied"` event name is bound to the
+  // CloudWatch metric filter `EditAuthzDeniedMetricFilter` in
+  // `cdk/lib/observability-stack.ts` (filter pattern: `{ $.event =
+  // "edit_authz_denied" }`). Renaming this string silently stops the
+  // alarm from firing -- update the metric filter in lockstep.
   console.warn(JSON.stringify({ event: "edit_authz_denied", ...denial }));
 }
