@@ -155,16 +155,72 @@ describe("SpsObservabilityStack", () => {
       expect(props?.Threshold).toBe(1);
     });
 
-    it("creates exactly one SNS topic named sps-alarms-prod with one email subscription", () => {
-      template.resourceCountIs("AWS::SNS::Topic", 1);
+    it("creates two SNS topics (page + notify) with the documented names", () => {
+      template.resourceCountIs("AWS::SNS::Topic", 2);
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-alarms-prod",
       });
+      template.hasResourceProperties("AWS::SNS::Topic", {
+        TopicName: "sps-notify-prod",
+      });
+    });
+
+    it("notify topic has exactly one email subscription to the operator", () => {
+      // Exactly one AWS::SNS::Subscription overall — on the notify topic.
       template.resourceCountIs("AWS::SNS::Subscription", 1);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
       });
+      // The single subscription points at the notify topic, not the page topic.
+      const subs = template.findResources("AWS::SNS::Subscription");
+      const sub = Object.values(subs)[0]?.Properties as
+        | { TopicArn?: { Ref?: string } }
+        | undefined;
+      const topicRef = sub?.TopicArn?.Ref;
+      expect(topicRef).toBeDefined();
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-prod",
+      )?.[0];
+      expect(notifyLogicalId).toBeDefined();
+      expect(topicRef).toBe(notifyLogicalId);
+    });
+
+    it("page topic carries zero SNS::Subscription resources (PD sub is out-of-band)", () => {
+      const subs = template.findResources("AWS::SNS::Subscription");
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-prod",
+      )?.[0];
+      const pageSubs = Object.values(subs).filter(
+        (r) =>
+          ((r.Properties as { TopicArn?: { Ref?: string } } | undefined)
+            ?.TopicArn?.Ref ?? "") === pageLogicalId,
+      );
+      expect(pageSubs).toHaveLength(0);
+    });
+
+    it("all 8 alarm AlarmActions resolve to the page topic ARN (no cross-wiring)", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-prod",
+      )?.[0];
+      expect(pageLogicalId).toBeDefined();
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      for (const r of Object.values(alarms)) {
+        const actions = r.Properties?.AlarmActions as
+          | Array<{ Ref?: string }>
+          | undefined;
+        expect(actions).toHaveLength(1);
+        expect(actions?.[0]?.Ref).toBe(pageLogicalId);
+      }
     });
 
     it("creates the account-wide monthly budget (prod only) with three notifications", () => {
@@ -180,6 +236,55 @@ describe("SpsObservabilityStack", () => {
       expect(notifs).toHaveLength(3);
     });
 
+    it("budget subscribers all point at the notify topic (B23 split)", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-prod",
+      )?.[0];
+      expect(notifyLogicalId).toBeDefined();
+      const budgets = template.findResources("AWS::Budgets::Budget");
+      const props = Object.values(budgets)[0]?.Properties;
+      const notifs = (props?.NotificationsWithSubscribers ?? []) as Array<{
+        Subscribers: Array<{
+          Address: { Ref?: string } | string;
+          SubscriptionType: string;
+        }>;
+      }>;
+      const addresses = notifs.flatMap((n) =>
+        n.Subscribers.map((s) =>
+          typeof s.Address === "string" ? s.Address : s.Address?.Ref,
+        ),
+      );
+      expect(addresses).toHaveLength(3);
+      for (const ref of addresses) {
+        expect(ref).toBe(notifyLogicalId);
+      }
+    });
+
+    it("cost-anomaly subscriber points at the notify topic (B23 split)", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-prod",
+      )?.[0];
+      const subs = template.findResources("AWS::CE::AnomalySubscription");
+      const props = Object.values(subs)[0]?.Properties as
+        | {
+            Subscribers?: Array<{
+              Address: { Ref?: string } | string;
+              Type: string;
+            }>;
+          }
+        | undefined;
+      expect(props?.Subscribers).toHaveLength(1);
+      const addr = props?.Subscribers?.[0]?.Address;
+      const ref = typeof addr === "string" ? addr : addr?.Ref;
+      expect(ref).toBe(notifyLogicalId);
+    });
+
     it("creates the Cost Anomaly Detection monitor + subscription (prod only)", () => {
       template.resourceCountIs("AWS::CE::AnomalyMonitor", 1);
       template.resourceCountIs("AWS::CE::AnomalySubscription", 1);
@@ -190,11 +295,31 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
-    it("grants budgets.amazonaws.com and costalerts.amazonaws.com publish on the topic", () => {
+    it("grants budgets.amazonaws.com and costalerts.amazonaws.com publish on the notify topic only (B23)", () => {
       const policies = template.findResources("AWS::SNS::TopicPolicy");
+      // Exactly one topic policy in the stack — on the notify topic.
       expect(Object.keys(policies)).toHaveLength(1);
-      const statements = Object.values(policies)[0]?.Properties?.PolicyDocument
-        ?.Statement as Array<{
+      const policy = Object.values(policies)[0];
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-prod",
+      )?.[0];
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-prod",
+      )?.[0];
+      const policyTopicsRaw = policy?.Properties?.Topics as
+        | Array<{ Ref?: string }>
+        | undefined;
+      const policyTopicRefs = (policyTopicsRaw ?? [])
+        .map((t) => t.Ref)
+        .filter((r): r is string => typeof r === "string");
+      expect(policyTopicRefs).toContain(notifyLogicalId);
+      expect(policyTopicRefs).not.toContain(pageLogicalId);
+      const statements = policy?.Properties?.PolicyDocument?.Statement as Array<{
         Action: string;
         Principal: { Service: string };
       }>;
@@ -204,6 +329,26 @@ describe("SpsObservabilityStack", () => {
         .sort();
       expect(services).toContain("budgets.amazonaws.com");
       expect(services).toContain("costalerts.amazonaws.com");
+    });
+
+    it("emits both AlarmTopicArn and NotifyTopicArn CFN outputs", () => {
+      template.hasOutput("AlarmTopicArn", {});
+      template.hasOutput("NotifyTopicArn", {});
+    });
+
+    it("new SNS topic display names + NotifyTopicArn description are printable ASCII (Footgun #6)", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      for (const r of Object.values(topics)) {
+        const dn = (r.Properties as { DisplayName?: string } | undefined)
+          ?.DisplayName;
+        if (typeof dn === "string") expect(dn).toMatch(PRINTABLE_ASCII);
+      }
+      const outputs = template.findOutputs("NotifyTopicArn");
+      const desc = Object.values(outputs)[0]?.Description as
+        | string
+        | undefined;
+      expect(desc).toBeDefined();
+      expect(desc!).toMatch(PRINTABLE_ASCII);
     });
 
     it("does not introduce any new log groups (AppStack already set retention)", () => {
@@ -236,11 +381,66 @@ describe("SpsObservabilityStack", () => {
       }
     });
 
-    it("creates exactly one SNS topic named sps-alarms-staging", () => {
-      template.resourceCountIs("AWS::SNS::Topic", 1);
+    it("creates two SNS topics (page + notify) with the staging env literals", () => {
+      template.resourceCountIs("AWS::SNS::Topic", 2);
       template.hasResourceProperties("AWS::SNS::Topic", {
         TopicName: "sps-alarms-staging",
       });
+      template.hasResourceProperties("AWS::SNS::Topic", {
+        TopicName: "sps-notify-staging",
+      });
+    });
+
+    it("page topic has zero SNS::Subscription resources; notify topic has the operator email", () => {
+      template.resourceCountIs("AWS::SNS::Subscription", 1);
+      template.hasResourceProperties("AWS::SNS::Subscription", {
+        Protocol: "email",
+        Endpoint: "paa2013@med.cornell.edu",
+      });
+      const subs = template.findResources("AWS::SNS::Subscription");
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-staging",
+      )?.[0];
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-staging",
+      )?.[0];
+      const pageSubs = Object.values(subs).filter(
+        (r) =>
+          ((r.Properties as { TopicArn?: { Ref?: string } } | undefined)
+            ?.TopicArn?.Ref ?? "") === pageLogicalId,
+      );
+      expect(pageSubs).toHaveLength(0);
+      const sub = Object.values(subs)[0]?.Properties as
+        | { TopicArn?: { Ref?: string } }
+        | undefined;
+      expect(sub?.TopicArn?.Ref).toBe(notifyLogicalId);
+    });
+
+    it("all 8 staging alarms publish to the page topic ARN", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-staging",
+      )?.[0];
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      for (const r of Object.values(alarms)) {
+        const actions = r.Properties?.AlarmActions as
+          | Array<{ Ref?: string }>
+          | undefined;
+        expect(actions).toHaveLength(1);
+        expect(actions?.[0]?.Ref).toBe(pageLogicalId);
+      }
+    });
+
+    it("emits both AlarmTopicArn and NotifyTopicArn CFN outputs in staging too", () => {
+      template.hasOutput("AlarmTopicArn", {});
+      template.hasOutput("NotifyTopicArn", {});
     });
 
     // The staging-vs-prod divergence at the core of this stack: cost

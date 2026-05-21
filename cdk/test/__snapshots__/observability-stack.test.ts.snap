@@ -4,9 +4,15 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
 {
   "Outputs": {
     "AlarmTopicArn": {
-      "Description": "SNS topic every CloudWatch alarm in this stack publishes to. B23 re-targets the subscription set.",
+      "Description": "SNS topic every CloudWatch alarm publishes to (page). The Teams channel webhook is subscribed out-of-band per docs/oncall.md.",
       "Value": {
         "Ref": "AlarmTopicD01E77F9",
+      },
+    },
+    "NotifyTopicArn": {
+      "Description": "SNS topic for cost guardrails + low-urgency fan-out (notify). Operator email subscription lands here, not on the page topic.",
+      "Value": {
+        "Ref": "NotifyTopic5FFA0016",
       },
     },
   },
@@ -20,57 +26,10 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
   "Resources": {
     "AlarmTopicD01E77F9": {
       "Properties": {
-        "DisplayName": "SPS prod alarms",
+        "DisplayName": "SPS prod alarms (page)",
         "TopicName": "sps-alarms-prod",
       },
       "Type": "AWS::SNS::Topic",
-    },
-    "AlarmTopicPolicy309DB5F8": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "budgets.amazonaws.com",
-              },
-              "Resource": {
-                "Ref": "AlarmTopicD01E77F9",
-              },
-              "Sid": "0",
-            },
-            {
-              "Action": "sns:Publish",
-              "Effect": "Allow",
-              "Principal": {
-                "Service": "costalerts.amazonaws.com",
-              },
-              "Resource": {
-                "Ref": "AlarmTopicD01E77F9",
-              },
-              "Sid": "1",
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Topics": [
-          {
-            "Ref": "AlarmTopicD01E77F9",
-          },
-        ],
-      },
-      "Type": "AWS::SNS::TopicPolicy",
-    },
-    "AlarmTopicpaa2013medcornelleduE4CDC7C5": {
-      "Properties": {
-        "Endpoint": "paa2013@med.cornell.edu",
-        "Protocol": "email",
-        "TopicArn": {
-          "Ref": "AlarmTopicD01E77F9",
-        },
-      },
-      "Type": "AWS::SNS::Subscription",
     },
     "AnomalyMonitor": {
       "Properties": {
@@ -91,7 +50,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Subscribers": [
           {
             "Address": {
-              "Ref": "AlarmTopicD01E77F9",
+              "Ref": "NotifyTopic5FFA0016",
             },
             "Status": "CONFIRMED",
             "Type": "SNS",
@@ -259,7 +218,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Subscribers": [
               {
                 "Address": {
-                  "Ref": "AlarmTopicD01E77F9",
+                  "Ref": "NotifyTopic5FFA0016",
                 },
                 "SubscriptionType": "SNS",
               },
@@ -275,7 +234,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Subscribers": [
               {
                 "Address": {
-                  "Ref": "AlarmTopicD01E77F9",
+                  "Ref": "NotifyTopic5FFA0016",
                 },
                 "SubscriptionType": "SNS",
               },
@@ -291,7 +250,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
             "Subscribers": [
               {
                 "Address": {
-                  "Ref": "AlarmTopicD01E77F9",
+                  "Ref": "NotifyTopic5FFA0016",
                 },
                 "SubscriptionType": "SNS",
               },
@@ -300,6 +259,60 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::Budgets::Budget",
+    },
+    "NotifyTopic5FFA0016": {
+      "Properties": {
+        "DisplayName": "SPS prod notifications (notify)",
+        "TopicName": "sps-notify-prod",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "NotifyTopicPolicy23E22CE3": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "budgets.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "NotifyTopic5FFA0016",
+              },
+              "Sid": "0",
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "costalerts.amazonaws.com",
+              },
+              "Resource": {
+                "Ref": "NotifyTopic5FFA0016",
+              },
+              "Sid": "1",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Topics": [
+          {
+            "Ref": "NotifyTopic5FFA0016",
+          },
+        ],
+      },
+      "Type": "AWS::SNS::TopicPolicy",
+    },
+    "NotifyTopicpaa2013medcornelledu2E34CAB1": {
+      "Properties": {
+        "Endpoint": "paa2013@med.cornell.edu",
+        "Protocol": "email",
+        "TopicArn": {
+          "Ref": "NotifyTopic5FFA0016",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
     },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {
@@ -576,9 +589,15 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
 {
   "Outputs": {
     "AlarmTopicArn": {
-      "Description": "SNS topic every CloudWatch alarm in this stack publishes to. B23 re-targets the subscription set.",
+      "Description": "SNS topic every CloudWatch alarm publishes to (page). The Teams channel webhook is subscribed out-of-band per docs/oncall.md.",
       "Value": {
         "Ref": "AlarmTopicD01E77F9",
+      },
+    },
+    "NotifyTopicArn": {
+      "Description": "SNS topic for cost guardrails + low-urgency fan-out (notify). Operator email subscription lands here, not on the page topic.",
+      "Value": {
+        "Ref": "NotifyTopic5FFA0016",
       },
     },
   },
@@ -592,20 +611,10 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
   "Resources": {
     "AlarmTopicD01E77F9": {
       "Properties": {
-        "DisplayName": "SPS staging alarms",
+        "DisplayName": "SPS staging alarms (page)",
         "TopicName": "sps-alarms-staging",
       },
       "Type": "AWS::SNS::Topic",
-    },
-    "AlarmTopicpaa2013medcornelleduE4CDC7C5": {
-      "Properties": {
-        "Endpoint": "paa2013@med.cornell.edu",
-        "Protocol": "email",
-        "TopicArn": {
-          "Ref": "AlarmTopicD01E77F9",
-        },
-      },
-      "Type": "AWS::SNS::Subscription",
     },
     "AuroraConnectionsAlarm320D1F2B": {
       "Properties": {
@@ -741,6 +750,23 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "TreatMissingData": "notBreaching",
       },
       "Type": "AWS::CloudWatch::Alarm",
+    },
+    "NotifyTopic5FFA0016": {
+      "Properties": {
+        "DisplayName": "SPS staging notifications (notify)",
+        "TopicName": "sps-notify-staging",
+      },
+      "Type": "AWS::SNS::Topic",
+    },
+    "NotifyTopicpaa2013medcornelledu2E34CAB1": {
+      "Properties": {
+        "Endpoint": "paa2013@med.cornell.edu",
+        "Protocol": "email",
+        "TopicArn": {
+          "Ref": "NotifyTopic5FFA0016",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
     },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {
