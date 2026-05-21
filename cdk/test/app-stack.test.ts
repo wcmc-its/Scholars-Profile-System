@@ -1,0 +1,670 @@
+import { Match, Template } from "aws-cdk-lib/assertions";
+import { AppStack } from "../lib/app-stack";
+import { NetworkStack } from "../lib/network-stack";
+import { makeFixture } from "./test-utils";
+
+function buildAppStack(envName: "staging" | "prod"): {
+  template: Template;
+  stack: AppStack;
+} {
+  const fixture = makeFixture(envName);
+  const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+  });
+  const stack = new AppStack(fixture.app, `Sps-App-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    vpc: network.vpc,
+    appSecurityGroup: network.appSecurityGroup,
+    etlSecurityGroup: network.etlSecurityGroup,
+    albSecurityGroup: network.albSecurityGroup,
+  });
+  return { template: Template.fromStack(stack), stack };
+}
+
+// The EC2 description allow-set (matches the regex documented in
+// data-stack.test.ts "EC2 property character-set safety"). Re-asserted in
+// this stack because Footgun #6 (PRs #401/#402) only catches at deploy
+// time; the synth-time guard generalizes to every stack with SGs.
+const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
+
+describe("AppStack", () => {
+  describe("prod", () => {
+    const { template } = buildAppStack("prod");
+
+    it("matches the snapshot", () => {
+      expect(template.toJSON()).toMatchSnapshot();
+    });
+
+    describe("Resource counts (the plan's § Acceptance criteria)", () => {
+      it("creates exactly one ECR repository, one ECS cluster, two task definitions, one ECS service", () => {
+        template.resourceCountIs("AWS::ECR::Repository", 1);
+        template.resourceCountIs("AWS::ECS::Cluster", 1);
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
+        template.resourceCountIs("AWS::ECS::Service", 1);
+      });
+
+      it("creates two ALBs (one internet-facing, one internal), one target group, two listeners", () => {
+        template.resourceCountIs(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+          2,
+        );
+        template.resourceCountIs(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          1,
+        );
+        template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
+
+        const lbs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        );
+        const schemes = Object.values(lbs)
+          .map((r) => r.Properties?.Scheme as string | undefined)
+          .sort();
+        expect(schemes).toEqual(["internal", "internet-facing"]);
+      });
+
+      it("creates the two task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
+        // The CDK custom resource that provisions the OIDC provider adds
+        // its own Lambda execution role; assert >= 3 customer roles by
+        // matching role names rather than the raw count.
+        const roles = template.findResources("AWS::IAM::Role");
+        const roleNames = Object.values(roles)
+          .map((r) => r.Properties?.RoleName as string | undefined)
+          .filter((n): n is string => typeof n === "string")
+          .sort();
+        expect(roleNames).toEqual(
+          ["sps-deploy-prod", "sps-task-exec-prod", "sps-task-prod"].sort(),
+        );
+      });
+
+      it("creates two VPC interface endpoints and one S3 gateway endpoint", () => {
+        const endpoints = template.findResources("AWS::EC2::VPCEndpoint");
+        const types = Object.values(endpoints)
+          .map((r) => r.Properties?.VpcEndpointType as string | undefined)
+          .sort();
+        // Two Interface + one Gateway.
+        expect(types.filter((t) => t === "Interface")).toHaveLength(2);
+        expect(types.filter((t) => t === "Gateway")).toHaveLength(1);
+      });
+
+      it("creates exactly two CloudWatch log groups (app + migrate)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 2);
+        const groups = template.findResources("AWS::Logs::LogGroup");
+        const names = Object.values(groups)
+          .map((r) => r.Properties?.LogGroupName as string | undefined)
+          .sort();
+        expect(names).toEqual([
+          "/aws/ecs/sps-app-prod",
+          "/aws/ecs/sps-migrate-prod",
+        ]);
+      });
+    });
+
+    describe("ECR repository", () => {
+      it("uses an env-prefixed name with image-scan-on-push", () => {
+        template.hasResourceProperties("AWS::ECR::Repository", {
+          RepositoryName: "scholars-app-prod",
+          ImageScanningConfiguration: { ScanOnPush: true },
+        });
+      });
+
+      it("attaches a lifecycle policy that keeps the last 30 tagged images and expires untagged after 7 days", () => {
+        const repos = template.findResources("AWS::ECR::Repository");
+        const policyText = Object.values(repos)[0]?.Properties
+          ?.LifecyclePolicy?.LifecyclePolicyText as string | undefined;
+        expect(typeof policyText).toBe("string");
+        const policy = JSON.parse(policyText ?? "{}") as {
+          rules?: Array<Record<string, unknown>>;
+        };
+        const tagged = policy.rules?.find(
+          (r) =>
+            (r.selection as { tagStatus?: string } | undefined)?.tagStatus ===
+            "tagged",
+        );
+        const untagged = policy.rules?.find(
+          (r) =>
+            (r.selection as { tagStatus?: string } | undefined)?.tagStatus ===
+            "untagged",
+        );
+        expect(tagged).toBeDefined();
+        expect(untagged).toBeDefined();
+        expect(
+          (tagged?.selection as { countNumber?: number })?.countNumber,
+        ).toBe(30);
+        expect(
+          (untagged?.selection as { countNumber?: number })?.countNumber,
+        ).toBe(7);
+      });
+    });
+
+    describe("ECS service + cluster", () => {
+      it("enables Container Insights on the cluster", () => {
+        template.hasResourceProperties("AWS::ECS::Cluster", {
+          ClusterName: "sps-cluster-prod",
+          ClusterSettings: Match.arrayWith([
+            Match.objectLike({
+              Name: "containerInsights",
+              // CDK serializes ContainerInsightsV2.ENABLED as the string
+              // "enhanced" -- the new v2 form covers the legacy
+              // ContainerInsights=enabled metric set plus the v2 perf
+              // signals. Asserted via stringLikeRegexp so the test
+              // survives a CDK rename without churn.
+              Value: Match.stringLikeRegexp("enabled|enhanced"),
+            }),
+          ]),
+        });
+      });
+
+      it("runs Fargate with desiredCount=2 (prod) and circuit-breaker rollback enabled (ADR-004)", () => {
+        template.hasResourceProperties("AWS::ECS::Service", {
+          ServiceName: "sps-app-prod",
+          LaunchType: "FARGATE",
+          DesiredCount: 2,
+          DeploymentConfiguration: Match.objectLike({
+            MinimumHealthyPercent: 100,
+            MaximumPercent: 200,
+            DeploymentCircuitBreaker: { Enable: true, Rollback: true },
+          }),
+        });
+      });
+
+      it("uses an env-config-valid Fargate (cpu, memory) pair on both task definitions", () => {
+        // L2 helper accepts invalid (cpu, memory) combinations; AWS rejects
+        // them only at run time. Lock the allowlist at synth time.
+        const valid: ReadonlySet<string> = new Set([
+          "256:512",
+          "256:1024",
+          "256:2048",
+          "512:1024",
+          "512:2048",
+          "512:3072",
+          "512:4096",
+          "1024:2048",
+          "1024:3072",
+          "1024:4096",
+          "1024:5120",
+          "1024:6144",
+          "1024:7168",
+          "1024:8192",
+          "2048:4096",
+          "2048:5120",
+          "2048:6144",
+          "2048:7168",
+          "2048:8192",
+          "2048:16384",
+          "4096:8192",
+          "4096:16384",
+          "4096:30720",
+        ]);
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        for (const [id, resource] of Object.entries(taskDefs)) {
+          const cpu = resource.Properties?.Cpu as string | undefined;
+          const memory = resource.Properties?.Memory as string | undefined;
+          const pair = `${cpu}:${memory}`;
+          expect({ id, pair, ok: valid.has(pair) }).toEqual({
+            id,
+            pair,
+            ok: true,
+          });
+        }
+      });
+
+      it("wires the ECS service to the target group via a loadBalancers mapping (manual L1 attach)", () => {
+        // The L2 attachToApplicationTargetGroup helper auto-establishes SG
+        // ingress rules from each ALB SG -- with the internal ALB's SG in
+        // AppStack and the app SG in NetworkStack that closes a cycle.
+        // The manual L1 attach skips the auto-wire; this assertion
+        // documents that the service still ends up registered with the TG.
+        template.hasResourceProperties("AWS::ECS::Service", {
+          LoadBalancers: Match.arrayWith([
+            Match.objectLike({
+              ContainerName: "app",
+              ContainerPort: 3000,
+              TargetGroupArn: Match.anyValue(),
+            }),
+          ]),
+        });
+      });
+    });
+
+    describe("Task definitions", () => {
+      it("the app task definition exposes container port 3000 and wires all six secrets", () => {
+        template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+          Family: "sps-app-prod",
+          NetworkMode: "awsvpc",
+          RequiresCompatibilities: ["FARGATE"],
+          ContainerDefinitions: Match.arrayWith([
+            Match.objectLike({
+              Name: "app",
+              PortMappings: Match.arrayWith([
+                Match.objectLike({ ContainerPort: 3000, Protocol: "tcp" }),
+              ]),
+              Environment: Match.arrayWith([
+                Match.objectLike({ Name: "NODE_ENV", Value: "production" }),
+                Match.objectLike({ Name: "PORT", Value: "3000" }),
+              ]),
+              Secrets: Match.arrayWith([
+                Match.objectLike({ Name: "DATABASE_URL" }),
+                Match.objectLike({ Name: "DATABASE_URL_RO" }),
+                Match.objectLike({ Name: "OPENSEARCH_USER" }),
+                Match.objectLike({ Name: "OPENSEARCH_PASS" }),
+                Match.objectLike({ Name: "REVALIDATE_TOKEN" }),
+                Match.objectLike({ Name: "SAML_SP_PRIVATE_KEY" }),
+              ]),
+            }),
+          ]),
+        });
+      });
+
+      it("the migration task definition has the prisma migrate deploy entrypoint and only the writer secret", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const migrate = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-migrate-prod",
+        );
+        expect(migrate).toBeDefined();
+        const container = (migrate?.Properties?.ContainerDefinitions as
+          | Array<Record<string, unknown>>
+          | undefined)?.[0];
+        expect(container?.EntryPoint).toEqual([
+          "npx",
+          "prisma",
+          "migrate",
+          "deploy",
+        ]);
+        const secretNames = (
+          container?.Secrets as Array<{ Name?: string }> | undefined
+        )?.map((s) => s.Name);
+        expect(secretNames).toEqual(["DATABASE_URL"]);
+      });
+    });
+
+    describe("IAM role split (B06)", () => {
+      it("the task-execution role policy lists exactly the five consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+        // No `*` resource on secretsmanager:* (Phase 1 hard rule).
+        // The five ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // opensearch/app, revalidate-token, and the SAML SP private key.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        expect(execPolicy).toBeDefined();
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const secretsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("secretsmanager:GetSecretValue")
+            : action === "secretsmanager:GetSecretValue";
+        });
+        expect(secretsStmt).toBeDefined();
+        const resourceList = Array.isArray(secretsStmt?.Resource)
+          ? (secretsStmt?.Resource as unknown[])
+          : [secretsStmt?.Resource];
+        expect(resourceList).toHaveLength(5);
+        // No `*` ever appears in the resource list.
+        for (const r of resourceList) {
+          expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+        }
+      });
+
+      it("the task role policy contains zero secretsmanager:* actions (runtime identity must not read secrets)", () => {
+        // Application secrets are injected by ECS at task-start via the
+        // EXECUTION role. The task role -- the role the running app
+        // assumes -- must never be in a position to pull a fresh secret
+        // value at runtime.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const taskRolePolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("TaskRole") &&
+              !r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        // The task role currently has no attached policy at all -- if
+        // some future PR introduces one, this assertion catches a
+        // secrets:* smuggle attempt before the PR lands.
+        if (taskRolePolicy !== undefined) {
+          const serialized = JSON.stringify(
+            taskRolePolicy.Properties?.PolicyDocument,
+          );
+          expect(serialized).not.toMatch(/secretsmanager:/);
+        }
+      });
+
+      it("the OIDC deploy role admits only the SPS repo via sub-claim StringLike", () => {
+        const roles = template.findResources("AWS::IAM::Role");
+        const deployRole = Object.values(roles).find(
+          (r) => r.Properties?.RoleName === "sps-deploy-prod",
+        );
+        expect(deployRole).toBeDefined();
+        const statements = deployRole?.Properties?.AssumeRolePolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const subClaim = statements?.[0]?.Condition as
+          | { StringLike?: Record<string, string> }
+          | undefined;
+        const sub =
+          subClaim?.StringLike?.["token.actions.githubusercontent.com:sub"];
+        // Prod admits only refs/heads/master.
+        expect(sub).toBe(
+          "repo:wcmc-its/Scholars-Profile-System:ref:refs/heads/master",
+        );
+      });
+
+      it("the OIDC deploy role policy contains no `*` Resource (every action is scoped)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        expect(deployPolicy).toBeDefined();
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        // Exactly one statement is allowed to use Resource=*: the ECR
+        // GetAuthorizationToken call, which is account-scoped at the API
+        // level and has no resource ARN. Everything else must be a
+        // concrete ARN (or Fn::Join/Ref pointing at one).
+        for (const stmt of statements ?? []) {
+          const action = stmt.Action as string | string[];
+          const resource = stmt.Resource as unknown;
+          const isAuthOnly =
+            (Array.isArray(action)
+              ? action.length === 1 && action[0] === "ecr:GetAuthorizationToken"
+              : action === "ecr:GetAuthorizationToken");
+          if (isAuthOnly) {
+            continue;
+          }
+          // Walk the resource value; assert no bare `"*"` literal.
+          const serialized = JSON.stringify(resource);
+          expect(serialized).not.toMatch(/^"\*"$/);
+        }
+      });
+    });
+
+    describe("Load balancers + target group", () => {
+      it("the public ALB is internet-facing with an env-prefixed name", () => {
+        const lbs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        );
+        const publicLb = Object.values(lbs).find(
+          (r) => r.Properties?.Scheme === "internet-facing",
+        );
+        expect(publicLb).toBeDefined();
+        expect(publicLb?.Properties?.Name).toBe("sps-public-prod");
+      });
+
+      it("the internal ALB is scheme=internal with an env-prefixed name", () => {
+        const lbs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        );
+        const internalLb = Object.values(lbs).find(
+          (r) => r.Properties?.Scheme === "internal",
+        );
+        expect(internalLb).toBeDefined();
+        expect(internalLb?.Properties?.Name).toBe("sps-internal-prod");
+      });
+
+      it("the target group uses the literal /api/health (PR #407) and a 30-second deregistration delay", () => {
+        template.hasResourceProperties(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+          {
+            Name: "sps-tg-app-prod",
+            Port: 3000,
+            Protocol: "HTTP",
+            TargetType: "ip",
+            HealthCheckPath: "/api/health",
+            HealthyThresholdCount: 2,
+            TargetGroupAttributes: Match.arrayWith([
+              Match.objectLike({
+                Key: "deregistration_delay.timeout_seconds",
+                Value: "30",
+              }),
+            ]),
+          },
+        );
+      });
+
+      it("the public ALB listener is HTTP-only :80 (HTTPS lands in B07+B14)", () => {
+        const listeners = template.findResources(
+          "AWS::ElasticLoadBalancingV2::Listener",
+        );
+        const protocols = Object.values(listeners).map(
+          (r) => r.Properties?.Protocol as string,
+        );
+        expect(protocols.every((p) => p === "HTTP")).toBe(true);
+        const ports = Object.values(listeners).map(
+          (r) => r.Properties?.Port as number,
+        );
+        expect(ports).toEqual([80, 80]);
+      });
+    });
+
+    describe("VPC endpoints (B17, deviation from ADR-008 Table 4)", () => {
+      it("the interface endpoint SG admits only :443 from the app + ETL SGs (no 0.0.0.0/0)", () => {
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        const endpointSg = Object.values(sgs).find((r) => {
+          const desc = r.Properties?.GroupDescription as string | undefined;
+          return typeof desc === "string" && desc.includes("VPC interface endpoints");
+        });
+        expect(endpointSg).toBeDefined();
+        const ingressRules = (endpointSg?.Properties?.SecurityGroupIngress ??
+          []) as Array<Record<string, unknown>>;
+        expect(ingressRules).toHaveLength(2);
+        for (const rule of ingressRules) {
+          expect(rule.FromPort).toBe(443);
+          expect(rule.ToPort).toBe(443);
+          expect(rule.IpProtocol).toBe("tcp");
+          expect(rule.CidrIp).toBeUndefined();
+          expect(rule.SourceSecurityGroupId).toBeDefined();
+        }
+      });
+    });
+
+    describe("Footgun #4 -- env-prefix guard", () => {
+      // Account 665083158573 hosts both staging and prod. Every named
+      // resource must carry the env literal so the two stacks coexist.
+      // PR #404 burned a deploy on this; the guard generalizes here so
+      // future AppStack changes can't introduce a non-env-prefixed name.
+      const ENV = "prod";
+      const NAME_KEYS: ReadonlyArray<{ type: string; prop: string }> = [
+        { type: "AWS::ECR::Repository", prop: "RepositoryName" },
+        { type: "AWS::ECS::Cluster", prop: "ClusterName" },
+        { type: "AWS::ECS::Service", prop: "ServiceName" },
+        { type: "AWS::ECS::TaskDefinition", prop: "Family" },
+        { type: "AWS::ElasticLoadBalancingV2::LoadBalancer", prop: "Name" },
+        { type: "AWS::ElasticLoadBalancingV2::TargetGroup", prop: "Name" },
+        { type: "AWS::Logs::LogGroup", prop: "LogGroupName" },
+        { type: "AWS::IAM::Role", prop: "RoleName" },
+      ];
+
+      it.each(NAME_KEYS)("every $type carries the env literal in $prop", ({ type, prop }) => {
+        const resources = template.findResources(type);
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(resources)) {
+          const name = resource.Properties?.[prop] as string | undefined;
+          if (typeof name !== "string") {
+            continue;
+          }
+          if (!name.includes(ENV)) {
+            violations.push(`${id}: ${type}.${prop}=${JSON.stringify(name)}`);
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+    });
+
+    describe("Footgun #6 -- EC2 property character-set safety", () => {
+      // Re-applied here. Carried forward from data-stack.test.ts; the
+      // guard generalizes to every stack that creates SGs.
+      it("every AWS::EC2::SecurityGroupIngress Description is ASCII-safe", () => {
+        const ingress = template.findResources(
+          "AWS::EC2::SecurityGroupIngress",
+        );
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(ingress)) {
+          const desc = resource.Properties?.Description as string | undefined;
+          if (typeof desc === "string" && !EC2_DESCRIPTION_ALLOWED.test(desc)) {
+            const bad = [...desc].filter(
+              (c) => !EC2_DESCRIPTION_ALLOWED.test(c),
+            );
+            violations.push(
+              `${id}: ${JSON.stringify(desc)} -- banned chars: ${JSON.stringify(bad.join(""))}`,
+            );
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+
+      it("every AWS::EC2::SecurityGroup GroupDescription is ASCII-safe", () => {
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(sgs)) {
+          const desc = resource.Properties?.GroupDescription as
+            | string
+            | undefined;
+          if (typeof desc === "string" && !EC2_DESCRIPTION_ALLOWED.test(desc)) {
+            const bad = [...desc].filter(
+              (c) => !EC2_DESCRIPTION_ALLOWED.test(c),
+            );
+            violations.push(
+              `${id}: ${JSON.stringify(desc)} -- banned chars: ${JSON.stringify(bad.join(""))}`,
+            );
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+
+      it("inline ingress descriptions on AWS::EC2::SecurityGroup are ASCII-safe", () => {
+        // VPC endpoint SG ingress lives inline as SecurityGroupIngress
+        // property entries rather than standalone resources because the
+        // peers are constructed via Peer.securityGroupId(...). Walk those
+        // descriptions too.
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        const violations: string[] = [];
+        for (const [id, resource] of Object.entries(sgs)) {
+          const inline = (resource.Properties?.SecurityGroupIngress ??
+            []) as Array<{ Description?: string }>;
+          for (const rule of inline) {
+            const desc = rule.Description;
+            if (
+              typeof desc === "string" &&
+              !EC2_DESCRIPTION_ALLOWED.test(desc)
+            ) {
+              const bad = [...desc].filter(
+                (c) => !EC2_DESCRIPTION_ALLOWED.test(c),
+              );
+              violations.push(
+                `${id}: ${JSON.stringify(desc)} -- banned chars: ${JSON.stringify(bad.join(""))}`,
+              );
+            }
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+    });
+
+    describe("Secrets hygiene", () => {
+      it("no plaintext secret value appears in the synthesized template", () => {
+        const json = JSON.stringify(template.toJSON());
+        expect(json).not.toMatch(/PasswordValue/);
+        expect(json).not.toMatch(/GenerateSecretString/);
+      });
+
+      it("the task definitions reference each secret only by ARN (Fn::Join/Ref) -- never as a literal value", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        for (const resource of Object.values(taskDefs)) {
+          const containers = (resource.Properties?.ContainerDefinitions ??
+            []) as Array<{ Secrets?: Array<{ Name?: string; ValueFrom?: unknown }> }>;
+          for (const container of containers) {
+            for (const secret of container.Secrets ?? []) {
+              // ValueFrom must always be a CFN intrinsic (object) referring
+              // to an ARN -- never a bare string.
+              expect(typeof secret.ValueFrom).toBe("object");
+            }
+          }
+        }
+      });
+    });
+  });
+
+  describe("staging", () => {
+    const { template } = buildAppStack("staging");
+
+    it("matches the snapshot", () => {
+      expect(template.toJSON()).toMatchSnapshot();
+    });
+
+    it("uses staging desiredCount = 1", () => {
+      template.hasResourceProperties("AWS::ECS::Service", {
+        DesiredCount: 1,
+      });
+    });
+
+    it("uses staging Fargate sizing 512 cpu / 1024 MiB on the app task definition", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      expect(appTaskDef).toBeDefined();
+      expect(appTaskDef?.Properties?.Cpu).toBe("512");
+      expect(appTaskDef?.Properties?.Memory).toBe("1024");
+    });
+
+    it("uses 30-day log retention for staging (vs 90 days in prod)", () => {
+      const groups = template.findResources("AWS::Logs::LogGroup");
+      for (const resource of Object.values(groups)) {
+        expect(resource.Properties?.RetentionInDays).toBe(30);
+      }
+    });
+
+    it("OIDC sub claim admits any ref in the SPS repo for staging", () => {
+      const roles = template.findResources("AWS::IAM::Role");
+      const deployRole = Object.values(roles).find(
+        (r) => r.Properties?.RoleName === "sps-deploy-staging",
+      );
+      expect(deployRole).toBeDefined();
+      const statements = deployRole?.Properties?.AssumeRolePolicyDocument
+        ?.Statement as Array<Record<string, unknown>> | undefined;
+      const subClaim = statements?.[0]?.Condition as
+        | { StringLike?: Record<string, string> }
+        | undefined;
+      const sub =
+        subClaim?.StringLike?.["token.actions.githubusercontent.com:sub"];
+      expect(sub).toBe("repo:wcmc-its/Scholars-Profile-System:*");
+    });
+
+    it("the env-config bootstrap override drives desiredCount to 0 when -c appDesiredCount=0 is set", () => {
+      // Models the first-deploy two-step in the plan's § Deploy strategy.
+      const fixture = makeFixture("staging");
+      fixture.app.node.setContext("appDesiredCount", 0);
+      const network = new NetworkStack(fixture.app, `Sps-Network-staging-zero`, {
+        env: fixture.env,
+        envConfig: fixture.envConfig,
+      });
+      const stack = new AppStack(fixture.app, `Sps-App-staging-zero`, {
+        env: fixture.env,
+        envConfig: fixture.envConfig,
+        vpc: network.vpc,
+        appSecurityGroup: network.appSecurityGroup,
+        etlSecurityGroup: network.etlSecurityGroup,
+        albSecurityGroup: network.albSecurityGroup,
+      });
+      const t = Template.fromStack(stack);
+      t.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });
+    });
+  });
+});

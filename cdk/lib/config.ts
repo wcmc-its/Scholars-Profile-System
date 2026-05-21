@@ -61,6 +61,35 @@ export interface SpsEnvConfig {
    * documented 14 days.
    */
   readonly awsBackupRetentionDays: number;
+
+  // --- AppStack (Phase 2) ---
+
+  /**
+   * Desired ECS task count for the SPS application service. Staging runs
+   * one task; prod runs two so a single AZ failure does not take the app
+   * fully offline. Tunable here so the bootstrap deploy can be temporarily
+   * driven to zero via `-c appDesiredCount=0` while the first image is
+   * pushed to ECR (see `feat-infra-phase2-appstack.md § Deploy strategy`).
+   */
+  readonly appDesiredCount: number;
+  /**
+   * Fargate CPU units for the app task definition. Must combine with
+   * {@link appMemoryMiB} to form a valid Fargate (cpu, memory) pair —
+   * AppStack's tests assert the combination against a small allowlist
+   * since the L2 helper accepts invalid pairs and AWS only rejects them
+   * at run time.
+   */
+  readonly appCpu: number;
+  /** Fargate memory (MiB) for the app task definition. */
+  readonly appMemoryMiB: number;
+  /**
+   * Fargate CPU units for the one-shot `prisma migrate deploy` task.
+   * Smaller than the app task — the migration runs briefly and is
+   * single-threaded against Aurora.
+   */
+  readonly migrationTaskCpu: number;
+  /** Fargate memory (MiB) for the migration task definition. */
+  readonly migrationTaskMemoryMiB: number;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -77,6 +106,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchDataNodes: 1,
     opensearchDataNodeInstanceType: "t3.small.search",
     awsBackupRetentionDays: 14,
+    appDesiredCount: 1,
+    appCpu: 512,
+    appMemoryMiB: 1024,
+    migrationTaskCpu: 512,
+    migrationTaskMemoryMiB: 1024,
   },
   prod: {
     envName: "prod",
@@ -98,6 +132,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchDataNodes: 2,
     opensearchDataNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
+    appDesiredCount: 2,
+    appCpu: 1024,
+    appMemoryMiB: 2048,
+    migrationTaskCpu: 512,
+    migrationTaskMemoryMiB: 1024,
   },
 };
 

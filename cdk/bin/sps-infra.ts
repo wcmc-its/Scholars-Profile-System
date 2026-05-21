@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { App, type Environment, Tags } from "aws-cdk-lib";
+import { AppStack } from "../lib/app-stack";
 import { resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
@@ -56,6 +57,22 @@ new SecretsStack(app, `Sps-Secrets-${envConfig.envName}`, {
   env,
   envConfig,
   description: `SPS secrets — empty Secrets Manager entries, ${envConfig.envName} (ADR-008).`,
+});
+
+// AppStack — compute and ingress plane (B05 + B06 + B09-CDK + B17).
+// SecretsStack is not threaded in: AppStack looks up the five consumer
+// secrets by name via Secret.fromSecretNameV2 so the two stacks stay
+// loosely coupled (same pattern NetworkStack -> DataStack uses for SGs
+// is inverted here — AppStack reads SecretsStack's resources by ARN
+// rather than receiving them as constructor props).
+new AppStack(app, `Sps-App-${envConfig.envName}`, {
+  env,
+  envConfig,
+  vpc: networkStack.vpc,
+  appSecurityGroup: networkStack.appSecurityGroup,
+  etlSecurityGroup: networkStack.etlSecurityGroup,
+  albSecurityGroup: networkStack.albSecurityGroup,
+  description: `SPS application plane — ECR, ECS Fargate, ALBs, VPC endpoints, ${envConfig.envName} (ADR-008).`,
 });
 
 // Tag every resource for cost allocation and ownership clarity.
