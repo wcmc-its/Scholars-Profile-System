@@ -5,6 +5,7 @@ import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cwActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
 import { type Construct } from "constructs";
@@ -39,6 +40,15 @@ const COST_ANOMALY_DAILY_USD = 50;
 /** Latency SLO target in milliseconds. Mirrored from docs/SLOs.md. */
 const LATENCY_P99_THRESHOLD_MS = 1500;
 
+/**
+ * Threshold for the B02 edit_authz_denied alarm: more than 10 denials in a
+ * 5-minute window, repeating for two consecutive windows. Distinguishes a
+ * confused user (1-3 denials in a row) from a misconfigured bot or a
+ * predicate regression. Re-tune after the first month of staging traffic,
+ * same loop as COST_ANOMALY_DAILY_USD; tracked in docs/SLOs.md.
+ */
+const EDIT_AUTHZ_DENIED_THRESHOLD = 10;
+
 /** Props for {@link SpsObservabilityStack}. */
 export interface ObservabilityStackProps extends StackProps {
   /** Resolved per-environment configuration. */
@@ -53,10 +63,11 @@ export interface ObservabilityStackProps extends StackProps {
  * ObservabilityStack — alarms, alarm destination, and (prod only) the
  * account-wide cost guardrails (ADR-008, B22).
  *
- * Per-env stack (`Sps-Observability-{env}`). Eight CloudWatch alarms cover
- * the public ALB / ECS / Aurora / OpenSearch surfaces; every alarm publishes
- * to the env's SNS topic (`sps-alarms-{env}`), which carries one email
- * subscription until B23 swaps in PagerDuty / Opsgenie.
+ * Per-env stack (`Sps-Observability-{env}`). Nine CloudWatch alarms cover
+ * the public ALB / ECS / Aurora / OpenSearch surfaces plus the B02 edit-
+ * surface 403 rate; every alarm publishes to the env's SNS topic
+ * (`sps-alarms-{env}`), which carries one email subscription until B23
+ * swaps in PagerDuty / Opsgenie.
  *
  * The budget and Cost Anomaly Detection monitor are account-wide AWS
  * resources, so they are created by the prod stack only -- deploying them
@@ -292,6 +303,57 @@ export class SpsObservabilityStack extends Stack {
       },
     );
     openSearchRedAlarm.addAlarmAction(snsAction);
+
+    // ------------------------------------------------------------------
+    // Edit authz-denied alarm (B02 #101)
+    // ------------------------------------------------------------------
+    // (9) edit_authz_denied rate -- the app log group records one JSON
+    // line per 403 from the edit surface (`lib/auth/authz-events.ts`); the
+    // metric filter pattern keys the count off the `event` field. A
+    // sustained rate is a predicate bug or active probing -- a normal day
+    // is 0; a confused user or a fat-fingered link is 1-3 in a row. The
+    // threshold (> 10 in a 5-minute window, two consecutive windows)
+    // separates those from a regression. Re-tune in staging.
+    //
+    // Filter pattern is keyed on the literal event name string emitted by
+    // `logAuthzDenied()`. If that string ever changes, the filter silently
+    // stops matching; the comment in `lib/auth/authz-events.ts` warns
+    // future renamers of this binding.
+    new logs.MetricFilter(this, "EditAuthzDeniedMetricFilter", {
+      logGroup: appStack.appLogGroup,
+      filterName: `sps-edit-authz-denied-${env}`,
+      filterPattern: logs.FilterPattern.stringValue(
+        "$.event",
+        "=",
+        "edit_authz_denied",
+      ),
+      metricNamespace: "SPS/Auth",
+      metricName: "EditAuthzDenied",
+      metricValue: "1",
+      defaultValue: 0,
+    });
+
+    const editAuthzDeniedAlarm = new cloudwatch.Alarm(
+      this,
+      "EditAuthzDeniedAlarm",
+      {
+        alarmName: `sps-edit-authz-denied-${env}`,
+        alarmDescription: `Edit-surface 403 (edit_authz_denied) count > ${EDIT_AUTHZ_DENIED_THRESHOLD} in any 5m window for 2 consecutive windows (${env}). Sustained rate -- predicate bug or active probing. See docs/SLOs.md.`,
+        metric: new cloudwatch.Metric({
+          namespace: "SPS/Auth",
+          metricName: "EditAuthzDenied",
+          statistic: "Sum",
+          period: Duration.minutes(5),
+        }),
+        threshold: EDIT_AUTHZ_DENIED_THRESHOLD,
+        evaluationPeriods: 2,
+        datapointsToAlarm: 2,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    editAuthzDeniedAlarm.addAlarmAction(snsAction);
 
     // ------------------------------------------------------------------
     // Prod-only: account-wide cost guardrail

@@ -103,6 +103,8 @@ export class AppStack extends Stack {
   public readonly internalAlb: elbv2.ApplicationLoadBalancer;
   /** Target group the public ALB forwards to; exposed for ObservabilityStack alarms. */
   public readonly publicTargetGroup: elbv2.ApplicationTargetGroup;
+  /** App task CloudWatch log group; exposed for ObservabilityStack metric filters (B02 edit_authz_denied alarm). */
+  public readonly appLogGroup: logs.LogGroup;
   /** GitHub Actions OIDC deploy role. */
   public readonly deployRole: iam.Role;
 
@@ -206,6 +208,7 @@ export class AppStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    this.appLogGroup = appLogGroup;
     const migrationLogGroup = new logs.LogGroup(this, "MigrationLogGroup", {
       logGroupName: `/aws/ecs/sps-migrate-${env}`,
       retention: logRetention,
