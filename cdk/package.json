@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "lambda/oncall-relay"
+  ],
   "scripts": {
     "synth": "cdk synth",
     "diff": "cdk diff",
@@ -23,6 +26,7 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^24.10.1",
     "aws-cdk": "2.1122.0",
+    "esbuild": "^0.24.0",
     "eslint": "^10.4.0",
     "globals": "^17.6.0",
     "jest": "^29.7.0",

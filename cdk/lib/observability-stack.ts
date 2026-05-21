@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
 import * as budgets from "aws-cdk-lib/aws-budgets";
 import * as ce from "aws-cdk-lib/aws-ce";
@@ -5,7 +6,11 @@ import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
 import * as cwActions from "aws-cdk-lib/aws-cloudwatch-actions";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import { SnsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sns from "aws-cdk-lib/aws-sns";
 import * as snsSubs from "aws-cdk-lib/aws-sns-subscriptions";
 import { type Construct } from "constructs";
@@ -92,6 +97,15 @@ export class SpsObservabilityStack extends Stack {
    * forecasted-spend tap doesn't page on-call (B23).
    */
   public readonly notifyTopic: sns.Topic;
+  /**
+   * Lambda that subscribes to {@link alarmTopic} and POSTs an Adaptive Card
+   * to the Power Automate Teams webhook (B27). Replaces the direct SNS HTTPS
+   * subscription that B23 originally documented -- empirically disproven
+   * 2026-05-21 because the Power Automate `Request` trigger enforces a JSON
+   * body type at the trigger level and SNS sends form-urlencoded; see
+   * `docs/oncall.md` § Gotchas.
+   */
+  public readonly relayFunction: lambda.IFunction;
 
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
@@ -383,6 +397,89 @@ export class SpsObservabilityStack extends Stack {
     editAuthzDeniedAlarm.addAlarmAction(snsAction);
 
     // ------------------------------------------------------------------
+    // On-call relay Lambda (B27)
+    // ------------------------------------------------------------------
+    // SNS -> Lambda -> Adaptive Card JSON POST to a Power Automate Teams
+    // workflow URL. B23 originally documented `aws sns subscribe --protocol
+    // https` against the workflow URL directly; that path was empirically
+    // disproven 2026-05-21 -- the Power Automate `Request` trigger enforces
+    // a JSON body type at the trigger level (not at schema validation) and
+    // SNS hardcodes `Content-Type: application/x-www-form-urlencoded` on
+    // HTTPS delivery, so SNS subscribe attempts fail with HTTP 400 and the
+    // subscription silently never lands. The Lambda exists to bridge that
+    // gap (see `docs/oncall.md` § Gotchas for the full evidence trail).
+    //
+    // No VPC attach -- the Lambda's only outbound URL is sourced from a
+    // secret we control, SSRF surface is nil (zero user-controlled URL
+    // inputs), and VPC-attaching would force a NAT for one HTTPS POST per
+    // alarm. Documented as a deliberate non-VPC decision in the threat
+    // model (SPEC § Threat model T8).
+    const teamsWebhookSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "TeamsWebhookSecret",
+      `scholars/${env}/oncall/teams-webhook-url`,
+    );
+
+    // Explicit log group rather than NodejsFunction's `logRetention` prop --
+    // the prop pulls in a CloudFormation custom resource (a second
+    // AWS::Lambda::Function and IAM::Role per stack) which would double the
+    // Lambda + role count and break the SPEC's 1-Lambda assertion. Owning
+    // the log group also gives a stable name we can reference in the
+    // runbook (`/aws/lambda/sps-oncall-relay-${env}`).
+    const relayLogGroup = new logs.LogGroup(this, "OncallRelayLogGroup", {
+      logGroupName: `/aws/lambda/sps-oncall-relay-${env}`,
+      retention: logs.RetentionDays.ONE_MONTH,
+    });
+
+    const relay = new NodejsFunction(this, "OncallRelayFunction", {
+      functionName: `sps-oncall-relay-${env}`,
+      entry: path.join(__dirname, "../lambda/oncall-relay/index.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_22_X,
+      memorySize: 256,
+      timeout: Duration.seconds(10),
+      logGroup: relayLogGroup,
+      environment: {
+        TEAMS_WEBHOOK_SECRET_ARN: teamsWebhookSecret.secretArn,
+      },
+      bundling: {
+        // Provided by the Lambda runtime; bundling it duplicates the SDK
+        // into the deployable and inflates cold start.
+        externalModules: ["@aws-sdk/client-secrets-manager"],
+        // Source maps off per SPEC § Decisions locked -- bundle is small,
+        // stack traces are line-accurate enough without them. Flip on if
+        // a prod stack-trace ever shows wrong line numbers.
+        sourceMap: false,
+        target: "node22",
+      },
+    });
+    this.relayFunction = relay;
+
+    teamsWebhookSecret.grantRead(relay);
+    relay.addEventSource(new SnsEventSource(this.alarmTopic));
+
+    // Failure-mode design (SPEC § Failure-mode design): if this Lambda
+    // errors, route to the NOTIFY topic (email) -- not the page topic --
+    // because the page topic IS this Lambda; routing failure back through
+    // itself either silently flaps or recursively masks the original alarm.
+    // Email is the out-of-band fallback.
+    const relayErrorsAlarm = new cloudwatch.Alarm(this, "OncallRelayErrors", {
+      alarmName: `sps-oncall-relay-errors-${env}`,
+      alarmDescription: `On-call relay Lambda surfaced one or more invocation errors in the last minute (${env}). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.`,
+      metric: relay.metricErrors({
+        period: Duration.minutes(1),
+        statistic: "Sum",
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      datapointsToAlarm: 1,
+      comparisonOperator:
+        cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    relayErrorsAlarm.addAlarmAction(new cwActions.SnsAction(this.notifyTopic));
+
+    // ------------------------------------------------------------------
     // Prod-only: account-wide cost guardrail
     // ------------------------------------------------------------------
     // Budget and Cost Anomaly Detection are account-scoped resources. If
@@ -503,6 +600,11 @@ export class SpsObservabilityStack extends Stack {
       value: this.notifyTopic.topicArn,
       description:
         "SNS topic for cost guardrails + low-urgency fan-out (notify). Operator email subscription lands here, not on the page topic.",
+    });
+    new CfnOutput(this, "OncallRelayFunctionArn", {
+      value: relay.functionArn,
+      description:
+        "Lambda that relays page topic SNS events to a Teams workflow as Adaptive Card JSON (B27). Reads workflow URL from scholars/{env}/oncall/teams-webhook-url at cold start.",
     });
   }
 }
