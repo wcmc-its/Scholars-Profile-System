@@ -35,20 +35,18 @@ Two SNS topics per env, both provisioned by `cdk/lib/observability-stack.ts`:
 
 | Topic | Logical id | AWS name | Subscriber | What publishes here |
 |---|---|---|---|---|
-| **Page** | `AlarmTopic` | `sps-alarms-${env}` | Teams channel webhook (HTTPS, out-of-band) | All 8 CloudWatch alarm actions in the stack |
-| **Notify** | `NotifyTopic` | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email) | `sps-monthly-budget` thresholds + `sps-anomaly-subscription` (prod only) |
+| **Page** | `AlarmTopic` | `sps-alarms-${env}` | `OncallRelayFunction` Lambda (CDK-managed; B27) -> Teams channel | All 9 CloudWatch alarm actions plus the B02 `edit_authz_denied` alarm |
+| **Notify** | `NotifyTopic` | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email); + `OncallRelayErrors` alarm | `sps-monthly-budget` thresholds + `sps-anomaly-subscription` (prod only); B27 relay-Lambda failure alarm |
 
-The split is the point of B23: a forecasted-budget tap at 50% of `$600/mo` is not channel-worthy noise for the page channel, and pre-B23 the cost notifications rode the same alarm topic. Page goes to the Teams channel; notify goes to the operator's inbox. Topic policies grant `sns:Publish` on the **notify** topic to `budgets.amazonaws.com` and `costalerts.amazonaws.com`; the page topic carries no service-principal grants because nothing in AWS publishes to it directly -- only CloudWatch alarm actions, which use the SNS-resource ARN, not a service principal.
+The split is the point of B23: a forecasted-budget tap at 50% of `$600/mo` is not channel-worthy noise for the page channel, and pre-B23 the cost notifications rode the same alarm topic. Page goes to the Teams channel via the B27 relay Lambda; notify goes to the operator's inbox. Topic policies grant `sns:Publish` on the **notify** topic to `budgets.amazonaws.com` and `costalerts.amazonaws.com`; the page topic carries no service-principal grants because nothing in AWS publishes to it directly -- only CloudWatch alarm actions (which use the SNS-resource ARN, not a service principal) and the B27 Lambda subscription (managed by CDK via `SnsEventSource`, which sets up the `lambda:InvokeFunction` permission with `SourceArn: alarmTopicArn`).
 
-CDK does not declare the Teams webhook subscription. The integration URL is a per-env secret (`scholars/${env}/oncall/teams-webhook-url`) populated out-of-band per ADR-008's "no secret values in CDK source" rule. The runbook below seeds the secret and runs the one-shot `aws sns subscribe` call.
+B27 changes the page-topic subscriber from "Teams webhook via HTTPS (out-of-band `aws sns subscribe`)" to "Lambda relay (CDK-managed) that POSTs an Adaptive Card to the Teams workflow URL." The Lambda reads the workflow URL from `scholars/${env}/oncall/teams-webhook-url` (already declared by SecretsStack per ADR-008's "no secret values in CDK source" rule) at cold start and caches it for the container lifetime. The original direct-HTTPS path was empirically disproven on 2026-05-21 -- see § Gotchas: *Power Automate Request trigger requires JSON body*. The runbook below seeds the secret and verifies the CDK-provisioned subscription; no `aws sns subscribe` call against the workflow URL is needed (or possible -- the trap is permanent).
 
 The Teams webhook URL **is** stored in Secrets Manager for audit + rotate even though it appears in `aws sns list-subscriptions-by-topic` output anyway. Two reasons: (1) it makes the seed-then-subscribe flow uniform with every other external endpoint in this stack; (2) it gives a rotation handle if the workflow is recreated or the channel moves.
 
 ## Rollout per env
 
-> **⚠️ Steps 4 and 5 below do not work and are pending replacement.** The `aws sns subscribe --protocol https --endpoint <power-automate-url>` path was empirically disproven on 2026-05-21 -- the Power Automate `Request` trigger enforces JSON body type at the trigger level (not at schema validation), and SNS's hardcoded `application/x-www-form-urlencoded` POST is rejected with HTTP 400 regardless of trigger configuration. The fix is a Lambda relay in `ObservabilityStack` (SNS -> Lambda -> Adaptive Card JSON POST to the workflow URL); see #436. Until that lands, steps 4-5 will fail silently (`aws sns list-subscriptions-by-topic` returns `[]` after a subscribe attempt). See § Gotchas: *Power Automate Request trigger requires JSON body* for the full evidence trail.
-
-First deploy of B23 changes the stack shape (adds a topic, moves the cost subscribers, removes the email sub from the page topic). The Teams subscription is then added against the running page topic via `aws sns subscribe`. Both staging and prod follow the same sequence; prod can either share the staging Teams channel or use a separate one -- the latter avoids staging dry-run noise leaking into the prod operations channel.
+First deploy of B23 changes the stack shape (adds the notify topic, moves the cost subscribers, removes the prior email sub from the page topic). B27 then adds a Lambda that subscribes to the page topic and POSTs an Adaptive Card to the Teams workflow URL -- the direct `aws sns subscribe --protocol https` against a Power Automate workflow URL was empirically disproven on 2026-05-21 (see § Gotchas: *Power Automate Request trigger requires JSON body*). Both staging and prod follow the same sequence; prod can either share the staging Teams channel or use a separate one -- the latter avoids staging dry-run noise leaking into the prod operations channel.
 
 Per-env, in order:
 
@@ -67,40 +65,73 @@ Per-env, in order:
      --secret-id "scholars/${ENV}/oncall/teams-webhook-url" \
      --query SecretString --output text
    ```
-   The read-back is load-bearing. A blank seed produces a successful `sns subscribe` against an empty endpoint that silently never delivers.
+   The read-back is load-bearing. A blank or wrong-template URL produces silent delivery failure -- the Lambda's `OncallRelayErrors` alarm catches the failure path post-deploy (see step 5), but the seed is the cheap check.
 
-3. **Deploy SecretsStack and ObservabilityStack** -- both via `cdk deploy ... --exclusively` per [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md). The Observability deploy adds the notify topic, moves cost subscribers, and removes any prior email sub on the page topic. Confirm the new notify-topic email subscription from `paa2013@med.cornell.edu`'s inbox within 3 days or it expires.
+3. **Deploy SecretsStack and ObservabilityStack** -- both via `cdk deploy ... --exclusively` per [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md). The Observability deploy provisions the Lambda relay (`sps-oncall-relay-${env}`), its log group (`/aws/lambda/sps-oncall-relay-${env}`, 30-day retention), an IAM role scoped to `secretsmanager:GetSecretValue` on the env's webhook secret, and the page-topic SNS subscription that wires the Lambda in. The deploy also adds (B23) the notify topic, moves cost subscribers, and removes any prior email sub on the page topic. Confirm the notify-topic email subscription from `paa2013@med.cornell.edu`'s inbox within 3 days or it expires.
 
-4. **Subscribe the Teams webhook to the page topic:**
+4. **Verify the Lambda relay is wired and reachable:**
    ```bash
+   RELAY_ARN=$(aws cloudformation describe-stacks \
+     --stack-name "Sps-Observability-${ENV}" \
+     --query 'Stacks[0].Outputs[?OutputKey==`OncallRelayFunctionArn`].OutputValue' \
+     --output text)
    PAGE_TOPIC_ARN=$(aws cloudformation describe-stacks \
      --stack-name "Sps-Observability-${ENV}" \
      --query 'Stacks[0].Outputs[?OutputKey==`AlarmTopicArn`].OutputValue' \
      --output text)
-   TEAMS_URL=$(aws secretsmanager get-secret-value \
-     --secret-id "scholars/${ENV}/oncall/teams-webhook-url" \
-     --query SecretString --output text)
-   aws sns subscribe --topic-arn "$PAGE_TOPIC_ARN" \
-     --protocol https --endpoint "$TEAMS_URL"
+   aws sns list-subscriptions-by-topic --topic-arn "$PAGE_TOPIC_ARN" \
+     --query 'Subscriptions[?Protocol==`lambda`].Endpoint' --output text
    ```
+   The output should be exactly `$RELAY_ARN`. CDK provisions the subscription as part of the stack (no `aws sns subscribe` step needed); a missing or extra subscription means a deploy was not run with the latest template.
 
-5. **Confirm the subscription manually.** SNS posts a `SubscriptionConfirmation` JSON message into the Teams channel. Open the message, find the `SubscribeURL` value, and GET it once (paste into a browser or `curl <URL>`). This is the SNS handshake; the Workflow does not auto-confirm. Verify with `aws sns list-subscriptions-by-topic --topic-arn "$PAGE_TOPIC_ARN"` -- the subscription should move from `PendingConfirmation` to a real ARN.
-
-6. **Fire a test alarm:**
+5. **Fire a test alarm:**
    ```bash
    aws cloudwatch set-alarm-state \
      --alarm-name "sps-alb-5xx-rate-${ENV}" \
      --state-value ALARM \
-     --state-reason "B23 dry-run"
+     --state-reason "B27 dry-run"
    ```
-   Expected: a Teams channel message within ~60 seconds containing the SNS notification JSON (alarm name, state, reason, timestamp). The alarm auto-recovers to `OK` on the next datapoint window. If nothing arrives within 5 minutes, see § Diagnostics.
+   Expected within ~60 seconds: an Adaptive Card in the Teams channel rendering `🚨 sps-alb-5xx-rate-${ENV}`, state `ALARM`, the dry-run reason, the region, the timestamp, and a `View in CloudWatch` action button. The alarm auto-recovers to `OK` on the next datapoint window -- expect a second card with `✅`. If neither card arrives within 5 minutes, see § Diagnostics; the Lambda's `OncallRelayErrors` alarm should also fire to the notify topic (email) if the Lambda itself errored.
 
-7. **For prod test alarm**, prefer `sps-aurora-connections-prod` over `sps-alb-5xx-rate-prod`. The 5xx-rate one is the customer-visible-symptom alarm; firing it as a dry-run mixes into the same channel as a real outage. The Aurora connections alarm is operationally-internal: setting it ALARM and back to OK has no user-facing signal.
+6. **For prod test alarm**, prefer `sps-aurora-connections-prod` over `sps-alb-5xx-rate-prod`. The 5xx-rate one is the customer-visible-symptom alarm; firing it as a dry-run mixes into the same channel as a real outage. The Aurora connections alarm is operationally-internal: setting it ALARM and back to OK has no user-facing signal.
+
+7. **Staging-only chaos test** (verifies the failure path the `OncallRelayErrors` alarm exists to catch -- B27 acceptance criterion #6, do not run in prod):
+   ```bash
+   # Save the real URL so we can put it back.
+   REAL_URL=$(aws secretsmanager get-secret-value \
+     --secret-id "scholars/staging/oncall/teams-webhook-url" \
+     --query SecretString --output text)
+   aws secretsmanager put-secret-value \
+     --secret-id "scholars/staging/oncall/teams-webhook-url" \
+     --secret-string "https://example.invalid/"
+   # Force a Lambda container recycle so the cached URL is evicted.
+   aws lambda update-function-configuration \
+     --function-name "sps-oncall-relay-staging" \
+     --environment "Variables={TEAMS_WEBHOOK_SECRET_ARN=$(aws cloudformation describe-stacks \
+       --stack-name Sps-Observability-staging \
+       --query 'Stacks[0].Resources[?LogicalResourceId==\`OncallRelayFunction9974C7E1\`]' \
+       --output text | head -1),DEPLOY_TS=$(date +%s)}"
+   # Fire the test alarm; expect Lambda Errors metric to tick and the
+   # OncallRelayErrors alarm to transition to ALARM (email arrives at
+   # paa2013@med.cornell.edu within ~2 min).
+   aws cloudwatch set-alarm-state \
+     --alarm-name "sps-alb-5xx-rate-staging" \
+     --state-value ALARM \
+     --state-reason "B27 chaos test"
+   # Restore.
+   aws secretsmanager put-secret-value \
+     --secret-id "scholars/staging/oncall/teams-webhook-url" \
+     --secret-string "$REAL_URL"
+   aws lambda update-function-configuration \
+     --function-name "sps-oncall-relay-staging" \
+     --environment "Variables={TEAMS_WEBHOOK_SECRET_ARN=...,DEPLOY_TS=$(date +%s)}"
+   ```
+   Run this once per env after the first deploy; re-run quarterly only if the Power Automate auth surface changes.
 
 ## Gotchas
 
-- **Power Automate `Request` trigger requires JSON body -- SNS direct subscription is not viable.** Per the [SNS HTTP/S delivery spec](https://docs.aws.amazon.com/sns/latest/dg/sns-message-and-json-formats.html#http-header), SNS sends `SubscriptionConfirmation` and `Notification` POSTs with `Content-Type: application/x-www-form-urlencoded; charset=utf-8` (the body itself is JSON, but the Content-Type header is fixed). The Power Automate `Request` trigger (the `kind: "TeamsWebhook"` / `type: "Request"` trigger used by every in-channel Workflows template) rejects this with `HTTP 400 InvalidRequestContent: "The input body for trigger 'manual' of type 'Request' must be of type JSON"`. Empirical testing on 2026-05-21 (#434) confirmed: (a) the rejection happens before any schema-validation step, so clearing the trigger's request-body JSON schema does not relax it -- two separately-created workflows returned the identical 400; (b) the same workflow accepts a properly-shaped Adaptive Card POST (`Content-Type: application/json`) with `HTTP 202` and renders a card in the channel. The check is at the trigger level and intrinsic to the Power Automate `Request` trigger family; it is not configurable. SNS treats the 400 as a failed endpoint validation and silently does not create the subscription -- `aws sns list-subscriptions-by-topic` returns `[]` after a failed attempt, with nothing in the channel and no AWS-side error. **Do not retry `aws sns subscribe --protocol https --endpoint <power-automate-url>`** -- the fix is an `ObservabilityStack` Lambda relay (SNS -> Lambda -> Adaptive Card JSON POST to workflow URL), tracked in #436. The error signature that surfaces this trap is `aws sns subscribe` returning an XML-parse error wrapping `{"error":{"code":"InvalidRequestContent",...}}`.
-- **SubscriptionConfirmation is manual.** Unlike PagerDuty's CloudWatch integration, Teams Workflows do not auto-confirm an SNS HTTPS subscription. The first message that lands in the channel after `aws sns subscribe` is the SNS confirmation JSON; the operator GETs the `SubscribeURL` once per topic per env. If the confirmation message is missed, `aws sns list-subscriptions-by-topic` shows the sub in `PendingConfirmation` -- re-run the subscribe call.
+- **Power Automate `Request` trigger requires JSON body -- SNS direct subscription is not viable.** Per the [SNS HTTP/S delivery spec](https://docs.aws.amazon.com/sns/latest/dg/sns-message-and-json-formats.html#http-header), SNS sends `SubscriptionConfirmation` and `Notification` POSTs with `Content-Type: application/x-www-form-urlencoded; charset=utf-8` (the body itself is JSON, but the Content-Type header is fixed). The Power Automate `Request` trigger (the `kind: "TeamsWebhook"` / `type: "Request"` trigger used by every in-channel Workflows template) rejects this with `HTTP 400 InvalidRequestContent: "The input body for trigger 'manual' of type 'Request' must be of type JSON"`. Empirical testing on 2026-05-21 (#434) confirmed: (a) the rejection happens before any schema-validation step, so clearing the trigger's request-body JSON schema does not relax it -- two separately-created workflows returned the identical 400; (b) the same workflow accepts a properly-shaped Adaptive Card POST (`Content-Type: application/json`) with `HTTP 202` and renders a card in the channel. The check is at the trigger level and intrinsic to the Power Automate `Request` trigger family; it is not configurable. SNS treats the 400 as a failed endpoint validation and silently does not create the subscription -- `aws sns list-subscriptions-by-topic` returns `[]` after a failed attempt, with nothing in the channel and no AWS-side error. **Do not retry `aws sns subscribe --protocol https --endpoint <power-automate-url>`** -- this is the trap B27 (#436) closed by inserting an `ObservabilityStack` Lambda relay (SNS -> Lambda -> Adaptive Card JSON POST to workflow URL). The Lambda is provisioned as part of `Sps-Observability-${env}`; § Rollout per env above is the current path. This entry is preserved as a do-not-retry historical record. The error signature that surfaces this trap is `aws sns subscribe` returning an XML-parse error wrapping `{"error":{"code":"InvalidRequestContent",...}}`.
+- **SubscriptionConfirmation is manual.** Unlike PagerDuty's CloudWatch integration, Teams Workflows do not auto-confirm an SNS HTTPS subscription. The first message that lands in the channel after `aws sns subscribe` is the SNS confirmation JSON; the operator GETs the `SubscribeURL` once per topic per env. If the confirmation message is missed, `aws sns list-subscriptions-by-topic` shows the sub in `PendingConfirmation` -- re-run the subscribe call. (B27 makes this gotcha moot for the page-topic Teams path -- the subscription is CDK-managed Lambda, no SNS confirmation handshake; the gotcha still applies to the notify-topic email sub and to any future HTTPS subscriber on either topic.)
 - **Payload is raw SNS JSON.** Without a Power Automate parse-and-format step in the Workflow, alarm messages arrive as the raw SNS JSON blob (`{"Type":"Notification","MessageId":"...","Message":"...alarm JSON...","Timestamp":"..."}`). Readable but ugly. Iterate by editing the Workflow's Power Automate steps (Parse JSON -> Adaptive Card -> Post message) to extract `AlarmName` / `NewStateValue` / `NewStateReason` for nicer rendering. Worth doing once the first real alarm fires and the rendering is shown to be too dense; not blocking for B23.
 - **Workflow URL is tied to the creator's Microsoft account.** Power Automate workflows have an owner identity. If the operator who created the workflow offboards from WCM, the workflow stops working until ownership is transferred or it's recreated under a different identity. Long-term fix is a service account or shared mailbox; for B23, document the workflow owner alongside the secret value.
 - **No off-hours paging.** Teams webhook + email = chat-level signal only. No SMS, no phone call, no ack tracking. The off-hours wake-up path at WCM is Ops calling a human via the ServiceNow CI escalation group; SPS doesn't have that wired yet (see § The WCM ops model above).
@@ -121,7 +152,7 @@ Trigger to size this row: (a) SPS has prod traffic; (b) at least one off-hours i
 If the operator is doing staging-only work and wants to suppress staging Teams messages without disturbing prod:
 
 - **Quick path (Teams-side, recommended):** In the staging alert channel, edit the Workflow to be disabled (Workflows app -> select the workflow -> Turn off). Re-enable when finished. No AWS changes.
-- **Heavy path (AWS-side):** `aws sns unsubscribe --subscription-arn <staging-Teams-sub-arn>` revokes the staging HTTPS subscription. Re-subscribe via the step 4 command above when finished. Avoid this path if the next operator might not realize the staging subscription is missing.
+- **Heavy path (AWS-side, B27):** The Teams subscription is now a CDK-managed Lambda, so `aws sns unsubscribe` is awkward (re-deploy would put it back). Prefer setting the staging Lambda's reserved concurrency to 0 (`aws lambda put-function-concurrency --function-name sps-oncall-relay-staging --reserved-concurrent-executions 0`) -- this drops every incoming SNS invocation to a `Throttle` (not an Error, so it won't trip `OncallRelayErrors`). Restore with `aws lambda delete-function-concurrency --function-name sps-oncall-relay-staging`. Leaves a clear AWS-side audit trail and doesn't affect prod.
 
 Never unsubscribe prod's Teams subscription as a "stop the noise" shortcut. There is no enforcement against it, only this paragraph.
 
@@ -129,20 +160,22 @@ Never unsubscribe prod's Teams subscription as a "stop the noise" shortcut. Ther
 
 Two flavors:
 
-1. **Revert the B23 PR.** CDK rollback restores the single-topic shape: the notify topic disappears, budget + anomaly subscribers re-target the page topic, the email subscription on the notify topic is gone. The Teams HTTPS subscription on the page topic is **not** affected by the revert (it's out-of-band); messages continue to fire as long as the URL secret hasn't been rotated. The pre-B23 email subscription on the page topic was deleted by the B23 deploy and is **not** restored by the revert -- if you need it back, re-run `aws sns subscribe --topic-arn <page-arn> --protocol email --endpoint paa2013@med.cornell.edu` and confirm the email.
-2. **Disable Teams notifications without reverting CDK.** Either disable the Power Automate workflow (Teams-side) or `aws sns unsubscribe --subscription-arn ...` on the page topic. Cost notifications keep flowing to the notify topic email. Re-subscribe with the seed-then-subscribe flow above when ready.
+1. **Revert the B27 PR.** CDK rollback removes the Lambda relay, its log group, IAM role, default policy, the page-topic Lambda subscription, the `OncallRelayErrors` alarm, and the `OncallRelayFunctionArn` output. The page topic stays. The notify topic stays. Email path stays functional via the existing notify-topic email subscription. Alarms continue to publish to the page topic but with no subscriber -- same state as pre-B27 (and pre-B23, which is where the original `aws sns subscribe --protocol https` path was empirically known to fail; reverting B27 puts the topic back into that non-functional state). To re-establish Teams delivery without the Lambda, the only known-working path is to add it back -- the direct-HTTPS subscription is not viable (see § Gotchas).
+2. **Revert the B23 PR.** CDK rollback restores the single-topic shape: the notify topic disappears, budget + anomaly subscribers re-target the page topic, the email subscription on the notify topic is gone. The B27 Lambda subscription continues to function against the renamed topic only if B27 is also reverted. The pre-B23 email subscription on the page topic was deleted by the B23 deploy and is **not** restored by the revert -- if you need it back, re-run `aws sns subscribe --topic-arn <page-arn> --protocol email --endpoint paa2013@med.cornell.edu` and confirm the email.
+3. **Disable Teams notifications without reverting CDK.** Set the Lambda's reserved concurrency to 0 (see § Un-subscribe heavy path above), or disable the Power Automate workflow Teams-side. Cost notifications keep flowing to the notify topic email regardless. Restore by deleting the reserved-concurrency override or re-enabling the workflow.
 
 ## Diagnostics: test alarm fires but no Teams message
 
-If `aws cloudwatch set-alarm-state ... --state-value ALARM` does not produce a Teams channel post within 5 minutes:
+If `aws cloudwatch set-alarm-state ... --state-value ALARM` does not produce an Adaptive Card in the channel within 5 minutes:
 
-1. **Verify the subscription is confirmed:** `aws sns list-subscriptions-by-topic --topic-arn <page-arn>`. `PendingConfirmation` means the `SubscribeURL` in the channel was never GET'd. Open the channel, find the SNS SubscriptionConfirmation message, and GET its `SubscribeURL`.
-2. **Check SNS delivery metrics** for the page topic: `NumberOfNotificationsDelivered` and `NumberOfNotificationsFailed`. A `Failed` increment means the topic published but Teams rejected -- the workflow URL is stale, disabled, or the owner identity is no longer valid.
+1. **Check whether `OncallRelayErrors` fired** -- if the Lambda errored, the operator's email already has the page. `aws cloudwatch describe-alarms --alarm-names "sps-oncall-relay-errors-${ENV}" --query 'MetricAlarms[0].StateValue'`. `ALARM` means the Lambda is broken and the email is the canonical signal; jump to step 4. `OK` means the Lambda succeeded (HTTP 2xx from Teams), so the failure is on the Teams side -- continue.
+2. **Check the Lambda's recent log group**: `aws logs tail "/aws/lambda/sps-oncall-relay-${ENV}" --since 10m --follow`. Look for structured `event:"oncall_relay"` lines; `outcome:"delivered"` with `status:202` means the POST succeeded, so the problem is downstream of the workflow trigger. `outcome:"upstream_error"` with `status:4xx`/`5xx` means the workflow rejected the POST -- often a stale URL, disabled workflow, or a workflow whose owner offboarded.
 3. **Check the Workflow's run history** in Power Automate (Teams -> channel -> Workflows -> select the workflow -> Run history). A failed run shows whether Teams received the call but the Post-to-channel step errored.
-4. **Verify the URL secret is non-empty:** `aws secretsmanager get-secret-value --secret-id "scholars/${ENV}/oncall/teams-webhook-url" --query SecretString --output text`. Empty value -> seed it and resubscribe.
-5. **Validate the alarm itself reached ALARM:** `aws cloudwatch describe-alarms --alarm-names "sps-alb-5xx-rate-${ENV}" --query 'MetricAlarms[0].StateValue'`. `INSUFFICIENT_DATA` means `set-alarm-state` was a no-op against the current evaluation window -- retry with a different alarm or wait for an actual datapoint.
+4. **Verify the URL secret is correct:** `aws secretsmanager get-secret-value --secret-id "scholars/${ENV}/oncall/teams-webhook-url" --query SecretString --output text`. Compare against the URL captured in step 1 of § Rollout per env. If wrong, `put-secret-value` and force a Lambda container recycle (`aws lambda update-function-configuration ... --environment Variables={...,DEPLOY_TS=$(date +%s)}`).
+5. **Verify the alarm itself reached ALARM:** `aws cloudwatch describe-alarms --alarm-names "sps-alb-5xx-rate-${ENV}" --query 'MetricAlarms[0].StateValue'`. `INSUFFICIENT_DATA` means `set-alarm-state` was a no-op against the current evaluation window -- retry with a different alarm or wait for an actual datapoint.
+6. **Verify the page-topic subscription still exists:** `aws sns list-subscriptions-by-topic --topic-arn <page-arn>`. There should be exactly one `Protocol: lambda` entry pointing at `sps-oncall-relay-${env}`. A missing entry means a CDK drift -- re-deploy the Observability stack.
 
-If steps 1-5 all check out and the message still doesn't arrive, capture the workflow run history + SNS delivery metrics in a hot-fix issue and re-subscribe rather than running production blind.
+If steps 1-6 all check out and the message still doesn't arrive, capture the Lambda log tail + the workflow run history in a hot-fix issue.
 
 ## Quarterly review trigger
 
@@ -150,7 +183,8 @@ Same cadence as the SLO review (see [`docs/SLOs.md` § Review cadence](./SLOs.md
 
 - Is the Workflow URL holder still at WCM and still owns the workflow? (Off-boarding is the main fragility.)
 - Has the WCM ServiceNow CI been registered for SPS yet? If yes, time to wire it in as the second subscriber and start the L1 escalation move.
-- Has the page topic accumulated any AWS-side subscriptions outside the single Teams webhook? Anything else should be justified or removed.
+- Has the page topic accumulated any AWS-side subscriptions outside the single B27 Lambda? Anything else should be justified or removed.
 - Are cost guardrails still on the notify topic, not the page topic? Easy to drift if a future operator "consolidates" topics.
+- Re-run the staging chaos test in § Rollout per env step 7 if the Power Automate auth surface has changed (Microsoft tenant policy update, workflow recreate, etc.). The test confirms the `OncallRelayErrors` -> email out-of-band fallback path still works end-to-end.
 
-All answered by `aws sns list-subscriptions-by-topic` against each topic ARN + a quick look at the workflow's owner in Teams. No tooling needed.
+All answered by `aws sns list-subscriptions-by-topic` against each topic ARN + a quick look at the workflow's owner in Teams + a one-shot chaos test. No tooling needed.
