@@ -1,4 +1,4 @@
-import { Template } from "aws-cdk-lib/assertions";
+import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
@@ -79,8 +79,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 9 CloudWatch alarms", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
+    it("creates exactly 10 CloudWatch alarms (9 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 10);
     });
 
     it("every alarm name contains the prod env literal (Footgun #4)", () => {
@@ -88,13 +88,13 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(9);
+      expect(names).toHaveLength(10);
       for (const name of names) {
         expect(name).toMatch(/-prod$/);
       }
     });
 
-    it("alarm names cover the nine documented surfaces", () => {
+    it("alarm names cover the nine platform surfaces plus the B27 relay-errors alarm", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
@@ -111,6 +111,7 @@ describe("SpsObservabilityStack", () => {
           "sps-edit-authz-denied-prod",
           "sps-opensearch-cluster-red-prod",
           "sps-opensearch-jvm-pressure-prod",
+          "sps-oncall-relay-errors-prod",
         ].sort(),
       );
     });
@@ -167,19 +168,13 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("notify topic has exactly one email subscription to the operator", () => {
-      // Exactly one AWS::SNS::Subscription overall — on the notify topic.
-      template.resourceCountIs("AWS::SNS::Subscription", 1);
+      // Two AWS::SNS::Subscription resources total post-B27: email on notify
+      // topic, Lambda on page topic (the B27 relay).
+      template.resourceCountIs("AWS::SNS::Subscription", 2);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
       });
-      // The single subscription points at the notify topic, not the page topic.
-      const subs = template.findResources("AWS::SNS::Subscription");
-      const sub = Object.values(subs)[0]?.Properties as
-        | { TopicArn?: { Ref?: string } }
-        | undefined;
-      const topicRef = sub?.TopicArn?.Ref;
-      expect(topicRef).toBeDefined();
       const topics = template.findResources("AWS::SNS::Topic");
       const notifyLogicalId = Object.entries(topics).find(
         ([, r]) =>
@@ -187,10 +182,19 @@ describe("SpsObservabilityStack", () => {
           "sps-notify-prod",
       )?.[0];
       expect(notifyLogicalId).toBeDefined();
+      const subs = template.findResources("AWS::SNS::Subscription");
+      const emailSub = Object.values(subs).find(
+        (r) =>
+          (r.Properties as { Protocol?: string } | undefined)?.Protocol ===
+          "email",
+      );
+      const topicRef = (emailSub?.Properties as
+        | { TopicArn?: { Ref?: string } }
+        | undefined)?.TopicArn?.Ref;
       expect(topicRef).toBe(notifyLogicalId);
     });
 
-    it("page topic carries zero SNS::Subscription resources (Teams sub is out-of-band)", () => {
+    it("page topic carries exactly one SNS::Subscription -- the B27 Lambda relay", () => {
       const subs = template.findResources("AWS::SNS::Subscription");
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
@@ -203,10 +207,13 @@ describe("SpsObservabilityStack", () => {
           ((r.Properties as { TopicArn?: { Ref?: string } } | undefined)
             ?.TopicArn?.Ref ?? "") === pageLogicalId,
       );
-      expect(pageSubs).toHaveLength(0);
+      expect(pageSubs).toHaveLength(1);
+      const proto = (pageSubs[0]?.Properties as { Protocol?: string } | undefined)
+        ?.Protocol;
+      expect(proto).toBe("lambda");
     });
 
-    it("all 9 alarm AlarmActions resolve to the page topic ARN (no cross-wiring)", () => {
+    it("all 9 platform alarms resolve their AlarmActions to the page topic ARN", () => {
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
         ([, r]) =>
@@ -215,13 +222,20 @@ describe("SpsObservabilityStack", () => {
       )?.[0];
       expect(pageLogicalId).toBeDefined();
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      let platformCount = 0;
       for (const r of Object.values(alarms)) {
+        const name = r.Properties?.AlarmName as string | undefined;
+        // The B27 relay-errors alarm goes to the notify topic by design --
+        // see SPEC § Failure-mode design; covered in a separate test below.
+        if (name === "sps-oncall-relay-errors-prod") continue;
         const actions = r.Properties?.AlarmActions as
           | Array<{ Ref?: string }>
           | undefined;
         expect(actions).toHaveLength(1);
         expect(actions?.[0]?.Ref).toBe(pageLogicalId);
+        platformCount++;
       }
+      expect(platformCount).toBe(9);
     });
 
     it("creates the account-wide monthly budget (prod only) with three notifications", () => {
@@ -332,9 +346,10 @@ describe("SpsObservabilityStack", () => {
       expect(services).toContain("costalerts.amazonaws.com");
     });
 
-    it("emits both AlarmTopicArn and NotifyTopicArn CFN outputs", () => {
+    it("emits AlarmTopicArn, NotifyTopicArn, and OncallRelayFunctionArn CFN outputs", () => {
       template.hasOutput("AlarmTopicArn", {});
       template.hasOutput("NotifyTopicArn", {});
+      template.hasOutput("OncallRelayFunctionArn", {});
     });
 
     it("new SNS topic display names + NotifyTopicArn description are printable ASCII (Footgun #6)", () => {
@@ -352,8 +367,16 @@ describe("SpsObservabilityStack", () => {
       expect(desc!).toMatch(PRINTABLE_ASCII);
     });
 
-    it("does not introduce any new log groups (AppStack already set retention)", () => {
-      template.resourceCountIs("AWS::Logs::LogGroup", 0);
+    it("introduces exactly one log group -- the B27 relay's own log group", () => {
+      // Pre-B27 this asserted zero; the on-call relay Lambda owns its log
+      // group explicitly (rather than via NodejsFunction `logRetention`,
+      // which would inflate the Lambda + Role counts via a CFN custom
+      // resource and break the 1-Lambda assertion below).
+      template.resourceCountIs("AWS::Logs::LogGroup", 1);
+      template.hasResourceProperties("AWS::Logs::LogGroup", {
+        LogGroupName: "/aws/lambda/sps-oncall-relay-prod",
+        RetentionInDays: 30,
+      });
     });
 
     it("creates the B02 edit_authz_denied metric filter on the app log group", () => {
@@ -396,6 +419,179 @@ describe("SpsObservabilityStack", () => {
       const actions = props?.AlarmActions as unknown[] | undefined;
       expect(actions).toHaveLength(1);
     });
+
+    // --------------------------------------------------------------------
+    // B27 -- on-call relay Lambda + Errors alarm
+    // --------------------------------------------------------------------
+    it("creates exactly one Lambda function (B27 on-call relay)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 1);
+      template.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "sps-oncall-relay-prod",
+        Runtime: "nodejs22.x",
+        MemorySize: 256,
+        Timeout: 10,
+        Handler: "index.handler",
+        Environment: {
+          Variables: { TEAMS_WEBHOOK_SECRET_ARN: Match.anyValue() },
+        },
+      });
+    });
+
+    it("Lambda env vars carry only the secret ARN -- no URL-shaped values (T3)", () => {
+      const fns = template.findResources("AWS::Lambda::Function");
+      const props = Object.values(fns)[0]?.Properties as
+        | { Environment?: { Variables?: Record<string, unknown> } }
+        | undefined;
+      const vars = props?.Environment?.Variables ?? {};
+      expect(Object.keys(vars)).toEqual(["TEAMS_WEBHOOK_SECRET_ARN"]);
+      // No env-var key should match /url/i (T3 -- defense against a later
+      // PR that smuggles the resolved URL into env vars by mistake).
+      for (const k of Object.keys(vars)) {
+        expect(k).not.toMatch(/url/i);
+      }
+    });
+
+    it("Lambda IAM policy grants secretsmanager:GetSecretValue on the env-specific secret only", () => {
+      // Walk the Lambda's default policy by hand -- `template.hasResource
+      // Properties` won't help because the synthesized `Resource` is an
+      // `Fn::Join` of tokens (region partition + account + name), not a
+      // plain string Match.stringLikeRegexp can compare against.
+      const policies = template.findResources("AWS::IAM::Policy");
+      const lambdaPolicies = Object.entries(policies).filter(([id]) =>
+        id.startsWith("OncallRelayFunctionServiceRoleDefaultPolicy"),
+      );
+      expect(lambdaPolicies).toHaveLength(1);
+      const stmts = (lambdaPolicies[0]![1].Properties as {
+        PolicyDocument?: {
+          Statement?: Array<{
+            Effect: string;
+            Action: string[] | string;
+            Resource: unknown;
+          }>;
+        };
+      }).PolicyDocument?.Statement;
+      expect(stmts).toBeDefined();
+      expect(stmts!.length).toBeGreaterThanOrEqual(1);
+      const grantStmt = stmts!.find((s) => {
+        const acts = Array.isArray(s.Action) ? s.Action : [s.Action];
+        return acts.includes("secretsmanager:GetSecretValue");
+      });
+      expect(grantStmt).toBeDefined();
+      expect(grantStmt!.Effect).toBe("Allow");
+      // Resource is the Fn::Join arn of the teams-webhook secret. Serialize
+      // it and grep for the env-scoped name fragment -- that's the only
+      // shape we care about for least-priv.
+      expect(JSON.stringify(grantStmt!.Resource)).toContain(
+        "scholars/prod/oncall/teams-webhook-url",
+      );
+
+      // Defense in depth: confirm the Lambda's default policy has NO
+      // wildcard Action or wildcard Resource. The AWSLambdaBasicExecutionRole
+      // managed policy is fine because it's a service-role attachment on
+      // the role itself, not a statement in the default-policy doc.
+      for (const pol of Object.values(policies)) {
+        const allStmts = (pol.Properties as {
+          PolicyDocument?: { Statement?: Array<{ Action?: unknown; Resource?: unknown }> };
+        }).PolicyDocument?.Statement;
+        if (!Array.isArray(allStmts)) continue;
+        for (const s of allStmts) {
+          const actions = Array.isArray(s.Action) ? s.Action : [s.Action];
+          for (const a of actions) {
+            expect(a).not.toBe("*");
+          }
+          const resources = Array.isArray(s.Resource) ? s.Resource : [s.Resource];
+          for (const r of resources) {
+            expect(r).not.toBe("*");
+          }
+        }
+      }
+    });
+
+    it("Lambda's execution role attaches AWSLambdaBasicExecutionRole only", () => {
+      const roles = template.findResources("AWS::IAM::Role");
+      // Find the Lambda's service role -- the one whose AssumeRole principal is lambda.amazonaws.com.
+      const lambdaRole = Object.values(roles).find((r) => {
+        const stmts = (r.Properties as {
+          AssumeRolePolicyDocument?: {
+            Statement?: Array<{ Principal?: { Service?: string } }>;
+          };
+        }).AssumeRolePolicyDocument?.Statement;
+        return stmts?.some((s) => s.Principal?.Service === "lambda.amazonaws.com");
+      });
+      expect(lambdaRole).toBeDefined();
+      const managed = (lambdaRole?.Properties as
+        | { ManagedPolicyArns?: unknown[] }
+        | undefined)?.ManagedPolicyArns;
+      expect(managed).toHaveLength(1);
+    });
+
+    it("the Lambda is the sole subscriber on the page topic", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const pageLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-alarms-prod",
+      )?.[0];
+      const subs = template.findResources("AWS::SNS::Subscription", {
+        Properties: { Protocol: "lambda" },
+      });
+      expect(Object.keys(subs)).toHaveLength(1);
+      const sub = Object.values(subs)[0]?.Properties as
+        | { TopicArn?: { Ref?: string }; Endpoint?: { "Fn::GetAtt"?: string[] } }
+        | undefined;
+      expect(sub?.TopicArn?.Ref).toBe(pageLogicalId);
+      expect(sub?.Endpoint?.["Fn::GetAtt"]?.[0]).toMatch(/^OncallRelayFunction/);
+    });
+
+    it("OncallRelayErrors alarm fires on Lambda Errors >= 1 over 1m and routes to the NOTIFY topic", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-oncall-relay-errors-prod" },
+      });
+      expect(Object.keys(alarms)).toHaveLength(1);
+      const props = Object.values(alarms)[0]?.Properties;
+      expect(props?.MetricName).toBe("Errors");
+      expect(props?.Namespace).toBe("AWS/Lambda");
+      expect(props?.Threshold).toBe(1);
+      expect(props?.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
+      expect(props?.EvaluationPeriods).toBe(1);
+      expect(props?.DatapointsToAlarm).toBe(1);
+      expect(props?.Period).toBe(60);
+      expect(props?.Statistic).toBe("Sum");
+      expect(props?.TreatMissingData).toBe("notBreaching");
+
+      // Routes to NOTIFY topic, not page -- SPEC § Failure-mode design.
+      // The page topic flows through this Lambda; routing its failure
+      // alarm back through itself would either flap silently or mask the
+      // original alarm. Notify (email) is the out-of-band fallback.
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-prod",
+      )?.[0];
+      const actions = props?.AlarmActions as Array<{ Ref?: string }> | undefined;
+      expect(actions).toHaveLength(1);
+      expect(actions?.[0]?.Ref).toBe(notifyLogicalId);
+    });
+
+    it("Lambda function name, alarm name, OncallRelayFunctionArn output description are printable ASCII (Footgun #6)", () => {
+      const fns = template.findResources("AWS::Lambda::Function");
+      const fnName = (Object.values(fns)[0]?.Properties as
+        | { FunctionName?: string }
+        | undefined)?.FunctionName;
+      expect(fnName).toBeDefined();
+      expect(fnName!).toMatch(PRINTABLE_ASCII);
+      const alarmName = "sps-oncall-relay-errors-prod";
+      expect(alarmName).toMatch(PRINTABLE_ASCII);
+      const outputs = template.findOutputs("OncallRelayFunctionArn");
+      const desc = Object.values(outputs)[0]?.Description as string | undefined;
+      expect(desc).toBeDefined();
+      expect(desc!).toMatch(PRINTABLE_ASCII);
+    });
+
+    it("emits the OncallRelayFunctionArn CFN output", () => {
+      template.hasOutput("OncallRelayFunctionArn", {});
+    });
   });
 
   // ----------------------------------------------------------------------
@@ -408,8 +604,8 @@ describe("SpsObservabilityStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates exactly 9 CloudWatch alarms (same count as prod)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
+    it("creates exactly 10 CloudWatch alarms (9 platform + 1 B27 relay-errors)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 10);
     });
 
     it("every alarm name contains the staging env literal", () => {
@@ -417,7 +613,7 @@ describe("SpsObservabilityStack", () => {
       const names = Object.values(alarms)
         .map((r) => r.Properties?.AlarmName as string | undefined)
         .filter((n): n is string => typeof n === "string");
-      expect(names).toHaveLength(9);
+      expect(names).toHaveLength(10);
       for (const name of names) {
         expect(name).toMatch(/-staging$/);
       }
@@ -433,8 +629,9 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
-    it("page topic has zero SNS::Subscription resources; notify topic has the operator email", () => {
-      template.resourceCountIs("AWS::SNS::Subscription", 1);
+    it("page topic carries the B27 Lambda subscription; notify topic has the operator email", () => {
+      // Two AWS::SNS::Subscription resources: email on notify, lambda on page.
+      template.resourceCountIs("AWS::SNS::Subscription", 2);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -451,19 +648,30 @@ describe("SpsObservabilityStack", () => {
           (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
           "sps-notify-staging",
       )?.[0];
+
       const pageSubs = Object.values(subs).filter(
         (r) =>
           ((r.Properties as { TopicArn?: { Ref?: string } } | undefined)
             ?.TopicArn?.Ref ?? "") === pageLogicalId,
       );
-      expect(pageSubs).toHaveLength(0);
-      const sub = Object.values(subs)[0]?.Properties as
-        | { TopicArn?: { Ref?: string } }
-        | undefined;
-      expect(sub?.TopicArn?.Ref).toBe(notifyLogicalId);
+      expect(pageSubs).toHaveLength(1);
+      expect(
+        (pageSubs[0]?.Properties as { Protocol?: string } | undefined)?.Protocol,
+      ).toBe("lambda");
+
+      const notifySubs = Object.values(subs).filter(
+        (r) =>
+          ((r.Properties as { TopicArn?: { Ref?: string } } | undefined)
+            ?.TopicArn?.Ref ?? "") === notifyLogicalId,
+      );
+      expect(notifySubs).toHaveLength(1);
+      expect(
+        (notifySubs[0]?.Properties as { Protocol?: string } | undefined)
+          ?.Protocol,
+      ).toBe("email");
     });
 
-    it("all 9 staging alarms publish to the page topic ARN", () => {
+    it("all 9 staging platform alarms publish to the page topic ARN", () => {
       const topics = template.findResources("AWS::SNS::Topic");
       const pageLogicalId = Object.entries(topics).find(
         ([, r]) =>
@@ -471,18 +679,65 @@ describe("SpsObservabilityStack", () => {
           "sps-alarms-staging",
       )?.[0];
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      let platformCount = 0;
       for (const r of Object.values(alarms)) {
+        const name = r.Properties?.AlarmName as string | undefined;
+        if (name === "sps-oncall-relay-errors-staging") continue;
         const actions = r.Properties?.AlarmActions as
           | Array<{ Ref?: string }>
           | undefined;
         expect(actions).toHaveLength(1);
         expect(actions?.[0]?.Ref).toBe(pageLogicalId);
+        platformCount++;
       }
+      expect(platformCount).toBe(9);
     });
 
-    it("emits both AlarmTopicArn and NotifyTopicArn CFN outputs in staging too", () => {
+    it("staging Lambda + alarm shape mirrors prod (env literal differs only)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 1);
+      template.hasResourceProperties("AWS::Lambda::Function", {
+        FunctionName: "sps-oncall-relay-staging",
+        Runtime: "nodejs22.x",
+        MemorySize: 256,
+        Timeout: 10,
+      });
+      // IAM policy scope-check: walk the default policy and confirm the
+      // staging-scoped name fragment shows up under the secrets statement.
+      const policies = template.findResources("AWS::IAM::Policy");
+      const lambdaPolicy = Object.entries(policies).find(([id]) =>
+        id.startsWith("OncallRelayFunctionServiceRoleDefaultPolicy"),
+      );
+      expect(lambdaPolicy).toBeDefined();
+      const stmts = (lambdaPolicy![1].Properties as {
+        PolicyDocument?: { Statement?: Array<{ Action: string[] | string; Resource: unknown }> };
+      }).PolicyDocument?.Statement;
+      const grant = stmts!.find((s) => {
+        const acts = Array.isArray(s.Action) ? s.Action : [s.Action];
+        return acts.includes("secretsmanager:GetSecretValue");
+      });
+      expect(JSON.stringify(grant!.Resource)).toContain(
+        "scholars/staging/oncall/teams-webhook-url",
+      );
+      // Relay-errors alarm routes to NOTIFY topic in staging too.
+      const alarms = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: { AlarmName: "sps-oncall-relay-errors-staging" },
+      });
+      expect(Object.keys(alarms)).toHaveLength(1);
+      const props = Object.values(alarms)[0]?.Properties;
+      const topics = template.findResources("AWS::SNS::Topic");
+      const notifyLogicalId = Object.entries(topics).find(
+        ([, r]) =>
+          (r.Properties as { TopicName?: string } | undefined)?.TopicName ===
+          "sps-notify-staging",
+      )?.[0];
+      const actions = props?.AlarmActions as Array<{ Ref?: string }> | undefined;
+      expect(actions?.[0]?.Ref).toBe(notifyLogicalId);
+    });
+
+    it("emits AlarmTopicArn, NotifyTopicArn, and OncallRelayFunctionArn CFN outputs", () => {
       template.hasOutput("AlarmTopicArn", {});
       template.hasOutput("NotifyTopicArn", {});
+      template.hasOutput("OncallRelayFunctionArn", {});
     });
 
     // The staging-vs-prod divergence at the core of this stack: cost
