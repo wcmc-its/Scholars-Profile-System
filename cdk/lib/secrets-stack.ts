@@ -114,6 +114,58 @@ export class SecretsStack extends Stack {
         name: `scholars/saml-sp/${env}/private-key`,
         description: `SPS SAML SP private key (${env}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
       },
+      // Per-source ETL credential stubs (Phase 3, EtlStack). Each source
+      // in the nightly/weekly/annual Step Functions state machines that
+      // calls an external system gets its own secret so credentials can
+      // rotate independently. Values are populated out-of-band per the
+      // ADR-008 hard rule. The eight sources here mirror D6 in
+      // `feat-infra-phase3-etlstack.md`.
+      {
+        constructId: "EtlEd",
+        name: `scholars/${env}/etl/ed`,
+        description:
+          "SPS ETL credentials — WCM Enterprise Directory (LDAP simple bind).",
+      },
+      {
+        constructId: "EtlAsms",
+        name: `scholars/${env}/etl/asms`,
+        description:
+          "SPS ETL credentials — ASMS export endpoint (basic auth or signed URL).",
+      },
+      {
+        constructId: "EtlInfoed",
+        name: `scholars/${env}/etl/infoed`,
+        description: "SPS ETL credentials — InfoEd grants export.",
+      },
+      {
+        constructId: "EtlCoi",
+        name: `scholars/${env}/etl/coi`,
+        description: "SPS ETL credentials — COI source endpoint.",
+      },
+      {
+        constructId: "EtlReciter",
+        name: `scholars/${env}/etl/reciter`,
+        description:
+          "SPS ETL credentials — ReCiter API bearer + IAM signer keys.",
+      },
+      {
+        constructId: "EtlDynamodb",
+        name: `scholars/${env}/etl/dynamodb`,
+        description:
+          "SPS ETL credentials — ReciterAI DynamoDB scan (IAM scoped).",
+      },
+      {
+        constructId: "EtlSpotlight",
+        name: `scholars/${env}/etl/spotlight`,
+        description:
+          "SPS ETL credentials — Spotlight S3 manifest + signed payload pull.",
+      },
+      {
+        constructId: "EtlHierarchy",
+        name: `scholars/${env}/etl/hierarchy`,
+        description:
+          "SPS ETL credentials — annual hierarchy import (Jenzabar / org chart source).",
+      },
     ];
 
     const arns: Record<string, string> = {};

@@ -95,6 +95,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "InternalAlbSecurityGroupId": {
+      "Description": "SPS internal ALB security group id (consumed by EtlStack ingress).",
+      "Export": {
+        "Name": "Sps-App-prod-InternalAlbSecurityGroupId",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "InternalAlbSecurityGroup32D71C5A",
+          "GroupId",
+        ],
+      },
+    },
     "PublicAlbDns": {
       "Description": "SPS public ALB DNS name (consumed by EdgeStack)",
       "Value": {
@@ -1499,6 +1511,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
         "Fn::GetAtt": [
           "InternalAlb58CEEAE8",
           "DNSName",
+        ],
+      },
+    },
+    "InternalAlbSecurityGroupId": {
+      "Description": "SPS internal ALB security group id (consumed by EtlStack ingress).",
+      "Export": {
+        "Name": "Sps-App-staging-InternalAlbSecurityGroupId",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "InternalAlbSecurityGroup32D71C5A",
+          "GroupId",
         ],
       },
     },
