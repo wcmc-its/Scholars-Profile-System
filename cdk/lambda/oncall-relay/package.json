@@ -1,0 +1,20 @@
+{
+  "name": "sps-oncall-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SNS -> Adaptive Card -> Power Automate workflow relay for SPS CloudWatch alarms (B27).",
+  "main": "index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.700.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.150",
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
+  }
+}
