@@ -1,0 +1,62 @@
+name: post-merge cleanup
+
+# When a PR merges, for every issue it closes (via "Closes #N" or
+# "Fixes #N" in the PR body), swap the `claimed:<branch>` label for
+# `claimed-and-merged`. Removes the manual `scripts/claim-task.sh ship`
+# step that was previously human-driven and drift-prone.
+#
+# GitHub itself already (1) closes the linked issues and (2) deletes the
+# head branch (delete_branch_on_merge is true on this repo). This workflow
+# only handles the label hand-off.
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  swap-claim-labels:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Swap claim labels on closing issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Fetch the issues this PR closes (the "Closes #N" links).
+          ISSUES=$(gh pr view "$PR_NUMBER" --repo "$REPO" \
+            --json closingIssuesReferences \
+            --jq '.closingIssuesReferences[].number')
+
+          if [ -z "$ISSUES" ]; then
+            echo "PR #$PR_NUMBER has no 'Closes #N' references; nothing to do."
+            exit 0
+          fi
+
+          # Ensure the destination label exists. Idempotent.
+          gh label create "claimed-and-merged" \
+            --repo "$REPO" \
+            --description "Auto-applied by post-merge-cleanup workflow" \
+            2>/dev/null || true
+
+          CLAIM_LABEL="claimed:$BRANCH"
+
+          for N in $ISSUES; do
+            echo "::group::Issue #$N"
+            # Remove the per-branch claim if present; tolerate absence.
+            gh issue edit "$N" --repo "$REPO" \
+              --remove-label "$CLAIM_LABEL" 2>&1 || \
+              echo "  (no $CLAIM_LABEL label to remove)"
+            # Apply the merged marker; tolerate already-applied.
+            gh issue edit "$N" --repo "$REPO" \
+              --add-label "claimed-and-merged" 2>&1 || \
+              echo "  (already labeled claimed-and-merged)"
+            echo "::endgroup::"
+          done
