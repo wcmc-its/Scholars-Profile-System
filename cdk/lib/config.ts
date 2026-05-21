@@ -20,8 +20,6 @@ export interface SpsEnvConfig {
   readonly drRegion: string;
   /** IPv4 CIDR block for the VPC; distinct per environment. */
   readonly vpcCidr: string;
-  /** Number of Availability Zones the VPC spans. */
-  readonly maxAzs: number;
   /** Number of NAT gateways — one per AZ in production, one in staging. */
   readonly natGateways: number;
 
@@ -71,7 +69,6 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     region: "us-east-1",
     drRegion: "us-west-2",
     vpcCidr: "10.20.0.0/16",
-    maxAzs: 2,
     natGateways: 1,
     auroraMinCapacity: 0.5,
     auroraMaxCapacity: 2,
@@ -86,7 +83,6 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     region: "us-east-1",
     drRegion: "us-west-2",
     vpcCidr: "10.10.0.0/16",
-    maxAzs: 2,
     // One NAT gateway in prod, not two — the account is at its EIP cap
     // (7 EIPs already in use across ReCiter + staging SPS, allocation
     // request denied 2026-05-20). A second prod NAT pushes past the cap.
