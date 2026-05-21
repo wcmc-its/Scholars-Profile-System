@@ -1002,33 +1002,6 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
-    "OpensearchEndpoint9393704F": {
-      "Properties": {
-        "PrivateDnsEnabled": true,
-        "SecurityGroupIds": [
-          {
-            "Fn::GetAtt": [
-              "VpcEndpointSecurityGroup02EA44AC",
-              "GroupId",
-            ],
-          },
-        ],
-        "ServiceName": "com.amazonaws.us-east-1.es",
-        "SubnetIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
-        ],
-        "VpcEndpointType": "Interface",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
-    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -2631,33 +2604,6 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
-    },
-    "OpensearchEndpoint9393704F": {
-      "Properties": {
-        "PrivateDnsEnabled": true,
-        "SecurityGroupIds": [
-          {
-            "Fn::GetAtt": [
-              "VpcEndpointSecurityGroup02EA44AC",
-              "GroupId",
-            ],
-          },
-        ],
-        "ServiceName": "com.amazonaws.us-east-1.es",
-        "SubnetIds": [
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
-          },
-          {
-            "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
-          },
-        ],
-        "VpcEndpointType": "Interface",
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::VPCEndpoint",
     },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
