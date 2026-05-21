@@ -179,3 +179,23 @@ aws cloudformation describe-stacks --stack-name Sps-App-${env} 2>&1 \
 - **CFN dynamic references for Secrets Manager must use the friendly-name form (or a *full* ARN with random suffix) -- partial-ARN is silently invalid.** CDK's `Secret.fromSecretNameV2(name).secretValue` emits a partial-ARN dynamic reference (`{{resolve:secretsmanager:arn:aws:secretsmanager:<region>:<acct>:secret:<name>:SecretString:::}}`). Synth accepts it; AWS Secrets Manager rejects it at deploy time with `ResourceNotFoundException`. Use `SecretValue.secretsManager(name)` instead, which emits `{{resolve:secretsmanager:<name>:SecretString:::}}`. Synth-time guard in `cdk/test/app-stack.test.ts` asserts the listener rule's `X-Origin-Verify` value never contains `arn:aws:secretsmanager` (the broken form's only distinguishing fragment).
 
 - **A target group can be associated with exactly one load balancer.** AWS enforces this at the second listener-create on a shared TG ("target groups cannot be associated with more than one load balancer"). CDK synth allows the shape. The two-ALB topology in AppStack therefore needs two target groups (public + internal), both registered on the ECS service via `cfnService.loadBalancers` so every task ends up reachable from both listeners. Synth-time guard in `cdk/test/app-stack.test.ts` walks every listener (and its rules), maps TG references to their parent LB, and fails if any TG is reachable from more than one ALB.
+
+## Gotchas: env-conditional resources
+
+**If a stack creates resources only under env-conditional code paths, synth + diff + (ideally) deploy against ALL env contexts before declaring it ready.** Staging-context synth and a staging-only first-deploy pass don't exercise the prod-only branches; bugs in those branches surface for the first time on the prod first-deploy -- which is exactly when the operational cost of a halt is highest.
+
+The pattern shows up as an `if (env === "prod")` (or `if (envConfig.X)`) block guarding account-scoped or env-specific resources. Three instances burned us before this convention was written down:
+
+| Issue | Stack / construct | Where the synth gap was |
+|---|---|---|
+| [#429](https://github.com/wcmc-its/Scholars-Profile-System/issues/429) | AppStack OpenSearch VPC endpoint | Service-name string passed CDK synth; AWS rejected `com.amazonaws.us-east-1.es` at endpoint-create (real name is `aos`). |
+| [#431](https://github.com/wcmc-its/Scholars-Profile-System/issues/431) | AppStack listener / cross-stack chain | Various AppStack create-time constraints (EC2 ASCII-only descriptions, listener-dependency order, shared-TG topology) only triggered on a fresh deploy against real AWS. |
+| [#440](https://github.com/wcmc-its/Scholars-Profile-System/issues/440) | ObservabilityStack `CfnAnomalySubscription` | `Frequency: "DAILY"` + `Type: "SNS"` subscriber passes CDK synth; Cost Explorer rejects the combination at deploy time with HTTP 400 ("Daily or weekly frequencies only support Email subscriptions"). The resource lives behind `if (env === "prod")`, so staging synth + staging deploy never touched it. |
+
+Operational shape:
+
+1. **Before opening the PR**, run `npx cdk synth --exclusively <Stack>-<env> -c env=<env> --output cdk.out.<env>` for every env-config the stack supports. Eyeball each cloud assembly for the env-gated resources.
+2. **Add a synth-time guard test** for every AWS-API combinatoric constraint surfaced by the deploy failure. Pattern: `template.hasResourceProperties(<Type>, { <key>: <expected> })` plus `template.resourcePropertiesCountIs(<Type>, { <key>: Match.stringLikeRegexp(<illegal-alternatives>) }, 0)`. See `cdk/test/observability-stack.test.ts` ("Footgun #7" for the AnomalySubscription case) and `cdk/test/app-stack.test.ts` ("Footgun #6" ASCII-only descriptions, the `\.es$` endpoint-service guard, and the shared-TG topology walker) for the working pattern.
+3. **(Ideally) deploy each env at least once** before merging. The Observability fix in #440 was caught only by attempting `cdk deploy --exclusively Sps-Observability-prod -c env=prod` -- the PR that introduced the resource passed all the staging-context tests but never exercised the prod branch against AWS.
+
+The broader takeaway: `aws-cdk-lib` L1 props are typed against the CloudFormation spec, which does not encode the AWS-API combinatoric constraints. Treat the "if (env === X)" conditional itself as a code smell -- every such branch is a path that needs an explicit prod-context test AND a prod-context deploy walk.
