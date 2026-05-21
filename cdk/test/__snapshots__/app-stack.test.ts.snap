@@ -207,6 +207,22 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "PORT",
                 "Value": "3000",
               },
+              {
+                "Name": "OTEL_SERVICE_NAME",
+                "Value": "sps-app-prod",
+              },
+              {
+                "Name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "Value": "http://localhost:4318",
+              },
+              {
+                "Name": "OTEL_PROPAGATORS",
+                "Value": "tracecontext,xray",
+              },
+              {
+                "Name": "SPS_ENV",
+                "Value": "prod",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -367,6 +383,92 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
             ],
+          },
+          {
+            "Command": [
+              "--config=env:AOT_CONFIG_CONTENT",
+            ],
+            "Environment": [
+              {
+                "Name": "AOT_CONFIG_CONTENT",
+                "Value": "# ADOT collector configuration for SPS app tasks.
+#
+# Pipeline shape: OTLP/HTTP receiver -> memory_limiter -> tail_sampling ->
+# batch -> awsxray exporter. The tail_sampling processor is the load-bearing
+# piece -- issue #123's "5% baseline + 100% on errors" cannot be delivered
+# by an SDK-side head sampler (NotSampled decisions can't be reversed once
+# the span is dropped), so the promotion happens here after the trace has
+# ended and its status is known.
+#
+# Drops happen before the awsxray exporter, so the X-Ray bill tracks the
+# kept-trace rate (~5% baseline + every error + every >1500ms trace),
+# not the SDK's 100% recording rate.
+#
+# Tunable in place: edit this file + cdk deploy --exclusively Sps-App-<env>.
+# No app-image rebuild required because the file is baked into the
+# collector container via the CDK Asset upload pattern (see app-stack.ts).
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Drop incoming OTLP if the collector is over a soft memory limit; required
+  # in front of tail_sampling because the latter buffers up to num_traces.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1500
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5
+
+  batch:
+    timeout: 5s
+    send_batch_size: 50
+
+exporters:
+  awsxray:
+    # Region resolved from the ECS task metadata; no need to hard-code.
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [awsxray]
+",
+              },
+            ],
+            "Essential": false,
+            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:c7e36a5b6ebd0a8d2a9e1f4b6c8d5a7e3b9f2c1d4e6a8b0c2d4e6f8a0b2c4d6e",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "OtelCollectorLogGroup0FD207F7",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "otel",
+              },
+            },
+            "Name": "otel-collector",
           },
         ],
         "Cpu": "1024",
@@ -927,6 +1029,15 @@ exports[`AppStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::VPCEndpoint",
     },
+    "OtelCollectorLogGroup0FD207F7": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-otel-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
     "PublicAlb84330974": {
       "Properties": {
         "LoadBalancerAttributes": [
@@ -1196,6 +1307,26 @@ exports[`AppStack prod matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::GetAtt": [
+                    "OtelCollectorLogGroup0FD207F7",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "OtelCollectorLogGroup0FD207F7",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1314,6 +1445,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
               "Effect": "Allow",
               "Resource": {
                 "Fn::GetAtt": [
+                  "OtelCollectorLogGroup0FD207F7",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
                   "MigrationLogGroupFD140541",
                   "Arn",
                 ],
@@ -1345,10 +1489,36 @@ exports[`AppStack prod matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ECS task role (prod). Application runtime identity; zero AWS API permissions today.",
+        "Description": "SPS ECS task role (prod). Application runtime identity; X-Ray write only.",
         "RoleName": "sps-task-prod",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "TaskRoleXrayPolicyBA24E3D0": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "xray:PutTraceSegments",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "xray:PutTelemetryRecords",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-xray",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "VpcEndpointSecurityGroup02EA44AC": {
       "Properties": {
@@ -1626,6 +1796,22 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Name": "PORT",
                 "Value": "3000",
               },
+              {
+                "Name": "OTEL_SERVICE_NAME",
+                "Value": "sps-app-staging",
+              },
+              {
+                "Name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+                "Value": "http://localhost:4318",
+              },
+              {
+                "Name": "OTEL_PROPAGATORS",
+                "Value": "tracecontext,xray",
+              },
+              {
+                "Name": "SPS_ENV",
+                "Value": "staging",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -1786,6 +1972,92 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 },
               },
             ],
+          },
+          {
+            "Command": [
+              "--config=env:AOT_CONFIG_CONTENT",
+            ],
+            "Environment": [
+              {
+                "Name": "AOT_CONFIG_CONTENT",
+                "Value": "# ADOT collector configuration for SPS app tasks.
+#
+# Pipeline shape: OTLP/HTTP receiver -> memory_limiter -> tail_sampling ->
+# batch -> awsxray exporter. The tail_sampling processor is the load-bearing
+# piece -- issue #123's "5% baseline + 100% on errors" cannot be delivered
+# by an SDK-side head sampler (NotSampled decisions can't be reversed once
+# the span is dropped), so the promotion happens here after the trace has
+# ended and its status is known.
+#
+# Drops happen before the awsxray exporter, so the X-Ray bill tracks the
+# kept-trace rate (~5% baseline + every error + every >1500ms trace),
+# not the SDK's 100% recording rate.
+#
+# Tunable in place: edit this file + cdk deploy --exclusively Sps-App-<env>.
+# No app-image rebuild required because the file is baked into the
+# collector container via the CDK Asset upload pattern (see app-stack.ts).
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Drop incoming OTLP if the collector is over a soft memory limit; required
+  # in front of tail_sampling because the latter buffers up to num_traces.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1500
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5
+
+  batch:
+    timeout: 5s
+    send_batch_size: 50
+
+exporters:
+  awsxray:
+    # Region resolved from the ECS task metadata; no need to hard-code.
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [awsxray]
+",
+              },
+            ],
+            "Essential": false,
+            "Image": "public.ecr.aws/aws-observability/aws-otel-collector@sha256:c7e36a5b6ebd0a8d2a9e1f4b6c8d5a7e3b9f2c1d4e6a8b0c2d4e6f8a0b2c4d6e",
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "OtelCollectorLogGroup0FD207F7",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "otel",
+              },
+            },
+            "Name": "otel-collector",
           },
         ],
         "Cpu": "512",
@@ -2346,6 +2618,15 @@ exports[`AppStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::VPCEndpoint",
     },
+    "OtelCollectorLogGroup0FD207F7": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-otel-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
     "PublicAlb84330974": {
       "Properties": {
         "LoadBalancerAttributes": [
@@ -2615,6 +2896,26 @@ exports[`AppStack staging matches the snapshot 1`] = `
                     ],
                   ],
                 },
+                {
+                  "Fn::GetAtt": [
+                    "OtelCollectorLogGroup0FD207F7",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "OtelCollectorLogGroup0FD207F7",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -2733,6 +3034,19 @@ exports[`AppStack staging matches the snapshot 1`] = `
               "Effect": "Allow",
               "Resource": {
                 "Fn::GetAtt": [
+                  "OtelCollectorLogGroup0FD207F7",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
                   "MigrationLogGroupFD140541",
                   "Arn",
                 ],
@@ -2764,10 +3078,36 @@ exports[`AppStack staging matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ECS task role (staging). Application runtime identity; zero AWS API permissions today.",
+        "Description": "SPS ECS task role (staging). Application runtime identity; X-Ray write only.",
         "RoleName": "sps-task-staging",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "TaskRoleXrayPolicyBA24E3D0": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "xray:PutTraceSegments",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "xray:PutTelemetryRecords",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-xray",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "VpcEndpointSecurityGroup02EA44AC": {
       "Properties": {

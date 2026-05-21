@@ -89,8 +89,8 @@ describe("AppStack", () => {
         expect(types.filter((t) => t === "Gateway")).toHaveLength(1);
       });
 
-      it("creates exactly two CloudWatch log groups (app + migrate)", () => {
-        template.resourceCountIs("AWS::Logs::LogGroup", 2);
+      it("creates exactly three CloudWatch log groups (app + migrate + otel-collector sidecar)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 3);
         const groups = template.findResources("AWS::Logs::LogGroup");
         const names = Object.values(groups)
           .map((r) => r.Properties?.LogGroupName as string | undefined)
@@ -98,6 +98,7 @@ describe("AppStack", () => {
         expect(names).toEqual([
           "/aws/ecs/sps-app-prod",
           "/aws/ecs/sps-migrate-prod",
+          "/aws/ecs/sps-otel-prod",
         ]);
       });
     });
@@ -597,6 +598,191 @@ describe("AppStack", () => {
             }
           }
         }
+      });
+    });
+
+    describe("Distributed tracing sidecar (B24)", () => {
+      it("the app task definition includes the otel-collector sidecar container", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        expect(appTaskDef).toBeDefined();
+        const containerNames = (
+          appTaskDef?.Properties?.ContainerDefinitions as
+            | Array<{ Name?: string }>
+            | undefined
+        )?.map((c) => c.Name);
+        expect(containerNames).toEqual(
+          expect.arrayContaining(["app", "otel-collector"]),
+        );
+      });
+
+      it("the otel-collector image is pinned by digest (no :latest, no tag-only)", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        const collector = (
+          appTaskDef?.Properties?.ContainerDefinitions as
+            | Array<{ Name?: string; Image?: string }>
+            | undefined
+        )?.find((c) => c.Name === "otel-collector");
+        expect(collector).toBeDefined();
+        // A pinned image always has `@sha256:<64-hex>` in the reference and
+        // never carries `:latest` or any other tag.
+        expect(collector?.Image).toMatch(
+          /public\.ecr\.aws\/aws-observability\/aws-otel-collector@sha256:[a-f0-9]{64}$/,
+        );
+        expect(collector?.Image).not.toMatch(/:latest/);
+      });
+
+      it("the otel-collector container is non-essential (sidecar lifecycle) and loads its config from env", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        const collector = (
+          appTaskDef?.Properties?.ContainerDefinitions as
+            | Array<{
+                Name?: string;
+                Essential?: boolean;
+                Command?: string[];
+                Environment?: Array<{ Name?: string; Value?: string }>;
+              }>
+            | undefined
+        )?.find((c) => c.Name === "otel-collector");
+        expect(collector?.Essential).toBe(false);
+        expect(collector?.Command).toEqual([
+          "--config=env:AOT_CONFIG_CONTENT",
+        ]);
+        const envEntry = collector?.Environment?.find(
+          (e) => e.Name === "AOT_CONFIG_CONTENT",
+        );
+        expect(envEntry?.Value).toMatch(/tail_sampling:/);
+        expect(envEntry?.Value).toMatch(/awsxray:/);
+        expect(envEntry?.Value).toMatch(/sampling_percentage:\s*5/);
+        expect(envEntry?.Value).toMatch(/threshold_ms:\s*1500/);
+      });
+
+      it("the app container has exactly the four OTEL_* env vars (no sampler env vars)", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        const appContainer = (
+          appTaskDef?.Properties?.ContainerDefinitions as
+            | Array<{
+                Name?: string;
+                Environment?: Array<{ Name?: string; Value?: string }>;
+              }>
+            | undefined
+        )?.find((c) => c.Name === "app");
+        const envByName = new Map(
+          (appContainer?.Environment ?? []).map((e) => [
+            e.Name as string,
+            e.Value,
+          ]),
+        );
+        expect(envByName.get("OTEL_SERVICE_NAME")).toBe("sps-app-prod");
+        expect(envByName.get("OTEL_EXPORTER_OTLP_ENDPOINT")).toBe(
+          "http://localhost:4318",
+        );
+        expect(envByName.get("OTEL_PROPAGATORS")).toBe("tracecontext,xray");
+        expect(envByName.get("SPS_ENV")).toBe("prod");
+        // Sampling lives at the collector. SDK head sampler env vars must
+        // not appear on the app container or the SDK will drop traces
+        // before the tail sampler can evaluate them.
+        expect(envByName.has("OTEL_TRACES_SAMPLER")).toBe(false);
+        expect(envByName.has("OTEL_TRACES_SAMPLER_ARG")).toBe(false);
+      });
+
+      it("the otel-collector log group is env-prefixed and shares the app retention", () => {
+        const groups = template.findResources("AWS::Logs::LogGroup");
+        const otelGroup = Object.values(groups).find(
+          (r) =>
+            (r.Properties?.LogGroupName as string | undefined) ===
+            "/aws/ecs/sps-otel-prod",
+        );
+        expect(otelGroup).toBeDefined();
+        // Prod = 90-day retention (THREE_MONTHS).
+        expect(otelGroup?.Properties?.RetentionInDays).toBe(90);
+      });
+
+      it("the task role has exactly two X-Ray action statements (custom inline, not the managed policy)", () => {
+        // The plan calls for a custom inline grant of exactly
+        // xray:PutTraceSegments + xray:PutTelemetryRecords on Resource:*.
+        // Inline (not AWSXRayDaemonWriteAccess) so the action surface stays
+        // pinned + immune to AWS quietly extending the managed document.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const taskRolePolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("TaskRole") &&
+              !r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        expect(taskRolePolicy).toBeDefined();
+        const statements = taskRolePolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements).toHaveLength(2);
+        const actions = statements
+          ?.flatMap((s) =>
+            Array.isArray(s.Action) ? (s.Action as string[]) : [s.Action as string],
+          )
+          .sort();
+        expect(actions).toEqual([
+          "xray:PutTelemetryRecords",
+          "xray:PutTraceSegments",
+        ]);
+        // Both X-Ray Put* actions are account-level on the AWS side and
+        // only accept Resource:*. This is the documented exception.
+        for (const stmt of statements ?? []) {
+          expect(stmt.Resource).toBe("*");
+        }
+      });
+
+      it("the task role has zero AWS managed policies attached", () => {
+        // The grant lands as an inline AWS::IAM::Policy resource attached
+        // to the role; the role itself must not import a managed policy.
+        const roles = template.findResources("AWS::IAM::Role");
+        const taskRole = Object.values(roles).find(
+          (r) => r.Properties?.RoleName === "sps-task-prod",
+        );
+        expect(taskRole).toBeDefined();
+        const managed = (taskRole?.Properties?.ManagedPolicyArns ?? []) as
+          | unknown[];
+        expect(managed).toHaveLength(0);
+      });
+
+      it("the task-execution role's logs grant covers the otel-collector log group", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" && r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const logsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("logs:PutLogEvents")
+            : action === "logs:PutLogEvents";
+        });
+        const serialized = JSON.stringify(logsStmt?.Resource);
+        // The execution-role logs grant references the otel-collector log
+        // group's logical id; matching by the OtelCollectorLogGroup token
+        // is enough to confirm the grant covers the sidecar's streams.
+        expect(serialized).toMatch(/OtelCollectorLogGroup/);
       });
     });
   });

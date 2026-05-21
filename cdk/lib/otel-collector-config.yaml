@@ -1,0 +1,62 @@
+# ADOT collector configuration for SPS app tasks.
+#
+# Pipeline shape: OTLP/HTTP receiver -> memory_limiter -> tail_sampling ->
+# batch -> awsxray exporter. The tail_sampling processor is the load-bearing
+# piece -- issue #123's "5% baseline + 100% on errors" cannot be delivered
+# by an SDK-side head sampler (NotSampled decisions can't be reversed once
+# the span is dropped), so the promotion happens here after the trace has
+# ended and its status is known.
+#
+# Drops happen before the awsxray exporter, so the X-Ray bill tracks the
+# kept-trace rate (~5% baseline + every error + every >1500ms trace),
+# not the SDK's 100% recording rate.
+#
+# Tunable in place: edit this file + cdk deploy --exclusively Sps-App-<env>.
+# No app-image rebuild required because the file is baked into the
+# collector container via the CDK Asset upload pattern (see app-stack.ts).
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Drop incoming OTLP if the collector is over a soft memory limit; required
+  # in front of tail_sampling because the latter buffers up to num_traces.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 1500
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 5
+
+  batch:
+    timeout: 5s
+    send_batch_size: 50
+
+exporters:
+  awsxray:
+    # Region resolved from the ECS task metadata; no need to hard-code.
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [awsxray]
