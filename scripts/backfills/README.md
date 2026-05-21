@@ -15,7 +15,7 @@ A backfill never blocks a deploy. It runs after the expand migration is in place
 ## Lifecycle
 
 1. PR adds the expand migration and the backfill script in the same change set.
-2. After the expand migration ships, the backfill is run as a one-shot ECS task or local invocation against prod (operator-driven, not pipeline-driven).
+2. After the expand migration ships, the backfill is run as a one-shot ECS task or local invocation against prod (operator-driven, not pipeline-driven). See [`docs/DEPLOY-RUNBOOK.md` § Backfill task invocation](../../docs/DEPLOY-RUNBOOK.md#backfill-task-invocation) for the `aws ecs run-task` recipe.
 3. Once the backfill is verified complete, a follow-up PR adds the contract migration.
 
 The backfill stays in the directory after it has run. Do not delete it.

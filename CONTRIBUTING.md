@@ -12,7 +12,7 @@ No column is dropped, renamed, or retyped in the same migration as the code that
 
 There is no migration rollback. If a new schema causes problems, fix forward with another expand migration. Do not run `prisma migrate resolve --rolled-back` against live traffic — that is a fast path to split-brain between `_prisma_migrations` and the actual schema.
 
-App-code rollback after a successful migration is fine: the new schema is additive by rule, so rolling the ECS service back to the previous image works. The previous version reads the old shape; the new column is unused until the next deploy makes it active.
+App-code rollback after a successful migration is fine: the new schema is additive by rule, so rolling the ECS service back to the previous image works. The previous version reads the old shape; the new column is unused until the next deploy makes it active. See [`docs/DEPLOY-RUNBOOK.md` § Emergency procedures](docs/DEPLOY-RUNBOOK.md#emergency-procedures) for the operator steps.
 
 ### Where migrations run
 
