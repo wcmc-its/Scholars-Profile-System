@@ -137,6 +137,16 @@ export async function swapAlias(
  * Called after `swapAlias` succeeds; deletion failures are surfaced but do
  * not roll back the swap (the alias is already pointing at the new version,
  * which is the user-visible outcome we want).
+ *
+ * Race window: a scroll cursor opened against the alias *before* swapAlias
+ * resolves to the old concrete index (scroll cursors are index-specific in
+ * OpenSearch, not alias-resolved). If that scroll is still in flight when
+ * `pruneOldVersions` deletes the old concrete index, the scroll's next
+ * fetch errors with `index_not_found_exception`. In practice the window is
+ * sub-second (swap and prune are sequential within `rebuildAliasedIndex`,
+ * and scrolls are typically completed in milliseconds), but for very
+ * long-running scrolls -- e.g. an export task -- consider running the
+ * rebuild during a known-idle period.
  */
 export async function pruneOldVersions(
   client: Client,
@@ -175,6 +185,25 @@ export async function pruneOldVersions(
  * version, fill it via the caller's `fillFn`, atomically swap the alias,
  * prune old versions. Returns the new concrete index name and the document
  * count the `fillFn` reported -- both useful in the orchestrator log.
+ *
+ * Failure modes:
+ *
+ * - `indices.create` throws -> the new concrete index does not exist;
+ *   alias is unaffected; safe to re-run after fixing the cause.
+ * - `fillFn` throws -> the new concrete index exists with partial data.
+ *   We delete it before re-throwing, so the alias is unaffected and the
+ *   *next* invocation can re-compute the same `nextVersionName` without
+ *   colliding with an orphan. (Skipping this cleanup would break every
+ *   subsequent rebuild: `indices.create` on the same v{N+1} would
+ *   resource-already-exists.)
+ * - `swapAlias` throws -> same handling. The new index is fully written
+ *   but unreferenced; we delete it and re-throw so the next attempt
+ *   starts clean.
+ * - `pruneOldVersions` throws -> the swap already succeeded; reads now
+ *   land on the new version. Re-throw so the caller's log shows the
+ *   error, but don't roll back -- the user-visible state is what we
+ *   wanted. Operator cleans up the stragglers manually
+ *   (`docs/search.md § Rollback` has the recipe).
  */
 export async function rebuildAliasedIndex<T extends number = number>(args: {
   client: Client;
@@ -187,8 +216,29 @@ export async function rebuildAliasedIndex<T extends number = number>(args: {
   const state = await resolveAliasState(client, alias);
   const newIndex = nextVersionName(alias, state);
   await client.indices.create({ index: newIndex, body: mapping });
-  const docsIndexed = await fillFn(newIndex);
-  await swapAlias(client, alias, newIndex, state);
+
+  // Guard the fill + swap as a single atomic unit from the alias's point of
+  // view: if either step throws, the new concrete index gets deleted so the
+  // alias stays pointing at the prior version and the next rebuild attempt
+  // doesn't collide with an orphan. Cleanup failure is swallowed (preferring
+  // to surface the original error) but logged for the operator.
+  let docsIndexed: T;
+  try {
+    docsIndexed = await fillFn(newIndex);
+    await swapAlias(client, alias, newIndex, state);
+  } catch (err) {
+    try {
+      await client.indices.delete({ index: newIndex });
+    } catch (cleanupErr) {
+      console.error(
+        `[alias-swap] rebuild of ${alias} failed AND orphan cleanup of ${newIndex} failed; ` +
+          `delete manually before next rebuild. cleanup error:`,
+        cleanupErr,
+      );
+    }
+    throw err;
+  }
+
   const { deleted } = await pruneOldVersions(client, alias, retain);
   return { docsIndexed, newIndex, deleted };
 }

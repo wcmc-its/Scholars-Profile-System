@@ -323,4 +323,69 @@ describe("rebuildAliasedIndex", () => {
   it("uses DEFAULT_RETENTION when retain is unset", () => {
     expect(DEFAULT_RETENTION).toBe(2);
   });
+
+  it("deletes the new concrete index when fillFn throws (no orphan)", async () => {
+    const { client, calls } = makeMockClient({
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v2": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    const fillError = new Error("ETL exploded mid-bulk-write");
+    await expect(
+      rebuildAliasedIndex({
+        client: client as never,
+        alias: "scholars-people",
+        mapping: { settings: {} },
+        fillFn: async () => {
+          throw fillError;
+        },
+      }),
+    ).rejects.toBe(fillError);
+
+    // The orphan-cleanup delete must have fired against the new concrete
+    // index, so the next rebuild attempt can re-use the same version name
+    // without colliding.
+    const deletes = calls
+      .filter((c) => c.method === "indices.delete")
+      .map((c) => (c.args as { index: string }).index);
+    expect(deletes).toContain("scholars-people-v3");
+    // swapAlias must NOT have been called (the failure happened before it).
+    expect(
+      calls.find((c) => c.method === "indices.updateAliases"),
+    ).toBeUndefined();
+  });
+
+  it("deletes the new concrete index when swapAlias throws (no orphan)", async () => {
+    // Mock that throws on updateAliases. Reuse the standard helper for the
+    // happy-path calls, then wrap with a swap-throwing override.
+    const { client, calls } = makeMockClient({
+      getAlias: {
+        statusCode: 200,
+        body: { "scholars-people-v2": { aliases: { "scholars-people": {} } } },
+      },
+    });
+    const swapError = new Error("cluster-state update failed");
+    const originalSwap = client.indices.updateAliases;
+    client.indices.updateAliases = async (args: unknown) => {
+      calls.push({ method: "indices.updateAliases", args });
+      throw swapError;
+    };
+    // Reference original to avoid unused-variable lint.
+    void originalSwap;
+
+    await expect(
+      rebuildAliasedIndex({
+        client: client as never,
+        alias: "scholars-people",
+        mapping: { settings: {} },
+        fillFn: async () => 7,
+      }),
+    ).rejects.toBe(swapError);
+
+    const deletes = calls
+      .filter((c) => c.method === "indices.delete")
+      .map((c) => (c.args as { index: string }).index);
+    expect(deletes).toContain("scholars-people-v3");
+  });
 });
