@@ -46,17 +46,17 @@ import {
   buildPeopleDoc,
   buildPublicationDoc,
 } from "@/lib/search-index-docs";
+import { rebuildAliasedIndex } from "./alias-swap";
 
-async function ensureIndex(name: string, body: unknown) {
-  const client = searchClient();
-  const exists = await client.indices.exists({ index: name });
-  if (exists.body) {
-    await client.indices.delete({ index: name });
-  }
-  await client.indices.create({ index: name, body: body as object });
-}
+// Rebuilds happen via the alias-swap pattern (B18, #117) -- see
+// `./alias-swap.ts`. The three exported names in `lib/search.ts`
+// (`scholars-people`, `scholars-publications`, `scholars-funding`) are
+// aliases pointing at concrete versioned indices (`-v{N}`); each rebuild
+// creates the next version, fills it, then atomically repoints the alias
+// in a single OpenSearch `_aliases` call. Reads against the alias name
+// transition between versions without a zero-result window.
 
-async function indexPeople() {
+async function indexPeople(concreteIndex: string) {
   const client = searchClient();
   // Phase 4b C4 — load the active publication-suppression set once per run
   // (same contract as the indexPublications load — see comment there).
@@ -87,7 +87,7 @@ async function indexPeople() {
     const chunk = docs.slice(i, i + CHUNK);
     const body: Record<string, unknown>[] = [];
     for (const { cwid, doc } of chunk) {
-      body.push({ index: { _index: PEOPLE_INDEX, _id: cwid } });
+      body.push({ index: { _index: concreteIndex, _id: cwid } });
       body.push(doc);
     }
     const resp = await client.bulk({ refresh: true, body });
@@ -104,7 +104,7 @@ async function indexPeople() {
   return docs.length;
 }
 
-async function indexPublications() {
+async function indexPublications(concreteIndex: string) {
   const client = searchClient();
   // Phase 4b C3 — load the active publication-suppression set once per run.
   // `loadAllPublicationSuppressions` is whole-table by contract
@@ -150,7 +150,7 @@ async function indexPublications() {
       const chunk = docs.slice(i, i + CHUNK);
       const body: Record<string, unknown>[] = [];
       for (const { pmid, doc } of chunk) {
-        body.push({ index: { _index: PUBLICATIONS_INDEX, _id: pmid } });
+        body.push({ index: { _index: concreteIndex, _id: pmid } });
         body.push(doc);
       }
       const resp = await client.bulk({ refresh: true, body });
@@ -170,7 +170,7 @@ async function indexPublications() {
   return totalIndexed;
 }
 
-async function indexFunding() {
+async function indexFunding(concreteIndex: string) {
   const client = searchClient();
   const rows = await prisma.grant.findMany({
     where: { scholar: { deletedAt: null, status: "active" } },
@@ -259,7 +259,7 @@ async function indexFunding() {
     const chunk = docs.slice(i, i + CHUNK);
     const body: Record<string, unknown>[] = [];
     for (const { projectId, doc } of chunk) {
-      body.push({ index: { _index: FUNDING_INDEX, _id: projectId } });
+      body.push({ index: { _index: concreteIndex, _id: projectId } });
       body.push(doc);
     }
     const resp = await client.bulk({ refresh: true, body });
@@ -465,29 +465,54 @@ async function main() {
   const selected = parseSelected(process.argv.slice(2));
   const counts: Partial<Record<SourceType, number>> = {};
 
+  const client = searchClient();
+
   if (selected.has("people")) {
-    console.log("Recreating people index...");
-    await ensureIndex(PEOPLE_INDEX, peopleIndexMapping);
-    console.log("Indexing people...");
-    counts.people = await indexPeople();
+    console.log(`Rebuilding ${PEOPLE_INDEX} via alias swap...`);
+    const { docsIndexed, newIndex, deleted } = await rebuildAliasedIndex({
+      client,
+      alias: PEOPLE_INDEX,
+      mapping: peopleIndexMapping,
+      fillFn: indexPeople,
+    });
+    counts.people = docsIndexed;
+    console.log(
+      `  ...swapped ${PEOPLE_INDEX} -> ${newIndex}` +
+        (deleted.length > 0 ? ` (pruned ${deleted.join(", ")})` : ""),
+    );
   }
 
   if (selected.has("publications")) {
-    console.log("Recreating publications index...");
-    await ensureIndex(PUBLICATIONS_INDEX, publicationsIndexMapping);
-    console.log("Indexing publications...");
-    counts.publications = await indexPublications();
+    console.log(`Rebuilding ${PUBLICATIONS_INDEX} via alias swap...`);
+    const { docsIndexed, newIndex, deleted } = await rebuildAliasedIndex({
+      client,
+      alias: PUBLICATIONS_INDEX,
+      mapping: publicationsIndexMapping,
+      fillFn: indexPublications,
+    });
+    counts.publications = docsIndexed;
+    console.log(
+      `  ...swapped ${PUBLICATIONS_INDEX} -> ${newIndex}` +
+        (deleted.length > 0 ? ` (pruned ${deleted.join(", ")})` : ""),
+    );
   }
 
   if (selected.has("funding")) {
-    console.log("Recreating funding index...");
-    await ensureIndex(FUNDING_INDEX, fundingIndexMapping);
-    console.log("Indexing funding...");
-    counts.funding = await indexFunding();
+    console.log(`Rebuilding ${FUNDING_INDEX} via alias swap...`);
+    const { docsIndexed, newIndex, deleted } = await rebuildAliasedIndex({
+      client,
+      alias: FUNDING_INDEX,
+      mapping: fundingIndexMapping,
+      fillFn: indexFunding,
+    });
+    counts.funding = docsIndexed;
+    console.log(
+      `  ...swapped ${FUNDING_INDEX} -> ${newIndex}` +
+        (deleted.length > 0 ? ` (pruned ${deleted.join(", ")})` : ""),
+    );
   }
 
   console.log("Running smoke checks...");
-  const client = searchClient();
   if (selected.has("people")) await assertPeopleIndexHealth(client);
   if (selected.has("publications")) await assertPublicationsIndexHealth(client);
   if (selected.has("funding")) await assertFundingIndexHealth(client);

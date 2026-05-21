@@ -21,6 +21,16 @@ export function searchClient(): Client {
   return _client;
 }
 
+// Since B18 (#117), each of the three names below is an OpenSearch ALIAS,
+// not a concrete index. The alias points at a versioned concrete index
+// (`scholars-people-v3`, etc.) created and atomically swapped by the
+// rebuild flow in `etl/search-index/alias-swap.ts`. Application reads and
+// writes against these constants resolve to the current versioned target
+// transparently; rebuilds happen with zero unavailability window. The
+// literal *values* of the three constants are stable -- env-to-env
+// references (e.g. `_index` in bulk-write headers from the indexer) bind
+// to these names and must not change without a coordinated cross-env
+// rebuild.
 export const PEOPLE_INDEX = "scholars-people";
 export const PUBLICATIONS_INDEX = "scholars-publications";
 export const FUNDING_INDEX = "scholars-funding";

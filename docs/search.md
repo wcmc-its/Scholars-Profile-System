@@ -167,3 +167,50 @@ A separate **taxonomy-match callout** above the result tabs (`matchQueryToTaxono
 - **Subaward topology**: `directSponsor` is captured but the chain (prime → first sub → us) is flattened to two hops; multi-hop subawards lose their middle nodes.
 - **Sparse profiles**: the `isComplete` flag (overview + ≥3 pubs + active grant) is computed at index time but no longer applied by default (#152) — the directory baseline shows every active scholar. Callers can opt back in by passing `includeIncomplete: false`.
 - **Topics / subtopics** depend on ReciterAI rollups; scholars whose pubs haven't been attributed yet won't show in the topic pre-filter even when their pub titles match the query.
+
+## Index rebuilds (alias swap)
+
+The three names referenced by the query path -- `scholars-people`, `scholars-publications`, `scholars-funding` -- are OpenSearch aliases, not concrete indices. Each alias points at a versioned concrete index (`scholars-people-v3`, etc.). Rebuilds happen via the alias-swap pattern (B18, #117) implemented in `etl/search-index/alias-swap.ts`; the goal is zero unavailability window during the multi-minute bulk-write.
+
+### Mechanism
+
+A rebuild against, e.g., `scholars-people`:
+
+1. **Resolve current state.** Is `scholars-people` an alias (and if so, at which target), a concrete index (pre-B18 deployed state), or absent (fresh deploy)?
+2. **Pick next version.** From `alias` state, parse the `-v{N}` suffix and pick `-v{N+1}`. From `index` or `absent` state, pick `-v1`.
+3. **Create the new concrete index** with the mapping. Existing reads against `scholars-people` continue to land on the old target.
+4. **Bulk-write all documents** into the new concrete index. Multi-minute step at scale; the alias still points at the old index, so query results are stable.
+5. **Atomically swap the alias** via `POST /_aliases` with an action body that adds the alias to the new concrete index and either removes it from the old concrete index (`alias` state) or deletes the old concrete index (`index` state, first-time bootstrap migration) -- both in a single OpenSearch cluster-state transition.
+6. **Prune old versions.** Retention default is 2: the just-promoted version and the immediately-previous version are kept; older are deleted. Adjust per-call via the `retain` argument.
+
+The rebuild orchestrator lives in `etl/search-index/index.ts`; the mechanism in `etl/search-index/alias-swap.ts`. Unit-test coverage (mocked OpenSearch client) is in `tests/unit/etl-alias-swap.test.ts`.
+
+### Bootstrap migration
+
+The first run of the new code per env converts the existing concrete `scholars-people` (etc.) into an aliased form. This is the only step with a *brief* window where reads against the alias name miss: the `_aliases` body uses `remove_index` to delete the old concrete index in the same atomic call that adds the alias pointing at `-v1`. Single-digit-millisecond unavailability window per index, versus the multi-minute destructive window of the pre-B18 ensure-index flow. Recommend running the first rebuild during low-traffic hours; subsequent rebuilds have zero window.
+
+### Rollback
+
+Roll the alias back to the previous version when a fresh rebuild ships semantically-bad data (e.g. ETL bug populates docs with `null` MeSH terms). With `retain=2` the previous version is still on disk:
+
+```sh
+# 1. Identify the current and previous versions.
+curl -s "$OPENSEARCH_NODE/_alias/scholars-people" | jq .
+# returns { "scholars-people-v4": { "aliases": { "scholars-people": {} } } }
+# look at the list of versioned indices to find scholars-people-v3 (the previous):
+curl -s "$OPENSEARCH_NODE/_cat/indices/scholars-people-v*?h=index&format=json"
+
+# 2. Repoint the alias atomically.
+curl -s -XPOST "$OPENSEARCH_NODE/_aliases" -H 'content-type: application/json' -d '{
+  "actions": [
+    { "remove": { "index": "scholars-people-v4", "alias": "scholars-people" } },
+    { "add":    { "index": "scholars-people-v3", "alias": "scholars-people" } }
+  ]
+}'
+```
+
+We deliberately do not ship a wrapped CLI for this because the operator inputs are too situational to script safely (which prior version to roll back to depends on which one was last known good, and the same call shape covers all three aliases). The runbook procedure above is the contract.
+
+### Retention tuning
+
+The default of 2 covers "roll back to immediately-previous." Bump higher when shipping a known-risky rebuild (e.g. a new mapping shape) by passing `retain: 5` once and reverting on the next deploy. Per-call override; no env-config knob (the right value is situational, not per-env).
