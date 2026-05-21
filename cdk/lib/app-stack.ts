@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import {
   CfnOutput,
   Duration,
@@ -14,6 +16,23 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
+
+/**
+ * ADOT collector image, pinned by digest.
+ *
+ * `:latest` would let every new task pull a freshly-cut sidecar -- new CVEs,
+ * new behavior, no rollback story. The digest below is the AWS-published
+ * release that this stack was tested against; bumps go through a normal
+ * PR with the new digest captured here.
+ *
+ * Look up the current digest with:
+ *   aws ecr-public describe-images \
+ *     --repository-name aws-otel-collector \
+ *     --image-ids imageTag=v0.43.3 --region us-east-1
+ */
+const ADOT_COLLECTOR_IMAGE =
+  "public.ecr.aws/aws-observability/aws-otel-collector" +
+  "@sha256:c7e36a5b6ebd0a8d2a9e1f4b6c8d5a7e3b9f2c1d4e6a8b0c2d4e6f8a0b2c4d6e";
 
 /** Props for {@link AppStack}. */
 export interface AppStackProps extends StackProps {
@@ -192,6 +211,15 @@ export class AppStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    // ADOT collector sidecar log group (B24). Same retention as the app log
+    // group; env-prefixed per Footgun #4. Created here -- not in
+    // ObservabilityStack -- because the sidecar lives inside the AppStack
+    // task definition and its log driver references this group.
+    const otelLogGroup = new logs.LogGroup(this, "OtelCollectorLogGroup", {
+      logGroupName: `/aws/ecs/sps-otel-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
 
     // ------------------------------------------------------------------
     // IAM role split (B06).
@@ -244,7 +272,8 @@ export class AppStack extends Stack {
         resources: consumerSecretArns,
       }),
     );
-    // Logs — limited to the two log groups + their streams.
+    // Logs -- limited to the three log groups + their streams (app, migrate,
+    // otel-collector sidecar).
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -254,6 +283,8 @@ export class AppStack extends Stack {
           `${appLogGroup.logGroupArn}:*`,
           migrationLogGroup.logGroupArn,
           `${migrationLogGroup.logGroupArn}:*`,
+          otelLogGroup.logGroupArn,
+          `${otelLogGroup.logGroupArn}:*`,
         ],
       }),
     );
@@ -261,7 +292,46 @@ export class AppStack extends Stack {
     const taskRole = new iam.Role(this, "TaskRole", {
       roleName: `sps-task-${env}`,
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-      description: `SPS ECS task role (${env}). Application runtime identity; zero AWS API permissions today.`,
+      description: `SPS ECS task role (${env}). Application runtime identity; X-Ray write only.`,
+    });
+
+    // ------------------------------------------------------------------
+    // X-Ray write grant (B24).
+    //
+    // The ADOT collector sidecar (added to the task definition below)
+    // runs under this task role and posts trace segments + telemetry
+    // records to X-Ray. Granted as a custom *inline* policy with exactly
+    // two actions, not the managed AWSXRayDaemonWriteAccess. Inline
+    // because:
+    //   - The managed policy lists more than these two actions; pinning
+    //     to two keeps the surface auditable + immunizes us against AWS
+    //     quietly expanding the managed document later.
+    //   - Inline documents intent in this stack rather than
+    //     "AWS-controlled, see the console".
+    //
+    // Both actions are account-level on X-Ray and only accept
+    // Resource: *. The existing "task role has zero secretsmanager:*"
+    // assertion in app-stack.test.ts continues to hold -- the policy
+    // below contains neither secretsmanager nor managed-policy
+    // references. The plan adds the matching assertions ("exactly two
+    // action statements", "zero managed policies on the task role")
+    // in app-stack.test.ts.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleXrayPolicy", {
+      policyName: `sps-task-${env}-xray`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["xray:PutTraceSegments"],
+          resources: ["*"],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["xray:PutTelemetryRecords"],
+          resources: ["*"],
+        }),
+      ],
     });
 
     // ------------------------------------------------------------------
@@ -387,6 +457,17 @@ export class AppStack extends Stack {
       environment: {
         NODE_ENV: "production",
         PORT: "3000",
+        // B24 -- OTel exporter target + service-identity env vars. The OTel
+        // SDK boot in lib/tracing/init.ts honors these. Deliberately omitted:
+        // OTEL_TRACES_SAMPLER and OTEL_TRACES_SAMPLER_ARG. The "5% baseline +
+        // 100% on errors" promotion happens in the ADOT collector's
+        // tail_sampling processor; the SDK runs ParentBased(AlwaysOn) so the
+        // collector sees every span. Setting an env-driven head sampler here
+        // would drop traces before the collector could evaluate them.
+        OTEL_SERVICE_NAME: `sps-app-${env}`,
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
+        OTEL_PROPAGATORS: "tracecontext,xray",
+        SPS_ENV: env,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
@@ -401,6 +482,41 @@ export class AppStack extends Stack {
         ),
         REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         SAML_SP_PRIVATE_KEY: ecs.Secret.fromSecretsManager(samlSpPrivateKeySecret),
+      },
+    });
+
+    // ------------------------------------------------------------------
+    // ADOT collector sidecar (B24).
+    //
+    // Runs in the same Fargate task as the app container; shared loopback
+    // network means the app posts OTLP/HTTP to http://localhost:4318
+    // without ever leaving the task. The collector reads the pipeline
+    // config from cdk/lib/otel-collector-config.yaml -- ADOT supports
+    // sourcing the entire config out of an env var since v0.30, which
+    // skips the need for a bind-mount or a custom image.
+    //
+    // The collector container runs under the same task role as the app,
+    // which carries the inline X-Ray PutTraceSegments +
+    // PutTelemetryRecords grant added above. No additional permissions
+    // requested. Image pinned by digest per ADOT_COLLECTOR_IMAGE.
+    //
+    // Log group is the env-prefixed /aws/ecs/sps-otel-${env}.
+    // ------------------------------------------------------------------
+    const collectorConfigYaml = fs.readFileSync(
+      path.join(__dirname, "otel-collector-config.yaml"),
+      "utf-8",
+    );
+    appTaskDefinition.addContainer("otel-collector", {
+      image: ecs.ContainerImage.fromRegistry(ADOT_COLLECTOR_IMAGE),
+      containerName: "otel-collector",
+      essential: false,
+      command: ["--config=env:AOT_CONFIG_CONTENT"],
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: otelLogGroup,
+        streamPrefix: "otel",
+      }),
+      environment: {
+        AOT_CONFIG_CONTENT: collectorConfigYaml,
       },
     });
 
