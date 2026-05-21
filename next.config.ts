@@ -1,6 +1,25 @@
 import type { NextConfig } from "next";
 import { buildSecurityHeaders } from "./lib/security-headers";
 
+// Next.js 15.5 instrumentation bundle does not resolve the `node:` URI scheme
+// for built-in modules pulled in from instrumentation.ts -> lib/tracing/init.ts
+// -> lib/tracing/redact.ts ("import { createHash } from 'node:crypto'") --
+// build fails with UnhandledSchemeError. The bare-name form ("crypto") then
+// fails with "Module not found" because the instrumentation bundle treats
+// built-ins as missing npm packages rather than Node-native modules.
+//
+// Fix: register the affected Node built-ins as commonjs externals for the
+// server-side webpack bundles. Narrowly scoped to built-ins actually imported
+// via the `node:` prefix anywhere in the server bundle graph (currently:
+// crypto, fs/promises, path -- grep `node:` under `lib/`, `app/`, `prisma/`,
+// `instrumentation.ts`). Add new entries here if a future module imports a
+// new `node:*` built-in.
+const NODE_BUILTIN_EXTERNALS: Record<string, string> = {
+  "node:crypto": "commonjs crypto",
+  "node:fs/promises": "commonjs fs/promises",
+  "node:path": "commonjs path",
+};
+
 const nextConfig: NextConfig = {
   // ADR-008: emit a standalone server bundle for the production container
   // image (see Dockerfile) — only traced dependencies are included.
@@ -47,6 +66,18 @@ const nextConfig: NextConfig = {
         }),
       },
     ];
+  },
+  webpack: (config, { isServer }) => {
+    if (!isServer) return config;
+    const externals = config.externals;
+    if (Array.isArray(externals)) {
+      externals.push(NODE_BUILTIN_EXTERNALS);
+    } else if (externals !== undefined) {
+      config.externals = [externals, NODE_BUILTIN_EXTERNALS];
+    } else {
+      config.externals = [NODE_BUILTIN_EXTERNALS];
+    }
+    return config;
   },
 };
 
