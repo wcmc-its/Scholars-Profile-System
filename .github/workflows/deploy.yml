@@ -1,0 +1,165 @@
+name: Deploy
+
+# Drives the five-step deploy pipeline contract documented in
+# docs/PRODUCTION_ADDENDUM.md § Schema migration policy and
+# docs/DEPLOY-RUNBOOK.md: build -> push -> migrate -> roll -> settle.
+#
+# Triggers
+# - push to master         -> staging deploy (auto)
+# - workflow_dispatch       -> staging OR prod (manual)
+#
+# Prod deploys are gated by the 'prod' GitHub Environment's required-reviewer
+# rule (configured in repo Settings -> Environments -> prod) on top of the
+# AppStack OIDC sub-claim that pins prod to refs/heads/master.
+#
+# All AWS resource names and CFN outputs consumed here are provisioned by
+# Sps-App-${env} (see cdk/lib/app-stack.ts). Bootstrap two-step
+# (PRODUCTION_ADDENDUM § Bootstrap two-step) must run once per env before the
+# first workflow run can succeed.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Target environment
+        type: choice
+        options: [staging, prod]
+        default: staging
+        required: true
+
+concurrency:
+  group: deploy-${{ inputs.env || 'staging' }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "665083158573"
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.env || 'staging' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env || 'staging' }}
+    steps:
+      - name: Refuse prod from non-master ref
+        if: ${{ inputs.env == 'prod' && github.ref != 'refs/heads/master' }}
+        run: |
+          echo "::error::Production deploys are only permitted from master. ref=${{ github.ref }}"
+          exit 1
+
+      - name: Resolve target env
+        id: target
+        run: |
+          target="${{ inputs.env || 'staging' }}"
+          echo "env=$target" >> "$GITHUB_OUTPUT"
+          echo "stack=Sps-App-$target" >> "$GITHUB_OUTPUT"
+          echo "role=arn:aws:iam::${AWS_ACCOUNT_ID}:role/sps-deploy-$target" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ steps.target.outputs.role }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Discover AppStack outputs
+        id: outputs
+        run: |
+          set -euo pipefail
+          out=$(aws cloudformation describe-stacks \
+            --stack-name "${{ steps.target.outputs.stack }}" \
+            --query 'Stacks[0].Outputs' --output json)
+          ecr_uri=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="EcrRepoUri").OutputValue')
+          cluster=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="EcsClusterName").OutputValue')
+          service=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="EcsServiceName").OutputValue')
+          mig_family=$(echo "$out"  | jq -er '.[]|select(.OutputKey=="EcsMigrationTaskFamily").OutputValue')
+          alb_dns=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="PublicAlbDns").OutputValue')
+          {
+            echo "ecr_uri=$ecr_uri"
+            echo "cluster=$cluster"
+            echo "service=$service"
+            echo "mig_family=$mig_family"
+            echo "alb_dns=$alb_dns"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: ECR login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: |
+          set -euo pipefail
+          docker build \
+            --tag "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}" \
+            --tag "${{ steps.outputs.outputs.ecr_uri }}:latest" \
+            .
+
+      - name: Push image
+        run: |
+          set -euo pipefail
+          docker push "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}"
+          docker push "${{ steps.outputs.outputs.ecr_uri }}:latest"
+
+      - name: Run migration task
+        id: migrate
+        run: |
+          set -euo pipefail
+          # Reuse the app service's network config so the migration task lands
+          # in the same private subnets / SGs (DB access + Secrets Manager
+          # endpoint reachable).
+          netcfg=$(aws ecs describe-services \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}" \
+            --query 'services[0].networkConfiguration' --output json)
+          task_arn=$(aws ecs run-task \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --task-definition "${{ steps.outputs.outputs.mig_family }}" \
+            --launch-type FARGATE \
+            --network-configuration "$netcfg" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Migration task: $task_arn"
+          aws ecs wait tasks-stopped \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::Migration task exited $exit_code. Service NOT rolled. Logs: /aws/ecs/sps-migrate-${{ steps.target.outputs.env }}"
+            exit 1
+          fi
+
+      - name: Update ECS service (force new deployment)
+        run: |
+          set -euo pipefail
+          aws ecs update-service \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --service "${{ steps.outputs.outputs.service }}" \
+            --force-new-deployment \
+            >/dev/null
+
+      - name: Wait for service to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}"
+
+      - name: Smoke test /api/health
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://${{ steps.outputs.outputs.alb_dns }}/api/health" || echo "000")
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Smoke test failed: /api/health did not return 200 within 25s"
+          exit 1

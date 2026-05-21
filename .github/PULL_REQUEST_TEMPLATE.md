@@ -8,7 +8,7 @@
 
 ## Schema migration checklist
 
-Required when this PR touches `prisma/schema.prisma`. Delete this section if no schema change. See [`docs/PRODUCTION_ADDENDUM.md` § Schema migration policy](../docs/PRODUCTION_ADDENDUM.md#schema-migration-policy).
+Required when this PR touches `prisma/schema.prisma`. Delete this section if no schema change. See [`docs/PRODUCTION_ADDENDUM.md` § Schema migration policy](../docs/PRODUCTION_ADDENDUM.md#schema-migration-policy) for the policy and [`docs/DEPLOY-RUNBOOK.md`](../docs/DEPLOY-RUNBOOK.md) for how the migration task runs in the deploy pipeline.
 
 - [ ] Migration is additive only (no `DROP COLUMN`, no `ALTER COLUMN` changing type).
 - [ ] Previous app version still works against the new schema.
