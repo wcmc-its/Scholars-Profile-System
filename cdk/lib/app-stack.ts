@@ -894,26 +894,6 @@ export class AppStack extends Stack {
       open: false,
     });
 
-    // OpenSearch managed-domain endpoint -- service name is `es`. The L2
-    // helper's constant for the managed service is `OPENSEARCH_SERVICE`
-    // in recent CDK; fall through to a string-constructed
-    // InterfaceVpcEndpointAwsService if the constant isn't present in
-    // the installed aws-cdk-lib version so the build doesn't break on
-    // an unrelated CDK bump.
-    const opensearchEndpointService =
-      (ec2.InterfaceVpcEndpointAwsService as unknown as Record<
-        string,
-        ec2.InterfaceVpcEndpointAwsService | undefined
-      >).OPENSEARCH_SERVICE ?? new ec2.InterfaceVpcEndpointAwsService("es");
-    new ec2.InterfaceVpcEndpoint(this, "OpensearchEndpoint", {
-      vpc,
-      service: opensearchEndpointService,
-      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      securityGroups: [vpcEndpointSecurityGroup],
-      privateDnsEnabled: true,
-      open: false,
-    });
-
     new ec2.GatewayVpcEndpoint(this, "S3GatewayEndpoint", {
       vpc,
       service: ec2.GatewayVpcEndpointAwsService.S3,

@@ -79,14 +79,43 @@ describe("AppStack", () => {
         );
       });
 
-      it("creates two VPC interface endpoints and one S3 gateway endpoint", () => {
+      it("creates one VPC interface endpoint (secretsmanager) and one S3 gateway endpoint", () => {
         const endpoints = template.findResources("AWS::EC2::VPCEndpoint");
         const types = Object.values(endpoints)
           .map((r) => r.Properties?.VpcEndpointType as string | undefined)
           .sort();
-        // Two Interface + one Gateway.
-        expect(types.filter((t) => t === "Interface")).toHaveLength(2);
+        // One Interface + one Gateway.
+        expect(types.filter((t) => t === "Interface")).toHaveLength(1);
         expect(types.filter((t) => t === "Gateway")).toHaveLength(1);
+      });
+
+      it("emits no VPC endpoint with a `.es` service name (deploy-only-validation guard, #429)", () => {
+        // CFN only validates VPC endpoint ServiceName strings against the
+        // regional service catalog at deploy time. `com.amazonaws.<region>.es`
+        // does not exist (the managed OpenSearch control-plane service is
+        // `aos`), so an `es` endpoint synths cleanly and then fails the
+        // stack create. Asserted at synth time so the pattern can't recur.
+        //
+        // Interface endpoints emit ServiceName as a literal string
+        // (`com.amazonaws.us-east-1.<svc>`) because the L2 helper resolves
+        // it at synth time; the L1 gateway endpoint constructs ServiceName
+        // via Fn::Join against `AWS::Region`, so its match has to walk the
+        // serialized intrinsic instead of a bare regex.
+        template.resourcePropertiesCountIs(
+          "AWS::EC2::VPCEndpoint",
+          { ServiceName: Match.stringLikeRegexp("\\.es$") },
+          0,
+        );
+        template.hasResourceProperties("AWS::EC2::VPCEndpoint", {
+          ServiceName: Match.stringLikeRegexp("\\.secretsmanager$"),
+        });
+        const endpoints = template.findResources("AWS::EC2::VPCEndpoint");
+        const gatewayEndpoints = Object.values(endpoints).filter(
+          (r) => r.Properties?.VpcEndpointType === "Gateway",
+        );
+        expect(gatewayEndpoints).toHaveLength(1);
+        expect(JSON.stringify(gatewayEndpoints[0]?.Properties?.ServiceName))
+          .toMatch(/\.s3"\s*\]/);
       });
 
       it("creates exactly three CloudWatch log groups (app + migrate + otel-collector sidecar)", () => {

@@ -266,8 +266,9 @@ ADR-008 Table 4 and the NetworkStack header comment both put VPC endpoints in `N
 Provisioned:
 
 - **Secrets Manager interface endpoint** — keeps task-execution-role secret pulls off the NAT.
-- **OpenSearch (`es`) interface endpoint** — keeps app + ETL query traffic on the AWS backbone.
 - **S3 gateway endpoint** — keeps ECR image-layer pulls (S3-backed) off the NAT; route-table associations only, no SG.
+
+OpenSearch is intentionally not in this list. The managed domain lives inside the VPC and exposes a private ENI for data-plane queries (`@opensearch-project/opensearch` from `lib/search.ts` and the ETL alias-swap), so app + ETL traffic already stays on the AWS backbone without PrivateLink. An interface endpoint would only matter for the OpenSearch control plane (`DescribeDomain`, `UpdateDomainConfig`, etc.), and nothing in the ECS-Fargate runtime calls those SDK paths today. The endpoint was dropped in #429 after a deploy attempt surfaced that the service name used (`com.amazonaws.us-east-1.es`) doesn't exist in the regional catalog (`aos` is the managed-service name) and that CFN only validates the string at deploy time. Re-add if/when an ECS-Fargate workload needs the OpenSearch control-plane API.
 
 The interface endpoint SG admits :443 from the app SG and the ETL SG only. CDK's default `:443 from VPC CIDR` ingress is suppressed via `open: false` so the surface is the two SG-to-SG rules and nothing else. The ETL SG ingress is included now, even though ETL Lambdas don't exist yet, so EtlStack doesn't have to re-touch this stack's endpoint SG when it ships.
 
