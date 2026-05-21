@@ -640,16 +640,28 @@ export class AppStack extends Stack {
         messageBody: "Forbidden",
       }),
     });
-    publicListener.addAction("OriginVerifiedForward", {
-      priority: 1,
-      conditions: [
-        elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-          originSharedSecret.secretValue.unsafeUnwrap(),
-        ]),
-      ],
-      action: elbv2.ListenerAction.forward([appTargetGroup]),
-    });
-    this.internalAlb.addListener("InternalHttpListener", {
+    // Constructed as an explicit L1 rule (rather than via the void-returning
+    // `publicListener.addAction(...)`) so we hold a handle and can add it to
+    // the ECS service's DependsOn list below. The TG-to-public-ALB
+    // association lives on this rule (the listener's default action is a
+    // 403, not a forward), so it is the resource that satisfies AWS's
+    // "target group must have an associated load balancer" check on the
+    // public side -- see the EcsService dependency comment further down.
+    const originVerifiedRule = new elbv2.ApplicationListenerRule(
+      this,
+      "OriginVerifiedForward",
+      {
+        listener: publicListener,
+        priority: 1,
+        conditions: [
+          elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+            originSharedSecret.secretValue.unsafeUnwrap(),
+          ]),
+        ],
+        action: elbv2.ListenerAction.forward([appTargetGroup]),
+      },
+    );
+    const internalListener = this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
       defaultTargetGroups: [appTargetGroup],
@@ -708,7 +720,29 @@ export class AppStack extends Stack {
     // The ALB listeners must exist before the ECS service tries to
     // register tasks with the target group; the L2 helper would have
     // added this dependency implicitly.
+    //
+    // CFN dependency-class fix (issue #431, blocker #4 on 2026-05-21).
+    // Because the service is L1-attached via `cfnService.loadBalancers`
+    // (rather than via `attachToApplicationTargetGroup` — see SG cycle
+    // note above), CDK does NOT auto-infer that the service must wait
+    // for the listeners that bind the target group to a load balancer.
+    // Without these explicit deps, CFN creates the EcsService in
+    // parallel with the listeners, and AWS rejects RegisterTargets with
+    // "target group <name> does not have an associated load balancer."
+    // Every resource that establishes a TG -> LB association must be
+    // an upstream dependency of the service:
+    //   - internalListener: associates the TG via its DefaultActions.
+    //   - originVerifiedRule: the priority-1 rule on the public listener
+    //     that forwards to the TG (the listener's own default action is
+    //     a fixed-response 403, so the rule -- not the listener -- is
+    //     what creates the public-side TG/LB association).
+    // The publicListener dependency is added for completeness; the rule
+    // itself transitively depends on the listener so this is belt-and-
+    // suspenders, but it keeps the intent self-evident in a refactor.
     this.ecsService.node.addDependency(appTargetGroup);
+    this.ecsService.node.addDependency(publicListener);
+    this.ecsService.node.addDependency(originVerifiedRule);
+    this.ecsService.node.addDependency(internalListener);
 
     // ------------------------------------------------------------------
     // GitHub Actions OIDC deploy role.

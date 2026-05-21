@@ -729,6 +729,9 @@ service:
     "EcsService81FC6EF6": {
       "DependsOn": [
         "AppTargetGroup3D716DB6",
+        "InternalAlbInternalHttpListener9436A291",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -1002,6 +1005,45 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "OriginVerifiedForwardC0422D52": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "AppTargetGroup3D716DB6",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "{{resolve:secretsmanager:arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
+                    ],
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -1070,45 +1112,6 @@ service:
         "Protocol": "HTTP",
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
-    },
-    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
-      "Properties": {
-        "Actions": [
-          {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
-            },
-            "Type": "forward",
-          },
-        ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
-        },
-        "Priority": 1,
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {
@@ -2332,6 +2335,9 @@ service:
     "EcsService81FC6EF6": {
       "DependsOn": [
         "AppTargetGroup3D716DB6",
+        "InternalAlbInternalHttpListener9436A291",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2605,6 +2611,45 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "OriginVerifiedForwardC0422D52": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "AppTargetGroup3D716DB6",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "{{resolve:secretsmanager:arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
+                    ],
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -2673,45 +2718,6 @@ service:
         "Protocol": "HTTP",
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
-    },
-    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
-      "Properties": {
-        "Actions": [
-          {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
-            },
-            "Type": "forward",
-          },
-        ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
-        },
-        "Priority": 1,
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {

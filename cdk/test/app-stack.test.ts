@@ -241,6 +241,27 @@ describe("AppStack", () => {
         }
       });
 
+      it("the ECS service DependsOn list includes both ALB listeners and the public origin-verify rule (#431 blocker #4)", () => {
+        // CFN dependency-class fix: because the service is L1-attached to
+        // the target group via `cfnService.loadBalancers`, CDK does NOT
+        // auto-infer that the service must wait for the listeners that
+        // bind the TG to a load balancer. Without an explicit DependsOn,
+        // CFN parallel-creates the service with the listeners and AWS
+        // rejects RegisterTargets with "target group does not have an
+        // associated load balancer." Every resource that establishes a
+        // TG <-> LB association must be a service dependency.
+        const services = template.findResources("AWS::ECS::Service");
+        const ids = Object.keys(services);
+        expect(ids).toHaveLength(1);
+        const dependsOn = (services[ids[0]!]?.DependsOn ?? []) as string[];
+        // Internal listener (associates TG via DefaultActions).
+        expect(dependsOn.some((d) => d.startsWith("InternalAlbInternalHttpListener"))).toBe(true);
+        // Public listener (its child rule below carries the TG association).
+        expect(dependsOn.some((d) => d.startsWith("PublicAlbPublicHttpListener"))).toBe(true);
+        // The priority-1 rule that forwards public traffic to the TG.
+        expect(dependsOn.some((d) => d.startsWith("OriginVerifiedForward"))).toBe(true);
+      });
+
       it("wires the ECS service to the target group via a loadBalancers mapping (manual L1 attach)", () => {
         // The L2 attachToApplicationTargetGroup helper auto-establishes SG
         // ingress rules from each ALB SG -- with the internal ALB's SG in
