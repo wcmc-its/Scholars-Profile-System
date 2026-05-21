@@ -35,6 +35,7 @@ function expectedSecrets(env: "staging" | "prod"): string[] {
     `scholars/${env}/revalidate-token`,
     `scholars/saml-sp/${env}/private-key`,
     ...PER_SOURCE_ETL_NAMES.map((s) => `scholars/${env}/etl/${s}`),
+    `scholars/${env}/edge/origin-shared-secret`,
   ];
 }
 
@@ -50,7 +51,7 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the expected set of secrets by name (seven core + eight per-source ETL stubs)", () => {
+    it("creates the expected set of secrets by name (seven core + eight per-source ETL stubs + the EdgeStack origin shared secret)", () => {
       template.resourceCountIs(
         "AWS::SecretsManager::Secret",
         EXPECTED_SECRET_COUNT,

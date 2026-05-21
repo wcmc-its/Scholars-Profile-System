@@ -4,6 +4,7 @@ import { AppStack } from "../lib/app-stack";
 import { resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
+import { EdgeStack } from "../lib/edge-stack";
 import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
@@ -109,6 +110,19 @@ new SpsObservabilityStack(
     description: `SPS observability — alarms, SNS, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
   },
 );
+
+// EdgeStack — CloudFront cache-behavior split + VIVO/legacy 301 redirect
+// front for the public ALB (B07 + B14). Receives the AppStack instance as a
+// prop so the CloudFront origin can reference the public ALB directly; CDK
+// auto-wires the cross-stack reference. Custom domain + ACM cert attach when
+// `-c edgeCustomDomain=...` and `-c edgeCertArn=...` are both supplied
+// (see plan D2's bootstrap two-step).
+new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
+  env,
+  envConfig,
+  publicAlb: appStack.publicAlb,
+  description: `SPS edge — CloudFront distribution fronting the public ALB, ${envConfig.envName} (ADR-008 B07+B14).`,
+});
 
 // Tag every resource for cost allocation and ownership clarity.
 Tags.of(app).add("Project", "scholars-profile-system");

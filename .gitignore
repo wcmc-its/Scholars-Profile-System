@@ -45,6 +45,13 @@ seed-output/
 # Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
 # so curation-team edits flow through PR review.
 !etl/mesh-anchors/curated.csv
+# Exception: B14 legacy-VIVO redirect set is build-time generated from ED
+# (scripts/etl/generate-vivo-redirect-set.ts) and consumed by middleware as
+# a static import. The file is intentionally checked in so prod deploys
+# pick up the CI-built artifact rather than running an LDAP query in CI.
+!data/
+data/*
+!data/vivo-redirects.json
 # Exception: Next.js dynamic route segment that happens to look like a CSV
 # filename — the literal `citations.csv` directory is the route path that
 # serves /api/publications/[pmid]/citations.csv. Brackets are escaped so

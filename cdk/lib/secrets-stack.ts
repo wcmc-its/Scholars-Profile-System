@@ -166,6 +166,19 @@ export class SecretsStack extends Stack {
         description:
           "SPS ETL credentials — annual hierarchy import (Jenzabar / org chart source).",
       },
+      // EdgeStack (B07) — shared secret CloudFront includes on every
+      // forwarded request via X-Origin-Verify; the public ALB listener
+      // rejects requests missing the matching value. Without this entry
+      // the public ALB DNS becomes a back-door bypass of every
+      // cache-behavior decision (and the future WAF). 64-char random,
+      // rotated out-of-band per ADR-008's hard rule. See
+      // PRODUCTION_ADDENDUM § Phase 4 -- EdgeStack.
+      {
+        constructId: "EdgeOriginSharedSecret",
+        name: `scholars/${env}/edge/origin-shared-secret`,
+        description:
+          "SPS CloudFront-to-ALB origin shared secret (B07). Forwarded as X-Origin-Verify; ALB listener admits only matching requests.",
+      },
     ];
 
     const arns: Record<string, string> = {};

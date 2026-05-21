@@ -493,10 +493,42 @@ export class AppStack extends Stack {
     });
     this.publicTargetGroup = appTargetGroup;
 
-    this.publicAlb.addListener("PublicHttpListener", {
+    // Public listener (B07 origin protection). Default action is a bare
+    // 403: a client that lands here without CloudFront's shared secret
+    // header (`X-Origin-Verify`) gets denied. The priority-1 rule that
+    // matches the header value -- and only that rule -- forwards to the
+    // app target group. Without this split, the public ALB DNS becomes a
+    // back-door bypass of every CloudFront cache-behavior decision (and
+    // any future WAF), since CloudFront-to-ALB runs over HTTP today and
+    // the DNS name is trivially discoverable.
+    //
+    // The expected header value is read from SecretsStack at deploy time
+    // via a CFN dynamic reference (`{{resolve:secretsmanager:...}}`); the
+    // value itself never appears in the synthesized template. The
+    // EdgeStack origin sends the same dynamic reference as the custom
+    // header on every forwarded request, so the two stacks pick up the
+    // same rotated value at deploy.
+    const originSharedSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "EdgeOriginSharedSecret",
+      `scholars/${env}/edge/origin-shared-secret`,
+    );
+    const publicListener = this.publicAlb.addListener("PublicHttpListener", {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      defaultTargetGroups: [appTargetGroup],
+      defaultAction: elbv2.ListenerAction.fixedResponse(403, {
+        contentType: "text/plain",
+        messageBody: "Forbidden",
+      }),
+    });
+    publicListener.addAction("OriginVerifiedForward", {
+      priority: 1,
+      conditions: [
+        elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
+          originSharedSecret.secretValue.unsafeUnwrap(),
+        ]),
+      ],
+      action: elbv2.ListenerAction.forward([appTargetGroup]),
     });
     this.internalAlb.addListener("InternalHttpListener", {
       port: 80,
