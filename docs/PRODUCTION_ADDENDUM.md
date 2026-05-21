@@ -302,7 +302,7 @@ The annual hierarchy state machine ends with a manual-approval gate. Implemented
 aws stepfunctions send-task-success --task-token <token> --task-output '{}'
 ```
 
-from this runbook to release the execution. A 7-day cap on the approval window auto-fails the execution if no one approves in time. The gate's catch path publishes a follow-up notification before the `Fail` state. Until B23 wires PagerDuty, subscribe an email to `etl-failures-${env}` manually for the first annual run.
+from this runbook to release the execution. A 7-day cap on the approval window auto-fails the execution if no one approves in time. The gate's catch path publishes a follow-up notification before the `Fail` state. Until the ETL workstream wires `etl-failures-${env}` into the page topic (B23 follow-on, see `docs/oncall.md`), subscribe an email to `etl-failures-${env}` manually for the first annual run.
 
 ### Cadence + status alarms — native Step Functions metrics (D4)
 
@@ -391,7 +391,7 @@ The full policy half (SLO targets, error-budget burn policy, alarm threshold rat
 
 ### Eight CloudWatch alarms per env
 
-Every alarm publishes to `sps-alarms-${env}` SNS topic, which carries one email subscription (`paa2013@med.cornell.edu`) until B23 (#122) swaps in PagerDuty/Opsgenie. Names + thresholds: see `docs/SLOs.md § Alarm catalog`. Surface coverage: public ALB x3 (5xx rate, unhealthy hosts, latency p99), ECS service x1 (task shortfall vs desired), Aurora x2 (CPU, connections), OpenSearch x2 (JVM memory pressure, cluster red).
+Every alarm publishes to `sps-alarms-${env}` SNS topic. As of B23 (#122) the page topic is HTTPS-subscribed to a Microsoft Teams channel webhook (out-of-band, per `docs/oncall.md`); the operator email moved to the sibling `sps-notify-${env}` topic. Names + thresholds: see `docs/SLOs.md § Alarm catalog`. Surface coverage: public ALB x3 (5xx rate, unhealthy hosts, latency p99), ECS service x1 (task shortfall vs desired), Aurora x2 (CPU, connections), OpenSearch x2 (JVM memory pressure, cluster red).
 
 The 5xx-rate alarm uses a CloudWatch math expression (`(5xx / IF(reqs > 0, reqs, 1)) * 100`) rather than a raw count so a zero-RPS quiet period does not false-fire on a single error response. The unhealthy-hosts alarm uses 5-of-5 consecutive 1-minute datapoints to absorb the natural ECS rolling-replace window (a new task is briefly unhealthy while the load balancer attaches it) without paging.
 
@@ -420,7 +420,32 @@ ObservabilityStack reads the public-ALB target group via `appStack.publicTargetG
 
 | Output | Consumer | What it carries |
 |---|---|---|
-| `AlarmTopicArn` | B23 (on-call routing) | SNS topic that B23 re-targets at PagerDuty/Opsgenie |
+| `AlarmTopicArn` | Operator (Teams webhook HTTPS subscribe) | Page topic ARN -- alarm fan-out endpoint |
+| `NotifyTopicArn` | Operator (audit / future fan-out) | Notify topic ARN -- cost guardrails + email |
+
+### ObservabilityStack -- page/notify split (B23)
+
+Originally the stack created one SNS topic (`sps-alarms-${env}`) carrying both the eight alarm actions and the cost-guardrail subscribers, with the operator's email subscribed at the same address. B23 splits that into two topics so a forecasted-budget tap doesn't ride the alarm channel:
+
+| Topic | Logical id | Name | Subscribers | What publishes here |
+|---|---|---|---|---|
+| Page | `AlarmTopic` | `sps-alarms-${env}` | Microsoft Teams channel webhook (out-of-band) | All 9 CloudWatch alarm actions (8 from B22 + 1 from B02 `edit_authz_denied` rate) |
+| Notify | `NotifyTopic` | `sps-notify-${env}` | `paa2013@med.cornell.edu` (email) | Budget thresholds + Cost Anomaly Detection (prod only) |
+
+Provider choice -- Teams channel webhook, not a dedicated paging tool. Matches the WCM-native ops pattern: chat surface + ServiceNow incident tickets + manual Ops phone escalation per CI escalation group. The original B23 plan picked PagerDuty; reversed 2026-05-21 mid-PR after confirming WCM app teams don't use third-party paging tools and the off-hours wake-up capability isn't part of how WCM does ops anyway. ServiceNow incident integration with SPS as a registered CI is tracked as a B23 follow-on (not yet sized). See `docs/oncall.md` for full rationale.
+
+Implementation notes:
+
+- The page topic logical id and AWS-side name (`sps-alarms-${env}`) are unchanged from B22 -- renaming would force a CFN replacement and break the staging-side email-confirmation grant chain that's already in place. Instead the email subscription on the page topic is removed and a new sibling topic is added.
+- All nine `cloudwatch.Alarm.addAlarmAction(new SnsAction(alarmTopic))` calls still point at the page topic; only the cost subscribers and the operator email move. Asserted in `cdk/test/observability-stack.test.ts` ("all 9 alarm AlarmActions resolve to the page topic ARN").
+- `grantPublish` for `budgets.amazonaws.com` and `costalerts.amazonaws.com` now lands on the notify topic. Without that move the budget + anomaly notifications would silently no-op against a topic they can't publish to.
+- CDK does **not** create the Teams HTTPS subscription. The webhook URL is a secret (`scholars/${env}/oncall/teams-webhook-url`) populated out-of-band per ADR-008's "no secret values in CDK source" rule. `docs/oncall.md` is the operator runbook for creating the Teams Workflow, seeding the secret, and running `aws sns subscribe`.
+- Notify-topic email subscription requires AWS SNS confirmation within 3 days of first deploy of the new topic. Same constraint as B22 -- the staging deploy of B23 sends a confirmation email to `paa2013@med.cornell.edu`; alarms-arrival path for cost notifications depends on confirming it.
+- Unlike a PagerDuty CloudWatch integration, Teams Workflows do **not** auto-confirm the SNS HTTPS subscription. The first message that lands in the Teams channel after `aws sns subscribe` is the SNS `SubscriptionConfirmation` JSON; the operator GETs the embedded `SubscribeURL` once per topic per env. Captured in `docs/oncall.md § Gotchas`.
+
+Snapshot diff per env: +1 `AWS::SNS::Topic` (notify), +1 `AWS::SNS::Subscription` (email on notify), -1 `AWS::SNS::Subscription` (email previously on page), `AWS::SNS::TopicPolicy` re-targeted at the notify topic, four `Subscribers[*].Address` Refs (three budget + one anomaly) move from `AlarmTopic` -> `NotifyTopic`. Reviewable in one sitting.
+
+See `docs/oncall.md` for the full on-call topology, rollout runbook, diagnostics, and the ServiceNow follow-on direction.
 
 ## Phase 4 — EdgeStack (B07 + B14)
 
@@ -548,4 +573,3 @@ Two post-deploy spot checks live here so the manual runbook for the cutover land
    ```
 
 Cutover from `*.cloudfront.net` to `scholars.weill.cornell.edu` is a separate deploy after WCM ITS issues the cert (see § Custom domain bootstrap two-step). Staging deploys first; prod follows after the staging cert + DNS lifecycle is exercised end-to-end.
-

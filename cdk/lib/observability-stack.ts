@@ -14,12 +14,13 @@ import { type SpsEnvConfig } from "./config";
 import { type DataStack } from "./data-stack";
 
 /**
- * The single email subscribed to alarm notifications until B23 swaps in
- * PagerDuty / Opsgenie. ADR-008 records the addresses in the secrets-stack
- * convention; this one is the operator's work email used for live ops
- * traffic, not the harness identity.
+ * The email subscribed to the **notify** topic (cost guardrails + low-urgency
+ * fan-out). The page topic carries no email subscription — a Microsoft Teams
+ * channel webhook is subscribed out-of-band per docs/oncall.md (B23 split).
+ * ADR-008 records the address in the secrets-stack convention; this is the
+ * operator's work email for live ops traffic, not the harness identity.
  */
-const ALARM_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
+const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
 
 /**
  * Account-wide monthly budget ceiling. Calibrated to roughly 40% headroom
@@ -61,13 +62,20 @@ export interface ObservabilityStackProps extends StackProps {
 
 /**
  * ObservabilityStack — alarms, alarm destination, and (prod only) the
- * account-wide cost guardrails (ADR-008, B22).
+ * account-wide cost guardrails (ADR-008, B22+B23).
  *
  * Per-env stack (`Sps-Observability-{env}`). Nine CloudWatch alarms cover
  * the public ALB / ECS / Aurora / OpenSearch surfaces plus the B02 edit-
- * surface 403 rate; every alarm publishes to the env's SNS topic
- * (`sps-alarms-{env}`), which carries one email subscription until B23
- * swaps in PagerDuty / Opsgenie.
+ * surface 403 rate; every alarm publishes to the env's **page** SNS topic
+ * (`sps-alarms-{env}`), which a Microsoft Teams channel webhook is subscribed
+ * to via HTTPS out-of-band per docs/oncall.md. (Teams matches the WCM-native
+ * ops pattern; ServiceNow incident integration tracked as a B23 follow-on.)
+ *
+ * The stack creates a second **notify** SNS topic (`sps-notify-{env}`) used
+ * exclusively for low-urgency fan-out: the account-wide budget thresholds and
+ * the Cost Anomaly Detection subscriber publish there, and the operator's
+ * work email is subscribed there. The page topic carries zero email
+ * subscriptions so a forecasted-budget tap can't wake on-call at 02:00 (B23).
  *
  * The budget and Cost Anomaly Detection monitor are account-wide AWS
  * resources, so they are created by the prod stack only -- deploying them
@@ -76,8 +84,14 @@ export interface ObservabilityStackProps extends StackProps {
  * resources; this is asserted by the test file.
  */
 export class SpsObservabilityStack extends Stack {
-  /** SNS topic every alarm in this stack publishes to. B23 re-targets it. */
+  /** SNS topic every alarm in this stack publishes to. Teams channel webhook subscribed out-of-band. */
   public readonly alarmTopic: sns.Topic;
+  /**
+   * SNS topic for low-urgency fan-out: budget thresholds, cost-anomaly
+   * subscriber, and the operator email. Separate from `alarmTopic` so a
+   * forecasted-spend tap doesn't page on-call (B23).
+   */
+  public readonly notifyTopic: sns.Topic;
 
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
@@ -86,14 +100,27 @@ export class SpsObservabilityStack extends Stack {
     const env = envConfig.envName;
 
     // ------------------------------------------------------------------
-    // SNS topic + email subscription
+    // SNS topics — page (alarms -> Teams channel) and notify (cost -> email)
     // ------------------------------------------------------------------
+    // Page topic keeps the B22 name `sps-alarms-${env}` to avoid a
+    // replacement-style logical-id churn on the existing CFN resource (and
+    // to keep the staging-side email-confirmation grant chain intact across
+    // the deploy). The Teams channel webhook is added as an HTTPS
+    // subscription out-of-band per docs/oncall.md; no AWS::SNS::Subscription
+    // is declared here.
     this.alarmTopic = new sns.Topic(this, "AlarmTopic", {
       topicName: `sps-alarms-${env}`,
-      displayName: `SPS ${env} alarms`,
+      displayName: `SPS ${env} alarms (page)`,
     });
-    this.alarmTopic.addSubscription(
-      new snsSubs.EmailSubscription(ALARM_SUBSCRIBER_EMAIL),
+
+    // Notify topic carries the cost guardrail fan-out and the operator
+    // email. Distinct topic, distinct logical id, distinct AWS-side name.
+    this.notifyTopic = new sns.Topic(this, "NotifyTopic", {
+      topicName: `sps-notify-${env}`,
+      displayName: `SPS ${env} notifications (notify)`,
+    });
+    this.notifyTopic.addSubscription(
+      new snsSubs.EmailSubscription(NOTIFY_SUBSCRIBER_EMAIL),
     );
 
     const snsAction = new cwActions.SnsAction(this.alarmTopic);
@@ -385,7 +412,7 @@ export class SpsObservabilityStack extends Stack {
             subscribers: [
               {
                 subscriptionType: "SNS",
-                address: this.alarmTopic.topicArn,
+                address: this.notifyTopic.topicArn,
               },
             ],
           },
@@ -399,7 +426,7 @@ export class SpsObservabilityStack extends Stack {
             subscribers: [
               {
                 subscriptionType: "SNS",
-                address: this.alarmTopic.topicArn,
+                address: this.notifyTopic.topicArn,
               },
             ],
           },
@@ -413,7 +440,7 @@ export class SpsObservabilityStack extends Stack {
             subscribers: [
               {
                 subscriptionType: "SNS",
-                address: this.alarmTopic.topicArn,
+                address: this.notifyTopic.topicArn,
               },
             ],
           },
@@ -421,9 +448,9 @@ export class SpsObservabilityStack extends Stack {
       });
 
       // AWS Budgets publishes to SNS via the AWS Budgets service principal;
-      // grant it Publish on the alarm topic. Without this the budget
-      // notifications silently no-op.
-      this.alarmTopic.grantPublish(
+      // grant it Publish on the **notify** topic (B23 page/notify split).
+      // Without this the budget notifications silently no-op.
+      this.notifyTopic.grantPublish(
         new iam.ServicePrincipal("budgets.amazonaws.com"),
       );
 
@@ -444,7 +471,7 @@ export class SpsObservabilityStack extends Stack {
         subscribers: [
           {
             type: "SNS",
-            address: this.alarmTopic.topicArn,
+            address: this.notifyTopic.topicArn,
             status: "CONFIRMED",
           },
         ],
@@ -457,8 +484,9 @@ export class SpsObservabilityStack extends Stack {
         }),
       });
 
-      // Cost Anomaly Detection publishes via a different service principal.
-      this.alarmTopic.grantPublish(
+      // Cost Anomaly Detection publishes via a different service principal,
+      // also against the notify topic (B23 page/notify split).
+      this.notifyTopic.grantPublish(
         new iam.ServicePrincipal("costalerts.amazonaws.com"),
       );
     }
@@ -469,7 +497,12 @@ export class SpsObservabilityStack extends Stack {
     new CfnOutput(this, "AlarmTopicArn", {
       value: this.alarmTopic.topicArn,
       description:
-        "SNS topic every CloudWatch alarm in this stack publishes to. B23 re-targets the subscription set.",
+        "SNS topic every CloudWatch alarm publishes to (page). The Teams channel webhook is subscribed out-of-band per docs/oncall.md.",
+    });
+    new CfnOutput(this, "NotifyTopicArn", {
+      value: this.notifyTopic.topicArn,
+      description:
+        "SNS topic for cost guardrails + low-urgency fan-out (notify). Operator email subscription lands here, not on the page topic.",
     });
   }
 }

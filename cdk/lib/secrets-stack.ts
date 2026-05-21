@@ -179,6 +179,19 @@ export class SecretsStack extends Stack {
         description:
           "SPS CloudFront-to-ALB origin shared secret (B07). Forwarded as X-Origin-Verify; ALB listener admits only matching requests.",
       },
+      // On-call Teams channel webhook URL (B23). Consumed by the operator's
+      // one-time `aws sns subscribe --protocol https --endpoint <Teams-URL>`
+      // against the `sps-alarms-${env}` page topic; the CDK does not create
+      // the subscription (no secret values in CDK source). Teams matches
+      // the WCM-native ops pattern (chat surface + ServiceNow tickets +
+      // manual Ops phone escalation); a dedicated paging tool was
+      // considered and rejected. See docs/oncall.md.
+      {
+        constructId: "OncallTeamsWebhookUrl",
+        name: `scholars/${env}/oncall/teams-webhook-url`,
+        description:
+          "SPS on-call Microsoft Teams channel webhook (B23). Seed before subscribing the page topic; see docs/oncall.md.",
+      },
     ];
 
     const arns: Record<string, string> = {};
