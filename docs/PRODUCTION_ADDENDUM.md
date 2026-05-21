@@ -421,3 +421,131 @@ ObservabilityStack reads the public-ALB target group via `appStack.publicTargetG
 | Output | Consumer | What it carries |
 |---|---|---|
 | `AlarmTopicArn` | B23 (on-call routing) | SNS topic that B23 re-targets at PagerDuty/Opsgenie |
+
+## Phase 4 — EdgeStack (B07 + B14)
+
+CloudFront distribution fronting the `sps-public-${env}` ALB. Eight cache behaviors implementing `docs/cloudfront-cache-spec.md` (one cacheable default + seven uncacheable carve-outs for writer routes, SSO, mutating endpoints, the health probe, telemetry, and on-demand exports), plus the B14 legacy-VIVO redirect layer in `middleware.ts`. WAF (B26 #125) and security headers beyond HSTS (B21 #120) attach to the same distribution / response-headers policy in follow-on rows without restructuring it.
+
+### Cache policy choices (D5)
+
+| Behavior class | Cache policy | Origin request policy | Cookie forwarding |
+|---|---|---|---|
+| Default (`*`) | `Managed-CachingOptimized` | **none** | none -- the single most important knob in the spec |
+| All other (writer / SSO / mutating / etc.) | `Managed-CachingDisabled` | `Managed-AllViewer` | full (cookies, query strings, all viewer headers) |
+
+The spec's documented header allowlist for the default cache key is `Accept, Accept-Language, Accept-Encoding`. `Managed-CachingOptimized` includes only `Accept-Encoding`, but no route in the current app `Vary`s on `Accept` or `Accept-Language` (no content negotiation, no i18n). Swapping to a custom cache policy is a follow-on the first time a route is added that needs them.
+
+### Origin protection: shared-secret custom header (D3)
+
+The public ALB has no TLS today (B05+B06+B09+B17 documented exposure: HTTP-only :80, "one PR cycle"). Without protection, the public ALB DNS becomes a back-door bypass of every cache-behavior decision and any future WAF, since the DNS name is published nowhere but is trivially discoverable.
+
+Mitigation: every CloudFront-originated request carries an `X-Origin-Verify` header injected via `Origin.customHeaders`. The public ALB listener's default action is `fixed-response 403`; a priority-1 listener rule forwards to the app target group only when `X-Origin-Verify` matches the expected value. The secret value lives in SecretsStack at `scholars/${env}/edge/origin-shared-secret` and is referenced by both stacks via the CloudFormation dynamic reference `{{resolve:secretsmanager:...}}` so it never appears in the synthesized template.
+
+**Rotation runbook.** Generate a fresh secret and put it into Secrets Manager, then redeploy AppStack so the listener rule picks up the new value:
+
+```
+aws secretsmanager put-secret-value \
+  --secret-id scholars/${ENV}/edge/origin-shared-secret \
+  --secret-string $(openssl rand -hex 32)
+npx cdk deploy --exclusively Sps-Edge-${ENV} -c env=${ENV}
+npx cdk deploy --exclusively Sps-App-${ENV}  -c env=${ENV}
+```
+
+Order matters: deploy EdgeStack first so CloudFront starts injecting the new header value, then deploy AppStack so the listener admits it. The reverse order produces a brief 403 window because the listener rule rejects the old header while CloudFront is still sending the old value.
+
+### Custom domain bootstrap two-step (D2)
+
+The distribution ships with the `*.cloudfront.net` domain by default. WCM ITS owns the `weill.cornell.edu` zone and the ACM certificate for `scholars.weill.cornell.edu` is provisioned and rotated by them, not by CDK. Two optional context flags attach the alias + viewer cert once the cert ARN is in hand:
+
+```
+npx cdk deploy --exclusively Sps-Edge-${ENV} \
+  -c env=${ENV} \
+  -c edgeCustomDomain=scholars.weill.cornell.edu \
+  -c edgeCertArn=arn:aws:acm:us-east-1:<acct>:certificate/<id>
+```
+
+Both flags must be present for the alias to attach; supplying just one is treated as "still on `*.cloudfront.net`". Route 53 / DNS CNAME / hosted-zone management stays outside this stack -- ITS handles it through their existing change-management process.
+
+### Response-headers policy (D6, B21 follow-on)
+
+`sps-security-headers-${env}` ships with HSTS (`max-age=63072000; includeSubDomains`) and nothing else. The policy is referenced by every behavior on day one so B21 (#120) only has to fill in CSP, X-Frame-Options, Referrer-Policy, and Permissions-Policy -- no plumbing change to the distribution.
+
+### B14: legacy VIVO URL redirect set (#113)
+
+After WCM ITS CNAMEs the legacy VIVO host onto the new CloudFront, legacy URLs of the form `http://vivo.med.cornell.edu/display/cwid-{cwid}` (and the well-known sibling shapes `/individual/cwid-*` and `/profile/cwid-*`) land at `scholars.weill.cornell.edu/<legacy-path>`. The B14 middleware layer rewrites them to the canonical CWID entry point with a single 301:
+
+```
+GET /display/cwid-abc1234     -> 301 -> /scholars/by-cwid/abc1234
+GET /individual/cwid-abc1234  -> 301 -> /scholars/by-cwid/abc1234
+GET /profile/cwid-abc1234     -> 301 -> /scholars/by-cwid/abc1234
+```
+
+The `/scholars/by-cwid/[cwid]` page then chains a second 301 to the current canonical slug via `resolveByCwidOrAlias` (`lib/url-resolver.ts`). The chained pattern keeps slug currency / aliasing in one place rather than baking a slug snapshot into the redirect map.
+
+**Redirect set provenance.** The CWID corpus is generated from WCM Enterprise Directory:
+
+```
+filter: (&(objectClass=weillCornellEduPerson)(weillCornellEduPersonTypeCode=academic-faculty))
+attrs:  ["uid", "labeledURI;vivo"]   # minimal -- never include DOB or other PII
+```
+
+The generator script `scripts/etl/generate-vivo-redirect-set.ts` parses each `labeledURI;vivo` value (e.g. `http://vivo.med.cornell.edu/display/cwid-abc1234`), de-dupes, sorts, and writes `data/vivo-redirects.json`. Run locally before each prod deploy; the JSON is checked in and consumed by middleware as a static import (Set-backed O(1) lookup). CI builds consume the committed JSON -- the script never runs in CI.
+
+```
+npx tsx scripts/etl/generate-vivo-redirect-set.ts
+# Add --filter-loose if the resulting count is suspiciously low
+# (broadens to weillCornellEduPersonTypeCode=academic-faculty*).
+```
+
+**Why middleware, not CloudFront Function.** Three reasons: (a) the CF Function code limit is 10 KB; a 3-4 k entry CWID -> slug object is ~100 KB. (b) Middleware already gates `/edit/*` and `/api/edit/*`; adding three matcher prefixes is a one-line diff. (c) The chained-301 design keeps the redirect map a flat CWID list with no slug snapshot to drift.
+
+**Out of corpus -> 404, not 410.** Retired academics whose CWID is no longer in the academic-faculty set fall through to the existing 404 handler. The spec allows 410 "where no equivalent exists" but Google treats 404 and 410 equivalently after a few crawls. An explicit 410 list lives in a future `data/vivo-retired.json` if signal-from-crawlers demands it; out of scope for B14 v1.
+
+### Verification (acceptance #15 + B14-6)
+
+Two post-deploy spot checks live here so the manual runbook for the cutover lands in one place:
+
+1. **Cache-key smoke test (B07 acceptance #15).** From the CloudFront console: Distribution -> Behaviors -> Default -> Cache Policy -> "Test cache policy." Submit the same path with two different `Cookie:` header values; the inspector must produce the same cache key. The header is excluded from the key by design -- a fragmented cache here means a configuration drift and silently leaks one user's cached HTML to another.
+
+2. **Legacy URL crawler check (B14-6).** After the WCM ITS CNAME cutover, sample 20 CWIDs from `data/vivo-redirects.json`:
+
+   ```
+   shuf -n 20 <(jq -r '.[]' data/vivo-redirects.json) | while read cwid; do
+     curl -sIL "https://scholars.weill.cornell.edu/display/cwid-${cwid}" | \
+       awk 'BEGIN{c=0} /^HTTP/{c++; print c": "$0}'
+   done
+   ```
+
+   Each sampled CWID should produce two `HTTP/2 301` (legacy -> by-cwid, by-cwid -> slug) followed by `HTTP/2 200`. If the chain stops at a single 301 with `Location: /scholars/by-cwid/*` and then a 404, the CWID is in the redirect set but no longer has an active scholar row -- expected for retirees, treat as out-of-corpus signal rather than a regression.
+
+### Outputs surfaced for downstream stacks
+
+| Output | Consumer | What it carries |
+|---|---|---|
+| `DistributionDomainName` | DNS cutover runbook (WCM ITS) | `*.cloudfront.net` domain to CNAME `scholars.weill.cornell.edu` against once the cert is staged |
+| `DistributionId` | manual invalidation runbook | distribution id for `aws cloudfront create-invalidation` |
+| `LogsBucketName` | follow-on analytics / B26 (WAF tuning) | S3 bucket receiving CloudFront standard access logs (`cf/${env}/`, 90-day lifecycle) |
+
+### Deploy strategy
+
+`cdk deploy --exclusively Sps-Edge-${env}` on first deploy. Order matters at first cutover so the public ALB does not start rejecting CloudFront mid-deploy:
+
+1. Seed the shared secret out-of-band:
+   ```
+   aws secretsmanager put-secret-value \
+     --secret-id scholars/${ENV}/edge/origin-shared-secret \
+     --secret-string $(openssl rand -hex 32)
+   ```
+2. `cdk deploy --exclusively Sps-Edge-${ENV}` -- CloudFront begins injecting `X-Origin-Verify`. (CloudFront propagation is up to 15 min; do not roll back on first 5 min of "this looks hung.")
+3. `cdk deploy --exclusively Sps-App-${ENV}` -- public ALB listener flips to deny-by-default plus the header-verified forward rule.
+4. Smoke-test:
+   ```
+   curl -H "X-Origin-Verify: $(aws secretsmanager get-secret-value \
+     --secret-id scholars/${ENV}/edge/origin-shared-secret \
+     --query SecretString --output text)" \
+     http://<public-alb-dns>/api/health      # expect 200
+   curl http://<public-alb-dns>/api/health   # expect 403
+   ```
+
+Cutover from `*.cloudfront.net` to `scholars.weill.cornell.edu` is a separate deploy after WCM ITS issues the cert (see § Custom domain bootstrap two-step). Staging deploys first; prod follows after the staging cert + DNS lifecycle is exercised end-to-end.
+

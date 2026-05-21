@@ -451,6 +451,74 @@ describe("AppStack", () => {
         );
         expect(ports).toEqual([80, 80]);
       });
+
+      it("the public ALB listener default action is a bare 403 (B07 origin-verify deny-by-default)", () => {
+        // The PublicHttpListener default action is a fixed-response 403:
+        // requests that arrive without the CloudFront-injected
+        // X-Origin-Verify header are rejected at the ALB. The internal
+        // listener still default-forwards to the target group (only the
+        // ETL Lambda SG can reach it -- the perimeter is the SG, not the
+        // header).
+        const listeners = template.findResources(
+          "AWS::ElasticLoadBalancingV2::Listener",
+        );
+        // Find the listener whose default action is fixed-response.
+        const publicListener = Object.values(listeners).find((r) => {
+          const actions = r.Properties?.DefaultActions as
+            | Array<{ Type?: string }>
+            | undefined;
+          return actions?.some((a) => a.Type === "fixed-response");
+        });
+        expect(publicListener).toBeDefined();
+        const publicActions = publicListener?.Properties?.DefaultActions as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(publicActions).toHaveLength(1);
+        const fr = publicActions?.[0]?.FixedResponseConfig as
+          | Record<string, unknown>
+          | undefined;
+        expect(fr?.StatusCode).toBe("403");
+      });
+
+      it("the public ALB has a priority-1 listener rule forwarding only when X-Origin-Verify matches", () => {
+        const rules = template.findResources(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+        );
+        const verified = Object.values(rules).find((r) => {
+          const conditions = r.Properties?.Conditions as
+            | Array<{ Field?: string }>
+            | undefined;
+          return conditions?.some((c) => c.Field === "http-header");
+        });
+        expect(verified).toBeDefined();
+        expect(verified?.Properties?.Priority).toBe(1);
+        const conditions = verified?.Properties?.Conditions as
+          | Array<Record<string, unknown>>
+          | undefined;
+        const headerCondition = conditions?.find(
+          (c) => c.Field === "http-header",
+        );
+        const headerConfig = headerCondition?.HttpHeaderConfig as
+          | { HttpHeaderName?: string; Values?: unknown[] }
+          | undefined;
+        expect(headerConfig?.HttpHeaderName).toBe("X-Origin-Verify");
+        // The header value is a CFN dynamic reference; CDK emits it as a
+        // Fn::Join with the literal `{{resolve:secretsmanager:` prefix
+        // plus a ${AWS::Partition} Ref plus the rest of the ARN. The
+        // secret value itself never sits in the template.
+        const values = headerConfig?.Values as unknown[] | undefined;
+        expect(values).toHaveLength(1);
+        const serialized = JSON.stringify(values?.[0]);
+        expect(serialized).toMatch(/\{\{resolve:secretsmanager:/);
+        expect(serialized).toContain(
+          "scholars/prod/edge/origin-shared-secret",
+        );
+        // Action: forward to the app target group.
+        const actions = verified?.Properties?.Actions as
+          | Array<{ Type?: string }>
+          | undefined;
+        expect(actions?.[0]?.Type).toBe("forward");
+      });
     });
 
     describe("VPC endpoints (B17, deviation from ADR-008 Table 4)", () => {

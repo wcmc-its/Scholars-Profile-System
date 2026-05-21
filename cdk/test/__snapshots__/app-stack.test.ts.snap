@@ -971,10 +971,12 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Properties": {
         "DefaultActions": [
           {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Forbidden",
+              "StatusCode": "403",
             },
-            "Type": "forward",
+            "Type": "fixed-response",
           },
         ],
         "LoadBalancerArn": {
@@ -984,6 +986,45 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Protocol": "HTTP",
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "AppTargetGroup3D716DB6",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "{{resolve:secretsmanager:arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
+                    ],
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {
@@ -2390,10 +2431,12 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Properties": {
         "DefaultActions": [
           {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+            "FixedResponseConfig": {
+              "ContentType": "text/plain",
+              "MessageBody": "Forbidden",
+              "StatusCode": "403",
             },
-            "Type": "forward",
+            "Type": "fixed-response",
           },
         ],
         "LoadBalancerArn": {
@@ -2403,6 +2446,45 @@ exports[`AppStack staging matches the snapshot 1`] = `
         "Protocol": "HTTP",
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
+    },
+    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "AppTargetGroup3D716DB6",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "{{resolve:secretsmanager:arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
+                    ],
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {
