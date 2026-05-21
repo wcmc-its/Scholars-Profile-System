@@ -207,3 +207,81 @@ Add to the PR template for every PR touching `prisma/schema.prisma`:
 - [ ] New app version still works against the old schema until the migration runs.
 - [ ] If a backfill is needed, script is in `scripts/backfills/`.
 - [ ] If this is the contract step of an expand-contract, the expand has been live for at least the backup retention window.
+
+## AppStack
+
+The compute and ingress plane. Provisioned by `cdk/lib/app-stack.ts` (ADR-008 stack 3 of 6, row `B05+B06+B09+B17`).
+
+### Two-ALB topology
+
+The application sits behind two Application Load Balancers, not one ALB with two listeners. Both forward to the same target group; the ECS service registers tasks once.
+
+- **Public ALB** (`sps-public-${env}`, scheme=`internet-facing`, public subnets) — serves end-user traffic from CloudFront once `B07+B14` (EdgeStack) ships. Until then it serves HTTP-only on :80 from any internet client that resolves the AWS-allocated DNS name. The DNS name is not published; the SAML cookie's `Secure` attribute prevents it transmitting over plain HTTP. Tolerable for one PR cycle.
+- **Internal ALB** (`sps-internal-${env}`, scheme=`internal`, private-with-egress subnets) — backs the intra-VPC `/api/revalidate` path. The listener exists with no SG ingress; once EtlStack ships the ETL Lambda SG, EtlStack adds the SG-to-SG ingress on the internal ALB SG that makes it reachable. Until then the listener is provisioned but unreachable.
+
+The two-ALB split keeps the SG semantics clean: the internal ALB SG can be scoped tightly to the ETL Lambda SG, never accidentally widened by an unrelated listener edit. Trading one extra ALB's monthly cost (~$16) for that boundary is correct for SPS's threat model.
+
+### Role split (B06)
+
+The ECS service uses two distinct IAM roles, each with the minimum permissions for its part of the task lifecycle:
+
+- **Task-execution role** (`sps-task-exec-${env}`) — assumed by ECS itself to pull the image, inject secret values into the container's env, and write CloudWatch log streams. Permissions: `ecr:GetAuthorizationToken` (account-level), ECR `BatchCheckLayerAvailability`/`GetDownloadUrlForLayer`/`BatchGetImage` on the SPS repo ARN only, `secretsmanager:GetSecretValue` on **exactly the five consumer ARNs**, `logs:CreateLogStream`+`PutLogEvents` on the two log groups only. No `*` resource on any non-auth statement.
+- **Task role** (`sps-task-${env}`) — assumed by the application code at runtime. Today: **zero attached permissions**. The Next.js + Prisma + OpenSearch client code calls no AWS API; secrets are injected by ECS via the *execution* role before the container starts, never assumed by the running app. Any future addition to this role goes through review — the test suite asserts the policy contains zero `secretsmanager:*` actions.
+
+The split matters: an RCE in the running app surfaces the *task* role's permissions, not the execution role's. With zero on the task role, an attacker who lands code execution gets nothing they can't already get from the container's already-injected env vars.
+
+### Migration task (B09, CDK half)
+
+`cdk deploy` provisions a one-shot `sps-migrate-${env}` Fargate task definition that runs `npx prisma migrate deploy` with `DATABASE_URL` set to the writer DSN secret. The CDK ships the task family; *invocation* lives in the (deferred) GitHub Actions deploy workflow that B09/B12 follow-on will ship. Issue #108 stays open after this PR merges; it's closed by the workflow PR.
+
+Migration log streams go to `/aws/ecs/sps-migrate-${env}` (separate log group from the app) so a failed migration's traceback is easy to find.
+
+### GitHub Actions OIDC role (provisioned, unused until B09/B12)
+
+`sps-deploy-${env}` is the IAM role the deploy workflow assumes via OIDC. The role exists after this PR but no workflow invokes it yet. Trust policy:
+
+- Audience: `sts.amazonaws.com`.
+- Subject (prod): `repo:wcmc-its/Scholars-Profile-System:ref:refs/heads/master` — only deploys originating from `master` branch.
+- Subject (staging): `repo:wcmc-its/Scholars-Profile-System:*` — feature branches can deploy to staging.
+
+Permissions are tightly scoped to AppStack-owned resources: ECR push on this repo, `ecs:RunTask` on the migration task family ARN, `ecs:UpdateService`+`DescribeServices` on the SPS service ARN, `ecs:DescribeTasks`+`ListTasks` on `cluster/sps-cluster-${env}/*`, and `iam:PassRole` on the two task-side roles (conditioned to `iam:PassedToService=ecs-tasks.amazonaws.com`). The test suite asserts no `*` Resource on any non-`GetAuthorizationToken` statement.
+
+The OIDC provider itself (`token.actions.githubusercontent.com`) is account-scoped — only one can exist per AWS account. The single-account staging+prod deviation means the first AppStack to deploy creates the provider; the second must reuse it by ARN. Pass `-c githubOidcProviderArn=arn:aws:iam::665083158573:oidc-provider/token.actions.githubusercontent.com` on the second deploy to reuse the first's provider.
+
+### Bootstrap two-step (first deploy)
+
+On the first deploy of `Sps-App-${env}`, ECR is empty. The ECS service can't pull an image, so it would loop on failed tasks for ~15 minutes before the deploy times out. The recipe is:
+
+1. `cdk deploy --exclusively Sps-App-${env} -c env=${env} -c appDesiredCount=0` — ECS service ramps to 0 tasks.
+2. Build + push the bootstrap image manually (`docker push ${account}.dkr.ecr.us-east-1.amazonaws.com/scholars-app-${env}:bootstrap`).
+3. Optionally run the migration task once (`aws ecs run-task --task-definition sps-migrate-${env} ...`) — empty migrations directory at minimum proves the wiring.
+4. `cdk deploy --exclusively Sps-App-${env} -c env=${env}` — drops the override; desiredCount returns to the env-config value (1 staging / 2 prod).
+
+Every deploy uses `--exclusively` until the `fix/infra-network-az-literal` row ships (Footgun #1 — NetworkStack would otherwise hit mass subnet replacement on the AZ-literal vs `Fn::Select` drift). The bootstrap recipe will move into the deploy runbook (B12) verbatim.
+
+### VPC endpoints (B17) — placement deviation from ADR-008 Table 4
+
+ADR-008 Table 4 and the NetworkStack header comment both put VPC endpoints in `NetworkStack`. The `B05+B06+B09+B17` row's `OWNS` column placed them in `AppStack`. The decision was to honor the row's `OWNS` column rather than touch the locked NetworkStack for a single comment-only edit; the structural shape (new SG owned here, referencing NetworkStack's VPC + app/ETL SGs) is identical to DataStack's Aurora and OpenSearch SGs and is a structurally valid home.
+
+Provisioned:
+
+- **Secrets Manager interface endpoint** — keeps task-execution-role secret pulls off the NAT.
+- **OpenSearch (`es`) interface endpoint** — keeps app + ETL query traffic on the AWS backbone.
+- **S3 gateway endpoint** — keeps ECR image-layer pulls (S3-backed) off the NAT; route-table associations only, no SG.
+
+The interface endpoint SG admits :443 from the app SG and the ETL SG only. CDK's default `:443 from VPC CIDR` ingress is suppressed via `open: false` so the surface is the two SG-to-SG rules and nothing else. The ETL SG ingress is included now, even though ETL Lambdas don't exist yet, so EtlStack doesn't have to re-touch this stack's endpoint SG when it ships.
+
+The NetworkStack header comment still reads "VPC endpoints (B17) are added to this stack in Phase 4." That's stale relative to where they actually landed. Recording the deviation here is the cheaper path than a hot-fix workstream against a locked stack to update a comment.
+
+### Outputs surfaced for downstream stacks
+
+| Output | Consumer | What it carries |
+|---|---|---|
+| `EcrRepoUri` | B09/B12 workflow | `docker push` destination |
+| `EcsClusterName` | EtlStack, B09/B12 workflow | `aws ecs run-task` cluster arg |
+| `EcsServiceName` | EtlStack, B09/B12 workflow | `aws ecs update-service` target |
+| `EcsAppTaskFamily` | EtlStack | Task-family ARN scope |
+| `EcsMigrationTaskFamily` | B09/B12 workflow | `aws ecs run-task --task-definition` |
+| `PublicAlbDns` | EdgeStack (B07+B14) | CloudFront origin domain |
+| `InternalAlbDns` | EtlStack (B08+B20) | `/api/revalidate` host |
+| `DeployRoleArn` | B09/B12 workflow | `aws-actions/configure-aws-credentials` |
