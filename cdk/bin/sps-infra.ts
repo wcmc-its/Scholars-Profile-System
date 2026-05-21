@@ -6,6 +6,7 @@ import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
 import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
+import { SpsObservabilityStack } from "../lib/observability-stack";
 import { SecretsStack } from "../lib/secrets-stack";
 
 const app = new App();
@@ -43,7 +44,7 @@ const drBackupVaultStack = new DrBackupVaultStack(
   },
 );
 
-new DataStack(app, `Sps-Data-${envConfig.envName}`, {
+const dataStack = new DataStack(app, `Sps-Data-${envConfig.envName}`, {
   env,
   envConfig,
   crossRegionReferences: true,
@@ -90,6 +91,24 @@ new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   ecrRepository: appStack.ecrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
+
+// ObservabilityStack — SLO alarms, SNS topic, and (prod only) the account
+// cost guardrails (B22). Receives the AppStack + DataStack instances as
+// props so the alarm definitions reference the L2 ALB / target group /
+// Aurora / OpenSearch constructs directly — string-interpolating against
+// env-known resource names would lose the synth-time guarantee that the
+// names line up.
+new SpsObservabilityStack(
+  app,
+  `Sps-Observability-${envConfig.envName}`,
+  {
+    env,
+    envConfig,
+    appStack,
+    dataStack,
+    description: `SPS observability — alarms, SNS, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
+  },
+);
 
 // Tag every resource for cost allocation and ownership clarity.
 Tags.of(app).add("Project", "scholars-profile-system");

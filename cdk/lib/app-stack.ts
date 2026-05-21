@@ -82,6 +82,8 @@ export class AppStack extends Stack {
   public readonly publicAlb: elbv2.ApplicationLoadBalancer;
   /** Internal ALB — reachable only from inside the VPC. */
   public readonly internalAlb: elbv2.ApplicationLoadBalancer;
+  /** Target group the public ALB forwards to; exposed for ObservabilityStack alarms. */
+  public readonly publicTargetGroup: elbv2.ApplicationTargetGroup;
   /** GitHub Actions OIDC deploy role. */
   public readonly deployRole: iam.Role;
 
@@ -489,6 +491,7 @@ export class AppStack extends Stack {
       },
       deregistrationDelay: Duration.seconds(30),
     });
+    this.publicTargetGroup = appTargetGroup;
 
     this.publicAlb.addListener("PublicHttpListener", {
       port: 80,
