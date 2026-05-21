@@ -4,6 +4,7 @@ import {
   CfnOutput,
   Duration,
   RemovalPolicy,
+  SecretValue,
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
@@ -627,9 +628,23 @@ export class AppStack extends Stack {
     // EdgeStack origin sends the same dynamic reference as the custom
     // header on every forwarded request, so the two stacks pick up the
     // same rotated value at deploy.
-    const originSharedSecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "EdgeOriginSharedSecret",
+    // CFN dynamic reference for the X-Origin-Verify rule's header value
+    // (blocker #5 of #431, 2026-05-21). `Secret.fromSecretNameV2(...).
+    // secretValue` emits a *partial-ARN* dynamic reference -- the form
+    // `{{resolve:secretsmanager:arn:aws:secretsmanager:<region>:<acct>:
+    // secret:<name>:SecretString:::}}` with no random suffix. CDK synth
+    // accepts it; AWS Secrets Manager rejects it at deploy time with
+    // `ResourceNotFoundException` (the resolver requires either the
+    // friendly name alone OR the *full* ARN including the random suffix
+    // -- the partial-ARN form is silently invalid).
+    //
+    // `SecretValue.secretsManager(name)` emits the friendly-name form
+    // (`{{resolve:secretsmanager:<name>:SecretString:::}}`), which AWS
+    // accepts. The synth-time guard in app-stack.test.ts asserts the
+    // emitted Values entry does not contain the literal
+    // `arn:aws:secretsmanager` (i.e. is not the partial-ARN form), so a
+    // future regression fails at jest instead of `cdk deploy`.
+    const originSharedSecretValue = SecretValue.secretsManager(
       `scholars/${env}/edge/origin-shared-secret`,
     );
     const publicListener = this.publicAlb.addListener("PublicHttpListener", {
@@ -655,7 +670,7 @@ export class AppStack extends Stack {
         priority: 1,
         conditions: [
           elbv2.ListenerCondition.httpHeader("X-Origin-Verify", [
-            originSharedSecret.secretValue.unsafeUnwrap(),
+            originSharedSecretValue.unsafeUnwrap(),
           ]),
         ],
         action: elbv2.ListenerAction.forward([appTargetGroup]),

@@ -553,10 +553,21 @@ describe("AppStack", () => {
           | { HttpHeaderName?: string; Values?: unknown[] }
           | undefined;
         expect(headerConfig?.HttpHeaderName).toBe("X-Origin-Verify");
-        // The header value is a CFN dynamic reference; CDK emits it as a
-        // Fn::Join with the literal `{{resolve:secretsmanager:` prefix
-        // plus a ${AWS::Partition} Ref plus the rest of the ARN. The
-        // secret value itself never sits in the template.
+        // The header value is a CFN dynamic reference using the FRIENDLY
+        // NAME form. The secret value itself never sits in the template.
+        //
+        // #431 blocker #5: the previous `Secret.fromSecretNameV2(...).
+        // secretValue` form emitted a *partial-ARN* dynamic reference
+        // (`{{resolve:secretsmanager:arn:aws:secretsmanager:<region>:
+        // <acct>:secret:<name>:SecretString:::}}`). CDK synth accepted
+        // it; AWS Secrets Manager rejects partial-ARN references at
+        // deploy time with `ResourceNotFoundException`. The fix is
+        // `SecretValue.secretsManager(name)`, which emits the
+        // friendly-name form (`{{resolve:secretsmanager:<name>:
+        // SecretString:::}}`). This assertion blocks a regression to
+        // the partial-ARN form by failing if the serialized value
+        // contains `arn:aws:secretsmanager` -- which only appears in
+        // the broken form.
         const values = headerConfig?.Values as unknown[] | undefined;
         expect(values).toHaveLength(1);
         const serialized = JSON.stringify(values?.[0]);
@@ -564,6 +575,7 @@ describe("AppStack", () => {
         expect(serialized).toContain(
           "scholars/prod/edge/origin-shared-secret",
         );
+        expect(serialized).not.toContain("arn:aws:secretsmanager");
         // Action: forward to the app target group.
         const actions = verified?.Properties?.Actions as
           | Array<{ Type?: string }>

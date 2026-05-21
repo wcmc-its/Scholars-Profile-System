@@ -1021,18 +1021,7 @@ service:
             "HttpHeaderConfig": {
               "HttpHeaderName": "X-Origin-Verify",
               "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
+                "{{resolve:secretsmanager:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
               ],
             },
           },
@@ -2627,18 +2616,7 @@ service:
             "HttpHeaderConfig": {
               "HttpHeaderName": "X-Origin-Verify",
               "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
+                "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
               ],
             },
           },
