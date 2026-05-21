@@ -579,7 +579,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
           {
             "Name": "TargetGroup",
             "Value": {
-              "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttAppTargetGroup3D716DB6TargetGroupFullName6ECDFE23",
+              "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAppTargetGroup68798009TargetGroupFullName72FE596A",
             },
           },
         ],
@@ -1072,7 +1072,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
           {
             "Name": "TargetGroup",
             "Value": {
-              "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttAppTargetGroup3D716DB6TargetGroupFullName6ECDFE23",
+              "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAppTargetGroup68798009TargetGroupFullName72FE596A",
             },
           },
         ],

@@ -167,33 +167,6 @@ exports[`AppStack prod matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "AppTargetGroup3D716DB6": {
-      "Properties": {
-        "HealthCheckIntervalSeconds": 30,
-        "HealthCheckPath": "/api/health",
-        "HealthCheckTimeoutSeconds": 5,
-        "HealthyThresholdCount": 2,
-        "Name": "sps-tg-app-prod",
-        "Port": 3000,
-        "Protocol": "HTTP",
-        "TargetGroupAttributes": [
-          {
-            "Key": "deregistration_delay.timeout_seconds",
-            "Value": "30",
-          },
-          {
-            "Key": "stickiness.enabled",
-            "Value": "false",
-          },
-        ],
-        "TargetType": "ip",
-        "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
     "AppTaskDefinitionCBC902A9": {
       "Properties": {
         "ContainerDefinitions": [
@@ -728,7 +701,11 @@ service:
     },
     "EcsService81FC6EF6": {
       "DependsOn": [
-        "AppTargetGroup3D716DB6",
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -760,7 +737,14 @@ service:
             "ContainerName": "app",
             "ContainerPort": 3000,
             "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+              "Ref": "PublicAppTargetGroup68798009",
+            },
+          },
+          {
+            "ContainerName": "app",
+            "ContainerPort": 3000,
+            "TargetGroupArn": {
+              "Ref": "InternalAppTargetGroup9E028644",
             },
           },
         ],
@@ -843,7 +827,7 @@ service:
         "DefaultActions": [
           {
             "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+              "Ref": "InternalAppTargetGroup9E028644",
             },
             "Type": "forward",
           },
@@ -880,6 +864,33 @@ service:
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
+    },
+    "InternalAppTargetGroup9E028644": {
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckTimeoutSeconds": 5,
+        "HealthyThresholdCount": 2,
+        "Name": "sps-tg-int-prod",
+        "Port": 3000,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30",
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false",
+          },
+        ],
+        "TargetType": "ip",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -1002,6 +1013,34 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "OriginVerifiedForwardC0422D52": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "PublicAppTargetGroup68798009",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                "{{resolve:secretsmanager:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -1071,44 +1110,32 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
     },
-    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
+    "PublicAppTargetGroup68798009": {
       "Properties": {
-        "Actions": [
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckTimeoutSeconds": 5,
+        "HealthyThresholdCount": 2,
+        "Name": "sps-tg-pub-prod",
+        "Port": 3000,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
           {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
-            },
-            "Type": "forward",
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30",
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false",
           },
         ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        "TargetType": "ip",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
         },
-        "Priority": 1,
       },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {
@@ -1770,33 +1797,6 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Type": "AWS::Logs::LogGroup",
       "UpdateReplacePolicy": "Retain",
     },
-    "AppTargetGroup3D716DB6": {
-      "Properties": {
-        "HealthCheckIntervalSeconds": 30,
-        "HealthCheckPath": "/api/health",
-        "HealthCheckTimeoutSeconds": 5,
-        "HealthyThresholdCount": 2,
-        "Name": "sps-tg-app-staging",
-        "Port": 3000,
-        "Protocol": "HTTP",
-        "TargetGroupAttributes": [
-          {
-            "Key": "deregistration_delay.timeout_seconds",
-            "Value": "30",
-          },
-          {
-            "Key": "stickiness.enabled",
-            "Value": "false",
-          },
-        ],
-        "TargetType": "ip",
-        "UnhealthyThresholdCount": 3,
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
-    },
     "AppTaskDefinitionCBC902A9": {
       "Properties": {
         "ContainerDefinitions": [
@@ -2331,7 +2331,11 @@ service:
     },
     "EcsService81FC6EF6": {
       "DependsOn": [
-        "AppTargetGroup3D716DB6",
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
         "TaskRole30FC0FBB",
       ],
       "Properties": {
@@ -2363,7 +2367,14 @@ service:
             "ContainerName": "app",
             "ContainerPort": 3000,
             "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+              "Ref": "PublicAppTargetGroup68798009",
+            },
+          },
+          {
+            "ContainerName": "app",
+            "ContainerPort": 3000,
+            "TargetGroupArn": {
+              "Ref": "InternalAppTargetGroup9E028644",
             },
           },
         ],
@@ -2446,7 +2457,7 @@ service:
         "DefaultActions": [
           {
             "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
+              "Ref": "InternalAppTargetGroup9E028644",
             },
             "Type": "forward",
           },
@@ -2483,6 +2494,33 @@ service:
         },
       },
       "Type": "AWS::EC2::SecurityGroup",
+    },
+    "InternalAppTargetGroup9E028644": {
+      "Properties": {
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckTimeoutSeconds": 5,
+        "HealthyThresholdCount": 2,
+        "Name": "sps-tg-int-staging",
+        "Port": 3000,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
+          {
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30",
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false",
+          },
+        ],
+        "TargetType": "ip",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
     "MigrationLogGroupFD140541": {
       "DeletionPolicy": "Retain",
@@ -2605,6 +2643,34 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "OriginVerifiedForwardC0422D52": {
+      "Properties": {
+        "Actions": [
+          {
+            "TargetGroupArn": {
+              "Ref": "PublicAppTargetGroup68798009",
+            },
+            "Type": "forward",
+          },
+        ],
+        "Conditions": [
+          {
+            "Field": "http-header",
+            "HttpHeaderConfig": {
+              "HttpHeaderName": "X-Origin-Verify",
+              "Values": [
+                "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
+              ],
+            },
+          },
+        ],
+        "ListenerArn": {
+          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        },
+        "Priority": 1,
+      },
+      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+    },
     "OtelCollectorLogGroup0FD207F7": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -2674,44 +2740,32 @@ service:
       },
       "Type": "AWS::ElasticLoadBalancingV2::Listener",
     },
-    "PublicAlbPublicHttpListenerOriginVerifiedForwardRule8BB5EC55": {
+    "PublicAppTargetGroup68798009": {
       "Properties": {
-        "Actions": [
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckPath": "/api/health",
+        "HealthCheckTimeoutSeconds": 5,
+        "HealthyThresholdCount": 2,
+        "Name": "sps-tg-pub-staging",
+        "Port": 3000,
+        "Protocol": "HTTP",
+        "TargetGroupAttributes": [
           {
-            "TargetGroupArn": {
-              "Ref": "AppTargetGroup3D716DB6",
-            },
-            "Type": "forward",
+            "Key": "deregistration_delay.timeout_seconds",
+            "Value": "30",
+          },
+          {
+            "Key": "stickiness.enabled",
+            "Value": "false",
           },
         ],
-        "Conditions": [
-          {
-            "Field": "http-header",
-            "HttpHeaderConfig": {
-              "HttpHeaderName": "X-Origin-Verify",
-              "Values": [
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "{{resolve:secretsmanager:arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
-                    ],
-                  ],
-                },
-              ],
-            },
-          },
-        ],
-        "ListenerArn": {
-          "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+        "TargetType": "ip",
+        "UnhealthyThresholdCount": 3,
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-staging:ExportsOutputRefVpc8378EB38272D6E3A",
         },
-        "Priority": 1,
       },
-      "Type": "AWS::ElasticLoadBalancingV2::ListenerRule",
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
     },
     "S3GatewayEndpointE8BAF1BC": {
       "Properties": {

@@ -45,14 +45,14 @@ describe("AppStack", () => {
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
-      it("creates two ALBs (one internet-facing, one internal), one target group, two listeners", () => {
+      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), two listeners", () => {
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
           2,
         );
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::TargetGroup",
-          1,
+          2,
         );
         template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
 
@@ -241,21 +241,46 @@ describe("AppStack", () => {
         }
       });
 
-      it("wires the ECS service to the target group via a loadBalancers mapping (manual L1 attach)", () => {
+      it("the ECS service DependsOn list includes both ALB listeners and the public origin-verify rule (#431 blocker #4)", () => {
+        // CFN dependency-class fix: because the service is L1-attached to
+        // the target group via `cfnService.loadBalancers`, CDK does NOT
+        // auto-infer that the service must wait for the listeners that
+        // bind the TG to a load balancer. Without an explicit DependsOn,
+        // CFN parallel-creates the service with the listeners and AWS
+        // rejects RegisterTargets with "target group does not have an
+        // associated load balancer." Every resource that establishes a
+        // TG <-> LB association must be a service dependency.
+        const services = template.findResources("AWS::ECS::Service");
+        const ids = Object.keys(services);
+        expect(ids).toHaveLength(1);
+        const dependsOn = (services[ids[0]!]?.DependsOn ?? []) as string[];
+        // Internal listener (associates TG via DefaultActions).
+        expect(dependsOn.some((d) => d.startsWith("InternalAlbInternalHttpListener"))).toBe(true);
+        // Public listener (its child rule below carries the TG association).
+        expect(dependsOn.some((d) => d.startsWith("PublicAlbPublicHttpListener"))).toBe(true);
+        // The priority-1 rule that forwards public traffic to the TG.
+        expect(dependsOn.some((d) => d.startsWith("OriginVerifiedForward"))).toBe(true);
+      });
+
+      it("wires the ECS service to BOTH target groups via the loadBalancers mapping (manual L1 attach)", () => {
         // The L2 attachToApplicationTargetGroup helper auto-establishes SG
         // ingress rules from each ALB SG -- with the internal ALB's SG in
         // AppStack and the app SG in NetworkStack that closes a cycle.
-        // The manual L1 attach skips the auto-wire; this assertion
-        // documents that the service still ends up registered with the TG.
-        template.hasResourceProperties("AWS::ECS::Service", {
-          LoadBalancers: Match.arrayWith([
-            Match.objectLike({
-              ContainerName: "app",
-              ContainerPort: 3000,
-              TargetGroupArn: Match.anyValue(),
-            }),
-          ]),
-        });
+        // The manual L1 attach skips the auto-wire and registers the
+        // running app container with both TGs (one per ALB after the
+        // #431 blocker #6 split).
+        const services = template.findResources("AWS::ECS::Service");
+        const ids = Object.keys(services);
+        expect(ids).toHaveLength(1);
+        const lbs = services[ids[0]!]?.Properties?.LoadBalancers as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(lbs).toHaveLength(2);
+        for (const lb of lbs ?? []) {
+          expect(lb.ContainerName).toBe("app");
+          expect(lb.ContainerPort).toBe(3000);
+          expect(lb.TargetGroupArn).toBeDefined();
+        }
       });
     });
 
@@ -448,24 +473,26 @@ describe("AppStack", () => {
         expect(internalLb?.Properties?.Name).toBe("sps-internal-prod");
       });
 
-      it("the target group uses the literal /api/health (PR #407) and a 30-second deregistration delay", () => {
-        template.hasResourceProperties(
-          "AWS::ElasticLoadBalancingV2::TargetGroup",
-          {
-            Name: "sps-tg-app-prod",
-            Port: 3000,
-            Protocol: "HTTP",
-            TargetType: "ip",
-            HealthCheckPath: "/api/health",
-            HealthyThresholdCount: 2,
-            TargetGroupAttributes: Match.arrayWith([
-              Match.objectLike({
-                Key: "deregistration_delay.timeout_seconds",
-                Value: "30",
-              }),
-            ]),
-          },
-        );
+      it("both target groups use the literal /api/health (PR #407) and a 30-second deregistration delay", () => {
+        for (const name of ["sps-tg-pub-prod", "sps-tg-int-prod"]) {
+          template.hasResourceProperties(
+            "AWS::ElasticLoadBalancingV2::TargetGroup",
+            {
+              Name: name,
+              Port: 3000,
+              Protocol: "HTTP",
+              TargetType: "ip",
+              HealthCheckPath: "/api/health",
+              HealthyThresholdCount: 2,
+              TargetGroupAttributes: Match.arrayWith([
+                Match.objectLike({
+                  Key: "deregistration_delay.timeout_seconds",
+                  Value: "30",
+                }),
+              ]),
+            },
+          );
+        }
       });
 
       it("the public ALB listener is HTTP-only :80 (HTTPS lands in B07+B14)", () => {
@@ -532,10 +559,21 @@ describe("AppStack", () => {
           | { HttpHeaderName?: string; Values?: unknown[] }
           | undefined;
         expect(headerConfig?.HttpHeaderName).toBe("X-Origin-Verify");
-        // The header value is a CFN dynamic reference; CDK emits it as a
-        // Fn::Join with the literal `{{resolve:secretsmanager:` prefix
-        // plus a ${AWS::Partition} Ref plus the rest of the ARN. The
-        // secret value itself never sits in the template.
+        // The header value is a CFN dynamic reference using the FRIENDLY
+        // NAME form. The secret value itself never sits in the template.
+        //
+        // #431 blocker #5: the previous `Secret.fromSecretNameV2(...).
+        // secretValue` form emitted a *partial-ARN* dynamic reference
+        // (`{{resolve:secretsmanager:arn:aws:secretsmanager:<region>:
+        // <acct>:secret:<name>:SecretString:::}}`). CDK synth accepted
+        // it; AWS Secrets Manager rejects partial-ARN references at
+        // deploy time with `ResourceNotFoundException`. The fix is
+        // `SecretValue.secretsManager(name)`, which emits the
+        // friendly-name form (`{{resolve:secretsmanager:<name>:
+        // SecretString:::}}`). This assertion blocks a regression to
+        // the partial-ARN form by failing if the serialized value
+        // contains `arn:aws:secretsmanager` -- which only appears in
+        // the broken form.
         const values = headerConfig?.Values as unknown[] | undefined;
         expect(values).toHaveLength(1);
         const serialized = JSON.stringify(values?.[0]);
@@ -543,6 +581,7 @@ describe("AppStack", () => {
         expect(serialized).toContain(
           "scholars/prod/edge/origin-shared-secret",
         );
+        expect(serialized).not.toContain("arn:aws:secretsmanager");
         // Action: forward to the app target group.
         const actions = verified?.Properties?.Actions as
           | Array<{ Type?: string }>
@@ -880,6 +919,243 @@ describe("AppStack", () => {
         // group's logical id; matching by the OtelCollectorLogGroup token
         // is enough to confirm the grant covers the sidecar's streams.
         expect(serialized).toMatch(/OtelCollectorLogGroup/);
+      });
+    });
+
+    // ----------------------------------------------------------------
+    // Audit pass for issue #431 § Scope (b).
+    //
+    // Five categories. The synth-time guards below close the gaps the
+    // walk surfaced; categories with no gap are documented in the PR
+    // body, not here.
+    // ----------------------------------------------------------------
+    describe("Audit (#431) -- deploy-only-gap preemption", () => {
+      // -- Category 1: string-name AWS API refs --
+      //
+      // SecretsStack defines six entries; AppStack reads them by name via
+      // `Secret.fromSecretNameV2`. A rename in SecretsStack that drops the
+      // matching AppStack entry would silently dangle the reference -- the
+      // synthesized template still resolves to a `secretsmanager:` ARN
+      // template that doesn't exist, and AWS rejects only at task-start
+      // (or, for the listener-rule dynamic ref, at deploy time). Assert
+      // every expected secret name appears at least once in the synth.
+      it("references all six AppStack-consumed Secrets Manager names exactly as SecretsStack defines them", () => {
+        const expected = [
+          "scholars/prod/db/app-rw",
+          "scholars/prod/db/app-ro",
+          "scholars/prod/opensearch/app",
+          "scholars/prod/revalidate-token",
+          "scholars/saml-sp/prod/private-key",
+          "scholars/prod/edge/origin-shared-secret",
+        ];
+        const json = JSON.stringify(template.toJSON());
+        for (const name of expected) {
+          expect(json).toContain(name);
+        }
+      });
+
+      // -- Category 3a: IAM `*` audit on the task-execution role --
+      //
+      // The deploy-role test already asserts "every Resource: `*` is the
+      // ecr:GetAuthorizationToken exception". The same posture must hold
+      // for the task-execution role -- otherwise a future PR can grant a
+      // task-side `s3:*` or similar before review.
+      it("the task-execution role policy uses `*` only on ecr:GetAuthorizationToken (account-level exception)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" && r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        expect(execPolicy).toBeDefined();
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        for (const stmt of statements ?? []) {
+          const action = stmt.Action as string | string[];
+          const resource = stmt.Resource as unknown;
+          const isAuthOnly = Array.isArray(action)
+            ? action.length === 1 && action[0] === "ecr:GetAuthorizationToken"
+            : action === "ecr:GetAuthorizationToken";
+          if (isAuthOnly) {
+            continue;
+          }
+          // Walk the Resource value (string or array); fail if any bare
+          // `"*"` slips in. Tokenized ARNs (Fn::Join / Ref) are objects,
+          // not strings, so this assertion only blocks the literal wild.
+          const list = Array.isArray(resource) ? resource : [resource];
+          for (const r of list) {
+            expect(r).not.toBe("*");
+          }
+        }
+      });
+
+      // -- Category 3b: deploy-role iam:PassRole posture --
+      //
+      // The deploy role grants iam:PassRole on the two task-side roles.
+      // Without the `iam:PassedToService=ecs-tasks.amazonaws.com`
+      // condition, the deploy workflow could pass either role to *any*
+      // service principal (Lambda, EC2, EMR, ...). The condition is the
+      // confused-deputy guard; assert it stays.
+      it("deploy role iam:PassRole is conditioned to ecs-tasks.amazonaws.com", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const passRoleStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("iam:PassRole")
+            : action === "iam:PassRole";
+        });
+        expect(passRoleStmt).toBeDefined();
+        const condition = passRoleStmt?.Condition as
+          | { StringEquals?: Record<string, string> }
+          | undefined;
+        expect(condition?.StringEquals?.["iam:PassedToService"]).toBe(
+          "ecs-tasks.amazonaws.com",
+        );
+      });
+
+      // -- Category 4: standalone CfnSecurityGroupIngress count --
+      //
+      // Three SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
+      // the rules co-located with the listeners they support (see SG
+      // comment in app-stack.ts). A future PR that adds a 4th wildcard
+      // ingress (e.g. `0.0.0.0/0` to a workload SG) should fail this
+      // assertion before review.
+      it("emits exactly three standalone AWS::EC2::SecurityGroupIngress resources", () => {
+        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 3);
+        const ingress = template.findResources(
+          "AWS::EC2::SecurityGroupIngress",
+        );
+        const cidrIngressCount = Object.values(ingress).filter(
+          (r) => r.Properties?.CidrIp === "0.0.0.0/0",
+        ).length;
+        // Exactly one rule is allowed to use 0.0.0.0/0 (the public ALB's
+        // :80 ingress); a future addition of a wildcard rule on a
+        // workload SG must come through review.
+        expect(cidrIngressCount).toBe(1);
+      });
+
+      // -- Category 2 (post-deploy gap): no target group spans more than
+      //    one load balancer (AWS-side constraint, #431 blocker #6).
+      //
+      // AWS enforces a strict 1:1 relationship between a target group and
+      // a load balancer: the second listener-create on a shared TG fails
+      // with "target groups cannot be associated with more than one load
+      // balancer." CDK synth accepts the shape; the deploy rejects it.
+      // The fix is one TG per ALB. This guard walks every listener (and
+      // its rules) in the template, maps each TG reference to the
+      // listener's parent LB, and fails if a TG is reachable from more
+      // than one distinct LB.
+      it("no target group is referenced by listeners on more than one ALB", () => {
+        const listeners = template.findResources(
+          "AWS::ElasticLoadBalancingV2::Listener",
+        );
+        const rules = template.findResources(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+        );
+        // Map listener logical-id -> LB logical-id.
+        const listenerToLb = new Map<string, string>();
+        for (const [id, r] of Object.entries(listeners)) {
+          const lbRef = (r.Properties?.LoadBalancerArn as { Ref?: string } | undefined)
+            ?.Ref;
+          if (typeof lbRef === "string") {
+            listenerToLb.set(id, lbRef);
+          }
+        }
+        // Walk each listener's default actions + each rule's actions for
+        // TargetGroupArn refs; collect TG -> LBs seen.
+        const tgToLbs = new Map<string, Set<string>>();
+        const collect = (listenerId: string, actions: unknown) => {
+          const lb = listenerToLb.get(listenerId);
+          if (lb === undefined) return;
+          for (const a of (actions as Array<Record<string, unknown>> | undefined) ?? []) {
+            const tgArn = (a.TargetGroupArn as { Ref?: string } | undefined)?.Ref;
+            if (typeof tgArn === "string") {
+              if (!tgToLbs.has(tgArn)) tgToLbs.set(tgArn, new Set());
+              tgToLbs.get(tgArn)!.add(lb);
+            }
+            // ForwardConfig.TargetGroups (multi-TG weighted forward).
+            const fc = a.ForwardConfig as
+              | { TargetGroups?: Array<Record<string, unknown>> }
+              | undefined;
+            for (const tg of fc?.TargetGroups ?? []) {
+              const arn = (tg.TargetGroupArn as { Ref?: string } | undefined)?.Ref;
+              if (typeof arn === "string") {
+                if (!tgToLbs.has(arn)) tgToLbs.set(arn, new Set());
+                tgToLbs.get(arn)!.add(lb);
+              }
+            }
+          }
+        };
+        for (const [id, r] of Object.entries(listeners)) {
+          collect(id, r.Properties?.DefaultActions);
+        }
+        for (const r of Object.values(rules)) {
+          const listenerRef = (r.Properties?.ListenerArn as { Ref?: string } | undefined)
+            ?.Ref;
+          if (typeof listenerRef === "string") {
+            collect(listenerRef, r.Properties?.Actions);
+          }
+        }
+        // Every TG that appears must belong to exactly one ALB.
+        const violations: string[] = [];
+        for (const [tg, lbs] of tgToLbs.entries()) {
+          if (lbs.size > 1) {
+            violations.push(`TG ${tg} reachable from LBs: ${[...lbs].sort().join(", ")}`);
+          }
+        }
+        expect(violations).toEqual([]);
+      });
+
+      // -- Category 5: AWS-side name-length constraints --
+      //
+      // ALB names are bounded at 32 chars and TG names at 32 chars. IAM
+      // role names are bounded at 64 chars. CDK synth accepts longer
+      // values and the deploy fails. `prod`/`staging` are safe today, but
+      // a future env literal (e.g. `dev-uat`) could overflow. Walk every
+      // ALB/TG/IAM-role name and assert the limit.
+      it("every ALB, target-group, and IAM role name fits the AWS-side length limit", () => {
+        const lbs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        );
+        for (const [id, r] of Object.entries(lbs)) {
+          const name = r.Properties?.Name as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 32 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
+        const tgs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+        );
+        for (const [id, r] of Object.entries(tgs)) {
+          const name = r.Properties?.Name as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 32 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
+        const roles = template.findResources("AWS::IAM::Role");
+        for (const [id, r] of Object.entries(roles)) {
+          const name = r.Properties?.RoleName as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 64 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
       });
     });
   });
