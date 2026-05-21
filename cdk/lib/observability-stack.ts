@@ -36,12 +36,19 @@ const NOTIFY_SUBSCRIBER_EMAIL = "paa2013@med.cornell.edu";
 const MONTHLY_BUDGET_USD = 600;
 
 /**
- * Cost Anomaly Detection threshold in USD/day. The baseline daily spend at
- * this writing is ~$14; a 4x spike (the kind we want to catch) is north of
- * $50, while a normal 1.5x bumpy day is under $20. Re-tune after the first
- * month of post-launch data.
+ * Cost Anomaly Detection threshold in USD. Compared against
+ * `ANOMALY_TOTAL_IMPACT_ABSOLUTE` on the subscription; the baseline daily
+ * spend at this writing is ~$14, a 4x spike (the kind we want to catch) is
+ * north of $50, and a normal 1.5x bumpy day is under $20. Re-tune after the
+ * first month of post-launch data.
+ *
+ * Note on naming: the prior `COST_ANOMALY_DAILY_USD` name was a leftover from
+ * `frequency: "DAILY"` on the subscription, which is incompatible with SNS
+ * subscribers (Cost Explorer rejects DAILY/WEEKLY + SNS at deploy time with
+ * HTTP 400 -- see #440). The constant describes the *threshold*, not a
+ * cadence; the subscription itself is IMMEDIATE.
  */
-const COST_ANOMALY_DAILY_USD = 50;
+const COST_ANOMALY_THRESHOLD_USD = 50;
 
 /** Latency SLO target in milliseconds. Mirrored from docs/SLOs.md. */
 const LATENCY_P99_THRESHOLD_MS = 1500;
@@ -51,7 +58,7 @@ const LATENCY_P99_THRESHOLD_MS = 1500;
  * 5-minute window, repeating for two consecutive windows. Distinguishes a
  * confused user (1-3 denials in a row) from a misconfigured bot or a
  * predicate regression. Re-tune after the first month of staging traffic,
- * same loop as COST_ANOMALY_DAILY_USD; tracked in docs/SLOs.md.
+ * same loop as COST_ANOMALY_THRESHOLD_USD; tracked in docs/SLOs.md.
  */
 const EDIT_AUTHZ_DENIED_THRESHOLD = 10;
 
@@ -561,9 +568,17 @@ export class SpsObservabilityStack extends Stack {
         },
       );
 
+      // `frequency` must be IMMEDIATE when any subscriber is `Type: SNS`;
+      // Cost Explorer rejects DAILY/WEEKLY + SNS at deploy time with HTTP 400
+      // ("Daily or weekly frequencies only support Email subscriptions"). CDK
+      // does not synth-validate this combinatoric constraint -- see #440 and
+      // the synth-time guard in `test/observability-stack.test.ts`.
+      // Semantically correct: the threshold below describes the *condition*
+      // for an alert; IMMEDIATE means alert on detection, matching the rest
+      // of this stack's posture.
       new ce.CfnAnomalySubscription(this, "AnomalySubscription", {
         subscriptionName: "sps-anomaly-subscription",
-        frequency: "DAILY",
+        frequency: "IMMEDIATE",
         monitorArnList: [anomalyMonitor.ref],
         subscribers: [
           {
@@ -576,7 +591,7 @@ export class SpsObservabilityStack extends Stack {
           Dimensions: {
             Key: "ANOMALY_TOTAL_IMPACT_ABSOLUTE",
             MatchOptions: ["GREATER_THAN_OR_EQUAL"],
-            Values: [String(COST_ANOMALY_DAILY_USD)],
+            Values: [String(COST_ANOMALY_THRESHOLD_USD)],
           },
         }),
       });

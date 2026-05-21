@@ -310,6 +310,37 @@ describe("SpsObservabilityStack", () => {
       });
     });
 
+    // Footgun #7 (#440): Cost Explorer rejects `Frequency: DAILY|WEEKLY` when
+    // any subscriber is `Type: SNS` -- HTTP 400 at deploy time, no CDK synth
+    // signal. Mirror the #429 / #431 pattern: assert the legal value AND
+    // assert zero of the illegal ones, so a future PR that flips back to
+    // DAILY for any reason is caught at vitest time.
+    it("AnomalySubscription frequency is IMMEDIATE (Cost Explorer + SNS subscriber constraint, Footgun #7)", () => {
+      template.hasResourceProperties("AWS::CE::AnomalySubscription", {
+        Frequency: "IMMEDIATE",
+      });
+      template.resourcePropertiesCountIs(
+        "AWS::CE::AnomalySubscription",
+        { Frequency: Match.stringLikeRegexp("DAILY|WEEKLY") },
+        0,
+      );
+    });
+
+    it("AnomalySubscription subscribers are all Type: SNS pointed at notify topic", () => {
+      // Belt-and-suspenders for the Frequency constraint above: if the
+      // subscriber list ever gains an EMAIL row, that's fine on its own, but
+      // the Frequency=IMMEDIATE assertion must still hold (any SNS subscriber
+      // forces IMMEDIATE -- mixing EMAIL doesn't relax it).
+      const subs = template.findResources("AWS::CE::AnomalySubscription");
+      const props = Object.values(subs)[0]?.Properties as
+        | { Subscribers?: Array<{ Type: string }> }
+        | undefined;
+      expect(props?.Subscribers).toBeDefined();
+      expect(props!.Subscribers!.length).toBeGreaterThanOrEqual(1);
+      const snsSubs = props!.Subscribers!.filter((s) => s.Type === "SNS");
+      expect(snsSubs.length).toBeGreaterThanOrEqual(1);
+    });
+
     it("grants budgets.amazonaws.com and costalerts.amazonaws.com publish on the notify topic only (B23)", () => {
       const policies = template.findResources("AWS::SNS::TopicPolicy");
       // Exactly one topic policy in the stack — on the notify topic.
