@@ -903,6 +903,171 @@ describe("AppStack", () => {
         expect(serialized).toMatch(/OtelCollectorLogGroup/);
       });
     });
+
+    // ----------------------------------------------------------------
+    // Audit pass for issue #431 § Scope (b).
+    //
+    // Five categories. The synth-time guards below close the gaps the
+    // walk surfaced; categories with no gap are documented in the PR
+    // body, not here.
+    // ----------------------------------------------------------------
+    describe("Audit (#431) -- deploy-only-gap preemption", () => {
+      // -- Category 1: string-name AWS API refs --
+      //
+      // SecretsStack defines six entries; AppStack reads them by name via
+      // `Secret.fromSecretNameV2`. A rename in SecretsStack that drops the
+      // matching AppStack entry would silently dangle the reference -- the
+      // synthesized template still resolves to a `secretsmanager:` ARN
+      // template that doesn't exist, and AWS rejects only at task-start
+      // (or, for the listener-rule dynamic ref, at deploy time). Assert
+      // every expected secret name appears at least once in the synth.
+      it("references all six AppStack-consumed Secrets Manager names exactly as SecretsStack defines them", () => {
+        const expected = [
+          "scholars/prod/db/app-rw",
+          "scholars/prod/db/app-ro",
+          "scholars/prod/opensearch/app",
+          "scholars/prod/revalidate-token",
+          "scholars/saml-sp/prod/private-key",
+          "scholars/prod/edge/origin-shared-secret",
+        ];
+        const json = JSON.stringify(template.toJSON());
+        for (const name of expected) {
+          expect(json).toContain(name);
+        }
+      });
+
+      // -- Category 3a: IAM `*` audit on the task-execution role --
+      //
+      // The deploy-role test already asserts "every Resource: `*` is the
+      // ecr:GetAuthorizationToken exception". The same posture must hold
+      // for the task-execution role -- otherwise a future PR can grant a
+      // task-side `s3:*` or similar before review.
+      it("the task-execution role policy uses `*` only on ecr:GetAuthorizationToken (account-level exception)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" && r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        expect(execPolicy).toBeDefined();
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        for (const stmt of statements ?? []) {
+          const action = stmt.Action as string | string[];
+          const resource = stmt.Resource as unknown;
+          const isAuthOnly = Array.isArray(action)
+            ? action.length === 1 && action[0] === "ecr:GetAuthorizationToken"
+            : action === "ecr:GetAuthorizationToken";
+          if (isAuthOnly) {
+            continue;
+          }
+          // Walk the Resource value (string or array); fail if any bare
+          // `"*"` slips in. Tokenized ARNs (Fn::Join / Ref) are objects,
+          // not strings, so this assertion only blocks the literal wild.
+          const list = Array.isArray(resource) ? resource : [resource];
+          for (const r of list) {
+            expect(r).not.toBe("*");
+          }
+        }
+      });
+
+      // -- Category 3b: deploy-role iam:PassRole posture --
+      //
+      // The deploy role grants iam:PassRole on the two task-side roles.
+      // Without the `iam:PassedToService=ecs-tasks.amazonaws.com`
+      // condition, the deploy workflow could pass either role to *any*
+      // service principal (Lambda, EC2, EMR, ...). The condition is the
+      // confused-deputy guard; assert it stays.
+      it("deploy role iam:PassRole is conditioned to ecs-tasks.amazonaws.com", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        const statements = deployPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const passRoleStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("iam:PassRole")
+            : action === "iam:PassRole";
+        });
+        expect(passRoleStmt).toBeDefined();
+        const condition = passRoleStmt?.Condition as
+          | { StringEquals?: Record<string, string> }
+          | undefined;
+        expect(condition?.StringEquals?.["iam:PassedToService"]).toBe(
+          "ecs-tasks.amazonaws.com",
+        );
+      });
+
+      // -- Category 4: standalone CfnSecurityGroupIngress count --
+      //
+      // Three SG-to-SG (or CIDR) ingresses are intentionally L1 to keep
+      // the rules co-located with the listeners they support (see SG
+      // comment in app-stack.ts). A future PR that adds a 4th wildcard
+      // ingress (e.g. `0.0.0.0/0` to a workload SG) should fail this
+      // assertion before review.
+      it("emits exactly three standalone AWS::EC2::SecurityGroupIngress resources", () => {
+        template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 3);
+        const ingress = template.findResources(
+          "AWS::EC2::SecurityGroupIngress",
+        );
+        const cidrIngressCount = Object.values(ingress).filter(
+          (r) => r.Properties?.CidrIp === "0.0.0.0/0",
+        ).length;
+        // Exactly one rule is allowed to use 0.0.0.0/0 (the public ALB's
+        // :80 ingress); a future addition of a wildcard rule on a
+        // workload SG must come through review.
+        expect(cidrIngressCount).toBe(1);
+      });
+
+      // -- Category 5: AWS-side name-length constraints --
+      //
+      // ALB names are bounded at 32 chars and TG names at 32 chars. IAM
+      // role names are bounded at 64 chars. CDK synth accepts longer
+      // values and the deploy fails. `prod`/`staging` are safe today, but
+      // a future env literal (e.g. `dev-uat`) could overflow. Walk every
+      // ALB/TG/IAM-role name and assert the limit.
+      it("every ALB, target-group, and IAM role name fits the AWS-side length limit", () => {
+        const lbs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        );
+        for (const [id, r] of Object.entries(lbs)) {
+          const name = r.Properties?.Name as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 32 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
+        const tgs = template.findResources(
+          "AWS::ElasticLoadBalancingV2::TargetGroup",
+        );
+        for (const [id, r] of Object.entries(tgs)) {
+          const name = r.Properties?.Name as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 32 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
+        const roles = template.findResources("AWS::IAM::Role");
+        for (const [id, r] of Object.entries(roles)) {
+          const name = r.Properties?.RoleName as string | undefined;
+          if (typeof name === "string") {
+            expect({ id, name, len: name.length, ok: name.length <= 64 })
+              .toEqual({ id, name, len: name.length, ok: true });
+          }
+        }
+      });
+    });
   });
 
   describe("staging", () => {
