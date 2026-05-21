@@ -169,6 +169,28 @@ Three pre-built dashboards:
 - **App dashboard**: Fargate task count, CPU/memory utilization, ALB target response time p50/p95/p99.
 - **Data dashboard**: Aurora connections, query latency p99, OpenSearch indexing latency, ETL run history.
 
+## Recovery objectives
+
+| Objective | Target | Backed by |
+|---|---|---|
+| **RPO** (Recovery Point Objective) — maximum acceptable data loss in a recovery event | **≤ 24 h** | Aurora PITR continuous backup (5-minute granularity, 14-day window) + daily AWS Backup vault snapshot. In normal operation, recovery to within ~10 minutes of the incident is achievable. |
+| **RTO** (Recovery Time Objective) — maximum acceptable wall-clock between incident decision and a validated, customer-serving cluster | **≤ 4 h** | Per-step budget: provision replacement Aurora cluster from PITR / snapshot (≈ 30 min, see [`docs/restore-drill-runbook.md`](./restore-drill-runbook.md) for measured wall-clocks) + DNS / ALB cutover (≈ 15 min) + warm-cache rebuild on CloudFront (≈ 30 min to ramp the long tail; the hot path is sub-minute). The remainder is buffer for human decision time. |
+
+These targets are justified by the workload's character: SPS is read-mostly, edit traffic is staff-only (B02 authz), and the corpus regenerates from authoritative upstream sources (ReCiter, ReciterAI, RePORTER, ED) on a nightly cadence — so a "lost 24 hours" worst case is recoverable by re-running ETL, not by reconstructing data from out-of-band copies.
+
+**Backup retention** (from `cdk/lib/config.ts`):
+
+| Env | Aurora PITR window | AWS Backup vault retention | Cross-region copy retention |
+|---|---|---|---|
+| staging | 14 d | 14 d | 14 d |
+| prod | 14 d | 35 d | 35 d |
+
+The AWS Backup plan's `copyAction` (`cdk/lib/data-stack.ts:355-361`) writes each daily recovery point to `sps-dr-backup-vault-${env}` in us-west-2, closing the single-region-failure recovery path. The DR-region restore variant is documented in the restore-drill runbook (Variant B) and intentionally not exercised in routine quarterly drills — PITR (Variant A) certifies the mechanism end-to-end.
+
+**Verification cadence.** The restore drill runs quarterly (first Tuesday of each calendar quarter) and any time `data-stack.ts`, the backup plan, or the engine version changes. The first drill ran 2026-05-21 at 19 min wall-clock; the runbook tracks subsequent drills.
+
+**What an actual RTO-bound incident looks like.** A drill is not a real recovery — drills target the mechanism, real incidents bring data-side validation, stakeholder communication, and DNS-propagation tails. Budget the full 4 h envelope for live recovery; the 19-min drill number is the lower bound, not the planning number.
+
 ## Incident: "pages are slow"
 
 This is the runbook for the symptom we hit in dev. In production the resolution is different at each layer:
