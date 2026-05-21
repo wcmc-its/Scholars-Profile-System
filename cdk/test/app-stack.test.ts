@@ -45,14 +45,14 @@ describe("AppStack", () => {
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
-      it("creates two ALBs (one internet-facing, one internal), one target group, two listeners", () => {
+      it("creates two ALBs (one internet-facing, one internal), two target groups (one per ALB, #431 blocker #6), two listeners", () => {
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::LoadBalancer",
           2,
         );
         template.resourceCountIs(
           "AWS::ElasticLoadBalancingV2::TargetGroup",
-          1,
+          2,
         );
         template.resourceCountIs("AWS::ElasticLoadBalancingV2::Listener", 2);
 
@@ -262,21 +262,25 @@ describe("AppStack", () => {
         expect(dependsOn.some((d) => d.startsWith("OriginVerifiedForward"))).toBe(true);
       });
 
-      it("wires the ECS service to the target group via a loadBalancers mapping (manual L1 attach)", () => {
+      it("wires the ECS service to BOTH target groups via the loadBalancers mapping (manual L1 attach)", () => {
         // The L2 attachToApplicationTargetGroup helper auto-establishes SG
         // ingress rules from each ALB SG -- with the internal ALB's SG in
         // AppStack and the app SG in NetworkStack that closes a cycle.
-        // The manual L1 attach skips the auto-wire; this assertion
-        // documents that the service still ends up registered with the TG.
-        template.hasResourceProperties("AWS::ECS::Service", {
-          LoadBalancers: Match.arrayWith([
-            Match.objectLike({
-              ContainerName: "app",
-              ContainerPort: 3000,
-              TargetGroupArn: Match.anyValue(),
-            }),
-          ]),
-        });
+        // The manual L1 attach skips the auto-wire and registers the
+        // running app container with both TGs (one per ALB after the
+        // #431 blocker #6 split).
+        const services = template.findResources("AWS::ECS::Service");
+        const ids = Object.keys(services);
+        expect(ids).toHaveLength(1);
+        const lbs = services[ids[0]!]?.Properties?.LoadBalancers as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(lbs).toHaveLength(2);
+        for (const lb of lbs ?? []) {
+          expect(lb.ContainerName).toBe("app");
+          expect(lb.ContainerPort).toBe(3000);
+          expect(lb.TargetGroupArn).toBeDefined();
+        }
       });
     });
 
@@ -469,24 +473,26 @@ describe("AppStack", () => {
         expect(internalLb?.Properties?.Name).toBe("sps-internal-prod");
       });
 
-      it("the target group uses the literal /api/health (PR #407) and a 30-second deregistration delay", () => {
-        template.hasResourceProperties(
-          "AWS::ElasticLoadBalancingV2::TargetGroup",
-          {
-            Name: "sps-tg-app-prod",
-            Port: 3000,
-            Protocol: "HTTP",
-            TargetType: "ip",
-            HealthCheckPath: "/api/health",
-            HealthyThresholdCount: 2,
-            TargetGroupAttributes: Match.arrayWith([
-              Match.objectLike({
-                Key: "deregistration_delay.timeout_seconds",
-                Value: "30",
-              }),
-            ]),
-          },
-        );
+      it("both target groups use the literal /api/health (PR #407) and a 30-second deregistration delay", () => {
+        for (const name of ["sps-tg-pub-prod", "sps-tg-int-prod"]) {
+          template.hasResourceProperties(
+            "AWS::ElasticLoadBalancingV2::TargetGroup",
+            {
+              Name: name,
+              Port: 3000,
+              Protocol: "HTTP",
+              TargetType: "ip",
+              HealthCheckPath: "/api/health",
+              HealthyThresholdCount: 2,
+              TargetGroupAttributes: Match.arrayWith([
+                Match.objectLike({
+                  Key: "deregistration_delay.timeout_seconds",
+                  Value: "30",
+                }),
+              ]),
+            },
+          );
+        }
       });
 
       it("the public ALB listener is HTTP-only :80 (HTTPS lands in B07+B14)", () => {
@@ -1040,6 +1046,78 @@ describe("AppStack", () => {
         // :80 ingress); a future addition of a wildcard rule on a
         // workload SG must come through review.
         expect(cidrIngressCount).toBe(1);
+      });
+
+      // -- Category 2 (post-deploy gap): no target group spans more than
+      //    one load balancer (AWS-side constraint, #431 blocker #6).
+      //
+      // AWS enforces a strict 1:1 relationship between a target group and
+      // a load balancer: the second listener-create on a shared TG fails
+      // with "target groups cannot be associated with more than one load
+      // balancer." CDK synth accepts the shape; the deploy rejects it.
+      // The fix is one TG per ALB. This guard walks every listener (and
+      // its rules) in the template, maps each TG reference to the
+      // listener's parent LB, and fails if a TG is reachable from more
+      // than one distinct LB.
+      it("no target group is referenced by listeners on more than one ALB", () => {
+        const listeners = template.findResources(
+          "AWS::ElasticLoadBalancingV2::Listener",
+        );
+        const rules = template.findResources(
+          "AWS::ElasticLoadBalancingV2::ListenerRule",
+        );
+        // Map listener logical-id -> LB logical-id.
+        const listenerToLb = new Map<string, string>();
+        for (const [id, r] of Object.entries(listeners)) {
+          const lbRef = (r.Properties?.LoadBalancerArn as { Ref?: string } | undefined)
+            ?.Ref;
+          if (typeof lbRef === "string") {
+            listenerToLb.set(id, lbRef);
+          }
+        }
+        // Walk each listener's default actions + each rule's actions for
+        // TargetGroupArn refs; collect TG -> LBs seen.
+        const tgToLbs = new Map<string, Set<string>>();
+        const collect = (listenerId: string, actions: unknown) => {
+          const lb = listenerToLb.get(listenerId);
+          if (lb === undefined) return;
+          for (const a of (actions as Array<Record<string, unknown>> | undefined) ?? []) {
+            const tgArn = (a.TargetGroupArn as { Ref?: string } | undefined)?.Ref;
+            if (typeof tgArn === "string") {
+              if (!tgToLbs.has(tgArn)) tgToLbs.set(tgArn, new Set());
+              tgToLbs.get(tgArn)!.add(lb);
+            }
+            // ForwardConfig.TargetGroups (multi-TG weighted forward).
+            const fc = a.ForwardConfig as
+              | { TargetGroups?: Array<Record<string, unknown>> }
+              | undefined;
+            for (const tg of fc?.TargetGroups ?? []) {
+              const arn = (tg.TargetGroupArn as { Ref?: string } | undefined)?.Ref;
+              if (typeof arn === "string") {
+                if (!tgToLbs.has(arn)) tgToLbs.set(arn, new Set());
+                tgToLbs.get(arn)!.add(lb);
+              }
+            }
+          }
+        };
+        for (const [id, r] of Object.entries(listeners)) {
+          collect(id, r.Properties?.DefaultActions);
+        }
+        for (const r of Object.values(rules)) {
+          const listenerRef = (r.Properties?.ListenerArn as { Ref?: string } | undefined)
+            ?.Ref;
+          if (typeof listenerRef === "string") {
+            collect(listenerRef, r.Properties?.Actions);
+          }
+        }
+        // Every TG that appears must belong to exactly one ALB.
+        const violations: string[] = [];
+        for (const [tg, lbs] of tgToLbs.entries()) {
+          if (lbs.size > 1) {
+            violations.push(`TG ${tg} reachable from LBs: ${[...lbs].sort().join(", ")}`);
+          }
+        }
+        expect(violations).toEqual([]);
       });
 
       // -- Category 5: AWS-side name-length constraints --
