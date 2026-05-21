@@ -15,6 +15,15 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "Ref": "NotifyTopic5FFA0016",
       },
     },
+    "OncallRelayFunctionArn": {
+      "Description": "Lambda that relays page topic SNS events to a Teams workflow as Adaptive Card JSON (B27). Reads workflow URL from scholars/{env}/oncall/teams-webhook-url at cold start.",
+      "Value": {
+        "Fn::GetAtt": [
+          "OncallRelayFunction9974C7E1",
+          "Arn",
+        ],
+      },
+    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -353,6 +362,186 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::SNS::Subscription",
     },
+    "OncallRelayErrorsD5425B8E": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "NotifyTopic5FFA0016",
+          },
+        ],
+        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors in the last minute (prod). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmName": "sps-oncall-relay-errors-prod",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "OncallRelayFunction9974C7E1",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "Errors",
+        "Namespace": "AWS/Lambda",
+        "Period": 60,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OncallRelayFunction9974C7E1": {
+      "DependsOn": [
+        "OncallRelayFunctionServiceRoleDefaultPolicy2861895F",
+        "OncallRelayFunctionServiceRole66F12272",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "fae4b883d0df861466b986cdf05b14f04a1ab2828112857470e1add2710c1e27.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "TEAMS_WEBHOOK_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/oncall/teams-webhook-url",
+                ],
+              ],
+            },
+          },
+        },
+        "FunctionName": "sps-oncall-relay-prod",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OncallRelayLogGroup260778A1",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "OncallRelayFunctionServiceRole66F12272",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 10,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "OncallRelayFunctionAlarmTopic6B29E7EA": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
+    "OncallRelayFunctionAllowInvokeSpsObservabilityprodAlarmTopic4D01AF6E49B56A35": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "OncallRelayFunctionServiceRole66F12272": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "OncallRelayFunctionServiceRoleDefaultPolicy2861895F": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/oncall/teams-webhook-url-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OncallRelayFunctionServiceRoleDefaultPolicy2861895F",
+        "Roles": [
+          {
+            "Ref": "OncallRelayFunctionServiceRole66F12272",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "OncallRelayLogGroup260778A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-oncall-relay-prod",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {
         "AlarmActions": [
@@ -639,6 +828,15 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "Ref": "NotifyTopic5FFA0016",
       },
     },
+    "OncallRelayFunctionArn": {
+      "Description": "Lambda that relays page topic SNS events to a Teams workflow as Adaptive Card JSON (B27). Reads workflow URL from scholars/{env}/oncall/teams-webhook-url at cold start.",
+      "Value": {
+        "Fn::GetAtt": [
+          "OncallRelayFunction9974C7E1",
+          "Arn",
+        ],
+      },
+    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -845,6 +1043,186 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::SNS::Subscription",
+    },
+    "OncallRelayErrorsD5425B8E": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "NotifyTopic5FFA0016",
+          },
+        ],
+        "AlarmDescription": "On-call relay Lambda surfaced one or more invocation errors in the last minute (staging). Paging-path delivery is at risk -- check Lambda CloudWatch logs and the Teams workflow URL in Secrets Manager. Routed to the notify topic (email) because the page topic flows through this Lambda.",
+        "AlarmName": "sps-oncall-relay-errors-staging",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "DatapointsToAlarm": 1,
+        "Dimensions": [
+          {
+            "Name": "FunctionName",
+            "Value": {
+              "Ref": "OncallRelayFunction9974C7E1",
+            },
+          },
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "Errors",
+        "Namespace": "AWS/Lambda",
+        "Period": 60,
+        "Statistic": "Sum",
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching",
+      },
+      "Type": "AWS::CloudWatch::Alarm",
+    },
+    "OncallRelayFunction9974C7E1": {
+      "DependsOn": [
+        "OncallRelayFunctionServiceRoleDefaultPolicy2861895F",
+        "OncallRelayFunctionServiceRole66F12272",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "fae4b883d0df861466b986cdf05b14f04a1ab2828112857470e1add2710c1e27.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "TEAMS_WEBHOOK_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/oncall/teams-webhook-url",
+                ],
+              ],
+            },
+          },
+        },
+        "FunctionName": "sps-oncall-relay-staging",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "OncallRelayLogGroup260778A1",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "OncallRelayFunctionServiceRole66F12272",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 10,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "OncallRelayFunctionAlarmTopic6B29E7EA": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
+    "OncallRelayFunctionAllowInvokeSpsObservabilitystagingAlarmTopicB2A49C20BFB9DD1C": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Ref": "AlarmTopicD01E77F9",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "OncallRelayFunctionServiceRole66F12272": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "OncallRelayFunctionServiceRoleDefaultPolicy2861895F": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/oncall/teams-webhook-url-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "OncallRelayFunctionServiceRoleDefaultPolicy2861895F",
+        "Roles": [
+          {
+            "Ref": "OncallRelayFunctionServiceRole66F12272",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "OncallRelayLogGroup260778A1": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-oncall-relay-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
     },
     "OpenSearchClusterRedAlarm2725A3FB": {
       "Properties": {

@@ -448,6 +448,25 @@ Snapshot diff per env: +1 `AWS::SNS::Topic` (notify), +1 `AWS::SNS::Subscription
 
 See `docs/oncall.md` for the full on-call topology, rollout runbook, diagnostics, and the ServiceNow follow-on direction.
 
+### ObservabilityStack -- Lambda relay to Teams (B27)
+
+B23 documented `aws sns subscribe --protocol https --endpoint <power-automate-url>` against the page topic; empirical testing on 2026-05-21 disproved the path. The Power Automate `Request` trigger enforces a JSON body type at the trigger level (not at schema validation) and SNS hardcodes `Content-Type: application/x-www-form-urlencoded` on HTTPS delivery, so the subscribe call returns HTTP 400 and the subscription silently never lands. The fix is a Lambda inside ObservabilityStack that subscribes to the page topic and POSTs an Adaptive Card to the workflow URL with `Content-Type: application/json` (which the trigger accepts; verified end-to-end). See `docs/oncall.md § Gotchas: Power Automate Request trigger requires JSON body` for the evidence trail.
+
+Per-env additions (the first Lambda in the CDK repo):
+
+- `sps-oncall-relay-${env}` -- `NodejsFunction`, runtime `nodejs22.x`, 256 MB, 10 s timeout, no VPC attach. Source in `cdk/lambda/oncall-relay/` (own npm workspace; `esbuild` bundles at synth time, `@aws-sdk/client-secrets-manager` marked external because the Lambda runtime provides it). Cold start ~400 ms; warm-path p50 ~200 ms.
+- Execution role with the `AWSLambdaBasicExecutionRole` managed policy and a single inline grant of `secretsmanager:GetSecretValue` on `scholars/${env}/oncall/teams-webhook-url` (the same secret B23 declared). No wildcard actions, no wildcard resources.
+- Own log group `/aws/lambda/sps-oncall-relay-${env}` with 30-day retention (matches the B22 discipline). Explicit log-group construct rather than `NodejsFunction.logRetention` -- the latter pulls a custom-resource Lambda and IAM role into the stack, which would double the Lambda count and break the SPEC's 1-Lambda assertion.
+- SNS subscription on the page topic (`Protocol: lambda`, endpoint = relay function ARN). The Lambda is the sole subscriber on the page topic.
+- `OncallRelayErrors` CloudWatch alarm on `AWS/Lambda Errors >= 1` over 1 minute, `TreatMissingData: notBreaching`. Routes to the **notify** topic (email), not the page topic -- the page topic flows through this Lambda; routing the failure-of-itself alarm back through itself either silently flaps or recursively masks the original alarm.
+- `OncallRelayFunctionArn` CFN output.
+
+Deliberate non-VPC decision: the Lambda's only outbound URL is sourced from a secret we control, the handler accepts no user-controlled URL inputs (SSRF surface is nil), and VPC-attaching would force a NAT for one HTTPS POST per alarm. If a future requirement adds VPC attachment, also add a NAT gateway or VPC endpoint -- the Lambda has no other egress path.
+
+Lambda env var key is `TEAMS_WEBHOOK_SECRET_ARN`. The URL itself is **never** in env vars and **never** logged. The handler logs structured `event:"oncall_relay"` lines carrying alarm name, outcome (`delivered` / `upstream_error` / `parse_error`), and HTTP status only.
+
+Snapshot diff per env: +1 `AWS::Lambda::Function`, +1 `AWS::IAM::Role`, +1 `AWS::IAM::Policy`, +1 `AWS::Lambda::Permission`, +1 `AWS::SNS::Subscription`, +1 `AWS::Logs::LogGroup`, +1 `AWS::CloudWatch::Alarm`, +1 `Output`. Larger than typical (first-Lambda blast radius) but bounded and reviewable.
+
 ## Phase 4 — EdgeStack (B07 + B14)
 
 CloudFront distribution fronting the `sps-public-${env}` ALB. Eight cache behaviors implementing `docs/cloudfront-cache-spec.md` (one cacheable default + seven uncacheable carve-outs for writer routes, SSO, mutating endpoints, the health probe, telemetry, and on-demand exports), plus the B14 legacy-VIVO redirect layer in `middleware.ts`. WAF (B26 #125) and security headers beyond HSTS (B21 #120) attach to the same distribution / response-headers policy in follow-on rows without restructuring it.
