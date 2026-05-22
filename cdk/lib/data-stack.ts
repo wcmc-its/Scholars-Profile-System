@@ -2,6 +2,7 @@ import {
   CfnOutput,
   Duration,
   RemovalPolicy,
+  SecretValue,
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
@@ -56,8 +57,6 @@ export class DataStack extends Stack {
   public readonly auroraMasterSecret: secretsmanager.ISecret;
   /** OpenSearch domain in private subnets. */
   public readonly opensearchDomain: opensearchservice.Domain;
-  /** IAM role that is the OpenSearch fine-grained access control master user. */
-  public readonly opensearchMasterRole: iam.Role;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -215,29 +214,25 @@ export class DataStack extends Stack {
     // OpenSearch domain.
     //
     // Fine-grained access control with an IAM master and the internal user
-    // database enabled. The master is the IAM role below (no master
-    // user/password pair, per Phase 1 sign-off); the internal user database
-    // is on so app and ETL can authenticate via basic auth (the
-    // `scholars/{env}/opensearch/{app,etl}` secrets in SecretsStack — see
-    // PRODUCTION_ADDENDUM § Secrets). With FGAC, AWS supports both
-    // simultaneously: `MasterUserOptions.MasterUserARN` chooses the IAM
-    // master, and `InternalUserDatabaseEnabled=true` lets the master create
-    // basic-auth internal users via the `_security` API after deploy.
+    // database enabled, with an INTERNAL master user (username + password).
     //
-    // The master role gets `es:ESHttp*` on the domain ARN — required for any
-    // IAM principal to reach the OpenSearch HTTP endpoint (FGAC mapping
-    // alone is necessary but not sufficient; AWS gates the request at the
-    // IAM layer before FGAC sees it).
+    // History (#443): the original config set an IAM master ARN *and*
+    // `InternalUserDatabaseEnabled=true`. AWS does NOT support that
+    // combination -- it silently dropped the master, leaving the deployed
+    // domain with `MasterUserOptions: null` and an un-administrable
+    // `_security` API (a later `update-domain-config` to add the IAM master
+    // was a confirmed no-op). FGAC master is EITHER an IAM ARN (no internal
+    // DB) OR an internal user (with the internal DB). Since the app + ETL
+    // authenticate via HTTP basic auth (`lib/search.ts`, the
+    // `scholars/{env}/opensearch/{app,etl}` secrets), we need the internal
+    // user database, so the master must be an internal user too. Its password
+    // comes from the `scholars/{env}/opensearch/master` secret (SecretsStack
+    // stub, seeded out-of-band per ADR-008 -- no value in CDK). The master
+    // then creates the app/etl internal users via the `_security` API.
     //
     // Multi-AZ-without-standby for prod (two AZs match NetworkStack);
     // single-AZ for staging. Encryption at rest + node-to-node + HTTPS-only.
     // ------------------------------------------------------------------
-    this.opensearchMasterRole = new iam.Role(this, "OpensearchMasterRole", {
-      assumedBy: new iam.AccountRootPrincipal(),
-      roleName: `sps-opensearch-master-${envConfig.envName}`,
-      description: `SPS OpenSearch fine-grained access control master (${envConfig.envName}). Assume from a workstation to administer the domain.`,
-    });
-
     const opensearchMultiAz = envConfig.opensearchDataNodes > 1;
     // OpenSearch validates `len(VPCOptions.SubnetIds) == zone-awareness AZ
     // count` at create time. Default `vpcSubnets` selection on a 2-AZ VPC
@@ -269,38 +264,21 @@ export class DataStack extends Stack {
       nodeToNodeEncryption: true,
       enforceHttps: true,
       tlsSecurityPolicy: opensearchservice.TLSSecurityPolicy.TLS_1_2_PFS,
+      // Internal master user. Providing `masterUserName` + `masterUserPassword`
+      // makes CDK synthesize `InternalUserDatabaseEnabled: true` +
+      // `MasterUserOptions.{MasterUserName,MasterUserPassword}` -- no escape
+      // hatch needed. The password is a Secrets Manager dynamic reference, so
+      // no plaintext value enters CDK source or the template (ADR-008). Seed
+      // `scholars/<env>/opensearch/master` before deploying this stack.
       fineGrainedAccessControl: {
-        masterUserArn: this.opensearchMasterRole.roleArn,
+        masterUserName: "sps_master",
+        masterUserPassword: SecretValue.secretsManager(
+          `scholars/${envConfig.envName}/opensearch/master`,
+        ),
       },
       enableAutoSoftwareUpdate: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });
-
-    // L1 escape hatch: the L2 Domain construct's AdvancedSecurityOptions
-    // type forces an XOR between IAM master and internal-DB master. AWS
-    // OpenSearch itself supports both at once — the IAM master administers,
-    // and InternalUserDatabaseEnabled=true lets that master mint basic-auth
-    // users for the app and ETL roles. Set the missing flag directly on
-    // CfnDomain so the synthesized template carries IAM master +
-    // InternalUserDatabaseEnabled=true together.
-    const cfnOpensearchDomain = this.opensearchDomain.node
-      .defaultChild as opensearchservice.CfnDomain;
-    cfnOpensearchDomain.addPropertyOverride(
-      "AdvancedSecurityOptions.InternalUserDatabaseEnabled",
-      true,
-    );
-
-    // `es:ESHttp*` on the domain ARN. Without this the assumed master role
-    // cannot reach the `_security` API (the IAM gate trips before FGAC
-    // mapping), and the post-deploy bootstrap that creates internal users
-    // fails with `not authorized to perform: es:ESHttpPut`.
-    this.opensearchMasterRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ["es:ESHttp*"],
-        resources: [`${this.opensearchDomain.domainArn}/*`],
-      }),
-    );
 
     // Domain access policy — allow `es:ESHttp*` from any AWS principal.
     //
@@ -398,10 +376,6 @@ export class DataStack extends Stack {
     new CfnOutput(this, "OpenSearchDomainArn", {
       value: this.opensearchDomain.domainArn,
       description: "SPS OpenSearch domain ARN",
-    });
-    new CfnOutput(this, "OpenSearchMasterRoleArn", {
-      value: this.opensearchMasterRole.roleArn,
-      description: "SPS OpenSearch FGAC master role ARN — assume to administer",
     });
     new CfnOutput(this, "BackupPlanArn", {
       value: backupPlan.backupPlanArn,
