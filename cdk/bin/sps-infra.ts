@@ -79,8 +79,10 @@ const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
 });
 
 // EtlStack — Step Functions state machines + cadence/status alarms
-// (B08 + B20). Consumes the AppStack ECS cluster + ECR repo via stack
-// props (CDK auto-wires the cross-stack export). The internal ALB SG id
+// (B08 + B20). Consumes the AppStack ECS cluster + the dedicated ETL ECR
+// repo via stack props (CDK auto-wires the cross-stack export). The ETL
+// image is the `scholars-etl-*` repo, not the standalone app image (#454).
+// The internal ALB SG id
 // is consumed via Fn::ImportValue of AppStack's `InternalAlbSecurityGroupId`
 // export (one additive output — see plan resolved item #3).
 new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
@@ -89,7 +91,7 @@ new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   vpc: networkStack.vpc,
   etlSecurityGroup: networkStack.etlSecurityGroup,
   ecsCluster: appStack.ecsCluster,
-  ecrRepository: appStack.ecrRepository,
+  etlEcrRepository: appStack.etlEcrRepository,
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 

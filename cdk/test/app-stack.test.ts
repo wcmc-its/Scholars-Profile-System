@@ -38,8 +38,9 @@ describe("AppStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly one ECR repository, one ECS cluster, two task definitions, one ECS service", () => {
-        template.resourceCountIs("AWS::ECR::Repository", 1);
+      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, two task definitions, one ECS service", () => {
+        // App image repo + the dedicated ETL batch-image repo (#454).
+        template.resourceCountIs("AWS::ECR::Repository", 2);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
         template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
         template.resourceCountIs("AWS::ECS::Service", 1);
@@ -136,6 +137,13 @@ describe("AppStack", () => {
       it("uses an env-prefixed name with image-scan-on-push", () => {
         template.hasResourceProperties("AWS::ECR::Repository", {
           RepositoryName: "scholars-app-prod",
+          ImageScanningConfiguration: { ScanOnPush: true },
+        });
+      });
+
+      it("provisions a separate ETL batch-image repo (scholars-etl-<env>) with image-scan-on-push (#454)", () => {
+        template.hasResourceProperties("AWS::ECR::Repository", {
+          RepositoryName: "scholars-etl-prod",
           ImageScanningConfiguration: { ScanOnPush: true },
         });
       });

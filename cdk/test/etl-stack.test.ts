@@ -27,7 +27,7 @@ function buildEtlStack(envName: "staging" | "prod"): {
     vpc: network.vpc,
     etlSecurityGroup: network.etlSecurityGroup,
     ecsCluster: appStack.ecsCluster,
-    ecrRepository: appStack.ecrRepository,
+    etlEcrRepository: appStack.etlEcrRepository,
   });
   return { template: Template.fromStack(stack), stack };
 }
