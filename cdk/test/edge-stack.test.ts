@@ -161,15 +161,20 @@ describe("EdgeStack", () => {
           [];
         const verify = customHeaders.find((h) => h.HeaderName === "X-Origin-Verify");
         expect(verify).toBeDefined();
-        // The header value is a CFN dynamic reference; CDK emits it as a
-        // Fn::Join of the literal `{{resolve:secretsmanager:` prefix plus a
-        // ${AWS::Partition} Ref plus the rest of the ARN. Serialize the
-        // whole object and grep -- the secret value itself never appears.
+        // The header value is a CFN dynamic reference; CDK emits the
+        // FRIENDLY-NAME form (`{{resolve:secretsmanager:<name>:SecretString:::}}`)
+        // via SecretValue.secretsManager(name). The secret value itself never
+        // appears in the template.
         const serialized = JSON.stringify(verify?.HeaderValue);
         expect(serialized).toMatch(/\{\{resolve:secretsmanager:/);
         expect(serialized).toContain(
           "scholars/prod/edge/origin-shared-secret",
         );
+        // Guard the #431-blocker-#5 footgun that broke the first Edge deploy:
+        // Secret.fromSecretNameV2(...).secretValue emits a PARTIAL-ARN
+        // reference Secrets Manager rejects at deploy (ResourceNotFound). The
+        // friendly-name form must contain NO ARN.
+        expect(serialized).not.toContain("arn:aws:secretsmanager");
       });
 
       it("default + every additional behavior redirects HTTP to HTTPS (acceptance #8)", () => {
