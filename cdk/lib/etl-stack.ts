@@ -129,10 +129,23 @@ export class EtlStack extends Stack {
     });
 
     // ------------------------------------------------------------------
-    // Per-source ETL secrets. Looked up by name -- SecretsStack appended
-    // the eight stubs in this PR. Plus the two shared ones the task family
-    // pulls (db/etl writer DSN + opensearch/etl user + the revalidate
-    // bearer token for the closing revalidate step). Eleven ARNs total.
+    // ETL secrets, looked up by name (SecretsStack owns the stubs; values
+    // are seeded out-of-band). Two classes:
+    //
+    //  - **Shared** -- db/etl writer DSN + opensearch/etl user + the
+    //    revalidate bearer the closing revalidate step posts.
+    //  - **Per-source credentials** -- the five external sources whose
+    //    config loaders read granular `SCHOLARS_*` connection vars
+    //    (ed/asms/infoed/coi/reciter). Each secret's JSON keys are exactly
+    //    those granular var names (pinned during staging/prod bring-up); we
+    //    fan each key out into its own env var below so the script reads
+    //    `process.env.SCHOLARS_*` with no SDK fetch coupling (#442).
+    //
+    // The dynamodb/spotlight/hierarchy sources reach ReciterAI's DynamoDB
+    // table and S3 buckets through the task role (IAM), not an injected
+    // credential -- so they are deliberately absent from the consumer ARN
+    // list, and their non-secret config (table name, bucket names, prefix)
+    // lives in the task `environment:` block. Eight consumer ARNs total.
     // ------------------------------------------------------------------
     const dbEtlSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -149,21 +162,78 @@ export class EtlStack extends Stack {
       "RevalidateTokenSecret",
       `scholars/${env}/revalidate-token`,
     );
-    const perSourceSecretNames = [
-      "ed",
-      "asms",
-      "infoed",
-      "coi",
-      "reciter",
-      "dynamodb",
-      "spotlight",
-      "hierarchy",
-    ] as const;
-    const perSourceSecrets = perSourceSecretNames.map((source) =>
+
+    /**
+     * One external source whose config loader reads granular `SCHOLARS_*`
+     * connection vars. `keys` are the secret's JSON field names -- identical
+     * to the env-var names the source reads -- each injected via
+     * `ecs.Secret.fromSecretsManager(secret, key)`. A key absent from the
+     * seeded secret JSON fails ECS task-start, so this list must mirror the
+     * pinned shape exactly.
+     */
+    interface CredentialedSource {
+      readonly constructId: string;
+      readonly secretName: string;
+      readonly keys: readonly string[];
+    }
+    const credentialedSources: readonly CredentialedSource[] = [
+      {
+        constructId: "EtlSecretEd",
+        secretName: `scholars/${env}/etl/ed`,
+        keys: [
+          "SCHOLARS_LDAP_URL",
+          "SCHOLARS_LDAP_BIND_DN",
+          "SCHOLARS_LDAP_BIND_PASSWORD",
+        ],
+      },
+      {
+        constructId: "EtlSecretAsms",
+        secretName: `scholars/${env}/etl/asms`,
+        keys: [
+          "SCHOLARS_ASMS_HOST",
+          "SCHOLARS_ASMS_PORT",
+          "SCHOLARS_ASMS_DATABASE",
+          "SCHOLARS_ASMS_USERNAME",
+          "SCHOLARS_ASMS_PASSWORD",
+        ],
+      },
+      {
+        constructId: "EtlSecretInfoed",
+        secretName: `scholars/${env}/etl/infoed`,
+        keys: [
+          "SCHOLARS_INFOED_DB_URL",
+          "SCHOLARS_INFOED_USERNAME",
+          "SCHOLARS_INFOED_PASSWORD",
+        ],
+      },
+      {
+        constructId: "EtlSecretCoi",
+        secretName: `scholars/${env}/etl/coi`,
+        keys: [
+          "SCHOLARS_COI_URL",
+          "SCHOLARS_COI_PORT",
+          "SCHOLARS_COI_DATABASE",
+          "SCHOLARS_COI_USERNAME",
+          "SCHOLARS_COI_PASSWORD",
+        ],
+      },
+      {
+        constructId: "EtlSecretReciter",
+        secretName: `scholars/${env}/etl/reciter`,
+        keys: [
+          "SCHOLARS_RECITERDB_HOST",
+          "SCHOLARS_RECITERDB_PORT",
+          "SCHOLARS_RECITERDB_DATABASE",
+          "SCHOLARS_RECITERDB_USERNAME",
+          "SCHOLARS_RECITERDB_PASSWORD",
+        ],
+      },
+    ];
+    const perSourceSecrets = credentialedSources.map((src) =>
       secretsmanager.Secret.fromSecretNameV2(
         this,
-        `EtlSecret${source[0].toUpperCase()}${source.slice(1)}`,
-        `scholars/${env}/etl/${source}`,
+        src.constructId,
+        src.secretName,
       ),
     );
     const allConsumerSecretArns: string[] = [
@@ -189,7 +259,7 @@ export class EtlStack extends Stack {
     //
     // - Execution role: ECR pull, secret injection at task-start, log
     //   stream write. `secretsmanager:GetSecretValue` resource list is the
-    //   eleven concrete ARNs above -- never `*`. Asserted in the tests.
+    //   eight concrete ARNs above -- never `*`. Asserted in the tests.
     // - Task role: identity the running ETL Node process assumes. Today
     //   the scripts read secrets via env vars (injected by ECS), so the
     //   task role itself has zero AWS-API permissions.
@@ -243,9 +313,10 @@ export class EtlStack extends Stack {
     // differentiation lives in ContainerOverrides at state-machine task
     // construction time (`command: ["npm","run","etl:<source>"]`). Base
     // env carries the db/etl + opensearch/etl + revalidate-token secrets
-    // every step needs; per-source secrets are injected as named env vars
-    // so external sources read them without coupling the script to a
-    // particular secret-fetch SDK call.
+    // every step needs; each external source's per-source secret is fanned
+    // out into the granular `SCHOLARS_*` env vars its config loader reads
+    // (#442). The IAM-based sources (dynamodb/spotlight/hierarchy) take
+    // their non-secret config from the `environment:` block.
     // ------------------------------------------------------------------
     const containerImage = ecs.ContainerImage.fromEcrRepository(
       ecrRepository,
@@ -274,13 +345,19 @@ export class EtlStack extends Stack {
       ),
       REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
     };
-    for (const [i, source] of perSourceSecretNames.entries()) {
-      // Per-source secret as `ETL_<SOURCE>_SECRET`. The ETL script reads
-      // its own var (e.g. `process.env.ETL_ED_SECRET`); the container
-      // never sees secrets it does not consume because ECS gates secret
-      // injection on the execution role's resource list.
-      containerSecrets[`ETL_${source.toUpperCase()}_SECRET`] =
-        ecs.Secret.fromSecretsManager(perSourceSecrets[i]);
+    // Fan each per-source secret out into the granular `SCHOLARS_*` env
+    // vars its config loader reads (#442). The injected env-var name equals
+    // the secret's JSON key; ECS only injects keys whose secret the
+    // execution role can read (resource list above), and a key absent from
+    // the secret JSON fails task-start -- so `keys` must match the seeded
+    // shape exactly.
+    for (const [i, src] of credentialedSources.entries()) {
+      for (const key of src.keys) {
+        containerSecrets[key] = ecs.Secret.fromSecretsManager(
+          perSourceSecrets[i],
+          key,
+        );
+      }
     }
     const etlContainer = this.etlTaskDefinition.addContainer("etl", {
       image: containerImage,
@@ -290,8 +367,19 @@ export class EtlStack extends Stack {
         logGroup: etlLogGroup,
         streamPrefix: "etl",
       }),
+      // Non-secret config the IAM-based sources read. Values match the
+      // source-script defaults; pinned here so the deployed config is
+      // explicit rather than implicit in code (#442). These resources are
+      // reached via the task role (IAM), not an injected credential:
+      //   dynamodb  -> ReciterAI publication table (task-role scan)
+      //   spotlight -> ReciterAI artifacts bucket + key prefix
+      //   hierarchy -> ReciterAI hierarchy bucket
       environment: {
         NODE_ENV: "production",
+        SCHOLARS_DYNAMODB_TABLE: "reciterai",
+        ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
+        ARTIFACT_PREFIX: "spotlight",
+        HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
       },
       secrets: containerSecrets,
     });
