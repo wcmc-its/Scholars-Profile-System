@@ -129,8 +129,8 @@ describe("EtlStack", () => {
         template.resourceCountIs("AWS::SNS::Topic", 1);
       });
 
-      it("creates exactly six CloudWatch alarms (2 per state machine -- status + cadence)", () => {
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 6);
+      it("creates exactly five CloudWatch alarms (3 status + nightly/weekly cadence; annual has no cadence alarm)", () => {
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 5);
       });
 
       it("creates one ECS task definition and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -226,7 +226,7 @@ describe("EtlStack", () => {
     describe("Alarms (D4 -- ExecutionsFailed sum>0 + ExecutionsStarted sum<1)", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
-        expect(Object.keys(alarms)).toHaveLength(6);
+        expect(Object.keys(alarms)).toHaveLength(5);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -253,20 +253,51 @@ describe("EtlStack", () => {
         }
       });
 
-      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching", () => {
+      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly only)", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
-        const cadenceAlarms = Object.values(alarms).filter((a) => {
+        const cadenceAlarms = Object.entries(alarms).filter(([, a]) => {
           const name = a.Properties?.AlarmName as string | undefined;
           return typeof name === "string" && name.includes("-cadence-");
         });
-        expect(cadenceAlarms).toHaveLength(3);
-        for (const a of cadenceAlarms) {
+        // Annual has no cadence alarm -- CloudWatch can't express a yearly
+        // no-execution window (see EtlStack alarm note + the guard below).
+        expect(cadenceAlarms).toHaveLength(2);
+        const labels = cadenceAlarms
+          .map(([, a]) => a.Properties?.AlarmName as string)
+          .sort();
+        expect(labels).toEqual([
+          "sps-etl-nightly-cadence-prod",
+          "sps-etl-weekly-cadence-prod",
+        ]);
+        for (const [, a] of cadenceAlarms) {
           expect(a.Properties?.MetricName).toBe("ExecutionsStarted");
           expect(a.Properties?.Statistic).toBe("Sum");
           expect(a.Properties?.ComparisonOperator).toBe("LessThanThreshold");
           expect(a.Properties?.Threshold).toBe(1);
           expect(a.Properties?.TreatMissingData).toBe("breaching");
         }
+      });
+
+      // Synth-time guard for the CloudWatch deploy-only constraint that
+      // rolled staging back: for any alarm whose Period >= 3600s,
+      // EvaluationPeriods * Period must be <= 604800s (one week). cdk synth
+      // and snapshots don't enforce this -- only the CFN create does.
+      it("no alarm violates the CloudWatch <=604800s evaluation-window cap (period>=3600)", () => {
+        const alarms = template.findResources("AWS::CloudWatch::Alarm");
+        const violations: string[] = [];
+        for (const [id, a] of Object.entries(alarms)) {
+          const period = a.Properties?.Period as number | undefined;
+          const evals = a.Properties?.EvaluationPeriods as number | undefined;
+          if (typeof period === "number" && period >= 3600) {
+            const window = period * (evals ?? 1);
+            if (window > 604800) {
+              violations.push(
+                `${id}: ${a.Properties?.AlarmName} -- ${evals ?? 1} * ${period}s = ${window}s > 604800s`,
+              );
+            }
+          }
+        }
+        expect(violations).toEqual([]);
       });
     });
 
