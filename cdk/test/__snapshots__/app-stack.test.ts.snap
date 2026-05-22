@@ -86,6 +86,57 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "EtlEcrRepoUri": {
+      "Description": "SPS ETL batch-image ECR repository URI (#454)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EtlEcrRepository058F5EEC",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EtlEcrRepository058F5EEC",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "EtlEcrRepository058F5EEC",
+            },
+          ],
+        ],
+      },
+    },
     "InternalAlbDns": {
       "Description": "SPS internal ALB DNS name (consumed by EtlStack)",
       "Value": {
@@ -786,6 +837,20 @@ service:
         },
       },
       "Type": "AWS::ECS::Service",
+    },
+    "EtlEcrRepository058F5EEC": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true,
+        },
+        "LifecyclePolicy": {
+          "LifecyclePolicyText": "{"rules":[{"rulePriority":1,"description":"Keep the last 30 tagged images","selection":{"tagStatus":"tagged","tagPatternList":["*"],"countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}},{"rulePriority":2,"description":"Expire untagged images after 7 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countNumber":7,"countUnit":"days"},"action":{"type":"expire"}}]}",
+        },
+        "RepositoryName": "scholars-etl-prod",
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Retain",
     },
     "GithubOidcProviderD8241A88": {
       "DeletionPolicy": "Delete",
@@ -1730,6 +1795,57 @@ exports[`AppStack staging matches the snapshot 1`] = `
         ],
       },
     },
+    "EtlEcrRepoUri": {
+      "Description": "SPS ETL batch-image ECR repository URI (#454)",
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            {
+              "Fn::Select": [
+                4,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EtlEcrRepository058F5EEC",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".dkr.ecr.",
+            {
+              "Fn::Select": [
+                3,
+                {
+                  "Fn::Split": [
+                    ":",
+                    {
+                      "Fn::GetAtt": [
+                        "EtlEcrRepository058F5EEC",
+                        "Arn",
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            ".",
+            {
+              "Ref": "AWS::URLSuffix",
+            },
+            "/",
+            {
+              "Ref": "EtlEcrRepository058F5EEC",
+            },
+          ],
+        ],
+      },
+    },
     "InternalAlbDns": {
       "Description": "SPS internal ALB DNS name (consumed by EtlStack)",
       "Value": {
@@ -2430,6 +2546,20 @@ service:
         },
       },
       "Type": "AWS::ECS::Service",
+    },
+    "EtlEcrRepository058F5EEC": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true,
+        },
+        "LifecyclePolicy": {
+          "LifecyclePolicyText": "{"rules":[{"rulePriority":1,"description":"Keep the last 30 tagged images","selection":{"tagStatus":"tagged","tagPatternList":["*"],"countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}},{"rulePriority":2,"description":"Expire untagged images after 7 days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countNumber":7,"countUnit":"days"},"action":{"type":"expire"}}]}",
+        },
+        "RepositoryName": "scholars-etl-staging",
+      },
+      "Type": "AWS::ECR::Repository",
+      "UpdateReplacePolicy": "Retain",
     },
     "GithubOidcProviderD8241A88": {
       "DeletionPolicy": "Delete",

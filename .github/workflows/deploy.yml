@@ -81,12 +81,18 @@ jobs:
           service=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="EcsServiceName").OutputValue')
           mig_family=$(echo "$out"  | jq -er '.[]|select(.OutputKey=="EcsMigrationTaskFamily").OutputValue')
           alb_dns=$(echo "$out"     | jq -er '.[]|select(.OutputKey=="PublicAlbDns").OutputValue')
+          # ETL batch-image repo (#454). Non-fatal jq (`//empty`): on the first
+          # deploy after this change the AppStack output may not exist yet, so
+          # the ETL build/push steps below self-skip when it's empty. Re-run the
+          # workflow once `cdk deploy Sps-App-<env>` has created the repo.
+          etl_ecr_uri=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EtlEcrRepoUri").OutputValue // empty')
           {
             echo "ecr_uri=$ecr_uri"
             echo "cluster=$cluster"
             echo "service=$service"
             echo "mig_family=$mig_family"
             echo "alb_dns=$alb_dns"
+            echo "etl_ecr_uri=$etl_ecr_uri"
           } >> "$GITHUB_OUTPUT"
 
       - name: ECR login
@@ -105,6 +111,26 @@ jobs:
           set -euo pipefail
           docker push "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}"
           docker push "${{ steps.outputs.outputs.ecr_uri }}:latest"
+
+      # ETL batch image (#454) -- the tsx-based etl/* + search:index scripts.
+      # Built from the `etl` target of the same Dockerfile and pushed to the
+      # dedicated scholars-etl-<env> repo. Self-skips when EtlEcrRepoUri is
+      # absent (repo not yet created by cdk deploy); re-run after deploy.
+      - name: Build and push ETL image
+        if: ${{ steps.outputs.outputs.etl_ecr_uri != '' }}
+        run: |
+          set -euo pipefail
+          docker build --target etl \
+            --tag "${{ steps.outputs.outputs.etl_ecr_uri }}:${{ github.sha }}" \
+            --tag "${{ steps.outputs.outputs.etl_ecr_uri }}:latest" \
+            .
+          docker push "${{ steps.outputs.outputs.etl_ecr_uri }}:${{ github.sha }}"
+          docker push "${{ steps.outputs.outputs.etl_ecr_uri }}:latest"
+
+      - name: Skipped ETL image (repo not yet provisioned)
+        if: ${{ steps.outputs.outputs.etl_ecr_uri == '' }}
+        run: |
+          echo "::warning::EtlEcrRepoUri not found on ${{ steps.target.outputs.stack }}. ETL image not built/pushed. Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create scholars-etl-${{ steps.target.outputs.env }}, then re-run this workflow."
 
       - name: Run migration task
         id: migrate

@@ -551,7 +551,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Fn::Split": [
                           ":",
                           {
-                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
                           },
                         ],
                       },
@@ -565,7 +565,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Fn::Split": [
                           ":",
                           {
-                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                            "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
                           },
                         ],
                       },
@@ -577,7 +577,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   },
                   "/",
                   {
-                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEcrRepository4D7B3EE140E01346",
+                    "Fn::ImportValue": "Sps-App-prod:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
                   },
                   ":latest",
                 ],
@@ -1031,7 +1031,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               ],
               "Effect": "Allow",
               "Resource": {
-                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
               },
             },
             {
@@ -3096,7 +3096,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Fn::Split": [
                           ":",
                           {
-                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
                           },
                         ],
                       },
@@ -3110,7 +3110,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Fn::Split": [
                           ":",
                           {
-                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                            "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
                           },
                         ],
                       },
@@ -3122,7 +3122,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   },
                   "/",
                   {
-                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEcrRepository4D7B3EE140E01346",
+                    "Fn::ImportValue": "Sps-App-staging:ExportsOutputRefEtlEcrRepository058F5EEC7A385183",
                   },
                   ":latest",
                 ],
@@ -3576,7 +3576,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               ],
               "Effect": "Allow",
               "Resource": {
-                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+                "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttEtlEcrRepository058F5EECArn64168886",
               },
             },
             {

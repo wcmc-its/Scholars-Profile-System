@@ -43,6 +43,39 @@ RUN npm install --no-save --omit=dev --no-audit --no-fund \
       "prisma@$(node -p "require('./package.json').dependencies.prisma")" \
       "dotenv@$(node -p "require('./package.json').devDependencies.dotenv")"
 
+# ---- ETL image --------------------------------------------------------------
+# Batch image for the `sps-etl-*` Fargate task family (Step Functions
+# nightly/weekly/annual) and the manual `search:index` build. Every `etl:*`
+# script is `tsx etl/<source>/index.ts` and `search:index` is
+# `tsx etl/search-index/index.ts` -- `tsx` is a devDependency and the source
+# trees (`etl/`, `lib/`) are not in the standalone runtime, so that image
+# exits 127 on these (#454). This stage keeps the full dependency tree from
+# `deps` (incl. `tsx`) and the whole source subset, and regenerates the Prisma
+# client in-image. tsx resolves the `@/` -> `./` path alias from tsconfig.json
+# exactly as local dev does. Built/pushed to the dedicated `scholars-etl-*`
+# ECR repo; never the standalone app image. The per-task command is supplied
+# by ECS containerOverrides (EtlStack) / the run-task runbook.
+FROM base AS etl
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+# Prisma's engines probe for libssl to select the matching engine build; the
+# slim base omits openssl, which can misdetect to a 1.1.x engine for the TLS
+# connections the source loaders make to Aurora / external DBs. Match the
+# runtime stage and install OpenSSL 3.0 + CA certs before dropping privileges.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+# Whole source subset (.dockerignore strips node_modules/.next/cdk/.env/etc.),
+# so no transitive import is missed.
+COPY --chown=node:node . .
+# lib/generated/ is excluded from the build context (.dockerignore); regenerate
+# the Prisma client against the in-image schema.
+RUN npx prisma generate
+USER node
+# Default is a harmless no-op: every task overrides `command` (npm run
+# etl:<source> / search:index). Documents the contract for an ad-hoc `docker run`.
+CMD ["node", "-e", "console.log('SPS ETL image -- supply a command, e.g. npm run etl:ed or npm run search:index')"]
+
 # ---- Runtime ----------------------------------------------------------------
 FROM base AS runtime
 ENV NODE_ENV=production

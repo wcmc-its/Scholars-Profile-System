@@ -32,8 +32,12 @@ export interface EtlStackProps extends StackProps {
   readonly etlSecurityGroup: ec2.ISecurityGroup;
   /** ECS cluster the ETL task family runs in (from AppStack). */
   readonly ecsCluster: ecs.ICluster;
-  /** ECR repo holding the SPS app image — ETL tasks reuse it (from AppStack). */
-  readonly ecrRepository: ecr.IRepository;
+  /**
+   * ECR repo holding the dedicated ETL batch image (from AppStack). The ETL
+   * scripts are `tsx`-based and need the full dep tree + source, so they run
+   * the `scholars-etl-*` image, not the standalone app image (#454).
+   */
+  readonly etlEcrRepository: ecr.IRepository;
 }
 
 /**
@@ -57,14 +61,15 @@ interface StepSpec {
  * fire them, an SNS topic for failures, two CloudWatch alarms per state
  * machine (status + cadence), the SG-to-SG ingress that finally makes the
  * internal ALB reachable from the ETL task family, and a single Fargate
- * task family that runs `npm run etl:<source>` against the AppStack image.
+ * task family that runs `npm run etl:<source>` against the dedicated ETL
+ * batch image (`scholars-etl-*`, not the standalone app image -- #454).
  *
  * Deliberate deviations from `docs/PRODUCTION_ADDENDUM.md` and the source
  * issue text — documented inline and in PRODUCTION_ADDENDUM § EtlStack:
  *
  * - **D1.** Task integration is ECS RunTask `.sync` (`RUN_JOB`), not
  *   Lambda. Today's `etl/*` scripts are Node entrypoints invoked via
- *   `npm run etl:<source>` against the AppStack image; packaging each as a
+ *   `npm run etl:<source>` against the ETL batch image; packaging each as a
  *   Lambda would multiply build/CI/maintenance surface and run into the
  *   15-min Lambda execution cap for `reciter` and similar long ETLs.
  * - **D3.** The annual hierarchy state machine's manual-approval gate is
@@ -79,7 +84,8 @@ interface StepSpec {
  *   `cron(0 8 ? * SUN *)`, annual `cron(0 9 1 7 ? *)` — all UTC.
  *
  * Cross-stack handoff: this stack consumes the AppStack ECS cluster and
- * ECR repo via constructor props (CDK auto-wires the cross-stack export).
+ * the dedicated ETL ECR repo via constructor props (CDK auto-wires the
+ * cross-stack export).
  * The internal ALB security group id is consumed via
  * `Fn::ImportValue("Sps-App-${env}-InternalAlbSecurityGroupId")` — the
  * one additive `CfnOutput` we added to AppStack for that purpose (per the
@@ -98,7 +104,7 @@ export class EtlStack extends Stack {
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
 
-    const { envConfig, etlSecurityGroup, ecsCluster, ecrRepository } = props;
+    const { envConfig, etlSecurityGroup, ecsCluster, etlEcrRepository } = props;
     const env = envConfig.envName;
     // `vpc` is in props for future SG lookups + API consistency with the
     // other stacks. ECS RunTask resolves the VPC from `ecsCluster`, so
@@ -284,7 +290,7 @@ export class EtlStack extends Stack {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage",
         ],
-        resources: [ecrRepository.repositoryArn],
+        resources: [etlEcrRepository.repositoryArn],
       }),
     );
     taskExecutionRole.addToPolicy(
@@ -319,7 +325,7 @@ export class EtlStack extends Stack {
     // their non-secret config from the `environment:` block.
     // ------------------------------------------------------------------
     const containerImage = ecs.ContainerImage.fromEcrRepository(
-      ecrRepository,
+      etlEcrRepository,
       "latest",
     );
     this.etlTaskDefinition = new ecs.FargateTaskDefinition(

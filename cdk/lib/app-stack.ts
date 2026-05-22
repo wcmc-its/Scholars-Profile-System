@@ -93,6 +93,13 @@ export interface AppStackProps extends StackProps {
 export class AppStack extends Stack {
   /** ECR repository the deploy pipeline pushes app images into. */
   public readonly ecrRepository: ecr.Repository;
+  /**
+   * ECR repository for the ETL batch image (the `tsx`-based `etl/*` +
+   * `search:index` scripts). Kept separate from the standalone app repo so
+   * the two artifacts have independent lifecycle/scan and no `latest`
+   * collision; EtlStack pulls from here (#454).
+   */
+  public readonly etlEcrRepository: ecr.Repository;
   /** ECS Fargate cluster the app + migration tasks run in. */
   public readonly ecsCluster: ecs.Cluster;
   /** ECS service for the SPS application. */
@@ -176,6 +183,29 @@ export class AppStack extends Stack {
     // ------------------------------------------------------------------
     this.ecrRepository = new ecr.Repository(this, "EcrRepository", {
       repositoryName: `scholars-app-${env}`,
+      imageScanOnPush: true,
+      lifecycleRules: [
+        {
+          description: "Keep the last 30 tagged images",
+          tagStatus: ecr.TagStatus.TAGGED,
+          tagPatternList: ["*"],
+          maxImageCount: 30,
+        },
+        {
+          description: "Expire untagged images after 7 days",
+          tagStatus: ecr.TagStatus.UNTAGGED,
+          maxImageAge: Duration.days(7),
+        },
+      ],
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // Dedicated ETL batch-image repo (#454). Same scan + lifecycle posture
+    // as the app repo, but a separate repository so ETL images don't share
+    // the app repo's 30-tag retention window or its `latest` tag. EtlStack
+    // pulls from here; the deploy workflow builds `--target etl` and pushes.
+    this.etlEcrRepository = new ecr.Repository(this, "EtlEcrRepository", {
+      repositoryName: `scholars-etl-${env}`,
       imageScanOnPush: true,
       lifecycleRules: [
         {
@@ -999,6 +1029,10 @@ export class AppStack extends Stack {
     new CfnOutput(this, "EcrRepoUri", {
       value: this.ecrRepository.repositoryUri,
       description: "SPS ECR repository URI",
+    });
+    new CfnOutput(this, "EtlEcrRepoUri", {
+      value: this.etlEcrRepository.repositoryUri,
+      description: "SPS ETL batch-image ECR repository URI (#454)",
     });
     new CfnOutput(this, "EcsClusterName", {
       value: this.ecsCluster.clusterName,
