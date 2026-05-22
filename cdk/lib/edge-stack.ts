@@ -265,7 +265,9 @@ export class EdgeStack extends Stack {
         scope: "CLOUDFRONT",
         ipAddressVersion: "IPV4",
         addresses: allowedCidrs,
-        description: `Temporary (#461) SPS front-end allowlist (${env}); remove after testing.`,
+        // WAFv2 descriptions reject `()` and `;` (allowed: \w + = : # @ / - , .
+        // and space) -- a deploy-only constraint cdk synth does not catch.
+        description: `Temporary #461 SPS front-end allowlist ${env} - remove after testing`,
       });
       const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
         name: `sps-edge-${env}-wcm-only`,
@@ -291,7 +293,7 @@ export class EdgeStack extends Stack {
           metricName: `sps-edge-${env}-wcm-only`,
           sampledRequestsEnabled: true,
         },
-        description: `Temporary (#461) SPS front end restricted to WCM networks (${env}).`,
+        description: `Temporary #461 SPS front end restricted to WCM networks ${env}`,
       });
       webAclArn = webAcl.attrArn;
     }

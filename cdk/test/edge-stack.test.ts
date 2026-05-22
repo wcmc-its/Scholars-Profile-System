@@ -397,6 +397,25 @@ describe("EdgeStack", () => {
         const dc = dist.DistributionConfig as Record<string, unknown>;
         expect(dc.WebACLId).toBeDefined();
       });
+
+      // Synth-time guard for a deploy-only constraint: WAFv2 IPSet/WebACL
+      // Description must match ^[\w+=:#@/\-,.][\w+=:#@/\-,.\s]+[\w+=:#@/\-,.]$
+      // -- no parens, no semicolons. cdk synth accepts anything; only the AWS
+      // create validates it (it rolled back the first #461 deploy).
+      it("every WAFv2 IPSet/WebACL Description satisfies the AWS charset", () => {
+        const WAFV2_DESCRIPTION = /^[\w+=:#@/\-,.][\w+=:#@/\-,.\s]+[\w+=:#@/\-,.]$/;
+        const violations: string[] = [];
+        for (const type of ["AWS::WAFv2::IPSet", "AWS::WAFv2::WebACL"]) {
+          for (const [id, r] of Object.entries(template.findResources(type))) {
+            const desc = (r.Properties as Record<string, unknown>)
+              .Description as string | undefined;
+            if (typeof desc === "string" && !WAFV2_DESCRIPTION.test(desc)) {
+              violations.push(`${id}: ${JSON.stringify(desc)}`);
+            }
+          }
+        }
+        expect(violations).toEqual([]);
+      });
     });
   });
 
