@@ -40,34 +40,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
     },
   },
   "Resources": {
-    "AnnualCadenceAlarm2696CFC7": {
-      "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "EtlFailureTopic8361D0D0",
-          },
-        ],
-        "AlarmDescription": "SPS ETL annual (prod) -- cadence missed (no execution started in period).",
-        "AlarmName": "sps-etl-annual-cadence-prod",
-        "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "AnnualStateMachine848975DB",
-            },
-          },
-        ],
-        "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
-        "Period": 32832000,
-        "Statistic": "Sum",
-        "Threshold": 1,
-        "TreatMissingData": "breaching",
-      },
-      "Type": "AWS::CloudWatch::Alarm",
-    },
     "AnnualScheduleRuleF1823588": {
       "Properties": {
         "Description": "SPS ETL annual cadence (prod). D7.",
@@ -2022,7 +1994,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
         "EvaluationPeriods": 1,
         "MetricName": "ExecutionsStarted",
         "Namespace": "AWS/States",
-        "Period": 777600,
+        "Period": 604800,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",
@@ -2613,34 +2585,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
     },
   },
   "Resources": {
-    "AnnualCadenceAlarm2696CFC7": {
-      "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "EtlFailureTopic8361D0D0",
-          },
-        ],
-        "AlarmDescription": "SPS ETL annual (staging) -- cadence missed (no execution started in period).",
-        "AlarmName": "sps-etl-annual-cadence-staging",
-        "ComparisonOperator": "LessThanThreshold",
-        "Dimensions": [
-          {
-            "Name": "StateMachineArn",
-            "Value": {
-              "Ref": "AnnualStateMachine848975DB",
-            },
-          },
-        ],
-        "EvaluationPeriods": 1,
-        "MetricName": "ExecutionsStarted",
-        "Namespace": "AWS/States",
-        "Period": 32832000,
-        "Statistic": "Sum",
-        "Threshold": 1,
-        "TreatMissingData": "breaching",
-      },
-      "Type": "AWS::CloudWatch::Alarm",
-    },
     "AnnualScheduleRuleF1823588": {
       "Properties": {
         "Description": "SPS ETL annual cadence (staging). D7.",
@@ -4595,7 +4539,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
         "EvaluationPeriods": 1,
         "MetricName": "ExecutionsStarted",
         "Namespace": "AWS/States",
-        "Period": 777600,
+        "Period": 604800,
         "Statistic": "Sum",
         "Threshold": 1,
         "TreatMissingData": "breaching",

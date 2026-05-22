@@ -638,42 +638,64 @@ export class EtlStack extends Stack {
     );
 
     // ------------------------------------------------------------------
-    // CloudWatch alarms (D4). Two per state machine, six total.
+    // CloudWatch alarms (D4). One status alarm per state machine (3) plus
+    // a cadence alarm for the sub-weekly machines (nightly + weekly = 2),
+    // five total.
     //
     // - **Status alarm** -- ExecutionsFailed sum > 0 over one period at
     //   the cadence interval. Catches every failed execution including
-    //   ones that crash before the per-step Catch block runs.
-    // - **Cadence alarm** -- ExecutionsStarted sum < 1 over a period
-    //   slightly longer than the cadence. Catches EventBridge-rule
-    //   disable / IAM gap / etc. `treatMissingData: BREACHING` so a
-    //   total absence of metric data alarms (rather than the
-    //   AWS default of NotBreaching which would silently miss this).
+    //   ones that crash before the per-step Catch block runs. Created for
+    //   all three machines.
+    // - **Cadence alarm** -- ExecutionsStarted sum < 1 over `cadenceWindow`.
+    //   Catches EventBridge-rule disable / IAM gap / etc.
+    //   `treatMissingData: BREACHING` so a total absence of metric data
+    //   alarms (rather than the AWS default of NotBreaching which would
+    //   silently miss this).
+    //
+    //   **Deploy-only constraint (CloudWatch):** for alarms whose period is
+    //   >= 1h, `EvaluationPeriods * Period` must be <= 604800s (one week).
+    //   `cdk synth` and the cdk-assertions snapshots do NOT catch this --
+    //   only the CloudFormation create does (it rolled back staging once).
+    //   So the weekly window is capped at exactly 7 days, and the **annual
+    //   machine gets no cadence alarm**: a yearly "no execution started"
+    //   window can't be expressed, and a 7-day window would false-alarm ~51
+    //   weeks a year. The annual run is operator-triggered behind a manual
+    //   approval gate, so a missed cadence is caught by the calendar/runbook;
+    //   its status alarm still covers execution failures. A synth-time guard
+    //   in the tests asserts the <=604800 product for every alarm.
     // ------------------------------------------------------------------
     const alarmAction = new cloudwatchActions.SnsAction(this.failureTopic);
     interface CadenceArgs {
       readonly id: string;
       readonly cadenceLabel: string;
-      readonly cadencePeriod: Duration;
       readonly stateMachine: sfn.StateMachine;
+      /**
+       * Trailing window for the cadence alarm (ExecutionsStarted Sum < 1 over
+       * this window => cadence missed). Must keep `1 * window <= 604800s` per
+       * the CloudWatch constraint above. Omitted => no cadence alarm.
+       */
+      readonly cadenceWindow?: Duration;
     }
     const cadences: ReadonlyArray<CadenceArgs> = [
       {
         id: "Nightly",
         cadenceLabel: "nightly",
-        // Cadence-alarm period = 25 % grace on top of 24h.
-        cadencePeriod: Duration.hours(30),
+        // 25 % grace on top of 24h; 108000s <= 604800s.
+        cadenceWindow: Duration.hours(30),
         stateMachine: this.nightlyStateMachine,
       },
       {
         id: "Weekly",
         cadenceLabel: "weekly",
-        cadencePeriod: Duration.days(9),
+        // Capped at the CloudWatch max (7d = 604800s); the 7-day cadence
+        // leaves no room for grace within the limit.
+        cadenceWindow: Duration.days(7),
         stateMachine: this.weeklyStateMachine,
       },
       {
         id: "Annual",
         cadenceLabel: "annual",
-        cadencePeriod: Duration.days(380),
+        // No cadence alarm -- see the deploy-only-constraint note above.
         stateMachine: this.annualStateMachine,
       },
     ];
@@ -688,13 +710,6 @@ export class EtlStack extends Stack {
         period: Duration.hours(1),
         dimensionsMap: dimensions,
       });
-      const startedMetric = new cloudwatch.Metric({
-        namespace: "AWS/States",
-        metricName: "ExecutionsStarted",
-        statistic: cloudwatch.Stats.SUM,
-        period: c.cadencePeriod,
-        dimensionsMap: dimensions,
-      });
       const statusAlarm = new cloudwatch.Alarm(this, `${c.id}StatusAlarm`, {
         alarmName: `sps-etl-${c.cadenceLabel}-status-${env}`,
         alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- execution failed.`,
@@ -706,16 +721,25 @@ export class EtlStack extends Stack {
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       statusAlarm.addAlarmAction(alarmAction);
-      const cadenceAlarm = new cloudwatch.Alarm(this, `${c.id}CadenceAlarm`, {
-        alarmName: `sps-etl-${c.cadenceLabel}-cadence-${env}`,
-        alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- cadence missed (no execution started in period).`,
-        metric: startedMetric,
-        evaluationPeriods: 1,
-        threshold: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-      });
-      cadenceAlarm.addAlarmAction(alarmAction);
+      if (c.cadenceWindow !== undefined) {
+        const startedMetric = new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: c.cadenceWindow,
+          dimensionsMap: dimensions,
+        });
+        const cadenceAlarm = new cloudwatch.Alarm(this, `${c.id}CadenceAlarm`, {
+          alarmName: `sps-etl-${c.cadenceLabel}-cadence-${env}`,
+          alarmDescription: `SPS ETL ${c.cadenceLabel} (${env}) -- cadence missed (no execution started in period).`,
+          metric: startedMetric,
+          evaluationPeriods: 1,
+          threshold: 1,
+          comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+          treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        });
+        cadenceAlarm.addAlarmAction(alarmAction);
+      }
     }
 
     // ------------------------------------------------------------------
