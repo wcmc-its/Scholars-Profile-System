@@ -184,7 +184,7 @@ export async function getMenteesForMentor(
          WHERE mentorCWID = ? AND studentCWID IS NOT NULL AND studentCWID != ''`,
         [mentorCwid],
       )) as AocRow[];
-    }),
+    }).catch(() => [] as AocRow[]),
     prisma.phdMentorRelationship.findMany({
       where: { mentorCwid },
       select: {
@@ -383,7 +383,7 @@ export async function getMenteesForMentor(
         copubPreviewByCwid.set(r.mentee_cwid, preview);
       }
     }
-  });
+  }).catch(() => {});
 
   // Scholar-table presence — drives linkability. Non-deleted, active rows only.
   // Only `status='active'` rows can be linked. Suppressed scholars (alumni
@@ -585,7 +585,7 @@ export async function getCoPublications(
         ),
       };
     });
-  });
+  }).catch(() => []);
 }
 
 /**
@@ -612,7 +612,7 @@ export async function getMentorMenteePair(
           LIMIT 1`,
         [mentorCwid, menteeCwid],
       )) as AocPairRow[];
-    }),
+    }).catch(() => [] as AocPairRow[]),
     prisma.phdMentorRelationship.findFirst({
       where: { mentorCwid, menteeCwid },
       select: { menteeFirstName: true, menteeLastName: true },

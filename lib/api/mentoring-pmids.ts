@@ -186,6 +186,15 @@ export async function getMentoringPmidBuckets(): Promise<MentoringPmidBuckets> {
       const buckets = await refresh();
       cache = { buckets, ts: now };
       return buckets;
+    } catch (err) {
+      // ReciterDB unavailable -> degrade to empty buckets rather than throwing
+      // up into the render (the mentoring surfaces simply show nothing). Do NOT
+      // cache the failure, so the next call retries once ReciterDB is reachable.
+      console.warn("[mentoring-pmids] refresh failed; serving empty buckets", err);
+      return {
+        all: [],
+        byProgram: { md: [], mdphd: [], phd: [], postdoc: [], ecr: [] },
+      };
     } finally {
       inflight = null;
     }
