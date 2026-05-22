@@ -666,12 +666,20 @@ service:
                 "ecr:DescribeRepositories",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "EcrRepository4D7B3EE1",
-                  "Arn",
-                ],
-              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EcrRepository4D7B3EE1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlEcrRepository058F5EEC",
+                    "Arn",
+                  ],
+                },
+              ],
             },
             {
               "Action": "ecs:RunTask",
@@ -744,6 +752,22 @@ service:
                   ],
                 },
               ],
+            },
+            {
+              "Action": "cloudformation:DescribeStacks",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudformation:us-east-1:123456789012:stack/Sps-App-prod/*",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
@@ -2394,12 +2418,20 @@ service:
                 "ecr:DescribeRepositories",
               ],
               "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "EcrRepository4D7B3EE1",
-                  "Arn",
-                ],
-              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EcrRepository4D7B3EE1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlEcrRepository058F5EEC",
+                    "Arn",
+                  ],
+                },
+              ],
             },
             {
               "Action": "ecs:RunTask",
@@ -2472,6 +2504,22 @@ service:
                   ],
                 },
               ],
+            },
+            {
+              "Action": "cloudformation:DescribeStacks",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudformation:us-east-1:123456789012:stack/Sps-App-staging/*",
+                  ],
+                ],
+              },
             },
           ],
           "Version": "2012-10-17",
