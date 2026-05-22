@@ -1,5 +1,6 @@
 import { CfnOutput, Stack, type StackProps } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as route53resolver from "aws-cdk-lib/aws-route53resolver";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -60,6 +61,37 @@ export class NetworkStack extends Stack {
         },
       ],
     });
+
+    // WCM-internal DNS resolution. The ETL (and any in-VPC client) must resolve
+    // WCM-internal hostnames -- ED LDAP (edprovider.weill.cornell.edu) and the
+    // ASMS/InfoEd/COI/ReciterDB sources -- to pull source data. Resolution is
+    // delegated to the Central Services account's (091981818184) RAM-shared
+    // Route 53 Resolver FORWARD rules ("Resolver Share <domain>"); associating
+    // them with this VPC sends those domains to the shared outbound endpoint --
+    // the same wiring ReCiter's EKS VPC uses. The rule ids are account-level
+    // (shared once into 665083158573), so they are identical for staging and
+    // prod. NOTE: resolution is necessary but not sufficient -- reaching the
+    // resolved IPs also needs the Central Services TGW attachment + WCM-side
+    // firewall for this VPC's CIDR, which are owned by 091981818184 / WCM
+    // network and tracked separately. ResolverRuleId is a stable shared-resource
+    // id, intentionally inlined (no CDK construct exists for an out-of-account
+    // shared rule).
+    const wcmResolverRules: ReadonlyArray<{ key: string; ruleId: string }> = [
+      { key: "WeillCornellEdu", ruleId: "rslvr-rr-58457e95d34548148" },
+      { key: "MedCornellEdu", ruleId: "rslvr-rr-467f0939c1f2458e9" },
+      { key: "WcmcAdNet", ruleId: "rslvr-rr-56f32331b3a1441ba" },
+    ];
+    for (const { key, ruleId } of wcmResolverRules) {
+      new route53resolver.CfnResolverRuleAssociation(
+        this,
+        `WcmResolverAssoc${key}`,
+        {
+          resolverRuleId: ruleId,
+          vpcId: this.vpc.vpcId,
+          name: `sps-${envConfig.envName}-${key.toLowerCase()}`,
+        },
+      );
+    }
 
     // Security groups. Each is created with egress allowed and no ingress
     // rules; the SG-to-SG ingress that defines reachability is added by the
