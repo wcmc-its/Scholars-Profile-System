@@ -3,6 +3,7 @@ import * as path from "node:path";
 import {
   CfnOutput,
   Duration,
+  Fn,
   RemovalPolicy,
   SecretValue,
   Stack,
@@ -472,6 +473,12 @@ export class AppStack extends Stack {
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
+        // OpenSearch domain endpoint (https://...) imported from DataStack.
+        // lib/search.ts reads OPENSEARCH_NODE; the OPENSEARCH_USER/PASS
+        // secrets below supply the FGAC basic-auth credentials. #447
+        OPENSEARCH_NODE: `https://${Fn.importValue(
+          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+        )}`,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
@@ -484,7 +491,10 @@ export class AppStack extends Stack {
           opensearchAppSecret,
           "password",
         ),
-        REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+        // Read by lib/revalidate-auth.ts / app/api/revalidate as
+        // SCHOLARS_REVALIDATE_TOKEN -- the env-var name is the contract. #447
+        SCHOLARS_REVALIDATE_TOKEN:
+          ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         SAML_SP_PRIVATE_KEY: ecs.Secret.fromSecretsManager(samlSpPrivateKeySecret),
       },
     });

@@ -50,7 +50,9 @@ const EXPECTED_SECRET_ENV_VARS = [
   "DATABASE_URL",
   "OPENSEARCH_USER",
   "OPENSEARCH_PASS",
-  "REVALIDATE_TOKEN",
+  // #447 -- renamed from REVALIDATE_TOKEN; etl/orchestrate.ts reads
+  // SCHOLARS_REVALIDATE_TOKEN.
+  "SCHOLARS_REVALIDATE_TOKEN",
   // ed (LDAP simple bind)
   "SCHOLARS_LDAP_URL",
   "SCHOLARS_LDAP_BIND_DN",
@@ -423,6 +425,13 @@ describe("EtlStack", () => {
         for (const name of Object.keys(EXPECTED_ENV_CONFIG)) {
           expect(secretNames).not.toContain(name);
         }
+      });
+
+      it("sets OPENSEARCH_NODE in the environment block (#447, imported from DataStack)", () => {
+        const envEntries = (etlContainerDef().Environment ?? []) as Array<{
+          Name?: string;
+        }>;
+        expect(envEntries.map((e) => e.Name)).toContain("OPENSEARCH_NODE");
       });
     });
 

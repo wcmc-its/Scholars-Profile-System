@@ -552,6 +552,20 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "https://",
+                      {
+                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
+                      },
+                    ],
+                  ],
+                },
+              },
             ],
             "Essential": true,
             "Image": {
@@ -655,7 +669,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "REVALIDATE_TOKEN",
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3111,6 +3125,20 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "HIERARCHY_BUCKET",
                 "Value": "wcmc-reciterai-hierarchy",
               },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "https://",
+                      {
+                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
+                      },
+                    ],
+                  ],
+                },
+              },
             ],
             "Essential": true,
             "Image": {
@@ -3214,7 +3242,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "REVALIDATE_TOKEN",
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",

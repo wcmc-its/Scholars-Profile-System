@@ -299,13 +299,18 @@ describe("AppStack", () => {
               Environment: Match.arrayWith([
                 Match.objectLike({ Name: "NODE_ENV", Value: "production" }),
                 Match.objectLike({ Name: "PORT", Value: "3000" }),
+                // #447 -- OpenSearch endpoint imported from DataStack (value
+                // is an Fn::ImportValue token, so assert on Name only).
+                Match.objectLike({ Name: "OPENSEARCH_NODE" }),
               ]),
               Secrets: Match.arrayWith([
                 Match.objectLike({ Name: "DATABASE_URL" }),
                 Match.objectLike({ Name: "DATABASE_URL_RO" }),
                 Match.objectLike({ Name: "OPENSEARCH_USER" }),
                 Match.objectLike({ Name: "OPENSEARCH_PASS" }),
-                Match.objectLike({ Name: "REVALIDATE_TOKEN" }),
+                // #447 -- renamed from REVALIDATE_TOKEN; the readers expect
+                // SCHOLARS_REVALIDATE_TOKEN.
+                Match.objectLike({ Name: "SCHOLARS_REVALIDATE_TOKEN" }),
                 Match.objectLike({ Name: "SAML_SP_PRIVATE_KEY" }),
               ]),
             }),

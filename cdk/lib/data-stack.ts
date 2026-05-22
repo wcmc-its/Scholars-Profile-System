@@ -390,6 +390,10 @@ export class DataStack extends Stack {
     new CfnOutput(this, "OpenSearchDomainEndpoint", {
       value: this.opensearchDomain.domainEndpoint,
       description: "SPS OpenSearch domain endpoint",
+      // Named export so AppStack + EtlStack can Fn::ImportValue it into
+      // OPENSEARCH_NODE without coupling to DataStack as a constructor prop
+      // (mirrors AppStack's InternalAlbSecurityGroupId export pattern). #447
+      exportName: `Sps-Data-${envConfig.envName}-OpenSearchDomainEndpoint`,
     });
     new CfnOutput(this, "OpenSearchDomainArn", {
       value: this.opensearchDomain.domainArn,

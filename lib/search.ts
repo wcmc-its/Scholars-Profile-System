@@ -10,14 +10,38 @@
  * Production target: AWS OpenSearch Service (managed, IAM-integrated).
  * Local dev: docker container at OPENSEARCH_NODE.
  */
-import { Client } from "@opensearch-project/opensearch";
+import { Client, type ClientOptions } from "@opensearch-project/opensearch";
 
 let _client: Client | null = null;
 
+/**
+ * Build the OpenSearch client options from the environment.
+ *
+ * Production is an AWS OpenSearch domain with fine-grained access control +
+ * the internal user database (see cdk/lib/data-stack.ts): the client
+ * authenticates with an `Authorization: Basic` header, NOT SigV4, so we pass
+ * `auth: { username, password }` from `OPENSEARCH_USER` / `OPENSEARCH_PASS`.
+ * `OPENSEARCH_NODE` is the `https://`-scheme domain endpoint, injected by the
+ * app + ETL task definitions. Local dev runs an unauthenticated docker
+ * container, so auth is omitted when the credential vars are absent.
+ *
+ * Pure (reads only `env`) so it can be unit-tested without constructing a
+ * real client.
+ */
+export function searchClientOptions(
+  env: Record<string, string | undefined> = process.env,
+): ClientOptions {
+  const node = env.OPENSEARCH_NODE ?? "http://localhost:9200";
+  const username = env.OPENSEARCH_USER;
+  const password = env.OPENSEARCH_PASS;
+  return username && password
+    ? { node, auth: { username, password } }
+    : { node };
+}
+
 export function searchClient(): Client {
   if (_client) return _client;
-  const node = process.env.OPENSEARCH_NODE ?? "http://localhost:9200";
-  _client = new Client({ node });
+  _client = new Client(searchClientOptions());
   return _client;
 }
 
