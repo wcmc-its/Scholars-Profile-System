@@ -209,18 +209,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "OriginCustomHeaders": [
                 {
                   "HeaderName": "X-Origin-Verify",
-                  "HeaderValue": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "{{resolve:secretsmanager:arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
-                      ],
-                    ],
-                  },
+                  "HeaderValue": "{{resolve:secretsmanager:scholars/prod/edge/origin-shared-secret:SecretString:::}}",
                 },
               ],
             },
@@ -571,18 +560,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "OriginCustomHeaders": [
                 {
                   "HeaderName": "X-Origin-Verify",
-                  "HeaderValue": {
-                    "Fn::Join": [
-                      "",
-                      [
-                        "{{resolve:secretsmanager:arn:",
-                        {
-                          "Ref": "AWS::Partition",
-                        },
-                        ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
-                      ],
-                    ],
-                  },
+                  "HeaderValue": "{{resolve:secretsmanager:scholars/staging/edge/origin-shared-secret:SecretString:::}}",
                 },
               ],
             },

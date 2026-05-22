@@ -2,6 +2,7 @@ import {
   CfnOutput,
   Duration,
   RemovalPolicy,
+  SecretValue,
   Stack,
   type StackProps,
 } from "aws-cdk-lib";
@@ -10,7 +11,6 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as s3 from "aws-cdk-lib/aws-s3";
-import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -74,17 +74,21 @@ export class EdgeStack extends Stack {
     // (and any future WAF), since the DNS name is published nowhere but
     // is trivially discoverable.
     //
-    // `unsafeUnwrap()` returns the CloudFormation dynamic reference token
-    // (`{{resolve:secretsmanager:...}}`), not the secret value -- the
-    // secret never sits in the synthesized template. CloudFront +
-    // CloudFormation resolve the reference at deploy time and write the
-    // value into the OriginCustomHeaders property of the distribution.
+    // `SecretValue.secretsManager(name)` emits the FRIENDLY-NAME dynamic
+    // reference (`{{resolve:secretsmanager:<name>:SecretString:::}}`);
+    // `unsafeUnwrap()` returns that token, not the value, so the secret never
+    // sits in the synthesized template. CloudFront + CloudFormation resolve it
+    // at deploy time into the OriginCustomHeaders property.
+    //
+    // DO NOT use `Secret.fromSecretNameV2(...).secretValue` here: it emits a
+    // PARTIAL-ARN reference (the ARN without the random `-xxxxxx` suffix) that
+    // Secrets Manager rejects at deploy with ResourceNotFoundException -- the
+    // same footgun fixed in AppStack (#431 blocker #5). It broke the first
+    // Edge deploy (the secret existed; the reference form was wrong).
     // ------------------------------------------------------------------
-    const originSecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "OriginSecret",
+    const originVerifyToken = SecretValue.secretsManager(
       `scholars/${env}/edge/origin-shared-secret`,
-    );
+    ).unsafeUnwrap();
 
     // ------------------------------------------------------------------
     // S3 bucket for CloudFront standard access logs.
@@ -155,7 +159,7 @@ export class EdgeStack extends Stack {
       protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
       httpPort: 80,
       customHeaders: {
-        "X-Origin-Verify": originSecret.secretValue.unsafeUnwrap(),
+        "X-Origin-Verify": originVerifyToken,
       },
     });
 
