@@ -100,15 +100,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
         ],
       },
     },
-    "OpenSearchMasterRoleArn": {
-      "Description": "SPS OpenSearch FGAC master role ARN — assume to administer",
-      "Value": {
-        "Fn::GetAtt": [
-          "OpensearchMasterRoleB011908B",
-          "Arn",
-        ],
-      },
-    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -699,12 +690,8 @@ exports[`DataStack prod matches the snapshot 1`] = `
           "Enabled": true,
           "InternalUserDatabaseEnabled": true,
           "MasterUserOptions": {
-            "MasterUserARN": {
-              "Fn::GetAtt": [
-                "OpensearchMasterRoleB011908B",
-                "Arn",
-              ],
-            },
+            "MasterUserName": "sps_master",
+            "MasterUserPassword": "{{resolve:secretsmanager:scholars/prod/opensearch/master:SecretString:::}}",
           },
         },
         "ClusterConfig": {
@@ -901,70 +888,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "ToPort": 443,
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
-    },
-    "OpensearchMasterRoleB011908B": {
-      "Properties": {
-        "AssumeRolePolicyDocument": {
-          "Statement": [
-            {
-              "Action": "sts:AssumeRole",
-              "Effect": "Allow",
-              "Principal": {
-                "AWS": {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":iam::123456789012:root",
-                    ],
-                  ],
-                },
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "Description": "SPS OpenSearch fine-grained access control master (prod). Assume from a workstation to administer the domain.",
-        "RoleName": "sps-opensearch-master-prod",
-      },
-      "Type": "AWS::IAM::Role",
-    },
-    "OpensearchMasterRoleDefaultPolicyF9FC8702": {
-      "Properties": {
-        "PolicyDocument": {
-          "Statement": [
-            {
-              "Action": "es:ESHttp*",
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Fn::GetAtt": [
-                        "OpenSearch587998CD",
-                        "Arn",
-                      ],
-                    },
-                    "/*",
-                  ],
-                ],
-              },
-            },
-          ],
-          "Version": "2012-10-17",
-        },
-        "PolicyName": "OpensearchMasterRoleDefaultPolicyF9FC8702",
-        "Roles": [
-          {
-            "Ref": "OpensearchMasterRoleB011908B",
-          },
-        ],
-      },
-      "Type": "AWS::IAM::Policy",
     },
     "SpsDataprodAuroraClusterSecretBBF92F2F3fdaad7efa858a3daf9490cf0a702aeb": {
       "DeletionPolicy": "Retain",

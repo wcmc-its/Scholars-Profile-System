@@ -92,6 +92,12 @@ export class SecretsStack extends Stack {
         description: "SPS ETL writer DSN (PRODUCTION_ADDENDUM § Secrets).",
       },
       {
+        constructId: "OpensearchMaster",
+        name: `scholars/${env}/opensearch/master`,
+        description:
+          "SPS OpenSearch FGAC internal master user password (DataStack consumes via dynamic reference). Plain-string password; seed before DataStack deploy (#443).",
+      },
+      {
         constructId: "OpensearchApp",
         name: `scholars/${env}/opensearch/app`,
         description:

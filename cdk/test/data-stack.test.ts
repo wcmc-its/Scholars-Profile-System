@@ -130,18 +130,19 @@ describe("DataStack", () => {
             Enabled: true,
             InternalUserDatabaseEnabled: true,
             MasterUserOptions: Match.objectLike({
-              MasterUserARN: Match.anyValue(),
+              MasterUserName: "sps_master",
             }),
           }),
         });
       });
 
-      it("AdvancedSecurityOptions does NOT carry MasterUserName/MasterUserPassword (IAM master only; app/ETL internal users seeded out-of-band)", () => {
-        // Phase 1 sign-off: the master credential is the IAM role, not a
-        // basic-auth user. The two `scholars/{env}/opensearch/{app,etl}`
-        // secrets are *internal users* the master creates via the
-        // `_security` API after deploy — none of their values appear in
-        // the synthesized template.
+      it("FGAC uses an internal master user with the password as a Secrets Manager dynamic reference, not a plaintext value or an IAM ARN (#443)", () => {
+        // #443: an IAM master ARN cannot coexist with the internal user
+        // database (AWS drops the master, leaving the domain un-administrable).
+        // The master is therefore an internal user; its password is a
+        // {{resolve:secretsmanager:...}} dynamic reference so no plaintext
+        // value enters the template (ADR-008). The app/ETL internal users are
+        // created by this master via the `_security` API after deploy.
         const domains = Object.values(
           template.findResources("AWS::OpenSearchService::Domain"),
         );
@@ -152,8 +153,12 @@ describe("DataStack", () => {
           | { MasterUserOptions?: Record<string, unknown> }
           | undefined;
         const opts = advancedSecurity?.MasterUserOptions ?? {};
-        expect(opts).not.toHaveProperty("MasterUserName");
-        expect(opts).not.toHaveProperty("MasterUserPassword");
+        expect(opts).toHaveProperty("MasterUserName", "sps_master");
+        expect(opts).not.toHaveProperty("MasterUserARN");
+        // Password is a dynamic reference to the master secret -- never a literal.
+        expect(String(opts.MasterUserPassword)).toMatch(
+          /^\{\{resolve:secretsmanager:scholars\/prod\/opensearch\/master:/,
+        );
       });
 
       it("domain access policy permits es:ESHttp* from any AWS principal (required for HTTP basic auth to reach FGAC)", () => {
@@ -177,44 +182,6 @@ describe("DataStack", () => {
         expect(policyJson).toContain("es:ESHttp*");
         expect(policyJson).toMatch(/Principal.{1,40}AWS.{1,40}\*/);
         expect(policyJson).toMatch(/Effect.{1,20}Allow/);
-      });
-
-      it("master role has es:ESHttp* on the domain ARN (without it, _security API calls 403 before FGAC sees them)", () => {
-        // Match a policy attached to the OS master role that allows
-        // es:ESHttp* on the domain ARN. The L2 Domain helper does NOT
-        // automatically attach this; without it, the assumed master role
-        // gets `not authorized to perform: es:ESHttpPut` at the IAM
-        // gate, which is a deploy-only failure mode.
-        template.hasResourceProperties(
-          "AWS::IAM::Policy",
-          Match.objectLike({
-            Roles: Match.arrayWith([
-              Match.objectLike({ Ref: Match.stringLikeRegexp("OpensearchMasterRole") }),
-            ]),
-            PolicyDocument: Match.objectLike({
-              Statement: Match.arrayWith([
-                Match.objectLike({
-                  Effect: "Allow",
-                  Action: "es:ESHttp*",
-                  Resource: Match.objectLike({
-                    "Fn::Join": Match.arrayWith([
-                      "",
-                      Match.arrayWith([
-                        Match.objectLike({
-                          "Fn::GetAtt": Match.arrayWith([
-                            Match.stringLikeRegexp("OpenSearch"),
-                            "Arn",
-                          ]),
-                        }),
-                        "/*",
-                      ]),
-                    ]),
-                  }),
-                }),
-              ]),
-            }),
-          }),
-        );
       });
 
       it("retains the OpenSearch domain on stack delete", () => {
@@ -249,19 +216,12 @@ describe("DataStack", () => {
         });
       });
 
-      it("creates the IAM FGAC master role with AccountRootPrincipal trust", () => {
-        template.hasResourceProperties("AWS::IAM::Role", {
-          RoleName: "sps-opensearch-master-prod",
-          AssumeRolePolicyDocument: Match.objectLike({
-            Statement: Match.arrayWith([
-              Match.objectLike({
-                Action: "sts:AssumeRole",
-                Effect: "Allow",
-                Principal: Match.objectLike({ AWS: Match.anyValue() }),
-              }),
-            ]),
-          }),
-        });
+      it("no longer creates an IAM FGAC master role (replaced by the internal master, #443)", () => {
+        const roles = template.findResources("AWS::IAM::Role");
+        const names = Object.values(roles).map(
+          (r) => r.Properties?.RoleName as string | undefined,
+        );
+        expect(names).not.toContain("sps-opensearch-master-prod");
       });
 
       it("exports the domain endpoint under a stable name for AppStack/EtlStack OPENSEARCH_NODE (#447)", () => {
