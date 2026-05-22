@@ -420,6 +420,36 @@ exports[`NetworkStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::Subnet",
     },
+    "WcmResolverAssocMedCornellEdu": {
+      "Properties": {
+        "Name": "sps-prod-medcornelledu",
+        "ResolverRuleId": "rslvr-rr-467f0939c1f2458e9",
+        "VPCId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::Route53Resolver::ResolverRuleAssociation",
+    },
+    "WcmResolverAssocWcmcAdNet": {
+      "Properties": {
+        "Name": "sps-prod-wcmcadnet",
+        "ResolverRuleId": "rslvr-rr-56f32331b3a1441ba",
+        "VPCId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::Route53Resolver::ResolverRuleAssociation",
+    },
+    "WcmResolverAssocWeillCornellEdu": {
+      "Properties": {
+        "Name": "sps-prod-weillcornelledu",
+        "ResolverRuleId": "rslvr-rr-58457e95d34548148",
+        "VPCId": {
+          "Ref": "Vpc8378EB38",
+        },
+      },
+      "Type": "AWS::Route53Resolver::ResolverRuleAssociation",
+    },
   },
   "Rules": {
     "CheckBootstrapVersion": {
