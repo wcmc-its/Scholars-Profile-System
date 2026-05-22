@@ -36,6 +36,28 @@ const ADOT_COLLECTOR_IMAGE =
   "public.ecr.aws/aws-observability/aws-otel-collector" +
   "@sha256:8aa9ea5f67b8d318f7d6af24677e3c70f7098bc0631147cb5fa91addbe980b06";
 
+/**
+ * WCM SAML IdP coordinates (#466). Identical across staging and prod — WCM
+ * confirmed non-prod authenticates against the SAME production IdP, so these
+ * are IdP-global constants rather than per-env config. Source of truth is the
+ * IdP metadata document:
+ *   https://login-proxy.weill.cornell.edu/idp/saml2/idp/metadata.php
+ * `SAML_IDP_CERT` (the signing cert) is NOT here — it is a rotatable secret
+ * injected from Secrets Manager (`scholars/<env>/saml/idp-cert`).
+ */
+const WCM_IDP_ENTITY_ID = "https://login-proxy.weill.cornell.edu/idp";
+const WCM_IDP_SSO_URL =
+  "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO";
+/**
+ * The assertion attribute carrying the bare CWID (#466). Confirmed against a
+ * live WCM assertion: a `CWID` attribute resolves to the un-suffixed CWID
+ * (e.g. `paa2013`), unlike the `@med.cornell.edu` eppn forms. node-saml keys
+ * attributes onto the profile by `Name`, and `extractCwid` reads
+ * `profile[SAML_CWID_ATTRIBUTE]`; setting it to `CWID` avoids the NameID
+ * fallback (which would otherwise yield the wrong identifier).
+ */
+const WCM_SAML_CWID_ATTRIBUTE = "CWID";
+
 /** Props for {@link AppStack}. */
 export interface AppStackProps extends StackProps {
   /** Resolved per-environment configuration. */
@@ -130,11 +152,13 @@ export class AppStack extends Stack {
     const env = envConfig.envName;
 
     // ------------------------------------------------------------------
-    // Secrets lookup. SecretsStack defines all seven entries; AppStack
-    // reads five of them (db/etl is ETL-only). Looked up by name so the
-    // two stacks stay loosely coupled — no shared stack prop, no
-    // cross-stack export. ARNs feed both the task-execution role's
-    // tightly-scoped policy and the task definition's `secrets:` block.
+    // Secrets lookup. SecretsStack defines the full set; AppStack reads the
+    // seven the running app consumes (db read/write, opensearch app,
+    // revalidate token, SAML SP private key, ReciterDB connection, SAML IdP
+    // cert). Looked up by name so the two stacks stay loosely coupled — no
+    // shared stack prop, no cross-stack export. ARNs feed both the
+    // task-execution role's tightly-scoped policy and the task definition's
+    // `secrets:` block.
     // ------------------------------------------------------------------
     const appRwSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -170,8 +194,18 @@ export class AppStack extends Stack {
       "EtlReciterSecret",
       `scholars/${env}/etl/reciter`,
     );
+    // SAML IdP signing cert — the trust anchor for assertion-signature
+    // verification (#466). Injected as SAML_IDP_CERT; a secret (not env) so
+    // the 2026-08-19 IdP cert rollover is a value rotation, not a code
+    // deploy. SecretsStack defines the stub; seed both rollover PEMs
+    // concatenated out-of-band.
+    const samlIdpCertSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "SamlIdpCertSecret",
+      `scholars/${env}/saml/idp-cert`,
+    );
 
-    // The exhaustive list of six consumer ARNs. The task-execution role's
+    // The exhaustive list of seven consumer ARNs. The task-execution role's
     // `secretsmanager:GetSecretValue` resource list is this exact array
     // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
     const consumerSecretArns: string[] = [
@@ -181,6 +215,7 @@ export class AppStack extends Stack {
       revalidateTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
+      samlIdpCertSecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -285,7 +320,7 @@ export class AppStack extends Stack {
     // - **Task-execution role** is the role ECS itself assumes to pull the
     //   image, inject secrets into the container, and write log streams.
     //   Permissions are tightly scoped: ECR auth + Batch* on the SPS repo
-    //   only; secrets:GetSecretValue on the five consumer ARNs only; logs
+    //   only; secrets:GetSecretValue on the seven consumer ARNs only; logs
     //   on the two log groups only. No `*` resource anywhere.
     // - **Task role** is the role the *application code* runs as. The
     //   running Next.js + Prisma code does not call any AWS API today;
@@ -322,7 +357,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets — exactly the five consumer ARNs. Asserted in tests.
+    // Secrets — exactly the seven consumer ARNs. Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -532,6 +567,20 @@ export class AppStack extends Stack {
         OPENSEARCH_NODE: `https://${Fn.importValue(
           `Sps-Data-${env}-OpenSearchDomainEndpoint`,
         )}`,
+        // SAML SP non-secret config (#466). Without these, getSamlEnv()'s
+        // requireEnv throws on the first missing var and every SAML route
+        // 503s ("SAML SP is not configured"); SP-initiated sign-in is dead.
+        // SAML_IDP_CERT is the one SAML value that is NOT here -- it is the
+        // rotatable trust anchor, injected as a secret below. The IdP-side
+        // values are IdP-global constants (shared prod IdP); the SP entityID
+        // + ACS URL are per-env off the public host (envConfig). E2E login
+        // additionally needs the app-CNAME DNS live so the IdP can redirect
+        // the browser back to the ACS URL.
+        SAML_IDP_ENTITY_ID: WCM_IDP_ENTITY_ID,
+        SAML_IDP_SSO_URL: WCM_IDP_SSO_URL,
+        SAML_SP_ENTITY_ID: envConfig.samlSpEntityId,
+        SAML_SP_ACS_URL: envConfig.samlSpAcsUrl,
+        SAML_CWID_ATTRIBUTE: WCM_SAML_CWID_ATTRIBUTE,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
@@ -549,6 +598,10 @@ export class AppStack extends Stack {
         SCHOLARS_REVALIDATE_TOKEN:
           ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         SAML_SP_PRIVATE_KEY: ecs.Secret.fromSecretsManager(samlSpPrivateKeySecret),
+        // SAML IdP signing cert(s), whole-secret PEM (#466). parseIdpCert
+        // accepts one or many concatenated PEM blocks, so the 2026-08-19
+        // rollover is a Secrets Manager value swap with no code change.
+        SAML_IDP_CERT: ecs.Secret.fromSecretsManager(samlIdpCertSecret),
         // ReciterDB connection vars. The env-var name == the secret's JSON key
         // (#442); the running app reads these via lib/sources/reciterdb.ts.
         SCHOLARS_RECITERDB_HOST: ecs.Secret.fromSecretsManager(

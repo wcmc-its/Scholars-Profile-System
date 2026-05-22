@@ -280,6 +280,26 @@ exports[`AppStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SAML_IDP_ENTITY_ID",
+                "Value": "https://login-proxy.weill.cornell.edu/idp",
+              },
+              {
+                "Name": "SAML_IDP_SSO_URL",
+                "Value": "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO",
+              },
+              {
+                "Name": "SAML_SP_ENTITY_ID",
+                "Value": "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
+              },
+              {
+                "Name": "SAML_SP_ACS_URL",
+                "Value": "https://scholars.weill.cornell.edu/api/auth/saml/callback",
+              },
+              {
+                "Name": "SAML_CWID_ATTRIBUTE",
+                "Value": "CWID",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -435,6 +455,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/private-key",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SAML_IDP_CERT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/saml/idp-cert",
                     ],
                   ],
                 },
@@ -1508,6 +1543,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/saml/idp-cert",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1683,6 +1730,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/private-key-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/saml/idp-cert-??????",
                   ],
                 ],
               },
@@ -2138,6 +2204,26 @@ exports[`AppStack staging matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SAML_IDP_ENTITY_ID",
+                "Value": "https://login-proxy.weill.cornell.edu/idp",
+              },
+              {
+                "Name": "SAML_IDP_SSO_URL",
+                "Value": "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO",
+              },
+              {
+                "Name": "SAML_SP_ENTITY_ID",
+                "Value": "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+              },
+              {
+                "Name": "SAML_SP_ACS_URL",
+                "Value": "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
+              },
+              {
+                "Name": "SAML_CWID_ATTRIBUTE",
+                "Value": "CWID",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -2293,6 +2379,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/private-key",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SAML_IDP_CERT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert",
                     ],
                   ],
                 },
@@ -3366,6 +3467,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3541,6 +3654,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/private-key-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert-??????",
                   ],
                 ],
               },

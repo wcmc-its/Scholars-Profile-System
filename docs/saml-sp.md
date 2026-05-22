@@ -39,7 +39,7 @@ If any step fails, do not declare the smoke test passed. Capture the failing ste
 
 - IdP returns a SAML status error like `urn:oasis:names:tc:SAML:2.0:status:Responder` — almost always `SAML_SP_ENTITY_ID` doesn't match what the IdP team registered. Check the issue comment.
 - `idp_status_error` or `invalid_saml_response` from the callback — signature mismatch. The IdP cert may have rotated, or `SAML_IDP_CERT` is the wrong cert. Re-pull metadata (see procedure 2).
-- `no_cwid` from the callback — the IdP isn't releasing the attribute we expect. Confirm with the IdP team whether the CWID arrives in the assertion NameID (current default) or in a specific `<Attribute Name="…">` (then set `SAML_CWID_ATTRIBUTE`).
+- `no_cwid` from the callback — the IdP isn't releasing the attribute we expect. The SP reads the CWID from the `CWID` assertion attribute (`SAML_CWID_ATTRIBUTE=CWID`, confirmed against a live WCM assertion — the bare CWID `paa2013`, not the `@med.cornell.edu` eppn form); if the IdP renames or drops it, set `SAML_CWID_ATTRIBUTE` to the new attribute name or clear it to fall back to the NameID.
 
 ---
 
@@ -67,7 +67,7 @@ If any step fails, do not declare the smoke test passed. Capture the failing ste
    -----END CERTIFICATE-----
    ```
    `openssl x509 -inform pem -noout -enddate -in <file>` on each one will confirm the expiry. Sanity check: one cert should match the currently-known active cert (issued 2016-08-19), the other the successor (issued 2026-03-27).
-4. Concatenate both PEMs in a single string, with a blank line between them, and update the `SAML_IDP_CERT` value in AWS Secrets Manager (`scholars/saml-sp/<env>/idp-cert` or wherever it lives in the active deployment).
+4. Concatenate both PEMs in a single string, with a blank line between them, and update the `SAML_IDP_CERT` value in AWS Secrets Manager (`scholars/<env>/saml/idp-cert` — the stub AppStack injects as `SAML_IDP_CERT`, #466).
 5. Trigger an ECS rolling deploy (no code change). Verify via the staging smoke test (procedure 1) that login still works — the IdP is still signing with the OLD cert at this point, so a successful login proves the cert array is correctly trusted in both shapes.
 
 ### The day of (or after) the IdP rotates

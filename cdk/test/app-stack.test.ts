@@ -320,10 +320,65 @@ describe("AppStack", () => {
                 // SCHOLARS_REVALIDATE_TOKEN.
                 Match.objectLike({ Name: "SCHOLARS_REVALIDATE_TOKEN" }),
                 Match.objectLike({ Name: "SAML_SP_PRIVATE_KEY" }),
+                // #466 -- the IdP signing cert is a secret (rotatable trust
+                // anchor), not an env var.
+                Match.objectLike({ Name: "SAML_IDP_CERT" }),
               ]),
             }),
           ]),
         });
+      });
+
+      // #466 -- the four required SAML_* config vars (plus the optional
+      // IdP-issuer + CWID-attribute) must be injected as ENV on the app
+      // container. Missing any required one makes getSamlEnv()'s requireEnv
+      // throw and every SAML route 503 ("SAML SP is not configured"), killing
+      // SP-initiated sign-in. SAML_IDP_CERT is asserted in the secrets test
+      // above, not here -- it is the one SAML value injected as a secret.
+      it("injects the required SAML_* config env on the app container (#466)", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        expect(appTaskDef).toBeDefined();
+        const appContainer = (
+          appTaskDef?.Properties?.ContainerDefinitions as
+            | Array<{
+                Name?: string;
+                Environment?: Array<{ Name?: string; Value?: string }>;
+              }>
+            | undefined
+        )?.find((c) => c.Name === "app");
+        const envByName = new Map(
+          (appContainer?.Environment ?? []).map((e) => [
+            e.Name as string,
+            e.Value,
+          ]),
+        );
+        // The four requireEnv vars are all present.
+        for (const name of [
+          "SAML_IDP_SSO_URL",
+          "SAML_SP_ENTITY_ID",
+          "SAML_SP_ACS_URL",
+        ]) {
+          expect(envByName.has(name)).toBe(true);
+        }
+        // IdP coordinates are the WCM prod IdP (shared across envs).
+        expect(envByName.get("SAML_IDP_ENTITY_ID")).toBe(
+          "https://login-proxy.weill.cornell.edu/idp",
+        );
+        expect(envByName.get("SAML_IDP_SSO_URL")).toBe(
+          "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO",
+        );
+        // SP entityID + ACS are the prod host; ACS route is /callback.
+        expect(envByName.get("SAML_SP_ENTITY_ID")).toBe(
+          "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
+        );
+        expect(envByName.get("SAML_SP_ACS_URL")).toBe(
+          "https://scholars.weill.cornell.edu/api/auth/saml/callback",
+        );
+        // CWID arrives in a `CWID` attribute, not the NameID.
+        expect(envByName.get("SAML_CWID_ATTRIBUTE")).toBe("CWID");
       });
 
       it("the migration task definition has the prisma migrate deploy entrypoint and only the writer secret", () => {
@@ -349,11 +404,12 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the six consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the seven consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The six ARNs are scholars/prod/db/app-rw, db/app-ro,
-        // opensearch/app, revalidate-token, the SAML SP private key, and
-        // etl/reciter (ReciterDB connection for funding/mentoring surfaces).
+        // The seven ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // opensearch/app, revalidate-token, the SAML SP private key,
+        // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
+        // and saml/idp-cert (the IdP signing-cert trust anchor, #466).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -376,7 +432,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(6);
+        expect(resourceList).toHaveLength(7);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -999,7 +1055,7 @@ describe("AppStack", () => {
       // template that doesn't exist, and AWS rejects only at task-start
       // (or, for the listener-rule dynamic ref, at deploy time). Assert
       // every expected secret name appears at least once in the synth.
-      it("references all six AppStack-consumed Secrets Manager names exactly as SecretsStack defines them", () => {
+      it("references every AppStack-consumed Secrets Manager name exactly as SecretsStack defines it", () => {
         const expected = [
           "scholars/prod/db/app-rw",
           "scholars/prod/db/app-ro",
@@ -1007,6 +1063,9 @@ describe("AppStack", () => {
           "scholars/prod/revalidate-token",
           "scholars/saml-sp/prod/private-key",
           "scholars/prod/edge/origin-shared-secret",
+          // ReciterDB connection (#465) and the SAML IdP signing cert (#466).
+          "scholars/prod/etl/reciter",
+          "scholars/prod/saml/idp-cert",
         ];
         const json = JSON.stringify(template.toJSON());
         for (const name of expected) {
@@ -1231,6 +1290,42 @@ describe("AppStack", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
         DesiredCount: 1,
       });
+    });
+
+    it("drives the SAML SP entityID + ACS off the staging host (#466)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [
+          e.Name as string,
+          e.Value,
+        ]),
+      );
+      expect(envByName.get("SAML_SP_ENTITY_ID")).toBe(
+        "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+      );
+      expect(envByName.get("SAML_SP_ACS_URL")).toBe(
+        "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
+      );
+      // IdP coordinates are shared with prod (same WCM prod IdP).
+      expect(envByName.get("SAML_IDP_SSO_URL")).toBe(
+        "https://login-proxy.weill.cornell.edu/idp/profile/SAML2/Redirect/SSO",
+      );
+    });
+
+    it("injects the staging SAML IdP cert secret name (#466)", () => {
+      const json = JSON.stringify(template.toJSON());
+      expect(json).toContain("scholars/staging/saml/idp-cert");
     });
 
     it("uses staging Fargate sizing 512 cpu / 1024 MiB on the app task definition", () => {
