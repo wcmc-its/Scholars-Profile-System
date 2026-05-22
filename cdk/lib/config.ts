@@ -90,6 +90,25 @@ export interface SpsEnvConfig {
   readonly migrationTaskCpu: number;
   /** Fargate memory (MiB) for the migration task definition. */
   readonly migrationTaskMemoryMiB: number;
+  /**
+   * SAML SP entityID this environment registers with the WCM IdP (#466).
+   * The app advertises it in `/api/auth/saml/metadata` and the IdP must have
+   * the exact same value on file, else login fails with a SAML Responder
+   * error. Per-env because the two SPs (`scholars-staging` / `scholars`) are
+   * distinct entities. Convention is the SP metadata URL (matches
+   * `.env.example`); the registered value is config-driven so confirming it
+   * with the SAML contact is a config edit, not a code change.
+   */
+  readonly samlSpEntityId: string;
+  /**
+   * SAML SP Assertion Consumer Service URL — where the IdP POSTs the
+   * SAMLResponse (#466). Always `https://<host>/api/auth/saml/callback`
+   * (the route is `/callback`, not `/acs`); per-env off the public host.
+   * Must be browser-reachable (custom-domain DNS live) for the round-trip
+   * to complete, so E2E waits on the app-CNAME even though the wiring lands
+   * now.
+   */
+  readonly samlSpAcsUrl: string;
 
   // --- EtlStack (Phase 3) ---
 
@@ -130,6 +149,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 1024,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    samlSpEntityId:
+      "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+    samlSpAcsUrl:
+      "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
     etlSchedulesEnabled: true,
     etlTaskCpu: 1024,
     etlTaskMemoryMiB: 2048,
@@ -159,6 +182,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
+    samlSpAcsUrl: "https://scholars.weill.cornell.edu/api/auth/saml/callback",
     // Prod schedules ship disabled — first run is operator-driven after
     // runbook review, then `aws events enable-rule` flips them on (see
     // PRODUCTION_ADDENDUM § EtlStack).

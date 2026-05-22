@@ -120,6 +120,20 @@ export class SecretsStack extends Stack {
         name: `scholars/saml-sp/${env}/private-key`,
         description: `SPS SAML SP private key (${env}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
       },
+      // IdP signing certificate(s) — the trust anchor that verifies every
+      // SAMLResponse signature (#466). A secret, not env: it is integrity-
+      // critical (a swapped cert lets an attacker forge assertions), it is a
+      // multi-line PEM, and it must be rotated at the 2026-08-19 IdP cert
+      // expiry without a code deploy. Seed out-of-band with BOTH rollover
+      // PEMs concatenated (active 2016 cert + 2036 successor — `parseIdpCert`
+      // accepts multiple blocks) so the expiry is a no-op. AppStack injects it
+      // as SAML_IDP_CERT. Env-first name per the SecretsStack convention (the
+      // SP private key's env-middle form is the lone pre-staged exception).
+      {
+        constructId: "SamlIdpCert",
+        name: `scholars/${env}/saml/idp-cert`,
+        description: `SPS SAML IdP signing certificate(s) (${env}) — PEM trust anchor for assertion-signature verification. Seed with both rollover certs concatenated; rotate before the 2026-08-19 IdP cert expiry. See docs/saml-sp.md.`,
+      },
       // Per-source ETL credential stubs (Phase 3, EtlStack). Each source
       // in the nightly/weekly/annual Step Functions state machines that
       // calls an external system gets its own secret so credentials can
