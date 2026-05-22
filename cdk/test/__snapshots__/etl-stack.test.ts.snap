@@ -536,6 +536,22 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Name": "NODE_ENV",
                 "Value": "production",
               },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -654,7 +670,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "ETL_ED_SECRET",
+                "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -663,13 +679,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_URL::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_ASMS_SECRET",
+                "Name": "SCHOLARS_LDAP_BIND_DN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -678,13 +694,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_BIND_DN::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_INFOED_SECRET",
+                "Name": "SCHOLARS_LDAP_BIND_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -693,13 +709,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/infoed",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_COI_SECRET",
+                "Name": "SCHOLARS_ASMS_HOST",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -708,13 +724,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms:SCHOLARS_ASMS_HOST::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_RECITER_SECRET",
+                "Name": "SCHOLARS_ASMS_PORT",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -723,13 +739,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms:SCHOLARS_ASMS_PORT::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_DYNAMODB_SECRET",
+                "Name": "SCHOLARS_ASMS_DATABASE",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -738,13 +754,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/dynamodb",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms:SCHOLARS_ASMS_DATABASE::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_SPOTLIGHT_SECRET",
+                "Name": "SCHOLARS_ASMS_USERNAME",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -753,13 +769,13 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/spotlight",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms:SCHOLARS_ASMS_USERNAME::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_HIERARCHY_SECRET",
+                "Name": "SCHOLARS_ASMS_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -768,7 +784,202 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/hierarchy",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/asms:SCHOLARS_ASMS_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_DB_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/infoed:SCHOLARS_INFOED_DB_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/infoed:SCHOLARS_INFOED_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/infoed:SCHOLARS_INFOED_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/coi:SCHOLARS_COI_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
                     ],
                   ],
                 },
@@ -934,42 +1145,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/dynamodb",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/spotlight",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/hierarchy",
                     ],
                   ],
                 },
@@ -1165,63 +1340,6 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/dynamodb-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/spotlight-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/hierarchy-??????",
                   ],
                 ],
               },
@@ -2977,6 +3095,22 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Name": "NODE_ENV",
                 "Value": "production",
               },
+              {
+                "Name": "SCHOLARS_DYNAMODB_TABLE",
+                "Value": "reciterai",
+              },
+              {
+                "Name": "ARTIFACTS_BUCKET",
+                "Value": "wcmc-reciterai-artifacts",
+              },
+              {
+                "Name": "ARTIFACT_PREFIX",
+                "Value": "spotlight",
+              },
+              {
+                "Name": "HIERARCHY_BUCKET",
+                "Value": "wcmc-reciterai-hierarchy",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -3095,7 +3229,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "ETL_ED_SECRET",
+                "Name": "SCHOLARS_LDAP_URL",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3104,13 +3238,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_URL::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_ASMS_SECRET",
+                "Name": "SCHOLARS_LDAP_BIND_DN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3119,13 +3253,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_DN::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_INFOED_SECRET",
+                "Name": "SCHOLARS_LDAP_BIND_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3134,13 +3268,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/infoed",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/ed:SCHOLARS_LDAP_BIND_PASSWORD::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_COI_SECRET",
+                "Name": "SCHOLARS_ASMS_HOST",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3149,13 +3283,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms:SCHOLARS_ASMS_HOST::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_RECITER_SECRET",
+                "Name": "SCHOLARS_ASMS_PORT",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3164,13 +3298,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms:SCHOLARS_ASMS_PORT::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_DYNAMODB_SECRET",
+                "Name": "SCHOLARS_ASMS_DATABASE",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3179,13 +3313,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/dynamodb",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms:SCHOLARS_ASMS_DATABASE::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_SPOTLIGHT_SECRET",
+                "Name": "SCHOLARS_ASMS_USERNAME",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3194,13 +3328,13 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/spotlight",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms:SCHOLARS_ASMS_USERNAME::",
                     ],
                   ],
                 },
               },
               {
-                "Name": "ETL_HIERARCHY_SECRET",
+                "Name": "SCHOLARS_ASMS_PASSWORD",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -3209,7 +3343,202 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/hierarchy",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/asms:SCHOLARS_ASMS_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_DB_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/infoed:SCHOLARS_INFOED_DB_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/infoed:SCHOLARS_INFOED_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_INFOED_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/infoed:SCHOLARS_INFOED_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_COI_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/coi:SCHOLARS_COI_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
                     ],
                   ],
                 },
@@ -3375,42 +3704,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/dynamodb",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/spotlight",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/hierarchy",
                     ],
                   ],
                 },
@@ -3606,63 +3899,6 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/dynamodb-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/spotlight-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/hierarchy-??????",
                   ],
                 ],
               },

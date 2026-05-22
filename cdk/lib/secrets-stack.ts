@@ -146,7 +146,7 @@ export class SecretsStack extends Stack {
         constructId: "EtlReciter",
         name: `scholars/${env}/etl/reciter`,
         description:
-          "SPS ETL credentials — ReCiter API bearer + IAM signer keys.",
+          "SPS ETL credentials — ReciterDB MySQL connection (SCHOLARS_RECITERDB_* host/port/database/username/password).",
       },
       {
         constructId: "EtlDynamodb",

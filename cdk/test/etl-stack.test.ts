@@ -43,16 +43,50 @@ const EXPECTED_CRONS: Readonly<Record<string, string>> = {
   annual: "cron(0 9 1 7 ? *)",
 };
 
-const PER_SOURCE_SECRET_NAMES = [
-  "ed",
-  "asms",
-  "infoed",
-  "coi",
-  "reciter",
-  "dynamodb",
-  "spotlight",
-  "hierarchy",
+// #442 -- the task container injects each credentialed source's granular
+// SCHOLARS_* keys (plus the three shared secrets), NOT a blob ETL_*_SECRET.
+const EXPECTED_SECRET_ENV_VARS = [
+  // shared
+  "DATABASE_URL",
+  "OPENSEARCH_USER",
+  "OPENSEARCH_PASS",
+  "REVALIDATE_TOKEN",
+  // ed (LDAP simple bind)
+  "SCHOLARS_LDAP_URL",
+  "SCHOLARS_LDAP_BIND_DN",
+  "SCHOLARS_LDAP_BIND_PASSWORD",
+  // asms
+  "SCHOLARS_ASMS_HOST",
+  "SCHOLARS_ASMS_PORT",
+  "SCHOLARS_ASMS_DATABASE",
+  "SCHOLARS_ASMS_USERNAME",
+  "SCHOLARS_ASMS_PASSWORD",
+  // infoed
+  "SCHOLARS_INFOED_DB_URL",
+  "SCHOLARS_INFOED_USERNAME",
+  "SCHOLARS_INFOED_PASSWORD",
+  // coi
+  "SCHOLARS_COI_URL",
+  "SCHOLARS_COI_PORT",
+  "SCHOLARS_COI_DATABASE",
+  "SCHOLARS_COI_USERNAME",
+  "SCHOLARS_COI_PASSWORD",
+  // reciter (ReciterDB MySQL)
+  "SCHOLARS_RECITERDB_HOST",
+  "SCHOLARS_RECITERDB_PORT",
+  "SCHOLARS_RECITERDB_DATABASE",
+  "SCHOLARS_RECITERDB_USERNAME",
+  "SCHOLARS_RECITERDB_PASSWORD",
 ] as const;
+
+// IAM-based sources read these as plaintext config from the environment
+// block (values mirror the source-script defaults).
+const EXPECTED_ENV_CONFIG: Readonly<Record<string, string>> = {
+  SCHOLARS_DYNAMODB_TABLE: "reciterai",
+  ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
+  ARTIFACT_PREFIX: "spotlight",
+  HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+};
 
 function getStateMachineDefinitionText(
   template: Template,
@@ -235,7 +269,7 @@ describe("EtlStack", () => {
     });
 
     describe("IAM least-privilege guards", () => {
-      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 11 consumer ARNs (no *)", () => {
+      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 8 consumer ARNs (no *)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -260,8 +294,10 @@ describe("EtlStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        // 8 per-source + db/etl + opensearch/etl + revalidate-token = 11.
-        expect(resourceList).toHaveLength(11);
+        // 5 credentialed sources + db/etl + opensearch/etl + revalidate-token
+        // = 8. The dynamodb/spotlight/hierarchy sources are IAM-based (task
+        // role) and read no injected secret, so they are absent (#442).
+        expect(resourceList).toHaveLength(8);
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
         }
@@ -320,22 +356,74 @@ describe("EtlStack", () => {
       });
     });
 
-    describe("Per-source secret consumption", () => {
-      it.each(PER_SOURCE_SECRET_NAMES)(
-        "task definition injects %s as an ETL_*_SECRET env var",
-        (source) => {
-          const tds = template.findResources("AWS::ECS::TaskDefinition");
-          expect(Object.keys(tds)).toHaveLength(1);
-          const td = Object.values(tds)[0];
-          const container = (td.Properties?.ContainerDefinitions as
+    describe("ETL var injection (#442 -- granular SCHOLARS_*, not blob ETL_*_SECRET)", () => {
+      function etlContainerDef(): Record<string, unknown> {
+        const tds = template.findResources("AWS::ECS::TaskDefinition");
+        expect(Object.keys(tds)).toHaveLength(1);
+        const td = Object.values(tds)[0];
+        const container = (
+          td.Properties?.ContainerDefinitions as
             | Array<Record<string, unknown>>
-            | undefined)?.[0];
+            | undefined
+        )?.find((c) => c.Name === "etl");
+        expect(container).toBeDefined();
+        return container as Record<string, unknown>;
+      }
+
+      it.each(EXPECTED_SECRET_ENV_VARS)(
+        "injects %s as a secret env var",
+        (envVar) => {
           const secretNames = (
-            container?.Secrets as Array<{ Name?: string }> | undefined
+            etlContainerDef().Secrets as Array<{ Name?: string }> | undefined
           )?.map((s) => s.Name);
-          expect(secretNames).toContain(`ETL_${source.toUpperCase()}_SECRET`);
+          expect(secretNames).toContain(envVar);
         },
       );
+
+      it("injects no blob ETL_*_SECRET env var", () => {
+        const secretNames = (
+          etlContainerDef().Secrets as Array<{ Name?: string }> | undefined
+        )?.map((s) => s.Name ?? "");
+        const blobs = (secretNames ?? []).filter((n) =>
+          /^ETL_.*_SECRET$/.test(n),
+        );
+        expect(blobs).toEqual([]);
+      });
+
+      it("binds SCHOLARS_LDAP_URL to that JSON key of the ed secret (ValueFrom carries the key)", () => {
+        const ldapUrl = (
+          etlContainerDef().Secrets as
+            | Array<{ Name?: string; ValueFrom?: unknown }>
+            | undefined
+        )?.find((s) => s.Name === "SCHOLARS_LDAP_URL");
+        expect(ldapUrl).toBeDefined();
+        // CDK serialises a JSON-keyed secret ValueFrom as a Fn::Join whose
+        // tail is `:<key>::`; the key segment must be the granular var name.
+        expect(JSON.stringify(ldapUrl?.ValueFrom)).toContain(
+          "SCHOLARS_LDAP_URL",
+        );
+      });
+
+      it.each(Object.entries(EXPECTED_ENV_CONFIG))(
+        "sets %s=%s in the plaintext environment block",
+        (name, value) => {
+          const envEntries = (etlContainerDef().Environment ?? []) as Array<{
+            Name?: string;
+            Value?: string;
+          }>;
+          const match = envEntries.find((e) => e.Name === name);
+          expect(match?.Value).toBe(value);
+        },
+      );
+
+      it("keeps no IAM-source config (table/buckets/prefix) in the secrets block", () => {
+        const secretNames = (
+          etlContainerDef().Secrets as Array<{ Name?: string }> | undefined
+        )?.map((s) => s.Name);
+        for (const name of Object.keys(EXPECTED_ENV_CONFIG)) {
+          expect(secretNames).not.toContain(name);
+        }
+      });
     });
 
     describe("Footgun #5 -- EC2 property character-set safety", () => {
