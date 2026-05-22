@@ -11,6 +11,7 @@ import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as s3 from "aws-cdk-lib/aws-s3";
+import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -236,6 +237,66 @@ export class EdgeStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // TEMPORARY front-end IP allowlist (#461).
+    //
+    // While we test, the front end is restricted to the WCM network ranges;
+    // it is lifted (opened to the public) once verified. Enforced here at the
+    // CloudFront layer via an AWS WAFv2 WebACL -- the ALB SG can't do it
+    // because CloudFront is the only client the ALB ever sees.
+    //
+    // Toggle: `-c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16` builds the
+    // WebACL (IP-set ALLOW, default BLOCK) and attaches it. Omit the flag and
+    // redeploy to remove the restriction -- no code change. WAFv2 WebACLs with
+    // CLOUDFRONT scope must live in us-east-1, which is EdgeStack's region.
+    // ------------------------------------------------------------------
+    const allowedCidrsCtx = this.node.tryGetContext("edgeAllowedCidrs") as
+      | string
+      | undefined;
+    const allowedCidrs = allowedCidrsCtx
+      ? allowedCidrsCtx
+          .split(",")
+          .map((c) => c.trim())
+          .filter((c) => c.length > 0)
+      : [];
+    let webAclArn: string | undefined;
+    if (allowedCidrs.length > 0) {
+      const ipAllowSet = new wafv2.CfnIPSet(this, "WcmIpAllowSet", {
+        name: `sps-edge-${env}-wcm-allow`,
+        scope: "CLOUDFRONT",
+        ipAddressVersion: "IPV4",
+        addresses: allowedCidrs,
+        description: `Temporary (#461) SPS front-end allowlist (${env}); remove after testing.`,
+      });
+      const webAcl = new wafv2.CfnWebACL(this, "EdgeWebAcl", {
+        name: `sps-edge-${env}-wcm-only`,
+        scope: "CLOUDFRONT",
+        defaultAction: { block: {} },
+        rules: [
+          {
+            name: "allow-wcm-networks",
+            priority: 0,
+            action: { allow: {} },
+            statement: {
+              ipSetReferenceStatement: { arn: ipAllowSet.attrArn },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: `sps-edge-${env}-allow-wcm`,
+              sampledRequestsEnabled: true,
+            },
+          },
+        ],
+        visibilityConfig: {
+          cloudWatchMetricsEnabled: true,
+          metricName: `sps-edge-${env}-wcm-only`,
+          sampledRequestsEnabled: true,
+        },
+        description: `Temporary (#461) SPS front end restricted to WCM networks (${env}).`,
+      });
+      webAclArn = webAcl.attrArn;
+    }
+
+    // ------------------------------------------------------------------
     // Distribution.
     //
     // - priceClass PRICE_CLASS_100 (NA + EU): SPS audience is US-centric;
@@ -252,6 +313,8 @@ export class EdgeStack extends Stack {
       comment: `SPS edge -- ${env}`,
       domainNames: customDomain ? [customDomain] : undefined,
       certificate: viewerCert,
+      // Temporary WCM-only allowlist (#461); undefined => unrestricted.
+      webAclId: webAclArn,
       defaultBehavior: {
         origin,
         cachePolicy: cachingOptimized,
