@@ -137,6 +137,25 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8": {
+      "Export": {
+        "Name": "Sps-App-prod:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "EcrRepository4D7B3EE1",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
+      "Export": {
+        "Name": "Sps-App-prod:ExportsOutputRefEcrRepository4D7B3EE140E01346",
+      },
+      "Value": {
+        "Ref": "EcrRepository4D7B3EE1",
+      },
+    },
     "InternalAlbDns": {
       "Description": "SPS internal ALB DNS name (consumed by EtlStack)",
       "Value": {
@@ -1844,6 +1863,25 @@ exports[`AppStack staging matches the snapshot 1`] = `
             },
           ],
         ],
+      },
+    },
+    "ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8": {
+      "Export": {
+        "Name": "Sps-App-staging:ExportsOutputFnGetAttEcrRepository4D7B3EE1Arn21868DE8",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "EcrRepository4D7B3EE1",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputRefEcrRepository4D7B3EE140E01346": {
+      "Export": {
+        "Name": "Sps-App-staging:ExportsOutputRefEcrRepository4D7B3EE140E01346",
+      },
+      "Value": {
+        "Ref": "EcrRepository4D7B3EE1",
       },
     },
     "InternalAlbDns": {
