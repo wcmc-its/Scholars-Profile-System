@@ -439,6 +439,81 @@ exports[`AppStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "SCHOLARS_RECITERDB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
           {
@@ -1421,6 +1496,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1596,6 +1683,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/private-key-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter-??????",
                   ],
                 ],
               },
@@ -2187,6 +2293,81 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/private-key",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_HOST",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_HOST::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PORT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PORT::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_DATABASE",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_DATABASE::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_USERNAME",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_USERNAME::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SCHOLARS_RECITERDB_PASSWORD",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
                     ],
                   ],
                 },
@@ -3173,6 +3354,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3348,6 +3541,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/private-key-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter-??????",
                   ],
                 ],
               },

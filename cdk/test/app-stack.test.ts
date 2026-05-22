@@ -349,10 +349,11 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the five consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the six consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The five ARNs are scholars/prod/db/app-rw, db/app-ro,
-        // opensearch/app, revalidate-token, and the SAML SP private key.
+        // The six ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // opensearch/app, revalidate-token, the SAML SP private key, and
+        // etl/reciter (ReciterDB connection for funding/mentoring surfaces).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -375,7 +376,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(5);
+        expect(resourceList).toHaveLength(6);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);

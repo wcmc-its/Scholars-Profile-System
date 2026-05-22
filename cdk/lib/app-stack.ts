@@ -161,8 +161,17 @@ export class AppStack extends Stack {
       "SamlSpPrivateKeySecret",
       `scholars/saml-sp/${env}/private-key`,
     );
+    // ReciterDB connection (RePORTER funding + mentoring surfaces). The app
+    // reads SCHOLARS_RECITERDB_* at request time; same secret + JSON keys the
+    // ETL task already consumes (#442). Without this the reciter-backed page
+    // sections fail at render and error-boundary out (#460 follow-on).
+    const etlReciterSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "EtlReciterSecret",
+      `scholars/${env}/etl/reciter`,
+    );
 
-    // The exhaustive list of five consumer ARNs. The task-execution role's
+    // The exhaustive list of six consumer ARNs. The task-execution role's
     // `secretsmanager:GetSecretValue` resource list is this exact array
     // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
     const consumerSecretArns: string[] = [
@@ -171,6 +180,7 @@ export class AppStack extends Stack {
       opensearchAppSecret.secretArn,
       revalidateTokenSecret.secretArn,
       samlSpPrivateKeySecret.secretArn,
+      etlReciterSecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -539,6 +549,28 @@ export class AppStack extends Stack {
         SCHOLARS_REVALIDATE_TOKEN:
           ecs.Secret.fromSecretsManager(revalidateTokenSecret),
         SAML_SP_PRIVATE_KEY: ecs.Secret.fromSecretsManager(samlSpPrivateKeySecret),
+        // ReciterDB connection vars. The env-var name == the secret's JSON key
+        // (#442); the running app reads these via lib/sources/reciterdb.ts.
+        SCHOLARS_RECITERDB_HOST: ecs.Secret.fromSecretsManager(
+          etlReciterSecret,
+          "SCHOLARS_RECITERDB_HOST",
+        ),
+        SCHOLARS_RECITERDB_PORT: ecs.Secret.fromSecretsManager(
+          etlReciterSecret,
+          "SCHOLARS_RECITERDB_PORT",
+        ),
+        SCHOLARS_RECITERDB_DATABASE: ecs.Secret.fromSecretsManager(
+          etlReciterSecret,
+          "SCHOLARS_RECITERDB_DATABASE",
+        ),
+        SCHOLARS_RECITERDB_USERNAME: ecs.Secret.fromSecretsManager(
+          etlReciterSecret,
+          "SCHOLARS_RECITERDB_USERNAME",
+        ),
+        SCHOLARS_RECITERDB_PASSWORD: ecs.Secret.fromSecretsManager(
+          etlReciterSecret,
+          "SCHOLARS_RECITERDB_PASSWORD",
+        ),
       },
     });
 
