@@ -40,6 +40,28 @@ describe("NetworkStack", () => {
       template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 0);
     });
 
+    // #458/#443: the three RAM-shared WCM Resolver rules must stay
+    // associated with the VPC so the ETL can resolve WCM-internal
+    // hostnames. The rule ids are account-level shared-resource ids that
+    // cannot be derived — pin them so a refactor can't silently drop or
+    // mistype an association.
+    it("associates the three WCM Route53 Resolver rules with the VPC", () => {
+      template.resourceCountIs(
+        "AWS::Route53Resolver::ResolverRuleAssociation",
+        3,
+      );
+      for (const [ruleId, name] of [
+        ["rslvr-rr-58457e95d34548148", "sps-prod-weillcornelledu"],
+        ["rslvr-rr-467f0939c1f2458e9", "sps-prod-medcornelledu"],
+        ["rslvr-rr-56f32331b3a1441ba", "sps-prod-wcmcadnet"],
+      ] as const) {
+        template.hasResourceProperties(
+          "AWS::Route53Resolver::ResolverRuleAssociation",
+          { ResolverRuleId: ruleId, Name: name },
+        );
+      }
+    });
+
     it("synthesizes literal AZ names, not Fn::Select placeholders", () => {
       const subnets = template.findResources("AWS::EC2::Subnet");
       const azs = Object.values(subnets).map(
