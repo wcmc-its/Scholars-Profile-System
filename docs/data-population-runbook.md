@@ -13,6 +13,10 @@ export ACCOUNT=665083158573
 export REGION=us-east-1
 ```
 
+> **zsh note:** these commands brace every variable (`${ACCOUNT}` not `$ACCOUNT`).
+> In zsh an unbraced `$ACCOUNT:role` / `$ACCOUNT:stateMachine` parses `:r` / `:s`
+> as a history modifier and mangles the ARN. Keep the braces when editing.
+
 ## 0. Preconditions (verify before starting)
 
 | Check | Command | Expected |
@@ -45,7 +49,7 @@ export OS_ENDPOINT=$(aws cloudformation describe-stacks --stack-name Sps-Data-$E
 
 # Assume the FGAC master role into this shell.
 eval $(aws sts assume-role \
-  --role-arn arn:aws:iam::$ACCOUNT:role/sps-opensearch-master-$ENV \
+  --role-arn "arn:aws:iam::${ACCOUNT}:role/sps-opensearch-master-${ENV}" \
   --role-session-name fgac-bootstrap \
   --query "Credentials.{AWS_ACCESS_KEY_ID:AccessKeyId,AWS_SECRET_ACCESS_KEY:SecretAccessKey,AWS_SESSION_TOKEN:SessionToken}" \
   --output text | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')
@@ -131,14 +135,14 @@ then **weekly** (DynamoDB topics + Completeness + Spotlight), then **annual**
 ```bash
 for cad in nightly weekly; do
   aws stepfunctions start-execution \
-    --state-machine-arn arn:aws:states:$REGION:$ACCOUNT:stateMachine:scholars-$cad-$ENV \
+    --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-${cad}-${ENV}" \
     --input '{}'
 done
 ```
 
 Monitor:
 ```bash
-aws stepfunctions list-executions --state-machine-arn arn:aws:states:$REGION:$ACCOUNT:stateMachine:scholars-nightly-$ENV --max-results 1
+aws stepfunctions list-executions --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-nightly-${ENV}" --max-results 1
 # task logs: /aws/ecs/sps-etl-$ENV    state machine logs: /aws/states/nightly-$ENV
 ```
 
