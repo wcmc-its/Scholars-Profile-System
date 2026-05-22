@@ -25,36 +25,50 @@ export REGION=us-east-1
 | App is serving | `aws ecs describe-services --cluster sps-cluster-$ENV --services sps-app-$ENV --query "services[0].{desired:desiredCount,running:runningCount}"` | desired ≥ 1, running ≥ 1 |
 | Source + db secrets populated | `for s in db/etl etl/ed etl/asms etl/infoed etl/coi etl/reciter etl/dynamodb etl/spotlight etl/hierarchy; do aws secretsmanager describe-secret --secret-id scholars/$ENV/$s --query "{n:Name,v:VersionIdsToStages}"; done` | each has an `AWSCURRENT` version |
 | Aurora schema migrated | (one-shot `sps-migrate-$ENV` task already run) | tables exist |
+| ETL image present (#454) | `aws ecr describe-images --repository-name scholars-etl-$ENV --image-ids imageTag=latest --query "imageDetails[0].imageTags"` | `["latest", ...]` |
 
-As of 2026-05-22 staging: all of the above hold **except** `opensearch/etl`
-(empty) and the OpenSearch FGAC internal users — which §1 provisions.
+The ETL runs the dedicated `scholars-etl-$ENV` image, **not** the standalone app
+image — the `tsx`-based `etl/*` + `search:index` scripts need the full dep tree
+and source the app image doesn't ship (#454).
+
+As of 2026-05-22 staging: all of the above hold, **including** `opensearch/etl`
+and the OpenSearch FGAC roles/users/mappings — §1 has already been run on
+staging (see the note in §1).
 
 ---
 
 ## 1. OpenSearch FGAC provisioning (the gap)
 
 The domain runs **fine-grained access control + the internal user database**
-(`cdk/lib/data-stack.ts`). Clients (app + ETL) authenticate with HTTP **basic
-auth**, not SigV4 (`lib/search.ts` reads `OPENSEARCH_USER`/`OPENSEARCH_PASS`).
-The **master** is the IAM role `sps-opensearch-master-$ENV` (trusts the account
-root), and the `_security` admin API is reachable only with that role,
-SigV4-signed, **from inside the VPC** (the domain endpoint is `vpc-...`, private).
+(`cdk/lib/data-stack.ts`). Every client authenticates with HTTP **basic auth**
+(`lib/search.ts` reads `OPENSEARCH_USER`/`OPENSEARCH_PASS`) — there is **no IAM
+master and no SigV4**. The **master is the internal user `sps_master`**, whose
+password is the `scholars/$ENV/opensearch/master` secret (CDK consumes it as the
+raw secret string; seeded out-of-band before the domain deploy). The `_security`
+admin API is reachable only with the master credential, **from inside the VPC**
+(the domain endpoint is `vpc-...`, private).
 
-Run §1 from an in-VPC host (bastion / SSM session / VPN) that has
-[`awscurl`](https://github.com/okigan/awscurl) (`pip install awscurl`).
+> **Staging is already provisioned (2026-05-22).** The `sps_etl`/`sps_app` roles,
+> their internal users, the role mappings, and the
+> `scholars/staging/opensearch/{etl,app}` secrets all exist (domain
+> `opensearch58799-j7tli0rlgtyz`, cluster green). The steps below are the
+> reference procedure — re-run them for **prod** (#445) or after a domain
+> recreate. The #443 comment dated 2026-05-22 documents the surgical
+> recreate that produced the current staging domain.
+
+Run §1 from an in-VPC host (a short-lived SSM-session bastion / VPN). No
+`awscurl` needed — plain `curl` with the master basic-auth credential.
 
 ```bash
-export OS_ENDPOINT=$(aws cloudformation describe-stacks --stack-name Sps-Data-$ENV \
+export OS_ENDPOINT=$(aws cloudformation describe-stacks --stack-name Sps-Data-${ENV} \
   --query "Stacks[0].Outputs[?OutputKey=='OpenSearchDomainEndpoint'].OutputValue" --output text)
 
-# Assume the FGAC master role into this shell.
-eval $(aws sts assume-role \
-  --role-arn "arn:aws:iam::${ACCOUNT}:role/sps-opensearch-master-${ENV}" \
-  --role-session-name fgac-bootstrap \
-  --query "Credentials.{AWS_ACCESS_KEY_ID:AccessKeyId,AWS_SECRET_ACCESS_KEY:SecretAccessKey,AWS_SESSION_TOKEN:SessionToken}" \
-  --output text | awk '{print "export AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_SESSION_TOKEN="$3}')
+# Master password (raw secret string). Read on the bastion; never echo it.
+MASTER_PW=$(aws secretsmanager get-secret-value --secret-id scholars/${ENV}/opensearch/master \
+  --query SecretString --output text)
 
-osput() { awscurl --service es --region $REGION -X PUT "https://$OS_ENDPOINT/$1" -d "$2"; }
+osput() { curl -s -u "sps_master:${MASTER_PW}" -H 'Content-Type: application/json' \
+  -X PUT "https://${OS_ENDPOINT}/$1" -d "$2"; }
 ```
 
 ### 1a. Roles (least privilege on `scholars-*`)
@@ -132,12 +146,21 @@ tasks in-VPC). Order: **nightly** (ED chain head + Reciter/ASMS/InfoEd/COI),
 then **weekly** (DynamoDB topics + Completeness + Spotlight), then **annual**
 (Hierarchy, behind a manual approval gate).
 
+Each machine starts with a top-level Choice on `$.startFrom` (so operators can
+skip ahead). Pass the **head step** explicitly — `--input '{}'` is **not**
+reliable here (an absent `$.startFrom` does not cleanly fall through the
+Choice). Run nightly to `SUCCEEDED` first, then weekly:
+
 ```bash
-for cad in nightly weekly; do
-  aws stepfunctions start-execution \
-    --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-${cad}-${ENV}" \
-    --input '{}'
-done
+# nightly: ED -> Reciter -> ASMS -> InfoEd -> COI -> mesh-coverage -> vivo-redirect
+aws stepfunctions start-execution \
+  --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-nightly-${ENV}" \
+  --input '{"startFrom":"Ed"}'
+
+# after nightly SUCCEEDED -- weekly: DynamoDB -> Completeness -> Spotlight -> mesh-coverage -> vivo-redirect
+aws stepfunctions start-execution \
+  --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-weekly-${ENV}" \
+  --input '{"startFrom":"Dynamodb"}'
 ```
 
 Monitor:
@@ -187,21 +210,28 @@ logs people/publication/funding counts and the alias swap).
 
 App service is already at desired=1. Confirm real data renders:
 
-```bash
-export ALB=$(aws cloudformation describe-stacks --stack-name Sps-App-$ENV \
-  --query "Stacks[0].Outputs[?OutputKey=='PublicAlbDns'].OutputValue" --output text)
+#432's origin-verify gate has landed: the public ALB **403s** without the
+`X-Origin-Verify` header (the 64-char `scholars/$ENV/edge/origin-shared-secret`).
+CloudFront injects this header in front of the ALB; a direct ALB call must
+supply it. Send it on every verification request:
 
-curl -si "http://$ALB/" | head -1                       # 200
-curl -si "http://$ALB/api/search?q=cardiology" | head -1 # 200 + results once §3 done
+```bash
+export ALB=$(aws cloudformation describe-stacks --stack-name Sps-App-${ENV} \
+  --query "Stacks[0].Outputs[?OutputKey=='PublicAlbDns'].OutputValue" --output text)
+export OV=$(aws secretsmanager get-secret-value --secret-id scholars/${ENV}/edge/origin-shared-secret \
+  --query SecretString --output text)
+
+curl -si -H "X-Origin-Verify: ${OV}" "http://${ALB}/" | head -1                        # 200 (403 without the header)
+curl -si -H "X-Origin-Verify: ${OV}" "http://${ALB}/api/search?q=cardiology" | head -1  # 200 + results once §3 done
 ```
 
 - A scholar profile page and a department page return **200 with content**.
 - Search returns hits (after §3).
 
-> Edge (CloudFront + `X-Origin-Verify`) is **not** deployed in staging yet
-> (`Sps-Edge-$ENV` absent), so the public ALB answers directly. Once #432 lands
-> the named TLS URL + origin-verify, verification moves to that URL with the
-> `X-Origin-Verify` header from `scholars/$ENV/edge/origin-shared-secret`.
+> The header gate is the only access path to the ALB now; omit it and you get a
+> 403 (not a routing/data failure). When the named TLS URL + CloudFront front
+> ship, verification can move to that URL — CloudFront adds `X-Origin-Verify`
+> automatically, so the manual header is only for direct-ALB checks like these.
 
 ---
 
@@ -216,7 +246,7 @@ curl -si "http://$ALB/api/search?q=cardiology" | head -1 # 200 + results once §
 
 ## 6. Prod differences
 
-- `ENV=prod`; stacks `Sps-*-prod`; cluster `sps-cluster-prod`; master role `sps-opensearch-master-prod`.
+- `ENV=prod`; stacks `Sps-*-prod`; cluster `sps-cluster-prod`; OpenSearch master is the internal user `sps_master` with its password in `scholars/prod/opensearch/master` (no IAM master).
 - Prod ETL schedules ship **disabled** (`etlSchedulesEnabled=false`) — there is no auto-fire; every run in §2 is manual until the schedules are deliberately enabled.
 - Prod secrets are partially pre-staged; **`scholars/prod/etl/ed` is still unset** — populate it before running the nightly chain (ED is the chain head and aborts the cascade on failure).
-- Run §1 against the prod domain endpoint and master role; store `scholars/prod/opensearch/etl` (and confirm `opensearch/app`).
+- Run §1 against the prod domain endpoint using the `sps_master` basic-auth credential; store `scholars/prod/opensearch/etl` (and confirm `opensearch/app`).
