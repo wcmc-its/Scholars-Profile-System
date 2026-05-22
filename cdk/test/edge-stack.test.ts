@@ -11,7 +11,7 @@ interface BuildResult {
 
 function buildEdgeStack(
   envName: "staging" | "prod",
-  options?: { customDomain?: string; certArn?: string },
+  options?: { customDomain?: string; certArn?: string; allowedCidrs?: string },
 ): BuildResult {
   const fixture = makeFixture(envName);
   if (options?.customDomain) {
@@ -19,6 +19,9 @@ function buildEdgeStack(
   }
   if (options?.certArn) {
     fixture.app.node.setContext("edgeCertArn", options.certArn);
+  }
+  if (options?.allowedCidrs) {
+    fixture.app.node.setContext("edgeAllowedCidrs", options.allowedCidrs);
   }
   const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
     env: fixture.env,
@@ -340,6 +343,79 @@ describe("EdgeStack", () => {
       const cert = dc.ViewerCertificate as Record<string, unknown>;
       expect(cert.AcmCertificateArn).toBe(STUB_CERT);
       expect(cert.SslSupportMethod).toBe("sni-only");
+    });
+  });
+
+  describe("temporary front-end IP allowlist (#461)", () => {
+    it("with no -c edgeAllowedCidrs: no WebACL, distribution unrestricted", () => {
+      const { template } = buildEdgeStack("staging");
+      template.resourceCountIs("AWS::WAFv2::WebACL", 0);
+      template.resourceCountIs("AWS::WAFv2::IPSet", 0);
+      const dist = Object.values(
+        template.findResources("AWS::CloudFront::Distribution"),
+      )[0]?.Properties as Record<string, unknown> | undefined;
+      const dc = dist?.DistributionConfig as Record<string, unknown>;
+      expect(dc.WebACLId).toBeUndefined();
+    });
+
+    describe("with -c edgeAllowedCidrs set", () => {
+      const { template } = buildEdgeStack("staging", {
+        allowedCidrs: "140.251.0.0/16,157.139.0.0/16",
+      });
+
+      it("creates an IPSet (CLOUDFRONT scope) holding exactly the WCM CIDRs", () => {
+        template.resourceCountIs("AWS::WAFv2::IPSet", 1);
+        const ipset = Object.values(
+          template.findResources("AWS::WAFv2::IPSet"),
+        )[0]?.Properties as Record<string, unknown>;
+        expect(ipset.Scope).toBe("CLOUDFRONT");
+        expect(ipset.Addresses).toEqual([
+          "140.251.0.0/16",
+          "157.139.0.0/16",
+        ]);
+      });
+
+      it("creates a WebACL that defaults to BLOCK and ALLOWs the IP set", () => {
+        template.resourceCountIs("AWS::WAFv2::WebACL", 1);
+        const acl = Object.values(
+          template.findResources("AWS::WAFv2::WebACL"),
+        )[0]?.Properties as Record<string, unknown>;
+        expect(acl.Scope).toBe("CLOUDFRONT");
+        expect(acl.DefaultAction).toHaveProperty("Block");
+        const rules = acl.Rules as Array<Record<string, unknown>>;
+        expect(rules).toHaveLength(1);
+        expect(rules[0].Action).toHaveProperty("Allow");
+        expect(JSON.stringify(rules[0].Statement)).toContain(
+          "IPSetReferenceStatement",
+        );
+      });
+
+      it("attaches the WebACL to the distribution (WebACLId set)", () => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0]?.Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        expect(dc.WebACLId).toBeDefined();
+      });
+
+      // Synth-time guard for a deploy-only constraint: WAFv2 IPSet/WebACL
+      // Description must match ^[\w+=:#@/\-,.][\w+=:#@/\-,.\s]+[\w+=:#@/\-,.]$
+      // -- no parens, no semicolons. cdk synth accepts anything; only the AWS
+      // create validates it (it rolled back the first #461 deploy).
+      it("every WAFv2 IPSet/WebACL Description satisfies the AWS charset", () => {
+        const WAFV2_DESCRIPTION = /^[\w+=:#@/\-,.][\w+=:#@/\-,.\s]+[\w+=:#@/\-,.]$/;
+        const violations: string[] = [];
+        for (const type of ["AWS::WAFv2::IPSet", "AWS::WAFv2::WebACL"]) {
+          for (const [id, r] of Object.entries(template.findResources(type))) {
+            const desc = (r.Properties as Record<string, unknown>)
+              .Description as string | undefined;
+            if (typeof desc === "string" && !WAFV2_DESCRIPTION.test(desc)) {
+              violations.push(`${id}: ${JSON.stringify(desc)}`);
+            }
+          }
+        }
+        expect(violations).toEqual([]);
+      });
     });
   });
 
