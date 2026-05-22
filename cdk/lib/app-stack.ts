@@ -855,10 +855,14 @@ export class AppStack extends Stack {
     // only refs/heads/master; staging admits any ref in the same repo
     // so feature branches can deploy to staging.
     //
-    // Permissions: tightly scoped to the AppStack-owned resources only.
-    // ECR push on this repo, ECS RunTask on the migration family, ECS
-    // service Update + Describe on the SPS service, iam:PassRole on the
-    // two task-side roles. No `*` resource anywhere.
+    // Permissions: tightly scoped to the AppStack-owned resources. ECR
+    // push on both the app and the ETL (#454) image repos, ECS RunTask on
+    // the migration family, ECS service Update + Describe on the SPS
+    // service, ECS task Describe/List on the cluster, iam:PassRole on the
+    // two task-side roles, and cloudformation:DescribeStacks on this stack
+    // (the deploy workflow reads the AppStack outputs to discover the ECR
+    // URIs, cluster, service, and migration family). The only `*` resource
+    // is ecr:GetAuthorizationToken, which has no resource-level ARN.
     // ------------------------------------------------------------------
     const githubOidcProviderArnContext = this.node.tryGetContext(
       "githubOidcProviderArn",
@@ -918,7 +922,12 @@ export class AppStack extends Stack {
           "ecr:DescribeImages",
           "ecr:DescribeRepositories",
         ],
-        resources: [this.ecrRepository.repositoryArn],
+        // Both image repos: the standalone app image and the dedicated
+        // ETL batch image (#454) the deploy workflow builds + pushes.
+        resources: [
+          this.ecrRepository.repositoryArn,
+          this.etlEcrRepository.repositoryArn,
+        ],
       }),
     );
     this.deployRole.addToPolicy(
@@ -964,6 +973,24 @@ export class AppStack extends Stack {
             "iam:PassedToService": "ecs-tasks.amazonaws.com",
           },
         },
+      }),
+    );
+    // The deploy workflow's "Discover AppStack outputs" step calls
+    // `aws cloudformation describe-stacks --stack-name Sps-App-<env>` to
+    // read the ECR URIs, cluster, service, and migration-task family. Scope
+    // to this stack only -- the wildcard tail matches the stack-id suffix
+    // CloudFormation appends to the ARN.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["cloudformation:DescribeStacks"],
+        resources: [
+          Stack.of(this).formatArn({
+            service: "cloudformation",
+            resource: "stack",
+            resourceName: `${this.stackName}/*`,
+          }),
+        ],
       }),
     );
 

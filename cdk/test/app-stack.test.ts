@@ -461,6 +461,52 @@ describe("AppStack", () => {
           expect(serialized).not.toMatch(/^"\*"$/);
         }
       });
+
+      // The deploy workflow (deploy.yml) reads AppStack outputs via
+      // `cloudformation:DescribeStacks` and pushes to both image repos.
+      // Both grants were missing before #460, so the workflow could not
+      // run end-to-end.
+      const findDeployStatements = () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("DeployRole"),
+          );
+        });
+        expect(deployPolicy).toBeDefined();
+        return (deployPolicy?.Properties?.PolicyDocument?.Statement ??
+          []) as Array<Record<string, unknown>>;
+      };
+
+      it("the OIDC deploy role can DescribeStacks on the AppStack only (#460)", () => {
+        const statements = findDeployStatements();
+        const cfn = statements.find((stmt) => {
+          const action = stmt.Action as string | string[];
+          return Array.isArray(action)
+            ? action.includes("cloudformation:DescribeStacks")
+            : action === "cloudformation:DescribeStacks";
+        });
+        expect(cfn).toBeDefined();
+        const serialized = JSON.stringify(cfn?.Resource);
+        // Scoped to this stack's ARN, not `*`.
+        expect(serialized).not.toMatch(/^"\*"$/);
+        expect(serialized).toContain("stack/Sps-App-prod/*");
+      });
+
+      it("the OIDC deploy role can push to both the app and ETL ECR repos (#460/#454)", () => {
+        const statements = findDeployStatements();
+        const push = statements.find((stmt) => {
+          const action = stmt.Action as string | string[];
+          return Array.isArray(action) && action.includes("ecr:PutImage");
+        });
+        expect(push).toBeDefined();
+        const serialized = JSON.stringify(push?.Resource);
+        expect(serialized).toContain("EcrRepository");
+        expect(serialized).toContain("EtlEcrRepository");
+      });
     });
 
     describe("Load balancers + target group", () => {
