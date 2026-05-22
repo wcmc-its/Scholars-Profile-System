@@ -223,6 +223,19 @@ export class AppStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
+    // Transitional cross-stack-export retention (#454 follow-up). EtlStack used
+    // to consume the app repo's ARN + name as auto-generated cross-stack
+    // exports; PR #455 repointed it to the dedicated ETL repo, so CDK would now
+    // drop those two exports. CloudFormation refuses to delete an export still
+    // imported by another stack, and the *currently deployed* EtlStack still
+    // imports them -- so an App-stack update that removes them rolls back. Pin
+    // them with the same auto-generated names for the transition deploy (App
+    // adds the ETL repo + its exports while keeping these; then EtlStack
+    // redeploys onto the ETL repo and stops importing them). Remove these two
+    // lines in a cleanup once every env's Sps-Etl-* no longer imports them.
+    this.exportValue(this.ecrRepository.repositoryArn);
+    this.exportValue(this.ecrRepository.repositoryName);
+
     // ------------------------------------------------------------------
     // CloudWatch log groups.
     //
