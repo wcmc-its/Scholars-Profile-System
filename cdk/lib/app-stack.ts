@@ -33,7 +33,7 @@ import { type SpsEnvConfig } from "./config";
  */
 const ADOT_COLLECTOR_IMAGE =
   "public.ecr.aws/aws-observability/aws-otel-collector" +
-  "@sha256:c7e36a5b6ebd0a8d2a9e1f4b6c8d5a7e3b9f2c1d4e6a8b0c2d4e6f8a0b2c4d6e";
+  "@sha256:8aa9ea5f67b8d318f7d6af24677e3c70f7098bc0631147cb5fa91addbe980b06";
 
 /** Props for {@link AppStack}. */
 export interface AppStackProps extends StackProps {
