@@ -196,6 +196,20 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "SPS_ENV",
                 "Value": "prod",
               },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "https://",
+                      {
+                        "Fn::ImportValue": "Sps-Data-prod-OpenSearchDomainEndpoint",
+                      },
+                    ],
+                  ],
+                },
+              },
             ],
             "Essential": true,
             "Image": {
@@ -326,7 +340,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "REVALIDATE_TOKEN",
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",
@@ -1826,6 +1840,20 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Name": "SPS_ENV",
                 "Value": "staging",
               },
+              {
+                "Name": "OPENSEARCH_NODE",
+                "Value": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "https://",
+                      {
+                        "Fn::ImportValue": "Sps-Data-staging-OpenSearchDomainEndpoint",
+                      },
+                    ],
+                  ],
+                },
+              },
             ],
             "Essential": true,
             "Image": {
@@ -1956,7 +1984,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 },
               },
               {
-                "Name": "REVALIDATE_TOKEN",
+                "Name": "SCHOLARS_REVALIDATE_TOKEN",
                 "ValueFrom": {
                   "Fn::Join": [
                     "",

@@ -343,7 +343,10 @@ export class EtlStack extends Stack {
         opensearchEtlSecret,
         "password",
       ),
-      REVALIDATE_TOKEN: ecs.Secret.fromSecretsManager(revalidateTokenSecret),
+      // Read by etl/orchestrate.ts as SCHOLARS_REVALIDATE_TOKEN -- the
+      // env-var name is the contract. #447
+      SCHOLARS_REVALIDATE_TOKEN:
+        ecs.Secret.fromSecretsManager(revalidateTokenSecret),
     };
     // Fan each per-source secret out into the granular `SCHOLARS_*` env
     // vars its config loader reads (#442). The injected env-var name equals
@@ -380,6 +383,12 @@ export class EtlStack extends Stack {
         ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
         ARTIFACT_PREFIX: "spotlight",
         HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+        // OpenSearch domain endpoint (https://...) imported from DataStack;
+        // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
+        // authenticates with the OPENSEARCH_USER/PASS secrets above. #447
+        OPENSEARCH_NODE: `https://${Fn.importValue(
+          `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+        )}`,
       },
       secrets: containerSecrets,
     });

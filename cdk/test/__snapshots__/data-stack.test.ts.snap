@@ -90,6 +90,9 @@ exports[`DataStack prod matches the snapshot 1`] = `
     },
     "OpenSearchDomainEndpoint": {
       "Description": "SPS OpenSearch domain endpoint",
+      "Export": {
+        "Name": "Sps-Data-prod-OpenSearchDomainEndpoint",
+      },
       "Value": {
         "Fn::GetAtt": [
           "OpenSearch587998CD",

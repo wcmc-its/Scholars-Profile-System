@@ -263,6 +263,12 @@ describe("DataStack", () => {
           }),
         });
       });
+
+      it("exports the domain endpoint under a stable name for AppStack/EtlStack OPENSEARCH_NODE (#447)", () => {
+        template.hasOutput("OpenSearchDomainEndpoint", {
+          Export: { Name: "Sps-Data-prod-OpenSearchDomainEndpoint" },
+        });
+      });
     });
 
     describe("EC2 property character-set safety", () => {
