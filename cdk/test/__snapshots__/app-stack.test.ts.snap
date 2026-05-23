@@ -2260,7 +2260,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SAML_SP_ENTITY_ID",
-                "Value": "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+                "Value": "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
               },
               {
                 "Name": "SAML_SP_ACS_URL",

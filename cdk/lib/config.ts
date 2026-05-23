@@ -149,8 +149,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 1024,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
-    samlSpEntityId:
-      "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+    // Staging announces the PROD SP entityID, not its own host (#466). WCM
+    // registered a single SP (the prod entityID, tied to the filed cert) and
+    // confirmed it covers staging too -- the staging-host entityID is not
+    // registered, so announcing it gets "Metadata not found" from the IdP.
+    // The ACS below stays the staging host (the IdP allows the staging ACS on
+    // that SP), so the response still comes back to staging.
+    samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
     samlSpAcsUrl:
       "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
     etlSchedulesEnabled: true,
