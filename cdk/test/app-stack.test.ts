@@ -1298,7 +1298,7 @@ describe("AppStack", () => {
       });
     });
 
-    it("drives the SAML SP entityID + ACS off the staging host (#466)", () => {
+    it("announces the registered prod SP entityID but keeps the staging ACS host (#466)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appTaskDef = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-app-staging",
@@ -1317,8 +1317,10 @@ describe("AppStack", () => {
           e.Value,
         ]),
       );
+      // Staging reuses the single registered SP entityID (the prod host), but
+      // its ACS stays the staging host so the response returns to staging.
       expect(envByName.get("SAML_SP_ENTITY_ID")).toBe(
-        "https://scholars-staging.weill.cornell.edu/api/auth/saml/metadata",
+        "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
       );
       expect(envByName.get("SAML_SP_ACS_URL")).toBe(
         "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
