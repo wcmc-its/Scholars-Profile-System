@@ -475,6 +475,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 },
               },
               {
+                "Name": "SAML_SP_CERT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/cert",
+                    ],
+                  ],
+                },
+              },
+              {
                 "Name": "SCHOLARS_RECITERDB_HOST",
                 "ValueFrom": {
                   "Fn::Join": [
@@ -1555,6 +1570,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/cert",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1749,6 +1776,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/saml/idp-cert-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/prod/cert-??????",
                   ],
                 ],
               },
@@ -2394,6 +2440,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "SAML_SP_CERT",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/cert",
                     ],
                   ],
                 },
@@ -3479,6 +3540,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/cert",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3673,6 +3746,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/saml/idp-cert-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/saml-sp/staging/cert-??????",
                   ],
                 ],
               },

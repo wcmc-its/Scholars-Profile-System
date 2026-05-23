@@ -120,6 +120,21 @@ export class SecretsStack extends Stack {
         name: `scholars/saml-sp/${env}/private-key`,
         description: `SPS SAML SP private key (${env}) — matches the SP cert filed with WCM IT. Pre-staged value in prod.`,
       },
+      // SP public certificate — the public half of the SP keypair, published
+      // in the SP metadata document (#466). node-saml's
+      // generateServiceProviderMetadata throws when the SP private key is
+      // configured but no public cert is supplied, so /api/auth/saml/metadata
+      // 503s without this. A secret (not a committed asset) so it is
+      // provisioned out-of-band like the private key it pairs with — matching
+      // ReCiter-Publication-Manager's "SAML material is never committed" stance
+      // and SPS's own Secrets Manager pattern. Env-middle name to sit beside
+      // the private key. The value is public; the secret is for provisioning
+      // consistency + rotation-without-deploy, not confidentiality.
+      {
+        constructId: "SamlSpCert",
+        name: `scholars/saml-sp/${env}/cert`,
+        description: `SPS SAML SP public certificate (${env}) — PEM published in SP metadata; pairs with scholars/saml-sp/${env}/private-key. Seed out-of-band with the SP cert filed with WCM IT.`,
+      },
       // IdP signing certificate(s) — the trust anchor that verifies every
       // SAMLResponse signature (#466). A secret, not env: it is integrity-
       // critical (a swapped cert lets an attacker forge assertions), it is a

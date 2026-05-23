@@ -323,6 +323,9 @@ describe("AppStack", () => {
                 // #466 -- the IdP signing cert is a secret (rotatable trust
                 // anchor), not an env var.
                 Match.objectLike({ Name: "SAML_IDP_CERT" }),
+                // #466 -- the SP public cert, required for metadata generation
+                // once the SP private key is configured.
+                Match.objectLike({ Name: "SAML_SP_CERT" }),
               ]),
             }),
           ]),
@@ -404,12 +407,13 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the seven consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the eight consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The seven ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // The eight ARNs are scholars/prod/db/app-rw, db/app-ro,
         // opensearch/app, revalidate-token, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
-        // and saml/idp-cert (the IdP signing-cert trust anchor, #466).
+        // saml/idp-cert (the IdP signing-cert trust anchor, #466), and
+        // saml-sp/prod/cert (the SP public cert for metadata, #466).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -432,7 +436,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(7);
+        expect(resourceList).toHaveLength(8);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1066,6 +1070,8 @@ describe("AppStack", () => {
           // ReciterDB connection (#465) and the SAML IdP signing cert (#466).
           "scholars/prod/etl/reciter",
           "scholars/prod/saml/idp-cert",
+          // SAML SP public cert (#466) -- published in SP metadata.
+          "scholars/saml-sp/prod/cert",
         ];
         const json = JSON.stringify(template.toJSON());
         for (const name of expected) {

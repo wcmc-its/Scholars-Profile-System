@@ -35,6 +35,7 @@ function expectedSecrets(env: "staging" | "prod"): string[] {
     `scholars/${env}/opensearch/etl`,
     `scholars/${env}/revalidate-token`,
     `scholars/saml-sp/${env}/private-key`,
+    `scholars/saml-sp/${env}/cert`,
     `scholars/${env}/saml/idp-cert`,
     ...PER_SOURCE_ETL_NAMES.map((s) => `scholars/${env}/etl/${s}`),
     `scholars/${env}/edge/origin-shared-secret`,
@@ -54,7 +55,7 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the expected set of secrets by name (nine core incl. opensearch/master + saml/idp-cert + eight per-source ETL stubs + EdgeStack origin shared secret + on-call Teams webhook)", () => {
+    it("creates the expected set of secrets by name (ten core incl. opensearch/master + saml/idp-cert + saml-sp/cert + eight per-source ETL stubs + EdgeStack origin shared secret + on-call Teams webhook)", () => {
       template.resourceCountIs(
         "AWS::SecretsManager::Secret",
         EXPECTED_SECRET_COUNT,
