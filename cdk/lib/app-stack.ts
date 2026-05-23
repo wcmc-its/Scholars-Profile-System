@@ -153,9 +153,9 @@ export class AppStack extends Stack {
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
-    // seven the running app consumes (db read/write, opensearch app,
+    // eight the running app consumes (db read/write, opensearch app,
     // revalidate token, SAML SP private key, ReciterDB connection, SAML IdP
-    // cert). Looked up by name so the two stacks stay loosely coupled — no
+    // cert, SAML SP cert). Looked up by name so the two stacks stay loosely coupled — no
     // shared stack prop, no cross-stack export. ARNs feed both the
     // task-execution role's tightly-scoped policy and the task definition's
     // `secrets:` block.
@@ -204,8 +204,18 @@ export class AppStack extends Stack {
       "SamlIdpCertSecret",
       `scholars/${env}/saml/idp-cert`,
     );
+    // SP public cert — published in SP metadata (#466). node-saml's
+    // generateServiceProviderMetadata throws when the SP private key is set
+    // but no public cert is supplied, so /api/auth/saml/metadata 503s without
+    // this. Injected as SAML_SP_CERT; the value is public but provisioned
+    // out-of-band like its paired private key.
+    const samlSpCertSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "SamlSpCertSecret",
+      `scholars/saml-sp/${env}/cert`,
+    );
 
-    // The exhaustive list of seven consumer ARNs. The task-execution role's
+    // The exhaustive list of eight consumer ARNs. The task-execution role's
     // `secretsmanager:GetSecretValue` resource list is this exact array
     // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
     const consumerSecretArns: string[] = [
@@ -216,6 +226,7 @@ export class AppStack extends Stack {
       samlSpPrivateKeySecret.secretArn,
       etlReciterSecret.secretArn,
       samlIdpCertSecret.secretArn,
+      samlSpCertSecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -320,7 +331,7 @@ export class AppStack extends Stack {
     // - **Task-execution role** is the role ECS itself assumes to pull the
     //   image, inject secrets into the container, and write log streams.
     //   Permissions are tightly scoped: ECR auth + Batch* on the SPS repo
-    //   only; secrets:GetSecretValue on the seven consumer ARNs only; logs
+    //   only; secrets:GetSecretValue on the eight consumer ARNs only; logs
     //   on the two log groups only. No `*` resource anywhere.
     // - **Task role** is the role the *application code* runs as. The
     //   running Next.js + Prisma code does not call any AWS API today;
@@ -357,7 +368,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets — exactly the seven consumer ARNs. Asserted in tests.
+    // Secrets — exactly the eight consumer ARNs. Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -602,6 +613,9 @@ export class AppStack extends Stack {
         // accepts one or many concatenated PEM blocks, so the 2026-08-19
         // rollover is a Secrets Manager value swap with no code change.
         SAML_IDP_CERT: ecs.Secret.fromSecretsManager(samlIdpCertSecret),
+        // SP public cert (#466) — required by generateServiceProviderMetadata
+        // once the SP private key is set, else /api/auth/saml/metadata 503s.
+        SAML_SP_CERT: ecs.Secret.fromSecretsManager(samlSpCertSecret),
         // ReciterDB connection vars. The env-var name == the secret's JSON key
         // (#442); the running app reads these via lib/sources/reciterdb.ts.
         SCHOLARS_RECITERDB_HOST: ecs.Secret.fromSecretsManager(
