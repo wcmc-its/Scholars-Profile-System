@@ -454,7 +454,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-secret",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key",
                     ],
                   ],
                 },
@@ -1605,7 +1605,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-secret",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key",
                     ],
                   ],
                 },
@@ -1783,7 +1783,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-secret-??????",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/session-cookie-key-??????",
                   ],
                 ],
               },
@@ -2470,7 +2470,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-secret",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-key",
                     ],
                   ],
                 },
@@ -3621,7 +3621,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-secret",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-key",
                     ],
                   ],
                 },
@@ -3799,7 +3799,7 @@ service:
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-secret-??????",
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/session-cookie-key-??????",
                   ],
                 ],
               },

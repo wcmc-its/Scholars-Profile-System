@@ -413,7 +413,7 @@ describe("AppStack", () => {
       it("the task-execution role policy lists exactly the nine consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
         // The nine ARNs are scholars/prod/db/app-rw, db/app-ro,
-        // opensearch/app, revalidate-token, session-cookie-secret, the SAML SP
+        // opensearch/app, revalidate-token, session-cookie-key, the SAML SP
         // private key, etl/reciter (ReciterDB connection for funding/mentoring
         // surfaces), saml/idp-cert (the IdP signing-cert trust anchor, #466),
         // and saml-sp/prod/cert (the SP public cert for metadata, #466).
@@ -1068,7 +1068,7 @@ describe("AppStack", () => {
           "scholars/prod/db/app-ro",
           "scholars/prod/opensearch/app",
           "scholars/prod/revalidate-token",
-          "scholars/prod/session-cookie-secret",
+          "scholars/prod/session-cookie-key",
           "scholars/saml-sp/prod/private-key",
           "scholars/prod/edge/origin-shared-secret",
           // ReciterDB connection (#465) and the SAML IdP signing cert (#466).

@@ -120,10 +120,20 @@ export class SecretsStack extends Stack {
       // the SAML callback 500s minting the session without it -- the gate gap
       // sibling to the SAML_* env wiring (#466). Seed out-of-band with a random
       // >=32-char value; rotating it invalidates all live sessions (acceptable).
+      //
+      // The Secrets Manager NAME must NOT end in a hyphen + exactly 6 chars.
+      // The original name ended in "-secret" (the 6-char token "secret"), which
+      // Secrets Manager mistakes for the random ARN suffix -- so the suffix-less
+      // ARN that AppStack's Secret.fromSecretNameV2 injects into the ECS task
+      // def becomes unresolvable and GetSecretValue fails at task start
+      // (AccessDenied under the scoped exec role; ResourceNotFound under broad
+      // creds). Hence "-key", not "-secret". The env var the app reads stays
+      // SESSION_COOKIE_SECRET; only this SM resource name changes. See
+      // docs/466-saml-deploy-debrief.md. Do NOT rename back to a 6-char tail.
       {
         constructId: "SessionCookieSecret",
-        name: `scholars/${env}/session-cookie-secret`,
-        description: `SPS SSO session-cookie encryption key (${env}) — iron-session password, >=32 chars. Read as SESSION_COOKIE_SECRET; seed out-of-band with a random value.`,
+        name: `scholars/${env}/session-cookie-key`,
+        description: `SPS SSO session-cookie encryption key (${env}) — iron-session password, >=32 chars. Read as SESSION_COOKIE_SECRET; seed out-of-band with a random value. Name avoids a 6-char tail (Secrets Manager partial-ARN gotcha).`,
       },
       {
         constructId: "SamlSpPrivateKey",

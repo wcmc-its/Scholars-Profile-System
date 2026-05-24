@@ -185,10 +185,16 @@ export class AppStack extends Stack {
     // SESSION_COOKIE_SECRET; the middleware gate and the SAML callback both read
     // it, so without it the callback 500s minting the session (the gap sibling
     // to the SAML_* env wiring, #466).
+    //
+    // Name is "-key", not "-secret": fromSecretNameV2 injects the *suffix-less*
+    // ARN into the task def's `secrets:` block, and a name ending in a 6-char
+    // token (like "secret") collides with the Secrets Manager random-suffix
+    // heuristic, making that ARN unresolvable -> GetSecretValue AccessDenied at
+    // task start. See SecretsStack + docs/466-saml-deploy-debrief.md.
     const sessionCookieSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       "SessionCookieSecret",
-      `scholars/${env}/session-cookie-secret`,
+      `scholars/${env}/session-cookie-key`,
     );
     const samlSpPrivateKeySecret = secretsmanager.Secret.fromSecretNameV2(
       this,
