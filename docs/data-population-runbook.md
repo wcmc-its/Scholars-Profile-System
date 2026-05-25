@@ -152,12 +152,12 @@ reliable here (an absent `$.startFrom` does not cleanly fall through the
 Choice). Run nightly to `SUCCEEDED` first, then weekly:
 
 ```bash
-# nightly: ED -> Reciter -> ASMS -> InfoEd -> COI -> mesh-coverage -> vivo-redirect
+# nightly: ED -> Reciter -> ASMS -> InfoEd -> COI -> mesh-coverage -> search:index
 aws stepfunctions start-execution \
   --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-nightly-${ENV}" \
   --input '{"startFrom":"Ed"}'
 
-# after nightly SUCCEEDED -- weekly: DynamoDB -> Completeness -> Spotlight -> mesh-coverage -> vivo-redirect
+# after nightly SUCCEEDED -- weekly: DynamoDB -> Completeness -> Spotlight -> search:index
 aws stepfunctions start-execution \
   --state-machine-arn "arn:aws:states:${REGION}:${ACCOUNT}:stateMachine:scholars-weekly-${ENV}" \
   --input '{"startFrom":"Dynamodb"}'
@@ -181,10 +181,11 @@ waits; approve with `aws stepfunctions send-task-success --task-token <token>`
 
 ## 3. Build the OpenSearch index
 
-The state-machine "search-index" step runs `etl:mesh-coverage` (a DB-side
-coverage pass), **not** the OpenSearch index build. Build the `scholars-*`
-indices with a one-off ECS task that reuses the ETL task definition (so it runs
-in-VPC with `OPENSEARCH_NODE` + the `opensearch/etl` basic-auth creds injected):
+The nightly and weekly cadences now close with a real `search:index` step
+(#451), so steady-state index refresh is automatic. This manual one-off is for
+the **initial bootstrap** (before the first cadence run) or an ad-hoc rebuild.
+It reuses the ETL task definition, so it runs in-VPC with `OPENSEARCH_NODE` +
+the `opensearch/etl` basic-auth creds injected:
 
 ```bash
 aws ecs run-task --cluster sps-cluster-$ENV \
@@ -200,9 +201,10 @@ fresh env: `aws cloudformation describe-stack-resources --stack-name Sps-Network
 Watch the task's `/aws/ecs/sps-etl-$ENV` log stream to completion (the indexer
 logs people/publication/funding counts and the alias swap).
 
-> Known follow-up: the nightly/weekly cadences do **not** rebuild the OpenSearch
-> index (they run `etl:mesh-coverage`). Ongoing index refresh is currently
-> manual via this step — track separately if automated re-index is wanted.
+> Steady-state re-index is automatic: both cadences run `search:index` as their
+> closing step (#451). Open follow-on: the cadences do not yet POST
+> `/api/revalidate` to bust the ISR cache after a run — ISR refreshes on its TTL
+> meanwhile (tracked in #479, alongside #353).
 
 ---
 

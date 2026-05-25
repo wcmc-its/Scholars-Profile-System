@@ -200,6 +200,42 @@ describe("EtlStack", () => {
         );
         expect(text).toMatch(/states:::sns:publish\.waitForTaskToken/);
       });
+
+      // #451 -- the cadence steps once labelled "SearchIndex"/"Revalidate"
+      // ran etl:mesh-coverage / etl:vivo-redirect, so the OpenSearch index
+      // was never rebuilt by any machine and vivo-redirect (a manual
+      // cutover-prep file generator) ran as a no-op Fargate task. Lock in
+      // the corrected command overrides.
+      describe("#451 -- cadences run search:index, never vivo-redirect", () => {
+        it("nightly rebuilds the index (search:index) and keeps mesh-coverage", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-nightly-prod",
+          );
+          expect(text).toMatch(/"search:index"/);
+          expect(text).toMatch(/"etl:mesh-coverage"/);
+        });
+
+        it("weekly rebuilds the index (search:index); mesh-coverage dropped (nightly-only)", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          expect(text).toMatch(/"search:index"/);
+          expect(text).not.toMatch(/"etl:mesh-coverage"/);
+        });
+
+        it.each(["nightly", "weekly"])(
+          "%s machine no longer wires the vivo-redirect cutover tool",
+          (cadence) => {
+            const text = getStateMachineDefinitionText(
+              template,
+              `scholars-${cadence}-prod`,
+            );
+            expect(text).not.toMatch(/vivo-redirect/);
+          },
+        );
+      });
     });
 
     describe("EventBridge schedules (D7)", () => {

@@ -527,8 +527,14 @@ export class EtlStack extends Stack {
     // Cadence definitions. The nightly machine carries the ED chain head
     // first (orchestrate.ts already aborts the cascade on ED failure --
     // we do the same here implicitly via the Catch block on the first
-    // step); the closing search-index + revalidate steps appear in both
-    // nightly and weekly (the documented duplicates per D6).
+    // step). Both cadences close with a full OpenSearch rebuild
+    // (`search:index` -- atomic alias-swap, so reads never see a gap).
+    // mesh-coverage runs nightly only: it recomputes the
+    // publication.mesh_terms numerator off ReCiter, which is a nightly
+    // source, so a weekly pass would recompute against an unchanged
+    // snapshot. No ISR-revalidate step here -- a real /api/revalidate sweep
+    // is a tracked follow-on (#479); ISR refreshes on its TTL meanwhile.
+    // (vivo-redirect is a manual cutover-prep tool, never a cadence step.)
     // ------------------------------------------------------------------
     const nightlySteps: ReadonlyArray<StepSpec> = [
       { id: "Ed", npmScript: "etl:ed", external: true },
@@ -536,15 +542,14 @@ export class EtlStack extends Stack {
       { id: "Asms", npmScript: "etl:asms", external: true },
       { id: "Infoed", npmScript: "etl:infoed", external: true },
       { id: "Coi", npmScript: "etl:coi", external: true },
-      { id: "SearchIndexNightly", npmScript: "etl:mesh-coverage", external: false },
-      { id: "RevalidateNightly", npmScript: "etl:vivo-redirect", external: false },
+      { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
+      { id: "SearchIndexNightly", npmScript: "search:index", external: false },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
       { id: "Completeness", npmScript: "etl:completeness", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
-      { id: "SearchIndexWeekly", npmScript: "etl:mesh-coverage", external: false },
-      { id: "RevalidateWeekly", npmScript: "etl:vivo-redirect", external: false },
+      { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
     ];
     const annualSteps: ReadonlyArray<StepSpec> = [
       { id: "Hierarchy", npmScript: "etl:hierarchy", external: true },
