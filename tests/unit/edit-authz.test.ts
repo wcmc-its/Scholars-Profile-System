@@ -124,6 +124,42 @@ describe("authorizeSuppress — publication (whole-publication takedown)", () =>
   });
 });
 
+describe("authorizeSuppress — grant / education / appointment (whole-entity, #160)", () => {
+  it.each(["grant", "education", "appointment"] as const)(
+    "allows the owning scholar to suppress their own %s",
+    (entityType) => {
+      expect(
+        authorizeSuppress(SELF, { entityType, entityId: "EXT-1", ownerCwid: "self01" }),
+      ).toEqual({ ok: true });
+    },
+  );
+
+  it.each(["grant", "education", "appointment"] as const)(
+    "denies a non-owner suppressing someone else's %s",
+    (entityType) => {
+      expect(
+        authorizeSuppress(SELF, { entityType, entityId: "EXT-1", ownerCwid: "other9" }),
+      ).toEqual({ ok: false, reason: "not_self" });
+    },
+  );
+
+  it.each(["grant", "education", "appointment"] as const)(
+    "allows a superuser to suppress any %s",
+    (entityType) => {
+      expect(
+        authorizeSuppress(ADMIN, { entityType, entityId: "EXT-1", ownerCwid: "other9" }),
+      ).toEqual({ ok: true });
+    },
+  );
+
+  it("denies a non-superuser when ownerCwid is unresolved (never implicitly self)", () => {
+    expect(authorizeSuppress(SELF, { entityType: "education", entityId: "EXT-1" })).toEqual({
+      ok: false,
+      reason: "not_self",
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // authorizeRevoke  (self-edit-spec.md § Authorization, edge cases 4, 5)
 // ---------------------------------------------------------------------------

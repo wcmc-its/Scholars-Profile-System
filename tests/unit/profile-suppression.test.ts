@@ -174,3 +174,69 @@ describe("getScholarFullProfileBySlug — publication suppression", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// whole-entity suppression: education / appointment sidebars (#160 PR-A)
+// ---------------------------------------------------------------------------
+
+function education(externalId: string, degree: string) {
+  return { externalId, degree, institution: "Inst", year: 2010, field: "Biology" };
+}
+function appointment(externalId: string, title: string) {
+  return {
+    externalId,
+    title,
+    organization: "Weill Cornell",
+    startDate: new Date("2015-01-01"),
+    endDate: null,
+    isPrimary: false,
+    isInterim: false,
+    source: "ED",
+  };
+}
+
+/** Mock keyed on the queried entityType, so the publication loader and the
+ *  whole-entity loaders don't cross-contaminate. */
+function suppressByType(map: Record<string, string[]>) {
+  mockSuppressionFindMany.mockImplementation(
+    async ({ where }: { where: { entityType: string } }) =>
+      (map[where.entityType] ?? []).map((entityId) => ({ entityId, contributorCwid: null })),
+  );
+}
+
+describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
+  it("drops a suppressed education entry from the sidebar", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD"), education("EDU-2", "PhD")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({ education: ["EDU-2"] });
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.educations ?? []).map((e) => e.degree)).toEqual(["MD"]);
+  });
+
+  it("drops a suppressed appointment from the sidebar", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      appointments: [appointment("APPT-1", "Professor"), appointment("APPT-2", "Lecturer")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({ appointment: ["APPT-2"] });
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.appointments ?? []).map((a) => a.title)).toEqual(["Professor"]);
+  });
+
+  it("keeps education + appointments when nothing is suppressed", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      educations: [education("EDU-1", "MD")],
+      appointments: [appointment("APPT-1", "Professor")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({});
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.educations ?? []).length).toBe(1);
+    expect((payload?.appointments ?? []).length).toBe(1);
+  });
+});

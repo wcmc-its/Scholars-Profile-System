@@ -26,6 +26,7 @@
 import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { isChairTitleFor } from "@/lib/leadership";
 
 /** The v1 `field_override.fieldName` allowlist (`self-edit-spec.md`). */
 export const EDITABLE_FIELDS = ["overview", "slug"] as const;
@@ -266,4 +267,71 @@ export async function publicationAuthorshipExists(
     select: { id: true },
   });
   return row !== null;
+}
+
+// ---------------------------------------------------------------------------
+// whole-entity suppression targets — grant / education / appointment (#160)
+// ---------------------------------------------------------------------------
+
+/** The Prisma surface the whole-entity owner lookup needs. */
+type EntityOwnerClient = Pick<PrismaClient, "grant" | "education" | "appointment">;
+
+/** Owner cwid (+ title, for the appointment chair guard) of a suppressible
+ *  whole entity. */
+export type SuppressibleEntityOwner = { ownerCwid: string; title: string | null };
+
+/**
+ * Resolve the owning scholar (and, for an appointment, its title) of a
+ * grant / education / appointment by stable `externalId` (#352). The suppress
+ * endpoint uses this as the 400 existence gate AND to feed the pure
+ * `authorizeSuppress` owner check (#160). No matching row → `null` → 400.
+ */
+export async function findSuppressibleEntityOwner(
+  entityType: "grant" | "education" | "appointment",
+  externalId: string,
+  client: EntityOwnerClient,
+): Promise<SuppressibleEntityOwner | null> {
+  if (entityType === "grant") {
+    const r = await client.grant.findUnique({
+      where: { externalId },
+      select: { cwid: true },
+    });
+    return r ? { ownerCwid: r.cwid, title: null } : null;
+  }
+  if (entityType === "education") {
+    const r = await client.education.findUnique({
+      where: { externalId },
+      select: { cwid: true },
+    });
+    return r ? { ownerCwid: r.cwid, title: null } : null;
+  }
+  const r = await client.appointment.findUnique({
+    where: { externalId },
+    select: { cwid: true, title: true },
+  });
+  return r ? { ownerCwid: r.cwid, title: r.title } : null;
+}
+
+/** The Prisma surface the chair-appointment guard needs. */
+type ChairLookupClient = Pick<PrismaClient, "department">;
+
+/**
+ * True when this appointment confers a *current* department chair role — its
+ * owner is some `Department.chairCwid` AND the title matches that department's
+ * chair phrase (`isChairTitleFor`, the same predicate the ETL uses to populate
+ * `chairCwid`). The suppress endpoint refuses to hide such an appointment
+ * (409, #160 D-leader) so the profile can't contradict the column-driven
+ * leader card. Other appointments of a chair stay suppressible.
+ */
+export async function isChairAppointment(
+  ownerCwid: string,
+  title: string,
+  client: ChairLookupClient,
+): Promise<boolean> {
+  const dept = await client.department.findFirst({
+    where: { chairCwid: ownerCwid },
+    select: { name: true },
+  });
+  if (!dept) return false;
+  return isChairTitleFor(title, dept.name);
 }
