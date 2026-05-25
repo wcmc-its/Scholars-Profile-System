@@ -8,9 +8,13 @@ name: Deploy
 # - push to master         -> staging deploy (auto)
 # - workflow_dispatch       -> staging OR prod (manual)
 #
-# Prod deploys are gated by the 'prod' GitHub Environment's required-reviewer
-# rule (configured in repo Settings -> Environments -> prod) on top of the
-# AppStack OIDC sub-claim that pins prod to refs/heads/master.
+# Prod deploys are gated by three controls, all required:
+#   1. The 'prod' GitHub Environment (repo Settings -> Environments -> prod):
+#      master-only deployment-branch policy + required-reviewer approval.
+#   2. The "Refuse prod from non-master ref" step below (defense in depth).
+#   3. The AppStack OIDC trust, whose sub-claim is scoped to
+#      repo:wcmc-its/Scholars-Profile-System:environment:prod -- an env-scoped
+#      sub, NOT a branch ref (see cdk/lib/app-stack.ts).
 #
 # All AWS resource names and CFN outputs consumed here are provisioned by
 # Sps-App-${env} (see cdk/lib/app-stack.ts). Bootstrap two-step
@@ -61,10 +65,10 @@ jobs:
           echo "stack=Sps-App-$target" >> "$GITHUB_OUTPUT"
           echo "role=arn:aws:iam::${AWS_ACCOUNT_ID}:role/sps-deploy-$target" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ steps.target.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
