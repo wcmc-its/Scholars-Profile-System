@@ -138,7 +138,14 @@ async function buildReflectionOps(
   }
   // Education / appointment (#160) have no search index, so a suppression
   // reflects only through ISR (lib/edit/revalidation.ts) — no op here.
-  // Grant funding-index reflection lands in PR-B.
+  //
+  // Grant (#160 PR-B): the profile reflects immediately via ISR, and the
+  // funding INDEX BUILD excludes suppressed rows, so a suppressed grant clears
+  // from search on the next nightly rebuild. A synchronous funding fast-path is
+  // deferred (it must re-project a whole funding project, keyed on
+  // coreProjectNum which is not a queryable column) — tracked as a follow-on;
+  // this is the same nightly-rebuild fallback the publication fast-path
+  // degrades to on failure.
   return [];
 }
 

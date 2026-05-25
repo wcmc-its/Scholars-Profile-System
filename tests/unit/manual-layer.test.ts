@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getEffectiveOverview, loadEntitySuppressions } from "@/lib/api/manual-layer";
+import {
+  getEffectiveOverview,
+  loadAllGrantSuppressions,
+  loadEntitySuppressions,
+} from "@/lib/api/manual-layer";
 
 type OverrideClient = Parameters<typeof getEffectiveOverview>[2];
 type SuppClient = Parameters<typeof loadEntitySuppressions>[2];
@@ -107,6 +111,32 @@ describe("loadEntitySuppressions (#160)", () => {
     expect(c.suppression.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { entityType: "grant", entityId: { in: ["G1", "G2"] }, revokedAt: null },
+        select: { entityId: true },
+      }),
+    );
+  });
+});
+
+describe("loadAllGrantSuppressions (#160 PR-B — funding index batch)", () => {
+  function suppClient(rows: Array<{ entityId: string }>): SuppClient {
+    return {
+      suppression: { findMany: vi.fn().mockResolvedValue(rows) },
+    } as unknown as SuppClient;
+  }
+
+  it("returns every active suppressed grant externalId", async () => {
+    const result = await loadAllGrantSuppressions(
+      suppClient([{ entityId: "INFOED-1-a" }, { entityId: "INFOED-2-b" }]),
+    );
+    expect([...result].sort()).toEqual(["INFOED-1-a", "INFOED-2-b"]);
+  });
+
+  it("queries the whole active grant-suppression set (no id scoping)", async () => {
+    const c = suppClient([]);
+    await loadAllGrantSuppressions(c);
+    expect(c.suppression.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { entityType: "grant", revokedAt: null },
         select: { entityId: true },
       }),
     );

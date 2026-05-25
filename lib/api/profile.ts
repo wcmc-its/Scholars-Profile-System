@@ -508,21 +508,28 @@ export async function getScholarFullProfileBySlug(
       !suppressions.darkPmids.has(a.publication.pmid),
   );
 
-  // #160 — whole-entity suppressions. A hidden education / appointment drops
-  // from the profile sidebars. Keyed on the stable `externalId` (#352). Grants
-  // are handled in PR-B (they also need the funding-search index + counts).
-  const [suppressedEducationIds, suppressedAppointmentIds] = await Promise.all([
-    loadEntitySuppressions(
-      "education",
-      scholar.educations.map((e) => e.externalId),
-      prisma,
-    ),
-    loadEntitySuppressions(
-      "appointment",
-      scholar.appointments.map((a) => a.externalId),
-      prisma,
-    ),
-  ]);
+  // #160 — whole-entity suppressions. A hidden education / appointment / grant
+  // drops from the profile (sidebars + funding section). Keyed on the stable
+  // `externalId` (#352). A grant row is per-investigator, so suppressing it
+  // hides that one role from this profile.
+  const [suppressedEducationIds, suppressedAppointmentIds, suppressedGrantIds] =
+    await Promise.all([
+      loadEntitySuppressions(
+        "education",
+        scholar.educations.map((e) => e.externalId),
+        prisma,
+      ),
+      loadEntitySuppressions(
+        "appointment",
+        scholar.appointments.map((a) => a.externalId),
+        prisma,
+      ),
+      loadEntitySuppressions(
+        "grant",
+        scholar.grants.map((g) => g.externalId),
+        prisma,
+      ),
+    ]);
 
   const rankablePubs = visibleAuthorships.map((a) => {
     // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
@@ -699,7 +706,10 @@ export async function getScholarFullProfileBySlug(
     // lookup (e.g. due to alias / normalization additions made after the
     // last ETL run), promote it on the fly. Lets the profile section
     // reflect canonical-lookup updates without re-ingesting.
-    grants: scholar.grants.map((g) => {
+    grants: scholar.grants
+      // #160 — drop a suppressed grant role from the funding section.
+      .filter((g) => !suppressedGrantIds.has(g.externalId))
+      .map((g) => {
       const lowerConfidenceCutoff = new Date(now);
       lowerConfidenceCutoff.setMonth(lowerConfidenceCutoff.getMonth() - 12);
       const pubs = g.publications
