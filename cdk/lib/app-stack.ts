@@ -971,9 +971,16 @@ export class AppStack extends Stack {
     // `-c githubOidcProviderArn=arn:aws:iam::<acct>:oidc-provider/...`
     // lets the prod deploy reuse what the staging deploy created.
     //
-    // Trust policy: sub claim restricted to the SPS repo. Prod admits
-    // only refs/heads/master; staging admits any ref in the same repo
-    // so feature branches can deploy to staging.
+    // Trust policy: sub claim restricted to the SPS repo. Prod admits the
+    // `prod` GitHub Environment subject, NOT a branch ref -- deploy.yml's prod
+    // job sets `environment: prod`, so GitHub mints a sub of
+    // `repo:<repo>:environment:prod` (a ref-based sub is only issued for a job
+    // WITHOUT an environment, which is why the old `ref:refs/heads/master`
+    // condition denied every prod deploy with AssumeRoleWithWebIdentity). The
+    // master pin is still enforced, twice over: the prod Environment's
+    // deployment-branch policy (master only) and deploy.yml's "Refuse prod from
+    // non-master ref" guard. Staging admits any ref so feature branches deploy
+    // to staging.
     //
     // Permissions: tightly scoped to the AppStack-owned resources. ECR
     // push on both the app and the ETL (#454) image repos, ECS RunTask on
@@ -1001,7 +1008,7 @@ export class AppStack extends Stack {
 
     const githubSubCondition =
       env === "prod"
-        ? "repo:wcmc-its/Scholars-Profile-System:ref:refs/heads/master"
+        ? "repo:wcmc-its/Scholars-Profile-System:environment:prod"
         : "repo:wcmc-its/Scholars-Profile-System:*";
 
     this.deployRole = new iam.Role(this, "DeployRole", {
