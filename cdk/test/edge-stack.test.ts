@@ -93,7 +93,7 @@ describe("EdgeStack", () => {
         const paths = cacheBehaviors.map((b) => b.PathPattern as string);
         expect(paths).toEqual([
           "/api/edit*",
-          "/edit/*",
+          "/edit*",
           "/api/auth/*",
           "/api/revalidate*",
           "/api/health/*",
@@ -201,7 +201,8 @@ describe("EdgeStack", () => {
         // Per the spec table: /api/edit*, /api/auth/*, /api/revalidate*,
         // /api/analytics need POST; CloudFront's enum collapses to ALLOW_ALL
         // for any of those. The GET-only routes (/edit/*, /api/health/*,
-        // /api/export/*) stay on GET/HEAD/OPTIONS.
+        // /api/export/*) stay on GET/HEAD/OPTIONS. /edit* covers the bare
+        // /edit self-editor route too (not just /edit/<cwid>).
         const byPath = new Map<string, string[]>();
         for (const b of cacheBehaviors) {
           byPath.set(
@@ -212,7 +213,7 @@ describe("EdgeStack", () => {
         const allMethods = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"];
         const ghOptions = ["GET", "HEAD", "OPTIONS"];
         expect(byPath.get("/api/edit*")).toEqual(allMethods);
-        expect(byPath.get("/edit/*")).toEqual(ghOptions);
+        expect(byPath.get("/edit*")).toEqual(ghOptions);
         expect(byPath.get("/api/auth/*")).toEqual(allMethods);
         expect(byPath.get("/api/revalidate*")).toEqual(allMethods);
         expect(byPath.get("/api/health/*")).toEqual(ghOptions);
