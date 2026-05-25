@@ -487,9 +487,12 @@ describe("AppStack", () => {
           | undefined;
         const sub =
           subClaim?.StringLike?.["token.actions.githubusercontent.com:sub"];
-        // Prod admits only refs/heads/master.
+        // Prod admits the `prod` GitHub Environment subject (deploy.yml's prod
+        // job runs with `environment: prod`, so GitHub mints an environment-
+        // scoped sub, not a ref-scoped one). The master pin lives in the prod
+        // Environment's branch policy + deploy.yml's non-master guard.
         expect(sub).toBe(
-          "repo:wcmc-its/Scholars-Profile-System:ref:refs/heads/master",
+          "repo:wcmc-its/Scholars-Profile-System:environment:prod",
         );
       });
 

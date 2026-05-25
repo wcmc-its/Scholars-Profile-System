@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,6 +11,17 @@ import { AccountMenu } from "./account-menu";
  * carry `?return={currentPath}` via `usePathname()`. The wider header is a
  * Server Component (`header.tsx`) that fetches the session + scholar row
  * and passes them down here as props.
+ *
+ * **Why this also probes `/api/auth/session` client-side.** The header renders
+ * on every public surface, but those are served by CloudFront's *cacheable*
+ * default behavior, which strips the Cookie header before it reaches the
+ * origin (cdk/lib/edge-stack.ts — the cache spec's "single most important
+ * knob"). So the server-rendered `isAuthenticated` is always `false` on a
+ * cached public page, even for a signed-in user. We treat the server prop as
+ * the initial value (it is authoritative on the cookie-forwarding `/edit/*`
+ * surface) and confirm it against `/api/auth/session`, which lives on the
+ * cookie-forwarding `/api/auth/*` behavior and so can read the session. The
+ * probe is skipped when the server already says authenticated.
  *
  * Why a client island instead of a middleware `x-pathname` header: the
  * existing `middleware.ts` matcher is scoped to `["/edit", "/edit/:path*",
@@ -31,6 +43,8 @@ import { AccountMenu } from "./account-menu";
  * The post-SSO return target is allow-listed by `lib/auth/return-path.ts`
  * (the public-page broaden lives in C4).
  */
+type ScholarLite = { slug: string; preferredName: string };
+
 export type HeaderAuthSlotProps = {
   /** True when the visitor has a valid session cookie. */
   isAuthenticated: boolean;
@@ -39,12 +53,36 @@ export type HeaderAuthSlotProps = {
    * row exists for the session's cwid (a staff-only superuser — D5.3).
    * Only consulted when `isAuthenticated` is true.
    */
-  scholar: { slug: string; preferredName: string } | null;
+  scholar: ScholarLite | null;
 };
 
 export function HeaderAuthSlot({ isAuthenticated, scholar }: HeaderAuthSlotProps) {
-  if (isAuthenticated) {
-    return <AccountMenu scholar={scholar} />;
+  const [auth, setAuth] = useState<{ isAuthenticated: boolean; scholar: ScholarLite | null }>(
+    { isAuthenticated, scholar },
+  );
+
+  useEffect(() => {
+    // The server prop is correct on cookie-forwarding surfaces; only probe
+    // when it says signed-out, which is also what a cached public page reports
+    // for a genuinely signed-in user.
+    if (isAuthenticated) return;
+    let active = true;
+    fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { authenticated?: boolean; scholar?: ScholarLite | null } | null) => {
+        if (!active || !data?.authenticated) return;
+        setAuth({ isAuthenticated: true, scholar: data.scholar ?? null });
+      })
+      .catch(() => {
+        /* leave the server-prop default — header stays as "Sign in" */
+      });
+    return () => {
+      active = false;
+    };
+  }, [isAuthenticated]);
+
+  if (auth.isAuthenticated) {
+    return <AccountMenu scholar={auth.scholar} />;
   }
   return <SignInLink />;
 }

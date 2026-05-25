@@ -177,15 +177,24 @@ jobs:
             --cluster "${{ steps.outputs.outputs.cluster }}" \
             --services "${{ steps.outputs.outputs.service }}"
 
-      - name: Smoke test /api/health
+      - name: Confirm rollout healthy
         run: |
           set -euo pipefail
-          for i in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" \
-              "http://${{ steps.outputs.outputs.alb_dns }}/api/health" || echo "000")
-            echo "attempt $i: HTTP $code"
-            if [ "$code" = "200" ]; then exit 0; fi
-            sleep 5
-          done
-          echo "::error::Smoke test failed: /api/health did not return 200 within 25s"
-          exit 1
+          # The authoritative health gate is the `services-stable` wait above:
+          # ECS reports the service stable only once the ALB target-group health
+          # check -- which polls /api/health -- passes. A direct HTTP probe from
+          # the runner cannot serve as the smoke test, because the ALB admits
+          # only requests bearing the B07 `X-Origin-Verify` shared secret that
+          # CloudFront injects (app-stack.ts), and the deploy role is
+          # intentionally NOT granted that secret. So assert running==desired
+          # via the ECS API (DescribeServices, already in the deploy role)
+          # rather than re-probe HTTP without the origin-verify header.
+          read -r desired running <<<"$(aws ecs describe-services \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}" \
+            --query 'services[0].[desiredCount,runningCount]' --output text)"
+          echo "desired=$desired running=$running"
+          if [ "$running" -lt 1 ] || [ "$running" != "$desired" ]; then
+            echo "::error::Service not fully running after rollout (desired=$desired running=$running)."
+            exit 1
+          fi

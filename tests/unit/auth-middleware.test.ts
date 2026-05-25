@@ -20,7 +20,7 @@ describe("middleware — SSO gate", () => {
   it("redirects an unauthenticated /edit request to SSO login", async () => {
     const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
     expect(res.status).toBe(302);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe("/api/auth/saml/login");
     expect(loc.searchParams.get("return")).toBe("/edit");
   });
@@ -29,7 +29,7 @@ describe("middleware — SSO gate", () => {
     const res = await middleware(
       new NextRequest(`${ORIGIN}/edit/scholar/abc1234?tab=overview`),
     );
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.searchParams.get("return")).toBe(
       "/edit/scholar/abc1234?tab=overview",
     );
@@ -81,7 +81,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}`),
     );
     expect(res.status).toBe(301);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID}`);
   });
 
@@ -90,7 +90,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
       new NextRequest(`${ORIGIN}/individual/cwid-${KNOWN_CWID_LATE}`),
     );
     expect(res.status).toBe(301);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID_LATE}`);
   });
 
@@ -99,7 +99,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
       new NextRequest(`${ORIGIN}/profile/cwid-${KNOWN_CWID}`),
     );
     expect(res.status).toBe(301);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID}`);
   });
 
@@ -119,7 +119,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
       new NextRequest(`${ORIGIN}/display/cwid-${KNOWN_CWID}?utm=campaign`),
     );
     expect(res.status).toBe(301);
-    const loc = new URL(res.headers.get("location")!);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
     expect(loc.search).toBe("");
     expect(loc.pathname).toBe(`/scholars/by-cwid/${KNOWN_CWID}`);
   });
@@ -131,7 +131,7 @@ describe("middleware — B14 legacy VIVO redirects", () => {
     expect(res.status).not.toBe(302);
     const loc = res.headers.get("location");
     if (loc !== null) {
-      expect(new URL(loc).pathname).not.toBe("/api/auth/saml/login");
+      expect(new URL(loc, ORIGIN).pathname).not.toBe("/api/auth/saml/login");
     }
   });
 });

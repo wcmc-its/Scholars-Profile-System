@@ -51,10 +51,15 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (vivoMatch) {
     const cwid = vivoMatch[1];
     if (cwid && VIVO_CWID_SET.has(cwid)) {
-      const target = request.nextUrl.clone();
-      target.pathname = `/scholars/by-cwid/${cwid}`;
-      target.search = "";
-      return NextResponse.redirect(target, 301);
+      // Relative Location: behind CloudFront -> ALB -> Fargate, request.nextUrl
+      // carries the container's internal host, so an absolute redirect would
+      // send the browser to an unreachable address (ip-...:3000). The browser
+      // resolves a relative Location against the public URL it requested. cwid
+      // is regex-constrained ([A-Za-z0-9._-]) so it is safe in the header.
+      return new NextResponse(null, {
+        status: 301,
+        headers: { Location: `/scholars/by-cwid/${cwid}` },
+      });
     }
     // Out-of-set CWID -- not in the academic-faculty roster. Fall through
     // so the existing 404 handling renders without a redirect.
@@ -79,14 +84,15 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   // Page route: redirect to SSO login, remembering the intended destination.
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = "/api/auth/saml/login";
-  loginUrl.search = "";
-  loginUrl.searchParams.set(
-    "return",
-    request.nextUrl.pathname + request.nextUrl.search,
-  );
-  return NextResponse.redirect(loginUrl, 302);
+  // Relative Location (see the VIVO branch above + the SAML callback route):
+  // request.nextUrl is the container's internal host behind the proxy, so an
+  // absolute redirect is unreachable. encodeURIComponent keeps the return value
+  // safe in the header; the login route re-validates it via safeReturnPath.
+  const returnTo = request.nextUrl.pathname + request.nextUrl.search;
+  return new NextResponse(null, {
+    status: 302,
+    headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
+  });
 }
 
 export const config = {
