@@ -82,9 +82,10 @@ describe("POST /api/auth/saml/callback", () => {
       callbackRequest({ SAMLResponse: "valid", RelayState: "/edit/scholar/abc1234" }),
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe(
-      "https://scholars.weill.cornell.edu/edit/scholar/abc1234",
-    );
+    // Relative Location (proxy-safe): the browser resolves it against the
+    // public ACS URL it POSTed to, never the container's internal request.url
+    // (ip-...:3000 behind CloudFront -> ALB -> Fargate).
+    expect(res.headers.get("location")).toBe("/edit/scholar/abc1234");
     expect(res.cookies.get("__Secure-sps_session")?.value).toBeTruthy();
   });
 
@@ -93,9 +94,7 @@ describe("POST /api/auth/saml/callback", () => {
     const res = await callbackPOST(
       callbackRequest({ SAMLResponse: "valid", RelayState: "https://evil.com" }),
     );
-    expect(res.headers.get("location")).toBe(
-      "https://scholars.weill.cornell.edu/edit",
-    );
+    expect(res.headers.get("location")).toBe("/edit");
   });
 
   it("503s when SAML is not configured", async () => {
@@ -107,13 +106,9 @@ describe("POST /api/auth/saml/callback", () => {
 
 describe("POST /api/auth/logout", () => {
   it("clears the session cookie and 302s home", async () => {
-    const res = await logoutPOST(
-      new NextRequest("https://scholars.weill.cornell.edu/api/auth/logout", {
-        method: "POST",
-      }),
-    );
+    const res = await logoutPOST();
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("https://scholars.weill.cornell.edu/");
+    expect(res.headers.get("location")).toBe("/");
     const cleared = res.cookies.get("__Secure-sps_session");
     expect(cleared?.value).toBe("");
     expect(cleared?.maxAge).toBe(0);

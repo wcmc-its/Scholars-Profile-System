@@ -68,7 +68,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     typeof relayState === "string" ? relayState : null,
     getDefaultReturnPath(),
   );
-  const response = NextResponse.redirect(new URL(dest, request.url), 302);
+  // Relative Location, NOT new URL(dest, request.url): behind CloudFront -> ALB
+  // -> Fargate, request.url is the container's internal address
+  // (e.g. http://ip-10-0-0-0.ec2.internal:3000) -- absolutizing against it sends
+  // the browser to an unreachable host after a successful login. A relative
+  // Location is resolved by the browser against the public URL it actually
+  // requested (the registered ACS host). `dest` is already validated to a safe,
+  // same-origin path by safeReturnPath (leading slash, no CR/LF), so a relative
+  // Location cannot become an open redirect.
+  const response = new NextResponse(null, {
+    status: 302,
+    headers: { Location: dest },
+  });
   const cookie = await createSessionCookie(result.cwid);
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;

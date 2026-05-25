@@ -319,6 +319,9 @@ describe("AppStack", () => {
                 // #447 -- renamed from REVALIDATE_TOKEN; the readers expect
                 // SCHOLARS_REVALIDATE_TOKEN.
                 Match.objectLike({ Name: "SCHOLARS_REVALIDATE_TOKEN" }),
+                // #100 -- iron-session key; the /edit gate + SAML callback
+                // 500 without it.
+                Match.objectLike({ Name: "SESSION_COOKIE_SECRET" }),
                 Match.objectLike({ Name: "SAML_SP_PRIVATE_KEY" }),
                 // #466 -- the IdP signing cert is a secret (rotatable trust
                 // anchor), not an env var.
@@ -407,13 +410,13 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the eight consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the nine consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The eight ARNs are scholars/prod/db/app-rw, db/app-ro,
-        // opensearch/app, revalidate-token, the SAML SP private key,
-        // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
-        // saml/idp-cert (the IdP signing-cert trust anchor, #466), and
-        // saml-sp/prod/cert (the SP public cert for metadata, #466).
+        // The nine ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // opensearch/app, revalidate-token, session-cookie-key, the SAML SP
+        // private key, etl/reciter (ReciterDB connection for funding/mentoring
+        // surfaces), saml/idp-cert (the IdP signing-cert trust anchor, #466),
+        // and saml-sp/prod/cert (the SP public cert for metadata, #466).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -436,7 +439,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(8);
+        expect(resourceList).toHaveLength(9);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1065,6 +1068,7 @@ describe("AppStack", () => {
           "scholars/prod/db/app-ro",
           "scholars/prod/opensearch/app",
           "scholars/prod/revalidate-token",
+          "scholars/prod/session-cookie-key",
           "scholars/saml-sp/prod/private-key",
           "scholars/prod/edge/origin-shared-secret",
           // ReciterDB connection (#465) and the SAML IdP signing cert (#466).

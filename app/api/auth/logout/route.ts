@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { clearedSessionCookie } from "@/lib/auth/session";
 
 /**
@@ -11,8 +11,14 @@ import { clearedSessionCookie } from "@/lib/auth/session";
  */
 export const dynamic = "force-dynamic";
 
-export function POST(request: NextRequest): NextResponse {
-  const response = NextResponse.redirect(new URL("/", request.url), 302);
+export function POST(): NextResponse {
+  // Relative Location (see callback route): request.url is the container's
+  // internal address behind the proxy, so absolutizing against it breaks the
+  // post-logout redirect. The browser resolves "/" against the public origin.
+  const response = new NextResponse(null, {
+    status: 302,
+    headers: { Location: "/" },
+  });
   const cookie = clearedSessionCookie();
   response.cookies.set(cookie.name, cookie.value, cookie.options);
   return response;
