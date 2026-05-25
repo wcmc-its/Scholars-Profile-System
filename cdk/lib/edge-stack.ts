@@ -215,7 +215,13 @@ export class EdgeStack extends Stack {
     // forwards the full request.
     const uncacheableBehaviors: ReadonlyArray<[string, cloudfront.AllowedMethods]> = [
       ["/api/edit*", cloudfront.AllowedMethods.ALLOW_ALL],
-      ["/edit/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/edit*`, NOT `/edit/*`: the bare `/edit` self-editor route must also
+      // forward cookies. `/edit/*` does not match `/edit` (no trailing slash),
+      // so a bare `/edit` request falls to the cacheable default behavior, which
+      // strips the session cookie -> the SSO gate sees no session -> redirect
+      // loop. Mirrors `/api/edit*` above. No public route begins with "edit",
+      // so the broader glob is safe.
+      ["/edit*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       ["/api/auth/*", cloudfront.AllowedMethods.ALLOW_ALL],
       ["/api/revalidate*", cloudfront.AllowedMethods.ALLOW_ALL],
       ["/api/health/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
