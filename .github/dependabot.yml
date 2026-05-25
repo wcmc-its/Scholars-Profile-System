@@ -1,0 +1,29 @@
+version: 2
+
+# Dependabot version-update config, scoped to GitHub Actions.
+#
+# Rationale: #475 surfaced the node20 -> node24 runner-runtime deprecation by
+# hand, against a hard 2026-06-02 cutoff. With this config Dependabot opens a
+# grouped PR whenever a pinned action has a newer release, so the next runtime
+# deprecation (or action CVE) appears as a reviewable PR well ahead of any
+# deadline -- no manual sweep of .github/workflows/*.
+#
+# Scope notes:
+#   - npm (root app + cdk/) is intentionally omitted to avoid version-update PR
+#     churn on an actively developed pre-launch app. Add a per-directory npm
+#     entry here if/when proactive dependency PRs are wanted.
+#   - This file controls VERSION updates only. CVE-driven SECURITY updates are a
+#     separate repo Settings toggle (Settings -> Code security -> Dependabot
+#     security updates), not configured here.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
