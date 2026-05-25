@@ -27,7 +27,10 @@
  */
 import { prisma } from "../../lib/db";
 import { coreProjectNum } from "@/lib/award-number";
-import { loadAllPublicationSuppressions } from "@/lib/api/manual-layer";
+import {
+  loadAllGrantSuppressions,
+  loadAllPublicationSuppressions,
+} from "@/lib/api/manual-layer";
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
 import {
   FUNDING_INDEX,
@@ -172,6 +175,11 @@ async function indexPublications(concreteIndex: string) {
 
 async function indexFunding(concreteIndex: string) {
   const client = searchClient();
+  // #160 — active grant suppressions (whole-table batch load). A suppressed
+  // grant row is one investigator's role; dropping it here removes that person
+  // from the project's people / wcmInvestigatorCwids projection, and a project
+  // with no surviving rows never forms a group below (-> dark, never indexed).
+  const suppressedGrants = await loadAllGrantSuppressions(prisma);
   const rows = await prisma.grant.findMany({
     where: { scholar: { deletedAt: null, status: "active" } },
     select: {
@@ -233,6 +241,8 @@ async function indexFunding(concreteIndex: string) {
   // Account_Number since they have no coreProjectNum.
   const byProject = new Map<string, typeof rows>();
   for (const r of rows) {
+    // #160 — drop a suppressed grant role before grouping/projection.
+    if (r.externalId && suppressedGrants.has(r.externalId)) continue;
     const ext = parseExternalId(r.externalId);
     if (!ext) continue;
     const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;

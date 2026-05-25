@@ -98,8 +98,8 @@ describe("POST /api/edit/suppress", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("rejects an out-of-scope entityType with 400", async () => {
-    const res = await POST(post({ entityType: "grant", entityId: "g1", reason: "x" }));
+  it("rejects an unknown entityType with 400", async () => {
+    const res = await POST(post({ entityType: "topic", entityId: "t1", reason: "x" }));
     expect(res.status).toBe(400);
   });
 
@@ -217,5 +217,35 @@ describe("POST /api/edit/suppress", () => {
       post({ entityType: "appointment", entityId: "APPT-1", reason: "stale entry" }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // --- grant (#160 PR-B): per-investigator role, no contributor, no chair guard ---
+
+  it("self-suppresses a grant role (200, no Scholar.status projection)", async () => {
+    const res = await POST(post({ entityType: "grant", entityId: "INFOED-1-self01" }));
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    expect(mockScholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects suppressing another scholar's grant with 403", async () => {
+    mockGrantFindUnique.mockResolvedValue({ cwid: "other9" });
+    const res = await POST(post({ entityType: "grant", entityId: "INFOED-1-other9" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a grant externalId that does not exist with 400 (entity_not_found)", async () => {
+    mockGrantFindUnique.mockResolvedValue(null);
+    const res = await POST(post({ entityType: "grant", entityId: "MISSING" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "entity_not_found" });
+  });
+
+  it("rejects a grant suppression carrying a contributorCwid with 400 (row is per-investigator)", async () => {
+    const res = await POST(
+      post({ entityType: "grant", entityId: "INFOED-1-self01", contributorCwid: "self01" }),
+    );
+    expect(res.status).toBe(400);
   });
 });

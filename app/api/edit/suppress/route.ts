@@ -35,14 +35,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- body shape ---
   const { entityType, entityId, contributorCwid, reason } = body;
-  // #160 PR-A adds education + appointment. Grant lands in PR-B — it needs the
-  // funding-search index + counts to ship complete, not just the profile, so
-  // accepting it here before that would leave a grant half-suppressed.
+  // #160 — scholar + publication (PR #356), education + appointment (PR-A),
+  // grant (PR-B). A grant row is per-(award, investigator), so suppressing it
+  // hides that one investigator's role; a funding project goes dark only when
+  // all its rows are suppressed.
   if (
     entityType !== "scholar" &&
     entityType !== "publication" &&
     entityType !== "education" &&
-    entityType !== "appointment"
+    entityType !== "appointment" &&
+    entityType !== "grant"
   ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
@@ -67,7 +69,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   //     pure-authz owner check. For an appointment, refuse to hide a current
   //     chair role (409, D-leader) so the profile can't contradict the
   //     column-driven dept-page leader card. ---
-  const isWholeEntity = entityType === "education" || entityType === "appointment";
+  const isWholeEntity =
+    entityType === "education" || entityType === "appointment" || entityType === "grant";
   let ownerCwid: string | null = null;
   if (isWholeEntity) {
     const owner = await findSuppressibleEntityOwner(entityType, entityId, db.read);

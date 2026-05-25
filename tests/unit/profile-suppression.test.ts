@@ -194,6 +194,29 @@ function appointment(externalId: string, title: string) {
     source: "ED",
   };
 }
+function grant(externalId: string, title: string) {
+  return {
+    externalId,
+    title,
+    role: "PI",
+    funder: "NIH",
+    startDate: new Date("2020-01-01"),
+    endDate: new Date("2030-01-01"),
+    awardNumber: null,
+    programType: "Grant",
+    primeSponsor: null,
+    primeSponsorRaw: null,
+    directSponsor: null,
+    directSponsorRaw: null,
+    mechanism: null,
+    nihIc: null,
+    isSubaward: false,
+    applId: null,
+    abstract: null,
+    abstractSource: null,
+    publications: [],
+  };
+}
 
 /** Mock keyed on the queried entityType, so the publication loader and the
  *  whole-entity loaders don't cross-contaminate. */
@@ -238,5 +261,16 @@ describe("getScholarFullProfileBySlug — entity suppression (#160)", () => {
     const payload = await getScholarFullProfileBySlug("owner-one");
     expect((payload?.educations ?? []).length).toBe(1);
     expect((payload?.appointments ?? []).length).toBe(1);
+  });
+
+  it("drops a suppressed grant role from the funding section (#160 PR-B)", async () => {
+    mockScholarFindFirst.mockResolvedValue({
+      ...scholarRow(),
+      grants: [grant("INFOED-1-owner001", "Grant A"), grant("INFOED-2-owner001", "Grant B")],
+    });
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    suppressByType({ grant: ["INFOED-2-owner001"] });
+    const payload = await getScholarFullProfileBySlug("owner-one");
+    expect((payload?.grants ?? []).map((g) => g.title)).toEqual(["Grant A"]);
   });
 });

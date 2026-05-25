@@ -209,6 +209,23 @@ export async function loadEntitySuppressions(
 }
 
 /**
+ * Every active suppressed grant `externalId` in the table — **batch only**
+ * (the funding search index build, #160 PR-B). One round trip over the small
+ * active grant-suppression set, mirroring {@link loadAllPublicationSuppressions}.
+ * The per-request path must use the id-scoped {@link loadEntitySuppressions}
+ * instead (ADR-005 immediacy — no whole-table cache on a request).
+ */
+export async function loadAllGrantSuppressions(
+  client: SuppressionReadClient,
+): Promise<ReadonlySet<string>> {
+  const rows = await client.suppression.findMany({
+    where: { entityType: "grant", revokedAt: null },
+    select: { entityId: true },
+  });
+  return new Set(rows.map((r) => r.entityId));
+}
+
+/**
  * True when this `(pmid, cwid)` WCM authorship is hidden by an active per-author
  * suppression — the scholar must then be omitted from that publication's
  * rendered author chips, profile links, and author-derived counts

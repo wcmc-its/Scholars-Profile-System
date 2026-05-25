@@ -157,6 +157,13 @@ export async function resolveAffectedProfiles(
     });
     return row?.scholar ? [{ slug: row.scholar.slug, cwid: row.scholar.cwid }] : [];
   }
+  if (entityType === "grant") {
+    const row = await db.read.grant.findUnique({
+      where: { externalId: entityId },
+      select: { scholar: { select: { slug: true, cwid: true } } },
+    });
+    return row?.scholar ? [{ slug: row.scholar.slug, cwid: row.scholar.cwid }] : [];
+  }
   if (contributorCwid) {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: contributorCwid },
