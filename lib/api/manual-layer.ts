@@ -171,6 +171,43 @@ export async function loadAllPublicationSuppressions(
   return { darkPmids, hiddenAuthorsByPmid };
 }
 
+// ---------------------------------------------------------------------------
+// Whole-entity suppression (grant / education / appointment) — #160.
+//
+// These entities are suppressed whole, keyed on the stable `externalId` (#352);
+// they carry no contributor dimension (a Grant row is already per-investigator,
+// so hiding one investigator's role is just suppressing that row — ADR-005
+// keying / #160 D1). So a plain set of suppressed `externalId`s is the whole
+// read predicate, simpler than the publication contributor map above.
+// ---------------------------------------------------------------------------
+
+/** The entity types suppressed whole by stable `externalId` (#160). */
+export type WholeEntityType = "grant" | "education" | "appointment";
+
+/**
+ * The active (`revokedAt IS NULL`) suppressed `externalId`s of one whole-entity
+ * type, scoped to the ids in hand. Per-request and never cached — the same
+ * ADR-005 immediacy rule as {@link loadPublicationSuppressions}; a TTL cache
+ * would reintroduce the staleness window suppression exists to close. The
+ * `@@index([entityType, entityId])` on `suppression` serves the lookup.
+ */
+export async function loadEntitySuppressions(
+  entityType: WholeEntityType,
+  externalIds: readonly string[],
+  client: SuppressionReadClient,
+): Promise<ReadonlySet<string>> {
+  if (externalIds.length === 0) return new Set();
+  const rows = await client.suppression.findMany({
+    where: {
+      entityType,
+      entityId: { in: [...new Set(externalIds)] },
+      revokedAt: null,
+    },
+    select: { entityId: true },
+  });
+  return new Set(rows.map((r) => r.entityId));
+}
+
 /**
  * True when this `(pmid, cwid)` WCM authorship is hidden by an active per-author
  * suppression — the scholar must then be omitted from that publication's

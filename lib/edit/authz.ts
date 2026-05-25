@@ -53,27 +53,45 @@ export function authorizeFieldEdit(
 
 /**
  * `POST /api/edit/suppress`:
- *   - scholar, whole-entity     → the scholar themselves, or a superuser
- *   - publication, per-author   → the actor suppressing *themselves* as a
- *                                 contributor, or a superuser
- *   - publication, whole-entity → superuser only (retraction / takedown)
+ *   - scholar, whole-entity                    → the scholar themselves, or a superuser
+ *   - grant / education / appointment          → the owning scholar, or a superuser (#160)
+ *   - publication, per-author                  → the actor suppressing *themselves* as a
+ *                                                contributor, or a superuser
+ *   - publication, whole-entity                → superuser only (retraction / takedown)
  *
- * A scholar suppression never carries a `contributorCwid`. The per-author
- * authorship-existence check is a separate `400` validation, not part of this
- * `403` predicate.
+ * Scholar and grant/education/appointment suppressions never carry a
+ * `contributorCwid`. For the whole-entity types the owning scholar's cwid
+ * (`ownerCwid`) is resolved upstream (`findSuppressibleEntityOwner`) and passed
+ * in so this predicate stays pure. The per-author authorship-existence check
+ * and the whole-entity existence check are separate `400` validations, not part
+ * of this `403` predicate.
  */
 export function authorizeSuppress(
   session: EditSession,
   target: {
-    entityType: "scholar" | "publication";
+    entityType: "scholar" | "publication" | "grant" | "education" | "appointment";
     entityId: string;
     contributorCwid?: string | null;
+    /** Owner cwid of a whole-entity grant/education/appointment target. */
+    ownerCwid?: string | null;
   },
 ): AuthzResult {
   if (session.isSuperuser) return ALLOW;
 
   if (target.entityType === "scholar") {
     return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
+  }
+
+  if (
+    target.entityType === "grant" ||
+    target.entityType === "education" ||
+    target.entityType === "appointment"
+  ) {
+    // Whole-entity self-suppression: a scholar may hide only their own
+    // grant / education / appointment. `ownerCwid` is resolved upstream (#160).
+    return session.cwid === (target.ownerCwid ?? null)
+      ? ALLOW
+      : { ok: false, reason: "not_self" };
   }
 
   // publication

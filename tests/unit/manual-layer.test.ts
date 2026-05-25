@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import { getEffectiveOverview, loadEntitySuppressions } from "@/lib/api/manual-layer";
 
 type OverrideClient = Parameters<typeof getEffectiveOverview>[2];
+type SuppClient = Parameters<typeof loadEntitySuppressions>[2];
 
 /** A client whose `fieldOverride.findUnique` resolves to `row`. */
 function client(row: unknown): OverrideClient {
@@ -72,6 +73,41 @@ describe("getEffectiveOverview", () => {
             fieldName: "overview",
           },
         },
+      }),
+    );
+  });
+});
+
+describe("loadEntitySuppressions (#160)", () => {
+  function suppClient(rows: Array<{ entityId: string }>): SuppClient {
+    return {
+      suppression: { findMany: vi.fn().mockResolvedValue(rows) },
+    } as unknown as SuppClient;
+  }
+
+  it("returns the set of active suppressed externalIds", async () => {
+    const result = await loadEntitySuppressions(
+      "education",
+      ["E1", "E2", "E3"],
+      suppClient([{ entityId: "E1" }, { entityId: "E3" }]),
+    );
+    expect([...result].sort()).toEqual(["E1", "E3"]);
+  });
+
+  it("short-circuits to an empty set with no ids (issues no query)", async () => {
+    const c = suppClient([]);
+    const result = await loadEntitySuppressions("appointment", [], c);
+    expect(result.size).toBe(0);
+    expect((c.suppression.findMany as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it("scopes the query to active rows of the given type + de-duped ids", async () => {
+    const c = suppClient([]);
+    await loadEntitySuppressions("grant", ["G1", "G1", "G2"], c);
+    expect(c.suppression.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { entityType: "grant", entityId: { in: ["G1", "G2"] }, revokedAt: null },
+        select: { entityId: true },
       }),
     );
   });

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db";
 import {
   getEffectiveOverview,
   isAuthorHidden,
+  loadEntitySuppressions,
   loadPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { identityImageEndpoint } from "@/lib/headshot";
@@ -507,6 +508,22 @@ export async function getScholarFullProfileBySlug(
       !suppressions.darkPmids.has(a.publication.pmid),
   );
 
+  // #160 — whole-entity suppressions. A hidden education / appointment drops
+  // from the profile sidebars. Keyed on the stable `externalId` (#352). Grants
+  // are handled in PR-B (they also need the funding-search index + counts).
+  const [suppressedEducationIds, suppressedAppointmentIds] = await Promise.all([
+    loadEntitySuppressions(
+      "education",
+      scholar.educations.map((e) => e.externalId),
+      prisma,
+    ),
+    loadEntitySuppressions(
+      "appointment",
+      scholar.appointments.map((a) => a.externalId),
+      prisma,
+    ),
+  ]);
+
   const rankablePubs = visibleAuthorships.map((a) => {
     // ReCiterAI publication score for this scholar+pmid pair (D-08). Source
     // chain after issue #316 PR-A: prefer the per-scholar PublicationScore
@@ -617,9 +634,11 @@ export async function getScholarFullProfileBySlug(
     "ED-NYP": 2, // NYP affiliates (#162)
   };
   const tier = (s: string) => APPOINTMENT_TIER_ORDER[s] ?? 99;
-  const sortedAppointments = [...scholar.appointments].sort(
-    (a, b) => tier(a.source) - tier(b.source),
-  );
+  const sortedAppointments = [...scholar.appointments]
+    // #160 — drop suppressed appointments before annotate/collapse so a hidden
+    // primary can't win the single-visible-primary collapse.
+    .filter((a) => !suppressedAppointmentIds.has(a.externalId))
+    .sort((a, b) => tier(a.source) - tier(b.source));
   const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
   // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
@@ -666,12 +685,15 @@ export async function getScholarFullProfileBySlug(
       isInterim: a.isInterim,
       isActive: a.isActive,
     })),
-    educations: scholar.educations.map((e) => ({
-      degree: e.degree,
-      institution: e.institution,
-      year: e.year,
-      field: e.field,
-    })),
+    educations: scholar.educations
+      // #160 — drop suppressed education entries from the sidebar.
+      .filter((e) => !suppressedEducationIds.has(e.externalId))
+      .map((e) => ({
+        degree: e.degree,
+        institution: e.institution,
+        year: e.year,
+        field: e.field,
+      })),
     // Issue #78 — runtime canonicalization fallback. When the stored
     // canonical short is null but the raw matches the current sponsor
     // lookup (e.g. due to alias / normalization additions made after the

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   checkSlugCollision,
+  findSuppressibleEntityOwner,
+  isChairAppointment,
   isEditableField,
   publicationAuthorshipExists,
   sanitizeOverview,
@@ -286,5 +288,77 @@ describe("publicationAuthorshipExists", () => {
         where: { pmid: "123", cwid: "cwid1", isConfirmed: true },
       }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findSuppressibleEntityOwner + isChairAppointment  (#160)
+// ---------------------------------------------------------------------------
+
+type OwnerClient = Parameters<typeof findSuppressibleEntityOwner>[2];
+
+function ownerClient(rows: {
+  grant?: unknown;
+  education?: unknown;
+  appointment?: unknown;
+}): OwnerClient {
+  return {
+    grant: { findUnique: vi.fn().mockResolvedValue(rows.grant ?? null) },
+    education: { findUnique: vi.fn().mockResolvedValue(rows.education ?? null) },
+    appointment: { findUnique: vi.fn().mockResolvedValue(rows.appointment ?? null) },
+  } as unknown as OwnerClient;
+}
+
+describe("findSuppressibleEntityOwner (#160)", () => {
+  it("resolves a grant owner (title null — grants carry no chair guard)", async () => {
+    expect(
+      await findSuppressibleEntityOwner("grant", "INFOED-1-abc", ownerClient({ grant: { cwid: "abc" } })),
+    ).toEqual({ ownerCwid: "abc", title: null });
+  });
+
+  it("resolves an appointment owner with its title (fed to the chair guard)", async () => {
+    expect(
+      await findSuppressibleEntityOwner(
+        "appointment",
+        "APPT-1",
+        ownerClient({ appointment: { cwid: "abc", title: "Professor of Medicine" } }),
+      ),
+    ).toEqual({ ownerCwid: "abc", title: "Professor of Medicine" });
+  });
+
+  it("returns null when no row carries the externalId (-> 400 at the route)", async () => {
+    expect(await findSuppressibleEntityOwner("education", "MISSING", ownerClient({}))).toBeNull();
+  });
+});
+
+type ChairClient = Parameters<typeof isChairAppointment>[2];
+
+function chairClient(dept: { name: string } | null): ChairClient {
+  return {
+    department: { findFirst: vi.fn().mockResolvedValue(dept) },
+  } as unknown as ChairClient;
+}
+
+describe("isChairAppointment (#160 D-leader)", () => {
+  it("is true when the owner chairs a dept and the title matches that dept's chair phrase", async () => {
+    expect(
+      await isChairAppointment("abc", "Chair of Medicine", chairClient({ name: "Medicine" })),
+    ).toBe(true);
+  });
+
+  it("is false for a non-chair title of a chair (their other appointments stay suppressible)", async () => {
+    expect(
+      await isChairAppointment("abc", "Professor of Medicine", chairClient({ name: "Medicine" })),
+    ).toBe(false);
+  });
+
+  it("is false when the owner chairs no department", async () => {
+    expect(await isChairAppointment("abc", "Chair of Medicine", chairClient(null))).toBe(false);
+  });
+
+  it("excludes vice/associate chairs (isChairTitleFor)", async () => {
+    expect(
+      await isChairAppointment("abc", "Vice-Chair of Medicine", chairClient({ name: "Medicine" })),
+    ).toBe(false);
   });
 });

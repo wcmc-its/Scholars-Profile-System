@@ -11,6 +11,10 @@ const {
   mockExecuteRaw,
   mockReflectVisibilityChange,
   mockResolveProfiles,
+  mockGrantFindUnique,
+  mockEducationFindUnique,
+  mockAppointmentFindUnique,
+  mockDepartmentFindFirst,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -21,6 +25,10 @@ const {
   mockExecuteRaw: vi.fn(),
   mockReflectVisibilityChange: vi.fn(),
   mockResolveProfiles: vi.fn(),
+  mockGrantFindUnique: vi.fn(),
+  mockEducationFindUnique: vi.fn(),
+  mockAppointmentFindUnique: vi.fn(),
+  mockDepartmentFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -29,6 +37,10 @@ vi.mock("@/lib/db", () => ({
     read: {
       suppression: { findFirst: mockSuppressionFindFirst },
       publicationAuthor: { findFirst: mockPublicationAuthorFindFirst },
+      grant: { findUnique: mockGrantFindUnique },
+      education: { findUnique: mockEducationFindUnique },
+      appointment: { findUnique: mockAppointmentFindUnique },
+      department: { findFirst: mockDepartmentFindFirst },
     },
     write: { $transaction: mockTransaction },
   },
@@ -72,6 +84,11 @@ beforeEach(() => {
   mockScholarUpdateMany.mockResolvedValue({ count: 1 });
   mockExecuteRaw.mockResolvedValue(1);
   mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
+  // Whole-entity lookups (#160) — default: owned by self01, no chair role.
+  mockGrantFindUnique.mockResolvedValue({ cwid: "self01" });
+  mockEducationFindUnique.mockResolvedValue({ cwid: "self01" });
+  mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Professor of Medicine" });
+  mockDepartmentFindFirst.mockResolvedValue(null);
 });
 
 describe("POST /api/edit/suppress", () => {
@@ -137,5 +154,68 @@ describe("POST /api/edit/suppress", () => {
   it("rejects a scholar suppression carrying a contributorCwid with 400", async () => {
     const res = await POST(post({ entityType: "scholar", entityId: "self01", contributorCwid: "self01" }));
     expect(res.status).toBe(400);
+  });
+
+  // --- whole-entity types: education / appointment (#160 PR-A) ---
+
+  it("self-suppresses an education entry (200, no Scholar.status projection)", async () => {
+    const res = await POST(post({ entityType: "education", entityId: "EDU-1" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, suppressionId: "sup-1" });
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    expect(mockScholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects suppressing another scholar's education with 403", async () => {
+    mockEducationFindUnique.mockResolvedValue({ cwid: "other9" });
+    const res = await POST(post({ entityType: "education", entityId: "EDU-1" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an education externalId that does not exist with 400 (entity_not_found)", async () => {
+    mockEducationFindUnique.mockResolvedValue(null);
+    const res = await POST(post({ entityType: "education", entityId: "MISSING" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "entity_not_found" });
+  });
+
+  it("self-suppresses a non-leadership appointment (200)", async () => {
+    const res = await POST(post({ entityType: "appointment", entityId: "APPT-1" }));
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to suppress a chair appointment with 409 (D-leader), even for the chair themselves", async () => {
+    mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Chair of Medicine" });
+    mockDepartmentFindFirst.mockResolvedValue({ name: "Medicine" });
+    const res = await POST(post({ entityType: "appointment", entityId: "APPT-CHAIR" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "leadership_appointment_not_suppressible" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses a chair appointment takedown even for a superuser (guard precedes authz)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockAppointmentFindUnique.mockResolvedValue({ cwid: "other9", title: "Chair of Medicine" });
+    mockDepartmentFindFirst.mockResolvedValue({ name: "Medicine" });
+    const res = await POST(post({ entityType: "appointment", entityId: "APPT-CHAIR", reason: "x" }));
+    expect(res.status).toBe(409);
+  });
+
+  it("rejects an education suppression carrying a contributorCwid with 400", async () => {
+    const res = await POST(
+      post({ entityType: "education", entityId: "EDU-1", contributorCwid: "self01" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("lets a superuser suppress another scholar's (non-leadership) appointment", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockAppointmentFindUnique.mockResolvedValue({ cwid: "other9", title: "Professor of Medicine" });
+    const res = await POST(
+      post({ entityType: "appointment", entityId: "APPT-1", reason: "stale entry" }),
+    );
+    expect(res.status).toBe(200);
   });
 });

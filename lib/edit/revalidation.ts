@@ -141,6 +141,22 @@ export async function resolveAffectedProfiles(
     });
     return scholar ? [{ slug: scholar.slug, cwid: scholar.cwid }] : [];
   }
+  // Whole-entity types (#160): the one owning scholar's profile. `entityId` is
+  // the stable `externalId`; the scholar relation gives slug (ISR) + cwid.
+  if (entityType === "education") {
+    const row = await db.read.education.findUnique({
+      where: { externalId: entityId },
+      select: { scholar: { select: { slug: true, cwid: true } } },
+    });
+    return row?.scholar ? [{ slug: row.scholar.slug, cwid: row.scholar.cwid }] : [];
+  }
+  if (entityType === "appointment") {
+    const row = await db.read.appointment.findUnique({
+      where: { externalId: entityId },
+      select: { scholar: { select: { slug: true, cwid: true } } },
+    });
+    return row?.scholar ? [{ slug: row.scholar.slug, cwid: row.scholar.cwid }] : [];
+  }
   if (contributorCwid) {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: contributorCwid },

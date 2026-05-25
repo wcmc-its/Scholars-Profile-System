@@ -8,6 +8,11 @@
  */
 import type { EdFacultyAppointment } from "@/lib/sources/ldap";
 
+// `isChairTitleFor` now lives in `@/lib/leadership` (the self-edit suppression
+// guard reuses it; #160). Re-exported here so existing ETL importers
+// (etl/ed/index.ts, etl/ed/probe-divisions.ts) keep their import path.
+export { isChairTitleFor } from "@/lib/leadership";
+
 export type ChiefVerdict = "HIGH" | "MEDIUM" | "LOW" | "NONE" | "GAP";
 
 export type ChiefCandidate = {
@@ -28,22 +33,6 @@ export type ChiefDetectionResult = {
    *  HIGH and MEDIUM are auto-written; LOW/NONE/GAP all clear to null. */
   valueToWrite: string | null;
 };
-
-/** Standalone-phrase match for "Chair of {dept name}". Catches direct,
- *  prefix, suffix, endowed ("Sanford I. Weill Chair of Medicine"), and
- *  acting ("Acting Chair of Cell and Developmental Biology") forms.
- *  Excludes vice/associate/deputy/assistant chairs. */
-export function isChairTitleFor(title: string, deptName: string): boolean {
-  if (/Vice[- ]Chair|Associate Chair|Deputy Chair|Assistant Chair/i.test(title)) {
-    return false;
-  }
-  const target = `Chair of ${deptName}`;
-  if (title === target) return true;
-  if (title.startsWith(`${target} `) || title.startsWith(`${target},`)) return true;
-  if (title.endsWith(` ${target}`)) return true;
-  if (title.includes(` ${target} `) || title.includes(` ${target},`)) return true;
-  return false;
-}
 
 export function detectDivisionChief(opts: {
   divCode: string;

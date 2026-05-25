@@ -16,7 +16,11 @@ import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
-import { publicationAuthorshipExists } from "@/lib/edit/validators";
+import {
+  findSuppressibleEntityOwner,
+  isChairAppointment,
+  publicationAuthorshipExists,
+} from "@/lib/edit/validators";
 
 const PATH = "/api/edit/suppress";
 
@@ -31,8 +35,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- body shape ---
   const { entityType, entityId, contributorCwid, reason } = body;
-  if (entityType !== "scholar" && entityType !== "publication") {
-    // grant / education / appointment suppression is blocked on #352.
+  // #160 PR-A adds education + appointment. Grant lands in PR-B — it needs the
+  // funding-search index + counts to ship complete, not just the profile, so
+  // accepting it here before that would leave a grant half-suppressed.
+  if (
+    entityType !== "scholar" &&
+    entityType !== "publication" &&
+    entityType !== "education" &&
+    entityType !== "appointment"
+  ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
   if (typeof entityId !== "string" || entityId.length === 0) {
@@ -45,17 +56,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     contributor = contributorCwid;
   }
-  if (entityType === "scholar" && contributor !== null) {
-    // A scholar suppression is always whole-entity — it carries no contributor.
+  // Only a publication suppression carries a contributor. Scholar and the
+  // whole-entity types (education / appointment) are always whole-entity.
+  if (entityType !== "publication" && contributor !== null) {
     return editError(400, "invalid_contributor", "contributorCwid");
   }
 
+  // --- whole-entity types (#160): resolve the owning scholar by stable
+  //     externalId. This is both the 400 existence gate and the source of the
+  //     pure-authz owner check. For an appointment, refuse to hide a current
+  //     chair role (409, D-leader) so the profile can't contradict the
+  //     column-driven dept-page leader card. ---
+  const isWholeEntity = entityType === "education" || entityType === "appointment";
+  let ownerCwid: string | null = null;
+  if (isWholeEntity) {
+    const owner = await findSuppressibleEntityOwner(entityType, entityId, db.read);
+    if (!owner) return editError(400, "entity_not_found", "entityId");
+    ownerCwid = owner.ownerCwid;
+    if (
+      entityType === "appointment" &&
+      owner.title !== null &&
+      (await isChairAppointment(owner.ownerCwid, owner.title, db.read))
+    ) {
+      return editError(409, "leadership_appointment_not_suppressible", "entityId");
+    }
+  }
+
   // --- authorization (403) ---
-  const authz = authorizeSuppress(session, { entityType, entityId, contributorCwid: contributor });
+  const authz = authorizeSuppress(session, {
+    entityType,
+    entityId,
+    contributorCwid: contributor,
+    ownerCwid,
+  });
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,
-      targetCwid: entityType === "scholar" ? entityId : (contributor ?? entityId),
+      targetCwid:
+        entityType === "scholar" ? entityId : (contributor ?? ownerCwid ?? entityId),
       path: PATH,
       reason: authz.reason,
     });
@@ -70,13 +108,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- reason: optional for a self-action (defaulted), mandatory otherwise ---
   const isSelfScholar = entityType === "scholar" && session.cwid === entityId;
+  const isSelfEntity = isWholeEntity && ownerCwid !== null && session.cwid === ownerCwid;
   const isSelfAuthorHide =
     entityType === "publication" && contributor !== null && session.cwid === contributor;
   const trimmedReason = typeof reason === "string" ? reason.trim() : "";
   let reasonValue: string;
   if (trimmedReason.length > 0) {
     reasonValue = trimmedReason;
-  } else if (isSelfScholar) {
+  } else if (isSelfScholar || isSelfEntity) {
     reasonValue = SELF_SUPPRESS_REASON;
   } else if (isSelfAuthorHide) {
     reasonValue = SELF_HIDE_REASON;

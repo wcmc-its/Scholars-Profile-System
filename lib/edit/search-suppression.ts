@@ -136,8 +136,9 @@ async function buildReflectionOps(
   if (args.entityType === "publication") {
     return buildPublicationOps(args.entityId, args.affectedCwids);
   }
-  // Other entity types are out of v1 scope (Grant / Education / Appointment
-  // — blocked on #352).
+  // Education / appointment (#160) have no search index, so a suppression
+  // reflects only through ISR (lib/edit/revalidation.ts) — no op here.
+  // Grant funding-index reflection lands in PR-B.
   return [];
 }
 
