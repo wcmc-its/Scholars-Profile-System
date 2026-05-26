@@ -1,7 +1,7 @@
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { NetworkStack } from "../lib/network-stack";
-import { makeFixture } from "./test-utils";
+import { makeFixture, TEST_ACCOUNT } from "./test-utils";
 
 function buildAppStack(envName: "staging" | "prod"): {
   template: Template;
@@ -67,9 +67,11 @@ describe("AppStack", () => {
       });
 
       it("creates the two task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
-        // The CDK custom resource that provisions the OIDC provider adds
-        // its own Lambda execution role; assert >= 3 customer roles by
-        // matching role names rather than the raw count.
+        // Match by role name rather than raw count: in the owner env the OIDC
+        // provider custom resource adds its own Lambda execution role, and any
+        // env may carry other framework-generated roles. prod imports the
+        // provider (issue #491) so has no such custom-resource role, but the
+        // name-based assertion holds either way.
         const roles = template.findResources("AWS::IAM::Role");
         const roleNames = Object.values(roles)
           .map((r) => r.Properties?.RoleName as string | undefined)
@@ -77,6 +79,27 @@ describe("AppStack", () => {
           .sort();
         expect(roleNames).toEqual(
           ["sps-deploy-prod", "sps-task-exec-prod", "sps-task-prod"].sort(),
+        );
+      });
+
+      it("imports the account-scoped OIDC provider rather than creating it (#491)", () => {
+        // prod is not the provider owner (staging is), so it must NOT create a
+        // second account-scoped provider -- that fails deploy with
+        // EntityAlreadyExistsException. It imports the deterministic ARN, so no
+        // Custom::AWSCDKOpenIdConnectProvider resource is synthesized and the
+        // deploy role federates directly to the well-known provider ARN.
+        template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 0);
+        const roles = template.findResources("AWS::IAM::Role");
+        const deployRole = Object.values(roles).find(
+          (r) => r.Properties?.RoleName === "sps-deploy-prod",
+        );
+        const federated = (
+          deployRole?.Properties?.AssumeRolePolicyDocument as {
+            Statement?: Array<{ Principal?: { Federated?: unknown } }>;
+          }
+        )?.Statement?.[0]?.Principal?.Federated;
+        expect(federated).toBe(
+          `arn:aws:iam::${TEST_ACCOUNT}:oidc-provider/token.actions.githubusercontent.com`,
         );
       });
 
@@ -1303,6 +1326,12 @@ describe("AppStack", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
         DesiredCount: 1,
       });
+    });
+
+    it("owns (creates) the account-scoped OIDC provider (#491)", () => {
+      // staging is the designated owner: it creates the single account-scoped
+      // provider that prod (and any other env) imports.
+      template.resourceCountIs("Custom::AWSCDKOpenIdConnectProvider", 1);
     });
 
     it("announces the registered prod SP entityID but keeps the staging ACS host (#466)", () => {

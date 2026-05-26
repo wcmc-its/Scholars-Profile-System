@@ -964,12 +964,17 @@ export class AppStack extends Stack {
     // GitHub Actions OIDC deploy role.
     //
     // The OIDC provider is account-scoped — only one
-    // `token.actions.githubusercontent.com` provider can exist per
-    // account. The single-account deviation (staging + prod share account
-    // 665083158573) means the second AppStack to deploy must reuse the
-    // first's provider rather than create another. The context flag
-    // `-c githubOidcProviderArn=arn:aws:iam::<acct>:oidc-provider/...`
-    // lets the prod deploy reuse what the staging deploy created.
+    // `token.actions.githubusercontent.com` provider can exist per account,
+    // and its ARN is deterministic. The single-account deviation (staging +
+    // prod share account 665083158573) means exactly one AppStack may own
+    // (create) the provider; every other env must import it. The owner is
+    // staging (it deploys first). Non-owner envs import the deterministic ARN
+    // by default, so a manual `cdk deploy` no longer has to remember
+    // `-c githubOidcProviderArn=...` — omitting it previously fell into the
+    // create branch and failed the prod stack with EntityAlreadyExistsException
+    // (#491). The context flag still overrides the imported ARN, and
+    // `-c createGithubOidcProvider=true` forces creation for a first-ever
+    // bootstrap of a brand-new account from a non-staging env.
     //
     // Trust policy: sub claim restricted to the SPS repo. Prod admits the
     // `prod` GitHub Environment subject, NOT a branch ref -- deploy.yml's prod
@@ -991,20 +996,29 @@ export class AppStack extends Stack {
     // URIs, cluster, service, and migration family). The only `*` resource
     // is ecr:GetAuthorizationToken, which has no resource-level ARN.
     // ------------------------------------------------------------------
+    const githubOidcIssuerHost = "token.actions.githubusercontent.com";
     const githubOidcProviderArnContext = this.node.tryGetContext(
       "githubOidcProviderArn",
     ) as string | undefined;
-    const githubOidcProvider =
-      githubOidcProviderArnContext && githubOidcProviderArnContext.length > 0
-        ? iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
-            this,
-            "GithubOidcProvider",
-            githubOidcProviderArnContext,
-          )
-        : new iam.OpenIdConnectProvider(this, "GithubOidcProvider", {
-            url: "https://token.actions.githubusercontent.com",
-            clientIds: ["sts.amazonaws.com"],
-          });
+    // staging owns/creates the account-scoped provider; every other env imports
+    // it. `-c createGithubOidcProvider=true` forces creation for a fresh-account
+    // bootstrap from a non-staging env.
+    const ownsGithubOidcProvider =
+      env === "staging" ||
+      `${this.node.tryGetContext("createGithubOidcProvider")}` === "true";
+    const githubOidcProvider = ownsGithubOidcProvider
+      ? new iam.OpenIdConnectProvider(this, "GithubOidcProvider", {
+          url: `https://${githubOidcIssuerHost}`,
+          clientIds: ["sts.amazonaws.com"],
+        })
+      : iam.OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+          this,
+          "GithubOidcProvider",
+          githubOidcProviderArnContext &&
+            githubOidcProviderArnContext.length > 0
+            ? githubOidcProviderArnContext
+            : `arn:aws:iam::${this.account}:oidc-provider/${githubOidcIssuerHost}`,
+        );
 
     const githubSubCondition =
       env === "prod"
