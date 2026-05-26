@@ -59,13 +59,21 @@ raw secret string; seeded out-of-band before the domain deploy). The `_security`
 admin API is reachable only with the master credential, **from inside the VPC**
 (the domain endpoint is `vpc-...`, private).
 
-> **Staging is already provisioned (2026-05-22).** The `sps_etl`/`sps_app` roles,
-> their internal users, the role mappings, and the
-> `scholars/staging/opensearch/{etl,app}` secrets all exist (domain
-> `opensearch58799-j7tli0rlgtyz`, cluster green). The steps below are the
-> reference procedure — re-run them for **prod** (#445) or after a domain
-> recreate. The #443 comment dated 2026-05-22 documents the surgical
-> recreate that produced the current staging domain.
+> **⚠️ Staging FGAC is NOT usable as of 2026-05-26 (#483).** The
+> `scholars/staging/opensearch/master` secret no longer matches the live domain
+> (`opensearch58799-j7tli0rlgtyz`) — `sps_master` basic auth returns **401**, and
+> so does the `sps_etl` credential, so `search:index` fails with 401 Unauthorized
+> ("OpenSearch Security"). The drift came from the out-of-band **surgical
+> recreate** documented in the #443 comment dated 2026-05-22: the recreated
+> domain's internal master password was never written back to the secret.
+> `aws opensearch update-domain-config` with `MasterUserOptions` is a **no-op** on
+> an internal-DB domain whose master is already set (verified: `UpdateVersion`
+> does not bump), so the password-less reset path does **not** work. Recovering
+> requires either the real master password (then reset `sps_etl` via the
+> `_security` API per §1a–§1d) or a clean Data-stack OpenSearch redeploy so the
+> domain master is seeded from the secret again. Tracked as a #443 follow-up;
+> the Aurora data load (§7) is independent and complete. The steps below remain
+> the reference procedure for **prod** (#445) and post-recovery re-provisioning.
 
 Run §1 from an in-VPC host (a short-lived SSM-session bastion / VPN). No
 `awscurl` needed — plain `curl` with the master basic-auth credential.
