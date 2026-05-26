@@ -25,7 +25,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
-import { RequestAChangeMenu } from "@/components/edit/request-a-change-picker";
+import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -240,7 +240,7 @@ export function EntityPanel<T extends EntityRow>({
           onShow={() => onShowClick(e)}
           testId={`${entityType}-row-${e.externalId}`}
           requestMenu={
-            <RequestAChangeMenu
+            <RequestAChangeDialog
               attribute={REQUEST_ATTR[entityType]}
               cwid={cwid}
               itemLabel={getTitle(e)}

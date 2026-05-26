@@ -2,15 +2,12 @@
  * The read-only (system-of-record) attribute panel — Name & Title, Photo
  * (#160 UI follow-up, `self-edit-launch-spec.md` § Item-level feedback). These
  * fields aren't suppressible here, so the panel shows only "Request a change":
- * the per-attribute triage (self-service link / route mailto / explanation),
- * expanded inline. Link-only; no write path, no new authorization.
+ * the per-attribute triage (self-service link / route mailto / explanation) in a
+ * modal. Link-only; no write path, no new authorization.
  */
 "use client";
 
-import * as React from "react";
-
-import { Button } from "@/components/ui/button";
-import { RequestAChangePicker } from "@/components/edit/request-a-change-picker";
+import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
 export type ReadonlyAttributePanelProps = {
@@ -32,8 +29,6 @@ export function ReadonlyAttributePanel({
   description,
   fields,
 }: ReadonlyAttributePanelProps) {
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-
   return (
     <section data-slot="readonly-attribute-panel" data-attribute={attribute} className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
@@ -58,18 +53,12 @@ export function ReadonlyAttributePanel({
           These fields come from WCM systems of record. Use Request a Change to fix one at its source.
         </p>
         <div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setPickerOpen((o) => !o)}
-            aria-expanded={pickerOpen}
-            data-testid="request-a-change-toggle"
-          >
-            Request a Change
-          </Button>
+          <RequestAChangeDialog
+            attribute={attribute}
+            cwid={cwid}
+            triggerTestId="request-a-change-toggle"
+          />
         </div>
-
-        {pickerOpen && <RequestAChangePicker attribute={attribute} cwid={cwid} />}
       </div>
     </section>
   );

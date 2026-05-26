@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
-import { RequestAChangeMenu } from "@/components/edit/request-a-change-picker";
+import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -341,7 +341,7 @@ function PublicationRow({
               </span>
             </div>
           )}
-          <RequestAChangeMenu attribute="publications" cwid={cwid} itemLabel={pub.title} />
+          <RequestAChangeDialog attribute="publications" cwid={cwid} itemLabel={pub.title} />
         </div>
       </div>
       {error && (
