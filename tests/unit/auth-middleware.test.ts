@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware } from "@/middleware";
 import { createSessionCookie } from "@/lib/auth/session";
@@ -56,6 +56,29 @@ describe("middleware — SSO gate", () => {
       }),
     );
     expect(res.status).toBe(302);
+  });
+});
+
+describe("middleware — local-dev login bounce (no IdP)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("bounces unauthenticated /edit to dev-login under `next dev` with no SAML", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SAML_IDP_SSO_URL", "");
+    const res = await middleware(new NextRequest(`${ORIGIN}/edit?attr=publications`));
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
+    expect(loc.pathname).toBe("/api/auth/dev-login");
+    expect(loc.searchParams.get("return")).toBe("/edit?attr=publications");
+  });
+
+  it("does NOT bounce to dev-login when an IdP is configured (prod-like)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SAML_IDP_SSO_URL", "https://idp.example/sso");
+    const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
+    expect(loc.pathname).toBe("/api/auth/saml/login");
   });
 });
 

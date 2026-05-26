@@ -89,6 +89,20 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   // absolute redirect is unreachable. encodeURIComponent keeps the return value
   // safe in the header; the login route re-validates it via safeReturnPath.
   const returnTo = request.nextUrl.pathname + request.nextUrl.search;
+
+  // Local-dev guard. Under `next dev` with no IdP configured, the SAML login
+  // route 503s and — worse — the dev middleware adapter rejects a RELATIVE
+  // Location with "Invalid URL" (the prod edge runtime accepts it, which is why
+  // the line below stays relative). Bounce to the local dev-login route with an
+  // ABSOLUTE URL the dev adapter accepts. Scoped to NODE_ENV==="development" +
+  // unset SAML so the test and prod paths stay byte-identical; the dev-login
+  // route is itself local-only (404s in production).
+  if (process.env.NODE_ENV === "development" && !process.env.SAML_IDP_SSO_URL) {
+    const devLogin = new URL("/api/auth/dev-login", request.nextUrl.origin);
+    devLogin.searchParams.set("return", returnTo);
+    return NextResponse.redirect(devLogin, 302);
+  }
+
   return new NextResponse(null, {
     status: 302,
     headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
