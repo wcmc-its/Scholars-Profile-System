@@ -59,6 +59,103 @@ import { rebuildAliasedIndex } from "./alias-swap";
 // in a single OpenSearch `_aliases` call. Reads against the alias name
 // transition between versions without a zero-result window.
 
+// #485 — bulk-index one request body with retry/backoff on 429. The first real
+// `search:index` run revealed two problems with the original
+// `client.bulk({ refresh: true, body })` per-chunk pattern: (1) a synchronous
+// refresh after every 500-doc chunk is needlessly expensive, and (2) on a small
+// single-node domain it (plus AWS's throttling of burstable instance types)
+// returns 429 "Too Many Requests" with no recovery, aborting the whole build.
+// This helper drops the per-chunk refresh (callers refresh once at the end) and
+// retries the chunk with exponential backoff on a 429 — whether the throttle
+// surfaces as a thrown transport error or as per-item `status: 429`. Index ops
+// carry explicit `_id`s, so re-sending a chunk is idempotent.
+async function bulkIndex(
+  client: ReturnType<typeof searchClient>,
+  body: Record<string, unknown>[],
+  label: string,
+): Promise<void> {
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 0; ; attempt++) {
+    const backoff = () =>
+      new Promise((r) => setTimeout(r, Math.min(30_000, 500 * 2 ** attempt)));
+    let resp;
+    try {
+      resp = await client.bulk({ body });
+    } catch (err) {
+      const status =
+        (err as { meta?: { statusCode?: number } })?.meta?.statusCode ??
+        (err as { statusCode?: number })?.statusCode;
+      if (status === 429 && attempt < MAX_ATTEMPTS) {
+        console.log(
+          `  ...429 on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
+        await backoff();
+        continue;
+      }
+      throw err;
+    }
+    if (resp.body.errors) {
+      const items = resp.body.items as Array<{
+        index?: { status?: number; error?: unknown };
+      }>;
+      const hardError = items.find(
+        (it) => it.index?.error && it.index?.status !== 429,
+      );
+      if (hardError) {
+        throw new Error(
+          `${label} bulk indexing had errors: ${JSON.stringify(hardError, null, 2)}`,
+        );
+      }
+      // Only 429s remain — retry the whole (idempotent) chunk.
+      if (attempt < MAX_ATTEMPTS) {
+        console.log(
+          `  ...429 (per-item) on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
+        await backoff();
+        continue;
+      }
+      throw new Error(
+        `${label} bulk indexing throttled (429) after ${MAX_ATTEMPTS} retries`,
+      );
+    }
+    return;
+  }
+}
+
+// #485 — byte-aware bulk chunking. The fixed CHUNK=500 ignored doc size: 500
+// people docs (each repeats publication titles + MeSH terms for query-time
+// weighting) exceed OpenSearch's 10 MB http.max_content_length -> 413 Request
+// size exceeded. Accumulate action+doc pairs until the body approaches a byte
+// budget (or a doc cap), flushing each chunk through bulkIndex (429 retry).
+async function bulkIndexDocs(
+  client: ReturnType<typeof searchClient>,
+  concreteIndex: string,
+  items: Array<{ id: string; doc: Record<string, unknown> }>,
+  label: string,
+): Promise<void> {
+  const MAX_BYTES = 8 * 1024 * 1024; // headroom under the 10 MB hard limit
+  const MAX_DOCS = 500;
+  let body: Record<string, unknown>[] = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (body.length === 0) return;
+    await bulkIndex(client, body, label);
+    body = [];
+    bytes = 0;
+  };
+  for (const { id, doc } of items) {
+    // ~120 bytes covers the action line ({"index":{"_index":...,"_id":...}}).
+    const docBytes = JSON.stringify(doc).length + 120;
+    if (body.length > 0 && (bytes + docBytes > MAX_BYTES || body.length / 2 >= MAX_DOCS)) {
+      await flush();
+    }
+    body.push({ index: { _index: concreteIndex, _id: id } });
+    body.push(doc);
+    bytes += docBytes;
+  }
+  await flush();
+}
+
 async function indexPeople(concreteIndex: string) {
   const client = searchClient();
   // Phase 4b C4 — load the active publication-suppression set once per run
@@ -84,26 +181,16 @@ async function indexPeople(concreteIndex: string) {
 
   if (docs.length === 0) return 0;
 
-  // Bulk index in chunks to stay under OpenSearch's 10 MB request limit.
-  const CHUNK = 500;
-  for (let i = 0; i < docs.length; i += CHUNK) {
-    const chunk = docs.slice(i, i + CHUNK);
-    const body: Record<string, unknown>[] = [];
-    for (const { cwid, doc } of chunk) {
-      body.push({ index: { _index: concreteIndex, _id: cwid } });
-      body.push(doc);
-    }
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      const firstError = resp.body.items.find(
-        (it: { index?: { error?: unknown } }) => it.index?.error,
-      );
-      throw new Error(
-        `People bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-      );
-    }
-    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} people`);
-  }
+  // Byte-aware bulk chunking (#485) to stay under the 10 MB request limit.
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    docs.map(({ cwid, doc }) => ({ id: cwid, doc })),
+    "People",
+  );
+  console.log(`  ...indexed ${docs.length} people`);
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return docs.length;
 }
 
@@ -147,29 +234,19 @@ async function indexPublications(concreteIndex: string) {
       continue;
     }
 
-    // Bulk index this page's docs in 500-doc chunks.
-    const CHUNK = 500;
-    for (let i = 0; i < docs.length; i += CHUNK) {
-      const chunk = docs.slice(i, i + CHUNK);
-      const body: Record<string, unknown>[] = [];
-      for (const { pmid, doc } of chunk) {
-        body.push({ index: { _index: concreteIndex, _id: pmid } });
-        body.push(doc);
-      }
-      const resp = await client.bulk({ refresh: true, body });
-      if (resp.body.errors) {
-        const firstError = resp.body.items.find(
-          (it: { index?: { error?: unknown } }) => it.index?.error,
-        );
-        throw new Error(
-          `Publications bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-        );
-      }
-    }
+    // Byte-aware bulk chunking (#485) within this page.
+    await bulkIndexDocs(
+      client,
+      concreteIndex,
+      docs.map(({ pmid, doc }) => ({ id: pmid, doc })),
+      "Publications",
+    );
     totalIndexed += docs.length;
     console.log(`  ...indexed ${totalIndexed} publications so far`);
     if (pubs.length < PUB_PAGE) break;
   }
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return totalIndexed;
 }
 
@@ -264,25 +341,16 @@ async function indexFunding(concreteIndex: string) {
 
   if (docs.length === 0) return 0;
 
-  const CHUNK = 500;
-  for (let i = 0; i < docs.length; i += CHUNK) {
-    const chunk = docs.slice(i, i + CHUNK);
-    const body: Record<string, unknown>[] = [];
-    for (const { projectId, doc } of chunk) {
-      body.push({ index: { _index: concreteIndex, _id: projectId } });
-      body.push(doc);
-    }
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      const firstError = resp.body.items.find(
-        (it: { index?: { error?: unknown } }) => it.index?.error,
-      );
-      throw new Error(
-        `Funding bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-      );
-    }
-    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} funding projects`);
-  }
+  // Byte-aware bulk chunking (#485) to stay under the 10 MB request limit.
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    docs.map(({ projectId, doc }) => ({ id: projectId, doc })),
+    "Funding",
+  );
+  console.log(`  ...indexed ${docs.length} funding projects`);
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return docs.length;
 }
 

@@ -509,6 +509,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                 "Value": "production",
               },
               {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
                 "Name": "SCHOLARS_DYNAMODB_TABLE",
                 "Value": "reciterai",
               },
@@ -981,7 +985,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           ],
         },
         "Family": "sps-etl-prod",
-        "Memory": "4096",
+        "Memory": "8192",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",
@@ -3026,6 +3030,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                 "Value": "production",
               },
               {
+                "Name": "NODE_OPTIONS",
+                "Value": "--max-old-space-size=7168",
+              },
+              {
                 "Name": "SCHOLARS_DYNAMODB_TABLE",
                 "Value": "reciterai",
               },
@@ -3490,7 +3498,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
             ],
           },
         ],
-        "Cpu": "1024",
+        "Cpu": "2048",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
             "EtlTaskExecutionRoleC745E2CD",
@@ -3498,7 +3506,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           ],
         },
         "Family": "sps-etl-staging",
-        "Memory": "2048",
+        "Memory": "8192",
         "NetworkMode": "awsvpc",
         "RequiresCompatibilities": [
           "FARGATE",

@@ -595,12 +595,12 @@ describe("EtlStack", () => {
       }
     });
 
-    it("staging task definition uses 1024 cpu / 2048 MiB", () => {
+    it("staging task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {
       const tds = template.findResources("AWS::ECS::TaskDefinition");
       expect(Object.keys(tds)).toHaveLength(1);
       const td = Object.values(tds)[0];
-      expect(td.Properties?.Cpu).toBe("1024");
-      expect(td.Properties?.Memory).toBe("2048");
+      expect(td.Properties?.Cpu).toBe("2048");
+      expect(td.Properties?.Memory).toBe("8192");
     });
 
     it("uses 30-day log retention for staging", () => {
