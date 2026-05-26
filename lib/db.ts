@@ -1,5 +1,6 @@
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "@/lib/generated/prisma/client";
+import { withMariadbPoolParams } from "@/lib/db-url";
 
 declare global {
   var __prismaWrite: PrismaClient | undefined;
@@ -22,10 +23,12 @@ function createPrismaClient(url: string): PrismaClient {
 
 const PLACEHOLDER_URL = "mysql://_unset:_unset@localhost:3306/_unset";
 
-const writeUrl = process.env.DATABASE_URL ?? PLACEHOLDER_URL;
+const writeUrl = withMariadbPoolParams(process.env.DATABASE_URL ?? PLACEHOLDER_URL);
 // The reader endpoint is optional: an unset DATABASE_URL_RO collapses reads
 // onto the writer — the supported single-endpoint posture (B16 / #115).
-const readUrl = process.env.DATABASE_URL_RO ?? writeUrl;
+const readUrl = process.env.DATABASE_URL_RO
+  ? withMariadbPoolParams(process.env.DATABASE_URL_RO)
+  : writeUrl;
 const splitEnabled = readUrl !== writeUrl;
 
 // Reuse clients across dev hot-reloads to avoid exhausting the pool.
