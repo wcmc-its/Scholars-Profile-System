@@ -59,6 +59,69 @@ import { rebuildAliasedIndex } from "./alias-swap";
 // in a single OpenSearch `_aliases` call. Reads against the alias name
 // transition between versions without a zero-result window.
 
+// #485 — bulk-index one request body with retry/backoff on 429. The first real
+// `search:index` run revealed two problems with the original
+// `client.bulk({ refresh: true, body })` per-chunk pattern: (1) a synchronous
+// refresh after every 500-doc chunk is needlessly expensive, and (2) on a small
+// single-node domain it (plus AWS's throttling of burstable instance types)
+// returns 429 "Too Many Requests" with no recovery, aborting the whole build.
+// This helper drops the per-chunk refresh (callers refresh once at the end) and
+// retries the chunk with exponential backoff on a 429 — whether the throttle
+// surfaces as a thrown transport error or as per-item `status: 429`. Index ops
+// carry explicit `_id`s, so re-sending a chunk is idempotent.
+async function bulkIndex(
+  client: ReturnType<typeof searchClient>,
+  body: Record<string, unknown>[],
+  label: string,
+): Promise<void> {
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 0; ; attempt++) {
+    const backoff = () =>
+      new Promise((r) => setTimeout(r, Math.min(30_000, 500 * 2 ** attempt)));
+    let resp;
+    try {
+      resp = await client.bulk({ body });
+    } catch (err) {
+      const status =
+        (err as { meta?: { statusCode?: number } })?.meta?.statusCode ??
+        (err as { statusCode?: number })?.statusCode;
+      if (status === 429 && attempt < MAX_ATTEMPTS) {
+        console.log(
+          `  ...429 on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
+        await backoff();
+        continue;
+      }
+      throw err;
+    }
+    if (resp.body.errors) {
+      const items = resp.body.items as Array<{
+        index?: { status?: number; error?: unknown };
+      }>;
+      const hardError = items.find(
+        (it) => it.index?.error && it.index?.status !== 429,
+      );
+      if (hardError) {
+        throw new Error(
+          `${label} bulk indexing had errors: ${JSON.stringify(hardError, null, 2)}`,
+        );
+      }
+      // Only 429s remain — retry the whole (idempotent) chunk.
+      if (attempt < MAX_ATTEMPTS) {
+        console.log(
+          `  ...429 (per-item) on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
+        await backoff();
+        continue;
+      }
+      throw new Error(
+        `${label} bulk indexing throttled (429) after ${MAX_ATTEMPTS} retries`,
+      );
+    }
+    return;
+  }
+}
+
 async function indexPeople(concreteIndex: string) {
   const client = searchClient();
   // Phase 4b C4 — load the active publication-suppression set once per run
@@ -93,17 +156,11 @@ async function indexPeople(concreteIndex: string) {
       body.push({ index: { _index: concreteIndex, _id: cwid } });
       body.push(doc);
     }
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      const firstError = resp.body.items.find(
-        (it: { index?: { error?: unknown } }) => it.index?.error,
-      );
-      throw new Error(
-        `People bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-      );
-    }
+    await bulkIndex(client, body, "People");
     console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} people`);
   }
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return docs.length;
 }
 
@@ -156,20 +213,14 @@ async function indexPublications(concreteIndex: string) {
         body.push({ index: { _index: concreteIndex, _id: pmid } });
         body.push(doc);
       }
-      const resp = await client.bulk({ refresh: true, body });
-      if (resp.body.errors) {
-        const firstError = resp.body.items.find(
-          (it: { index?: { error?: unknown } }) => it.index?.error,
-        );
-        throw new Error(
-          `Publications bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-        );
-      }
+      await bulkIndex(client, body, "Publications");
     }
     totalIndexed += docs.length;
     console.log(`  ...indexed ${totalIndexed} publications so far`);
     if (pubs.length < PUB_PAGE) break;
   }
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return totalIndexed;
 }
 
@@ -272,17 +323,11 @@ async function indexFunding(concreteIndex: string) {
       body.push({ index: { _index: concreteIndex, _id: projectId } });
       body.push(doc);
     }
-    const resp = await client.bulk({ refresh: true, body });
-    if (resp.body.errors) {
-      const firstError = resp.body.items.find(
-        (it: { index?: { error?: unknown } }) => it.index?.error,
-      );
-      throw new Error(
-        `Funding bulk indexing had errors: ${JSON.stringify(firstError, null, 2)}`,
-      );
-    }
+    await bulkIndex(client, body, "Funding");
     console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} funding projects`);
   }
+  // #485 — refresh once after the full load (was per-chunk refresh:true).
+  await client.indices.refresh({ index: concreteIndex });
   return docs.length;
 }
 

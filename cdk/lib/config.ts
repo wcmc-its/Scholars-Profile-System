@@ -159,8 +159,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     samlSpAcsUrl:
       "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
     etlSchedulesEnabled: true,
-    etlTaskCpu: 1024,
-    etlTaskMemoryMiB: 2048,
+    // #485 — search:index OOM-killed at 2048 MiB building the full corpus
+    // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
+    // 2 vCPU also speeds the build, easing throttle pressure on the node.
+    etlTaskCpu: 2048,
+    etlTaskMemoryMiB: 8192,
   },
   prod: {
     envName: "prod",
@@ -193,8 +196,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // runbook review, then `aws events enable-rule` flips them on (see
     // PRODUCTION_ADDENDUM § EtlStack).
     etlSchedulesEnabled: false,
+    // #485 — match staging's 8 GB headroom for the search:index corpus build
+    // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
+    // m6g.large.search domain already handles the bulk write rate.
     etlTaskCpu: 2048,
-    etlTaskMemoryMiB: 4096,
+    etlTaskMemoryMiB: 8192,
   },
 };
 

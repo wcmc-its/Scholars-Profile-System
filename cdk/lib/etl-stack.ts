@@ -385,6 +385,11 @@ export class EtlStack extends Stack {
       //   hierarchy -> ReciterAI hierarchy bucket
       environment: {
         NODE_ENV: "production",
+        // #485 — the search:index build holds the full corpus graph in memory
+        // (178k+ publications). Node's default old-space cap (~2 GB) OOM-kills
+        // the task well under the container limit; pin the heap to ~85% of the
+        // 8 GB task memory (etlTaskMemoryMiB) so it can use what's allocated.
+        NODE_OPTIONS: "--max-old-space-size=7168",
         SCHOLARS_DYNAMODB_TABLE: "reciterai",
         ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
         ARTIFACT_PREFIX: "spotlight",
