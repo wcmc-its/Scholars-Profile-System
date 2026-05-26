@@ -77,16 +77,16 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus seven additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus eight additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(7);
+        expect(cacheBehaviors).toHaveLength(8);
       });
 
-      it("evaluates additional behaviors in the spec-defined order (#1..#7)", () => {
+      it("evaluates additional behaviors in the spec-defined order (#1..#8)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
@@ -99,6 +99,9 @@ describe("EdgeStack", () => {
           "/api/health/*",
           "/api/analytics",
           "/api/export/*",
+          // `/api/search*` -- query-string-dependent dynamic GET; must not hit
+          // the cacheable default (which strips `?q=` and caches). See edge-stack.ts.
+          "/api/search*",
         ]);
       });
 
@@ -219,6 +222,7 @@ describe("EdgeStack", () => {
         expect(byPath.get("/api/health/*")).toEqual(ghOptions);
         expect(byPath.get("/api/analytics")).toEqual(allMethods);
         expect(byPath.get("/api/export/*")).toEqual(ghOptions);
+        expect(byPath.get("/api/search*")).toEqual(ghOptions);
       });
     });
 
