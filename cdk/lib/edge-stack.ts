@@ -203,7 +203,7 @@ export class EdgeStack extends Stack {
 
     // Each entry: [pathPattern, allowedMethods]. Order matters because
     // CloudFront evaluates path patterns top-down -- specific must
-    // precede general. Spec § Behaviors #1..#7 map to this list in
+    // precede general. Spec § Behaviors #1..#8 map to this list in
     // the exact same order.
     //
     // Methods: CloudFront's AllowedMethods enum exposes three values
@@ -227,6 +227,16 @@ export class EdgeStack extends Stack {
       ["/api/health/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       ["/api/analytics", cloudfront.AllowedMethods.ALLOW_ALL],
       ["/api/export/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/api/search*` (covers `/api/search` AND `/api/search/suggest`): the
+      // search API is a query-string-dependent dynamic GET (`export const
+      // dynamic = "force-dynamic"`). Without an explicit behavior it falls to
+      // the cacheable default, whose Managed-CachingOptimized policy excludes
+      // the query string from the cache key -- so CloudFront BOTH strips `?q=`
+      // before the origin sees it (every request degrades to a match_all over
+      // the whole corpus) AND caches the first response for every subsequent
+      // query. CachingDisabled + AllViewer forwards the full query string and
+      // never caches, matching the other dynamic GET routes above.
+      ["/api/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
     ];
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
