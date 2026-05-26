@@ -1,67 +1,154 @@
 /**
- * The shared `/edit/*` page shell (#356 Phase 6 C8 / Phase 7 C5, UI-SPEC §
- * Global layout — the `/edit/*` shell + § `/edit/scholar/[cwid]`).
+ * The `/edit/*` detail router inside the Apollo shell (#160 UI follow-up,
+ * `self-edit-launch-spec.md` § Layout + § Role parity). Supersedes the v1
+ * single-column card stack: the ATTRIBUTES rail selects one attribute and this
+ * component renders its detail panel for the active `?attr=`. Server Component
+ * composing client-island panels — server-rendered per selection, deep-linkable.
  *
- * Server Component composing client-island cards inside one centered
- * container. Phase 6 wired the `self` mode (Card 1 Overview, Card 2 Visibility,
- * Card 3 My publications); Phase 7 fills the `'superuser'` branch — read-only
- * Overview, Visibility with required-reason dialog, and the Slug-override
- * card in place of "My publications" (UI-SPEC § /edit/scholar/[cwid]).
+ * Which attributes appear (and whether editable) is the only thing that differs
+ * by actor; the data contract and write calls are layout-independent.
  */
+import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { EditShell } from "@/components/edit/edit-shell";
+import { EducationCard } from "@/components/edit/education-card";
+import { FundingCard } from "@/components/edit/funding-card";
 import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
+import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { SlugCard } from "@/components/edit/slug-card";
-import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { VisibilityCard } from "@/components/edit/visibility-card";
+import type { RailItem } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
+
+type AttrKey =
+  | "name-title"
+  | "photo"
+  | "overview"
+  | "visibility"
+  | "publications"
+  | "funding"
+  | "appointments"
+  | "education"
+  | "profile-url";
+
+type AttrDef = {
+  key: AttrKey;
+  label: string;
+  readonly?: boolean;
+  modes: ReadonlyArray<"self" | "superuser">;
+};
+
+/** The full attribute set; the rail filters to the actor's visible subset. */
+const ATTRIBUTES: ReadonlyArray<AttrDef> = [
+  { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
+  { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
+  { key: "overview", label: "Overview", modes: ["self", "superuser"] },
+  { key: "visibility", label: "Visibility", modes: ["self", "superuser"] },
+  { key: "publications", label: "Publications", modes: ["self"] },
+  { key: "funding", label: "Funding", modes: ["self", "superuser"] },
+  { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
+  { key: "education", label: "Education", modes: ["self", "superuser"] },
+  { key: "profile-url", label: "Profile URL", modes: ["superuser"] },
+];
+
+const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
+  self: "overview",
+  superuser: "visibility",
+};
 
 export type EditPageProps = {
   ctx: EditContext;
-  /**
-   * `'self'` (default) — the Phase 6 surface. `'superuser'` — the read-only
-   * Overview + required-reason Visibility + Slug-override surface; renders the
-   * superuser banner above the cards and adjusts the page title.
-   */
   mode?: "self" | "superuser";
+  /** The selected attribute from `?attr=`; falls back to the mode's default. */
+  attr?: string;
 };
 
-export function EditPage({ ctx, mode = "self" }: EditPageProps) {
-  const isSuperuser = mode === "superuser";
+export function EditPage({ ctx, mode = "self", attr }: EditPageProps) {
+  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode));
+  const active: AttrDef =
+    visible.find((a) => a.key === attr) ??
+    visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
+    visible[0];
+
+  const railItems: RailItem[] = visible.map((a) => ({
+    key: a.key,
+    label: a.label,
+    readonly: a.readonly,
+  }));
+  const basePath = mode === "superuser" ? `/edit/scholar/${ctx.scholar.cwid}` : "/edit";
+  const scholarName = ctx.scholar.preferredName;
+
   return (
-    <main className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-10 md:py-12">
-      <header className="mb-6">
-        <h1 className="page-title">
-          {isSuperuser ? `Edit profile — ${ctx.scholar.preferredName}` : "Edit my profile"}
-        </h1>
-        <p className="text-muted-foreground text-sm">
-          {isSuperuser
-            ? "Changes appear on this scholar's public profile."
-            : "Changes appear on your public profile."}
-        </p>
-      </header>
-      {isSuperuser && <SuperuserBanner targetLabel={ctx.scholar.preferredName} />}
-      <div className="flex flex-col gap-6">
-        <OverviewCard
-          cwid={ctx.scholar.cwid}
-          initialHtml={ctx.scholar.overview}
-          readOnly={isSuperuser}
+    <EditShell
+      mode={mode}
+      scholarName={scholarName}
+      railItems={railItems}
+      activeAttr={active.key}
+      basePath={basePath}
+      detailHeading={active.label}
+      previewHref={`/scholars/${ctx.scholar.slug}`}
+    >
+      {renderPanel(active.key, ctx, mode, scholarName)}
+    </EditShell>
+  );
+}
+
+function renderPanel(
+  key: AttrKey,
+  ctx: EditContext,
+  mode: "self" | "superuser",
+  scholarName: string,
+) {
+  const cwid = ctx.scholar.cwid;
+  switch (key) {
+    case "name-title":
+      return (
+        <ReadonlyAttributePanel
+          attribute="name-title"
+          heading="Name & Title"
+          description="Name, title, department, email, and ORCID come from the WCM directory and faculty records."
+          fields={[{ label: "Name", value: ctx.scholar.fullName }]}
         />
+      );
+    case "photo":
+      return (
+        <ReadonlyAttributePanel
+          attribute="photo"
+          heading="Photo"
+          description="Your profile photo comes from the WCM directory."
+        />
+      );
+    case "overview":
+      return (
+        <OverviewCard cwid={cwid} initialHtml={ctx.scholar.overview} readOnly={mode === "superuser"} />
+      );
+    case "visibility":
+      return (
         <VisibilityCard
-          cwid={ctx.scholar.cwid}
+          cwid={cwid}
           suppression={ctx.scholar.suppression}
-          scholarName={ctx.scholar.preferredName}
+          scholarName={scholarName}
           mode={mode}
         />
-        {isSuperuser ? (
-          <SlugCard
-            cwid={ctx.scholar.cwid}
-            liveSlug={ctx.scholar.slug}
-            initialOverride={ctx.scholar.slugOverride}
-          />
-        ) : (
-          <PublicationsCard cwid={ctx.scholar.cwid} publications={ctx.publications} />
-        )}
-      </div>
-    </main>
-  );
+      );
+    case "publications":
+      return <PublicationsCard cwid={cwid} publications={ctx.publications} />;
+    case "funding":
+      return <FundingCard cwid={cwid} mode={mode} scholarName={scholarName} grants={ctx.grants} />;
+    case "appointments":
+      return (
+        <AppointmentsCard
+          cwid={cwid}
+          mode={mode}
+          scholarName={scholarName}
+          appointments={ctx.appointments}
+        />
+      );
+    case "education":
+      return (
+        <EducationCard cwid={cwid} mode={mode} scholarName={scholarName} educations={ctx.educations} />
+      );
+    case "profile-url":
+      return <SlugCard cwid={cwid} liveSlug={ctx.scholar.slug} initialOverride={ctx.scholar.slugOverride} />;
+  }
 }

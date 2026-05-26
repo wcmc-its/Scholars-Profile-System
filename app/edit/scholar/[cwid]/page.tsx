@@ -37,8 +37,10 @@ export const metadata = {
 
 export default async function EditScholarPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ cwid: string }>;
+  searchParams?: Promise<{ attr?: string }>;
 }) {
   const { cwid: targetCwid } = await params;
 
@@ -70,5 +72,6 @@ export default async function EditScholarPage({
     notFound();
   }
 
-  return <EditPage ctx={ctx} mode={isSelf ? "self" : "superuser"} />;
+  const { attr } = (await searchParams) ?? {};
+  return <EditPage ctx={ctx} mode={isSelf ? "self" : "superuser"} attr={attr} />;
 }
