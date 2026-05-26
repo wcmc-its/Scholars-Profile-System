@@ -42,9 +42,13 @@ The ETL runs the dedicated `scholars-etl-$ENV` image, **not** the standalone app
 image — the `tsx`-based `etl/*` + `search:index` scripts need the full dep tree
 and source the app image doesn't ship (#454).
 
-As of 2026-05-22 staging: all of the above hold, **including** `opensearch/etl`
-and the OpenSearch FGAC roles/users/mappings — §1 has already been run on
-staging (see the note in §1).
+Staging FGAC (`opensearch/etl` + the `sps_etl`/`sps_app` roles/users/mappings)
+was wiped and **re-provisioned 2026-05-26** (#485) — see the note in §1. The
+`search:index` build then surfaced two never-before-exercised indexer issues
+(it had always been blocked upstream): the ETL Fargate task **OOMs at 2 GB**
+(run the one-off with `cpu=2048,memory=8192` + `NODE_OPTIONS=--max-old-space-size`),
+and the single `t3.small.search` node **429s** under the indexer's per-chunk
+`refresh: true` bulk with no backoff. Both tracked for a code/CDK fix (#485).
 
 ---
 
@@ -59,21 +63,20 @@ raw secret string; seeded out-of-band before the domain deploy). The `_security`
 admin API is reachable only with the master credential, **from inside the VPC**
 (the domain endpoint is `vpc-...`, private).
 
-> **⚠️ Staging FGAC is NOT usable as of 2026-05-26 (#483).** The
-> `scholars/staging/opensearch/master` secret no longer matches the live domain
-> (`opensearch58799-j7tli0rlgtyz`) — `sps_master` basic auth returns **401**, and
-> so does the `sps_etl` credential, so `search:index` fails with 401 Unauthorized
-> ("OpenSearch Security"). The drift came from the out-of-band **surgical
-> recreate** documented in the #443 comment dated 2026-05-22: the recreated
-> domain's internal master password was never written back to the secret.
-> `aws opensearch update-domain-config` with `MasterUserOptions` is a **no-op** on
-> an internal-DB domain whose master is already set (verified: `UpdateVersion`
-> does not bump), so the password-less reset path does **not** work. Recovering
-> requires either the real master password (then reset `sps_etl` via the
-> `_security` API per §1a–§1d) or a clean Data-stack OpenSearch redeploy so the
-> domain master is seeded from the secret again. Tracked as a #443 follow-up;
-> the Aurora data load (§7) is independent and complete. The steps below remain
-> the reference procedure for **prod** (#445) and post-recovery re-provisioning.
+> **Staging FGAC was drifted, recovered 2026-05-26 (#485).** The whole staging
+> `.opendistro_security` config had been wiped (every custom user/role/mapping
+> gone, including the master) — `sps_master` AND `sps_etl` both 401'd, so
+> `search:index` failed with 401. **Recovery — the master-reset trick:** a same-
+> name `update-domain-config MasterUserOptions` is a **no-op** on an internal-DB
+> domain (AWS can't diff a password, so it detects no change — `UpdateVersion`
+> never bumps). But **changing the master *username* forces a real update** that
+> sets both name and password. So: `update-domain-config` with a *new*
+> `MasterUserName` (e.g. `sps_master_fix`) + the secret password → wait for
+> Processing → re-provision §1a–§1d as that master → then `update-domain-config`
+> back to `MasterUserName: sps_master` + the same secret to match CDK. No domain
+> recreate needed. (The destructive alternative — the #443 `-c osRecreate` dance —
+> is only needed if even the username-change no-ops.) The Aurora load (§7) is
+> independent.
 
 Run §1 from an in-VPC host (a short-lived SSM-session bastion / VPN). No
 `awscurl` needed — plain `curl` with the master basic-auth credential.
@@ -94,10 +97,16 @@ osput() { curl -s -u "sps_master:${MASTER_PW}" -H 'Content-Type: application/jso
 
 ```bash
 # ETL / indexer: read + write + create/swap indices and aliases.
+# NOTE (#485): the second block (alias-get on *) is REQUIRED, not optional. The
+# alias-swap rebuild calls getAlias({name}) on a fresh cluster where the alias
+# does not exist yet; FGAC resolves that permission check against `*`, which
+# `scholars-*` does not cover -> 403 indices:admin/aliases/get. Verified by an
+# actual search:index run (the first ever — it had always been blocked before).
 osput "_plugins/_security/api/roles/sps_etl" '{
   "cluster_permissions": ["cluster_composite_ops", "cluster_monitor"],
   "index_permissions": [
-    { "index_patterns": ["scholars-*"], "allowed_actions": ["indices_all"] }
+    { "index_patterns": ["scholars-*"], "allowed_actions": ["indices_all"] },
+    { "index_patterns": ["*"], "allowed_actions": ["indices:admin/aliases/get", "indices:admin/get"] }
   ]
 }'
 
