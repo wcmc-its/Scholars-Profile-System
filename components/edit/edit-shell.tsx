@@ -20,8 +20,6 @@ export type EditShellProps = {
   railItems: ReadonlyArray<RailItem>;
   activeAttr: string;
   basePath: string;
-  /** The detail-panel heading ("{Attribute} for {Name}"). */
-  detailHeading: string;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
   children: React.ReactNode;
@@ -33,7 +31,6 @@ export function EditShell({
   railItems,
   activeAttr,
   basePath,
-  detailHeading,
   previewHref,
   children,
 }: EditShellProps) {
@@ -50,7 +47,7 @@ export function EditShell({
             >
               WCM
             </span>
-            <span className="font-semibold">Scholars Profile Console</span>
+            <h1 className="text-base font-semibold">Scholars Profile Console</h1>
           </div>
           <span className="text-sm text-white/70" aria-hidden>
             {scholarName}
@@ -72,11 +69,8 @@ export function EditShell({
         <AttributeRail items={railItems} active={activeAttr} basePath={basePath} />
 
         <main className="min-w-0">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h1 className="text-xl font-semibold">
-              {detailHeading} for {scholarName}
-            </h1>
-            {previewHref && (
+          {previewHref && (
+            <div className="mb-4 flex justify-end">
               <Link
                 href={previewHref}
                 className="text-[var(--apollo-maroon)] text-sm underline"
@@ -85,8 +79,8 @@ export function EditShell({
               >
                 Preview Profile
               </Link>
-            )}
-          </div>
+            </div>
+          )}
 
           {isSuperuser && (
             <div

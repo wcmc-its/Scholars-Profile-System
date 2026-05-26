@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { RequestAChangeMenu } from "@/components/edit/request-a-change-picker";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -236,6 +237,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
                     {items.map((p) => (
                       <PublicationRow
                         key={p.pmid}
+                        cwid={cwid}
                         pub={p}
                         error={errors.get(p.pmid) ?? null}
                         onHide={() => startHide(p)}
@@ -271,11 +273,13 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
 }
 
 function PublicationRow({
+  cwid,
   pub,
   error,
   onHide,
   onShow,
 }: {
+  cwid: string;
   pub: Pub;
   error: string | null;
   onHide: () => void;
@@ -337,6 +341,7 @@ function PublicationRow({
               </span>
             </div>
           )}
+          <RequestAChangeMenu attribute="publications" cwid={cwid} itemLabel={pub.title} />
         </div>
       </div>
       {error && (

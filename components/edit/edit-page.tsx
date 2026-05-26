@@ -85,7 +85,6 @@ export function EditPage({ ctx, mode = "self", attr }: EditPageProps) {
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}
-      detailHeading={active.label}
       previewHref={`/scholars/${ctx.scholar.slug}`}
     >
       {renderPanel(active.key, ctx, mode, scholarName)}

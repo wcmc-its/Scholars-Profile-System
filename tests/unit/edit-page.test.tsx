@@ -101,20 +101,23 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.queryByTestId("rail-profile-url")).toBeNull();
   });
 
+  it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Scholars Profile Console");
+  });
+
   it("defaults to the Overview panel for self", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Overview for Alex Self");
     expect(screen.getByTestId("mock-editor")).toBeTruthy();
   });
 
-  it("an unknown ?attr falls back to the default", () => {
+  it("an unknown ?attr falls back to the default (Overview)", () => {
     render(<EditPage ctx={ctx} mode="self" attr="does-not-exist" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Overview for Alex Self");
+    expect(screen.getByTestId("mock-editor")).toBeTruthy();
   });
 
   it("?attr=appointments renders the Appointments panel + a row", () => {
     render(<EditPage ctx={ctx} mode="self" attr="appointments" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Appointments for Alex Self");
     expect(document.querySelector('[data-slot="appointments-panel"]')).not.toBeNull();
     expect(screen.getByTestId("appointment-row-appt-1")).toBeTruthy();
     expect(screen.getByText("Professor of Medicine")).toBeTruthy();
@@ -143,7 +146,7 @@ describe("EditPage router — the Apollo shell + rail", () => {
 describe("EditPage router — superuser mode", () => {
   it("defaults to Visibility, shows the admin banner, and the superuser rail (Profile URL yes, Publications no)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Visibility for Alex Other");
+    expect(screen.getByText("Profile visibility")).toBeTruthy();
     expect(document.querySelector('[data-slot="superuser-banner"]')).not.toBeNull();
     expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
     expect(screen.queryByTestId("rail-publications")).toBeNull();

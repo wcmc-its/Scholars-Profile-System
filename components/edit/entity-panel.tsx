@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { RequestAChangeMenu } from "@/components/edit/request-a-change-picker";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,8 +33,16 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { EditEntityState } from "@/lib/api/edit-context";
+import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
 type EntityType = "appointment" | "education" | "grant";
+
+/** Map the entity type to its "Request a change" attribute key. */
+const REQUEST_ATTR: Record<EntityType, RequestAttribute> = {
+  appointment: "appointments",
+  education: "education",
+  grant: "funding",
+};
 
 /** The minimum shape every entity row carries. */
 export type EntityRow = {
@@ -230,6 +239,13 @@ export function EntityPanel<T extends EntityRow>({
           onHide={() => onHideClick(e)}
           onShow={() => onShowClick(e)}
           testId={`${entityType}-row-${e.externalId}`}
+          requestMenu={
+            <RequestAChangeMenu
+              attribute={REQUEST_ATTR[entityType]}
+              cwid={cwid}
+              itemLabel={getTitle(e)}
+            />
+          }
         />
       ))}
     </ul>
@@ -318,6 +334,7 @@ function EntityRowView({
   onHide,
   onShow,
   testId,
+  requestMenu,
 }: {
   title: string;
   meta: React.ReactNode;
@@ -328,6 +345,7 @@ function EntityRowView({
   onHide: () => void;
   onShow: () => void;
   testId: string;
+  requestMenu: React.ReactNode;
 }) {
   const isSuperuser = mode === "superuser";
   const isHidden = state === "hidden_by_self" || state === "hidden_by_admin";
@@ -384,6 +402,7 @@ function EntityRowView({
               Show
             </Button>
           )}
+          {requestMenu}
         </div>
       </div>
       {error && (

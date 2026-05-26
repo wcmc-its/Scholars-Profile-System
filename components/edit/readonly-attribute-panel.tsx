@@ -2,26 +2,20 @@
  * The read-only (system-of-record) attribute panel — Name & Title, Photo
  * (#160 UI follow-up, `self-edit-launch-spec.md` § Item-level feedback). These
  * fields aren't suppressible here, so the panel shows only "Request a change":
- * a per-attribute triage where each issue resolves to one of three shapes —
- * fix-it-yourself (self-service link), email-the-owner (mailto), or an
- * explanation. Link-only; no write path, no new authorization.
+ * the per-attribute triage (self-service link / route mailto / explanation),
+ * expanded inline. Link-only; no write path, no new authorization.
  */
 "use client";
 
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  getChangeConfig,
-  resolveSelfServiceHref,
-  type ChangeIssue,
-  type RequestAttribute,
-  type RouteAction,
-} from "@/lib/edit/request-a-change";
+import { RequestAChangePicker } from "@/components/edit/request-a-change-picker";
+import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
 export type ReadonlyAttributePanelProps = {
   attribute: RequestAttribute;
-  /** The scholar whose profile this is — used to resolve `{cwid}` links (ORCID). */
+  /** The scholar whose profile this is — resolves `{cwid}` links (ORCID). */
   cwid: string;
   /** Panel heading, e.g. "Name & Title" or "Photo". */
   heading: string;
@@ -31,14 +25,6 @@ export type ReadonlyAttributePanelProps = {
   fields?: ReadonlyArray<{ label: string; value: string | null }>;
 };
 
-// The subject/body format for routed emails is deferred (operator, 2026-05);
-// a generic subject ships until then.
-function mailtoHref(action: RouteAction): string {
-  const params = new URLSearchParams({ subject: "Scholars profile correction request" });
-  if (action.cc) params.set("cc", action.cc);
-  return `mailto:${action.email}?${params.toString()}`;
-}
-
 export function ReadonlyAttributePanel({
   attribute,
   cwid,
@@ -46,7 +32,6 @@ export function ReadonlyAttributePanel({
   description,
   fields,
 }: ReadonlyAttributePanelProps) {
-  const config = getChangeConfig(attribute);
   const [pickerOpen, setPickerOpen] = React.useState(false);
 
   return (
@@ -84,60 +69,8 @@ export function ReadonlyAttributePanel({
           </Button>
         </div>
 
-        {pickerOpen && (
-          <div className="flex flex-col gap-2" data-slot="request-a-change-picker">
-            <p className="text-sm font-medium">{config.heading}</p>
-            <ul className="border-border divide-border divide-y rounded-md border bg-[var(--background)]">
-              {config.issues.map((issue) => (
-                <IssueRow key={issue.id} issue={issue} cwid={cwid} />
-              ))}
-            </ul>
-          </div>
-        )}
+        {pickerOpen && <RequestAChangePicker attribute={attribute} cwid={cwid} />}
       </div>
     </section>
-  );
-}
-
-function IssueRow({ issue, cwid }: { issue: ChangeIssue; cwid: string }) {
-  const { action } = issue;
-  return (
-    <li className="flex flex-col gap-1 px-3 py-2" data-testid={`rac-issue-${issue.id}`}>
-      <span className="text-sm font-medium">{issue.label}</span>
-      {action.kind === "self-service" && (
-        <>
-          <span className="text-muted-foreground text-xs">{action.instruction}</span>
-          <a
-            className="text-[var(--apollo-maroon)] text-xs underline"
-            href={resolveSelfServiceHref(action.href, cwid)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open {action.tool}
-          </a>
-        </>
-      )}
-      {action.kind === "route" && (
-        <>
-          {action.note && <span className="text-muted-foreground text-xs">{action.note}</span>}
-          <a className="text-[var(--apollo-maroon)] text-xs underline" href={mailtoHref(action)}>
-            Email {action.office}
-          </a>
-        </>
-      )}
-      {action.kind === "explain" && (
-        <>
-          <span className="text-muted-foreground text-xs">{action.detail}</span>
-          {action.fallbackEmail && (
-            <a
-              className="text-[var(--apollo-maroon)] text-xs underline"
-              href={`mailto:${action.fallbackEmail}?subject=${encodeURIComponent("Scholars profile correction request")}`}
-            >
-              Still wrong? Contact us
-            </a>
-          )}
-        </>
-      )}
-    </li>
   );
 }
