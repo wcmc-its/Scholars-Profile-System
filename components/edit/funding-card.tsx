@@ -10,6 +10,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { EntityPanel } from "@/components/edit/entity-panel";
+import { fundingRoleLabel } from "@/lib/funding-roles";
 import type { EditContextGrant } from "@/lib/api/edit-context";
 
 export type FundingCardProps = {
@@ -35,7 +36,7 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
         <>
           {g.funderLabel}
           {" · "}
-          {g.role}
+          {fundingRoleLabel(g.role)}
           {" · "}
           {g.startYear}–{g.endYear}
           {" · "}

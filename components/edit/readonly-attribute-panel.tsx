@@ -1,14 +1,10 @@
 /**
  * The read-only (system-of-record) attribute panel — Name & Title, Photo
- * (#160 UI follow-up, `self-edit-launch-spec.md` § Request a Change). These
- * fields are directory-authoritative and not suppressible, so the panel shows
- * *only* "Request a Change": a per-attribute triage that names the issue type
- * and routes it to the owning office (never a generic mailbox, never an
- * override here). Link-only — no write path, no new authorization.
- *
- * Destinations are `pending` until the operator supplies them (D6); a pending
- * route renders a graceful "routing to be configured" note naming the office,
- * so the panel ships before the addresses land.
+ * (#160 UI follow-up, `self-edit-launch-spec.md` § Item-level feedback). These
+ * fields aren't suppressible here, so the panel shows only "Request a change":
+ * a per-attribute triage where each issue resolves to one of three shapes —
+ * fix-it-yourself (self-service link), email-the-owner (mailto), or an
+ * explanation. Link-only; no write path, no new authorization.
  */
 "use client";
 
@@ -17,13 +13,16 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   getChangeConfig,
+  resolveSelfServiceHref,
   type ChangeIssue,
   type RequestAttribute,
-  type RequestDestination,
+  type RouteAction,
 } from "@/lib/edit/request-a-change";
 
 export type ReadonlyAttributePanelProps = {
   attribute: RequestAttribute;
+  /** The scholar whose profile this is — used to resolve `{cwid}` links (ORCID). */
+  cwid: string;
   /** Panel heading, e.g. "Name & Title" or "Photo". */
   heading: string;
   /** The explanatory line under the heading. */
@@ -32,8 +31,17 @@ export type ReadonlyAttributePanelProps = {
   fields?: ReadonlyArray<{ label: string; value: string | null }>;
 };
 
+// The subject/body format for routed emails is deferred (operator, 2026-05);
+// a generic subject ships until then.
+function mailtoHref(action: RouteAction): string {
+  const params = new URLSearchParams({ subject: "Scholars profile correction request" });
+  if (action.cc) params.set("cc", action.cc);
+  return `mailto:${action.email}?${params.toString()}`;
+}
+
 export function ReadonlyAttributePanel({
   attribute,
+  cwid,
   heading,
   description,
   fields,
@@ -62,8 +70,7 @@ export function ReadonlyAttributePanel({
       <div className="bg-muted/40 border-border flex flex-col gap-3 rounded-md border p-4">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
-          To correct one of these, use Request a Change — it routes to the team that owns the data rather
-          than overriding it here.
+          These fields come from WCM systems of record. Use Request a Change to fix one at its source.
         </p>
         <div>
           <Button
@@ -82,7 +89,7 @@ export function ReadonlyAttributePanel({
             <p className="text-sm font-medium">{config.heading}</p>
             <ul className="border-border divide-border divide-y rounded-md border bg-[var(--background)]">
               {config.issues.map((issue) => (
-                <IssueRow key={issue.id} issue={issue} />
+                <IssueRow key={issue.id} issue={issue} cwid={cwid} />
               ))}
             </ul>
           </div>
@@ -92,42 +99,45 @@ export function ReadonlyAttributePanel({
   );
 }
 
-function IssueRow({ issue }: { issue: ChangeIssue }) {
+function IssueRow({ issue, cwid }: { issue: ChangeIssue; cwid: string }) {
+  const { action } = issue;
   return (
     <li className="flex flex-col gap-1 px-3 py-2" data-testid={`rac-issue-${issue.id}`}>
-      <span className="text-sm">{issue.label}</span>
-      {issue.action.kind === "hide" ? (
-        <span className="text-muted-foreground text-xs">{issue.action.note}</span>
-      ) : (
-        <DestinationLine office={issue.action.route.office} destination={issue.action.route.destination} />
+      <span className="text-sm font-medium">{issue.label}</span>
+      {action.kind === "self-service" && (
+        <>
+          <span className="text-muted-foreground text-xs">{action.instruction}</span>
+          <a
+            className="text-[var(--apollo-maroon)] text-xs underline"
+            href={resolveSelfServiceHref(action.href, cwid)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Open {action.tool}
+          </a>
+        </>
+      )}
+      {action.kind === "route" && (
+        <>
+          {action.note && <span className="text-muted-foreground text-xs">{action.note}</span>}
+          <a className="text-[var(--apollo-maroon)] text-xs underline" href={mailtoHref(action)}>
+            Email {action.office}
+          </a>
+        </>
+      )}
+      {action.kind === "explain" && (
+        <>
+          <span className="text-muted-foreground text-xs">{action.detail}</span>
+          {action.fallbackEmail && (
+            <a
+              className="text-[var(--apollo-maroon)] text-xs underline"
+              href={`mailto:${action.fallbackEmail}?subject=${encodeURIComponent("Scholars profile correction request")}`}
+            >
+              Still wrong? Contact us
+            </a>
+          )}
+        </>
       )}
     </li>
-  );
-}
-
-function DestinationLine({ office, destination }: { office: string; destination: RequestDestination }) {
-  if (destination.type === "email") {
-    const href = `mailto:${destination.address}${destination.subjectHint ? `?subject=${encodeURIComponent(destination.subjectHint)}` : ""}`;
-    return (
-      <a className="text-[var(--apollo-maroon)] text-xs underline" href={href}>
-        Email {office}
-      </a>
-    );
-  }
-  if (destination.type === "url") {
-    return (
-      <a className="text-[var(--apollo-maroon)] text-xs underline" href={destination.href} target="_blank" rel="noreferrer">
-        {office} →
-      </a>
-    );
-  }
-  if (destination.type === "instruction") {
-    return <span className="text-muted-foreground text-xs">{destination.text}</span>;
-  }
-  // pending — D6 not yet supplied.
-  return (
-    <span className="text-muted-foreground text-xs italic">
-      Routes to {office} (contact details coming soon).
-    </span>
   );
 }

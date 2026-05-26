@@ -1,122 +1,181 @@
 /**
- * "Request a Change" routing config (#160 UI follow-up,
- * `self-edit-launch-spec.md` § Request a Change).
+ * "Request a change" routing config (#160 UI follow-up,
+ * `self-edit-launch-spec.md` § Item-level feedback). The per-item triage data;
+ * the picker UI consumes it. No write path, no new authorization — every
+ * resolution is a self-service link, a `mailto:`, or an in-place explanation.
  *
- * The profile is assembled from several systems of record; a correction must
- * reach the *right* one. So "Request a Change" is a per-attribute triage that
- * names the issue type and routes it to the owning office — never a generic
- * mailbox. This module is the data behind that triage; the picker UI consumes
- * it. It adds **no** write path or authorization surface — every route is a
- * link out (email / form / instruction).
+ * Three response shapes (from the operator's filled taxonomy,
+ * `.planning/self-edit-item-feedback-taxonomy.md`):
  *
- * Two intents are kept deliberately distinct (the copy must stop a scholar
- * reaching for the wrong one):
- *   - `request` — the data is *wrong or missing at the source*; fix it upstream.
- *   - `hide`    — the data is *correct* but shouldn't be displayed; use the
- *                 in-app Hide control on the editable attribute instead.
+ *   - `self-service` — the scholar fixes it themselves in the owning tool
+ *     (Web Directory, Publication Manager). The dominant case; instant.
+ *   - `route` — email the owning office (no deep-linking is available, so this
+ *     is a prefilled `mailto:`; the exact subject/body format is deferred).
+ *   - `explain` — not an error, or not fixable here (e.g. the NCE grace window,
+ *     non-PubMed publications) — say so in place rather than route a junk ticket.
  *
- * Destinations are `pending` until the operator supplies them (D6 — see
- * `.planning/self-edit-D6-request-a-change-scenarios.md`). The picker renders a
- * graceful fallback for a `pending` destination, so the feature ships before
- * the addresses land; filling D6 is a data change here, not a code change.
+ * Hide (display-only suppression on Scholars) is a SEPARATE per-row control,
+ * not an issue type here — and "not mine" is never Hide (the attribution would
+ * persist in ReCiter / leadership reports / the Faculty Review Tool).
  *
- * Operator corrections already applied: ASMS = Faculty Affairs; Registrar is a
- * separate office (not the education channel); there is no "WOOFA" — the SOR
- * owner for degrees/post-nominals is still open (D6 / scenario S5).
+ * Constraints (operator, 2026-05-26): no deep-linking to any system; no
+ * ServiceNow business service for Scholars yet (route by email, not tickets;
+ * the tracked-queue graduation waits on that service). Superusers / org-unit
+ * admins can perform these fixes for scholars in their purview.
  */
 
-/** Where a `request` route points. `pending` = D6 not yet supplied. */
-export type RequestDestination =
-  | { type: "email"; address: string; subjectHint?: string }
-  | { type: "url"; href: string }
-  | { type: "instruction"; text: string }
-  | { type: "pending" };
+const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
+const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
+/** ORCID self-management; `{cwid}` is substituted by the panel at render. */
+const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
 
-export type RequestRoute = {
-  /** The office/team that owns the fix (display label). Known before the exact
-   *  address sometimes is — "TBD" marks an office still open in D6. */
-  office: string;
-  /** The system of record the value comes from. */
-  sourceSystem: string;
-  destination: RequestDestination;
+const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
+const FACULTY_AFFAIRS_EMAIL = "ofa@med.cornell.edu"; // degrees + education (ASMS)
+const OSRA_EMAIL = "osra-operations@med.cornell.edu";
+const OSRA_CC = "scholars@weill.cornell.edu";
+
+/** The scholar fixes it themselves in the owning tool. */
+export type SelfServiceAction = {
+  kind: "self-service";
+  tool: string;
+  /** May contain `{cwid}`, substituted at render. */
+  href: string;
+  instruction: string;
 };
 
+/**
+ * Email the owning office. No deep-linking exists, so this is a prefilled
+ * `mailto:` composed at render (the item's identity goes in the body; the exact
+ * subject/body format is deferred — see the spec). `note` carries a derivation
+ * or caveat shown before the user sends.
+ */
+export type RouteAction = {
+  kind: "route";
+  office: string;
+  email: string;
+  cc?: string;
+  sourceSystem: string;
+  note?: string;
+};
+
+/** Not an error, or not fixable here — explain in place. */
+export type ExplainAction = {
+  kind: "explain";
+  detail: string;
+  fallbackEmail?: string;
+};
+
+export type ChangeAction = SelfServiceAction | RouteAction | ExplainAction;
+
 export type ChangeIssue = {
-  /** Stable id (maps to a D6 scenario; never shown to the user). */
+  /** Stable id (never shown to the user). */
   id: string;
   /** The picker option text. */
   label: string;
-  action:
-    | { kind: "request"; route: RequestRoute }
-    /** Steer the user to the in-app Hide control rather than a correction. */
-    | { kind: "hide"; note: string };
+  action: ChangeAction;
 };
 
-/** The editor attributes that expose a "Request a Change" picker. */
 export type RequestAttribute =
   | "name-title"
   | "photo"
-  | "education"
   | "appointments"
+  | "education"
   | "funding"
   | "publications";
 
 export type AttributeChangeConfig = {
-  /** The picker heading ("What needs to change?" is the shared prompt). */
   heading: string;
   issues: ChangeIssue[];
 };
 
-const PENDING: RequestDestination = { type: "pending" };
+const route = (over: Omit<RouteAction, "kind">): RouteAction => ({ kind: "route", ...over });
+const selfService = (over: Omit<SelfServiceAction, "kind">): SelfServiceAction => ({
+  kind: "self-service",
+  ...over,
+});
+const explain = (over: Omit<ExplainAction, "kind">): ExplainAction => ({ kind: "explain", ...over });
 
-/**
- * The routing map. One entry per editor attribute; each lists its issue types.
- * `request` issues name the owning office + source; `hide` issues redirect to
- * the in-app control. Addresses are `PENDING` until D6.
- */
 export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> = {
   "name-title": {
     heading: "What needs to change?",
     issues: [
       {
-        id: "name-wrong", // D6 S1/S2
+        id: "name-wrong",
         label: "My name or preferred name is wrong",
-        action: {
-          kind: "request",
-          route: { office: "Enterprise Directory", sourceSystem: "ED / LDAP", destination: PENDING },
-        },
+        action: selfService({
+          tool: "Web Directory",
+          href: WEB_DIRECTORY_URL,
+          instruction:
+            "Update the Preferred Name field in Web Directory. Changes reach Scholars within about 24 hours.",
+        }),
       },
       {
-        id: "title-or-dept-wrong", // D6 S3/S4
-        label: "My title or department is wrong",
-        action: {
-          kind: "request",
-          route: { office: "TBD (Faculty Affairs / ED)", sourceSystem: "ED / LDAP", destination: PENDING },
-        },
+        id: "title-wrong",
+        label: "My title is wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
+          note: "Your title is the title of your primary appointment, sourced from ASMS / Enterprise Directory.",
+        }),
       },
       {
-        id: "degrees-wrong", // D6 S5 — SOR owner still open (no WOOFA)
-        label: "My degrees or post-nominals are wrong",
-        action: {
-          kind: "request",
-          route: { office: "TBD (faculty SOR owner — D6/S5)", sourceSystem: "faculty SOR", destination: PENDING },
-        },
+        id: "department-wrong",
+        label: "My department is wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
+          note: "Your department is the department of your primary appointment.",
+        }),
       },
       {
-        id: "email-wrong", // D6 S6
+        id: "division-wrong",
+        label: "My division is wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "primary appointment (ASMS / Enterprise Directory)",
+          note: "Your division is the division of your primary appointment's department.",
+        }),
+      },
+      {
+        id: "email-wrong",
         label: "My email is wrong",
-        action: {
-          kind: "request",
-          route: { office: "Enterprise Directory", sourceSystem: "ED / LDAP", destination: PENDING },
-        },
+        action: selfService({
+          tool: "Web Directory",
+          href: WEB_DIRECTORY_URL,
+          instruction: "Update the Primary email field in Web Directory.",
+        }),
       },
       {
-        id: "orcid-wrong", // D6 S7
+        id: "email-hide",
+        label: "I don't want my email shown publicly",
+        action: selfService({
+          tool: "Web Directory",
+          href: WEB_DIRECTORY_URL,
+          instruction:
+            "In Web Directory, set your email's “Publish to” to “Institution only”.",
+        }),
+      },
+      {
+        id: "degrees-wrong",
+        label: "My degrees or post-nominals are wrong or missing",
+        action: route({
+          office: "Office of Faculty Affairs",
+          email: FACULTY_AFFAIRS_EMAIL,
+          sourceSystem: "ASMS (faculty system of record)",
+          note: "Your degree list is sourced from ASMS and imported into Enterprise Directory.",
+        }),
+      },
+      {
+        id: "orcid-wrong",
         label: "My ORCID is wrong or missing",
-        action: {
-          kind: "request",
-          route: { office: "Identity team", sourceSystem: "WCM Identity", destination: PENDING },
-        },
+        action: selfService({
+          tool: "ReCiter",
+          href: ORCID_MANAGE_URL,
+          instruction: "Manage your ORCID in ReCiter.",
+        }),
       },
     ],
   },
@@ -124,30 +183,24 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     heading: "What needs to change?",
     issues: [
       {
-        id: "photo-issue", // D6 S8/S9/S10
+        id: "photo-wrong",
         label: "My photo is wrong, outdated, or missing",
-        action: {
-          kind: "request",
-          route: { office: "Directory photo process", sourceSystem: "WCM directory photo service", destination: PENDING },
-        },
-      },
-    ],
-  },
-  education: {
-    heading: "What needs to change?",
-    issues: [
-      {
-        id: "education-wrong-or-missing", // D6 S11/S12 — ASMS = Faculty Affairs
-        label: "An education or training entry is wrong or missing",
-        action: {
-          kind: "request",
-          route: { office: "Faculty Affairs", sourceSystem: "ASMS", destination: PENDING },
-        },
+        action: selfService({
+          tool: "Web Directory",
+          href: WEB_DIRECTORY_URL,
+          instruction:
+            "In Web Directory, go to the Profile Picture section to add, update, or remove your photo. Updates are immediate.",
+        }),
       },
       {
-        id: "education-stale", // D6 S13
-        label: "An entry is correct but I don't want it shown",
-        action: { kind: "hide", note: "Use Hide on that entry — the data is fine, it just won't display." },
+        id: "photo-hide",
+        label: "I don't want my photo shown publicly",
+        action: selfService({
+          tool: "Web Directory",
+          href: WEB_DIRECTORY_URL,
+          instruction:
+            "In Web Directory → Profile Picture, set “Publish to” to “Institution”. Updates are immediate.",
+        }),
       },
     ],
   },
@@ -155,17 +208,99 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     heading: "What needs to change?",
     issues: [
       {
-        id: "appointment-wrong-or-missing", // D6 S14/S15/S16
-        label: "An appointment is wrong or missing",
-        action: {
-          kind: "request",
-          route: { office: "TBD (dept admin / Faculty Affairs — D6)", sourceSystem: "ED", destination: PENDING },
-        },
+        id: "appointment-title-wrong",
+        label: "An appointment's title is wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ASMS / Enterprise Directory",
+          note: "This may be an ASMS or Enterprise Directory source-data issue.",
+        }),
       },
       {
-        id: "appointment-hide", // D6 S17
-        label: "An appointment is correct but I don't want it shown",
-        action: { kind: "hide", note: "Use Hide on that appointment (a department chair role can't be hidden)." },
+        id: "appointment-missing",
+        label: "An academic appointment is missing",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Enterprise Directory",
+          note: "Scholars shows only approved appointments. If yours is approved and still missing, contact support.",
+        }),
+      },
+      {
+        id: "appointment-dates-wrong",
+        label: "An appointment's dates are wrong (it shows active but I've left)",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ASMS / Enterprise Directory",
+          note: "This may be an ASMS or Enterprise Directory source-data issue. You can also Hide it here to clear the display while it's corrected.",
+        }),
+      },
+      {
+        id: "appointment-not-mine",
+        label: "This isn't my appointment",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ASMS / Enterprise Directory",
+          note: "Hiding it here won't correct the source — support will fix the record.",
+        }),
+      },
+      {
+        id: "appointment-chair-ended",
+        label: "A chair role is shown but has ended",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Enterprise Directory + chair detection",
+          note: "A chair role can't be hidden here; it's corrected at the source.",
+        }),
+      },
+    ],
+  },
+  education: {
+    heading: "What needs to change?",
+    issues: [
+      {
+        id: "education-wrong",
+        label: "A degree, field, institution, or year is wrong",
+        action: route({
+          office: "Office of Faculty Affairs",
+          email: FACULTY_AFFAIRS_EMAIL,
+          sourceSystem: "ASMS",
+          note: "Education is sourced from ASMS and corrected there.",
+        }),
+      },
+      {
+        id: "education-missing",
+        label: "An education or training entry is missing",
+        action: route({
+          office: "Office of Faculty Affairs",
+          email: FACULTY_AFFAIRS_EMAIL,
+          sourceSystem: "ASMS",
+          note: "Education is sourced from ASMS and corrected there.",
+        }),
+      },
+      {
+        id: "education-duplicate",
+        label: "An entry is duplicated",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ASMS import",
+          note: "This is likely an import error — include a screenshot. You can also Hide the duplicate here in the meantime.",
+        }),
+      },
+      {
+        id: "education-not-mine",
+        label: "This isn't my education",
+        action: route({
+          office: "Office of Faculty Affairs",
+          email: FACULTY_AFFAIRS_EMAIL,
+          sourceSystem: "ASMS",
+          note: "Hiding it here won't correct the source — Faculty Affairs will fix the record in ASMS.",
+        }),
       },
     ],
   },
@@ -173,17 +308,46 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     heading: "What needs to change?",
     issues: [
       {
-        id: "grant-wrong-or-missing", // D6 S19/S20/S21
-        label: "A grant's title, sponsor, dates, or role is wrong, or a grant is missing",
-        action: {
-          kind: "request",
-          route: { office: "OSRA (Office of Sponsored Research Administration)", sourceSystem: "InfoEd", destination: PENDING },
-        },
+        id: "funding-wrong",
+        label: "A grant's title, sponsor, dates, or role is wrong",
+        action: route({
+          office: "OSRA",
+          email: OSRA_EMAIL,
+          cc: OSRA_CC,
+          sourceSystem: "InfoEd",
+          note: "Funding is sourced from InfoEd; OSRA corrects the record.",
+        }),
       },
       {
-        id: "grant-not-mine", // D6 S22
-        label: "I shouldn't be listed on a grant",
-        action: { kind: "hide", note: "Use Hide on that grant — it removes only your role, not the award." },
+        id: "funding-missing",
+        label: "A grant is missing",
+        action: route({
+          office: "OSRA",
+          email: OSRA_EMAIL,
+          cc: OSRA_CC,
+          sourceSystem: "InfoEd",
+          note: "Funding is sourced from InfoEd; OSRA corrects the record.",
+        }),
+      },
+      {
+        id: "funding-active-expired",
+        label: "A grant shows Active but looks expired",
+        action: explain({
+          detail:
+            "A grant stays Active for up to 12 months past its end date (a no-cost-extension grace window). This is usually correct.",
+          fallbackEmail: OSRA_EMAIL,
+        }),
+      },
+      {
+        id: "funding-not-mine",
+        label: "I shouldn't be listed on this grant",
+        action: route({
+          office: "OSRA",
+          email: OSRA_EMAIL,
+          cc: OSRA_CC,
+          sourceSystem: "InfoEd",
+          note: "Hiding it here won't correct InfoEd; OSRA fixes the investigator list so it stops appearing on funding reports.",
+        }),
       },
     ],
   },
@@ -191,25 +355,51 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     heading: "What needs to change?",
     issues: [
       {
-        id: "publication-missing", // D6 S23
-        label: "A publication of mine is missing",
-        action: {
-          kind: "request",
-          route: { office: "Publications curation (added in ReCiter)", sourceSystem: "ReCiter", destination: PENDING },
-        },
-      },
-      {
-        id: "publication-metadata-wrong", // D6 S24/S26
-        label: "A publication's title, journal, year, or authors are wrong",
-        action: {
-          kind: "request",
-          route: { office: "Publications curation (PubMed correction)", sourceSystem: "PubMed", destination: PENDING },
-        },
-      },
-      {
-        id: "publication-not-mine", // D6 S25
+        id: "publication-not-mine",
         label: "A publication isn't mine / is wrongly attributed",
-        action: { kind: "hide", note: "Use Hide on that publication — it removes you from it now." },
+        action: selfService({
+          tool: "Publication Manager",
+          href: PUBLICATION_MANAGER_URL,
+          instruction:
+            "Don't just hide it. Log into Publication Manager and reject the article so it isn't misattributed in other venues. The correction reaches Scholars within about 24 hours.",
+        }),
+      },
+      {
+        id: "publication-missing-pubmed",
+        label: "A PubMed publication of mine is missing",
+        action: selfService({
+          tool: "Publication Manager",
+          href: PUBLICATION_MANAGER_URL,
+          instruction: "Claim it in Publication Manager.",
+        }),
+      },
+      {
+        id: "publication-missing-nonpubmed",
+        label: "A non-PubMed publication of mine is missing",
+        action: explain({
+          detail:
+            "Scholars and ReCiter only support PubMed-indexed publications, so works outside PubMed can't be imported or displayed.",
+        }),
+      },
+      {
+        id: "publication-metadata-wrong",
+        label: "A publication's title, journal, year, or authors are wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ReCiter / PubMed / publisher",
+          note: "The metadata may originate in ReCiter, PubMed, or the publisher; support can help trace it.",
+        }),
+      },
+      {
+        id: "publication-duplicate",
+        label: "A publication is duplicated",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "ReCiter import",
+          note: "Likely an import issue — send a ticket with details.",
+        }),
       },
     ],
   },
@@ -220,7 +410,7 @@ export function getChangeConfig(attr: RequestAttribute): AttributeChangeConfig {
   return REQUEST_A_CHANGE[attr];
 }
 
-/** True once an operator has supplied a real destination (not `pending`). */
-export function isRouteResolved(route: RequestRoute): boolean {
-  return route.destination.type !== "pending";
+/** Substitute `{cwid}` in a self-service href (ORCID). */
+export function resolveSelfServiceHref(href: string, cwid: string): string {
+  return href.replace("{cwid}", encodeURIComponent(cwid));
 }

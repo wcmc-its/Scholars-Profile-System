@@ -1,63 +1,125 @@
 /**
- * `lib/edit/request-a-change.ts` — the "Request a Change" routing config
- * (#160 UI follow-up). Structural invariants the picker UI relies on, so a
- * future D6 edit (filling destinations) can't silently break the shape.
+ * `lib/edit/request-a-change.ts` — the per-item "Request a change" routing
+ * config (#160 UI follow-up). Pins the three-shape model + the operator's
+ * routing decisions so a future edit can't silently break them.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   REQUEST_A_CHANGE,
   getChangeConfig,
-  isRouteResolved,
+  resolveSelfServiceHref,
   type RequestAttribute,
 } from "@/lib/edit/request-a-change";
 
 const ATTRS = Object.keys(REQUEST_A_CHANGE) as RequestAttribute[];
 
 describe("REQUEST_A_CHANGE — structure", () => {
-  it("covers the six editor attributes", () => {
+  it("covers the six attributes, each with a heading and ≥1 issue", () => {
     expect(ATTRS.sort()).toEqual(
       ["appointments", "education", "funding", "name-title", "photo", "publications"].sort(),
     );
-  });
-
-  it("every attribute has a heading and at least one issue", () => {
-    for (const attr of ATTRS) {
-      const cfg = REQUEST_A_CHANGE[attr];
-      expect(cfg.heading.length).toBeGreaterThan(0);
-      expect(cfg.issues.length).toBeGreaterThan(0);
+    for (const a of ATTRS) {
+      expect(REQUEST_A_CHANGE[a].heading.length).toBeGreaterThan(0);
+      expect(REQUEST_A_CHANGE[a].issues.length).toBeGreaterThan(0);
     }
   });
 
-  it("issue ids are globally unique (they map 1:1 to D6 scenarios)", () => {
+  it("issue ids are globally unique", () => {
     const ids = ATTRS.flatMap((a) => REQUEST_A_CHANGE[a].issues.map((i) => i.id));
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("every request issue has office + sourceSystem + destination; every hide issue has a note", () => {
-    for (const attr of ATTRS) {
-      for (const issue of REQUEST_A_CHANGE[attr].issues) {
-        expect(issue.label.length).toBeGreaterThan(0);
-        if (issue.action.kind === "request") {
-          expect(issue.action.route.office.length).toBeGreaterThan(0);
-          expect(issue.action.route.sourceSystem.length).toBeGreaterThan(0);
-          expect(issue.action.route.destination).toBeDefined();
+  it("every action is one of the three shapes with its required fields", () => {
+    for (const a of ATTRS) {
+      for (const { label, action } of REQUEST_A_CHANGE[a].issues) {
+        expect(label.length).toBeGreaterThan(0);
+        if (action.kind === "self-service") {
+          expect(action.href).toMatch(/^https:\/\//);
+          expect(action.tool.length).toBeGreaterThan(0);
+          expect(action.instruction.length).toBeGreaterThan(0);
+        } else if (action.kind === "route") {
+          expect(action.email).toMatch(/@/);
+          expect(action.sourceSystem.length).toBeGreaterThan(0);
         } else {
-          expect(issue.action.note.length).toBeGreaterThan(0);
+          expect(action.detail.length).toBeGreaterThan(0);
         }
       }
     }
   });
 
-  it("read-only attributes (name-title, photo) offer only 'request' issues — no Hide", () => {
-    for (const attr of ["name-title", "photo"] as const) {
-      expect(REQUEST_A_CHANGE[attr].issues.every((i) => i.action.kind === "request")).toBe(true);
+  it("routes only ever target the three approved mailboxes", () => {
+    const allowed = new Set([
+      "support@med.cornell.edu",
+      "ofa@med.cornell.edu",
+      "osra-operations@med.cornell.edu",
+    ]);
+    for (const a of ATTRS) {
+      for (const { action } of REQUEST_A_CHANGE[a].issues) {
+        if (action.kind === "route") expect(allowed.has(action.email)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("operator routing decisions", () => {
+  const issue = (attr: RequestAttribute, id: string) =>
+    REQUEST_A_CHANGE[attr].issues.find((i) => i.id === id)!;
+
+  it("publication 'not mine' is self-service into Publication Manager — never a Hide", () => {
+    const a = issue("publications", "publication-not-mine").action;
+    expect(a.kind).toBe("self-service");
+    if (a.kind === "self-service") {
+      expect(a.href).toBe("https://reciter.weill.cornell.edu/");
+      expect(a.instruction.toLowerCase()).toContain("reject");
     }
   });
 
-  it("editable attributes each steer at least one issue to in-app Hide", () => {
-    for (const attr of ["education", "appointments", "funding", "publications"] as const) {
-      expect(REQUEST_A_CHANGE[attr].issues.some((i) => i.action.kind === "hide")).toBe(true);
+  it("funding 'wrongly listed' routes to OSRA (cc scholars), not Hide", () => {
+    const a = issue("funding", "funding-not-mine").action;
+    expect(a.kind).toBe("route");
+    if (a.kind === "route") {
+      expect(a.email).toBe("osra-operations@med.cornell.edu");
+      expect(a.cc).toBe("scholars@weill.cornell.edu");
+    }
+  });
+
+  it("funding 'active but expired' explains the NCE grace instead of routing", () => {
+    const a = issue("funding", "funding-active-expired").action;
+    expect(a.kind).toBe("explain");
+    if (a.kind === "explain") expect(a.detail.toLowerCase()).toContain("grace");
+  });
+
+  it("non-PubMed missing publication explains it's unsupported (no route)", () => {
+    const a = issue("publications", "publication-missing-nonpubmed").action;
+    expect(a.kind).toBe("explain");
+  });
+
+  it("publication metadata routes to ITS support (operator decision #2)", () => {
+    const a = issue("publications", "publication-metadata-wrong").action;
+    expect(a.kind === "route" && a.email).toBe("support@med.cornell.edu");
+  });
+
+  it("degrees + education route to Faculty Affairs; appointments to support", () => {
+    expect((issue("name-title", "degrees-wrong").action as { email?: string }).email).toBe(
+      "ofa@med.cornell.edu",
+    );
+    expect((issue("education", "education-wrong").action as { email?: string }).email).toBe(
+      "ofa@med.cornell.edu",
+    );
+    expect((issue("appointments", "appointment-title-wrong").action as { email?: string }).email).toBe(
+      "support@med.cornell.edu",
+    );
+  });
+
+  it("name / email / photo / ORCID are self-service", () => {
+    for (const [attr, id] of [
+      ["name-title", "name-wrong"],
+      ["name-title", "email-wrong"],
+      ["name-title", "orcid-wrong"],
+      ["photo", "photo-wrong"],
+    ] as const) {
+      expect(issue(attr, id).action.kind).toBe("self-service");
     }
   });
 });
@@ -67,19 +129,12 @@ describe("helpers", () => {
     expect(getChangeConfig("funding")).toBe(REQUEST_A_CHANGE.funding);
   });
 
-  it("isRouteResolved is false while destinations are pending (pre-D6)", () => {
-    // The whole map ships pending — every request route is unresolved today.
-    const allRequestRoutes = ATTRS.flatMap((a) =>
-      REQUEST_A_CHANGE[a].issues
-        .filter((i) => i.action.kind === "request")
-        .map((i) => (i.action as { kind: "request"; route: Parameters<typeof isRouteResolved>[0] }).route),
+  it("resolveSelfServiceHref substitutes {cwid} (ORCID), leaves other hrefs alone", () => {
+    expect(resolveSelfServiceHref("https://reciter.weill.cornell.edu/manageprofile/{cwid}", "abc1001")).toBe(
+      "https://reciter.weill.cornell.edu/manageprofile/abc1001",
     );
-    expect(allRequestRoutes.every((r) => !isRouteResolved(r))).toBe(true);
-  });
-
-  it("isRouteResolved is true for a supplied destination", () => {
-    expect(
-      isRouteResolved({ office: "OSRA", sourceSystem: "InfoEd", destination: { type: "email", address: "x@y.edu" } }),
-    ).toBe(true);
+    expect(resolveSelfServiceHref("https://directory.weill.cornell.edu/x", "abc1001")).toBe(
+      "https://directory.weill.cornell.edu/x",
+    );
   });
 });

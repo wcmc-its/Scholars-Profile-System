@@ -172,8 +172,19 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
       <CardHeader>
         <CardTitle>My publications</CardTitle>
         <CardDescription>
-          Hide a publication to remove yourself as an author from it across the
-          site. Use this for a paper that isn&apos;t yours, too.
+          Hide a publication to remove yourself from it on this site. Hiding
+          affects this profile only. A paper that isn&apos;t yours keeps
+          appearing on internal reports and the Faculty Review Tool until
+          it&apos;s corrected in{" "}
+          <a
+            href="https://reciter.weill.cornell.edu/"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            Publication Manager
+          </a>
+          .
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

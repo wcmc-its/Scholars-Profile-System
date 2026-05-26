@@ -105,6 +105,7 @@ function renderPanel(
       return (
         <ReadonlyAttributePanel
           attribute="name-title"
+          cwid={cwid}
           heading="Name & Title"
           description="Name, title, department, email, and ORCID come from the WCM directory and faculty records."
           fields={[{ label: "Name", value: ctx.scholar.fullName }]}
@@ -114,6 +115,7 @@ function renderPanel(
       return (
         <ReadonlyAttributePanel
           attribute="photo"
+          cwid={cwid}
           heading="Photo"
           description="Your profile photo comes from the WCM directory."
         />
