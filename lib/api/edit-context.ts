@@ -9,6 +9,13 @@
  * (`shown` / `hidden_by_self` / `removed_by_admin`) plus the sole-displayed-
  * author flag that drives the sole-author confirm dialog (UI-SPEC edge case 11).
  *
+ * #160 UI follow-up (`self-edit-launch-spec.md`): the same call also loads the
+ * scholar's active appointments, all education, and all grants — each keyed on
+ * its stable `externalId` (#352) and annotated with the shared four-state row
+ * model (`shown` / `hidden_by_self` / `hidden_by_admin` / `locked`) the new
+ * Appointments / Education / Funding panels render. The write-path (suppress /
+ * revoke) is unchanged — PR-A #480 / PR-B #482 shipped it; this is the read.
+ *
  * Suppression-OFF means: the lookup does not filter `scholar.status='active'`,
  * so a self- or admin-suppressed scholar can still load `/edit` and revoke. The
  * helper still returns `null` when no scholar row exists, or when the row is
@@ -22,12 +29,22 @@
  * so the module loads under vitest without a stub, matching `manual-layer.ts`.
  */
 import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+import { isFundingActive } from "@/lib/funding-active";
+import { isChairTitleFor } from "@/lib/leadership";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
 type EditContextReadClient = Pick<
   PrismaClient,
-  "scholar" | "suppression" | "publicationAuthor" | "fieldOverride"
+  | "scholar"
+  | "suppression"
+  | "publicationAuthor"
+  | "fieldOverride"
+  | "appointment"
+  | "education"
+  | "grant"
+  | "department"
 >;
 
 export type EditContextScholar = {
@@ -70,9 +87,68 @@ export type EditContextPublication = {
   isSoleDisplayedAuthor: boolean;
 };
 
+/**
+ * The shared four-state row model for the three new whole-entity panels
+ * (Appointments / Education / Funding). Publications keeps its own distinct
+ * union (`removed_by_admin`, `isSoleDisplayedAuthor`, no `locked`) — a
+ * whole-publication takedown is a different mechanism with opposite revoke
+ * semantics, so the two are deliberately not unified (`self-edit-launch-spec.md`
+ * § Publications is deliberately not refactored).
+ *
+ * - `shown` — no active whole-entity suppression.
+ * - `hidden_by_self` — the scholar hid it (`createdBy === ownerCwid`).
+ * - `hidden_by_admin` — a superuser hid it (`createdBy !== ownerCwid`).
+ * - `locked` — appointment only: a current chair appointment, not hideable
+ *   (the route refuses it 409 before authz).
+ */
+export type EditEntityState = "shown" | "hidden_by_self" | "hidden_by_admin" | "locked";
+
+export type EditContextAppointment = {
+  externalId: string; // the suppress `entityId`
+  title: string;
+  organization: string;
+  startDate: string | null; // ISO `YYYY-MM-DD` for display
+  endDate: string | null; // null = current
+  isPrimary: boolean;
+  state: EditEntityState; // "locked" iff a current chair appointment
+  /** Set iff state is `hidden_by_self` | `hidden_by_admin` (the superuser
+   *  surface revokes either; the self surface revokes only its own). */
+  suppressionId: string | null;
+};
+
+export type EditContextEducation = {
+  externalId: string;
+  degree: string;
+  institution: string;
+  field: string | null;
+  year: number | null;
+  state: Exclude<EditEntityState, "locked">;
+  suppressionId: string | null;
+};
+
+export type EditContextGrant = {
+  externalId: string;
+  title: string;
+  role: string;
+  /** The funding-section sponsor label — mirrors the profile's derivation
+   *  (`primeSponsor ?? canonicalizeSponsor(primeSponsorRaw)`), falling back to
+   *  the legacy `funder` so the label is never empty. */
+  funderLabel: string;
+  startYear: number;
+  endYear: number;
+  /** Matches the profile's Active/Past badge — `isFundingActive` (NCE grace
+   *  window), NOT a bare `endDate >= today`. */
+  isActive: boolean;
+  state: Exclude<EditEntityState, "locked">;
+  suppressionId: string | null;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
+  appointments: ReadonlyArray<EditContextAppointment>;
+  educations: ReadonlyArray<EditContextEducation>;
+  grants: ReadonlyArray<EditContextGrant>;
 };
 
 /**
@@ -85,6 +161,7 @@ export type EditContext = {
 export async function loadEditContext(
   cwid: string,
   client: EditContextReadClient,
+  now: Date = new Date(),
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -133,6 +210,136 @@ export async function loadEditContext(
   const ownRow = scholarSuppressions.find((r) => r.createdBy === cwid) ?? null;
   const adminRow = scholarSuppressions.find((r) => r.createdBy !== cwid) ?? null;
 
+  // --- #160 UI follow-up: the three whole-entity attributes ---
+  // Each panel lists exactly what the public profile renders, keyed on the
+  // stable `externalId` (#352). Active appointments only — mirrors the profile
+  // sidebar's default set (`endDate` null or in the future). The interim-drop /
+  // single-visible-primary collapse the profile also applies are a display
+  // refinement deferred here: a hidden interim row is a no-op against the
+  // read-path anyway. Education and grants render in full on the profile.
+  const appointmentRows = await client.appointment.findMany({
+    where: { cwid, OR: [{ endDate: null }, { endDate: { gt: now } }] },
+    select: {
+      externalId: true,
+      title: true,
+      organization: true,
+      startDate: true,
+      endDate: true,
+      isPrimary: true,
+    },
+    orderBy: [{ isPrimary: "desc" }, { startDate: "desc" }],
+  });
+  const educationRows = await client.education.findMany({
+    where: { cwid },
+    select: { externalId: true, degree: true, institution: true, field: true, year: true },
+    orderBy: [{ year: "desc" }],
+  });
+  const grantRows = await client.grant.findMany({
+    where: { cwid },
+    select: {
+      externalId: true,
+      title: true,
+      role: true,
+      funder: true,
+      primeSponsor: true,
+      primeSponsorRaw: true,
+      startDate: true,
+      endDate: true,
+    },
+    orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+  });
+
+  // One bounded suppression query across all three entity types, keyed on the
+  // stable externalId. Whole-entity only (`contributorCwid IS NULL` — PR-A/PR-B
+  // reject a contributor for these). Per-request, never cached — the ADR-005
+  // immediacy rule the publication path uses. Skipped when the scholar has no
+  // entities (keeps the call count down; mirrors the pmid guard below).
+  const entityExternalIds = [
+    ...appointmentRows.map((a) => a.externalId),
+    ...educationRows.map((e) => e.externalId),
+    ...grantRows.map((g) => g.externalId),
+  ];
+  // `${entityType}:${entityId}` → the active hide. Absent key = "shown".
+  const entityHide = new Map<
+    string,
+    { state: "hidden_by_self" | "hidden_by_admin"; suppressionId: string }
+  >();
+  if (entityExternalIds.length > 0) {
+    const entitySuppressions = await client.suppression.findMany({
+      where: {
+        entityType: { in: ["appointment", "education", "grant"] },
+        entityId: { in: entityExternalIds },
+        contributorCwid: null,
+        revokedAt: null,
+      },
+      select: { id: true, entityType: true, entityId: true, createdBy: true },
+    });
+    for (const row of entitySuppressions) {
+      // suppressionId is carried for BOTH hidden states — the superuser surface
+      // revokes either; the self surface renders a control only for its own.
+      entityHide.set(`${row.entityType}:${row.entityId}`, {
+        state: row.createdBy === cwid ? "hidden_by_self" : "hidden_by_admin",
+        suppressionId: row.id,
+      });
+    }
+  }
+
+  // Chair lock — a current chair appointment is not hideable (the route refuses
+  // it 409 before authz, for the chair AND a superuser). Mirror that exact
+  // predicate: the dept the scholar chairs (0–1 rows) + a per-appointment title
+  // match (`isChairTitleFor`) — NOT a bare `chairCwid` existence check, which
+  // would over-lock the chair's other (suppressible) appointments. Keep in
+  // lockstep with `validators.isChairAppointment`.
+  const chairedDept = await client.department.findFirst({
+    where: { chairCwid: cwid },
+    select: { name: true },
+  });
+
+  const appointments: EditContextAppointment[] = appointmentRows.map((a) => {
+    const locked = chairedDept !== null && isChairTitleFor(a.title, chairedDept.name);
+    const hide = entityHide.get(`appointment:${a.externalId}`);
+    return {
+      externalId: a.externalId,
+      title: a.title,
+      organization: a.organization,
+      startDate: a.startDate ? a.startDate.toISOString().slice(0, 10) : null,
+      endDate: a.endDate ? a.endDate.toISOString().slice(0, 10) : null,
+      isPrimary: a.isPrimary,
+      state: locked ? "locked" : hide ? hide.state : "shown",
+      suppressionId: locked ? null : hide ? hide.suppressionId : null,
+    };
+  });
+
+  const educations: EditContextEducation[] = educationRows.map((e) => {
+    const hide = entityHide.get(`education:${e.externalId}`);
+    return {
+      externalId: e.externalId,
+      degree: e.degree,
+      institution: e.institution,
+      field: e.field,
+      year: e.year,
+      state: hide ? hide.state : "shown",
+      suppressionId: hide ? hide.suppressionId : null,
+    };
+  });
+
+  const grants: EditContextGrant[] = grantRows.map((g) => {
+    const hide = entityHide.get(`grant:${g.externalId}`);
+    return {
+      externalId: g.externalId,
+      title: g.title,
+      role: g.role,
+      funderLabel: g.primeSponsor ?? canonicalizeSponsor(g.primeSponsorRaw) ?? g.funder,
+      // UTC year (not getFullYear, which is local) so it matches how the
+      // profile renders grant dates (`toISOString().slice(0, 10)`).
+      startYear: Number(g.startDate.toISOString().slice(0, 4)),
+      endYear: Number(g.endDate.toISOString().slice(0, 4)),
+      isActive: isFundingActive(g.endDate, now),
+      state: hide ? hide.state : "shown",
+      suppressionId: hide ? hide.suppressionId : null,
+    };
+  });
+
   const authorships = await client.publicationAuthor.findMany({
     where: { cwid, isConfirmed: true },
     select: {
@@ -161,6 +368,9 @@ export async function loadEditContext(
         },
       },
       publications,
+      appointments,
+      educations,
+      grants,
     };
   }
 
@@ -269,5 +479,8 @@ export async function loadEditContext(
       },
     },
     publications,
+    appointments,
+    educations,
+    grants,
   };
 }

@@ -25,7 +25,11 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function EditSelfPage() {
+export default async function EditSelfPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ attr?: string }>;
+}) {
   const session = await getSession();
   if (!session) {
     // Belt-and-braces: middleware also covers this with a 302 → login.
@@ -38,5 +42,6 @@ export default async function EditSelfPage() {
     // deleted them after SSO authenticated them.
     notFound();
   }
-  return <EditPage ctx={ctx} mode="self" />;
+  const { attr } = (await searchParams) ?? {};
+  return <EditPage ctx={ctx} mode="self" attr={attr} />;
 }

@@ -16,20 +16,18 @@ import {
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
+import { isFundingActive } from "@/lib/funding-active";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   rankForSelectedHighlights,
   type ScoredPublication,
 } from "@/lib/ranking";
 
-/** Funding "Active" definition (issue #78, decision Q6).
- *  A grant is considered active through its end date plus a 12-month
- *  no-cost-extension grace window. NCE status isn't reliably present in
- *  InfoEd, so we use the most common NIH NCE window as a proxy. */
-const NCE_GRACE_MS = 365 * 24 * 60 * 60 * 1000;
-export function isFundingActive(endDate: Date, now: Date): boolean {
-  return endDate.getTime() + NCE_GRACE_MS > now.getTime();
-}
+// `isFundingActive` (issue #78, decision Q6) moved to the Prisma-free
+// `@/lib/funding-active` so the profile, the funding search index, and the
+// self-edit Funding panel share one definition. Re-exported here for the
+// existing callers that import it from this module.
+export { isFundingActive };
 
 export type CoauthorChip = {
   cwid: string;
