@@ -12,7 +12,17 @@
  *   - `route` — email the owning office (no deep-linking is available, so this
  *     is a prefilled `mailto:`; the exact subject/body format is deferred).
  *   - `explain` — not an error, or not fixable here (e.g. the NCE grace window,
- *     non-PubMed publications) — say so in place rather than route a junk ticket.
+ *     non-PubMed publications). Say so in place rather than route a junk ticket;
+ *     for a true dead-end, state what WILL happen (e.g. auto-pickup if later
+ *     indexed in PubMed) and acknowledge with "Got it" — never imply a request
+ *     was filed.
+ *
+ * Each action carries a `cta` — the on-select footer verb (e.g. "Add by PMID",
+ * "Report correction"), so the primary button names the actual next step
+ * instead of a generic "Open"/"Submit". Phase 1 honors the no-deep-link rule:
+ * the verb opens the tool's front door (or composes the email) and the callout
+ * gives the precise step; true in-modal actions (a ReCiter feedback POST) wait
+ * for Phase 2.
  *
  * Hide (display-only suppression on Scholars) is a SEPARATE per-row control,
  * not an issue type here — and "not mine" is never Hide (the attribution would
@@ -41,6 +51,8 @@ export type SelfServiceAction = {
   /** May contain `{cwid}`, substituted at render. */
   href: string;
   instruction: string;
+  /** On-select footer verb. Defaults to `Open {tool}`. */
+  cta?: string;
 };
 
 /**
@@ -56,6 +68,8 @@ export type RouteAction = {
   cc?: string;
   sourceSystem: string;
   note?: string;
+  /** On-select footer verb. Defaults to `Email {office}`. */
+  cta?: string;
 };
 
 /** Not an error, or not fixable here — explain in place. */
@@ -63,6 +77,8 @@ export type ExplainAction = {
   kind: "explain";
   detail: string;
   fallbackEmail?: string;
+  /** On-select footer verb. Defaults to "Got it" (a dead-end acknowledgement). */
+  cta?: string;
 };
 
 export type ChangeAction = SelfServiceAction | RouteAction | ExplainAction;
@@ -105,6 +121,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Web Directory",
           href: WEB_DIRECTORY_URL,
+          cta: "Update in Web Directory",
           instruction:
             "Update the Preferred Name field in Web Directory. Changes reach Scholars within about 24 hours.",
         }),
@@ -145,6 +162,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Web Directory",
           href: WEB_DIRECTORY_URL,
+          cta: "Update in Web Directory",
           instruction: "Update the Primary email field in Web Directory.",
         }),
       },
@@ -154,6 +172,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Web Directory",
           href: WEB_DIRECTORY_URL,
+          cta: "Update in Web Directory",
           instruction:
             "In Web Directory, set your email's “Publish to” to “Institution only”.",
         }),
@@ -174,6 +193,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "ReCiter",
           href: ORCID_MANAGE_URL,
+          cta: "Manage in ReCiter",
           instruction: "Manage your ORCID in ReCiter.",
         }),
       },
@@ -188,6 +208,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Web Directory",
           href: WEB_DIRECTORY_URL,
+          cta: "Update in Web Directory",
           instruction:
             "In Web Directory, go to the Profile Picture section to add, update, or remove your photo. Updates are immediate.",
         }),
@@ -198,6 +219,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Web Directory",
           href: WEB_DIRECTORY_URL,
+          cta: "Update in Web Directory",
           instruction:
             "In Web Directory → Profile Picture, set “Publish to” to “Institution”. Updates are immediate.",
         }),
@@ -356,12 +378,13 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
     issues: [
       {
         id: "publication-not-mine",
-        label: "A publication isn't mine / is wrongly attributed",
+        label: "Isn't mine / wrongly attributed",
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
+          cta: "Flag as not mine",
           instruction:
-            "Don't just hide it. Log into Publication Manager and reject the article so it isn't misattributed in other venues. The correction reaches Scholars within about 24 hours.",
+            "Don't just hide it. Reject the article in Publication Manager so it isn't misattributed in other venues too. The correction reaches Scholars within about 24 hours.",
         }),
       },
       {
@@ -370,7 +393,9 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         action: selfService({
           tool: "Publication Manager",
           href: PUBLICATION_MANAGER_URL,
-          instruction: "Claim it in Publication Manager.",
+          cta: "Add by PMID",
+          instruction:
+            "Claim it in Publication Manager by its PubMed ID. It reaches Scholars within about 24 hours.",
         }),
       },
       {
@@ -378,27 +403,29 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
         label: "A non-PubMed publication of mine is missing",
         action: explain({
           detail:
-            "Scholars and ReCiter only support PubMed-indexed publications, so works outside PubMed can't be imported or displayed.",
+            "Scholars and ReCiter only index PubMed publications, so this one can't be displayed here. If it's added to PubMed later, ReCiter picks it up automatically — no action needed.",
         }),
       },
       {
         id: "publication-metadata-wrong",
-        label: "A publication's title, journal, year, or authors are wrong",
+        label: "Title, journal, year, or authors are wrong",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
+          cta: "Report correction",
           sourceSystem: "ReCiter / PubMed / publisher",
-          note: "The metadata may originate in ReCiter, PubMed, or the publisher; support can help trace it.",
+          note: "This data comes from PubMed, the authoritative record at NLM. We'll flag it with ITS Support, but the correction flows from the source — it can't be edited in Scholars directly.",
         }),
       },
       {
         id: "publication-duplicate",
-        label: "A publication is duplicated",
+        label: "This publication is duplicated",
         action: route({
           office: "ITS Support",
           email: SUPPORT_EMAIL,
+          cta: "Flag duplicate",
           sourceSystem: "ReCiter import",
-          note: "Likely an import issue — send a ticket with details.",
+          note: "Likely an import error — include the duplicate's details so support can merge it.",
         }),
       },
     ],

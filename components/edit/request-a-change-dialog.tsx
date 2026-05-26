@@ -1,24 +1,27 @@
 /**
  * The "Request a change" modal (#160 UI follow-up,
- * `docs/self-edit-request-change-modal.md`). Supersedes the popover-of-links
- * (`request-a-change-picker.tsx`). One Apollo-style modal that keeps the
- * three-shape routing brain from `lib/edit/request-a-change.ts`:
+ * `docs/self-edit-request-change-modal.md`). Supersedes the popover-of-links.
+ * A ROUTER, not a form: pick one issue and the modal resolves it to a
+ * path-specific action whose footer verb matches —
  *
- *   - `self-service` — primary action is a link to the owning tool (new tab);
- *   - `route` — a free-text box + Submit that composes a STRUCTURED `mailto:`
- *     (Phase 1: the user's own mail client sends; Phase 2 will POST to a
- *     server mailer + issue a receipt) and shows an in-dialog confirmation;
- *   - `explain` — an in-place explanation, optionally revealing a route box.
+ *   - `self-service` — primary opens the owning tool (new tab); the callout
+ *     gives the precise step. Verb e.g. "Add by PMID", "Update in Web Directory".
+ *   - `route` — a free-text box + a verb-named Submit that composes a STRUCTURED
+ *     `mailto:` (Phase 1: the user's own client sends; Phase 2 will POST to a
+ *     server mailer + issue a receipt). Verb e.g. "Report correction".
+ *   - `explain` — an honest dead-end: the callout says what WILL happen (e.g.
+ *     auto-pickup if later indexed), the verb is "Got it" (no request is filed).
+ *     If it carries a fallback, "Still wrong?" reveals a route box.
  *
- * Link/mailto only — no write path, no new authorization. Free text never
- * reaches a header field (subject/recipient are derived from server-trusted
- * config + a fixed attribute-label map), and CRLF is stripped from every
- * interpolated value before composition (header-injection guard).
+ * The guidance for the selected issue renders in a callout directly under its
+ * row, so it reads as a response to the choice. Link/mailto only — no write
+ * path, no new authorization; CRLF is stripped from every interpolated value
+ * before composition (header-injection guard).
  */
 "use client";
 
 import * as React from "react";
-import { Flag } from "lucide-react";
+import { ArrowRight, Flag, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,13 +34,15 @@ import {
 } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import {
   getChangeConfig,
   resolveSelfServiceHref,
+  type ChangeAction,
   type RequestAttribute,
 } from "@/lib/edit/request-a-change";
 
-/** Human label per attribute — drives the dialog title + email subject. */
+/** Human label per attribute — drives the email subject + "Regarding" line. */
 const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   "name-title": "Name & Title",
   photo: "Photo",
@@ -46,6 +51,13 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   funding: "Funding",
   publications: "Publications",
 };
+
+/** The footer verb for an action (its config `cta`, else a sensible default). */
+function ctaFor(action: ChangeAction, fallbackRevealed: boolean): string {
+  if (action.kind === "self-service") return action.cta ?? `Open ${action.tool}`;
+  if (action.kind === "route") return action.cta ?? `Email ${action.office}`;
+  return fallbackRevealed ? "Email us" : (action.cta ?? "Got it");
+}
 
 /** Strip CR/LF so a value can't break out of its field (header-injection guard). */
 function sanitize(value: string): string {
@@ -61,9 +73,9 @@ function buildMailto(opts: {
   sourceSystem?: string;
   detail: string;
 }): string {
-  // The subject is derived from a fixed map (never user free text), so no
-  // header-injection vector. URLSearchParams renders spaces as "+", which mail
-  // clients show literally; RFC 6068 wants %20 — so encode by hand.
+  // Subject is derived from a fixed map (never user free text) — no injection
+  // vector. URLSearchParams renders spaces as "+", which mail clients show
+  // literally; RFC 6068 wants %20, so encode by hand.
   const subject = `Scholars profile correction — ${opts.attributeLabel}`;
   const lines = [
     `Issue: ${sanitize(opts.issueLabel)}`,
@@ -105,7 +117,6 @@ export function RequestAChangeDialog({
   const [submitted, setSubmitted] = React.useState(false);
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
 
-  // Re-opening starts fresh.
   React.useEffect(() => {
     if (open) {
       setIssueId(null);
@@ -119,7 +130,6 @@ export function RequestAChangeDialog({
   const issue = config.issues.find((i) => i.id === issueId) ?? null;
   const action = issue?.action ?? null;
 
-  // A `route` body, or an `explain` body once its fallback is revealed.
   const showRouteBox =
     action?.kind === "route" || (action?.kind === "explain" && revealFallback);
   const hasUnsavedText = showRouteBox && detail.trim().length > 0 && !submitted;
@@ -145,7 +155,6 @@ export function RequestAChangeDialog({
     setOpen(false);
   }
 
-  // The recipient shown in the post-submit confirmation.
   const submitTarget: { email: string; office: string | null } | null =
     action?.kind === "route"
       ? { email: action.email, office: action.office }
@@ -165,7 +174,6 @@ export function RequestAChangeDialog({
         detail,
       });
     }
-    // explain → fallback
     if (action?.kind === "explain" && action.fallbackEmail) {
       return buildMailto({
         email: action.fallbackEmail,
@@ -178,8 +186,8 @@ export function RequestAChangeDialog({
     return "#";
   }
 
-  const title = `Request a change — ${itemLabel ?? attributeLabel}`;
-  const hasPrimary = action?.kind === "self-service" || showRouteBox;
+  const cta = action ? ctaFor(action, revealFallback) : null;
+  const isAck = action?.kind === "explain" && !revealFallback; // dead-end "Got it"
 
   return (
     <>
@@ -196,21 +204,29 @@ export function RequestAChangeDialog({
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent data-testid="request-a-change-dialog">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>
-              We&apos;ll point you to the right place to fix it, or route it to the team that owns it.
-            </DialogDescription>
+          <DialogHeader className="gap-1 text-left">
+            <DialogTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+              Request a change
+            </DialogTitle>
+            {itemLabel && (
+              <p className="flex items-baseline gap-2 text-sm">
+                <span className="text-muted-foreground shrink-0">Regarding</span>
+                <span title={itemLabel} className="line-clamp-1 font-medium">
+                  {itemLabel}
+                </span>
+              </p>
+            )}
           </DialogHeader>
 
-          {/* ---- post-submit confirmation (route) ---- */}
           {submitted && submitTarget ? (
+            /* ---- post-submit confirmation (route) ---- */
             <div className="flex flex-col gap-2" role="status" aria-live="polite">
-              <p className="text-sm">
+              <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
+              <p className="text-muted-foreground text-sm">
                 Your email client should have opened a pre-filled message
                 {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
                 opened, email{" "}
-                <a className="underline" href={`mailto:${submitTarget.email}`}>
+                <a className="text-[var(--apollo-maroon)] underline" href={`mailto:${submitTarget.email}`}>
                   {submitTarget.email}
                 </a>{" "}
                 directly.
@@ -219,75 +235,103 @@ export function RequestAChangeDialog({
           ) : confirmDiscard ? (
             /* ---- unsaved-text discard guard (edge case 3) ---- */
             <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Discard your request?</p>
-              <p className="text-muted-foreground text-sm">
-                The detail you typed will be lost.
-              </p>
+              <p className="text-base font-medium">Discard your request?</p>
+              <p className="text-muted-foreground text-sm">The detail you typed will be lost.</p>
             </div>
           ) : (
-            /* ---- the form ---- */
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <p id={`rac-q-${attribute}`} className="text-sm font-medium">
+            /* ---- the router ---- */
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <p id={`rac-q-${attribute}`} className="text-base font-medium">
                   {config.heading}
                 </p>
-                <RadioGroup
-                  aria-labelledby={`rac-q-${attribute}`}
-                  value={issueId ?? ""}
-                  onValueChange={selectIssue}
-                >
-                  {config.issues.map((i) => (
-                    <label
-                      key={i.id}
-                      htmlFor={`rac-${i.id}`}
-                      data-testid={`rac-issue-${i.id}`}
-                      className="flex cursor-pointer items-start gap-2 py-1"
-                    >
-                      <RadioGroupItem id={`rac-${i.id}`} value={i.id} className="mt-0.5" />
-                      <span className="text-sm">{i.label}</span>
-                    </label>
-                  ))}
-                </RadioGroup>
+                <DialogDescription>
+                  Pick one — we&apos;ll point you to the right place, or route it to the team that
+                  owns it.
+                </DialogDescription>
               </div>
 
-              {/* contextual body for the selected issue */}
-              {action?.kind === "self-service" && (
-                <p className="text-muted-foreground text-sm">{action.instruction}</p>
-              )}
-
-              {action?.kind === "route" && action.note && (
-                <p className="text-muted-foreground text-sm">{action.note}</p>
-              )}
-
-              {action?.kind === "explain" && (
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm">{action.detail}</p>
-                  {action.fallbackEmail && !revealFallback && (
-                    <button
-                      type="button"
-                      className="text-[var(--apollo-maroon)] w-fit text-sm hover:underline"
-                      onClick={() => setRevealFallback(true)}
+              <RadioGroup
+                aria-labelledby={`rac-q-${attribute}`}
+                value={issueId ?? ""}
+                onValueChange={selectIssue}
+                className="gap-1.5"
+              >
+                {config.issues.map((i) => {
+                  const selected = i.id === issueId;
+                  const a = i.action;
+                  const hint = a.kind === "explain" ? null : ctaFor(a, false);
+                  return (
+                    <div
+                      key={i.id}
+                      data-testid={`rac-issue-${i.id}`}
+                      className={cn(
+                        "overflow-hidden rounded-md border transition-colors",
+                        selected
+                          ? "border-[var(--apollo-maroon)] bg-[var(--apollo-maroon)]/[0.04]"
+                          : "border-border",
+                      )}
                     >
-                      Still wrong? Email us
-                    </button>
-                  )}
-                </div>
-              )}
+                      <label
+                        htmlFor={`rac-${i.id}`}
+                        className="flex cursor-pointer items-center gap-2.5 px-3 py-2.5"
+                      >
+                        <RadioGroupItem id={`rac-${i.id}`} value={i.id} />
+                        <span className="flex-1 text-sm">{i.label}</span>
+                        {!selected && hint && (
+                          <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
+                            {hint}
+                            <ArrowRight className="size-3" />
+                          </span>
+                        )}
+                      </label>
 
-              {showRouteBox && (
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="rac-detail" className="text-sm font-medium">
-                    Add any detail (optional)
-                  </label>
-                  <Textarea
-                    id="rac-detail"
-                    value={detail}
-                    onChange={(e) => setDetail(e.target.value)}
-                    placeholder="What should change, and to what?"
-                    rows={4}
-                  />
-                </div>
-              )}
+                      {selected && (
+                        <div className="border-border flex flex-col gap-2 border-t px-3 py-3">
+                          {a.kind === "self-service" && (
+                            <p className="text-muted-foreground text-sm">{a.instruction}</p>
+                          )}
+                          {a.kind === "route" && a.note && (
+                            <p className="text-muted-foreground text-sm">{a.note}</p>
+                          )}
+                          {a.kind === "explain" && (
+                            <>
+                              <div className="flex gap-2">
+                                <Info className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+                                <p className="text-sm">{a.detail}</p>
+                              </div>
+                              {a.fallbackEmail && !revealFallback && (
+                                <button
+                                  type="button"
+                                  className="text-[var(--apollo-maroon)] w-fit text-sm hover:underline"
+                                  onClick={() => setRevealFallback(true)}
+                                >
+                                  Still wrong? Email us
+                                </button>
+                              )}
+                            </>
+                          )}
+
+                          {selected && showRouteBox && (
+                            <div className="flex flex-col gap-1.5">
+                              <label htmlFor="rac-detail" className="text-sm font-medium">
+                                Add any detail (optional)
+                              </label>
+                              <Textarea
+                                id="rac-detail"
+                                value={detail}
+                                onChange={(e) => setDetail(e.target.value)}
+                                placeholder="What should change, and to what?"
+                                rows={3}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </RadioGroup>
             </div>
           )}
 
@@ -320,25 +364,34 @@ export function RequestAChangeDialog({
             ) : (
               <>
                 <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-                  {hasPrimary ? "Cancel" : "Close"}
+                  {action ? "Cancel" : "Close"}
                 </Button>
                 {action?.kind === "self-service" && (
-                  <Button asChild>
+                  <Button asChild data-testid="request-a-change-open">
                     <a
                       href={resolveSelfServiceHref(action.href, cwid)}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => setOpen(false)}
                     >
-                      Fix it in {action.tool}
+                      {cta}
                     </a>
                   </Button>
                 )}
                 {showRouteBox && (
                   <Button asChild data-testid="request-a-change-submit">
                     <a href={routeMailto()} onClick={() => setSubmitted(true)}>
-                      Submit
+                      {cta}
                     </a>
+                  </Button>
+                )}
+                {isAck && (
+                  <Button
+                    type="button"
+                    data-testid="request-a-change-ack"
+                    onClick={() => setOpen(false)}
+                  >
+                    {cta}
                   </Button>
                 )}
               </>

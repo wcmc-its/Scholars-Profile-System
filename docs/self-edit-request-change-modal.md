@@ -92,6 +92,11 @@ server send in Phase 2.
 
 ### 3.3 Contextual body + footer, by action shape
 
+> **Refined by §12 (post-review).** The footer is now a **per-issue verb**
+> (`cta`), the body renders in a callout **under the selected row**, and an
+> `explain` dead-end ends in **"Got it"** (not "Close"). The shape→behavior
+> mapping below still holds; only the labels/placement changed.
+
 The selected issue's `action.kind` drives the body and the footer's primary
 action (each screen has exactly one primary action):
 
@@ -212,7 +217,7 @@ user who has no OS handler can still copy it. This directly resolves the current
 | 3 | Select `route`, type detail, press Esc / click scrim | Confirm "Discard your request?" before closing (unsaved text). |
 | 4 | Select `route`, leave detail blank, Submit | Allowed; body shows "(no additional detail provided)". |
 | 5 | `self-service` issue | No textarea, no Submit; primary action is the tool link (new tab). |
-| 6 | `explain` issue, no `fallbackEmail` | Informational only; footer = "Close". |
+| 6 | `explain` issue, no `fallbackEmail` (e.g. non-PubMed) | Honest dead-end: callout states what WILL happen (auto-pickup if later indexed in PubMed); footer = "Got it" — never implies a request was filed. |
 | 7 | `explain` issue with `fallbackEmail`, user clicks "Still wrong?" | Reveals route textarea + Submit to `fallbackEmail`. |
 | 8 | No OS mail handler on `route` Submit | Modal still closes + confirmation banner gives the copyable address (no silent dead-end). |
 | 9 | Free-text contains newlines / `%0A` | CRLF stripped; `mailto:` stays well-formed (header-injection guard). |
@@ -258,3 +263,39 @@ ORDER BY created_at DESC;
    section-level on the read-only Name/Photo panels.
 2. **Icon** — keep `Flag`.
 3. **Phase 2 sender identity** — SES From = `no-reply-scholars@weill.cornell.edu`.
+
+## 12. Router refinement (2026-05-26, post-review)
+
+Review of the first build flagged that the modal "broke its own promise" on the
+one shape that *didn't* resolve to an action: a selected `explain` issue showed
+a disclaimer + a lone Close, telling the user nothing happened. The fix reframes
+the modal explicitly as a **router** and makes every option resolve to a
+path-specific action whose footer verb matches.
+
+- **Per-issue action verb (`cta`).** Each action in `lib/edit/request-a-change.ts`
+  gains an optional `cta` — the on-select footer verb — defaulting to
+  `Open {tool}` / `Email {office}` / "Got it". Publications use specific verbs:
+  "Flag as not mine", "Add by PMID", "Report correction", "Flag duplicate". The
+  footer primary swaps to the selected issue's verb; a single static "Close"
+  across all options is gone.
+- **Per-row destination hint.** Unselected actionable rows show their verb +
+  `→` on the right, so users self-triage before clicking and the router model is
+  legible. (Phase-1-honest: the verb opens the tool's front door + a precise
+  callout instruction; a true in-modal ReCiter feedback POST is Phase 2, gated
+  on the same backend + an operator decision on deep-linking ReCiter.)
+- **Callout under the selected row.** The selected issue's guidance renders in a
+  bordered callout directly beneath its radio (not as floating body text), so it
+  reads as a response to the choice. Only one row is expanded at a time.
+- **Honest dead-end.** A no-action `explain` (non-PubMed) states what *will*
+  happen ("if it's added to PubMed later, ReCiter picks it up automatically — no
+  action needed") and the primary becomes **"Got it"** — not a fake submit.
+- **Demoted title.** The big `Request a change — {item}` title becomes a small
+  "Request a change" eyebrow (still the accessible dialog name) + a clamped
+  "Regarding {item}" reference line (hover-to-expand); "What needs to change?"
+  is the focal heading.
+- **PubMed source-of-truth caveat.** `publication-metadata-wrong`'s callout says
+  the data is the authoritative NLM record and the correction flows from the
+  source — it can't be edited in Scholars — rather than implying an instant fix.
+- **Copy parallelism.** Publication option labels tightened
+  ("Isn't mine / wrongly attributed", "Title, journal, year, or authors are
+  wrong", "This publication is duplicated").
