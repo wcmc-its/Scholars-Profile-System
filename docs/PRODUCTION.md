@@ -120,19 +120,19 @@ Crawl-delay is advisory — Google ignores it — but `Sitemap` and a sane `Disa
 
 ## Database connection pooling
 
-Prisma defaults to `connection_limit = num_physical_cpus * 2 + 1`. On a Fargate task with 1 vCPU that's 3 connections — too low under any concurrency. Set explicitly in `DATABASE_URL`:
+**The app uses the `@prisma/adapter-mariadb` driver adapter (`lib/db.ts`), so Prisma's own pool is bypassed and the mariadb driver's pool is used instead.** This means the `connection_limit` / `pool_timeout` URL params Prisma documents are **inert** here — the driver reads its own option names (`connectionLimit`, `connectTimeout`, `acquireTimeout`). Pool tuning is applied in code, in `lib/db-url.ts` (`withMariadbPoolParams`), as query params on the connection URL — not hand-edited into the secret.
 
-```
-mysql://app:***@cluster-ro.{region}.rds.amazonaws.com:3306/scholars?connection_limit=15&pool_timeout=10
-```
+Current values (`lib/db-url.ts`):
+
+- `connectTimeout=5000` — the mariadb driver defaults to **1000ms** to open a socket. Aurora TLS + cold-connection setup intermittently exceeds that, surfacing as `failed to create socket after 1000ms` and cascading into `pool failed to retrieve a connection from pool` (the 2026-05-26 5xx trickle). 5000ms absorbs the handshake and stays under the 10000ms `acquireTimeout` the driver would otherwise clamp it to.
+- `connectionLimit=15` — the driver defaults to 10. 15 matches the per-task budget below.
 
 Sizing logic:
 
 - Aurora MySQL `db.r6g.large` reader allows ~270 client connections (4 GB instance, `max_connections ≈ ram_mb / 12.5`). Allocate ~80% to the app, leave headroom for ETL, Bastion, and observability.
 - 4 Fargate tasks × 15 connections = 60 active. Up to 16 tasks before exhaustion; ECS service should cap at 12.
-- `pool_timeout=10` — fail a request fast rather than queueing on a depleted pool. Better signal for autoscaler.
 
-If you see `Timed out fetching a new connection from the connection pool` in the logs, either the pool is too small for the task's concurrency (raise `connection_limit`), or there's a leaked transaction (the application bug — fix it). Don't paper over either by raising `pool_timeout`.
+A value baked into the `DATABASE_URL` secret still wins — `withMariadbPoolParams` only fills in params that are absent. If you see `pool failed to retrieve a connection from pool` persist after this, either the pool is too small for the task's concurrency (raise `connectionLimit`), or there's a leaked transaction (the application bug — fix it). Don't paper over a leak by raising `acquireTimeout`.
 
 ## ETL scheduling
 

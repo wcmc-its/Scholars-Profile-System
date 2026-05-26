@@ -622,7 +622,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         "EvaluationPeriods": 2,
         "Metrics": [
           {
-            "Expression": "(m5xx / IF(reqs > 0, reqs, 1)) * 100",
+            "Expression": "IF(m5xx >= 5, (m5xx / IF(reqs > 0, reqs, 1)) * 100, 0)",
             "Id": "expr_1",
             "Label": "5xx rate (%) over 5m",
             "ReturnData": true,
@@ -1304,7 +1304,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         "EvaluationPeriods": 2,
         "Metrics": [
           {
-            "Expression": "(m5xx / IF(reqs > 0, reqs, 1)) * 100",
+            "Expression": "IF(m5xx >= 5, (m5xx / IF(reqs > 0, reqs, 1)) * 100, 0)",
             "Id": "expr_1",
             "Label": "5xx rate (%) over 5m",
             "ReturnData": true,

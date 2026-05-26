@@ -54,6 +54,18 @@ const COST_ANOMALY_THRESHOLD_USD = 50;
 const LATENCY_P99_THRESHOLD_MS = 1500;
 
 /**
+ * Minimum absolute target-5xx count in a 5-minute window before the 5xx *rate*
+ * alarm is allowed to evaluate. Without a floor, a single stray 5xx in a
+ * low-traffic window reads as a huge rate and pages: this is what produced the
+ * 2026-05-26 flap, where 1 error / 4 requests (25%) and 3 errors / 46 requests
+ * (6.5%) both crossed the 1% threshold on a quiet ALB. Requiring a handful of
+ * errors first preserves the SLO-rate semantics for a genuine burst at any
+ * traffic level while ignoring the 1-3 stray-error noise. Re-tune in the SLO
+ * review loop; tracked in docs/SLOs.md.
+ */
+const MIN_5XX_FOR_RATE_ALARM = 5;
+
+/**
  * Threshold for the B02 edit_authz_denied alarm: more than 10 denials in a
  * 5-minute window, repeating for two consecutive windows. Distinguishes a
  * confused user (1-3 denials in a row) from a misconfigured bot or a
@@ -149,11 +161,16 @@ export class SpsObservabilityStack extends Stack {
     // ------------------------------------------------------------------
     // Public ALB alarms (3)
     // ------------------------------------------------------------------
-    // (1) 5xx rate -- ratio of target-side 5xx to total request count.
-    // Math expression rather than a raw count so a quiet period at 0 RPS
-    // does not false-fire on a single error.
+    // (1) 5xx rate -- ratio of target-side 5xx to total request count, gated
+    // behind a minimum absolute error count (MIN_5XX_FOR_RATE_ALARM). The bare
+    // ratio false-fires on a quiet ALB: a single stray 5xx in a single-digit-
+    // request window reads as 25%+ and pages (the 2026-05-26 flap). The outer
+    // IF returns 0 until at least MIN_5XX_FOR_RATE_ALARM errors land in the
+    // window, so transient one-off 5xx are ignored while a genuine burst still
+    // trips the 1% threshold at any traffic level. Hard-down (0 healthy hosts)
+    // is covered separately by the unhealthy-hosts alarm below.
     const alb5xxRate = new cloudwatch.MathExpression({
-      expression: "(m5xx / IF(reqs > 0, reqs, 1)) * 100",
+      expression: `IF(m5xx >= ${MIN_5XX_FOR_RATE_ALARM}, (m5xx / IF(reqs > 0, reqs, 1)) * 100, 0)`,
       usingMetrics: {
         m5xx: appStack.publicAlb.metrics.httpCodeTarget(
           elbv2.HttpCodeTarget.TARGET_5XX_COUNT,

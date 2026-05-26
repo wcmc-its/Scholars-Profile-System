@@ -157,6 +157,22 @@ describe("SpsObservabilityStack", () => {
       expect(props?.Threshold).toBe(1);
     });
 
+    it("5xx-rate alarm gates the rate behind a minimum absolute 5xx count", () => {
+      // Regression guard for the 2026-05-26 low-traffic flap: a single stray
+      // 5xx in a single-digit-request window must not page. The expression
+      // returns 0 until at least MIN_5XX_FOR_RATE_ALARM (5) errors land.
+      const fivexx = template.findResources("AWS::CloudWatch::Alarm", {
+        Properties: {
+          AlarmName: "sps-alb-5xx-rate-prod",
+        },
+      });
+      const props = Object.values(fivexx)[0]?.Properties;
+      const metrics = (props?.Metrics ?? []) as Array<{ Expression?: string }>;
+      const expr = metrics.find((m) => typeof m.Expression === "string")
+        ?.Expression;
+      expect(expr).toContain("m5xx >= 5");
+    });
+
     it("creates two SNS topics (page + notify) with the documented names", () => {
       template.resourceCountIs("AWS::SNS::Topic", 2);
       template.hasResourceProperties("AWS::SNS::Topic", {
