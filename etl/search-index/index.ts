@@ -122,6 +122,40 @@ async function bulkIndex(
   }
 }
 
+// #485 — byte-aware bulk chunking. The fixed CHUNK=500 ignored doc size: 500
+// people docs (each repeats publication titles + MeSH terms for query-time
+// weighting) exceed OpenSearch's 10 MB http.max_content_length -> 413 Request
+// size exceeded. Accumulate action+doc pairs until the body approaches a byte
+// budget (or a doc cap), flushing each chunk through bulkIndex (429 retry).
+async function bulkIndexDocs(
+  client: ReturnType<typeof searchClient>,
+  concreteIndex: string,
+  items: Array<{ id: string; doc: Record<string, unknown> }>,
+  label: string,
+): Promise<void> {
+  const MAX_BYTES = 8 * 1024 * 1024; // headroom under the 10 MB hard limit
+  const MAX_DOCS = 500;
+  let body: Record<string, unknown>[] = [];
+  let bytes = 0;
+  const flush = async () => {
+    if (body.length === 0) return;
+    await bulkIndex(client, body, label);
+    body = [];
+    bytes = 0;
+  };
+  for (const { id, doc } of items) {
+    // ~120 bytes covers the action line ({"index":{"_index":...,"_id":...}}).
+    const docBytes = JSON.stringify(doc).length + 120;
+    if (body.length > 0 && (bytes + docBytes > MAX_BYTES || body.length / 2 >= MAX_DOCS)) {
+      await flush();
+    }
+    body.push({ index: { _index: concreteIndex, _id: id } });
+    body.push(doc);
+    bytes += docBytes;
+  }
+  await flush();
+}
+
 async function indexPeople(concreteIndex: string) {
   const client = searchClient();
   // Phase 4b C4 — load the active publication-suppression set once per run
@@ -147,18 +181,14 @@ async function indexPeople(concreteIndex: string) {
 
   if (docs.length === 0) return 0;
 
-  // Bulk index in chunks to stay under OpenSearch's 10 MB request limit.
-  const CHUNK = 500;
-  for (let i = 0; i < docs.length; i += CHUNK) {
-    const chunk = docs.slice(i, i + CHUNK);
-    const body: Record<string, unknown>[] = [];
-    for (const { cwid, doc } of chunk) {
-      body.push({ index: { _index: concreteIndex, _id: cwid } });
-      body.push(doc);
-    }
-    await bulkIndex(client, body, "People");
-    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} people`);
-  }
+  // Byte-aware bulk chunking (#485) to stay under the 10 MB request limit.
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    docs.map(({ cwid, doc }) => ({ id: cwid, doc })),
+    "People",
+  );
+  console.log(`  ...indexed ${docs.length} people`);
   // #485 — refresh once after the full load (was per-chunk refresh:true).
   await client.indices.refresh({ index: concreteIndex });
   return docs.length;
@@ -204,17 +234,13 @@ async function indexPublications(concreteIndex: string) {
       continue;
     }
 
-    // Bulk index this page's docs in 500-doc chunks.
-    const CHUNK = 500;
-    for (let i = 0; i < docs.length; i += CHUNK) {
-      const chunk = docs.slice(i, i + CHUNK);
-      const body: Record<string, unknown>[] = [];
-      for (const { pmid, doc } of chunk) {
-        body.push({ index: { _index: concreteIndex, _id: pmid } });
-        body.push(doc);
-      }
-      await bulkIndex(client, body, "Publications");
-    }
+    // Byte-aware bulk chunking (#485) within this page.
+    await bulkIndexDocs(
+      client,
+      concreteIndex,
+      docs.map(({ pmid, doc }) => ({ id: pmid, doc })),
+      "Publications",
+    );
     totalIndexed += docs.length;
     console.log(`  ...indexed ${totalIndexed} publications so far`);
     if (pubs.length < PUB_PAGE) break;
@@ -315,17 +341,14 @@ async function indexFunding(concreteIndex: string) {
 
   if (docs.length === 0) return 0;
 
-  const CHUNK = 500;
-  for (let i = 0; i < docs.length; i += CHUNK) {
-    const chunk = docs.slice(i, i + CHUNK);
-    const body: Record<string, unknown>[] = [];
-    for (const { projectId, doc } of chunk) {
-      body.push({ index: { _index: concreteIndex, _id: projectId } });
-      body.push(doc);
-    }
-    await bulkIndex(client, body, "Funding");
-    console.log(`  ...indexed ${Math.min(i + CHUNK, docs.length)}/${docs.length} funding projects`);
-  }
+  // Byte-aware bulk chunking (#485) to stay under the 10 MB request limit.
+  await bulkIndexDocs(
+    client,
+    concreteIndex,
+    docs.map(({ projectId, doc }) => ({ id: projectId, doc })),
+    "Funding",
+  );
+  console.log(`  ...indexed ${docs.length} funding projects`);
   // #485 — refresh once after the full load (was per-chunk refresh:true).
   await client.indices.refresh({ index: concreteIndex });
   return docs.length;
