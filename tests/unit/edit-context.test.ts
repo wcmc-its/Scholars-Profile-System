@@ -12,6 +12,10 @@ type FakeClient = {
   suppression: { findMany: AnyMock };
   publicationAuthor: { findMany: AnyMock };
   fieldOverride: { findUnique: AnyMock };
+  appointment: { findMany: AnyMock };
+  education: { findMany: AnyMock };
+  grant: { findMany: AnyMock };
+  department: { findFirst: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -28,6 +32,13 @@ function fakeClient(): FakeClient {
     suppression: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     fieldOverride: { findUnique: vi.fn().mockResolvedValue(null) },
+    // #160 entity attributes — default to "no rows" so the existing tests
+    // (which exercise only scholar + publications) trigger zero entity-
+    // suppression queries (guarded on externalIds.length > 0) and stay green.
+    appointment: { findMany: vi.fn().mockResolvedValue([]) },
+    education: { findMany: vi.fn().mockResolvedValue([]) },
+    grant: { findMany: vi.fn().mockResolvedValue([]) },
+    department: { findFirst: vi.fn().mockResolvedValue(null) },
   };
 }
 
@@ -406,5 +417,196 @@ describe("loadEditContext — arbitrary-cwid behavior (Phase 7 §2)", () => {
     c.scholar.findUnique.mockResolvedValue(null);
     const ctx = await loadEditContext("missing-cwid", asClient(c));
     expect(ctx).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #160 UI follow-up — the three whole-entity attributes
+// (Appointments / Education / Funding), `self-edit-launch-spec.md`.
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — entity attributes (#160 appointments / education / grants)", () => {
+  const NOW = new Date("2026-06-01T12:00:00.000Z");
+
+  /**
+   * Set up a scholar with the given entities. `suppression.findMany` is
+   * sequenced: call #1 = the scholar-level query (empty here), call #2 = the
+   * bounded entity query (skipped by the loader when there are no entities).
+   */
+  function withEntities(opts: {
+    appointments?: unknown[];
+    educations?: unknown[];
+    grants?: unknown[];
+    entitySuppressions?: unknown[];
+    chairedDept?: { name: string } | null;
+  }) {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.appointment.findMany.mockResolvedValue(opts.appointments ?? []);
+    c.education.findMany.mockResolvedValue(opts.educations ?? []);
+    c.grant.findMany.mockResolvedValue(opts.grants ?? []);
+    c.department.findFirst.mockResolvedValue(opts.chairedDept ?? null);
+    c.suppression.findMany
+      .mockResolvedValueOnce([]) // scholar-level
+      .mockResolvedValueOnce(opts.entitySuppressions ?? []); // entity-level
+    return c;
+  }
+
+  const appt = (over: Record<string, unknown>) => ({
+    externalId: "appt",
+    title: "Professor of Medicine",
+    organization: "Weill Cornell Medicine",
+    startDate: new Date("2015-01-01"),
+    endDate: null,
+    isPrimary: false,
+    ...over,
+  });
+  const grant = (over: Record<string, unknown>) => ({
+    externalId: "grant",
+    title: "R01 Something",
+    role: "PI",
+    funder: "Legacy Funder String",
+    primeSponsor: "NCI",
+    primeSponsorRaw: null,
+    startDate: new Date("2024-01-01"),
+    endDate: new Date("2027-01-01"),
+    ...over,
+  });
+
+  it("annotates a shown appointment / education / grant when no suppression exists", async () => {
+    const c = withEntities({
+      appointments: [appt({ externalId: "appt-1", isPrimary: true })],
+      educations: [
+        { externalId: "edu-1", degree: "MD", institution: "Cornell", field: null, year: 2005 },
+      ],
+      grants: [grant({ externalId: "grant-1" })],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.appointments[0]).toMatchObject({
+      externalId: "appt-1",
+      state: "shown",
+      suppressionId: null,
+      isPrimary: true,
+      startDate: "2015-01-01",
+      endDate: null,
+    });
+    expect(ctx!.educations[0]).toMatchObject({ externalId: "edu-1", state: "shown", year: 2005 });
+    expect(ctx!.grants[0]).toMatchObject({
+      externalId: "grant-1",
+      state: "shown",
+      funderLabel: "NCI",
+      startYear: 2024,
+      endYear: 2027,
+      isActive: true,
+    });
+  });
+
+  it("distinguishes hidden_by_self from hidden_by_admin, carrying suppressionId for both", async () => {
+    const c = withEntities({
+      appointments: [
+        appt({ externalId: "appt-self" }),
+        appt({ externalId: "appt-adm" }),
+      ],
+      entitySuppressions: [
+        { id: "sup-self", entityType: "appointment", entityId: "appt-self", createdBy: SELF },
+        { id: "sup-adm", entityType: "appointment", entityId: "appt-adm", createdBy: "admin99" },
+      ],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    const bySelf = ctx!.appointments.find((a) => a.externalId === "appt-self")!;
+    const byAdmin = ctx!.appointments.find((a) => a.externalId === "appt-adm")!;
+    expect(bySelf).toMatchObject({ state: "hidden_by_self", suppressionId: "sup-self" });
+    // suppressionId is carried for admin hides too — the superuser surface revokes it.
+    expect(byAdmin).toMatchObject({ state: "hidden_by_admin", suppressionId: "sup-adm" });
+  });
+
+  it("buckets a suppression to the right entity type (education vs grant share the query)", async () => {
+    const c = withEntities({
+      educations: [
+        { externalId: "shared-id", degree: "PhD", institution: "X", field: null, year: 2000 },
+      ],
+      grants: [grant({ externalId: "shared-id" })], // same externalId, different type
+      entitySuppressions: [
+        { id: "sup-edu", entityType: "education", entityId: "shared-id", createdBy: SELF },
+      ],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.educations[0].state).toBe("hidden_by_self");
+    // The grant with the same externalId is untouched — keying is (type, id).
+    expect(ctx!.grants[0].state).toBe("shown");
+  });
+
+  it("locks ONLY the chair appointment, not the chair's other appointments", async () => {
+    const c = withEntities({
+      appointments: [
+        appt({ externalId: "appt-chair", title: "Chair of Medicine", isPrimary: true }),
+        appt({ externalId: "appt-other", title: "Professor of Medicine" }),
+      ],
+      chairedDept: { name: "Medicine" },
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    const chair = ctx!.appointments.find((a) => a.externalId === "appt-chair")!;
+    const other = ctx!.appointments.find((a) => a.externalId === "appt-other")!;
+    expect(chair.state).toBe("locked");
+    expect(chair.suppressionId).toBeNull();
+    expect(other.state).toBe("shown");
+  });
+
+  it("a chair lock overrides an (anomalous) suppression row on that appointment", async () => {
+    // A chair appt can't be suppressed (409 guard), but defensively locked wins.
+    const c = withEntities({
+      appointments: [appt({ externalId: "appt-chair", title: "Chair of Medicine" })],
+      chairedDept: { name: "Medicine" },
+      entitySuppressions: [
+        { id: "sup-x", entityType: "appointment", entityId: "appt-chair", createdBy: SELF },
+      ],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.appointments[0].state).toBe("locked");
+    expect(ctx!.appointments[0].suppressionId).toBeNull();
+  });
+
+  it("filters appointments to the active set (endDate null or in the future)", async () => {
+    const c = withEntities({ appointments: [] });
+    await loadEditContext(SELF, asClient(c), NOW);
+    expect(c.appointment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { cwid: SELF, OR: [{ endDate: null }, { endDate: { gt: NOW } }] },
+      }),
+    );
+  });
+
+  it("grant isActive uses the NCE grace window — a just-expired grant is still Active", async () => {
+    // endDate ~6 months before NOW, inside the 12-month NCE grace → Active.
+    const c = withEntities({
+      grants: [grant({ externalId: "g-nce", endDate: new Date("2025-12-01") })],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.grants[0].isActive).toBe(true);
+  });
+
+  it("grant funderLabel falls back primeSponsor → canonicalized raw → legacy funder", async () => {
+    const c = withEntities({
+      grants: [grant({ externalId: "g-fallback", primeSponsor: null, primeSponsorRaw: null })],
+    });
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.grants[0].funderLabel).toBe("Legacy Funder String");
+  });
+
+  it("skips the entity-suppression query when the scholar has no entities", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    await loadEditContext(SELF, asClient(c), NOW);
+    // Only the scholar-level suppression query runs — no entity query.
+    expect(c.suppression.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty entity arrays for a scholar with no appointments / education / grants", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.appointments).toEqual([]);
+    expect(ctx!.educations).toEqual([]);
+    expect(ctx!.grants).toEqual([]);
   });
 });

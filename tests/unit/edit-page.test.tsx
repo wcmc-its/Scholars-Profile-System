@@ -40,6 +40,9 @@ const ctx: EditContext = {
       isSoleDisplayedAuthor: false,
     },
   ],
+  appointments: [],
+  educations: [],
+  grants: [],
 };
 
 describe("EditPage shell — self mode (default)", () => {
@@ -81,6 +84,9 @@ const superuserCtx: EditContext = {
     suppression: { ownRow: null, adminRow: null },
   },
   publications: [], // not surfaced in superuser mode
+  appointments: [],
+  educations: [],
+  grants: [],
 };
 
 describe("EditPage shell — superuser mode (Phase 7)", () => {
