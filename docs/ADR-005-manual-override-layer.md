@@ -5,7 +5,8 @@
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
-**Tracks:** [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) (slug override), [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) (suppression)
+**Amendments:** [Amendment 1 (2026-05-27) — org-unit curation & three-tier access model](#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) — **Proposed** · [Amendment 2 (2026-05-27) — slug override reconcile-on-write & hard-delete prohibition](#amendment-2-2026-05-27--slug-override-reconcile-on-write-d5-and-the-scholar-hard-delete-prohibition) — **Accepted**
+**Tracks:** [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) (slug override), [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) (suppression), [#358](https://github.com/wcmc-its/Scholars-Profile-System/issues/358) (org-unit curation — Amendment 1), [#497](https://github.com/wcmc-its/Scholars-Profile-System/issues/497) (slug personalization — Amendment 2)
 **Gates:** B01–B03 ([#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100)/[#101](https://github.com/wcmc-its/Scholars-Profile-System/issues/101)/[#102](https://github.com/wcmc-its/Scholars-Profile-System/issues/102)) — self-edit auth, authorization, and audit
 
 ---
@@ -315,3 +316,175 @@ GROUP BY s.entity_id;
 - [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) — § Schema migration policy (additive-only); § `/api/edit` (B03 audit log).
 - B01 #100 / B02 #101 / B03 #102 — self-edit auth, authorization, audit; gated by this ADR.
 - B08 #107 — Step Functions ETL orchestration; the stable-key refactor should precede it. B09 #108 — migration pipeline. B13 #112 — staging. B14 #113 — VIVO redirect map.
+
+---
+
+## Amendment 1 (2026-05-27) — Org-unit curation: entity-type extension and three-tier access model
+
+**Status:** Proposed
+**Date:** 2026-05-27
+**Amends:** § Two tables (enum extension), § Keying and v1 entity scope (units qualify with no stable-key prerequisite), § Non-goals ("Manually-created records" — closed). Authoritative source for the org-unit access model that [`unit-curation-spec.md`](./unit-curation-spec.md) (#358) consumes.
+**Driver:** The base ADR's actor model is binary — a scholar edits their own record; a `scholars-admins` **superuser** does everything else (§ Non-goals, "Broad admin field-editing"). Org-unit curation needs an actor *between* those two: the person who maintains a department's page and its faculty is, in the institution's words, "never the Chair — usually some admin." A 2026-05-27 design review ratified (A1.2) a three-tier, per-unit access model to fill that gap without making every grant flow through a site-wide superuser. This amendment is **additive**: no base-ADR mechanism (the two tables, the read-merge, the write-path failure model, the search reflection layers) changes.
+
+### A1.1 Storage extensions
+
+`EntityType` gains `department`, `division`, `center` — the online, backwards-compatible `ALTER` the base ADR's § Two tables anticipates. Unlike Grant/Education/Appointment (blocked behind the #352 stable-key refactor), all three unit tables key on a `code` primary key that survives every ETL run, so **units qualify for the manual layer with no stable-key prerequisite**.
+
+The `origin` discriminator the base ADR deferred (§ Non-goals, "Manually-created records") is **already shipped, not a new column**: `Department`, `Division`, and `Center` carry a `source` column, and `etl/ed`'s orphan sweep is already `source='ED'`-scoped (`etl/ed/index.ts`), so a `source='manual'` unit is invisible to the sweep by construction. This amendment *uses* it; it does not add it.
+
+Two new tables, both **ETL-never-written and foreign-key-free** in the base ADR's style:
+
+```prisma
+enum EntityType {
+  scholar
+  publication
+  grant
+  education
+  appointment
+  department   // + Amendment 1
+  division     // + Amendment 1
+  center       // + Amendment 1
+}
+
+/// The role a person holds on one unit. Data-derived (a UnitAdmin row), NOT an
+/// SSO group — so it needs no new B02 group plumbing. `owner` strictly subsumes
+/// `curator`; a person holds at most one role per unit (the @@unique below).
+enum UnitRole {
+  owner    // edit the unit + proxy-edit its faculty + MANAGE ACCESS (grant/revoke owner|curator) within this unit's subtree + create informal no-code subunits in own department
+  curator  // edit the unit + proxy-edit its faculty; NO access management
+}
+
+/// A per-unit access grant. Inserted on grant, HARD-DELETED on revoke (B03
+/// audits both — an access grant is crisply present or absent, no soft-revoke).
+model UnitAdmin {
+  id         String     @id @default(uuid()) @db.VarChar(64)
+  entityType EntityType @map("entity_type")                   // department | division | center
+  entityId   String     @map("entity_id")  @db.VarChar(64)    // the unit `code`
+  cwid       String     @db.VarChar(32)                       // grantee — a WCM person (LDAP), NOT necessarily a Scholar
+  role       UnitRole
+  grantedBy  String     @map("granted_by") @db.VarChar(32)    // grantor cwid; a historical breadcrumb, NOT a live FK (see A1.3 T5)
+  createdAt  DateTime   @default(now())    @map("created_at")
+
+  @@unique([entityType, entityId, cwid])                      // one role per person per unit
+  @@index([cwid])                                             // "what do I administer?" — the scoped-roster query
+  @@map("unit_admin")
+}
+
+/// The manual roster of a manually-created (`source='manual'`) division — the
+/// pre-adoption membership of a division LDAP does not carry yet. Mirrors
+/// CenterMembership exactly; no FK to Scholar (a listed person may have no row).
+model DivisionMembership {
+  divisionCode    String   @map("division_code")    @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  source          String   @db.VarChar(16)                    // 'manual-ui' | 'file' | ...
+  lastRefreshedAt DateTime @map("last_refreshed_at")
+
+  @@id([divisionCode, cwid])
+  @@map("division_membership")
+}
+```
+
+`@@unique([entityType, entityId, cwid])` enforces one role per person per unit: granting `curator` to someone who already holds `owner` is a no-op upgrade/downgrade on the same row, never two competing rows. Proxy profile editing adds **no** table — it reuses the base ADR's `field_override(scholar, cwid, 'overview')` and per-author `suppression`, widening only the authorized-actor set (A1.5).
+
+### A1.2 Three-tier access model
+
+| Tier | Scope | Powers |
+|---|---|---|
+| **Superuser** | global / site-wide (SSO `scholars-admins`) | Everything below, anywhere, **plus** the sole structural levers: set/clear a unit `slug` (routing-critical), retire a unit, `centerType`, create a **coded** LDAP division or a new department. The root of trust — every Owner chain terminates at a Superuser grant. |
+| **Owner** | one unit; cascades to child divisions | Edit the unit (`description`, leadership) + proxy-edit its LDAP-primary faculty + **manage access** (grant/revoke `owner` or `curator`) within the owned subtree + **create an informal, no-code subunit** under their own department and curate its roster. **No** structural levers. |
+| **Curator** | one unit; cascades to child divisions | Edit the unit + proxy-edit its LDAP-primary faculty. **No** access management, **no** structural levers. |
+
+This **renames the base ADR / spec vocabulary** to remove a collision: what the base ADR and earlier `unit-curation-spec.md` drafts called "curator" (the site-wide tier) is here **Superuser**; "unit admin" (the per-unit editor) is here **Curator**; **Owner** is new.
+
+Two cross-cutting rules bound all delegation (textbook RBAC least-privilege):
+
+1. **Grant authority ≤ the grantor's own role.** A Curator grants nothing. An Owner grants `owner` or `curator` — never a structural power, which no role below Superuser holds. Only a Superuser grants structural powers, and only a Superuser exists site-wide. (An Owner *may* grant `owner` — see A1.3 T1/T4 and A1.4 for why owner→owner is permitted rather than owner→curator-only.)
+2. **Grant scope ⊆ the grantor's own scope.** An Owner's grants apply only within the subtree they own — their unit, and (for a department Owner) that department's divisions via the dept→division cascade. A grant targeting a sibling unit, a parent, or anything outside the subtree is `403`.
+
+Role membership is **data-derived** and **re-checked per POST** through B02's predicate machinery — there is **no new SSO group**. The predicate for a session `S` acting on unit `U`:
+
+```
+isSuperuser(S)            := S.session.isSuperuser                         // SSO scholars-admins (B02)
+ownerOf(S, U)             := ∃ UnitAdmin(role=owner, U, S.cwid)
+                             ∨ (U.kind = division ∧ ∃ UnitAdmin(role=owner, department=U.deptCode, S.cwid))
+curatorOf(S, U)           := ownerOf(S, U) ∨ ∃ UnitAdmin(role=curator, U, S.cwid) ∨ (division cascade as above)
+
+canEditUnit(S, U)         := isSuperuser(S) ∨ curatorOf(S, U)
+canManageAccess(S, U)     := isSuperuser(S) ∨ ownerOf(S, U)
+canGrant(S, role, V)      := isSuperuser(S) ∨ (ownerOf(S, V) ∧ role ∈ {owner, curator})
+canStructural(S, U)       := isSuperuser(S)                                 // slug, retire, centerType, coded-division/dept create
+canCreateInformalSubunit(S, deptD) := isSuperuser(S) ∨ ownerOf(S, deptD)
+```
+
+`canGrant` is the load-bearing line: because it requires `ownerOf(S, V)` and `ownerOf` only holds inside the subtree, rules (1) and (2) are enforced by one predicate. A department-level grant cascades down; a division-level grant never cascades up.
+
+### A1.3 Threat model
+
+In scope — privilege management within the unit tree. Authentication (B01 SSO), audit-log integrity (B03), and session freshness (B02 re-checks `isSuperuser` per POST) are inherited from the base gates and **out of scope** here, as is the integrity of LDAP's department/division tree itself (system-of-record, not ours to defend).
+
+| # | Threat | Mitigation |
+|---|---|---|
+| **T1** | **Privilege escalation by delegation** — an Owner mints access wider or higher than their own. | `canGrant` requires `ownerOf(S, V)` (scope ⊆ own) and caps `role ∈ {owner, curator}` (authority ≤ own — structural powers are unreachable). An out-of-subtree or structural grant is `403 edit_authz_denied`. Every Owner chain roots at a Superuser, so no authority is created from nothing. |
+| **T2** | **Scope widening** — an Owner grants themselves or a confederate a *parent* or *sibling* unit. | Same `ownerOf(S, V)` gate: a division Owner cannot grant on the parent department (no upward cascade); a department Owner cannot grant on a sibling department (different subtree). |
+| **T3** | **Capture-via-roster** — an Owner adds an arbitrary scholar to a center/division roster to gain proxy-edit rights over them. | Proxy-edit scope keys **only** on the scholar's LDAP-primary `deptCode`/`divCode` *columns* (never `field_override`-able, never roster-derived). Roster membership is a listing, never authority. (Restates the base spec; load-bearing here because Owners can now both manage rosters and proxy-edit.) |
+| **T4** | **Peer-revoke griefing** — two Owners of the same unit revoke each other. | **Accepted risk.** Revoke is symmetric (`canManageAccess`), so peers can revoke peers; this is a social/trust matter within one department, and the Superuser is an always-available backstop to re-appoint. The alternative (only-the-grantor-may-revoke) was rejected — it creates revoke deadlocks when the grantor leaves. |
+| **T5** | **Orphaned / dangling grants** on revoke. | Revoke **hard-deletes one row only**; it does **not** cascade to, or re-attribute, grants that person previously made. `grantedBy` is a historical breadcrumb (like the base ADR's `createdBy`), **not** a live foreign key — a grant whose `grantedBy` now points to a revoked person is still valid. No cascade, no re-attribution rewrite, no `previous_role` snapshot. (A1.4 alternative D.) |
+| **T6** | **Grantee-identity confusion** — a mistyped or guessed CWID grants access to the wrong or a non-existent person. | The grant UI resolves the grantee by **directory name search** (A1.5), so the operator selects a real LDAP person and never types a raw CWID; a non-person cannot be selected. Validation moves to selection time — the base spec's "unknown CWID → 400" guard becomes "you can only pick a directory entry." |
+| **T7** | **Lockout** — a unit ends with zero Owners and nobody can manage it. | **Accepted, no guard.** A Superuser can always grant a fresh Owner, so "zero Owners" is recoverable, not a lockout. A "cannot remove the last Owner" guard was rejected (A1.4 E) as state for no benefit. Self-revoke is blocked in the UI as a footgun guard only, not a security control. |
+
+### A1.4 Alternatives considered
+
+- **A — Strict Superuser-only grants (the base ADR / early-spec binary).** Every `unit_admin` granted only by a `scholars-admins` Superuser; no Owner tier. Rejected: makes the Superuser a bottleneck for large departments (Medicine has 11 divisions), exactly the friction #358 exists to remove. Kept as the *fallback* if the Owner tier is descoped for a first slice.
+- **B — Bounded depth-delegation without explicit roles.** A single "admin" grant that may delegate only to strictly-lower units. Rejected in favour of explicit `UnitRole`: roles are self-documenting in the access map (audit query B), make "who can manage access" a column rather than a graph computation, and cleanly express co-ownership.
+- **C — Owner→curator only (no owner→owner).** Owners appoint Curators but only a Superuser appoints Owners. Rejected per the 2026-05-27 decision: a large department must be able to stand up a division Owner without routing through a Superuser. Accepted cost: owner→owner reintroduces T1/T4, mitigated above. (This is the one place this amendment deliberately widens delegation beyond strict least-privilege, with eyes open.)
+- **D — Re-attribution or cascade-revoke on Owner removal.** On revoking an Owner, either auto-revoke everything they granted or rewrite those rows' `grantedBy` to the actor. Rejected: complexity and surprising bulk side-effects from a single revoke. `grantedBy`-as-history + Superuser backstop (T5) is simpler and safe.
+- **E — "Cannot remove the last Owner" guard.** Rejected: the Superuser backstop makes zero-Owner recoverable (T7), so the guard adds state and edge-case handling for no real protection.
+- **F — A new SSO group per unit role.** Rejected: would need B02 group plumbing per unit (thousands of groups) and a provisioning path WCM ITS does not offer. Data-derived `UnitAdmin` rows need none.
+
+### A1.5 Downstream requirements (enforceable)
+
+These are requirements on the implementing code, not soft guidance:
+
+1. **The grant/edit predicate MUST implement A1.2 exactly** — `ownerOf` includes the dept→division cascade; `canGrant` rejects any `role`/`V` failing scope-⊆-own or authority-≤-own with `403` and a `edit_authz_denied` telemetry event `{ actor_cwid, target_entity_type, target_entity_id, role, path, reason }` (B02). The predicate keys on `role` and `entityType`, never on the HTTP verb or `op`.
+2. **Structural actions MUST gate on `isSuperuser` alone** — `slug`, retire (`suppression` of a unit), `centerType`, coded-division creation, department creation. An Owner reaching these is `403`, not a silent no-op.
+3. **A directory people-search endpoint is REQUIRED and is new** — the grant UI resolves a grantee by name, so an internal endpoint MUST take a name fragment and return `[{ cwid, displayName, title, dept }]` from the **WCM enterprise directory (LDAP/ED), not the scholars corpus**, requesting **minimal attributes only** (no `weillCornellEduDOB` or other PII). The base spec assumed a known CWID; this is the one genuinely new interface the access model adds.
+4. **The grantee need NOT be a Scholar.** Owners and Curators are commonly administrative staff with no profile. `UnitAdmin.cwid` references a WCM person by LDAP identity; the "must be an active scholar" phrasing in earlier drafts is corrected. (The proxy-edit *target* must still be a faculty Scholar — that is a separate predicate.)
+5. **Revoke MUST hard-delete exactly one row** and MUST NOT cascade or re-attribute (T5). B03 audits the delete.
+6. **Every write remains one MySQL transaction** per the base ADR's write-path failure model (validate → write `unit_admin`/unit/membership row(s) → one B03 row → rollback on any failure). Unit curation has no FERPA/retraction urgency, so it uses the **nightly `etl/search-index` rebuild as its only search path** — no fast-path OpenSearch write, no reconciler entry (contrast suppression).
+
+The `UnitAdmin` / `DivisionMembership` tables are a purely additive migration, compatible with the additive-only policy (§ Two tables). The base ADR's branded-`Merged<T>` read discipline and the single-writer `Scholar.status` invariant are untouched.
+
+---
+
+## Amendment 2 (2026-05-27) — slug-override reconcile-on-write (D5) and the Scholar hard-delete prohibition
+
+**Status:** Accepted
+**Date:** 2026-05-27
+**Amends:** § ETL precedence and the slug exception (the slug override now *also drives routing*, not only ETL re-mint precedence), and Edge cases #5/#7 (mechanism made concrete). Authoritative source for the slug-routing decision that [`slug-personalization-spec.md`](./slug-personalization-spec.md) (#497) consumes.
+**Driver:** The base ADR shipped the slug-override *storage* (the `field_override(scholar, cwid, 'slug')` row) and the ETL *re-mint precedence* (Edge case #5: the ED ETL reads the override before `maybeUpdatedSlug` and never re-mints a pinned slug). A 2026-05-27 trace confirmed a gap the base ADR did not close: the override was **write-only**. `Scholar.slug`, `slug_history`, and every read path (`lib/url-resolver.ts`, the profile reads, the sitemap, the canonical-URL metadata) key off `Scholar.slug` and **never read `field_override`**, so a pinned slug `brandon-swed` while `Scholar.slug='brandon-swed-2'` left `/scholars/brandon-swed` returning 404 and the canonical URL wrong. This amendment decides how a slug override becomes routable. It is **additive**: no base-ADR mechanism (the two tables, the read-merge, the write-path failure model) changes.
+
+### A2.1 Decision D5 — reconcile on write (Option B)
+
+**Writing or clearing a `field_override(scholar, cwid, 'slug')` row mutates `Scholar.slug` and `slug_history` in the same transaction; the `field_override` row remains the *pin* the ETL checks.** Concretely:
+
+- **Set an override.** After the `field_override` upsert + collision validation, the write path sets `Scholar.slug` to the override value and writes the prior slug to `slug_history` (`{ old_slug: prior, current_cwid: cwid }`) — all in the one MySQL transaction that already carries the override upsert and the B03 audit row. The `Scholar.slug @unique` index and the `slug_guard` UNIQUE index both guard and fail the transaction closed on any collision the application check missed.
+- **Clear an override.** After deleting the `field_override` row, the write path reconciles `Scholar.slug` back to the **name-derived** slug — `nextAvailableSlug(deriveSlug(preferredName), <other live scholars' slugs>)` — writing the old pinned slug to `slug_history`. Clearing the pin therefore returns the scholar to the derived slug **immediately**, not on the next ETL run.
+- **The pin still gates the ETL** (base ADR Edge case #5, unchanged): `etl/ed` loads the set of pinned cwids once per run and `maybeUpdatedSlug` skips re-mint entirely for a pinned scholar, so a name change touches neither `Scholar.slug` nor `slug_history` nor the override.
+
+The shared primitive is `reconcileScholarSlug(tx, cwid, newSlug)` in `lib/slug.ts`: read the current `Scholar.slug`; if unchanged, no-op; else upsert `slug_history` and update `Scholar.slug`. Both `/api/edit` slug paths and the ETL's `maybeUpdatedSlug` call it — one implementation, no duplication.
+
+**Rejected — Option A (resolver fork):** make every read path (`resolveBySlugOrHistory`, the profile reads, the sitemap, the canonical-URL metadata) consult `field_override(slug)` and overlay it on `Scholar.slug`. Rejected because it scatters override-awareness across every slug-consuming surface — a new read path that forgets the overlay silently serves the wrong URL, the exact regression class the branded-`Merged<T>` discipline exists to prevent, but for routing rather than fields. Option B keeps `Scholar.slug` the single canonical key every read path already trusts; the override layer reconciles *into* it on write and **zero read paths change** (the point of Option B).
+
+This makes `Scholar.slug` a *partially manual-driven* column — the one place a `field_override` value is reflected back into an ETL-managed column rather than merged only at read time. It is sound for the same reason `Scholar.status` is (§ Scholar suppression): there is exactly one app-layer writer that reconciles it from the manual layer (the `/api/edit` slug paths), and the ETL's only slug writer (`maybeUpdatedSlug`) defers to the pin. The asymmetry with the read-time `overview` override is deliberate — `slug` is routing-critical and `@unique`, so it must live in the indexed canonical column the resolver keys on, not be overlaid per-request.
+
+### A2.2 Reserved-word denylist
+
+`RESERVED_SLUGS` (`lib/slug.ts`, re-exported from `lib/edit/validators.ts`) enumerates every current and reserved-future top-level route segment plus the `/scholars/*` sub-segments a slug must not shadow. Enforced two ways: a *derived* slug landing on a reserved word takes the numeric floor (`about` → `about-2`, via `nextAvailableSlug`); a *requested or override* slug equal to a reserved word is rejected (`validateSlugFormat` → `error: "reserved"`). This guards the PR-2 root-alias catch-all route (`/<slug>`) against a scholar slug shadowing a real route word.
+
+### A2.3 Downstream requirement (enforceable) — Scholar hard-delete is prohibited in app code
+
+`SlugHistory.current` has `onDelete: Cascade` to `Scholar`. **Hard-deleting a `Scholar` row therefore cascades away its `slug_history` rows and frees those slugs for reuse — an identity-bleed vector**: a slug that 301-redirected to scholar A could later be minted for, or overridden onto, scholar B, so an old citation URL silently resolves to the wrong person.
+
+The system's deliberate disappearance mechanism is **soft delete** — `Scholar.deletedAt` (departed) and `Scholar.status='suppressed'` (manual takedown). Both keep the row, and thus its `slug_history`, intact; the read paths already filter on both, so a soft-deleted scholar's slugs neither resolve nor 301 to a live profile, yet remain *reserved* against reuse.
+
+**Requirement:** application code MUST NOT hard-delete a `Scholar` row. Removal from public view is always a soft delete (`deletedAt` / `status`). This is a convention guarded by PR review and the threat model (#497 §7), not a DB constraint — `onDelete: Cascade` is retained because it is correct for the legitimate operational case (a true data-erasure run, e.g. a GDPR/right-to-be-forgotten action, deliberately *should* take the history with it). The prohibition is on routine app-layer deletion, not on that out-of-band administrative path.
