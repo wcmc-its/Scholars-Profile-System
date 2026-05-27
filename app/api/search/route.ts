@@ -290,6 +290,11 @@ export async function GET(request: NextRequest) {
       includeIncomplete,
     },
     topic,
+    // Issue #309 / SPEC §6.1.2 — hand the already-computed relevance mode and
+    // classified shape down so `searchPeople` can route a `name` query to the
+    // name-shape body without re-classifying or re-fetching the surname set.
+    relevanceMode: appliedRelevanceMode,
+    shape: queryShape,
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).

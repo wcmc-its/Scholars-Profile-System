@@ -45,6 +45,10 @@ import {
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import { resolveConceptMode } from "@/lib/api/search-flags";
+// Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
+// distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
+// to keep both names unambiguous within this module.
+import type { PeopleQueryShape as PeopleQueryClassification } from "@/lib/api/people-query-shape";
 
 const PAGE_SIZE = 20;
 
@@ -231,10 +235,17 @@ export type DeptDivBucket = { value: string; label: string; count: number };
  * stream can attribute result-count and ranking changes to the correct
  * code path. Reserved values (`concept_filtered`, `concept_fallback`) name
  * future §1.6 shapes up front to avoid a schema migration later.
+ *
+ * Issue #309 / SPEC §6.1.2 — `name_template` names the v3 name-shape body
+ * (name fields only). It is independent of the #259 restructure flag: when
+ * the relevance mode is `v3` and the classifier returns `name`, this label
+ * supersedes `legacy_multi_match` / `restructured_msm` so analytics can tell
+ * a name-only body apart from the cross_fields fallback families.
  */
 export type PeopleQueryShape =
   | "legacy_multi_match"
   | "restructured_msm"
+  | "name_template"
   | "concept_filtered"
   | "concept_fallback";
 
@@ -312,6 +323,22 @@ export async function searchPeople(opts: {
   filters?: PeopleFilters;
   /** Phase 3 D-10 — filter results to scholars who have publications in this topic (parent topic slug). */
   topic?: string;
+  /**
+   * Issue #309 / SPEC §6.1 — the `SEARCH_PEOPLE_RELEVANCE_MODE` value at
+   * request time. The route reads the env and classifies the query; both are
+   * passed down so this function stays env-free and re-uses the route's
+   * already-computed classification (no second classifier run, no second
+   * surname-set fetch). Defaults to `legacy` so headless callers that don't
+   * opt in keep today's behavior.
+   */
+  relevanceMode?: "legacy" | "v3";
+  /**
+   * Issue #309 / SPEC §6.1.1 — the classifier shape from the route
+   * (`classifyPeopleQuery`). Only `name` triggers a body change in PR-2; the
+   * remaining shapes ride the existing restructure/legacy body until PR-3/PR-4
+   * add their templates.
+   */
+  shape?: PeopleQueryClassification;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -325,9 +352,22 @@ export async function searchPeople(opts: {
   // emergency rollback without redeploying.
   const useRestructure =
     (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "on") === "on";
-  const queryShape: PeopleQueryShape = useRestructure
+
+  // Issue #309 / SPEC §6.1.2 — name-shape template. When the relevance mode is
+  // `v3` and the route classified the query as `name`, the body restricts to
+  // name fields only (the Problem #2 fix: a surname matching unrelated pubs no
+  // longer fans those scholars in via cross_fields). Independent of the #259
+  // restructure flag — `v3` supersedes it for this shape. Empty/whitespace
+  // queries fall through to the `match_all` browse branch, so gate on a
+  // non-empty trimmed query.
+  const relevanceMode = opts.relevanceMode ?? "legacy";
+  const applyNameTemplate =
+    relevanceMode === "v3" && opts.shape === "name" && trimmed.length > 0;
+
+  let queryShape: PeopleQueryShape = useRestructure
     ? "restructured_msm"
     : "legacy_multi_match";
+  if (applyNameTemplate) queryShape = "name_template";
 
   // D-10 topic pre-filter: resolve cwids via Prisma before hitting OpenSearch.
   // This ensures the search is scoped to scholars attributed to the topic regardless
@@ -396,7 +436,27 @@ export async function searchPeople(opts: {
   // committed to enforce. For a 3-token query like "electronic health
   // records", and/or are equivalent (msm requires all 3 anyway); they
   // diverge on 4+ tokens where msm allows 25% missing and "and" doesn't.
-  const queryBranch: Record<string, unknown> = useRestructure
+  //
+  // Issue #309 / SPEC §6.1.2 — name-shape template takes precedence over both
+  // bodies above when active. Name fields only (preferredName, fullName,
+  // lastNameSort): match_phrase (slop 2) rewards exact-order names, plain
+  // match catches reversed/initial-only order, and the lastNameSort keyword
+  // term is the single-token surname exact hit. The cwid^100 term stays in the
+  // outer `should` (the existing short-circuit), so it is NOT repeated here.
+  const queryBranch: Record<string, unknown> = applyNameTemplate
+    ? {
+        bool: {
+          should: [
+            { match_phrase: { preferredName: { query: trimmed, slop: 2, boost: 30 } } },
+            { match: { preferredName: { query: trimmed, boost: 10 } } },
+            { match_phrase: { fullName: { query: trimmed, slop: 2, boost: 30 } } },
+            { match: { fullName: { query: trimmed, boost: 10 } } },
+            { term: { lastNameSort: { value: trimmed.toLowerCase(), boost: 25 } } },
+          ],
+          minimum_should_match: 1,
+        },
+      }
+    : useRestructure
     ? {
         bool: {
           must: [
