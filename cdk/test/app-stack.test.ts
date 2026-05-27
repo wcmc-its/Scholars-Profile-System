@@ -34,7 +34,7 @@ describe("AppStack", () => {
     const { template } = buildAppStack("prod");
 
     /** Inline IAM policies attached to the app TASK role (not the exec role). */
-    function findTaskRolePolicies(): Array<{ Properties?: Record<string, any> }> {
+    function findTaskRolePolicies() {
       return Object.values(template.findResources("AWS::IAM::Policy")).filter((p) => {
         const roles = p.Properties?.Roles as Array<{ Ref?: string }> | undefined;
         return roles?.some(
