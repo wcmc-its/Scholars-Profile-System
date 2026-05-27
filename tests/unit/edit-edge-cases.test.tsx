@@ -32,6 +32,9 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockSlugHistoryFindFirst,
     mockReflectOverviewEdit,
     mockResolveProfiles,
+    mockTxScholarFindUnique,
+    mockTxScholarUpdate,
+    mockTxSlugHistoryUpsert,
   } = vi.hoisted(() => ({
     mockGetEditSession: vi.fn(),
     mockTransaction: vi.fn(),
@@ -43,6 +46,9 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockSlugHistoryFindFirst: vi.fn(),
     mockReflectOverviewEdit: vi.fn(),
     mockResolveProfiles: vi.fn(),
+    mockTxScholarFindUnique: vi.fn(),
+    mockTxScholarUpdate: vi.fn(),
+    mockTxSlugHistoryUpsert: vi.fn(),
   }));
 
   vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -74,6 +80,10 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
           findUnique: mockFieldOverrideFindUnique,
           upsert: mockFieldOverrideUpsert,
         },
+        // #497 §5.1 — slug reconcile surface; a no-Scholar-row reconcile is a
+        // no-op (the override is pinned ahead of the ED record, ADR-005 edge 6).
+        scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
+        slugHistory: { upsert: mockTxSlugHistoryUpsert },
         $executeRaw: mockExecuteRaw,
       }),
     );
@@ -85,6 +95,10 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockFieldOverrideFindFirst.mockResolvedValue(null);
     mockSlugHistoryFindFirst.mockResolvedValue(null);
     mockResolveProfiles.mockResolvedValue([]); // no affected profile yet
+    // No Scholar row for the incoming hire -> reconcile reads null -> no-op.
+    mockTxScholarFindUnique.mockResolvedValue(null);
+    mockTxScholarUpdate.mockResolvedValue({});
+    mockTxSlugHistoryUpsert.mockResolvedValue({});
   });
 
   it("a slug override write succeeds for a CWID with no Scholar row (incoming hire)", async () => {
@@ -112,15 +126,20 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     });
     expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // audit row
+    // No Scholar row yet -> the slug reconcile is a no-op (the override is the
+    // pin; the slug is applied to Scholar.slug when the ED record arrives).
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+    expect(mockTxSlugHistoryUpsert).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// UI-SPEC #17 — slug success copy includes the directory-sync caveat
+// UI-SPEC #17 — slug success copy reflects reconcile-on-write (#497 D5)
 //
-// Extra integration assertion: the user-visible message after a successful
-// slug save must include the SPEC's ETL-precedence language so a superuser
-// understands the live URL does not change immediately.
+// Extra integration assertion: under reconcile-on-write (ADR-005 Amendment 2,
+// D5) a slug override drives routing immediately, so the success message must
+// tell the superuser the change is live now and the old URL auto-redirects —
+// not the old "takes effect on the next directory sync" caveat.
 // ---------------------------------------------------------------------------
 
 describe("UI-SPEC #17 — slug save success copy", () => {
@@ -128,7 +147,7 @@ describe("UI-SPEC #17 — slug save success copy", () => {
     useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
   }));
 
-  it("success copy after Save names the next directory sync", async () => {
+  it("success copy after Save says the new URL is live and the old one redirects", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({ ok: true, fieldName: "slug", value: "new-handle" }),
@@ -145,7 +164,8 @@ describe("UI-SPEC #17 — slug save success copy", () => {
       expect(screen.getByTestId("slug-card-set-success")).toBeTruthy(),
     );
     const alert = screen.getByTestId("slug-card-set-success");
-    expect(alert.textContent).toMatch(/takes effect after the next directory sync/i);
+    expect(alert.textContent).toMatch(/is now live/i);
+    expect(alert.textContent).toMatch(/redirects to it automatically/i);
     expect(alert.textContent).toContain("/scholars/new-handle");
   });
 });

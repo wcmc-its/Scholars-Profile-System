@@ -12,6 +12,8 @@
  * a later collision; only the new arrival gets the suffix.
  */
 
+import type { PrismaClient } from "@/lib/generated/prisma/client";
+
 const COMBINING_MARKS = /\p{Mark}/gu;
 const APOSTROPHES = /['‘’ʼ]/g; // straight, curly, modifier letter
 const NON_SLUG_CHARS = /[^a-z0-9\s-]/g;
@@ -68,19 +70,71 @@ export function deriveSlug(name: string): string {
 }
 
 /**
+ * Reserved single-segment paths a slug must never equal — every current and
+ * reserved-future top-level route word, plus the `/scholars/*` segments a slug
+ * override must not shadow (#497 §6.1). A bare slug equal to one of these would
+ * either shadow a real route (the PR-2 root-alias catch-all) or a `/scholars/*`
+ * segment, so:
+ *   - a *derived* slug landing here takes the numeric floor (`about` ->
+ *     `about-2`), via `nextAvailableSlug` below; and
+ *   - a *requested / override* slug here is rejected (`validateSlugFormat`).
+ *
+ * The single source of truth: `lib/edit/validators.ts` re-exports this set, and
+ * the PR-2 root-alias route consults it. Keep this in lock-step with the route
+ * tree under `app/` (top-level segments) and `app/(public)/scholars/`.
+ */
+export const RESERVED_SLUGS: ReadonlySet<string> = new Set<string>([
+  // top-level app route segments (current + reserved-future)
+  "about",
+  "browse",
+  "centers",
+  "departments",
+  "scholars",
+  "search",
+  "topics",
+  "edit",
+  "api",
+  "og",
+  "healthz",
+  "readiness",
+  "robots",
+  "sitemap",
+  "llms",
+  "not-found",
+  "admin",
+  "login",
+  "logout",
+  "auth",
+  "static",
+  "_next",
+  "assets",
+  "news",
+  "help",
+  "support",
+  "contact",
+  // `/scholars/*` sub-segment a slug override must not shadow (legacy entry)
+  "by-cwid",
+]);
+
+/**
  * Given a base slug and a set of taken slugs, return the next available variant
  * with a numeric suffix. Used at scholar-creation time when ED reports a name
  * whose slug collides with an existing scholar.
  *
- * Returns the base slug unchanged if it isn't taken.
+ * A base slug equal to a reserved word (#497 §6.1) is treated as taken so it
+ * gets the numeric floor (`about` -> `about-2`) — a bare reserved-word slug
+ * would shadow a real route.
+ *
+ * Returns the base slug unchanged if it isn't taken and isn't reserved.
  *
  * Example:
  *   nextAvailableSlug("jane-smith", new Set()) -> "jane-smith"
  *   nextAvailableSlug("jane-smith", new Set(["jane-smith"])) -> "jane-smith-2"
  *   nextAvailableSlug("jane-smith", new Set(["jane-smith", "jane-smith-2"])) -> "jane-smith-3"
+ *   nextAvailableSlug("about", new Set()) -> "about-2"
  */
 export function nextAvailableSlug(base: string, taken: Set<string> | ReadonlySet<string>): string {
-  if (!taken.has(base)) return base;
+  if (!taken.has(base) && !RESERVED_SLUGS.has(base)) return base;
   let n = 2;
   while (taken.has(`${base}-${n}`)) n++;
   return `${base}-${n}`;
@@ -92,4 +146,60 @@ export function nextAvailableSlug(base: string, taken: Set<string> | ReadonlySet
  */
 export function looksLikeSlug(s: string): boolean {
   return /-/.test(s) || /^[a-z]+$/.test(s);
+}
+
+// ---------------------------------------------------------------------------
+// reconcile-on-write — the shared Option B helper (#497 §5.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Prisma surface `reconcileScholarSlug` needs — a `$transaction`
+ * interactive client (or the base client) satisfies it. Keeping it a `Pick`
+ * lets the helper run inside any caller's transaction.
+ */
+type SlugReconcileClient = Pick<PrismaClient, "scholar" | "slugHistory">;
+
+/**
+ * Reconcile a scholar's canonical `Scholar.slug` to `newSlug`, recording the
+ * outgoing slug in `slug_history` so the old URL keeps 301-redirecting (#497
+ * §5.1 — Option B "reconcile on write").
+ *
+ * MUST be called inside a transaction: the `slug_history` upsert and the
+ * `Scholar.slug` update commit atomically, so the 301 mapping can never lag the
+ * canonical change. The caller owns the transaction (the `/api/edit` write path
+ * wraps it with the `field_override` upsert + B03 audit row; the ETL wraps it in
+ * its per-scholar update). Collision authority is unchanged and external:
+ * `Scholar.slug @unique` + the `slug_guard` UNIQUE index both guard, and this
+ * `update` fails closed on either — rolling back the whole transaction.
+ *
+ * Returns `true` when the slug actually changed (and a history row was written),
+ * `false` on the no-op when `newSlug` already equals the current slug.
+ *
+ * This is the single implementation of the "set the slug, record the old one"
+ * step; the ED ETL's `maybeUpdatedSlug` delegates here rather than duplicating
+ * the upsert-then-update logic.
+ */
+export async function reconcileScholarSlug(
+  tx: SlugReconcileClient,
+  cwid: string,
+  newSlug: string,
+): Promise<boolean> {
+  const current = await tx.scholar.findUnique({
+    where: { cwid },
+    select: { slug: true },
+  });
+  // No scholar row (e.g. an override pinned ahead of the ED record per ADR-005
+  // edge 6), or the slug is already what we want — nothing to reconcile.
+  if (!current || current.slug === newSlug) return false;
+
+  await tx.slugHistory.upsert({
+    where: { oldSlug: current.slug },
+    update: { currentCwid: cwid },
+    create: { oldSlug: current.slug, currentCwid: cwid },
+  });
+  await tx.scholar.update({
+    where: { cwid },
+    data: { slug: newSlug },
+  });
+  return true;
 }

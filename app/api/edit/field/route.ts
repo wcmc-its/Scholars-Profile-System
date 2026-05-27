@@ -20,6 +20,7 @@ import {
   sanitizeOverview,
   validateSlugFormat,
 } from "@/lib/edit/validators";
+import { reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
 
@@ -90,6 +91,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         },
         update: { value: storedValue, actorCwid: session.cwid },
       });
+      // #497 §5.1 (Option B) — a slug override is the *pin*, but it must also
+      // drive routing: reconcile Scholar.slug to the override value in the same
+      // transaction, writing the prior slug to slug_history (so the old URL
+      // 301s). The Scholar.slug @unique + slug_guard UNIQUE guards both fail the
+      // transaction closed on a collision the app check missed.
+      if (fieldName === "slug") {
+        await reconcileScholarSlug(tx, entityId, storedValue);
+      }
       await appendAuditRow(tx, {
         actorCwid: session.cwid,
         targetEntityType: "scholar",
@@ -108,8 +117,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // --- post-commit reflection (best-effort) ---
-  // An overview edit busts the profile page; a slug override changes nothing
-  // until etl/ed consumes it, so it reflects nothing at write time.
+  // An overview edit busts the profile page. A slug override now reconciles
+  // Scholar.slug in-transaction (#497 §5.1), so the new URL resolves and the old
+  // one 301s via the existing Scholar.slug / slug_history read paths with no
+  // resolver change; ISR revalidation of the moved profile is deferred to the
+  // PR-2/§5.3 routing work (B04 surface) — out of PR-1 scope.
   if (fieldName === "overview") {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
     if (profile) reflectOverviewEdit(profile.slug);

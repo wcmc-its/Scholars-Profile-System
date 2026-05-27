@@ -198,6 +198,19 @@ describe("validateSlugFormat", () => {
   it("rejects a reserved route segment", () => {
     expect(validateSlugFormat("by-cwid")).toEqual({ ok: false, error: "reserved" });
   });
+
+  it("rejects the expanded reserved-word denylist (#497 §6.1)", () => {
+    for (const w of ["search", "about", "api", "edit", "scholars", "admin", "login"]) {
+      expect(validateSlugFormat(w)).toEqual({ ok: false, error: "reserved" });
+    }
+  });
+
+  it("admits a name slug that merely contains a reserved word as a part", () => {
+    expect(validateSlugFormat("jane-about-smith")).toEqual({
+      ok: true,
+      value: "jane-about-smith",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import { appendAuditRow } from "@/lib/edit/audit";
 import { logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { isEditableField } from "@/lib/edit/validators";
+import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/clear-field";
 
@@ -77,6 +78,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // emitted for a no-op clear; an audit row records a state change.
       if (!existing) return false;
       await tx.fieldOverride.delete({ where: key });
+
+      // #497 §5.1 (clear arm) — clearing the pin returns the scholar to the
+      // name-derived slug *immediately*, not on the next ETL run. Re-derive from
+      // the current preferredName and find the numeric/reserved floor against
+      // every other live scholar's slug; reconcileScholarSlug writes the old
+      // pinned slug to slug_history (so its URL 301s) and sets Scholar.slug.
+      // No-op when the derived slug already equals the current one (the pin
+      // matched the derived value). Reserved-word avoidance rides nextAvailableSlug.
+      const scholar = await tx.scholar.findUnique({
+        where: { cwid: entityId },
+        select: { preferredName: true },
+      });
+      if (scholar) {
+        const taken = new Set(
+          (
+            await tx.scholar.findMany({
+              where: { cwid: { not: entityId } },
+              select: { slug: true },
+            })
+          ).map((s) => s.slug),
+        );
+        const derived = nextAvailableSlug(
+          deriveSlug(scholar.preferredName) || entityId.toLowerCase(),
+          taken,
+        );
+        await reconcileScholarSlug(tx, entityId, derived);
+      }
+
       await appendAuditRow(tx, {
         actorCwid: session.cwid,
         targetEntityType: "scholar",

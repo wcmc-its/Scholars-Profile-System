@@ -12,6 +12,9 @@ const {
   mockSlugHistoryFindFirst,
   mockReflectOverviewEdit,
   mockResolveProfiles,
+  mockTxScholarFindUnique,
+  mockTxScholarUpdate,
+  mockTxSlugHistoryUpsert,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -23,6 +26,9 @@ const {
   mockSlugHistoryFindFirst: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockResolveProfiles: vi.fn(),
+  mockTxScholarFindUnique: vi.fn(),
+  mockTxScholarUpdate: vi.fn(),
+  mockTxSlugHistoryUpsert: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -48,6 +54,8 @@ const ADMIN = { cwid: "adm001", isSuperuser: true };
 
 const fakeTx = {
   fieldOverride: { findUnique: mockFieldOverrideFindUnique, upsert: mockFieldOverrideUpsert },
+  scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
+  slugHistory: { upsert: mockTxSlugHistoryUpsert },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -72,6 +80,11 @@ beforeEach(() => {
   mockFieldOverrideFindFirst.mockResolvedValue(null);
   mockSlugHistoryFindFirst.mockResolvedValue(null);
   mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
+  // reconcileScholarSlug surface inside the tx — default: current slug differs
+  // from the new value so a reconcile fires.
+  mockTxScholarFindUnique.mockResolvedValue({ slug: "old-slug" });
+  mockTxScholarUpdate.mockResolvedValue({});
+  mockTxSlugHistoryUpsert.mockResolvedValue({});
 });
 
 describe("POST /api/edit/field", () => {
@@ -130,14 +143,67 @@ describe("POST /api/edit/field", () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "new-slug" }));
     expect(res.status).toBe(200);
-    expect(mockReflectOverviewEdit).not.toHaveBeenCalled(); // slug reflects nothing at write time
+    expect(mockReflectOverviewEdit).not.toHaveBeenCalled(); // overview reflection only
   });
 
-  it("rejects a colliding slug with 400", async () => {
+  it("reconciles Scholar.slug + slug_history on a slug override (#497 §5.1)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockTxScholarFindUnique.mockResolvedValue({ slug: "brandon-swed-2" });
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "brandon-swed" }),
+    );
+    expect(res.status).toBe(200);
+    // the override row (the pin) is still upserted
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+    // ...and Scholar.slug reconciled in the same tx, old slug -> history
+    expect(mockTxSlugHistoryUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { oldSlug: "brandon-swed-2" },
+        create: { oldSlug: "brandon-swed-2", currentCwid: "sch5" },
+      }),
+    );
+    expect(mockTxScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "sch5" },
+      data: { slug: "brandon-swed" },
+    });
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // B03 audit row in the same tx
+  });
+
+  it("does not touch Scholar.slug when the override equals the current slug (no-op reconcile)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockTxScholarFindUnique.mockResolvedValue({ slug: "brandon-swed" });
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "brandon-swed" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+    expect(mockTxSlugHistoryUpsert).not.toHaveBeenCalled();
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does NOT reconcile Scholar.slug on an overview edit (only slug overrides reconcile)", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "overview", value: "<p>hi</p>" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+    expect(mockTxSlugHistoryUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects a colliding slug with 400 (live Scholar.slug)", async () => {
     mockGetEditSession.mockResolvedValue(ADMIN);
     mockScholarFindFirst.mockResolvedValue({ cwid: "other" });
     const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "taken" }));
     expect(res.status).toBe(400);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reserved-word slug with 400 (#497 §6.1)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "search" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("reserved");
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

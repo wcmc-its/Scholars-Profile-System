@@ -27,7 +27,7 @@ import { db } from "../../lib/db";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
-import { deriveSlug, nextAvailableSlug } from "@/lib/slug";
+import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 import { classifyByExternalId } from "@/lib/etl/reconcile";
 import { appointmentContentKey } from "@/lib/etl/content-keys";
 import {
@@ -430,6 +430,19 @@ async function main() {
     const existingByCwid = new Map(existing.map((s) => [s.cwid, s]));
     const existingSlugs = new Set(existing.map((s) => s.slug));
 
+    // #497 §5.2 — cwids whose slug is *pinned* by a FieldOverride(slug) row.
+    // A pinned scholar's slug must never be re-minted on a name change
+    // (`maybeUpdatedSlug` skips them). Loaded once for the whole run, alongside
+    // existingSlugs, so the per-scholar loop does no extra query.
+    const pinnedSlugCwids = new Set(
+      (
+        await db.write.fieldOverride.findMany({
+          where: { entityType: "scholar", fieldName: "slug" },
+          select: { entityId: true },
+        })
+      ).map((o) => o.entityId),
+    );
+
     let created = 0;
     let updated = 0;
     let reactivated = 0;
@@ -734,9 +747,6 @@ async function main() {
             primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
             roleCategory,
-            // Slug is NOT regenerated on update if the name is unchanged. If it
-            // changed, derive a new one and write the old to slug_history.
-            ...(await maybeUpdatedSlug(existingScholar.slug, f.preferredName, f.cwid, existingSlugs)),
             ...(wasDeleted ? { deletedAt: null } : {}),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
             // SOR primary active appointment (level1/level2 subtypes).
@@ -749,6 +759,19 @@ async function main() {
             clinicalProfileUrl: f.clinicalProfileUrl,
           },
         });
+        // Slug is NOT regenerated on update if the name is unchanged, and a
+        // slug pinned by a FieldOverride(slug) is never re-minted (#497 §5.2).
+        // When the name changed in a slug-affecting way, re-mint: write the old
+        // slug to slug_history and set the new one. Done as a separate write
+        // (after the profile-fields update) so it shares reconcileScholarSlug
+        // with the /api/edit override path rather than duplicating it.
+        await maybeUpdatedSlug(
+          existingScholar.slug,
+          f.preferredName,
+          f.cwid,
+          existingSlugs,
+          pinnedSlugCwids,
+        );
         await refreshEdAppointments(f.cwid, appointmentsByCwid.get(f.cwid) ?? []);
         if (wasDeleted) reactivated += 1;
         updated += 1;
@@ -1414,37 +1437,59 @@ async function main() {
   }
 }
 
-async function maybeUpdatedSlug(
+/**
+ * Re-mint a scholar's slug after a slug-affecting name change — unless the slug
+ * is pinned by a `FieldOverride(slug)` (#497 §5.2), in which case it is left
+ * untouched. When a re-mint is warranted, the old slug is written to
+ * `slug_history` and `Scholar.slug` is set via the shared `reconcileScholarSlug`
+ * helper (the same primitive the `/api/edit` override path uses), then the
+ * in-memory `existingSlugs` set is updated so later scholars in this run resolve
+ * collisions against the new value.
+ *
+ * Side-effecting (writes the DB) and returns nothing — the slug is no longer
+ * folded into the caller's `scholar.update` payload; `reconcileScholarSlug` does
+ * its own `scholar.update`.
+ */
+export async function maybeUpdatedSlug(
   currentSlug: string,
   newName: string,
   cwid: string,
   existingSlugs: Set<string>,
-): Promise<{ slug?: string }> {
+  pinnedSlugCwids: ReadonlySet<string>,
+): Promise<void> {
+  // #497 §5.2 — a pinned slug is authoritative; never re-mint it. The override
+  // is the pin; Scholar.slug and slug_history stay exactly as the last set/clear
+  // through /api/edit left them.
+  if (pinnedSlugCwids.has(cwid)) return;
+
   const newBase = deriveSlug(newName) || cwid.toLowerCase();
   // If the current slug matches the derived base (or a base-N suffix variant),
   // nothing to do. Otherwise the name changed in a slug-affecting way.
   const base = currentSlug.replace(/-\d+$/, "");
-  if (base === newBase) return {};
+  if (base === newBase) return;
 
   const newSlug = nextAvailableSlug(newBase, existingSlugs);
-  if (newSlug === currentSlug) return {};
+  if (newSlug === currentSlug) return;
 
-  // Record the old slug in history; emit the new slug.
-  await db.write.slugHistory.upsert({
-    where: { oldSlug: currentSlug },
-    update: { currentCwid: cwid },
-    create: { oldSlug: currentSlug, currentCwid: cwid },
-  });
+  // Record the old slug in history and set the new one — shared with the
+  // /api/edit override write path. Not wrapped in a transaction here because
+  // the ED ETL is a single-writer batch (no concurrent slug writer); the helper
+  // still fails closed on the Scholar.slug @unique guard.
+  await reconcileScholarSlug(db.write, cwid, newSlug);
   existingSlugs.delete(currentSlug);
   existingSlugs.add(newSlug);
-  return { slug: newSlug };
 }
 
-main()
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await db.write.$disconnect();
-  });
+// Run the ETL only when this file is executed as a script — never when it is
+// imported (a unit test importing `maybeUpdatedSlug` must not trigger a full ED
+// sync inside the vitest worker). Mirrors the guard in `etl/search-index/index.ts`.
+if (!process.env.VITEST) {
+  main()
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await db.write.$disconnect();
+    });
+}
