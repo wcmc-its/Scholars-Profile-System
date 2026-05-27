@@ -27,6 +27,7 @@ import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { isChairTitleFor } from "@/lib/leadership";
+import { RESERVED_SLUGS } from "@/lib/slug";
 
 /** The v1 `field_override.fieldName` allowlist (`self-edit-spec.md`). */
 export const EDITABLE_FIELDS = ["overview", "slug"] as const;
@@ -173,11 +174,14 @@ export const SLUG_MAX_LENGTH = 64;
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 
 /**
- * Static segments under `/scholars/*` a slug override must never shadow.
- * Keep in sync with `app/(public)/scholars/`; `self-edit-spec.md` names
- * `by-cwid` as the worked example.
+ * Reserved single-segment paths a slug override / request must never equal —
+ * every current and reserved-future top-level route word plus the `/scholars/*`
+ * segments (#497 §6.1). The canonical set lives in `lib/slug.ts` (the low-
+ * dependency module the ETL mint path also consults); re-exported here so the
+ * write-path validators, the PR-2 root-alias route, and PR-3 request validation
+ * all share one source of truth.
  */
-export const RESERVED_SLUGS = new Set<string>(["by-cwid"]);
+export { RESERVED_SLUGS };
 
 export type SlugFormatResult =
   | { ok: true; value: string }
