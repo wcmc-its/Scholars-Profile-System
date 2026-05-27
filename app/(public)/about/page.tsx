@@ -32,8 +32,14 @@ export default function AboutPage() {
         grant databases, publication records, and the ReCiterAI scoring pipeline.
       </p>
       <Link
-        href="/about/methodology"
+        href="/about/help"
         className="mt-6 block text-base text-[var(--color-accent-slate)] underline underline-offset-4 hover:no-underline"
+      >
+        Help &amp; FAQ &#x2192;
+      </Link>
+      <Link
+        href="/about/methodology"
+        className="mt-3 block text-base text-[var(--color-accent-slate)] underline underline-offset-4 hover:no-underline"
       >
         How algorithmic surfaces work &#x2192;
       </Link>

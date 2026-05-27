@@ -12,6 +12,7 @@
  * llms.txt spec. Served as text/plain with a 24h revalidate.
  */
 import { prisma } from "@/lib/db";
+import { HELP_ENTRIES } from "@/lib/docs/help-content";
 
 export const revalidate = 86400;
 
@@ -56,8 +57,18 @@ export async function GET() {
     `- [Methodology](${BASE}/about/methodology): data sources, refresh cadence, and how publication–scholar attributions are produced.`,
   );
   sections.push(
+    `- [Help & FAQ](${BASE}/about/help): answers to common questions about Impact scores, publications, search, data sources, and corrections.`,
+  );
+  sections.push(
     `- [Sitemap](${BASE}/sitemap.xml): complete list of indexed URLs (every scholar, topic, department, and center).`,
   );
+  sections.push("");
+
+  sections.push("## Help & FAQ");
+  sections.push("");
+  for (const e of HELP_ENTRIES) {
+    sections.push(`- [${e.title}](${BASE}/about/help/${e.slug}): ${e.description}`);
+  }
   sections.push("");
 
   sections.push("## Navigation");
