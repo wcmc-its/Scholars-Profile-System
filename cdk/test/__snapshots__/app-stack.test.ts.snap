@@ -300,6 +300,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "SAML_CWID_ATTRIBUTE",
                 "Value": "CWID",
               },
+              {
+                "Name": "SELF_EDIT_REQUEST_CHANGE_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_MAIL_FROM",
+                "Value": "no-reply-scholars@weill.cornell.edu",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -1835,6 +1843,32 @@ service:
       },
       "Type": "AWS::IAM::Role",
     },
+    "TaskRoleSesPolicy94AACEAC": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ses:SendEmail",
+              "Condition": {
+                "StringEquals": {
+                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-ses",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleXrayPolicyBA24E3D0": {
       "Properties": {
         "PolicyDocument": {
@@ -2229,6 +2263,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SAML_CWID_ATTRIBUTE",
                 "Value": "CWID",
+              },
+              {
+                "Name": "SELF_EDIT_REQUEST_CHANGE_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_MAIL_FROM",
+                "Value": "no-reply-scholars@weill.cornell.edu",
               },
             ],
             "Essential": true,
@@ -3850,6 +3892,32 @@ service:
         "RoleName": "sps-task-staging",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "TaskRoleSesPolicy94AACEAC": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ses:SendEmail",
+              "Condition": {
+                "StringEquals": {
+                  "ses:FromAddress": "no-reply-scholars@weill.cornell.edu",
+                },
+              },
+              "Effect": "Allow",
+              "Resource": "arn:aws:ses:us-east-1:123456789012:identity/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-ses",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "TaskRoleXrayPolicyBA24E3D0": {
       "Properties": {

@@ -33,6 +33,35 @@ describe("AppStack", () => {
   describe("prod", () => {
     const { template } = buildAppStack("prod");
 
+    /** Inline IAM policies attached to the app TASK role (not the exec role). */
+    function findTaskRolePolicies(): Array<{ Properties?: Record<string, any> }> {
+      return Object.values(template.findResources("AWS::IAM::Policy")).filter((p) => {
+        const roles = p.Properties?.Roles as Array<{ Ref?: string }> | undefined;
+        return roles?.some(
+          (r) =>
+            typeof r.Ref === "string" &&
+            r.Ref.includes("TaskRole") &&
+            !r.Ref.includes("TaskExecutionRole"),
+        );
+      });
+    }
+
+    /** The `app` container's environment as a name -> value map. */
+    function appContainerEnv(): Map<string, string | undefined> {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-prod",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      return new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+    }
+
     it("matches the snapshot", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
@@ -475,7 +504,7 @@ describe("AppStack", () => {
         // assumes -- must never be in a position to pull a fresh secret
         // value at runtime.
         const policies = template.findResources("AWS::IAM::Policy");
-        const taskRolePolicy = Object.values(policies).find((p) => {
+        const taskRolePolicies = Object.values(policies).filter((p) => {
           const roles = p.Properties?.Roles as
             | Array<{ Ref?: string }>
             | undefined;
@@ -486,13 +515,12 @@ describe("AppStack", () => {
               !r.Ref.includes("TaskExecutionRole"),
           );
         });
-        // The task role currently has no attached policy at all -- if
-        // some future PR introduces one, this assertion catches a
-        // secrets:* smuggle attempt before the PR lands.
-        if (taskRolePolicy !== undefined) {
-          const serialized = JSON.stringify(
-            taskRolePolicy.Properties?.PolicyDocument,
-          );
+        // Whatever policies are attached to the task role (X-Ray, SES, ...),
+        // NONE may carry a secretsmanager action -- the running app must never
+        // be able to pull a fresh secret value. Catches a secrets:* smuggle
+        // before the PR lands.
+        for (const policy of taskRolePolicies) {
+          const serialized = JSON.stringify(policy.Properties?.PolicyDocument);
           expect(serialized).not.toMatch(/secretsmanager:/);
         }
       });
@@ -999,21 +1027,16 @@ describe("AppStack", () => {
         // xray:PutTraceSegments + xray:PutTelemetryRecords on Resource:*.
         // Inline (not AWSXRayDaemonWriteAccess) so the action surface stays
         // pinned + immune to AWS quietly extending the managed document.
-        const policies = template.findResources("AWS::IAM::Policy");
-        const taskRolePolicy = Object.values(policies).find((p) => {
-          const roles = p.Properties?.Roles as
-            | Array<{ Ref?: string }>
-            | undefined;
-          return roles?.some(
-            (r) =>
-              typeof r.Ref === "string" &&
-              r.Ref.includes("TaskRole") &&
-              !r.Ref.includes("TaskExecutionRole"),
-          );
-        });
-        expect(taskRolePolicy).toBeDefined();
-        const statements = taskRolePolicy?.Properties?.PolicyDocument
-          ?.Statement as Array<Record<string, unknown>> | undefined;
+        // The task role now carries two inline policies (X-Ray + SES); select
+        // the X-Ray one by its actions rather than assuming a single policy.
+        const taskRolePolicies = findTaskRolePolicies();
+        const xrayPolicy = taskRolePolicies.find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes("xray:"),
+        );
+        expect(xrayPolicy).toBeDefined();
+        const statements = xrayPolicy?.Properties?.PolicyDocument?.Statement as
+          | Array<Record<string, unknown>>
+          | undefined;
         expect(statements).toHaveLength(2);
         const actions = statements
           ?.flatMap((s) =>
@@ -1029,6 +1052,39 @@ describe("AppStack", () => {
         for (const stmt of statements ?? []) {
           expect(stmt.Resource).toBe("*");
         }
+      });
+
+      it("the SES send grant is the single ses:SendEmail action, From-conditioned + identity-scoped (#160 Phase 2)", () => {
+        // Synth-time guard (deploy-only-validation pattern): the "Request a
+        // change" mailer grant must be least-privilege -- one action, scoped to
+        // SES identities (never a bare `*` resource), and conditioned to the one
+        // verified no-reply From so the task can't send as any other address.
+        const sesPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes("ses:SendEmail"),
+        );
+        expect(sesPolicy).toBeDefined();
+        const statements = sesPolicy?.Properties?.PolicyDocument?.Statement as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("ses:SendEmail");
+        // Resource is SES-identity-scoped, NOT a blanket "*".
+        const resource = stmt.Resource as string;
+        expect(resource).not.toBe("*");
+        expect(resource).toContain(":identity/");
+        // The From-address condition pins the sender.
+        expect(stmt.Condition).toMatchObject({
+          StringEquals: { "ses:FromAddress": "no-reply-scholars@weill.cornell.edu" },
+        });
+      });
+
+      it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {
+        // Dormant by default: the endpoint 503s + the client mailto: fallback
+        // stays in force until ops flip the flag post-verification.
+        const env = appContainerEnv();
+        expect(env.get("SELF_EDIT_REQUEST_CHANGE_SEND")).toBe("off");
+        expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
       it("the task role has zero AWS managed policies attached", () => {

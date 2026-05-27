@@ -116,6 +116,9 @@ export function RequestAChangeDialog({
   const [revealFallback, setRevealFallback] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
+  const [sending, setSending] = React.useState(false);
+  /** How the request was sent — drives the confirmation copy. */
+  const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -124,6 +127,8 @@ export function RequestAChangeDialog({
       setRevealFallback(false);
       setSubmitted(false);
       setConfirmDiscard(false);
+      setSending(false);
+      setSentVia(null);
     }
   }, [open]);
 
@@ -140,6 +145,7 @@ export function RequestAChangeDialog({
     setDetail("");
     setRevealFallback(false);
     setSubmitted(false);
+    setSentVia(null);
   }
 
   // Single choke point for every close path (Esc / scrim / X / Cancel).
@@ -186,6 +192,43 @@ export function RequestAChangeDialog({
     return "#";
   }
 
+  /**
+   * Submit a `route` request. Phase 2: POST to the server mailer; on success the
+   * confirmation reads "Request sent." On ANY non-2xx (incl. `503 send_disabled`
+   * while the mailer is dark) or a network error, fall back to the Phase-1
+   * `mailto:` + its banner — so behavior never regresses before the flag flips.
+   */
+  async function handleRouteSubmit() {
+    if (!issue || !submitTarget) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/edit/request-change", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          attribute,
+          issueId: issue.id,
+          itemId: itemLabel,
+          detail,
+          targetCwid: cwid,
+        }),
+      });
+      if (res.ok) {
+        setSentVia("server");
+        setSubmitted(true);
+        return;
+      }
+    } catch {
+      // network error — fall through to the mailto: fallback
+    } finally {
+      setSending(false);
+    }
+    // Phase-1 fallback: hand off to the user's own mail client.
+    window.location.href = routeMailto();
+    setSentVia("mailto");
+    setSubmitted(true);
+  }
+
   const cta = action ? ctaFor(action, revealFallback) : null;
   const isAck = action?.kind === "explain" && !revealFallback; // dead-end "Got it"
 
@@ -221,16 +264,32 @@ export function RequestAChangeDialog({
           {submitted && submitTarget ? (
             /* ---- post-submit confirmation (route) ---- */
             <div className="flex flex-col gap-2" role="status" aria-live="polite">
-              <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
-              <p className="text-muted-foreground text-sm">
-                Your email client should have opened a pre-filled message
-                {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
-                opened, email{" "}
-                <a className="text-[var(--apollo-maroon)] underline" href={`mailto:${submitTarget.email}`}>
-                  {submitTarget.email}
-                </a>{" "}
-                directly.
-              </p>
+              {sentVia === "server" ? (
+                <>
+                  <p className="text-base font-medium">Request sent.</p>
+                  <p className="text-muted-foreground text-sm">
+                    We&apos;ve routed your request
+                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. They&apos;ll
+                    follow up if they need more detail.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
+                  <p className="text-muted-foreground text-sm">
+                    Your email client should have opened a pre-filled message
+                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
+                    opened, email{" "}
+                    <a
+                      className="text-[var(--apollo-maroon)] underline"
+                      href={`mailto:${submitTarget.email}`}
+                    >
+                      {submitTarget.email}
+                    </a>{" "}
+                    directly.
+                  </p>
+                </>
+              )}
             </div>
           ) : confirmDiscard ? (
             /* ---- unsaved-text discard guard (edge case 3) ---- */
@@ -379,10 +438,13 @@ export function RequestAChangeDialog({
                   </Button>
                 )}
                 {showRouteBox && (
-                  <Button asChild data-testid="request-a-change-submit">
-                    <a href={routeMailto()} onClick={() => setSubmitted(true)}>
-                      {cta}
-                    </a>
+                  <Button
+                    type="button"
+                    data-testid="request-a-change-submit"
+                    disabled={sending}
+                    onClick={handleRouteSubmit}
+                  >
+                    {sending ? "Sending…" : cta}
                   </Button>
                 )}
                 {isAck && (
