@@ -73,6 +73,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
         "Ref": "EcsCluster97242B84",
       },
     },
+    "EcsDbBootstrapTaskFamily": {
+      "Description": "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      "Value": "sps-db-bootstrap-prod",
+    },
     "EcsMigrationTaskFamily": {
       "Description": "SPS one-shot prisma migrate deploy task family",
       "Value": "sps-migrate-prod",
@@ -702,6 +706,141 @@ service:
       },
       "Type": "AWS::ECS::TaskDefinition",
     },
+    "DbBootstrapLogGroupAF64F8C3": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-db-bootstrap-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "DbBootstrapTaskDefinition603C6DE9": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/db-bootstrap.ts",
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "DbBootstrapLogGroupAF64F8C3",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "db-bootstrap",
+              },
+            },
+            "Name": "db-bootstrap",
+            "Secrets": [
+              {
+                "Name": "BOOTSTRAP_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "APP_RW_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-rw",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "TaskExecutionRole250D2532",
+            "Arn",
+          ],
+        },
+        "Family": "sps-db-bootstrap-prod",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole30FC0FBB",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
     "DeployRole885297C3": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -769,18 +908,32 @@ service:
             {
               "Action": "ecs:RunTask",
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":ecs:us-east-1:123456789012:task-definition/sps-migrate-prod:*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-migrate-prod:*",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-prod:*",
+                    ],
+                  ],
+                },
+              ],
             },
             {
               "Action": [
@@ -1535,6 +1688,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1577,6 +1742,26 @@ service:
                       {
                         "Fn::GetAtt": [
                           "MigrationLogGroupFD140541",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DbBootstrapLogGroupAF64F8C3",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DbBootstrapLogGroupAF64F8C3",
                           "Arn",
                         ],
                       },
@@ -1816,6 +2001,52 @@ service:
                 ],
               },
             },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DbBootstrapLogGroupAF64F8C3",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -2040,6 +2271,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
       "Value": {
         "Ref": "EcsCluster97242B84",
       },
+    },
+    "EcsDbBootstrapTaskFamily": {
+      "Description": "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+      "Value": "sps-db-bootstrap-staging",
     },
     "EcsMigrationTaskFamily": {
       "Description": "SPS one-shot prisma migrate deploy task family",
@@ -2735,6 +2970,141 @@ service:
       },
       "Type": "AWS::IAM::Role",
     },
+    "DbBootstrapLogGroupAF64F8C3": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-db-bootstrap-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "DbBootstrapTaskDefinition603C6DE9": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/db-bootstrap.ts",
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "DbBootstrapLogGroupAF64F8C3",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "db-bootstrap",
+              },
+            },
+            "Name": "db-bootstrap",
+            "Secrets": [
+              {
+                "Name": "BOOTSTRAP_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "APP_RW_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-rw",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "TaskExecutionRole250D2532",
+            "Arn",
+          ],
+        },
+        "Family": "sps-db-bootstrap-staging",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole30FC0FBB",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
+    },
     "DeployRole885297C3": {
       "Properties": {
         "AssumeRolePolicyDocument": {
@@ -2804,18 +3174,32 @@ service:
             {
               "Action": "ecs:RunTask",
               "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":ecs:us-east-1:123456789012:task-definition/sps-migrate-staging:*",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-migrate-staging:*",
+                    ],
                   ],
-                ],
-              },
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-staging:*",
+                    ],
+                  ],
+                },
+              ],
             },
             {
               "Action": [
@@ -3589,6 +3973,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -3631,6 +4027,26 @@ service:
                       {
                         "Fn::GetAtt": [
                           "MigrationLogGroupFD140541",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DbBootstrapLogGroupAF64F8C3",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DbBootstrapLogGroupAF64F8C3",
                           "Arn",
                         ],
                       },
@@ -3867,6 +4283,52 @@ service:
                 "Fn::GetAtt": [
                   "MigrationLogGroupFD140541",
                   "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DbBootstrapLogGroupAF64F8C3",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap-??????",
+                  ],
                 ],
               },
             },

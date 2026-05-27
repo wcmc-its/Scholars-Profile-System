@@ -61,6 +61,27 @@ npm run db:check
 
 It prints the host, port, database, server version (MySQL vs MariaDB), and the column count for the `grant` table as a schema sanity check.
 
+### Audit log (`scholars_audit`)
+
+`/api/edit` writes (Hide/Show, field overrides, "Request a change") append a B03
+audit row to a **separate** `scholars_audit` database, and the app role needs an
+`INSERT` grant there or every edit 500s (the audit INSERT is in-transaction —
+#493). Provision it once locally:
+
+```bash
+# BOOTSTRAP_DSN = a privileged local login (root) that can CREATE DATABASE + GRANT.
+# APP_RW_DSN    = your app DSN (the grantee). GRANTEE_HOST=localhost because the
+#                 local app user is 'scholars'@'localhost' (Aurora uses '%').
+BOOTSTRAP_DSN='mysql://root@127.0.0.1:3306/' \
+APP_RW_DSN="$DATABASE_URL" \
+GRANTEE_HOST=localhost \
+npm run db:audit-setup
+```
+
+This is the same runner (`scripts/db-bootstrap.ts`) the deploy pipeline runs as
+the `sps-db-bootstrap` task; it applies `scripts/sql/audit-log.sql` and grants the
+app role INSERT-only on the audit table, verifying the grant before it exits.
+
 ## Local setup
 
 ```bash

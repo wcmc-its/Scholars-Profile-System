@@ -67,11 +67,12 @@ describe("AppStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, two task definitions, one ECS service", () => {
+      it("creates exactly two ECR repositories (app + ETL), one ECS cluster, three task definitions, one ECS service", () => {
         // App image repo + the dedicated ETL batch-image repo (#454).
         template.resourceCountIs("AWS::ECR::Repository", 2);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
+        // app + migrate + db-bootstrap (#493).
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 3);
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
@@ -171,14 +172,15 @@ describe("AppStack", () => {
           .toMatch(/\.s3"\s*\]/);
       });
 
-      it("creates exactly three CloudWatch log groups (app + migrate + otel-collector sidecar)", () => {
-        template.resourceCountIs("AWS::Logs::LogGroup", 3);
+      it("creates exactly four CloudWatch log groups (app + migrate + db-bootstrap + otel-collector sidecar)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 4);
         const groups = template.findResources("AWS::Logs::LogGroup");
         const names = Object.values(groups)
           .map((r) => r.Properties?.LogGroupName as string | undefined)
           .sort();
         expect(names).toEqual([
           "/aws/ecs/sps-app-prod",
+          "/aws/ecs/sps-db-bootstrap-prod",
           "/aws/ecs/sps-migrate-prod",
           "/aws/ecs/sps-otel-prod",
         ]);
@@ -459,16 +461,44 @@ describe("AppStack", () => {
         )?.map((s) => s.Name);
         expect(secretNames).toEqual(["DATABASE_URL"]);
       });
+
+      it("the db-bootstrap task runs the tsx runner on the ETL image with both DSNs (#493)", () => {
+        // Synth-time guard (deploy-only-validation pattern): the audit-bootstrap
+        // task must run scripts/db-bootstrap.ts (the ETL image is the only one
+        // with tsx + the source tree + the mariadb client), and inject exactly
+        // its least-priv login plus the app-rw DSN it reads to resolve the
+        // grantee -- nothing more.
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const bootstrap = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-db-bootstrap-prod",
+        );
+        expect(bootstrap).toBeDefined();
+        const container = (bootstrap?.Properties?.ContainerDefinitions as
+          | Array<Record<string, unknown>>
+          | undefined)?.[0];
+        expect(container?.Name).toBe("db-bootstrap");
+        expect(container?.EntryPoint).toEqual(["npx", "tsx", "scripts/db-bootstrap.ts"]);
+        // Image comes from the ETL repo, not the app repo. The Image is a
+        // Join over the ETL repo URI; assert the ETL repo logical id appears.
+        expect(JSON.stringify(container?.Image)).toMatch(/EtlEcrRepository/);
+        const secretNames = (
+          container?.Secrets as Array<{ Name?: string }> | undefined
+        )
+          ?.map((s) => s.Name)
+          .sort();
+        expect(secretNames).toEqual(["APP_RW_DSN", "BOOTSTRAP_DSN"]);
+      });
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the nine consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the ten consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The nine ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro,
         // opensearch/app, revalidate-token, session-cookie-key, the SAML SP
         // private key, etl/reciter (ReciterDB connection for funding/mentoring
         // surfaces), saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // and saml-sp/prod/cert (the SP public cert for metadata, #466).
+        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
+        // db/bootstrap (the least-priv db-bootstrap login, #493).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -491,7 +521,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(9);
+        expect(resourceList).toHaveLength(10);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -624,6 +654,23 @@ describe("AppStack", () => {
         const serialized = JSON.stringify(push?.Resource);
         expect(serialized).toContain("EcrRepository");
         expect(serialized).toContain("EtlEcrRepository");
+      });
+
+      it("the OIDC deploy role can RunTask on both the migrate and db-bootstrap families (#493)", () => {
+        // The workflow runs db-bootstrap before migrate; the deploy role must be
+        // scoped to both task-definition families and to no broader `*`.
+        const statements = findDeployStatements();
+        const runTask = statements.find((stmt) => {
+          const action = stmt.Action as string | string[];
+          return Array.isArray(action)
+            ? action.includes("ecs:RunTask")
+            : action === "ecs:RunTask";
+        });
+        expect(runTask).toBeDefined();
+        const serialized = JSON.stringify(runTask?.Resource);
+        expect(serialized).not.toMatch(/^"\*"$/);
+        expect(serialized).toContain("sps-migrate-prod:*");
+        expect(serialized).toContain("sps-db-bootstrap-prod:*");
       });
     });
 

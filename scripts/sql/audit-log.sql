@@ -33,10 +33,19 @@
 --
 --   then apply the GRANT at the foot of this file, substituting the real
 --   application user. Idempotent (IF NOT EXISTS throughout) -- re-running is
---   safe. Local dev: the MariaDB instance the app uses. Staging / prod: the
---   Aurora cluster, applied by a DBA -- or folded into the B09 (#108) migration
---   pipeline once it lands. This file is not a Prisma migration and is not run
---   by `prisma migrate deploy`.
+--   safe.
+--
+--   CODIFIED PATH (#493). The executable DDL in this file is the single source
+--   of truth for `scripts/db-bootstrap.ts`, run on every deploy as the one-shot
+--   `sps-db-bootstrap-${env}` Fargate task BEFORE `sps-migrate`. That task
+--   applies this DDL and the INSERT grant automatically -- as the least-
+--   privilege `sps_bootstrap` user, never master -- and fails the deploy if the
+--   grant does not verify INSERT-only. The runner strips comments and runs the
+--   remaining statements, so the commented GRANT template below never executes;
+--   it computes the real grantee from the live app-rw DSN instead.
+--
+--   This file is still not a Prisma migration and is not run by
+--   `prisma migrate deploy`. Local dev: `npm run db:audit-setup`.
 -- =============================================================================
 
 CREATE DATABASE IF NOT EXISTS `scholars_audit`

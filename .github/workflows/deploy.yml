@@ -90,6 +90,11 @@ jobs:
           # the ETL build/push steps below self-skip when it's empty. Re-run the
           # workflow once `cdk deploy Sps-App-<env>` has created the repo.
           etl_ecr_uri=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EtlEcrRepoUri").OutputValue // empty')
+          # db-bootstrap task family (#493). Same non-fatal pattern: absent until
+          # `cdk deploy Sps-App-<env>` ships the new task def, so the step below
+          # self-skips (with a warning) rather than bricking discovery. Once the
+          # family exists, a FAILED bootstrap hard-fails the deploy (fails-closed).
+          bootstrap_family=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EcsDbBootstrapTaskFamily").OutputValue // empty')
           {
             echo "ecr_uri=$ecr_uri"
             echo "cluster=$cluster"
@@ -97,6 +102,7 @@ jobs:
             echo "mig_family=$mig_family"
             echo "alb_dns=$alb_dns"
             echo "etl_ecr_uri=$etl_ecr_uri"
+            echo "bootstrap_family=$bootstrap_family"
           } >> "$GITHUB_OUTPUT"
 
       - name: ECR login
@@ -135,6 +141,46 @@ jobs:
         if: ${{ steps.outputs.outputs.etl_ecr_uri == '' }}
         run: |
           echo "::warning::EtlEcrRepoUri not found on ${{ steps.target.outputs.stack }}. ETL image not built/pushed. Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create scholars-etl-${{ steps.target.outputs.env }}, then re-run this workflow."
+
+      # db-bootstrap (#493) — provision scholars_audit + the app-rw INSERT grant
+      # BEFORE migrate, as the least-privilege sps_bootstrap user. Idempotent;
+      # fails-closed (non-zero exit halts the deploy, service not rolled), so a
+      # missing/mis-scoped audit grant errors loud-and-early here instead of
+      # silently breaking Hide/Show + the request-change audit at runtime.
+      - name: Run db-bootstrap task
+        id: db_bootstrap
+        if: ${{ steps.outputs.outputs.bootstrap_family != '' }}
+        run: |
+          set -euo pipefail
+          # Reuse the app service's network config (same private subnets + app SG,
+          # which already has Aurora 3306 ingress + the Secrets Manager endpoint).
+          netcfg=$(aws ecs describe-services \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}" \
+            --query 'services[0].networkConfiguration' --output json)
+          task_arn=$(aws ecs run-task \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --task-definition "${{ steps.outputs.outputs.bootstrap_family }}" \
+            --launch-type FARGATE \
+            --network-configuration "$netcfg" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "db-bootstrap task: $task_arn"
+          aws ecs wait tasks-stopped \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::db-bootstrap task exited $exit_code. Service NOT rolled. Logs: /aws/ecs/sps-db-bootstrap-${{ steps.target.outputs.env }}"
+            exit 1
+          fi
+
+      - name: Skipped db-bootstrap (task family not yet provisioned)
+        if: ${{ steps.outputs.outputs.bootstrap_family == '' }}
+        run: |
+          echo "::warning::EcsDbBootstrapTaskFamily not found on ${{ steps.target.outputs.stack }}. scholars_audit provisioning skipped (#493). Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create sps-db-bootstrap-${{ steps.target.outputs.env }}, then re-run this workflow."
 
       - name: Run migration task
         id: migrate

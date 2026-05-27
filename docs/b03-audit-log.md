@@ -113,14 +113,16 @@ If B03 is ever relocated off-cluster (a separate audit store, CloudWatch), this 
 mysql -h <host> -u <admin> -p < scripts/sql/audit-log.sql
 ```
 
-then apply the `GRANT` template at the foot of that file with the real app user. Local dev: the MariaDB instance the app uses. Staging / prod: the Aurora cluster, by a DBA — or folded into the B09 ([#108](https://github.com/wcmc-its/Scholars-Profile-System/issues/108)) migration pipeline once it lands. The file is not a Prisma migration and is not picked up by `prisma migrate deploy`.
+then apply the `GRANT` template at the foot of that file with the real app user. The file is not a Prisma migration and is not picked up by `prisma migrate deploy`.
+
+**Codified path ([#493](https://github.com/wcmc-its/Scholars-Profile-System/issues/493)).** Staging / prod no longer rely on a remembered manual step. `scripts/db-bootstrap.ts` runs as the one-shot `sps-db-bootstrap-${env}` Fargate task in the deploy pipeline **before** `sps-migrate`: it applies this DDL and the INSERT grant, and **verifies** the app role's `scholars_audit` privileges are INSERT-only before exiting. A non-zero exit halts the deploy (fails-closed) — so a missing or over-broad grant errors *loud and early* at deploy instead of silently breaking edits at runtime. It connects as the least-privilege `sps_bootstrap` user (`CREATE`/`ALTER` on `scholars_audit.*` + `INSERT` there `WITH GRANT OPTION`, nothing on `scholars`), never the Aurora master; the one-time master use that seeds `sps_bootstrap` is confined to a DataStack custom resource. Local dev: `npm run db:audit-setup` (see README § Audit log).
 
 ## #102 acceptance criteria
 
 | #102 criterion | Status |
 |---|---|
 | Audit table in a separate schema | ✅ `scholars_audit.manual_edit_audit` via versioned SQL (`scripts/sql/audit-log.sql`) — a separate database, not a Prisma migration (see § Why a separate database) |
-| App role `INSERT` only, verified | Grant template + `SHOW GRANTS` verification provided; applied per environment at provisioning time |
+| App role `INSERT` only, verified | ✅ Applied + verified automatically by the `sps-db-bootstrap` deploy task (`scripts/db-bootstrap.ts`), which runs `SHOW GRANTS` and fails the deploy on any non-INSERT privilege on `scholars_audit` (#493); grant template + manual `SHOW GRANTS` also at the foot of `scripts/sql/audit-log.sql` |
 | One audit row per successful `/api/edit*` POST, same transaction | Contract specified above; wired by #356 |
 | Spot-check query returns readable before/after JSON | ✅ below |
 | Documented retention policy | ✅ 7 years recommended, pending WCM compliance confirmation |
