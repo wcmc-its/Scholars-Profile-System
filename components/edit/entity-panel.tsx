@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { FieldSourceLine } from "@/components/edit/field-source-line";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -255,6 +256,7 @@ export function EntityPanel<T extends EntityRow>({
     <section data-slot={slot} className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">{copy.heading}</h2>
+        <FieldSourceLine attribute={REQUEST_ATTR[entityType]} />
         <p className="text-muted-foreground text-sm">{copy.description}</p>
       </header>
 

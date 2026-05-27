@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { FieldSourceLine } from "@/components/edit/field-source-line";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -172,6 +173,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
     <Card data-slot="publications-card">
       <CardHeader>
         <CardTitle>My publications</CardTitle>
+        <FieldSourceLine attribute="publications" />
         <CardDescription>
           Hide a publication to remove yourself from it on this site. Hiding
           affects this profile only. A paper that isn&apos;t yours keeps
