@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   composeBody,
+  composeReceiptBody,
   isRequestAttribute,
+  receiptSubjectFor,
   resolveRequestChange,
   subjectFor,
 } from "@/lib/edit/request-change";
@@ -115,5 +117,30 @@ describe("composeBody", () => {
     });
     expect(body).toContain("Item: line1 Bcc: evil@example.com");
     expect(body).not.toContain("\r");
+  });
+});
+
+describe("receiptSubjectFor / composeReceiptBody", () => {
+  it("subject names the attribute", () => {
+    expect(receiptSubjectFor("Education")).toBe("Your Scholars profile change request — Education");
+  });
+
+  it("restates the issue / item / routed-to office + detail", () => {
+    const body = composeReceiptBody({
+      issueLabel: "A degree, field, institution, or year is wrong",
+      itemLabel: "Ph.D., Stanford",
+      office: "Office of Faculty Affairs",
+      detail: "The year should be 2009.",
+    });
+    expect(body).toContain("Issue: A degree, field, institution, or year is wrong");
+    expect(body).toContain("Item: Ph.D., Stanford");
+    expect(body).toContain("Routed to: Office of Faculty Affairs");
+    expect(body).toContain("The year should be 2009.");
+  });
+
+  it("uses placeholders for a section-level receipt with no detail", () => {
+    const body = composeReceiptBody({ issueLabel: "My title is wrong", office: "ITS Support" });
+    expect(body).toContain("Item: (whole section)");
+    expect(body).toContain("(no additional detail provided)");
   });
 });

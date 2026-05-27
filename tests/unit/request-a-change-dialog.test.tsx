@@ -127,6 +127,20 @@ describe("RequestAChangeDialog", () => {
     });
     // Server path must NOT touch the mailto: fallback.
     expect(window.location.href).toBe("");
+    // Receipt opt-out defaults to "send a copy".
+    expect(body.noReceipt).toBe(false);
+  });
+
+  it("opting out of the receipt sets noReceipt=true in the POST body", async () => {
+    const fetchMock = mockFetch({ ok: true });
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    open();
+    pickIssue("education-wrong");
+    fireEvent.click(screen.getByRole("checkbox", { name: /don't email me a copy/i }));
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+
+    expect(await screen.findByText("Request sent.")).toBeTruthy();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).noReceipt).toBe(true);
   });
 
   it("falls back to the mailto: client on a non-2xx (no regression while the mailer is dark)", async () => {

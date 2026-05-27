@@ -24,6 +24,7 @@ import * as React from "react";
 import { ArrowRight, Flag, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -119,6 +120,8 @@ export function RequestAChangeDialog({
   const [sending, setSending] = React.useState(false);
   /** How the request was sent — drives the confirmation copy. */
   const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
+  /** Opt-out of the courtesy email receipt (default = receipt sent). */
+  const [noReceipt, setNoReceipt] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -129,6 +132,7 @@ export function RequestAChangeDialog({
       setConfirmDiscard(false);
       setSending(false);
       setSentVia(null);
+      setNoReceipt(false);
     }
   }, [open]);
 
@@ -146,6 +150,7 @@ export function RequestAChangeDialog({
     setRevealFallback(false);
     setSubmitted(false);
     setSentVia(null);
+    setNoReceipt(false);
   }
 
   // Single choke point for every close path (Esc / scrim / X / Cancel).
@@ -211,6 +216,7 @@ export function RequestAChangeDialog({
           itemId: itemLabel,
           detail,
           targetCwid: cwid,
+          noReceipt,
         }),
       });
       if (res.ok) {
@@ -372,17 +378,30 @@ export function RequestAChangeDialog({
                           )}
 
                           {selected && showRouteBox && (
-                            <div className="flex flex-col gap-1.5">
-                              <label htmlFor="rac-detail" className="text-sm font-medium">
-                                Add any detail (optional)
+                            <div className="flex flex-col gap-2.5">
+                              <div className="flex flex-col gap-1.5">
+                                <label htmlFor="rac-detail" className="text-sm font-medium">
+                                  Add any detail (optional)
+                                </label>
+                                <Textarea
+                                  id="rac-detail"
+                                  value={detail}
+                                  onChange={(e) => setDetail(e.target.value)}
+                                  placeholder="What should change, and to what?"
+                                  rows={3}
+                                />
+                              </div>
+                              <label
+                                htmlFor="rac-no-receipt"
+                                className="text-muted-foreground flex items-center gap-2 text-sm"
+                              >
+                                <Checkbox
+                                  id="rac-no-receipt"
+                                  checked={noReceipt}
+                                  onCheckedChange={(v) => setNoReceipt(v === true)}
+                                />
+                                Don&apos;t email me a copy
                               </label>
-                              <Textarea
-                                id="rac-detail"
-                                value={detail}
-                                onChange={(e) => setDetail(e.target.value)}
-                                placeholder="What should change, and to what?"
-                                rows={3}
-                              />
                             </div>
                           )}
                         </div>

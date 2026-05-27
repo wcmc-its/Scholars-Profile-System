@@ -24,7 +24,9 @@ import { isMailerConfigured, sendMail } from "@/lib/edit/mailer";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   composeBody,
+  composeReceiptBody,
   isRequestAttribute,
+  receiptSubjectFor,
   resolveRequestChange,
   subjectFor,
 } from "@/lib/edit/request-change";
@@ -39,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { session, body, requestId } = req.ctx;
 
   // --- body shape ---
-  const { attribute, issueId, itemId, detail, targetCwid } = body;
+  const { attribute, issueId, itemId, detail, targetCwid, noReceipt } = body;
   if (!isRequestAttribute(attribute)) return editError(400, "invalid_attribute", "attribute");
   if (typeof issueId !== "string" || issueId.length === 0) {
     return editError(400, "invalid_issue", "issueId");
@@ -52,6 +54,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (typeof detail === "string" && detail.length > MAX_DETAIL) {
     return editError(400, "detail_too_long", "detail");
+  }
+  if (noReceipt !== undefined && typeof noReceipt !== "boolean") {
+    return editError(400, "invalid_receipt_flag", "noReceipt");
   }
   // `targetCwid` is the scholar the request concerns — self in self-mode, the
   // edited scholar in superuser-mode. Defaults to the actor.
@@ -138,6 +143,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+  }
+
+  // --- best-effort courtesy receipt to the submitter (opt-out; default on).
+  //     Resolved from the local Scholar record -- always reachable, avoids the
+  //     VPC<->WCM LDAP gap. Skipped on opt-out, or when the actor has no email
+  //     (e.g. a superuser not in the scholar table). Never fails the request. ---
+  if (noReceipt !== true) {
+    try {
+      const actor = await db.read.scholar.findUnique({
+        where: { cwid: session.cwid },
+        select: { email: true },
+      });
+      if (actor?.email) {
+        await sendMail({
+          to: actor.email,
+          subject: receiptSubjectFor(resolved.attributeLabel),
+          text: composeReceiptBody({
+            issueLabel: resolved.issueLabel,
+            itemLabel: typeof itemId === "string" ? itemId : undefined,
+            office: resolved.office,
+            detail: typeof detail === "string" ? detail : undefined,
+          }),
+        });
+      }
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "request_change_receipt_failed",
+          path: PATH,
+          request_id: requestId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    }
   }
 
   return editOk({ sent: true });

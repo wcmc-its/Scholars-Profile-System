@@ -13,12 +13,14 @@ const {
   mockSendMail,
   mockAppendAuditRow,
   mockTransaction,
+  mockScholarFindUnique,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockIsMailerConfigured: vi.fn(),
   mockSendMail: vi.fn(),
   mockAppendAuditRow: vi.fn(),
   mockTransaction: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -27,7 +29,12 @@ vi.mock("@/lib/edit/mailer", () => ({
   sendMail: mockSendMail,
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
-vi.mock("@/lib/db", () => ({ db: { write: { $transaction: mockTransaction } } }));
+vi.mock("@/lib/db", () => ({
+  db: {
+    write: { $transaction: mockTransaction },
+    read: { scholar: { findUnique: mockScholarFindUnique } },
+  },
+}));
 
 import { POST } from "@/app/api/edit/request-change/route";
 
@@ -52,6 +59,9 @@ beforeEach(() => {
   mockTransaction.mockImplementation(async (cb: (tx: { $executeRaw: () => void }) => unknown) =>
     cb({ $executeRaw: vi.fn() }),
   );
+  // Default: the actor has no resolvable email, so no courtesy receipt is sent
+  // and `sendMail` is called once (the office). Receipt tests opt this in.
+  mockScholarFindUnique.mockResolvedValue({ email: null });
 });
 
 describe("POST /api/edit/request-change", () => {
@@ -155,5 +165,45 @@ describe("POST /api/edit/request-change", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "detail_too_long" });
+  });
+
+  it("sends a courtesy receipt to the submitter by default", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: "self01@med.cornell.edu" });
+    await POST(post({ attribute: "education", issueId: "education-wrong", itemId: "Ph.D." }));
+    expect(mockSendMail).toHaveBeenCalledTimes(2); // office + receipt
+    const receipt = mockSendMail.mock.calls[1][0];
+    expect(receipt.to).toBe("self01@med.cornell.edu");
+    expect(receipt.subject).toBe("Your Scholars profile change request — Education");
+    expect(receipt.text).toContain("Routed to: Office of Faculty Affairs");
+  });
+
+  it("omits the receipt when the submitter opts out (noReceipt)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: "self01@med.cornell.edu" });
+    await POST(post({ attribute: "education", issueId: "education-wrong", noReceipt: true }));
+    expect(mockSendMail).toHaveBeenCalledTimes(1); // office only
+  });
+
+  it("skips the receipt when the actor has no email (e.g. a superuser not in the scholar table)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: null });
+    await POST(post({ attribute: "education", issueId: "education-wrong" }));
+    expect(mockSendMail).toHaveBeenCalledTimes(1); // office only, no throw
+  });
+
+  it("still returns 200 when the receipt send fails (best-effort, after the office send)", async () => {
+    mockScholarFindUnique.mockResolvedValue({ email: "self01@med.cornell.edu" });
+    mockSendMail
+      .mockResolvedValueOnce({ messageId: "office-1" }) // office send ok
+      .mockRejectedValueOnce(new Error("SES throttled")); // receipt send fails
+    const res = await POST(post({ attribute: "education", issueId: "education-wrong" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sent: true });
+  });
+
+  it("400 invalid_receipt_flag when noReceipt is not a boolean", async () => {
+    const res = await POST(
+      post({ attribute: "education", issueId: "education-wrong", noReceipt: "yes" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "invalid_receipt_flag" });
   });
 });

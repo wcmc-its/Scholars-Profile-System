@@ -115,3 +115,36 @@ export function composeBody(opts: {
 
   return lines.join("\n");
 }
+
+/** The subject of the courtesy receipt sent back to the submitter. */
+export function receiptSubjectFor(attributeLabel: string): string {
+  return `Your Scholars profile change request — ${attributeLabel}`;
+}
+
+/**
+ * Compose the courtesy receipt the submitter gets (opt-out, default on). It
+ * restates what they sent and where it went — no action required of them. The
+ * free-text `detail` is preserved; single-line fields are CR/LF-collapsed.
+ */
+export function composeReceiptBody(opts: {
+  issueLabel: string;
+  itemLabel?: string;
+  office: string;
+  detail?: string;
+}): string {
+  const lines = [
+    "You submitted a change request from your WCM Scholars profile. Here's a copy for your records.",
+    "",
+    `Issue: ${oneLine(opts.issueLabel)}`,
+    `Item: ${opts.itemLabel ? oneLine(opts.itemLabel) : "(whole section)"}`,
+    `Routed to: ${oneLine(opts.office)}`,
+  ];
+  const detail = (opts.detail ?? "").trim();
+  lines.push("", detail.length > 0 ? detail : "(no additional detail provided)", "");
+  lines.push(
+    `${oneLine(opts.office)} will follow up if they need more information — you don't need to do anything else.`,
+    "",
+    "— WCM Scholars",
+  );
+  return lines.join("\n");
+}
