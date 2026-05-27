@@ -12,6 +12,16 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    // Test fixtures intentionally render raw <a href="/page"> elements to
+    // exercise navigation/guard behavior (e.g. the unsaved-changes
+    // beforeunload guard); rewriting them to next/link would defeat the
+    // test. The no-html-link-for-pages rule only matters for real pages.
+    files: ["tests/**"],
+    rules: {
+      "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+  {
     ignores: [
       ".next/**",
       "node_modules/**",
