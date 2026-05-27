@@ -7,6 +7,7 @@
  */
 "use client";
 
+import { FieldSourceLine } from "@/components/edit/field-source-line";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
@@ -33,6 +34,7 @@ export function ReadonlyAttributePanel({
     <section data-slot="readonly-attribute-panel" data-attribute={attribute} className="flex flex-col gap-4">
       <header className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold">{heading}</h2>
+        <FieldSourceLine attribute={attribute} />
         <p className="text-muted-foreground text-sm">{description}</p>
       </header>
 
