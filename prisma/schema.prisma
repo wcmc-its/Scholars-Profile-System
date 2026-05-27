@@ -1045,3 +1045,24 @@ model Suppression {
   @@index([entityType, entityId])
   @@map("suppression")
 }
+
+/// Per-cwid fixed-window rate limit for the "Request a change" server send
+/// (#160 Phase 2, docs/self-edit-request-change-modal.md § 5 abuse controls).
+/// One row per (actor cwid, UTC hour-window); the hot-path increment is a raw
+/// `INSERT ... ON DUPLICATE KEY UPDATE count = count + 1`, atomic on the PK row
+/// lock — Prisma `upsert` is read-then-write and would double-count concurrent
+/// requests, which is exactly the adversary (a parallel spam loop). Rows accrete
+/// (one per cwid per active hour); volume is negligible and stale windows can be
+/// pruned out-of-band. Deliberately NOT a distributed store (Redis/ElastiCache):
+/// standing up new infra for one soft control on a low-frequency, authenticated
+/// endpoint is over-engineering — the DB is already here and won't notice. Kept
+/// in the main schema so the app role's existing DML covers it, with no separate-
+/// schema GRANT to forget at deploy time (cf. the #493 audit-grant gap).
+model RequestChangeRateLimit {
+  cwid        String   @db.VarChar(32)
+  windowStart DateTime @map("window_start") // start of the UTC hour-window
+  count       Int      @default(0)
+
+  @@id([cwid, windowStart])
+  @@map("request_change_rate_limit")
+}

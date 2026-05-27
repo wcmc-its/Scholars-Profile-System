@@ -21,7 +21,14 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { canAccessScholarEditPage, logEditDenial } from "@/lib/edit/authz";
 import { isMailerConfigured, sendMail } from "@/lib/edit/mailer";
-import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { recordRequestChangeAttempt } from "@/lib/edit/rate-limit";
+import {
+  editError,
+  editOk,
+  editRateLimited,
+  logEditFailure,
+  readEditRequest,
+} from "@/lib/edit/request";
 import {
   composeBody,
   composeReceiptBody,
@@ -83,6 +90,29 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- dormant unless enabled + configured: the client falls back to mailto: ---
   if (!isMailerConfigured()) return editError(503, "send_disabled");
+
+  // --- per-cwid rate limit (SPEC § 5 abuse controls / § 6 threat model). Placed
+  //     AFTER the dormant gate so a 503 consumes no quota (no rows accrue until
+  //     the feature is live) and BEFORE the send so the count actually gates it.
+  //     Superusers — trusted staff who may legitimately triage many scholars —
+  //     are exempt. Every 429 is logged with cwid + count so the env-tuned limit
+  //     can be ratcheted from data rather than guessed. ---
+  if (!session.isSuperuser) {
+    const rate = await recordRequestChangeAttempt(session.cwid);
+    if (!rate.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "request_change_rate_limited",
+          path: PATH,
+          request_id: requestId,
+          actor_cwid: session.cwid,
+          count: rate.count,
+          limit: rate.limit,
+        }),
+      );
+      return editRateLimited(rate.retryAfterSeconds);
+    }
+  }
 
   // --- send (the request fails only if the send itself fails) ---
   let messageId: string;

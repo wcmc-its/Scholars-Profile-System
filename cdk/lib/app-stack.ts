@@ -662,6 +662,11 @@ export class AppStack extends Stack {
         // on, so the From and the IAM scope can't drift.
         SELF_EDIT_REQUEST_CHANGE_SEND: "off",
         SCHOLARS_MAIL_FROM,
+        // Per-cwid hourly cap on the server send (SPEC § 5 abuse controls).
+        // Superusers are exempt; the app defaults to this same value if unset.
+        // Surfaced here as an explicit, tunable knob: ratchet from the 429 logs
+        // rather than redeploy code to change a number.
+        SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT: "20",
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
