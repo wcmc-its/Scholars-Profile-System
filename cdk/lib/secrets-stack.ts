@@ -95,14 +95,16 @@ export class SecretsStack extends Stack {
       // provisions the scholars_audit database + INSERT grant before migrate
       // (#493, scripts/db-bootstrap.ts). The user (sps_bootstrap) holds only
       // CREATE/ALTER on scholars_audit.* and INSERT there WITH GRANT OPTION --
-      // nothing on `scholars`, and NEVER master. Seed out-of-band in PR 1; a
-      // DataStack custom resource generates + seeds it in PR 2. Name avoids a
-      // 6-char hyphen tail (Secrets Manager partial-ARN gotcha).
+      // nothing on `scholars`, and NEVER master. This stub is created here but
+      // POPULATED by the DataStack db-bootstrap seeder (a CloudFormation custom
+      // resource that mints sps_bootstrap using master, confined in-stack, and
+      // writes this DSN -- so master never reaches CI). Name avoids a 6-char
+      // hyphen tail (Secrets Manager partial-ARN gotcha).
       {
         constructId: "DbBootstrap",
         name: `scholars/${env}/db/bootstrap`,
         description:
-          "SPS db-bootstrap DSN — least-privilege sps_bootstrap user that provisions scholars_audit + the app-rw INSERT grant (#493). Seed out-of-band (PR 1); CDK-generated (PR 2).",
+          "SPS db-bootstrap DSN — least-privilege sps_bootstrap user that provisions scholars_audit + the app-rw INSERT grant (#493). Populated by the DataStack seeder custom resource.",
       },
       {
         constructId: "OpensearchMaster",

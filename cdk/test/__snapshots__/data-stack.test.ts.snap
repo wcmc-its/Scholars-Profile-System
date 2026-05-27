@@ -441,6 +441,27 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
+    "AuroraSecurityGroupfromSpsDataprodDbBootstrapSeederSg4CBE4B4D33065911FAD2": {
+      "Properties": {
+        "Description": "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
+        "FromPort": 3306,
+        "GroupId": {
+          "Fn::GetAtt": [
+            "AuroraSecurityGroup75F699F6",
+            "GroupId",
+          ],
+        },
+        "IpProtocol": "tcp",
+        "SourceSecurityGroupId": {
+          "Fn::GetAtt": [
+            "DbBootstrapSeederSg35FF8349",
+            "GroupId",
+          ],
+        },
+        "ToPort": 3306,
+      },
+      "Type": "AWS::EC2::SecurityGroupIngress",
+    },
     "AuroraSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3063306972DA0A5": {
       "Properties": {
         "Description": "ECS app tasks to Aurora writer/reader endpoints",
@@ -662,6 +683,351 @@ exports[`DataStack prod matches the snapshot 1`] = `
         ],
       },
       "Type": "AWS::IAM::Role",
+    },
+    "DbBootstrapSeederFunction89CD5B99": {
+      "DependsOn": [
+        "DbBootstrapSeederFunctionServiceRoleDefaultPolicy9A95D51A",
+        "DbBootstrapSeederFunctionServiceRole9DE90705",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "c3e8fe452dcf35a798a5853b9a3797129ce8ae874b0afae0e2f6e3a010f76ecc.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "BOOTSTRAP_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
+                ],
+              ],
+            },
+            "DB_HOST": {
+              "Fn::GetAtt": [
+                "AuroraCluster23D869C0",
+                "Endpoint.Address",
+              ],
+            },
+            "DB_PORT": {
+              "Fn::GetAtt": [
+                "AuroraCluster23D869C0",
+                "Endpoint.Port",
+              ],
+            },
+            "MASTER_SECRET_ARN": {
+              "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+            },
+          },
+        },
+        "FunctionName": "sps-db-bootstrap-seed-prod",
+        "Handler": "index.onEvent",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "DbBootstrapSeederLogGroupE86A4174",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "DbBootstrapSeederFunctionServiceRole9DE90705",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 120,
+        "VpcConfig": {
+          "SecurityGroupIds": [
+            {
+              "Fn::GetAtt": [
+                "DbBootstrapSeederSg35FF8349",
+                "GroupId",
+              ],
+            },
+          ],
+          "SubnetIds": [
+            {
+              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet1SubnetCEAD37168693D373",
+            },
+            {
+              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpcprivateSubnet2Subnet2DE7549CDF5ACE3D",
+            },
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "DbBootstrapSeederFunctionServiceRole9DE90705": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "DbBootstrapSeederFunctionServiceRoleDefaultPolicy9A95D51A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:UpdateSecretVersionStage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DbBootstrapSeederFunctionServiceRoleDefaultPolicy9A95D51A",
+        "Roles": [
+          {
+            "Ref": "DbBootstrapSeederFunctionServiceRole9DE90705",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "DbBootstrapSeederLogGroupE86A4174": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-db-bootstrap-seed-prod",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "DbBootstrapSeederProviderframeworkonEvent38589041": {
+      "DependsOn": [
+        "DbBootstrapSeederProviderframeworkonEventServiceRoleDefaultPolicy122E4D05",
+        "DbBootstrapSeederProviderframeworkonEventServiceRole24F6C709",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "07a90cc3efdfc34da22208dcd9d211f06f5b0e01b21e778edc7c3966b1f61d57.zip",
+        },
+        "Description": "AWS CDK resource provider framework - onEvent (Sps-Data-prod/DbBootstrapSeederProvider)",
+        "Environment": {
+          "Variables": {
+            "USER_ON_EVENT_FUNCTION_ARN": {
+              "Fn::GetAtt": [
+                "DbBootstrapSeederFunction89CD5B99",
+                "Arn",
+              ],
+            },
+          },
+        },
+        "Handler": "framework.onEvent",
+        "LoggingConfig": {
+          "ApplicationLogLevel": "FATAL",
+          "LogFormat": "JSON",
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "DbBootstrapSeederProviderframeworkonEventServiceRole24F6C709",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "DbBootstrapSeederProviderframeworkonEventServiceRole24F6C709": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "DbBootstrapSeederProviderframeworkonEventServiceRoleDefaultPolicy122E4D05": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DbBootstrapSeederFunction89CD5B99",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DbBootstrapSeederFunction89CD5B99",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "lambda:GetFunction",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DbBootstrapSeederFunction89CD5B99",
+                  "Arn",
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DbBootstrapSeederProviderframeworkonEventServiceRoleDefaultPolicy122E4D05",
+        "Roles": [
+          {
+            "Ref": "DbBootstrapSeederProviderframeworkonEventServiceRole24F6C709",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "DbBootstrapSeederResource": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "Revision": "1",
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "DbBootstrapSeederProviderframeworkonEvent38589041",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::CloudFormation::CustomResource",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "DbBootstrapSeederSg35FF8349": {
+      "Properties": {
+        "GroupDescription": "SPS db-bootstrap seeder Lambda (prod)",
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic by default",
+            "IpProtocol": "-1",
+          },
+        ],
+        "VpcId": {
+          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
+        },
+      },
+      "Type": "AWS::EC2::SecurityGroup",
     },
     "ExportsReader8B249524": {
       "DeletionPolicy": "Delete",

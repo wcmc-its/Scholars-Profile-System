@@ -1,18 +1,25 @@
+import * as path from "node:path";
 import {
+  CustomResource,
   CfnOutput,
   Duration,
   RemovalPolicy,
   SecretValue,
   Stack,
+  Token,
   type StackProps,
 } from "aws-cdk-lib";
 import * as backup from "aws-cdk-lib/aws-backup";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as events from "aws-cdk-lib/aws-events";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import * as logs from "aws-cdk-lib/aws-logs";
 import * as opensearchservice from "aws-cdk-lib/aws-opensearchservice";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
+import * as cr from "aws-cdk-lib/custom-resources";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
 
@@ -208,6 +215,109 @@ export class DataStack extends Stack {
     this.auroraCluster.addRotationSingleUser({
       automaticallyAfter: Duration.days(30),
       excludeCharacters: '"@/\\',
+    });
+
+    // ------------------------------------------------------------------
+    // sps_bootstrap seeder (#493 PR 2).
+    //
+    // A CloudFormation custom resource that, at `cdk deploy`, uses the Aurora
+    // MASTER credential to create the least-privilege `sps_bootstrap` role
+    // (CREATE/ALTER on `scholars_audit`.* + INSERT there WITH GRANT OPTION;
+    // nothing on `scholars`) and writes its DSN into the SecretsStack
+    // `db/bootstrap` stub that the PR-1 `sps-db-bootstrap` task reads.
+    //
+    // This Lambda's execution role is the SOLE principal granted read on the
+    // master secret, and it is invoked only by CloudFormation — never CI, never
+    // a task definition. That is the whole point of the two-runner split: the
+    // recurring audit provisioning runs as the least-priv `sps_bootstrap` user
+    // in the deploy pipeline, while the one-time master use that mints that user
+    // is confined here, in the stack that already owns the master secret.
+    //
+    // In-VPC on a dedicated SG the Aurora SG admits on 3306 — the same path the
+    // RDS rotation Lambda above already takes to reach the cluster.
+    // ------------------------------------------------------------------
+    const bootstrapSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "BootstrapSecret",
+      `scholars/${envConfig.envName}/db/bootstrap`,
+    );
+
+    const seederSecurityGroup = new ec2.SecurityGroup(
+      this,
+      "DbBootstrapSeederSg",
+      {
+        vpc,
+        description: `SPS db-bootstrap seeder Lambda (${envConfig.envName})`,
+        allowAllOutbound: true,
+      },
+    );
+    auroraSecurityGroup.addIngressRule(
+      seederSecurityGroup,
+      ec2.Port.tcp(3306),
+      "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
+    );
+
+    const seederLogGroup = new logs.LogGroup(this, "DbBootstrapSeederLogGroup", {
+      logGroupName: `/aws/lambda/sps-db-bootstrap-seed-${envConfig.envName}`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const seederFunction = new NodejsFunction(
+      this,
+      "DbBootstrapSeederFunction",
+      {
+        functionName: `sps-db-bootstrap-seed-${envConfig.envName}`,
+        entry: path.join(__dirname, "../lambda/db-bootstrap-seed/index.ts"),
+        // Pin the seeder's own lockfile — otherwise NodejsFunction walks up to
+        // cdk/package-lock.json (which has no mariadb) and `npm ci` fails during
+        // the nodeModules install.
+        depsLockFilePath: path.join(
+          __dirname,
+          "../lambda/db-bootstrap-seed/package-lock.json",
+        ),
+        handler: "onEvent",
+        runtime: lambda.Runtime.NODEJS_22_X,
+        memorySize: 256,
+        timeout: Duration.minutes(2),
+        vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [seederSecurityGroup],
+        logGroup: seederLogGroup,
+        environment: {
+          MASTER_SECRET_ARN: this.auroraMasterSecret.secretArn,
+          BOOTSTRAP_SECRET_ARN: bootstrapSecret.secretArn,
+          DB_HOST: this.auroraCluster.clusterEndpoint.hostname,
+          DB_PORT: Token.asString(this.auroraCluster.clusterEndpoint.port),
+        },
+        bundling: {
+          // Provided by the Lambda runtime; bundling it inflates cold start.
+          externalModules: ["@aws-sdk/client-secrets-manager"],
+          // mariadb is a runtime dep (the driver) — CDK npm-installs it into the
+          // bundle rather than esbuild-inlining the connector's dynamic requires.
+          nodeModules: ["mariadb"],
+          sourceMap: false,
+          target: "node22",
+        },
+      },
+    );
+    // Master read is granted to THIS Lambda's role only — the sole master
+    // consumer besides the RDS rotation Lambda. Read+write on the bootstrap
+    // stub so the seeder can reuse an existing password and persist a new DSN.
+    this.auroraMasterSecret.grantRead(seederFunction);
+    bootstrapSecret.grantRead(seederFunction);
+    bootstrapSecret.grantWrite(seederFunction);
+
+    const seederProvider = new cr.Provider(this, "DbBootstrapSeederProvider", {
+      onEventHandler: seederFunction,
+    });
+    new CustomResource(this, "DbBootstrapSeederResource", {
+      serviceToken: seederProvider.serviceToken,
+      properties: {
+        // Bump to force a re-assert of the user + grants on a future change to
+        // the seeded grant set (the handler is idempotent, so re-runs are safe).
+        Revision: "1",
+      },
     });
 
     // ------------------------------------------------------------------
