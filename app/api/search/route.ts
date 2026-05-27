@@ -295,6 +295,10 @@ export async function GET(request: NextRequest) {
     // name-shape body without re-classifying or re-fetching the surname set.
     relevanceMode: appliedRelevanceMode,
     shape: queryShape,
+    // Issue #310 / SPEC §6.1.3 — the resolved descriptor's descendant-UI set
+    // drives the topic-shape attribution boost; searchPeople ignores it for
+    // non-topic shapes.
+    meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).
@@ -313,13 +317,18 @@ export async function GET(request: NextRequest) {
       filters: { deptDiv, personType, activity, includeIncomplete },
       meshResolutionDescriptorUi,
       meshResolutionConfidence,
-      // SPEC §9 — resolved MeSH descendant-set size; null when the query
-      // did not resolve to a descriptor.
+      // SPEC §9 — resolved MeSH descendant-set size, reported only for the
+      // shapes that consume it (topic / unclassified soft-fallback). Null
+      // otherwise, even when a name/hybrid query happens to MeSH-resolve, so
+      // the field reads as "the attribution path was in play with N descendants."
       meshDescendantSetSize:
-        taxonomyMatch.meshResolution?.descendantUis.length ?? null,
-      // SPEC §9 — null in PR-1: the §6.1.3 attribution boost this reports
-      // on does not exist until SPEC PR-3 (#310).
-      attributionBoostFired: null,
+        queryShape === "topic" || queryShape === "unclassified"
+          ? (taxonomyMatch.meshResolution?.descendantUis.length ?? null)
+          : null,
+      // SPEC §9 / Issue #310 — did the §6.1.3 attribution boost move any
+      // result? Boolean under the v3 topic template with a resolved
+      // descriptor; null when the boost wasn't in play.
+      attributionBoostFired: result.attributionBoostFired,
       taxonomyMatchMs,
       searchLatencyMs,
       // SPEC §9 — top-3 result slugs + person types let the post-flip eval

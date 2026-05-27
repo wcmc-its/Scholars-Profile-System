@@ -374,4 +374,148 @@ describe("buildPeopleDoc — golden snapshots", () => {
     );
     expect(doc).toMatchSnapshot();
   });
+
+  // Issue #310 / SPEC §6.1.3 — publicationMeshUi rollup applies the SAME
+  // min-evidence threshold as the publicationMesh labels: a descriptor counts
+  // if it appears on >= 2 distinct pubs OR on any first/last-author pub.
+  it("publicationMeshUi: keeps descriptors clearing min-evidence, drops drive-bys", async () => {
+    const s: Partial<ScholarForIndex> = {
+      cwid: "mix1234",
+      slug: "mix",
+      preferredName: "Mix Author",
+      fullName: "Mix Author",
+      postnominal: null,
+      primaryTitle: "Professor",
+      primaryDepartment: "Dept",
+      overview: "x".repeat(250), // > 200 chars → non-trivial overview
+      roleCategory: "faculty",
+      deptCode: null,
+      divCode: null,
+      department: null,
+      division: null,
+      topicAssignments: [
+        { cwid: "mix1234", topic: "a", score: 1 },
+        { cwid: "mix1234", topic: "b", score: 1 },
+        { cwid: "mix1234", topic: "c", score: 1 },
+      ] as unknown as ScholarForIndex["topicAssignments"],
+      grants: [],
+      authorships: [
+        // D-KEEP-2PUB: middle author on two distinct pubs → distinctPubs 2 → kept.
+        // D-FIRST: appears once, but on a first-author pub → hasFirstOrLast → kept.
+        // D-DRIVEBY: appears once on a middle-author pub → dropped.
+        {
+          pmid: "1",
+          cwid: "mix1234",
+          isConfirmed: true,
+          isFirst: false,
+          isLast: false,
+          isPenultimate: false,
+          position: 3,
+          totalAuthors: 6,
+          publication: {
+            title: "p1",
+            meshTerms: [{ ui: "D-KEEP-2PUB", label: "Kept Two" }],
+            abstract: null,
+          },
+        },
+        {
+          pmid: "2",
+          cwid: "mix1234",
+          isConfirmed: true,
+          isFirst: false,
+          isLast: false,
+          isPenultimate: false,
+          position: 3,
+          totalAuthors: 6,
+          publication: {
+            title: "p2",
+            meshTerms: [
+              { ui: "D-KEEP-2PUB", label: "Kept Two" },
+              { ui: "D-DRIVEBY", label: "Drive By" },
+            ],
+            abstract: null,
+          },
+        },
+        {
+          pmid: "3",
+          cwid: "mix1234",
+          isConfirmed: true,
+          isFirst: true,
+          isLast: false,
+          isPenultimate: false,
+          position: 1,
+          totalAuthors: 4,
+          publication: {
+            title: "p3",
+            meshTerms: [{ ui: "D-FIRST", label: "First Only" }],
+            abstract: null,
+          },
+        },
+      ] as unknown as ScholarForIndex["authorships"],
+    };
+    const doc = (await buildPeopleDoc(
+      s as ScholarForIndex,
+      mockPeopleClient([null, null, null]),
+      NO_SUP,
+    )) as {
+      publicationMeshUi?: string[];
+      overviewLength: number;
+      aoiTermCount: number;
+    };
+
+    expect(new Set(doc.publicationMeshUi)).toEqual(
+      new Set(["D-KEEP-2PUB", "D-FIRST"]),
+    );
+    expect(doc.publicationMeshUi).not.toContain("D-DRIVEBY");
+    // Sparse-decay inputs are materialized.
+    expect(doc.overviewLength).toBe(250);
+    expect(doc.aoiTermCount).toBe(3);
+  });
+
+  it("publicationMeshUi: omitted entirely when no descriptor survives", async () => {
+    const s: Partial<ScholarForIndex> = {
+      cwid: "none1234",
+      slug: "none",
+      preferredName: "No Mesh",
+      fullName: "No Mesh",
+      postnominal: null,
+      primaryTitle: "Professor",
+      primaryDepartment: "Dept",
+      overview: null,
+      roleCategory: "faculty",
+      deptCode: null,
+      divCode: null,
+      department: null,
+      division: null,
+      topicAssignments: [],
+      grants: [],
+      authorships: [
+        {
+          pmid: "1",
+          cwid: "none1234",
+          isConfirmed: true,
+          isFirst: false,
+          isLast: false,
+          isPenultimate: false,
+          position: 3,
+          totalAuthors: 6,
+          // single middle-author mention → dropped by min-evidence → no UIs survive
+          publication: {
+            title: "p1",
+            meshTerms: [{ ui: "D-LONELY", label: "Lonely" }],
+            abstract: null,
+          },
+        },
+      ] as unknown as ScholarForIndex["authorships"],
+    };
+    const doc = (await buildPeopleDoc(
+      s as ScholarForIndex,
+      mockPeopleClient([null]),
+      NO_SUP,
+    )) as Record<string, unknown>;
+
+    expect(doc).not.toHaveProperty("publicationMeshUi");
+    expect(doc.overviewLength).toBe(0);
+    expect(doc.aoiTermCount).toBe(0);
+  });
 });

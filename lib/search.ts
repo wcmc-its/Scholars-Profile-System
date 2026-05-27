@@ -141,8 +141,24 @@ export const peopleIndexMapping = {
       deptDivLabel: { type: "keyword" },
       areasOfInterest: { type: "text", analyzer: "scholar_text" },
       overview: { type: "text", analyzer: "scholar_text" },
+      // Issue #310 / SPEC §6.1.5 — materialized inputs to the topic-shape
+      // sparse-profile soft decay. The decay's "non-trivial" thresholds
+      // (overview length > 200, >= 3 AOI topic terms) can't be evaluated
+      // against the analyzed text fields above, so they're indexed as integers
+      // the function_score range filter reads. `aoiTermCount` is the
+      // topic-assignment count, not a token count of `areasOfInterest`.
+      overviewLength: { type: "integer" },
+      aoiTermCount: { type: "integer" },
       publicationTitles: { type: "text", analyzer: "scholar_text" },
       publicationMesh: { type: "text", analyzer: "scholar_text" },
+      // Issue #310 / SPEC §6.1.3 — per-scholar rollup of MeSH descriptor UIs
+      // (Dnnnnnn), min-evidence-filtered in the ETL like `publicationMesh`.
+      // `keyword` (multi-valued) so the v3 topic-shape attribution boost can
+      // run `terms: { publicationMeshUi: descendantUis }` — the descendant-UI
+      // subsumption match that `publicationMesh` (analyzed label text) can't
+      // express. Same field intent as the publications index `meshDescriptorUi`.
+      // OMITTED on scholars with no surviving descriptor (omit-on-empty).
+      publicationMeshUi: { type: "keyword" },
       // Issue #21 — concatenated abstract text from each scholar's
       // confirmed publications. ONE copy per paper (no authorship-position
       // repetition); abstracts are 50-200x longer than titles, so the
@@ -494,6 +510,40 @@ export const PEOPLE_ABSTRACTS_BOOST = 0.3;
  * exact string is asserted on by `tests/unit/search-msm-parser.test.ts`.
  */
 export const PEOPLE_RESTRUCTURED_MSM = "2<-34%";
+
+/**
+ * Issue #310 / SPEC §6.1.3 — re-weighted high-evidence boost ladder for the v3
+ * topic-shape template. Same field SET and `cross_fields` + msm shape as
+ * `PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS`, but the weights pivot from "name/AOI
+ * lead" to "pub-derived evidence leads":
+ *
+ *   - name fields drop 10 -> 1 (a topic query is not a name query)
+ *   - `areasOfInterest` 6 -> 3 (down-weight self-reported signal; §5.1 bias)
+ *   - `publicationTitles` 1 -> 6 and `publicationMesh` 0.5 -> 4 (auth-weighted,
+ *     min-evidence-filtered pub evidence is the highest-confidence topic signal)
+ *
+ * `publicationAbstracts` stays in the scoring-only `should` clause at the
+ * raised `PEOPLE_TOPIC_ABSTRACTS_BOOST` (0.5). Name-shape and department-shape
+ * keep their own ladders (#309 / PR-4 #311).
+ */
+export const PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
+  "preferredName^1",
+  "fullName^1",
+  "areasOfInterest^3",
+  "primaryTitle^3",
+  "primaryDepartment^1",
+  "overview^2",
+  "publicationTitles^6",
+  "publicationMesh^4",
+];
+
+/**
+ * Issue #310 / SPEC §6.1.3 — `publicationAbstracts` boost for the v3
+ * topic-shape `should` clause (0.3 -> 0.5). Still scoring-only: a blob-only
+ * abstract match can't admit a doc on its own (the must clause governs
+ * admission), it only nudges ranking.
+ */
+export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
 
 /**
  * Boost weights used by the publications-index query builder.

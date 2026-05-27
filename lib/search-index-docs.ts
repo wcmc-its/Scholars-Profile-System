@@ -545,6 +545,17 @@ export async function buildPeopleDoc(
     string,
     { distinctPubs: number; hasFirstOrLast: boolean; weightedCount: number }
   >();
+  // Issue #310 / SPEC §6.1.3 — per-descriptor-UI aggregation, parallel to
+  // `termAgg`. Feeds the `publicationMeshUi` keyword rollup the v3 topic-shape
+  // attribution boost filters on (`terms { publicationMeshUi: descendantUis }`).
+  // The people index's `publicationMesh` holds analyzed *label text*, so it
+  // cannot be matched against MeSH descriptor UIs — this dedicated keyword set
+  // is what makes the descendant-UI subsumption filter possible. The set is
+  // dedup-only (no weight repetition): the attribution filter is binary
+  // membership, not BM25 scoring. The SAME min-evidence threshold as the label
+  // field is applied below, so drive-by single-mention descriptors don't fire
+  // the boost.
+  const uiAgg = new Map<string, { distinctPubs: number; hasFirstOrLast: boolean }>();
   // Issue #21 — collect each scholar's abstract texts (one copy per pmid;
   // duplicates can occur if the same publication shows up twice in a
   // listing, so dedupe).
@@ -587,6 +598,16 @@ export async function buildPeopleDoc(
       cur.weightedCount += weight;
       termAgg.set(term, cur);
     }
+
+    // Issue #310 — accumulate descriptor UIs in lock-step with the labels.
+    // `extractMeshDescriptorUis` dedupes within a pub, so each UI counts once
+    // per distinct pub here — the same distinct-pub semantics the threshold below uses.
+    for (const ui of extractMeshDescriptorUis(a.publication.meshTerms)) {
+      const cur = uiAgg.get(ui) ?? { distinctPubs: 0, hasFirstOrLast: false };
+      cur.distinctPubs += 1;
+      if (kind === "firstOrLast") cur.hasFirstOrLast = true;
+      uiAgg.set(ui, cur);
+    }
   }
 
   // Apply min-evidence threshold and emit term repetitions.
@@ -594,6 +615,15 @@ export async function buildPeopleDoc(
   for (const [term, agg] of termAgg.entries()) {
     if (agg.distinctPubs < 2 && !agg.hasFirstOrLast) continue;
     for (let i = 0; i < agg.weightedCount; i++) meshParts.push(term);
+  }
+
+  // Issue #310 — same min-evidence gate as the labels above, emitted once per
+  // surviving descriptor (a deduped keyword set). A descriptor counts if it
+  // appears on >= 2 of the scholar's pubs OR on any first/last-author pub.
+  const publicationMeshUi: string[] = [];
+  for (const [ui, agg] of uiAgg.entries()) {
+    if (agg.distinctPubs < 2 && !agg.hasFirstOrLast) continue;
+    publicationMeshUi.push(ui);
   }
 
   // Issue #233 — `hasActiveGrants` realigned onto NCE 12-month grace
@@ -740,6 +770,20 @@ export async function buildPeopleDoc(
     overview: s.overview,
     publicationTitles: titleParts.join(" "),
     publicationMesh: meshParts.join(" "),
+    // Issue #310 — descriptor-UI rollup for the v3 topic-shape attribution
+    // boost. OMIT-on-empty (mirrors the pub doc's `meshDescriptorUi`): scholars
+    // with no surviving descriptor write nothing, so `_source` consumers and the
+    // `terms` filter distinguish "no signal" from "[]".
+    ...(publicationMeshUi.length > 0 ? { publicationMeshUi } : {}),
+    // Issue #310 / SPEC §6.1.5 — indexed inputs to the topic-shape sparse-profile
+    // soft decay (×0.7). The decay's thresholds (overview length > 200, ≥3 AOI
+    // terms) aren't expressible against the analyzed `overview` / `areasOfInterest`
+    // text at query time, so they're materialized here as integers the
+    // function_score range filter reads directly. `aoiTermCount` is the count of
+    // topic assignments (the "topic-assignment terms" §6.1.5 names), not a token
+    // count of the joined string.
+    overviewLength: s.overview?.length ?? 0,
+    aoiTermCount: s.topicAssignments.length,
     publicationAbstracts: abstractParts.join(" "),
     hasActiveGrants,
     piRoleEver,
