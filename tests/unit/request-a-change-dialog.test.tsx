@@ -1,11 +1,13 @@
 /**
  * components/edit/request-a-change-dialog.tsx — the "Request a change" router
- * modal (#160 UI follow-up). Verifies the demoted title + "Regarding" line, the
- * per-issue action verb, the callout under the selected row, the honest
- * dead-end ("Got it", no request filed), the structured `mailto:`, switch-reset
- * + discard guard, and the CRLF header-injection guard.
+ * modal (#160 UI follow-up + Phase 2 server mailer). Verifies the demoted title
+ * + "Regarding" line, the per-issue action verb, the callout under the selected
+ * row, the honest dead-end ("Got it", no request filed), switch-reset + discard
+ * guard, the Phase-2 server POST (primary) with "Request sent.", and the
+ * Phase-1 `mailto:` fallback (cc / structured body / CRLF injection guard)
+ * exercised through a non-2xx response.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
@@ -19,10 +21,38 @@ function pickIssue(id: string) {
 function detailBox() {
   return screen.getByLabelText("Add any detail (optional)") as HTMLTextAreaElement;
 }
+/** Mock `global.fetch` for the route Submit; default = server send succeeds. */
+function mockFetch(response: { ok: boolean; status?: number }) {
+  const fn = vi.fn().mockResolvedValue({ ok: response.ok, status: response.status ?? 200 });
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
+// jsdom can't navigate; replace `window.location` with a capturable stub so the
+// `mailto:` fallback's `window.location.href = …` is observable, not an error.
+let originalLocation: Location;
+beforeEach(() => {
+  originalLocation = window.location;
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    writable: true,
+    value: { href: "" },
+  });
+});
+afterEach(() => {
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    writable: true,
+    value: originalLocation,
+  });
+  vi.unstubAllGlobals();
+});
 
 describe("RequestAChangeDialog", () => {
   it("opens a named dialog with a demoted title + Regarding line + focal question", () => {
-    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D., Stanford" />);
+    render(
+      <RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D., Stanford" />,
+    );
     expect(screen.getByTestId("request-a-change-trigger")).toBeTruthy();
     open();
     expect(screen.getByRole("dialog", { name: /request a change/i })).toBeTruthy();
@@ -64,28 +94,77 @@ describe("RequestAChangeDialog", () => {
     expect(screen.queryByLabelText("Add any detail (optional)")).toBeNull();
   });
 
-  it("route → verb-named Submit with the structured, specific mailto", () => {
+  it("route → verb-named Submit button + the PubMed source caveat", () => {
     render(<RequestAChangeDialog attribute="publications" cwid="abc1001" itemLabel="My Paper" />);
     open();
     pickIssue("publication-metadata-wrong");
     expect(screen.getByText(/authoritative record at NLM/i)).toBeTruthy(); // PubMed-source caveat
-    fireEvent.change(detailBox(), { target: { value: "Author 3 is misspelled." } });
     const submit = screen.getByTestId("request-a-change-submit");
+    expect(submit.tagName).toBe("BUTTON"); // Phase 2: a POST trigger, not an <a href=mailto>
     expect(submit.textContent).toContain("Report correction");
-    const decoded = decodeURIComponent(submit.getAttribute("href")!);
-    expect(submit.getAttribute("href")!.startsWith("mailto:support@med.cornell.edu")).toBe(true);
-    expect(decoded).toContain("Scholars profile correction — Publications");
-    expect(decoded).toContain("Item: My Paper");
-    expect(decoded).toContain("Author 3 is misspelled.");
   });
 
-  it("route carries cc + item label (funding → OSRA)", () => {
+  it("route Submit POSTs to the server mailer and confirms 'Request sent.'", async () => {
+    const fetchMock = mockFetch({ ok: true });
     render(<RequestAChangeDialog attribute="funding" cwid="abc1001" itemLabel="R01 Test Grant" />);
     open();
     pickIssue("funding-wrong");
-    const href = screen.getByTestId("request-a-change-submit").getAttribute("href")!;
-    expect(href).toContain("cc=scholars%40weill.cornell.edu");
-    expect(decodeURIComponent(href)).toContain("Item: R01 Test Grant");
+    fireEvent.change(detailBox(), { target: { value: "Sponsor is wrong." } });
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+
+    expect(await screen.findByText("Request sent.")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/edit/request-change",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).toMatchObject({
+      attribute: "funding",
+      issueId: "funding-wrong",
+      itemId: "R01 Test Grant",
+      targetCwid: "abc1001",
+      detail: "Sponsor is wrong.",
+    });
+    // Server path must NOT touch the mailto: fallback.
+    expect(window.location.href).toBe("");
+    // Receipt opt-out defaults to "send a copy".
+    expect(body.noReceipt).toBe(false);
+  });
+
+  it("opting out of the receipt sets noReceipt=true in the POST body", async () => {
+    const fetchMock = mockFetch({ ok: true });
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    open();
+    pickIssue("education-wrong");
+    fireEvent.click(screen.getByRole("checkbox", { name: /don't email me a copy/i }));
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+
+    expect(await screen.findByText("Request sent.")).toBeTruthy();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string).noReceipt).toBe(true);
+  });
+
+  it("falls back to the mailto: client on a non-2xx (no regression while the mailer is dark)", async () => {
+    mockFetch({ ok: false, status: 503 });
+    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
+    open();
+    pickIssue("education-wrong");
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+
+    expect(await screen.findByText(/email client should have opened/i)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("ofa@med.cornell.edu");
+    expect(window.location.href.startsWith("mailto:ofa@med.cornell.edu")).toBe(true);
+  });
+
+  it("the fallback mailto carries cc + item label (funding → OSRA)", async () => {
+    mockFetch({ ok: false, status: 503 });
+    render(<RequestAChangeDialog attribute="funding" cwid="abc1001" itemLabel="R01 Test Grant" />);
+    open();
+    pickIssue("funding-wrong");
+    fireEvent.click(screen.getByTestId("request-a-change-submit"));
+    await screen.findByRole("status");
+
+    expect(window.location.href).toContain("cc=scholars%40weill.cornell.edu");
+    expect(decodeURIComponent(window.location.href)).toContain("Item: R01 Test Grant");
   });
 
   it("honest dead-end: non-PubMed explains auto-pickup and offers only 'Got it'", () => {
@@ -127,22 +206,16 @@ describe("RequestAChangeDialog", () => {
     expect(screen.getByText("Discard your request?")).toBeTruthy();
   });
 
-  it("strips CRLF from detail in the composed mailto (edge 9 — injection guard)", () => {
+  it("strips CRLF from detail in the fallback mailto (edge 9 — injection guard)", async () => {
+    mockFetch({ ok: false, status: 503 });
     render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
     open();
     pickIssue("education-wrong");
     fireEvent.change(detailBox(), { target: { value: "line1\r\nBcc: evil@example.com" } });
-    const href = screen.getByTestId("request-a-change-submit").getAttribute("href")!;
-    expect(href).not.toContain("%0A%0ABcc");
-    expect(decodeURIComponent(href)).toContain("line1 Bcc: evil@example.com");
-  });
-
-  it("Submit shows an in-dialog confirmation with a copyable address (edge 8)", () => {
-    render(<RequestAChangeDialog attribute="education" cwid="abc1001" itemLabel="Ph.D." />);
-    open();
-    pickIssue("education-wrong");
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
-    expect(screen.getByRole("status").textContent).toContain("ofa@med.cornell.edu");
-    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    await screen.findByRole("status");
+
+    expect(window.location.href).not.toContain("%0A%0ABcc");
+    expect(decodeURIComponent(window.location.href)).toContain("line1 Bcc: evil@example.com");
   });
 });

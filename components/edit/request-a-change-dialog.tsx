@@ -24,6 +24,7 @@ import * as React from "react";
 import { ArrowRight, Flag, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -116,6 +117,11 @@ export function RequestAChangeDialog({
   const [revealFallback, setRevealFallback] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
+  const [sending, setSending] = React.useState(false);
+  /** How the request was sent — drives the confirmation copy. */
+  const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
+  /** Opt-out of the courtesy email receipt (default = receipt sent). */
+  const [noReceipt, setNoReceipt] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -124,6 +130,9 @@ export function RequestAChangeDialog({
       setRevealFallback(false);
       setSubmitted(false);
       setConfirmDiscard(false);
+      setSending(false);
+      setSentVia(null);
+      setNoReceipt(false);
     }
   }, [open]);
 
@@ -140,6 +149,8 @@ export function RequestAChangeDialog({
     setDetail("");
     setRevealFallback(false);
     setSubmitted(false);
+    setSentVia(null);
+    setNoReceipt(false);
   }
 
   // Single choke point for every close path (Esc / scrim / X / Cancel).
@@ -186,6 +197,44 @@ export function RequestAChangeDialog({
     return "#";
   }
 
+  /**
+   * Submit a `route` request. Phase 2: POST to the server mailer; on success the
+   * confirmation reads "Request sent." On ANY non-2xx (incl. `503 send_disabled`
+   * while the mailer is dark) or a network error, fall back to the Phase-1
+   * `mailto:` + its banner — so behavior never regresses before the flag flips.
+   */
+  async function handleRouteSubmit() {
+    if (!issue || !submitTarget) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/edit/request-change", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          attribute,
+          issueId: issue.id,
+          itemId: itemLabel,
+          detail,
+          targetCwid: cwid,
+          noReceipt,
+        }),
+      });
+      if (res.ok) {
+        setSentVia("server");
+        setSubmitted(true);
+        return;
+      }
+    } catch {
+      // network error — fall through to the mailto: fallback
+    } finally {
+      setSending(false);
+    }
+    // Phase-1 fallback: hand off to the user's own mail client.
+    window.location.href = routeMailto();
+    setSentVia("mailto");
+    setSubmitted(true);
+  }
+
   const cta = action ? ctaFor(action, revealFallback) : null;
   const isAck = action?.kind === "explain" && !revealFallback; // dead-end "Got it"
 
@@ -221,16 +270,32 @@ export function RequestAChangeDialog({
           {submitted && submitTarget ? (
             /* ---- post-submit confirmation (route) ---- */
             <div className="flex flex-col gap-2" role="status" aria-live="polite">
-              <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
-              <p className="text-muted-foreground text-sm">
-                Your email client should have opened a pre-filled message
-                {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
-                opened, email{" "}
-                <a className="text-[var(--apollo-maroon)] underline" href={`mailto:${submitTarget.email}`}>
-                  {submitTarget.email}
-                </a>{" "}
-                directly.
-              </p>
+              {sentVia === "server" ? (
+                <>
+                  <p className="text-base font-medium">Request sent.</p>
+                  <p className="text-muted-foreground text-sm">
+                    We&apos;ve routed your request
+                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. They&apos;ll
+                    follow up if they need more detail.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
+                  <p className="text-muted-foreground text-sm">
+                    Your email client should have opened a pre-filled message
+                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
+                    opened, email{" "}
+                    <a
+                      className="text-[var(--apollo-maroon)] underline"
+                      href={`mailto:${submitTarget.email}`}
+                    >
+                      {submitTarget.email}
+                    </a>{" "}
+                    directly.
+                  </p>
+                </>
+              )}
             </div>
           ) : confirmDiscard ? (
             /* ---- unsaved-text discard guard (edge case 3) ---- */
@@ -313,17 +378,30 @@ export function RequestAChangeDialog({
                           )}
 
                           {selected && showRouteBox && (
-                            <div className="flex flex-col gap-1.5">
-                              <label htmlFor="rac-detail" className="text-sm font-medium">
-                                Add any detail (optional)
+                            <div className="flex flex-col gap-2.5">
+                              <div className="flex flex-col gap-1.5">
+                                <label htmlFor="rac-detail" className="text-sm font-medium">
+                                  Add any detail (optional)
+                                </label>
+                                <Textarea
+                                  id="rac-detail"
+                                  value={detail}
+                                  onChange={(e) => setDetail(e.target.value)}
+                                  placeholder="What should change, and to what?"
+                                  rows={3}
+                                />
+                              </div>
+                              <label
+                                htmlFor="rac-no-receipt"
+                                className="text-muted-foreground flex items-center gap-2 text-sm"
+                              >
+                                <Checkbox
+                                  id="rac-no-receipt"
+                                  checked={noReceipt}
+                                  onCheckedChange={(v) => setNoReceipt(v === true)}
+                                />
+                                Don&apos;t email me a copy
                               </label>
-                              <Textarea
-                                id="rac-detail"
-                                value={detail}
-                                onChange={(e) => setDetail(e.target.value)}
-                                placeholder="What should change, and to what?"
-                                rows={3}
-                              />
                             </div>
                           )}
                         </div>
@@ -379,10 +457,13 @@ export function RequestAChangeDialog({
                   </Button>
                 )}
                 {showRouteBox && (
-                  <Button asChild data-testid="request-a-change-submit">
-                    <a href={routeMailto()} onClick={() => setSubmitted(true)}>
-                      {cta}
-                    </a>
+                  <Button
+                    type="button"
+                    data-testid="request-a-change-submit"
+                    disabled={sending}
+                    onClick={handleRouteSubmit}
+                  >
+                    {sending ? "Sending…" : cta}
                   </Button>
                 )}
                 {isAck && (

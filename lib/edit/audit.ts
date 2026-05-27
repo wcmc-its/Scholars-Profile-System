@@ -28,7 +28,9 @@ export type AuditAction =
   | "field_override"
   | "field_override_clear"
   | "suppression_create"
-  | "suppression_revoke";
+  | "suppression_revoke"
+  /** a "Request a change" email routed to the owning office (#160 Phase 2) */
+  | "request_change";
 
 /** The target type — mirrors the table ENUM; v1 emits only `scholar` / `publication`. */
 export type AuditEntityType =

@@ -58,6 +58,15 @@ const WCM_IDP_SSO_URL =
  */
 const WCM_SAML_CWID_ATTRIBUTE = "CWID";
 
+/**
+ * The verified SES sender for the #160 Phase 2 "Request a change" server mailer.
+ * Shared by the task-role `ses:FromAddress` condition and the app `SCHOLARS_MAIL_
+ * FROM` env var so the IAM grant and the runtime From can never drift. Verifying
+ * this identity (DKIM CNAMEs) + leaving the SES sandbox are ops steps
+ * (docs/ses-sender-verification.md); the send stays dormant until then.
+ */
+const SCHOLARS_MAIL_FROM = "no-reply-scholars@weill.cornell.edu";
+
 /** Props for {@link AppStack}. */
 export interface AppStackProps extends StackProps {
   /** Resolved per-environment configuration. */
@@ -456,6 +465,42 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // SES send grant (#160 Phase 2 -- "Request a change" server mailer).
+    //
+    // POST /api/edit/request-change sends one email to the office that owns
+    // the data. A custom *inline* policy with the single action ses:SendEmail,
+    // scoped by an `ses:FromAddress` condition to exactly the no-reply sender.
+    // Conditioning on the From (not just the identity ARN) is tighter and is
+    // independent of whether the sender is later verified as an email or a
+    // domain identity. Resource stays SES-identity-scoped -- never a bare `*`.
+    //
+    // Dormant until SELF_EDIT_REQUEST_CHANGE_SEND=on (the env var below ships
+    // "off") AND the identity is verified + the account is out of the SES
+    // sandbox (ops -- docs/ses-sender-verification.md). No EmailIdentity
+    // construct: a no-reply mailbox can't complete email-link verification, and
+    // the real path is a DKIM/domain identity owned in WCM DNS, so the resource
+    // is granted by ARN pattern + From condition and verified out-of-band.
+    //
+    // Contains no secretsmanager reference, so the "zero secretsmanager on the
+    // task role" assertion still holds; app-stack.test.ts adds the SES-scope
+    // assertions (single action, From condition, identity-scoped resource).
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleSesPolicy", {
+      policyName: `sps-task-${env}-ses`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["ses:SendEmail"],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+          conditions: {
+            StringEquals: { "ses:FromAddress": SCHOLARS_MAIL_FROM },
+          },
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -609,6 +654,14 @@ export class AppStack extends Stack {
         SAML_SP_ENTITY_ID: envConfig.samlSpEntityId,
         SAML_SP_ACS_URL: envConfig.samlSpAcsUrl,
         SAML_CWID_ATTRIBUTE: WCM_SAML_CWID_ATTRIBUTE,
+        // #160 Phase 2 -- "Request a change" server mailer. Ships OFF: while
+        // off the endpoint 503s and the dialog falls back to the Phase-1 client
+        // mailto:. Flip to "on" only after the SES sender identity is verified
+        // + the account leaves the SES sandbox (docs/ses-sender-verification.md).
+        // SCHOLARS_MAIL_FROM is the same address the task-role grant conditions
+        // on, so the From and the IAM scope can't drift.
+        SELF_EDIT_REQUEST_CHANGE_SEND: "off",
+        SCHOLARS_MAIL_FROM,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
