@@ -11,6 +11,7 @@
  */
 import Link from "next/link";
 
+import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,9 @@ export type ProfilesRosterProps = {
   status: EditRosterStatusFilter;
   page: number;
   pageSize: number;
+  /** Pending slug-request count for the admin sub-nav pill; `null` when the
+   *  slug-request feature is off (the "URL requests" tab is then hidden). */
+  pendingSlugRequests: number | null;
 };
 
 const BASE = "/edit/scholars";
@@ -36,7 +40,15 @@ function pageHref(page: number, query: string, status: EditRosterStatusFilter): 
   return qs ? `${BASE}?${qs}` : BASE;
 }
 
-export function ProfilesRoster({ entries, total, query, status, page, pageSize }: ProfilesRosterProps) {
+export function ProfilesRoster({
+  entries,
+  total,
+  query,
+  status,
+  page,
+  pageSize,
+  pendingSlugRequests,
+}: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
   const hasPrev = page > 0;
@@ -55,13 +67,7 @@ export function ProfilesRoster({ entries, total, query, status, page, pageSize }
           <span className="font-semibold">Scholars Profile Console</span>
         </div>
       </header>
-      <div className="border-border border-b">
-        <div className="mx-auto max-w-[var(--max-content)] px-6">
-          <span className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium">
-            Profiles
-          </span>
-        </div>
-      </div>
+      <AdminSubnav active="profiles" pendingSlugRequests={pendingSlugRequests} />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-4 text-xl font-semibold">Profiles</h1>

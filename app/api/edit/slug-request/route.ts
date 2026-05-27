@@ -26,8 +26,8 @@ import {
   logEditFailure,
   readEditRequest,
 } from "@/lib/edit/request";
-import { isSlugRequestEnabled } from "@/lib/edit/slug-request";
-import { checkSlugCollision, RESERVED_SLUGS, validateRequestedSlug } from "@/lib/edit/validators";
+import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
+import { checkSlugCollision, validateRequestedSlug } from "@/lib/edit/validators";
 
 const PATH = "/api/edit/slug-request";
 /** A short free-text justification; rejects an abusive payload. */
@@ -151,45 +151,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const status = request.nextUrl.searchParams.get("status") ?? "pending";
   if (status !== "pending") return editError(400, "invalid_status", "status");
 
-  const rows = await db.read.slugRequest.findMany({
-    where: { status: "pending" },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      cwid: true,
-      requestedSlug: true,
-      reason: true,
-      createdAt: true,
-    },
-  });
-
-  // Resolve target scholar + a live collision/reserved warning per row. The
-  // pending queue is small; N lookups are acceptable.
-  const requests = await Promise.all(
-    rows.map(async (r) => {
-      const scholar = await db.read.scholar.findUnique({
-        where: { cwid: r.cwid },
-        select: { slug: true, preferredName: true, fullName: true },
-      });
-      let warning: "collision" | "reserved" | null = null;
-      if (RESERVED_SLUGS.has(r.requestedSlug)) {
-        warning = "reserved";
-      } else {
-        const collision = await checkSlugCollision(r.requestedSlug, r.cwid, db.read);
-        if (!collision.ok) warning = "collision";
-      }
-      return {
-        id: r.id,
-        cwid: r.cwid,
-        requestedSlug: r.requestedSlug,
-        reason: r.reason,
-        createdAt: r.createdAt.toISOString(),
-        currentSlug: scholar?.slug ?? null,
-        name: scholar?.preferredName ?? scholar?.fullName ?? null,
-        warning,
-      };
-    }),
-  );
-
+  // The queue load (rows + per-row name/current-slug/collision-or-reserved
+  // warning) is shared with the `/edit/slug-requests` page so they never drift.
+  const requests = await loadSlugRequestQueue(db.read);
   return editOk({ requests });
 }

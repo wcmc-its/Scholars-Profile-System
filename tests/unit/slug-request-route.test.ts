@@ -16,6 +16,7 @@ const {
   mockEnabled,
   mockTransaction,
   mockScholarFindUnique,
+  mockScholarFindFirst,
   mockSlugReqFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockEnabled: vi.fn(),
   mockTransaction: vi.fn(),
   mockScholarFindUnique: vi.fn(),
+  mockScholarFindFirst: vi.fn(),
   mockSlugReqFindMany: vi.fn(),
 }));
 
@@ -45,7 +47,7 @@ vi.mock("@/lib/db", () => ({
   db: {
     write: { $transaction: mockTransaction },
     read: {
-      scholar: { findUnique: mockScholarFindUnique },
+      scholar: { findUnique: mockScholarFindUnique, findFirst: mockScholarFindFirst },
       slugRequest: { findMany: mockSlugReqFindMany },
     },
   },
@@ -87,6 +89,7 @@ beforeEach(() => {
   mockValidate.mockReturnValue({ ok: true, value: "jane-smith" });
   mockCheckCollision.mockResolvedValue({ ok: true });
   mockScholarFindUnique.mockResolvedValue(null); // no current slug by default
+  mockScholarFindFirst.mockResolvedValue(null); // no colliding live holder by default
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 20 });
   mockAppendAuditRow.mockResolvedValue(undefined);
   mockTransaction.mockImplementation(async (cb: (tx: ReturnType<typeof txStub>) => unknown) =>
@@ -178,6 +181,7 @@ describe("GET /api/edit/slug-request (queue)", () => {
     ]);
     mockScholarFindUnique.mockResolvedValue({ slug: "c-one", preferredName: "Casey One", fullName: "Casey N. One" });
     mockCheckCollision.mockResolvedValue({ ok: false, error: "collision" });
+    mockScholarFindFirst.mockResolvedValue({ cwid: "holder9" });
     const res = await GET(get("?status=pending"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -188,6 +192,7 @@ describe("GET /api/edit/slug-request (queue)", () => {
       currentSlug: "c-one",
       name: "Casey One",
       warning: "collision",
+      collidesWith: "holder9",
     });
   });
 

@@ -18,6 +18,7 @@ import { loadEditRoster, type EditRosterStatusFilter } from "@/lib/api/edit-rost
 import { getEditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,12 @@ export default async function EditScholarsPage({
     db.read,
   );
 
+  // The "URL requests" admin tab + pending-count pill (#497 PR-3c); `null` when
+  // the slug-request feature is off, which hides the tab.
+  const pendingSlugRequests = isSlugRequestEnabled()
+    ? await countPendingSlugRequests(db.read)
+    : null;
+
   return (
     <ProfilesRoster
       entries={entries}
@@ -65,6 +72,7 @@ export default async function EditScholarsPage({
       status={statusFilter}
       page={pageNum}
       pageSize={PAGE_SIZE}
+      pendingSlugRequests={pendingSlugRequests}
     />
   );
 }
