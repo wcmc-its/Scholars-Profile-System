@@ -142,7 +142,7 @@ Resolution order:
 
 ### 5.4 Slug-request queue (PR-3)
 
-- **Request** `POST /api/edit/slug-request` `{ requestedSlug, reason? }`. Authz: `canAccessScholarEditPage(session, cwid)` self-or-superuser — but the *target is always `session.cwid`* in self-mode (a scholar requests only their own). Validates §6 rules + a collision pre-check (advisory; not authoritative). A newer pending request for the same cwid sets the prior to `superseded`. Rate-limited per-cwid via the existing `recordRequestChangeAttempt` pattern (`lib/edit/rate-limit.ts`), superusers exempt.
+- **Request** `POST /api/edit/slug-request` `{ requestedSlug, reason? }`. Authz: `canAccessScholarEditPage(session, cwid)` self-or-superuser — but the *target is always `session.cwid`* in self-mode (a scholar requests only their own). Validates §6 rules + a **collision check that rejects at request time** (400 `collision`). *Rationale (settled 2026-05-27):* v1 ships no incumbent-swap (§3/§7) and the `slug_history` identity-bleed guard (§6.4) makes a cross-scholar collision **durable** — a colliding request can therefore only ever be declined. Rejecting up front gives the scholar immediate feedback and keeps doomed rows out of the queue. (The earlier "advisory, don't block" framing assumed approval-time swap flexibility that v1 does not have; revert to advisory only if incumbent-swap lands.) The approval-time UNIQUE guards remain the authoritative, race-proof gate for the one collision that *can* legitimately reach the queue: free-at-request, taken-by-approval. A newer pending request for the same cwid sets the prior to `superseded`. Rate-limited per-cwid via the existing `recordRequestChangeAttempt` pattern (`lib/edit/rate-limit.ts`), superusers exempt.
 - **Queue** — superuser-only surface inside `/edit` (a `pending`-ordered list; reuses the Phase-7 superuser surface pattern from #398). Read endpoint `GET /api/edit/slug-request?status=pending`.
 - **Decision** `POST /api/edit/slug-request/[id]/decision` `{ decision: 'approve'|'reject', note? }`, superuser-only. Approve → `reconcileScholarSlug` + `FieldOverride` upsert (§5.1) **in one transaction**, then mark the request `approved`. Reject → mark `rejected` with `decisionNote`. Both write a B03 row.
 - **Requester notification** (PR-3) — on either decision, email the requester (approved: the new URL is live; rejected: the `decisionNote`) via `lib/edit/mailer.ts`, opt-out/default-on, best-effort (never fails the decision), resolved from the local `Scholar.email` (avoids the VPC↔WCM LDAP gap, mirroring the request-change receipt).
@@ -171,9 +171,10 @@ Must equal `deriveSlug(input)` (idempotent — `[a-z0-9]` + single hyphens, no l
 
 Best-effort denylist check (English list, substring-aware with word boundaries). Explicitly best-effort — not a security control.
 
-### 6.4 Collision (authoritative)
+### 6.4 Collision (two layers)
 
-`slug_guard` UNIQUE (cross-override) + `Scholar.slug` UNIQUE (cross-scholar) + the existing `slug_history` check (`validators.ts:301`). A scholar reclaiming a slug from **their own** history is allowed (existing rule, `validators.ts:212`).
+1. **Application check (`checkSlugCollision`)** — the *friendly* half: a live `Scholar.slug`, another cwid's `field_override(slug)`, or a `slug_history.old_slug` pointing at a different scholar (the identity-bleed guard — a departed scholar's slug stays blocked, which is what makes collisions **durable**). Used to return a friendly `400 collision` at override-set **and request time** (§5.4), and to compute the per-row warning the approval queue shows. A scholar reclaiming a slug from **their own** history is allowed (every check excludes `forCwid`; `validators.ts`).
+2. **Authoritative guard** — `slug_guard` UNIQUE (cross-override) + `Scholar.slug` UNIQUE (cross-scholar). The application check is not atomic; these indexes are the race-proof backstop. Approval runs reconcile+override in one transaction, so a slug that was free at request time but taken by approval makes the tx fail closed → the decision endpoint returns `409 collision` and the request stays `pending` for the reviewer to decline. The queue read (`GET ?status=pending`) re-runs the application check at load so the reviewer sees the warning before they try.
 
 ---
 
@@ -215,7 +216,9 @@ OWASP framing: §6.2 is input canonicalization (ASVS V5.1); §6.1+catch-all is a
 | Request by non-owner non-superuser | 403 `not_self` |
 | Decision by non-superuser | 403 `not_superuser` |
 | Second pending request, same cwid | prior → `superseded` |
+| Request a currently-colliding slug | `400 collision` at request time — rejected, not queued (§5.4/§6.4) |
 | Approve | override written + `Scholar.slug` reconciled + request `approved` + B03 row |
+| Approve a request whose slug was taken since filing | tx fails closed → `409 collision`; request stays `pending`; reviewer declines |
 
 Run `vitest` before any push (mock-factory/rendered-order regressions tsc can't see).
 
@@ -253,17 +256,20 @@ Keep diffs tight (no blanket prettier; printWidth 100). Flag-gate PR-3 behind a 
 
 - **ADR-005 amendment** (confirmed): record D5 (reconcile-on-write) and the hard-delete prohibition (§7). Part of PR-1.
 - **Requester notification** (confirmed): in PR-3 (§5.4).
+- **Request-time collision = hard reject** (settled 2026-05-27, §5.4/§6.4): block at request time (`400 collision`) rather than queue an advisory row, because v1 has no incumbent-swap and the identity-bleed guard makes collisions durable. Revisit (→ advisory) only if incumbent-swap is built.
+- **Withdraw** (settled): added `withdrawn` to `SlugRequestStatus` (keeps the audit trail) + a self-only `POST …/[id]/withdraw` (`pending → withdrawn`).
+- **Reason field** (settled): collapsed by default on the request card ("Add a note for the reviewer (optional)" disclosure).
 
-## 12. UI surfaces (companion UI-SPEC required — TBD)
+## 12. UI surfaces (companion UI-SPEC: `docs/slug-personalization-ui-spec.md`)
 
-This SPEC does not specify the UI. The feature introduces three surfaces that need a UI-SPEC anchored to the Apollo master-detail `/edit` layout (mockup-first, per team practice; see #355 for the /edit UI-SPEC track):
+This SPEC does not specify the UI in detail — the companion `slug-personalization-ui-spec.md` does (signed off 2026-05-27). The feature introduces three surfaces anchored to the Apollo master-detail `/edit` layout (mockup-first, per team practice; see #355 for the /edit UI-SPEC track):
 
 | # | Surface | Audience | Must cover |
 |---|---|---|---|
-| U1 | **Profile-URL request entry** | Scholar (self) | Shows current URL; field to propose a new slug; inline validation feedback (format / reserved-word / advisory collision); "Request" action (not "Save" — they can't self-apply); placement in the ATTRIBUTES rail (own attribute vs. under Name & Title — TBD). |
-| U2 | **Request status** | Scholar (self) | Pending badge after submit; on approve the live URL updates; on reject, show `decisionNote` + allow re-request; supersede messaging if a newer request replaces an older. |
-| U3 | **Approval queue** | Superuser | Pending list (oldest first); per row: target scholar (name + cwid), current slug, requested slug, reason, **live collision/reserved warning**, approve/reject controls + decision-note input; empty state. Placement: new `/edit/slug-requests` route vs. a section in the existing superuser surfaces — TBD. |
+| U1 | **Profile-URL request entry** | Scholar (self) | Shows current URL; field to propose a new slug; inline validation feedback (format / reserved-word client-side; collision rejected server-side `400` and shown inline, §5.4); **"Request this URL"** action (not "Save" — they can't self-apply). **Placement (decided): its own "Profile URL" item in the ATTRIBUTES rail** (mirrors the superuser `slug-card`). URL displayed in **root form** `scholars.weill.cornell.edu/<slug>` (with `/scholars/<slug>` still valid). |
+| U2 | **Request status** | Scholar (self) | Pending badge after submit + "Withdraw request"; on approve the live URL updates ("old address redirects automatically"); on reject, show `decisionNote` + allow re-request; supersede messaging if a newer request replaces an older. |
+| U3 | **Approval queue** | Superuser | Pending list (oldest first); per row: target scholar (name + cwid), current → requested slug, reason, **live collision/reserved warning** computed at load (collision is the **race case only** — free-at-request, taken-by-approval — since same-time collisions never enter the queue, §6.4; v1 has **no incumbent-swap**, so collision/reserved both **disable approve and the reviewer declines**), approve/decline-with-note controls; empty state. **Placement (decided): dedicated `/edit/slug-requests` admin route** with a pending-count badge in the rail. |
 
-Root-alias routing (§5.3) has **no UI** (server redirect only). The public profile already surfaces the canonical URL — no change.
+Root-alias routing (§5.3) has **no UI** (server redirect only). The public profile already surfaces the canonical URL — no change. **Note (PR-1):** the superuser `slug-card.tsx` copy "takes effect on the next directory sync" must change to *immediate* (Option B reconciles on write).
 
-**Process:** throwaway HTML mockup of U1 + U3 first (extending `/tmp/sps-edit-apollo.html`), visual sign-off, then the UI-SPEC, then PR-3 build. Do not assume spacing/sizing/icons.
+**Process:** mockup built + visually signed off 2026-05-27 (`/tmp/sps-slug-mockup.html`); placements decided above. Next: write the UI-SPEC from this + the mockup, then PR-3 build. Do not assume spacing/sizing/icons beyond the mockup.

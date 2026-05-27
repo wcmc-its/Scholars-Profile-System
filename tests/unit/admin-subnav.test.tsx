@@ -1,0 +1,46 @@
+/**
+ * `components/edit/admin-subnav.tsx` — the superuser admin sub-nav
+ * (#497 PR-3c, `slug-personalization-ui-spec.md` § 3.1).
+ */
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
+import { AdminSubnav } from "@/components/edit/admin-subnav";
+
+describe("AdminSubnav", () => {
+  it("renders both tabs with the pending-count pill when the feature is on", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
+    expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
+    expect(screen.getByTestId("admin-tab-slug-requests")).toBeTruthy();
+    expect(screen.getByTestId("admin-subnav-pending-count").textContent).toBe("3");
+  });
+
+  it("marks the active tab with aria-current and links the inactive one", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={1} />);
+    expect(screen.getByTestId("admin-tab-profiles").getAttribute("aria-current")).toBe("page");
+    // The inactive tab is a link to its surface.
+    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("href")).toBe(
+      "/edit/slug-requests",
+    );
+  });
+
+  it("hides the URL-requests tab when the feature is off (pendingSlugRequests null)", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    expect(screen.getByTestId("admin-tab-profiles")).toBeTruthy();
+    expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
+  });
+
+  it("omits the count pill when zero pending", () => {
+    render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} />);
+    expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+});

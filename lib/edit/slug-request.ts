@@ -8,6 +8,7 @@
  * approval (via `reconcileScholarSlug`); the `SlugRequest` table is the queue.
  */
 import type { PrismaClient, SlugRequestStatus } from "@/lib/generated/prisma/client";
+import { checkSlugCollision, RESERVED_SLUGS } from "@/lib/edit/validators";
 
 /** Canonical public base URL — mirrors `lib/seo/jsonld.ts`. */
 export function publicSiteUrl(): string {
@@ -70,6 +71,100 @@ export async function loadLatestSlugRequest(
   });
   if (!row) return null;
   return { ...row, createdAt: row.createdAt.toISOString() };
+}
+
+/**
+ * One pending request as the superuser approval queue (U3) renders it: the
+ * request, the target scholar's resolved name + current slug, and a warning
+ * computed live at load (a slug free at request time may be taken now). All
+ * Date fields serialized to ISO for the client island.
+ */
+export type SlugRequestQueueRow = {
+  id: string;
+  cwid: string;
+  requestedSlug: string;
+  reason: string | null;
+  createdAt: string;
+  /** The target scholar's live slug (override-aware), or `null` if no row. */
+  currentSlug: string | null;
+  /** Resolved display name (`preferredName ?? fullName`), or `null`. */
+  name: string | null;
+  /** The target's primary department, for the row header; `null` if unset. */
+  department: string | null;
+  /** Live warning blocking approval; `null` when clean. */
+  warning: "collision" | "reserved" | null;
+  /** When `warning === "collision"` and the conflict is a live scholar, that
+   *  scholar's cwid (so the reviewer knows who holds it); `null` otherwise
+   *  (clean, reserved, or an override/history-only conflict). */
+  collidesWith: string | null;
+};
+
+/** The Prisma surface the queue load needs (`checkSlugCollision` adds the rest). */
+type SlugRequestQueueClient = Pick<
+  PrismaClient,
+  "slugRequest" | "scholar" | "fieldOverride" | "slugHistory"
+>;
+
+/**
+ * Load the pending slug-request queue, oldest-first (`@@index([status,
+ * createdAt])`), each row carrying the target's name + current slug and a
+ * live collision/reserved warning. Shared by the `GET /api/edit/slug-request`
+ * endpoint and the `/edit/slug-requests` page so the two never drift. The
+ * pending queue is small; the per-row lookups are acceptable.
+ */
+export async function loadSlugRequestQueue(
+  client: SlugRequestQueueClient,
+): Promise<SlugRequestQueueRow[]> {
+  const rows = await client.slugRequest.findMany({
+    where: { status: "pending" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, cwid: true, requestedSlug: true, reason: true, createdAt: true },
+  });
+
+  return Promise.all(
+    rows.map(async (r) => {
+      const scholar = await client.scholar.findUnique({
+        where: { cwid: r.cwid },
+        select: { slug: true, preferredName: true, fullName: true, primaryDepartment: true },
+      });
+      let warning: "collision" | "reserved" | null = null;
+      let collidesWith: string | null = null;
+      if (RESERVED_SLUGS.has(r.requestedSlug)) {
+        warning = "reserved";
+      } else {
+        const collision = await checkSlugCollision(r.requestedSlug, r.cwid, client);
+        if (!collision.ok) {
+          warning = "collision";
+          // Resolve the live holder for the warning copy. An override/history-
+          // only conflict yields no live scholar → `collidesWith` stays null.
+          const holder = await client.scholar.findFirst({
+            where: { slug: r.requestedSlug, cwid: { not: r.cwid }, deletedAt: null, status: "active" },
+            select: { cwid: true },
+          });
+          collidesWith = holder?.cwid ?? null;
+        }
+      }
+      return {
+        id: r.id,
+        cwid: r.cwid,
+        requestedSlug: r.requestedSlug,
+        reason: r.reason,
+        createdAt: r.createdAt.toISOString(),
+        currentSlug: scholar?.slug ?? null,
+        name: scholar?.preferredName ?? scholar?.fullName ?? null,
+        department: scholar?.primaryDepartment ?? null,
+        warning,
+        collidesWith,
+      };
+    }),
+  );
+}
+
+/** Count pending slug requests — the rail pending-count pill (U3 + roster). */
+export function countPendingSlugRequests(
+  client: Pick<PrismaClient, "slugRequest">,
+): Promise<number> {
+  return client.slugRequest.count({ where: { status: "pending" } });
 }
 
 export type ComposedEmail = { subject: string; text: string };

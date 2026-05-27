@@ -1,0 +1,87 @@
+/**
+ * The shared admin sub-nav for the superuser `/edit` list surfaces (#497 PR-3c,
+ * `slug-personalization-ui-spec.md` § 3.1). The maroon-underlined tab strip
+ * under the black Apollo bar, linking the Profiles roster (`/edit/scholars`) and
+ * the Profile-URL request queue (`/edit/slug-requests`). A pending-count pill
+ * sits on the "URL requests" tab.
+ *
+ * `pendingSlugRequests === null` hides the URL-requests tab entirely — the
+ * slug-request feature is flag-gated (`SELF_EDIT_SLUG_REQUEST`), so a surface
+ * that doesn't exist isn't advertised.
+ */
+import Link from "next/link";
+
+export type AdminSubnavActive = "profiles" | "slug-requests";
+
+export function AdminSubnav({
+  active,
+  pendingSlugRequests,
+}: {
+  active: AdminSubnavActive;
+  pendingSlugRequests: number | null;
+}) {
+  return (
+    <div className="border-border border-b" data-slot="admin-subnav">
+      <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+        <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
+        {pendingSlugRequests !== null && (
+          <AdminTab
+            href="/edit/slug-requests"
+            id="slug-requests"
+            label="URL requests"
+            active={active === "slug-requests"}
+            count={pendingSlugRequests}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdminTab({
+  href,
+  id,
+  label,
+  active,
+  count,
+}: {
+  href: string;
+  id: AdminSubnavActive;
+  label: string;
+  active: boolean;
+  count?: number;
+}) {
+  const inner = (
+    <span className="inline-flex items-center gap-2">
+      {label}
+      {count !== undefined && count > 0 && (
+        <span
+          className="bg-apollo-maroon inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-xs font-semibold text-white"
+          data-testid="admin-subnav-pending-count"
+        >
+          {count}
+        </span>
+      )}
+    </span>
+  );
+  if (active) {
+    return (
+      <span
+        className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
+        aria-current="page"
+        data-testid={`admin-tab-${id}`}
+      >
+        {inner}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
+      data-testid={`admin-tab-${id}`}
+    >
+      {inner}
+    </Link>
+  );
+}
