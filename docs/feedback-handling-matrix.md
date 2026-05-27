@@ -77,6 +77,8 @@ Rows marked **✅** are **locked** — the destination is already encoded in `li
 | **Disclosures** | **Conflicts-of-Interest system** | route | ⚠️ **TBD — COI office?** | **TBD** |
 | Topic / Impact / synopsis (wrong) | ReciterAI (computed) | route | ⚠️ proposed `scholars@weill.cornell.edu` | Scholars team |
 | **Center membership** | **Scholars (this app)** | route | ⚠️ proposed `scholars@weill.cornell.edu` | Scholars team |
+| **Whole-profile duplicate / identity** ("two profiles for one person") | ReCiter (disambiguation) | route | ⚠️ proposed `scholars@weill.cornell.edu` | Scholars team / ITS |
+| **Technical / display problem** ("this page is broken / shows an error") | Scholars (this app) | route | ⚠️ proposed `scholars@weill.cornell.edu` | Scholars team |
 | General feedback / "can't find an answer" | — | route | ⚠️ proposed `scholars@weill.cornell.edu` | Scholars team |
 
 ### 3.1 Source of truth for the ✅ rows
@@ -186,3 +188,15 @@ What the Scholars server needs from the ServiceNow team to create the ticket:
 - **#511** — the per-field provenance map (`lib/edit/field-sources.ts`) is the source of field 10; the form's category list and source labels stay consistent with it.
 - **#508 / #515** — the `/about/help/request-a-correction` page is the user-facing front door. Its contact-mechanism copy is the placeholder gated on **this spec**; once the integration ships, that page links to the in-app form and the source-system column is joined by a real "how to submit" path.
 - **WCM ops model** — ServiceNow + Teams, no automated paging (`project_wcm_ops_model`). A Scholars ServiceNow CI / business service was already a tracked follow-on; this integration assumes it exists or names creating it as a precondition.
+
+---
+
+## 9. Validated against VIVO incident history
+
+This matrix's three-shape model and route-only intake were validated against the predecessor system's ten-year ServiceNow record (604 incidents, 2016–2026; N = 594 after excluding infra noise) in `vivo-incident-analysis.md`. Key confirmations and the two changes that analysis drove:
+
+- **The intake design holds.** ~25% of VIVO tickets closed as "Information provided" (an answer, no fix) — exactly the volume the self-service + explain shapes deflect without a ticket (§2). Publications (~27%) was the single largest theme and is the best-covered (auto-ingest + the publications attribute).
+- **~40–50% of VIVO volume is structurally eliminated** by the Scholars platform (auto-generated profiles, unified SSO, the self-edit surface, no phone rendering), so it never reaches this matrix. The matrix's job is the source-data residual + the long tail.
+- **Two rows added to §3** from gaps the history exposed: **whole-profile duplicate / identity** and **technical / display problem** (both → Scholars team).
+- **The catch-all is load-bearing.** ~15% of VIVO tickets were vague ("just fix my profile"); without the "General feedback / can't find an answer" row reaching the form (build #520), that volume reverts to emailing support — the pattern this system replaces.
+- **Confirmed out of scope:** phone/contact (not rendered), overview/bio (direct self-edit), provisioning/login (structural). See `vivo-incident-analysis.md` §7.
