@@ -183,8 +183,10 @@ describe("PublicationsCard — optimistic hide", () => {
         screen.getByText("We couldn't hide this publication. Please try again."),
       ).toBeTruthy(),
     );
-    // Reverted — the Hide button is back.
-    expect(screen.getByTestId("pub-hide-a")).toBeTruthy();
+    // Reverted — the Hide button is back. The optimistic revert lands when
+    // the transition ends, which is a separate commit from the error setState
+    // above, so await it rather than asserting synchronously.
+    expect(await screen.findByTestId("pub-hide-a")).toBeTruthy();
   });
 });
 
@@ -262,7 +264,8 @@ describe("PublicationsCard — show (revoke)", () => {
         screen.getByText("We couldn't restore this publication. Please try again."),
       ).toBeTruthy(),
     );
-    // The Show button is back — reverted.
-    expect(screen.getByTestId("pub-show-a")).toBeTruthy();
+    // The Show button is back — reverted. Same transition-end timing as the
+    // hide-failure case above; await the revert.
+    expect(await screen.findByTestId("pub-show-a")).toBeTruthy();
   });
 });
