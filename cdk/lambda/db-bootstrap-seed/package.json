@@ -1,0 +1,21 @@
+{
+  "name": "sps-db-bootstrap-seed",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CloudFormation custom-resource handler that seeds the least-privilege sps_bootstrap DB user using the Aurora master credential, confined to this Lambda's role (#493 PR 2).",
+  "main": "index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "mariadb": "^3.5.2"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.150",
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

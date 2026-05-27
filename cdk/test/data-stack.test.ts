@@ -284,8 +284,9 @@ describe("DataStack", () => {
     });
 
     describe("Security groups", () => {
-      it("Aurora SG admits the app and ETL SGs on 3306", () => {
-        // We declare two ingress rules explicitly (app + ETL). The Secrets
+      it("Aurora SG admits the app, ETL, and db-bootstrap-seeder SGs on 3306", () => {
+        // Three ingress rules declared explicitly: app + ETL + the #493 PR-2
+        // seeder Lambda (which mints sps_bootstrap using master). The Secrets
         // Manager rotation Lambda's reachability is added by
         // `cluster.addRotationSingleUser()` separately; that connection
         // path is verified by the RotationSchedule + Serverless application
@@ -299,7 +300,7 @@ describe("DataStack", () => {
             r.Properties?.ToPort === 3306 &&
             r.Properties?.IpProtocol === "tcp",
         );
-        expect(aurora3306).toHaveLength(2);
+        expect(aurora3306).toHaveLength(3);
       });
 
       it("OpenSearch SG admits the app + ETL SGs on 443 — and nothing else", () => {
@@ -332,6 +333,60 @@ describe("DataStack", () => {
 
       it("deploys the Secrets Manager rotation Serverless application", () => {
         template.resourceCountIs("AWS::Serverless::Application", 1);
+      });
+    });
+
+    describe("db-bootstrap seeder (#493 PR 2)", () => {
+      it("creates the seeder Lambda in-VPC with both secret ARNs + DB host in env", () => {
+        const fns = template.findResources("AWS::Lambda::Function");
+        const seeder = Object.values(fns).find(
+          (r) => r.Properties?.FunctionName === "sps-db-bootstrap-seed-prod",
+        );
+        expect(seeder).toBeDefined();
+        // In-VPC, the same reachability path the rotation Lambda takes.
+        expect(seeder?.Properties?.VpcConfig).toBeDefined();
+        const env = (seeder?.Properties?.Environment as
+          | { Variables?: Record<string, unknown> }
+          | undefined)?.Variables ?? {};
+        expect(env.MASTER_SECRET_ARN).toBeDefined();
+        expect(env.BOOTSTRAP_SECRET_ARN).toBeDefined();
+        expect(env.DB_HOST).toBeDefined();
+      });
+
+      it("adds a dedicated seeder security group (the Aurora 3306 ingress above references it)", () => {
+        const sgs = template.findResources("AWS::EC2::SecurityGroup");
+        const seederSg = Object.values(sgs).find((r) =>
+          (r.Properties?.GroupDescription as string | undefined)?.includes(
+            "db-bootstrap seeder",
+          ),
+        );
+        expect(seederSg).toBeDefined();
+      });
+
+      it("grants the seeder PutSecretValue (DSN write) without a wildcard resource", () => {
+        // Only the seeder writes a secret in DataStack; assert the grant exists
+        // and is scoped (no `*` resource — the bootstrap secret ARN only).
+        const policies = template.findResources("AWS::IAM::Policy");
+        const writeStmts = Object.values(policies).flatMap((p) => {
+          const stmts = (p.Properties?.PolicyDocument?.Statement ?? []) as Array<
+            Record<string, unknown>
+          >;
+          return stmts.filter((s) => {
+            const a = s.Action;
+            return Array.isArray(a)
+              ? a.includes("secretsmanager:PutSecretValue")
+              : a === "secretsmanager:PutSecretValue";
+          });
+        });
+        expect(writeStmts.length).toBeGreaterThanOrEqual(1);
+        for (const s of writeStmts) {
+          expect(JSON.stringify(s.Resource)).not.toMatch(/^"\*"$/);
+        }
+      });
+
+      it("registers a CloudFormation custom resource to invoke the seeder at deploy", () => {
+        const crs = template.findResources("AWS::CloudFormation::CustomResource");
+        expect(Object.keys(crs).length).toBeGreaterThanOrEqual(1);
       });
     });
 

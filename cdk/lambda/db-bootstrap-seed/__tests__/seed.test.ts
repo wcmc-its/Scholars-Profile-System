@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { runSeed, type SeedDeps } from "../seed.js";
+
+function deps(overrides: Partial<SeedDeps> = {}): SeedDeps & {
+  queries: string[];
+  logs: Array<{ event: string; extra?: Record<string, unknown> }>;
+  put: ReturnType<typeof vi.fn>;
+} {
+  const queries: string[] = [];
+  const logs: Array<{ event: string; extra?: Record<string, unknown> }> = [];
+  const put = vi.fn(async () => {});
+  return {
+    requestType: "Create",
+    query: vi.fn(async (sql: string) => {
+      queries.push(sql);
+    }),
+    getBootstrapSecret: vi.fn(async () => undefined),
+    putBootstrapSecret: put,
+    dbHost: "db.internal",
+    dbPort: 3306,
+    log: (event, extra) => logs.push({ event, extra }),
+    queries,
+    logs,
+    put,
+    ...overrides,
+  };
+}
+
+describe("runSeed", () => {
+  it("Create with an empty secret: creates the user, grants, and writes a fresh DSN", async () => {
+    const d = deps();
+    const res = await runSeed(d);
+
+    expect(res.reused).toBe(false);
+    expect(res.physicalResourceId).toBe("db-bootstrap-seed-sps_bootstrap");
+    // 4 idempotent statements (CREATE USER, ALTER, 2 GRANTs).
+    expect(d.queries).toHaveLength(4);
+    expect(d.queries[0]).toMatch(/^CREATE USER IF NOT EXISTS 'sps_bootstrap'@'%'/);
+    // A fresh DSN was persisted, carrying the generated password + host/port.
+    expect(d.put).toHaveBeenCalledTimes(1);
+    const dsn = d.put.mock.calls[0][0] as string;
+    expect(dsn).toMatch(/^mysql:\/\/sps_bootstrap:[A-Za-z0-9]{32}@db\.internal:3306\/$/);
+  });
+
+  it("Update with an existing DSN: reuses the password and does NOT rewrite the secret", async () => {
+    const d = deps({
+      requestType: "Update",
+      getBootstrapSecret: vi.fn(async () => "mysql://sps_bootstrap:ExistingPW@db.internal:3306/"),
+    });
+    const res = await runSeed(d);
+
+    expect(res.reused).toBe(true);
+    expect(d.put).not.toHaveBeenCalled();
+    // The re-asserted user statements carry the reused password.
+    expect(d.queries[1]).toBe("ALTER USER 'sps_bootstrap'@'%' IDENTIFIED BY 'ExistingPW'");
+  });
+
+  it("Delete: drops the user and touches no secret", async () => {
+    const d = deps({ requestType: "Delete" });
+    const res = await runSeed(d);
+
+    expect(res.reused).toBe(false);
+    expect(d.queries).toEqual(["DROP USER IF EXISTS 'sps_bootstrap'@'%'"]);
+    expect(d.getBootstrapSecret).not.toHaveBeenCalled();
+    expect(d.put).not.toHaveBeenCalled();
+  });
+
+  it("fails-closed: a SQL error propagates", async () => {
+    const d = deps({
+      query: vi.fn(async () => {
+        throw new Error("Access denied for CREATE USER");
+      }),
+    });
+    await expect(runSeed(d)).rejects.toThrow(/Access denied/);
+  });
+
+  it("never logs the password or the DSN", async () => {
+    const d = deps();
+    await runSeed(d);
+    const serialized = JSON.stringify(d.logs);
+    const dsn = d.put.mock.calls[0][0] as string;
+    const password = dsn.slice("mysql://sps_bootstrap:".length, dsn.indexOf("@"));
+    expect(serialized).not.toContain(password);
+    expect(serialized).not.toContain("mysql://");
+    // Only the outcome class + non-secret fields are logged.
+    expect(d.logs[0]).toMatchObject({ event: "db_bootstrap_seed_ok", extra: { reused: false } });
+  });
+});
