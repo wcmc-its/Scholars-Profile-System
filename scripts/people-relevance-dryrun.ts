@@ -1,13 +1,15 @@
 /**
- * #362 — provisional §4 Recall@3 dry-run for the People-relevance baseline.
+ * #362 — §4/§7 Recall@3 baseline harness for the People-relevance eval.
  *
- * Runs the §3.1 candidate labeled set (docs/people-relevance-baseline.md §6)
+ * Runs the frozen §3.1 labeled set (docs/people-relevance-baseline.md §6)
  * through `searchPeople()` under the current ("legacy") ranking and reports
  * Recall@3 per query shape. Bypasses the HTTP/route layer — calls the same
  * `searchPeople` the route does, so the ranking is faithful.
  *
- * PROVISIONAL: the labeled set is not frozen. This is a sanity check, not the
- * signed-off §4 baseline (that is the eval owner's, per #362).
+ * The legacy numbers this produces ARE the frozen §7 baseline (signed off
+ * 2026-05-27, PR-2's rollback target). Re-running it reproduces those numbers;
+ * never re-freeze from a refreshed run (SPEC §4). Requires OpenSearch up
+ * (`npm run db:up`) and a current `scholars-people` index.
  *
  * Run (host dev DB reached via the OS-user socket — see
  * memory/feedback_verify_db_target):
@@ -43,7 +45,7 @@ async function main() {
   };
   const ranks: number[] = [];
 
-  console.log("=== #362 People-relevance §4 Recall@3 dry-run (PROVISIONAL — legacy ranking) ===\n");
+  console.log("=== #362 People-relevance §4/§7 Recall@3 baseline (legacy ranking) ===\n");
   console.log(
     " # | shape      | query                       | total | top-3 result slugs                              | hit",
   );
@@ -95,7 +97,7 @@ async function main() {
     `\n§3.3 secondary — mean rank of labeled scholars appearing on page 1: ${meanRank} (n=${ranks.length})`,
   );
   console.log(
-    "\nProvisional: labeled set unfrozen. Name-shape floor is 0.95; topic 0.65 / dept 0.90 / hybrid 0.75 are directional.",
+    "\nFrozen §7 baseline (legacy). Name-shape floor is 0.95; topic 0.65 / dept 0.90 / hybrid 0.75 are directional.",
   );
   process.exit(0);
 }

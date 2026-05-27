@@ -1,16 +1,22 @@
 # People-tab Relevance — PR-1 Baseline
 
-**Status: DRAFT — not frozen.** This is the *mechanical half* of issue
-[#362](https://github.com/wcmc-its/Scholars-Profile-System/issues/362) (People
-relevance PR-1 eval): the SPEC §11 audit and a *candidate* §3.1 labeled set,
-produced ahead of an assigned owner per #362's own scoping ("the §11 audit and a
-draft 12-query labeled set can be produced ahead of time"). The *judgment half*
-— validating and **freezing** the labeled set, and running and **signing off**
-the §4 Recall@3 baseline — is pending a human eval owner (§10).
+**Status: FROZEN 2026-05-27.** Eval-owner sign-off: paulalbert1 (issue author,
+acting as eval owner — #362's "Owner: TBD" was never separately assigned). The
+*mechanical half* — the SPEC §11 audit and the candidate §3.1 labeled set — was
+landed by [#365](https://github.com/wcmc-its/Scholars-Profile-System/pull/365).
+This revision completes the *judgment half*: the §6 labeled set is validated and
+**frozen** (§6), and the §4 Recall@3 baseline is **captured and signed off**
+under `legacy` ranking (§7) against a freshly rebuilt index (§2). The audit was
+re-confirmed against a stable corpus (§2).
 
-**Gate:** PR-2 ([#309](https://github.com/wcmc-its/Scholars-Profile-System/issues/309),
-name-shape template) must not begin until §6 is frozen and §7 is captured —
-this document is PR-2's 0.95 name-shape acceptance and rollback target.
+**Gate lifted:** PR-2 ([#309](https://github.com/wcmc-its/Scholars-Profile-System/issues/309),
+name-shape template) may begin — §7 below is its 0.95 name-shape acceptance and
+rollback target. §6 is frozen and revisable only at a major-version flip.
+
+**Forward input:** §5.4 records a v3 prominence-ranking recommendation
+(publication-count-led, with full-time-faculty and active-grant boosts) surfaced
+while capturing this baseline. It is a recommendation for the v3 ladder, not a
+change to the legacy baseline.
 
 | Source | Reference |
 | --- | --- |
@@ -29,8 +35,9 @@ this document is PR-2's 0.95 name-shape acceptance and rollback target.
 | §11 audit (k)/(m)/(n) — query-side audits | ⏸ Deferred — require a People-tab query log that does not yet exist (§8) |
 | §5.1 coverage map + §5.3 calibration implications | ✅ §5 below |
 | Legacy ranking configuration (boost ladder, msm) | ✅ §3 below — verified against `lib/search.ts` |
-| §3.1 12-query labeled set | 🟡 **Candidate draft** — §6 below; owner validates + freezes |
-| §4 Recall@3 baseline under `legacy` mode | ⛔ **Not run** — §7 is the owner's action (needs the frozen set + a live `scholars-people` index) |
+| §3.1 12-query labeled set | ✅ **Frozen 2026-05-27** — §6 below; judgment calls resolved |
+| §4 Recall@3 baseline under `legacy` mode | ✅ **Captured + frozen 2026-05-27** — §7 below (overall 0.16) |
+| Prominence signal (v3 ranking recommendation) | ✅ §5.4 below — pub-led + faculty/grant boosts; not a baseline change |
 
 The query-log dependency is **not** treated as a blocker (per maintainer
 direction): audits (k)/(m)/(n) and the traffic-grounded validation of the
@@ -61,6 +68,14 @@ about.** Any re-run must confirm the same — verify schema against
 | `publication_author` | 250,311 |
 | `topic_assignment` | 12,992 |
 | `topic` | 67 |
+
+> **Re-verified 2026-05-27 (freeze).** The corpus is stable versus the 05-18
+> snapshot: every count above is unchanged except `topic_assignment`
+> (12,992 → 13,030, +38). The §4 audit therefore stands without a re-run. The
+> `scholars-people` index was rebuilt from the host DB immediately before the §7
+> measurement (`npm run search:index:people` → 8,937 docs, alias-swapped to
+> `scholars-people-v1`, smoke checks passed), so §7 reflects current data under
+> the legacy ranking.
 
 **ETL freshness** (last successful run per source) — establishes how current
 each signal is:
@@ -282,17 +297,77 @@ than the `docs/search.md` estimates the SPEC was seeded from.
    cohort's hits landing below position 10. The first condition holds now; the
    second needs post-flip `top3PersonTypes` data. Flag for the PR-5 retro.
 
+### 5.4 Prominence signal — v3 ranking recommendation
+
+The §7 legacy baseline carries **no prominence signal**: within a result set,
+scholars are ordered by text relevance alone, so prominent scholars sink in
+large sets (topic/dept Recall@3 = 0.00) and same-surname ties resolve
+arbitrarily (#4 `wong` = 0/3). The remedy is a prominence factor in the v3
+ladder. This section records what that factor should be, with the evidence
+gathered while freezing this baseline. **It is a recommendation for the v3
+ladder (SPEC §6, PR-2/PR-3, `SEARCH_PEOPLE_RELEVANCE_MODE=v3`); it does not
+change the legacy baseline above.**
+
+**Candidate-signal coverage (all 8,937 active people, search-independent — it is
+the fraction of the corpus a score on that field can re-order at all):**
+
+| Signal field | Coverage | As a ranker |
+| --- | --- | --- |
+| `publicationCount ≥ 1` | **60.9%** | Dense enough to lead. |
+| `grantCount ≥ 1` | 16.1% | Too sparse to lead; fine as a minor boost. |
+| `hasActiveGrants` | 12.5% | " |
+| `activePiGrantCount ≥ 1` | 7.0% | Sparsest; minor boost only. |
+
+**Experiment — #4 `wong` re-ranked by `function_score` over the rebuilt index**
+(the cleanest case: pure name disambiguation, no topic template). Labeled top-3 =
+the three highest-output Wongs (stephen 254 / shing 201 / richard 186 pubs):
+
+| Variant | Recall@3 | Top-3 |
+| --- | --- | --- |
+| Legacy (control, no prominence) | 0/3 | krystie / ada / christopher (0–3 pubs) |
+| `× log1p(grantCount)` | 1/3 | only shing surfaces; degenerate (zeroes the 84% with no grant) |
+| `× log1p(activePiGrantCount)` | 0/3 | all zeroed — no prominent Wong holds an active PI grant |
+| **`× log1p(publicationCount)`** | **3/3** | **stephen / shing / richard** |
+
+Publication count alone lifts #4 from 0/3 to 3/3; grants cannot, because the
+scholars who *should* rank carry many publications but few or zero grants.
+
+**Recommended v3 prominence factor (eval-owner decision, 2026-05-27):**
+
+1. **Publication count leads** — log-saturated (`log1p`, so 250 vs 500 pubs does
+   not run away), applied as a multiplicative or strong additive prominence
+   factor over the text score.
+2. **Full-time-faculty — a *meaningful additive* boost**, not an absolute first
+   tier. The owner's intent is that faculty surface higher; an absolute
+   "faculty-first" rule is explicitly **rejected** because it breaks #4 — the
+   labeled Wongs are *affiliated* faculty with 186–254 pubs, and a hard
+   faculty-first tier would rank full-time Wongs with ≤17 pubs above them. The
+   boost must be unable to override a large publication-count gap.
+3. **Active grants — a *small additive* boost** (`hasActiveGrants` /
+   `activePiGrantCount`) as a "currently funded" tiebreaker, never a standalone
+   multiplier.
+
+**Selection bias:** publication, grant, and faculty signals are all
+full-time-faculty-skewed (§4b, §5). The eval owner has **accepted** this
+amplification as desirable (prominent/established scholars *should* rank higher);
+§5.3's down-weight caution is therefore overridden by product decision for the
+prominence factor. Weights must still be calibrated against the §7 frozen
+baseline and the per-shape lift measured before any v3 flip — the full 12-query
+prominence sweep (which needs the production topic-template query in hand) is
+deferred to the v3 PR.
+
 ---
 
-## 6. §3.1 candidate labeled set — DRAFT (12 queries)
+## 6. §3.1 labeled set — FROZEN 2026-05-27 (12 queries)
 
 Per SPEC §3.1: 12 queries (4 name / 4 topic / 2 department / 2 hybrid), each
 with 1–3 scholar slugs that should appear in the top 3, and a one-line
-rationale. **This is a candidate draft for the eval owner to validate, adjust,
-and freeze (§10).** All slugs are real, active scholars in the snapshot.
-Subjects were chosen from corpus data (surname frequency, pub counts,
-`publication_topic` attribution depth, department headcount), not query
-traffic — traffic-grounded representativeness (audit n) is a later revisit (§8).
+rationale. **Frozen 2026-05-27** — the open judgment calls below were resolved
+by the eval owner; revisable only at a major-version flip. All 22 distinct slugs
+were re-verified 2026-05-27 as real, active scholars. Subjects were chosen from
+corpus data (surname frequency, pub counts, `publication_topic` attribution
+depth, department headcount), not query traffic — traffic-grounded
+representativeness (audit n) is a later revisit (§8).
 
 "Expected shape" is the §6.1.1 / PLAN-D1 classifier outcome; rows marked † carry
 a data dependency noted below the table.
@@ -316,88 +391,107 @@ a data dependency noted below the table.
 - **#7** — classified `unclassified` (2 tokens, not a surname, not MeSH-resolvable, < 4 tokens) and soft-routed to the topic template. SPEC §3.1 places it in the topic bucket *by intent*; the eval partitions it as topic-shape.
 - **#11** — `hybrid` requires `matchQueryToTaxonomy("iadecola stroke")` to resolve "stroke" to MeSH. If it does not, the query degrades to `name` and #11 still tests Iadecola retrieval — note for the owner.
 
-**Open judgment calls for the owner (do not freeze without resolving):**
-- **#4** — with 18 tied surname matches, the name template alone cannot
-  *disambiguate among Wongs*; it can only stop *non-Wong* results. Confirm the
-  intent is "top-3 are all real Wongs" (SPEC §3.2's framing) and that the three
-  named Wongs are the right representatives.
-- **#8** — confirm the broad-domain labeled answer; see the row's note.
-- **Reuse:** `iadecola` anchors #1 and #11 (intentional — same scholar via two
-  shapes); `rulla-tamimi` anchors #6 and #10. Acceptable, but the owner may
-  prefer fully disjoint subjects.
-- Scholars 5/6/7/8 selected by `publication_topic` attribution depth; sense-check
-  against domain knowledge before freezing.
+**Resolved judgment calls (frozen 2026-05-27):**
+- **#4 `wong` — kept; metric is "the three highest-output Wongs in top-3."**
+  Re-verified against the corpus: among 19 active Wongs, stephen-t-c (254 pubs),
+  shing-chiu (201) and richard-j (186) are unambiguously the top three by output,
+  with a clear gap to #4 (kelvin, 43). The name template alone cannot disambiguate
+  among same-surname matches — it only stops *non-Wong* results — so this row is
+  the canonical case for the §5.4 prominence factor: legacy scores it 0/3, a
+  pub-led prominence factor scores it 3/3.
+- **#6 `breast cancer` and #8 `immunology` — kept the domain-defensible picks
+  over the raw-attribution leaders.** For #6, raw #2 by attribution is Otterburn
+  (25, breast *reconstruction*); the frozen labels keep Cristofanilli (medical
+  onc) + Newman (surgical onc) for oncology span. For #8, raw #1 is Elemento (48,
+  a computational biologist whose immunology attribution is incidental); the
+  frozen labels keep Wolchok (immuno-oncology) + Permar (viral immunology). The
+  labeled set encodes what a *good ranker should surface*, not raw row counts.
+- **Reuse accepted:** `iadecola` anchors #1 and #11 (intentional — one scholar
+  via two shapes); `rulla-tamimi` anchors #6 and #10.
+- **Data flag (not blocking):** `christopher-e-mason` (#7) has 0
+  `publication_author` rows — his authorships are not linked to his cwid — yet 49
+  attributed-topic pubs. He may be hard to retrieve via authorship-derived
+  signals; the #7 topic template relies on topic attribution, which he has. Noted
+  for the v3 sweep.
 
-Once validated, freeze this section verbatim (SPEC §3.1: "Frozen at first
-capture; revisable only at major-version flips").
+Frozen verbatim per SPEC §3.1 ("Frozen at first capture; revisable only at
+major-version flips").
 
 ---
 
-## 7. §4 Recall@3 baseline — OWNER ACTION (not yet run)
+## 7. §4 Recall@3 baseline — CAPTURED + FROZEN 2026-05-27
 
-The §4 baseline — top-3 results and per-shape Recall@3 for each §6 query under
-`SEARCH_PEOPLE_RELEVANCE_MODE=legacy` — is **not captured here**. It requires
-the labeled set frozen (§6) and a populated `scholars-people` OpenSearch index,
-and its sign-off is the eval owner's. It is PR-2's hard rollback target.
+The §4 baseline — per-shape Recall@3 for each §6 query under
+`SEARCH_PEOPLE_RELEVANCE_MODE=legacy` — is **captured below** against the index
+rebuilt at freeze time (§2). It is PR-2's hard rollback target and is frozen,
+never refreshed (SPEC §4).
 
-**Prerequisites**
-1. §6 validated and frozen.
-2. `scholars-people` OpenSearch index present and current (a prior session
-   handoff recorded it had gone missing — confirm before measuring; rebuild via
-   the search-index ETL if absent).
-
-**Protocol**
-1. With `SEARCH_PEOPLE_RELEVANCE_MODE=legacy` (the default), for each of the 12
-   queries run a People-tab relevance search (`/api/search?type=people&q=…&sort=relevance`).
-2. Record the top-3 result slugs.
-3. Recall@3 = (labeled scholars appearing in top-3) ÷ (labeled scholars total),
-   computed per shape and overall. Capture mean rank of each labeled scholar
-   that appears (§3.3).
-4. Fill the table below; freeze it.
-
-| Shape | Queries | Recall@3 (legacy) | PR-2/3/4 target | Gate |
+| Shape | Queries | **Recall@3 (legacy, frozen)** | PR-2/3/4 target | Gate |
 | --- | --- | --- | --- | --- |
-| Name | #1–4 | _TBD_ | 0.95 | **Hard floor — PR-2 rolls back if not cleared** |
-| Topic | #5–8 | _TBD_ | 0.65 | Directional — "should improve" |
-| Department | #9–10 | _TBD_ | 0.90 | Directional |
-| Hybrid | #11–12 | _TBD_ | 0.75 | Directional |
-| **Overall** | all 12 | _TBD_ | — | — |
+| Name | #1–4 | **0.50** (3/6) | 0.95 | **Hard floor — PR-2 rolls back if not cleared** |
+| Topic | #5–8 | **0.00** (0/9) | 0.65 | Directional — "should improve" |
+| Department | #9–10 | **0.00** (0/6) | 0.90 | Directional |
+| Hybrid | #11–12 | **0.25** (1/4) | 0.75 | Directional |
+| **Overall** | all 12 | **0.16** (4/25) | — | — |
 
-Frozen here, never refreshed (SPEC §4). A v3 flag-flip that fails to beat the
-name-shape number is reverted; a regression on another shape is a review flag.
+§3.3 secondary — mean rank of labeled scholars appearing on page 1: **8.38**
+(n=13). The official run (2026-05-27, rebuilt index) reproduced the 2026-05-18
+provisional dry-run **exactly**, confirming reproducibility.
 
-### Provisional dry-run (2026-05-18) — NOT the frozen baseline
+**Reading the baseline.** The numbers confirm SPEC §1's thesis: legacy ranking
+carries no prominence/topical-fit signal, so prominent scholars sink in
+400–1,400-result topic/department sets (Recall@3 = 0.00) and same-surname ties
+resolve arbitrarily.
 
-A provisional Recall@3 was measured ahead of owner sign-off, to sanity-check the
-candidate labeled set. The `scholars-people` index was rebuilt (8,937 active
-scholars) and the 12 queries were run through `searchPeople()` directly under the
-current ("legacy") ranking via `scripts/people-relevance-dryrun.ts`.
+- **Name 0.50 is the legacy floor, not a failure.** #1–3 (unique surnames) and
+  #11 all rank their target #1; the *only* name miss is #4 `wong`. Closing #4 to
+  the 0.95 PR-2 floor **requires a prominence tiebreaker** — demonstrated in §5.4
+  (pub-led prominence takes #4 from 0/3 to 3/3). This is the headroom PR-2 must
+  close, not a defect in the baseline.
+- **Topic/department 0.00** is the v3 headroom: labeled scholars are present in
+  the result set (mean rank 8.4) but below position 3 because nothing floats
+  prominent scholars up. The §5.4 prominence factor targets exactly this.
 
-| Shape | Recall@3 (provisional) | Notes |
-| --- | --- | --- |
-| Name | 3/6 = 0.50 | #1–3 (unique surnames) all rank-1; #4 `wong` 0/3 |
-| Topic | 0/9 = 0.00 | labeled scholars absent from top-3 of 78–769-result sets |
-| Department | 0/6 = 0.00 | labeled scholars absent from top-3 of 878–1,362-result sets |
-| Hybrid | 1/4 = 0.25 | `iadecola stroke` ✓; `medicine cardiology` ✗ |
-| **Overall** | **4/25 = 0.16** | mean rank of labeled scholars appearing on page 1: 8.4 (n=13) |
+**Reproduction.** With OpenSearch up (`npm run db:up`) and the index rebuilt:
 
-**Provisional and unfrozen — the eval owner still captures and signs the official
-§4 baseline above.** Three findings for that review:
+```
+DATABASE_URL='mysql://paulalbert@localhost/scholars?socketPath=/tmp/mysql.sock' \
+  OPENSEARCH_NODE='http://localhost:9200' \
+  SEARCH_PEOPLE_RELEVANCE_MODE='legacy' \
+  npx tsx scripts/people-relevance-dryrun.ts
+```
 
-- **Exact-name lookup works** (#1–3, #11 → rank 1): the index and `searchPeople`
-  are verified functional, so the low topic/department numbers are a *ranking*
-  result, not a data bug.
-- **Topic/department 0.00 needs interpretation.** It is consistent with SPEC §1's
-  thesis — legacy ranking carries no prominence/topical-fit signal, so prominent
-  scholars sink in 400–1,400-result sets (large v3 headroom). It is *also*
-  consistent with the candidate labeled set's topic/dept picks (chosen by raw
-  `publication_topic` / pub-count rank) not matching what good ranking surfaces —
-  see §6's open judgment calls and §5 finding 2. Resolve which before freezing.
-- **#4 `wong`** returned arbitrary Wongs, not the labeled prominent three —
-  confirming §6's flagged concern that a bare shared surname cannot disambiguate
-  namesakes (and §6.1.2's name template will not either). Re-decide #4.
+**Protocol (as run, 2026-05-27).** With `SEARCH_PEOPLE_RELEVANCE_MODE=legacy`,
+each of the 12 queries was run through `searchPeople()` (the same path the
+`/api/search?type=people` route uses, so the ranking is faithful) via
+`scripts/people-relevance-dryrun.ts`. For each query the top-3 result slugs were
+recorded; Recall@3 = (labeled scholars in top-3) ÷ (labeled scholars total), per
+shape and overall, plus the mean rank of each labeled scholar that appears
+(§3.3). Frozen here, never refreshed (SPEC §4): a v3 flag-flip that fails to beat
+the name-shape number is reverted; a regression on another shape is a review
+flag.
 
-Harness: `scripts/people-relevance-dryrun.ts` — re-runnable once §6 is frozen.
+**Per-query detail (legacy, 2026-05-27).** ✓ = labeled scholar in top-3.
+
+| # | Shape | Query | Total hits | Hit |
+| --- | --- | --- | --- | --- |
+| 1 | name | `iadecola` | 1 | 1/1 ✓ |
+| 2 | name | `richard devereux` | 1 | 1/1 ✓ |
+| 3 | name | `harold varmus` | 1 | 1/1 ✓ |
+| 4 | name | `wong` | 20 | 0/3 — arbitrary low-output Wongs (see §5.4) |
+| 5 | topic | `melanoma` | 388 | 0/2 |
+| 6 | topic | `breast cancer` | 769 | 0/3 |
+| 7 | topic | `spatial transcriptomics` | 78 | 0/2 |
+| 8 | topic | `immunology` | 515 | 0/2 |
+| 9 | department | `pediatrics` | 1,362 | 0/3 |
+| 10 | department | `population health sciences` | 878 | 0/3 |
+| 11 | hybrid | `iadecola stroke` | 1 | 1/1 ✓ |
+| 12 | hybrid | `medicine cardiology` | 99 | 0/3 |
+
+Exact-name lookup (#1–3, #11) ranks the target #1 — the index and `searchPeople`
+are verified functional, so the topic/department 0.00 is a *ranking* result, not
+a data bug. The §6 judgment calls that this run would have informed are resolved
+above; the prominence headroom it reveals is addressed in §5.4.
 
 ---
 
@@ -441,16 +535,17 @@ already listed in PLAN-issue-308 §Open-questions Q5):
 
 ## 10. Owner sign-off checklist
 
-Assigning an eval owner is the remaining #362 blocker. With this draft in hand,
-the owner's task is review-and-freeze, not from-scratch construction:
+Completed 2026-05-27 by paulalbert1 acting as eval owner (#362's "Owner: TBD"
+was never separately assigned):
 
-- [ ] Review §6 — adjust queries / labeled slugs as needed; resolve the open
-      judgment calls (#4, #8, reuse).
-- [ ] **Freeze §6** — once frozen, revisable only at a major-version flip.
-- [ ] Confirm the `scholars-people` index is present (§7 prerequisite 2).
-- [ ] Run §7 — capture per-shape and overall Recall@3 under `legacy`.
-- [ ] **Sign off §7** — fill the table; this becomes PR-2's rollback target.
-- [ ] Confirm #309 (PR-2) may begin.
+- [x] Review §6 — judgment calls resolved (#4 metric + picks, #6/#8
+      domain-defensible over raw attribution, reuse accepted, Mason data flag).
+- [x] **Freeze §6** — frozen 2026-05-27; revisable only at a major-version flip.
+- [x] Confirm the `scholars-people` index is present — rebuilt at freeze time
+      (§2), 8,937 docs.
+- [x] Run §7 — per-shape + overall Recall@3 captured under `legacy` (§7).
+- [x] **Sign off §7** — table filled; this is PR-2's rollback target.
+- [x] Confirm #309 (PR-2) may begin — **gate lifted.**
 
 ---
 
