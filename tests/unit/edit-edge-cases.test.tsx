@@ -134,11 +134,12 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
 });
 
 // ---------------------------------------------------------------------------
-// UI-SPEC #17 — slug success copy includes the directory-sync caveat
+// UI-SPEC #17 — slug success copy reflects reconcile-on-write (#497 D5)
 //
-// Extra integration assertion: the user-visible message after a successful
-// slug save must include the SPEC's ETL-precedence language so a superuser
-// understands the live URL does not change immediately.
+// Extra integration assertion: under reconcile-on-write (ADR-005 Amendment 2,
+// D5) a slug override drives routing immediately, so the success message must
+// tell the superuser the change is live now and the old URL auto-redirects —
+// not the old "takes effect on the next directory sync" caveat.
 // ---------------------------------------------------------------------------
 
 describe("UI-SPEC #17 — slug save success copy", () => {
@@ -146,7 +147,7 @@ describe("UI-SPEC #17 — slug save success copy", () => {
     useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
   }));
 
-  it("success copy after Save names the next directory sync", async () => {
+  it("success copy after Save says the new URL is live and the old one redirects", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({ ok: true, fieldName: "slug", value: "new-handle" }),
@@ -163,7 +164,8 @@ describe("UI-SPEC #17 — slug save success copy", () => {
       expect(screen.getByTestId("slug-card-set-success")).toBeTruthy(),
     );
     const alert = screen.getByTestId("slug-card-set-success");
-    expect(alert.textContent).toMatch(/takes effect after the next directory sync/i);
+    expect(alert.textContent).toMatch(/is now live/i);
+    expect(alert.textContent).toMatch(/redirects to it automatically/i);
     expect(alert.textContent).toContain("/scholars/new-handle");
   });
 });

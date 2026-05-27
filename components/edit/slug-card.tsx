@@ -44,9 +44,11 @@ export type SlugCardProps = {
   /** The target scholar's cwid (the API requests' `entityId`). */
   cwid: string;
   /**
-   * The live `scholar.slug` — the directory-derived URL segment. Display only;
-   * not editable here. A successful override changes the rendered profile URL
-   * only after the next `etl/ed` sync absorbs it (SPEC edge case 12).
+   * The live `scholar.slug` — the URL segment the profile resolves at today.
+   * Display only; not editable here. Under reconcile-on-write (ADR-005
+   * Amendment 2, D5) a successful override updates `Scholar.slug` in the same
+   * transaction, so this equals the override when one is active; the change is
+   * immediate and the prior slug 301-redirects via `slug_history`.
    */
   liveSlug: string;
   /**
@@ -177,8 +179,8 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
       <CardHeader>
         <CardTitle>Profile URL</CardTitle>
         <CardDescription>
-          Override the directory-derived URL segment. Changes take effect on the
-          next directory sync.
+          Override the directory-derived URL segment. The change takes effect
+          immediately; the old URL redirects to the new one automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -263,16 +265,16 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
         {saveSuccess === "set" && override !== null && (
           <Alert variant="info" data-testid="slug-card-set-success">
             <AlertDescription>
-              Override saved: <code>/scholars/{override}</code> — the new URL takes
-              effect after the next directory sync.
+              Override saved: <code>/scholars/{override}</code> is now live — the
+              old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
         )}
         {saveSuccess === "cleared" && (
           <Alert variant="info" data-testid="slug-card-cleared-success">
             <AlertDescription>
-              Override cleared. The URL is <code>/scholars/{liveSlug}</code>{" "}
-              (subject to the next directory sync if it changes).
+              Override cleared. The URL is now <code>/scholars/{liveSlug}</code>{" "}
+              — the old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
         )}
@@ -282,7 +284,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
         title="Clear the slug override?"
-        description={`The profile URL will revert to /scholars/${liveSlug} after the next directory sync.`}
+        description="The profile URL reverts to the directory-derived value, effective immediately. The old URL will redirect to it automatically."
         reasonMode="none"
         confirmLabel="Clear override"
         confirmVariant="default"
