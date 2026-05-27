@@ -1,5 +1,7 @@
 # dependencies
-node_modules/
+# No trailing slash: also ignores a symlink named `node_modules` (a dir-only
+# `node_modules/` pattern misses symlinks, which is how one was tracked once).
+node_modules
 .pnp
 .pnp.*
 .yarn/*
