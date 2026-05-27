@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- "Request a change" email routed to the owning office (#160 Phase 2 -- a
   -- best-effort row written AFTER the send, so a missing INSERT grant degrades
   -- to a logged audit gap, never a lost email).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -128,11 +128,13 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --   Phase 1 (#102/#354): field_override · suppression_create · suppression_revoke
 --   Phase 7 (#356):    + field_override_clear  (slug-card "Clear override")
 --   #160 Phase 2:      + request_change        ("Request a change" server mailer)
+--   #497 PR-3:         + slug_request · slug_request_approved · slug_request_rejected
+--                        · slug_request_withdrawn  (slug-request queue)
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn')
     NOT NULL;
 
 -- =============================================================================

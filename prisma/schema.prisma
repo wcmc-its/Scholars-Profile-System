@@ -1066,3 +1066,38 @@ model RequestChangeRateLimit {
   @@id([cwid, windowStart])
   @@map("request_change_rate_limit")
 }
+
+/// A scholar's request for a personalized profile slug (#497 PR-3,
+/// docs/slug-personalization-spec.md § 4.1). This is the *approval queue*, not
+/// the source of truth: an approved request writes a FieldOverride(slug) row +
+/// reconciles Scholar.slug (the authoritative override), then marks the request
+/// `approved`. No FK to Scholar (mirrors FieldOverride / Suppression — a request
+/// may concern a cwid not yet routable, e.g. an incoming hire).
+model SlugRequest {
+  id            String            @id @default(uuid()) @db.VarChar(64)
+  cwid          String            @db.VarChar(32) // target scholar
+  requestedSlug String            @map("requested_slug") @db.VarChar(255) // post-validate normalized form
+  reason        String?           @db.Text
+  status        SlugRequestStatus @default(pending)
+  requestedBy   String            @map("requested_by") @db.VarChar(32) // actor cwid (= cwid in self-mode)
+  createdAt     DateTime          @default(now()) @map("created_at")
+  decidedBy     String?           @map("decided_by") @db.VarChar(32)
+  decidedAt     DateTime?         @map("decided_at")
+  decisionNote  String?           @map("decision_note") @db.Text
+
+  @@index([status, createdAt]) // queue view: oldest pending first
+  @@index([cwid])
+  @@map("slug_request")
+}
+
+/// Lifecycle of a SlugRequest. `superseded` is set on the prior pending row when
+/// a newer request for the same cwid arrives; `withdrawn` is the requester
+/// cancelling their own pending request (#497 — kept distinct from `superseded`
+/// for the audit trail).
+enum SlugRequestStatus {
+  pending
+  approved
+  rejected
+  superseded
+  withdrawn
+}
