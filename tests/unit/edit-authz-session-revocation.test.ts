@@ -32,6 +32,9 @@ const {
   mockSlugHistoryFindFirst,
   mockReflectOverviewEdit,
   mockResolveProfiles,
+  mockTxScholarFindUnique,
+  mockTxScholarUpdate,
+  mockTxSlugHistoryUpsert,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -43,6 +46,9 @@ const {
   mockSlugHistoryFindFirst: vi.fn(),
   mockReflectOverviewEdit: vi.fn(),
   mockResolveProfiles: vi.fn(),
+  mockTxScholarFindUnique: vi.fn(),
+  mockTxScholarUpdate: vi.fn(),
+  mockTxSlugHistoryUpsert: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -71,6 +77,9 @@ const fakeTx = {
     findUnique: mockFieldOverrideFindUnique,
     upsert: mockFieldOverrideUpsert,
   },
+  // #497 §5.1 — the slug branch reconciles Scholar.slug in-transaction.
+  scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
+  slugHistory: { upsert: mockTxSlugHistoryUpsert },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -106,6 +115,10 @@ beforeEach(() => {
   mockFieldOverrideFindFirst.mockResolvedValue(null);
   mockSlugHistoryFindFirst.mockResolvedValue(null);
   mockResolveProfiles.mockResolvedValue([{ slug: `${TARGET_CWID}-slug`, cwid: TARGET_CWID }]);
+  // The target scholar currently holds a different slug, so reconcile fires.
+  mockTxScholarFindUnique.mockResolvedValue({ slug: `${TARGET_CWID}-slug` });
+  mockTxScholarUpdate.mockResolvedValue({});
+  mockTxSlugHistoryUpsert.mockResolvedValue({});
 });
 
 describe("POST /api/edit/field -- live superuser re-fetch (B02 AC-3)", () => {

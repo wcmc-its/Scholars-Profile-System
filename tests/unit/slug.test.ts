@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { deriveSlug, looksLikeSlug, nextAvailableSlug } from "@/lib/slug";
+import { describe, expect, it, vi } from "vitest";
+import {
+  deriveSlug,
+  looksLikeSlug,
+  nextAvailableSlug,
+  reconcileScholarSlug,
+  RESERVED_SLUGS,
+} from "@/lib/slug";
 
 describe("deriveSlug", () => {
   it("handles plain ASCII names", () => {
@@ -65,6 +71,74 @@ describe("nextAvailableSlug", () => {
     const newSlug = nextAvailableSlug("jane-smith", taken);
     expect(newSlug).toBe("jane-smith-2");
     expect(taken.has("jane-smith")).toBe(true); // unchanged
+  });
+
+  it("takes the numeric floor when a derived slug lands on a reserved word (#497 §6.1)", () => {
+    // No collision in `taken`, but the bare slug would shadow a route word.
+    expect(nextAvailableSlug("about", new Set())).toBe("about-2");
+    expect(nextAvailableSlug("search", new Set())).toBe("search-2");
+    // ...and still counts past an already-taken floor.
+    expect(nextAvailableSlug("about", new Set(["about-2"]))).toBe("about-3");
+  });
+
+  it("leaves a non-reserved base unchanged", () => {
+    expect(nextAvailableSlug("jane-about-smith", new Set())).toBe("jane-about-smith");
+  });
+});
+
+describe("RESERVED_SLUGS (#497 §6.1)", () => {
+  it("contains the route words and the legacy by-cwid segment", () => {
+    for (const w of ["about", "search", "api", "edit", "scholars", "by-cwid", "_next"]) {
+      expect(RESERVED_SLUGS.has(w)).toBe(true);
+    }
+  });
+
+  it("does not contain a normal name slug", () => {
+    expect(RESERVED_SLUGS.has("jane-smith")).toBe(false);
+  });
+});
+
+describe("reconcileScholarSlug (#497 §5.1 — Option B shared helper)", () => {
+  function tx(opts: { current: string | null }) {
+    return {
+      scholar: {
+        findUnique: vi.fn().mockResolvedValue(opts.current === null ? null : { slug: opts.current }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      slugHistory: { upsert: vi.fn().mockResolvedValue({}) },
+    };
+  }
+
+  it("upserts slug_history and sets Scholar.slug when the slug changes", async () => {
+    const t = tx({ current: "brandon-swed-2" });
+    const changed = await reconcileScholarSlug(t as never, "cwid1", "brandon-swed");
+    expect(changed).toBe(true);
+    expect(t.slugHistory.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { oldSlug: "brandon-swed-2" },
+        create: { oldSlug: "brandon-swed-2", currentCwid: "cwid1" },
+      }),
+    );
+    expect(t.scholar.update).toHaveBeenCalledWith({
+      where: { cwid: "cwid1" },
+      data: { slug: "brandon-swed" },
+    });
+  });
+
+  it("is a no-op when the slug is unchanged (no history, no update)", async () => {
+    const t = tx({ current: "brandon-swed" });
+    const changed = await reconcileScholarSlug(t as never, "cwid1", "brandon-swed");
+    expect(changed).toBe(false);
+    expect(t.slugHistory.upsert).not.toHaveBeenCalled();
+    expect(t.scholar.update).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when no scholar row exists (override pinned ahead of the ED record)", async () => {
+    const t = tx({ current: null });
+    const changed = await reconcileScholarSlug(t as never, "ghost", "some-slug");
+    expect(changed).toBe(false);
+    expect(t.slugHistory.upsert).not.toHaveBeenCalled();
+    expect(t.scholar.update).not.toHaveBeenCalled();
   });
 });
 

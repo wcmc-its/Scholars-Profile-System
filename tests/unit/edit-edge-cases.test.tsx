@@ -32,6 +32,9 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockSlugHistoryFindFirst,
     mockReflectOverviewEdit,
     mockResolveProfiles,
+    mockTxScholarFindUnique,
+    mockTxScholarUpdate,
+    mockTxSlugHistoryUpsert,
   } = vi.hoisted(() => ({
     mockGetEditSession: vi.fn(),
     mockTransaction: vi.fn(),
@@ -43,6 +46,9 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockSlugHistoryFindFirst: vi.fn(),
     mockReflectOverviewEdit: vi.fn(),
     mockResolveProfiles: vi.fn(),
+    mockTxScholarFindUnique: vi.fn(),
+    mockTxScholarUpdate: vi.fn(),
+    mockTxSlugHistoryUpsert: vi.fn(),
   }));
 
   vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -74,6 +80,10 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
           findUnique: mockFieldOverrideFindUnique,
           upsert: mockFieldOverrideUpsert,
         },
+        // #497 §5.1 — slug reconcile surface; a no-Scholar-row reconcile is a
+        // no-op (the override is pinned ahead of the ED record, ADR-005 edge 6).
+        scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
+        slugHistory: { upsert: mockTxSlugHistoryUpsert },
         $executeRaw: mockExecuteRaw,
       }),
     );
@@ -85,6 +95,10 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockFieldOverrideFindFirst.mockResolvedValue(null);
     mockSlugHistoryFindFirst.mockResolvedValue(null);
     mockResolveProfiles.mockResolvedValue([]); // no affected profile yet
+    // No Scholar row for the incoming hire -> reconcile reads null -> no-op.
+    mockTxScholarFindUnique.mockResolvedValue(null);
+    mockTxScholarUpdate.mockResolvedValue({});
+    mockTxSlugHistoryUpsert.mockResolvedValue({});
   });
 
   it("a slug override write succeeds for a CWID with no Scholar row (incoming hire)", async () => {
@@ -112,6 +126,10 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     });
     expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
     expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // audit row
+    // No Scholar row yet -> the slug reconcile is a no-op (the override is the
+    // pin; the slug is applied to Scholar.slug when the ED record arrives).
+    expect(mockTxScholarUpdate).not.toHaveBeenCalled();
+    expect(mockTxSlugHistoryUpsert).not.toHaveBeenCalled();
   });
 });
 

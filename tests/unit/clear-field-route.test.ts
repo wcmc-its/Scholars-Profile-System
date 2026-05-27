@@ -7,12 +7,20 @@ const {
   mockFieldOverrideFindUnique,
   mockFieldOverrideDelete,
   mockExecuteRaw,
+  mockScholarFindUnique,
+  mockScholarFindMany,
+  mockScholarUpdate,
+  mockSlugHistoryUpsert,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
   mockFieldOverrideFindUnique: vi.fn(),
   mockFieldOverrideDelete: vi.fn(),
   mockExecuteRaw: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
+  mockScholarFindMany: vi.fn(),
+  mockScholarUpdate: vi.fn(),
+  mockSlugHistoryUpsert: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -33,6 +41,12 @@ const fakeTx = {
     findUnique: mockFieldOverrideFindUnique,
     delete: mockFieldOverrideDelete,
   },
+  scholar: {
+    findUnique: mockScholarFindUnique,
+    findMany: mockScholarFindMany,
+    update: mockScholarUpdate,
+  },
+  slugHistory: { upsert: mockSlugHistoryUpsert },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -53,6 +67,13 @@ beforeEach(() => {
   mockFieldOverrideFindUnique.mockResolvedValue({ value: "former-slug" });
   mockFieldOverrideDelete.mockResolvedValue({});
   mockExecuteRaw.mockResolvedValue(1);
+  // The cleared scholar: pinned slug "former-slug", name "Jane Smith". The route
+  // re-derives to "jane-smith"; reconcileScholarSlug reads the same findUnique
+  // (so the object carries both `preferredName` and `slug`).
+  mockScholarFindUnique.mockResolvedValue({ preferredName: "Jane Smith", slug: "former-slug" });
+  mockScholarFindMany.mockResolvedValue([]); // no other scholars hold a slug
+  mockScholarUpdate.mockResolvedValue({});
+  mockSlugHistoryUpsert.mockResolvedValue({});
 });
 
 describe("POST /api/edit/clear-field", () => {
@@ -117,6 +138,35 @@ describe("POST /api/edit/clear-field", () => {
     // audit row carries the new action discriminator and the before/after shape
     const auditArgs = mockExecuteRaw.mock.calls[0];
     expect(auditArgs[4]).toBe("field_override_clear");
+  });
+
+  it("reverts Scholar.slug to the name-derived slug, pinning the old slug to history (#497 §5.1)", async () => {
+    const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cleared).toBe(true);
+    expect(mockFieldOverrideDelete).toHaveBeenCalledTimes(1);
+    // derived from preferredName "Jane Smith" -> "jane-smith"; old pinned slug -> history
+    expect(mockSlugHistoryUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { oldSlug: "former-slug" },
+        create: { oldSlug: "former-slug", currentCwid: "sch5" },
+      }),
+    );
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "sch5" },
+      data: { slug: "jane-smith" },
+    });
+  });
+
+  it("takes the numeric floor when the derived slug collides with another live scholar", async () => {
+    mockScholarFindMany.mockResolvedValue([{ slug: "jane-smith" }]); // taken by someone else
+    const res = await POST(post({ entityType: "scholar", entityId: "sch5", fieldName: "slug" }));
+    expect(res.status).toBe(200);
+    expect(mockScholarUpdate).toHaveBeenCalledWith({
+      where: { cwid: "sch5" },
+      data: { slug: "jane-smith-2" },
+    });
   });
 
   it("is idempotent — no override yields cleared:false, no audit row, no delete call", async () => {
