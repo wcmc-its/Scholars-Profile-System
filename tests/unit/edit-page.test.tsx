@@ -143,6 +143,47 @@ describe("EditPage router — the Apollo shell + rail", () => {
   });
 });
 
+describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gated)", () => {
+  it("omits the Profile URL rail item when the slug-request flag is off (default)", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.queryByTestId("rail-profile-url")).toBeNull();
+  });
+
+  it("shows the Profile URL rail item when slugRequestEnabled", () => {
+    render(<EditPage ctx={ctx} mode="self" slugRequestEnabled />);
+    expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
+  });
+
+  it("?attr=profile-url renders the scholar request card (not the superuser direct-set card)", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="profile-url" slugRequestEnabled />);
+    // The self request card, in Idle (no latest request) → input present.
+    expect(screen.getByTestId("slug-request-input")).toBeTruthy();
+    // The superuser direct-set card must NOT be the one rendered.
+    expect(screen.queryByTestId("slug-card-input")).toBeNull();
+  });
+
+  it("seeds the request card from latestSlugRequest (Pending state)", () => {
+    render(
+      <EditPage
+        ctx={ctx}
+        mode="self"
+        attr="profile-url"
+        slugRequestEnabled
+        latestSlugRequest={{
+          id: "req-1",
+          status: "pending",
+          requestedSlug: "alex-self",
+          reason: null,
+          decisionNote: null,
+          createdAt: "2026-05-27T12:00:00.000Z",
+        }}
+      />,
+    );
+    expect(screen.getByTestId("slug-request-pending")).toBeTruthy();
+    expect(screen.getByTestId("slug-request-withdraw")).toBeTruthy();
+  });
+});
+
 describe("EditPage router — superuser mode", () => {
   it("defaults to Visibility, shows the admin banner, and the superuser rail (Profile URL yes, Publications no)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);

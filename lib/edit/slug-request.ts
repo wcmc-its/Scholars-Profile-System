@@ -7,6 +7,7 @@
  * authoritative override is still the `FieldOverride(slug)` row written on
  * approval (via `reconcileScholarSlug`); the `SlugRequest` table is the queue.
  */
+import type { PrismaClient, SlugRequestStatus } from "@/lib/generated/prisma/client";
 
 /** Canonical public base URL — mirrors `lib/seo/jsonld.ts`. */
 export function publicSiteUrl(): string {
@@ -25,6 +26,50 @@ export function publicProfileUrl(slug: string): string {
  */
 export function isSlugRequestEnabled(): boolean {
   return process.env.SELF_EDIT_SLUG_REQUEST === "on";
+}
+
+/**
+ * The scholar's latest `SlugRequest`, shaped for the self request card
+ * (`components/edit/slug-request-card.tsx`). `createdAt` is serialized to an ISO
+ * string so it crosses the server→client boundary as a plain prop.
+ */
+export type SlugRequestSummary = {
+  id: string;
+  status: SlugRequestStatus;
+  requestedSlug: string;
+  reason: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+};
+
+/** The Prisma surface `loadLatestSlugRequest` needs — satisfied by a client or tx. */
+type SlugRequestReadClient = Pick<PrismaClient, "slugRequest">;
+
+/**
+ * Load a scholar's most-recent `SlugRequest` (any status), or `null` if they
+ * have never filed one. The `/edit` self surface seeds the request card with
+ * this so it opens in the right state (Pending / Rejected / Just-approved)
+ * without a client round-trip. Shared by `/edit` and the self-view branch of
+ * `/edit/scholar/[cwid]` so the two never drift.
+ */
+export async function loadLatestSlugRequest(
+  cwid: string,
+  client: SlugRequestReadClient,
+): Promise<SlugRequestSummary | null> {
+  const row = await client.slugRequest.findFirst({
+    where: { cwid },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      status: true,
+      requestedSlug: true,
+      reason: true,
+      decisionNote: true,
+      createdAt: true,
+    },
+  });
+  if (!row) return null;
+  return { ...row, createdAt: row.createdAt.toISOString() };
 }
 
 export type ComposedEmail = { subject: string; text: string };

@@ -26,6 +26,7 @@ import { loadEditContext } from "@/lib/api/edit-context";
 import { getEditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
+import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
 
@@ -73,5 +74,23 @@ export default async function EditScholarPage({
   }
 
   const { attr } = (await searchParams) ?? {};
-  return <EditPage ctx={ctx} mode={isSelf ? "self" : "superuser"} attr={attr} />;
+
+  // When a superuser views their OWN profile this renders mode='self' — surface
+  // the flag-gated request card there too (#497 PR-3), seeded with their latest
+  // request, so it matches /edit exactly. The superuser direct-set card is
+  // unaffected (it has no flag).
+  const slugRequestEnabled = isSelf && isSlugRequestEnabled();
+  const latestSlugRequest = slugRequestEnabled
+    ? await loadLatestSlugRequest(session.cwid, db.read)
+    : null;
+
+  return (
+    <EditPage
+      ctx={ctx}
+      mode={isSelf ? "self" : "superuser"}
+      attr={attr}
+      slugRequestEnabled={slugRequestEnabled}
+      latestSlugRequest={latestSlugRequest}
+    />
+  );
 }

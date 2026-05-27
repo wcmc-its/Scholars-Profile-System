@@ -14,6 +14,7 @@ import { EditPage } from "@/components/edit/edit-page";
 import { getSession } from "@/lib/auth/session-server";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
+import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -43,5 +44,22 @@ export default async function EditSelfPage({
     notFound();
   }
   const { attr } = (await searchParams) ?? {};
-  return <EditPage ctx={ctx} mode="self" attr={attr} />;
+
+  // The "Profile URL" request card (#497 PR-3) is flag-gated. When on, seed it
+  // with the scholar's latest request so the card opens in the right state
+  // (Pending / Rejected / Just-approved) without a client round-trip.
+  const slugRequestEnabled = isSlugRequestEnabled();
+  const latestSlugRequest = slugRequestEnabled
+    ? await loadLatestSlugRequest(session.cwid, db.read)
+    : null;
+
+  return (
+    <EditPage
+      ctx={ctx}
+      mode="self"
+      attr={attr}
+      slugRequestEnabled={slugRequestEnabled}
+      latestSlugRequest={latestSlugRequest}
+    />
+  );
 }
