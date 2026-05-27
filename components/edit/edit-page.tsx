@@ -16,6 +16,7 @@ import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { SlugCard } from "@/components/edit/slug-card";
+import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
 import { VisibilityCard } from "@/components/edit/visibility-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
@@ -48,7 +49,9 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
-  { key: "profile-url", label: "Profile URL", modes: ["superuser"] },
+  // Superuser direct-set is always available; the self request card is flag-gated
+  // (`slugRequestEnabled`) — see the rail filter below.
+  { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
 ];
 
 const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
@@ -61,10 +64,28 @@ export type EditPageProps = {
   mode?: "self" | "superuser";
   /** The selected attribute from `?attr=`; falls back to the mode's default. */
   attr?: string;
+  /** Whether the self "Profile URL" request card is enabled (#497 PR-3,
+   *  `SELF_EDIT_SLUG_REQUEST`). Off ⇒ the self rail omits Profile URL. The
+   *  superuser direct-set card is unaffected. */
+  slugRequestEnabled?: boolean;
+  /** The scholar's latest `SlugRequest` (self mode only), seeding the request
+   *  card's state machine. `null` when they have never filed one. */
+  latestSlugRequest?: SlugRequestSummary | null;
 };
 
-export function EditPage({ ctx, mode = "self", attr }: EditPageProps) {
-  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode));
+export function EditPage({
+  ctx,
+  mode = "self",
+  attr,
+  slugRequestEnabled = false,
+  latestSlugRequest = null,
+}: EditPageProps) {
+  const visible = ATTRIBUTES.filter((a) => {
+    if (!a.modes.includes(mode)) return false;
+    // The self request card is flag-gated; the superuser direct-set card is not.
+    if (a.key === "profile-url" && mode === "self" && !slugRequestEnabled) return false;
+    return true;
+  });
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
@@ -87,7 +108,7 @@ export function EditPage({ ctx, mode = "self", attr }: EditPageProps) {
       basePath={basePath}
       previewHref={`/scholars/${ctx.scholar.slug}`}
     >
-      {renderPanel(active.key, ctx, mode, scholarName)}
+      {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest)}
     </EditShell>
   );
 }
@@ -97,6 +118,7 @@ function renderPanel(
   ctx: EditContext,
   mode: "self" | "superuser",
   scholarName: string,
+  latestSlugRequest: SlugRequestSummary | null,
 ) {
   const cwid = ctx.scholar.cwid;
   switch (key) {
@@ -150,6 +172,11 @@ function renderPanel(
         <EducationCard cwid={cwid} mode={mode} scholarName={scholarName} educations={ctx.educations} />
       );
     case "profile-url":
-      return <SlugCard cwid={cwid} liveSlug={ctx.scholar.slug} initialOverride={ctx.scholar.slugOverride} />;
+      // Superuser sets a slug directly; a scholar requests one for approval.
+      return mode === "superuser" ? (
+        <SlugCard cwid={cwid} liveSlug={ctx.scholar.slug} initialOverride={ctx.scholar.slugOverride} />
+      ) : (
+        <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
+      );
   }
 }
