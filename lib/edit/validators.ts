@@ -26,6 +26,7 @@
 import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
 import { RESERVED_SLUGS } from "@/lib/slug";
 
@@ -200,6 +201,43 @@ export function validateSlugFormat(input: string): SlugFormatResult {
   if (value.includes("--")) return { ok: false, error: "format" };
   if (RESERVED_SLUGS.has(value)) return { ok: false, error: "reserved" };
   return { ok: true, value };
+}
+
+/** Minimum length for a *requested* slug (#497 §6.2 — a 1-char vanity URL is
+ *  rejected; the override path has no minimum, but a request should not propose
+ *  a single character). */
+export const SLUG_REQUEST_MIN_LENGTH = 2;
+
+export type RequestedSlugResult =
+  | { ok: true; value: string }
+  | { ok: false; error: "format" | "too_long" | "too_short" | "reserved" | "numeric" | "profanity" };
+
+/**
+ * Validate a slug a *scholar requested* (#497 §6.2/§6.3 — the PR-3 request path).
+ *
+ * Layered on {@link validateSlugFormat} (the same format/length/reserved rule the
+ * superuser override path enforces, so an approved request always yields a valid
+ * `field_override(slug)`), plus the request-only guards from the SPEC:
+ *   - **min length 2** (`too_short`) — no single-character vanity URL.
+ *   - **not purely numeric** (`numeric`) — a digits-only slug could shadow a
+ *     future `/123` route and is indistinguishable from a CWID (`looksLikeSlug`).
+ *   - **best-effort profanity** (`profanity`) — token-exact, name-safe
+ *     (`containsProfanity`); the superuser review is the real gate.
+ *
+ * Note (deviation, deliberate): the SPEC §6.2 wrote "length 2–255" and
+ * "must equal deriveSlug(input)". We reconcile to the already-shipped
+ * `validateSlugFormat` (≤ 64 chars, `SLUG_PATTERN`) so a request can never be
+ * approved into an override the rest of the system would consider invalid;
+ * `SLUG_PATTERN` is stricter than (and subsumes) the deriveSlug-equality intent
+ * for the allowed charset.
+ */
+export function validateRequestedSlug(input: string): RequestedSlugResult {
+  const format = validateSlugFormat(input);
+  if (!format.ok) return format;
+  if (format.value.length < SLUG_REQUEST_MIN_LENGTH) return { ok: false, error: "too_short" };
+  if (/^[0-9]+$/.test(format.value)) return { ok: false, error: "numeric" };
+  if (containsProfanity(format.value)) return { ok: false, error: "profanity" };
+  return { ok: true, value: format.value };
 }
 
 /** The Prisma surface `checkSlugCollision` needs — satisfied by a client or a tx. */

@@ -30,7 +30,15 @@ export type AuditAction =
   | "suppression_create"
   | "suppression_revoke"
   /** a "Request a change" email routed to the owning office (#160 Phase 2) */
-  | "request_change";
+  | "request_change"
+  /** a scholar filed a slug request (#497 PR-3) */
+  | "slug_request"
+  /** a superuser approved a slug request — writes the override + reconciles (#497 PR-3) */
+  | "slug_request_approved"
+  /** a superuser rejected a slug request (#497 PR-3) */
+  | "slug_request_rejected"
+  /** a scholar withdrew their own pending slug request (#497 PR-3) */
+  | "slug_request_withdrawn";
 
 /** The target type — mirrors the table ENUM; v1 emits only `scholar` / `publication`. */
 export type AuditEntityType =
