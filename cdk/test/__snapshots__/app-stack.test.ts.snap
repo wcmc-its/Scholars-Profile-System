@@ -308,6 +308,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "SCHOLARS_MAIL_FROM",
                 "Value": "no-reply-scholars@weill.cornell.edu",
               },
+              {
+                "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
+                "Value": "20",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -2271,6 +2275,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_MAIL_FROM",
                 "Value": "no-reply-scholars@weill.cornell.edu",
+              },
+              {
+                "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
+                "Value": "20",
               },
             ],
             "Essential": true,

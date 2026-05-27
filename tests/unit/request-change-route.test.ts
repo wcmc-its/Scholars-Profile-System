@@ -1,8 +1,11 @@
 /**
  * POST /api/edit/request-change — the server mailer endpoint (#160 Phase 2).
  * Mirrors the edit-suppress-route mocking. Verifies the dormant 503, server-side
- * recipient resolution, the non-routable + authz gates, send-first ordering, and
- * the best-effort audit that never rolls back a sent email (#493 grant gap).
+ * recipient resolution, the non-routable + authz gates, send-first ordering, the
+ * best-effort audit that never rolls back a sent email (#493 grant gap), and the
+ * per-cwid rate limit (SPEC § 5 abuse controls). The rate-limit *mechanism* is
+ * unit-tested in edit-rate-limit.test.ts; here it is mocked to assert the route's
+ * gate, superuser exemption, dormant-no-quota ordering, and 429 logging.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -14,6 +17,7 @@ const {
   mockAppendAuditRow,
   mockTransaction,
   mockScholarFindUnique,
+  mockRecordAttempt,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockIsMailerConfigured: vi.fn(),
@@ -21,6 +25,7 @@ const {
   mockAppendAuditRow: vi.fn(),
   mockTransaction: vi.fn(),
   mockScholarFindUnique: vi.fn(),
+  mockRecordAttempt: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
@@ -29,6 +34,7 @@ vi.mock("@/lib/edit/mailer", () => ({
   sendMail: mockSendMail,
 }));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
+vi.mock("@/lib/edit/rate-limit", () => ({ recordRequestChangeAttempt: mockRecordAttempt }));
 vi.mock("@/lib/db", () => ({
   db: {
     write: { $transaction: mockTransaction },
@@ -52,10 +58,13 @@ function post(body: unknown): NextRequest {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   mockGetEditSession.mockResolvedValue(SELF);
   mockIsMailerConfigured.mockReturnValue(true);
   mockSendMail.mockResolvedValue({ messageId: "msg-1" });
   mockAppendAuditRow.mockResolvedValue(undefined);
+  // Within the limit by default; the rate-limit tests below opt into a block.
+  mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 20 });
   mockTransaction.mockImplementation(async (cb: (tx: { $executeRaw: () => void }) => unknown) =>
     cb({ $executeRaw: vi.fn() }),
   );
@@ -71,6 +80,8 @@ describe("POST /api/edit/request-change", () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toMatchObject({ error: "send_disabled" });
     expect(mockSendMail).not.toHaveBeenCalled();
+    // The 503 gate precedes the limiter, so a dormant endpoint consumes no quota.
+    expect(mockRecordAttempt).not.toHaveBeenCalled();
   });
 
   it("sends to the resolved office, structured body, returns sent:true", async () => {
@@ -205,5 +216,62 @@ describe("POST /api/edit/request-change", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: "invalid_receipt_flag" });
+  });
+
+  describe("per-cwid rate limit (SPEC § 5)", () => {
+    it("counts one attempt against the actor's cwid before sending", async () => {
+      await POST(post({ attribute: "education", issueId: "education-wrong" }));
+      expect(mockRecordAttempt).toHaveBeenCalledWith("self01");
+    });
+
+    it("429 rate_limited with a Retry-After header, and no send, when over the limit", async () => {
+      mockRecordAttempt.mockResolvedValue({
+        allowed: false,
+        count: 21,
+        limit: 20,
+        retryAfterSeconds: 1800,
+      });
+      const res = await POST(post({ attribute: "education", issueId: "education-wrong" }));
+      expect(res.status).toBe(429);
+      expect(res.headers.get("retry-after")).toBe("1800");
+      expect(await res.json()).toMatchObject({ ok: false, error: "rate_limited" });
+      expect(mockSendMail).not.toHaveBeenCalled();
+      expect(mockAppendAuditRow).not.toHaveBeenCalled();
+    });
+
+    it("logs every 429 with the actor cwid and observed count", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockRecordAttempt.mockResolvedValue({
+        allowed: false,
+        count: 25,
+        limit: 20,
+        retryAfterSeconds: 600,
+      });
+      await POST(post({ attribute: "education", issueId: "education-wrong" }));
+      const line = JSON.parse(warn.mock.calls[0][0] as string);
+      expect(line).toMatchObject({
+        event: "request_change_rate_limited",
+        actor_cwid: "self01",
+        count: 25,
+        limit: 20,
+      });
+    });
+
+    it("exempts superusers — never consults the limiter, sends regardless", async () => {
+      mockGetEditSession.mockResolvedValue(ADMIN);
+      // A blocked verdict here would be ignored, because it is never requested.
+      mockRecordAttempt.mockResolvedValue({
+        allowed: false,
+        count: 999,
+        limit: 20,
+        retryAfterSeconds: 1,
+      });
+      const res = await POST(
+        post({ attribute: "education", issueId: "education-wrong", targetCwid: "other9" }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockRecordAttempt).not.toHaveBeenCalled();
+      expect(mockSendMail).toHaveBeenCalledTimes(1);
+    });
   });
 });

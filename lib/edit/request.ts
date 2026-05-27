@@ -50,6 +50,18 @@ export function editError(status: number, error: string, field?: string): NextRe
 }
 
 /**
+ * A `429` rate-limit response with a `Retry-After` header (whole seconds until
+ * the window clears). The body is the same `{ ok: false, error }` shape as
+ * {@link editError}; the header is what {@link editError} cannot set.
+ */
+export function editRateLimited(retryAfterSeconds: number): NextResponse {
+  return NextResponse.json(
+    { ok: false, error: "rate_limited" },
+    { status: 429, headers: { "retry-after": String(retryAfterSeconds) } },
+  );
+}
+
+/**
  * The shared `/api/edit/*` preamble. Returns the request context, or a ready
  * error response — `415` (non-JSON), `403` (cross-origin), `401` (no session,
  * empty body — `self-edit-spec.md` edge case 16), `413` (oversized body), or
