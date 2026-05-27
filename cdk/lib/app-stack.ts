@@ -137,6 +137,7 @@ export class AppStack extends Stack {
   public readonly ecsService: ecs.FargateService;
   /** Family-only handle to the one-shot Prisma migration task definition. */
   public readonly migrationTaskDefinition: ecs.FargateTaskDefinition;
+  public readonly dbBootstrapTaskDefinition: ecs.FargateTaskDefinition;
   /** Public, internet-facing ALB. */
   public readonly publicAlb: elbv2.ApplicationLoadBalancer;
   /** Internal ALB — reachable only from inside the VPC. */
@@ -179,6 +180,15 @@ export class AppStack extends Stack {
       this,
       "AppRoSecret",
       `scholars/${env}/db/app-ro`,
+    );
+    // Least-privilege DSN for the one-shot sps-db-bootstrap task that provisions
+    // the scholars_audit database + the app-rw INSERT grant before migrate
+    // (#493). The sps_bootstrap user holds only CREATE/ALTER on scholars_audit.*
+    // and INSERT there WITH GRANT OPTION -- never master, nothing on `scholars`.
+    const bootstrapDsnSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "BootstrapDsnSecret",
+      `scholars/${env}/db/bootstrap`,
     );
     const opensearchAppSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -240,7 +250,7 @@ export class AppStack extends Stack {
       `scholars/saml-sp/${env}/cert`,
     );
 
-    // The exhaustive list of nine consumer ARNs. The task-execution role's
+    // The exhaustive list of ten consumer ARNs. The task-execution role's
     // `secretsmanager:GetSecretValue` resource list is this exact array
     // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
     const consumerSecretArns: string[] = [
@@ -253,6 +263,9 @@ export class AppStack extends Stack {
       samlIdpCertSecret.secretArn,
       samlSpCertSecret.secretArn,
       sessionCookieSecret.secretArn,
+      // db-bootstrap task (#493): both DSNs it consumes -- its own least-priv
+      // login, and the app-rw DSN it reads only to resolve the grantee username.
+      bootstrapDsnSecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -341,6 +354,13 @@ export class AppStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    // db-bootstrap task log group (#493) — distinct stream from migrate so the
+    // audit-provisioning output is visibly separate in CloudWatch.
+    const dbBootstrapLogGroup = new logs.LogGroup(this, "DbBootstrapLogGroup", {
+      logGroupName: `/aws/ecs/sps-db-bootstrap-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
     // ADOT collector sidecar log group (B24). Same retention as the app log
     // group; env-prefixed per Footgun #4. Created here -- not in
     // ObservabilityStack -- because the sidecar lives inside the AppStack
@@ -402,8 +422,8 @@ export class AppStack extends Stack {
         resources: consumerSecretArns,
       }),
     );
-    // Logs -- limited to the three log groups + their streams (app, migrate,
-    // otel-collector sidecar).
+    // Logs -- limited to the four log groups + their streams (app, migrate,
+    // db-bootstrap, otel-collector sidecar).
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -413,6 +433,8 @@ export class AppStack extends Stack {
           `${appLogGroup.logGroupArn}:*`,
           migrationLogGroup.logGroupArn,
           `${migrationLogGroup.logGroupArn}:*`,
+          dbBootstrapLogGroup.logGroupArn,
+          `${dbBootstrapLogGroup.logGroupArn}:*`,
           otelLogGroup.logGroupArn,
           `${otelLogGroup.logGroupArn}:*`,
         ],
@@ -587,6 +609,13 @@ export class AppStack extends Stack {
     // ------------------------------------------------------------------
     const containerImage = ecs.ContainerImage.fromEcrRepository(
       this.ecrRepository,
+      "latest",
+    );
+    // The ETL batch image (#454) — the only image with `tsx` + the source tree +
+    // the `mariadb` client, so it is what runs the tsx-based db-bootstrap script
+    // (#493). The standalone app image has none of those.
+    const etlContainerImage = ecs.ContainerImage.fromEcrRepository(
+      this.etlEcrRepository,
       "latest",
     );
 
@@ -787,6 +816,50 @@ export class AppStack extends Stack {
       }),
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
+      },
+    });
+
+    // ------------------------------------------------------------------
+    // db-bootstrap task definition (#493).
+    //
+    // Provisions the separate `scholars_audit` database + the append-only
+    // INSERT grant for the app role, BEFORE `sps-migrate` in the deploy
+    // pipeline. Runs the tsx-based scripts/db-bootstrap.ts on the ETL image
+    // (the only image carrying tsx + the source tree + the mariadb client).
+    // Idempotent and fails-closed: a non-zero exit halts the deploy, so a
+    // mis-provisioned audit grant errors loud-and-early rather than #493's
+    // silent-late runtime failure.
+    //
+    // Logs in as the least-privilege `sps_bootstrap` user (BOOTSTRAP_DSN), never
+    // master; APP_RW_DSN is injected read-only so the runner can resolve the
+    // live grantee username (it can't drift from the real app identity). The
+    // network config (private subnets + the app SG, which already has Aurora
+    // 3306 ingress) is supplied at run-task time by the deploy workflow, exactly
+    // as for the migrate task -- so no SG/subnet wiring lives on the task def.
+    // ------------------------------------------------------------------
+    this.dbBootstrapTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "DbBootstrapTaskDefinition",
+      {
+        family: `sps-db-bootstrap-${env}`,
+        cpu: envConfig.migrationTaskCpu,
+        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+        executionRole: taskExecutionRole,
+        taskRole,
+      },
+    );
+    this.dbBootstrapTaskDefinition.addContainer("db-bootstrap", {
+      image: etlContainerImage,
+      containerName: "db-bootstrap",
+      essential: true,
+      entryPoint: ["npx", "tsx", "scripts/db-bootstrap.ts"],
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: dbBootstrapLogGroup,
+        streamPrefix: "db-bootstrap",
+      }),
+      secrets: {
+        BOOTSTRAP_DSN: ecs.Secret.fromSecretsManager(bootstrapDsnSecret),
+        APP_RW_DSN: ecs.Secret.fromSecretsManager(appRwSecret),
       },
     });
 
@@ -1139,6 +1212,12 @@ export class AppStack extends Stack {
             resource: "task-definition",
             resourceName: `${this.migrationTaskDefinition.family}:*`,
           }),
+          // The db-bootstrap task the workflow runs before migrate (#493).
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.dbBootstrapTaskDefinition.family}:*`,
+          }),
         ],
       }),
     );
@@ -1288,6 +1367,11 @@ export class AppStack extends Stack {
     new CfnOutput(this, "EcsMigrationTaskFamily", {
       value: this.migrationTaskDefinition.family,
       description: "SPS one-shot prisma migrate deploy task family",
+    });
+    new CfnOutput(this, "EcsDbBootstrapTaskFamily", {
+      value: this.dbBootstrapTaskDefinition.family,
+      description:
+        "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,

@@ -174,15 +174,29 @@ Migrations run as a one-shot ECS task in the deploy pipeline. Not from the app a
 
 ```
 deploy pipeline:
-  1. build image
+  1. build image (app + ETL targets)
   2. push to ECR
-  3. run migration task
+  3. run db-bootstrap task                                  ← #493
+     image:   ETL image (carries tsx + the source tree)
+     command: npx tsx scripts/db-bootstrap.ts
+     secrets: scholars/db/bootstrap (least-priv) + scholars/db/app-rw (grantee lookup)
+     does:    CREATE scholars_audit + table + ENUM; GRANT INSERT to app-rw;
+              verify INSERT-only (SHOW GRANTS)
+     exit 0 → continue; non-zero → fail the deploy, do not roll the service
+  4. run migration task
      image:   same image as the new app version
      command: prisma migrate deploy
      secret:  scholars/db/app-rw
      exit 0 → continue; non-zero → fail the deploy, do not roll the service
-  4. update ECS service → rolling deploy of the new image
+  5. update ECS service → rolling deploy of the new image
 ```
+
+The db-bootstrap step (3) runs **before** migrate and as the least-privilege
+`sps_bootstrap` user (never master), so the separate `scholars_audit` database +
+the app role's append-only INSERT grant are provisioned-and-verified on every
+deploy. A missing/over-broad grant fails the deploy loud-and-early (fails-closed)
+rather than silently breaking Hide/Show + the request-change audit at runtime
+(the #493 failure class). See `docs/b03-audit-log.md` § Applying the schema.
 
 `prisma migrate dev` is never run anywhere above a developer laptop. `prisma db push` is never run against any environment.
 
@@ -283,6 +297,7 @@ The NetworkStack header comment still reads "VPC endpoints (B17) are added to th
 | `EcsServiceName` | EtlStack, B09/B12 workflow | `aws ecs update-service` target |
 | `EcsAppTaskFamily` | EtlStack | Task-family ARN scope |
 | `EcsMigrationTaskFamily` | B09/B12 workflow | `aws ecs run-task --task-definition` |
+| `EcsDbBootstrapTaskFamily` | B09/B12 workflow | `aws ecs run-task --task-definition` for the audit bootstrap (#493) |
 | `PublicAlbDns` | EdgeStack (B07+B14) | CloudFront origin domain |
 | `InternalAlbDns` | EtlStack (B08+B20) | `/api/revalidate` host |
 | `DeployRoleArn` | B09/B12 workflow | `aws-actions/configure-aws-credentials` |
