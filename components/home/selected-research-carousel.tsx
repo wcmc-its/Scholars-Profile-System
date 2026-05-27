@@ -11,6 +11,7 @@
  *
  * Sparse-state hide is the caller's responsibility (D-12 floor 4 of 8).
  */
+import Link from "next/link";
 import { SubtopicCard } from "./subtopic-card";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 import type { SubtopicCard as SubtopicCardData } from "@/lib/api/home";
@@ -24,12 +25,12 @@ export function SelectedResearchCarousel({
     <section className="mt-12">
       <div className="flex items-baseline gap-4">
         <h2 className="text-lg font-semibold">Selected research</h2>
-        <a
+        <Link
           href="/browse"
           className="ml-auto text-sm font-medium text-[var(--color-accent-slate)] hover:underline"
         >
           Browse all areas ↓
-        </a>
+        </Link>
       </div>
       <p className="text-muted-foreground mt-1 text-sm">
         Eight subtopics with the strongest recent activity at WCM, one per
