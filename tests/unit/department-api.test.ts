@@ -25,6 +25,8 @@ const {
   mockDivisionFindFirst,
   mockGrantCount,
   mockGrantGroupBy,
+  mockFieldOverrideFindMany,
+  mockSuppressionFindFirst,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -40,6 +42,8 @@ const {
   mockDivisionFindFirst: vi.fn(),
   mockGrantCount: vi.fn(),
   mockGrantGroupBy: vi.fn(),
+  mockFieldOverrideFindMany: vi.fn(),
+  mockSuppressionFindFirst: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -66,6 +70,8 @@ vi.mock("@/lib/db", () => ({
       count: mockGrantCount,
       groupBy: mockGrantGroupBy,
     },
+    fieldOverride: { findMany: mockFieldOverrideFindMany },
+    suppression: { findFirst: mockSuppressionFindFirst },
   },
 }));
 
@@ -118,6 +124,9 @@ function mockDefaultDeptSetup() {
   mockDepartmentFindUnique.mockResolvedValue(DEPT);
   mockScholarFindUnique.mockResolvedValue(CHAIR_SCHOLAR);
   mockAppointmentFindFirst.mockResolvedValue(CHAIR_APPT);
+  // #540 — manual-layer reads default to no overrides + not suppressed.
+  mockFieldOverrideFindMany.mockResolvedValue([]);
+  mockSuppressionFindFirst.mockResolvedValue(null);
   mockPublicationTopicGroupBy.mockResolvedValue([
     { parentTopicId: "cancer_genomics", _count: { pmid: 42 } },
     { parentTopicId: "cardiovascular_disease", _count: { pmid: 38 } },
@@ -177,6 +186,8 @@ describe("getDepartment", () => {
     mockScholarCount.mockResolvedValue(100);
     mockPublicationTopicCount.mockResolvedValue(500);
     mockGrantCount.mockResolvedValue(10);
+    mockFieldOverrideFindMany.mockResolvedValue([]);
+    mockSuppressionFindFirst.mockResolvedValue(null);
 
     const result = await getDepartment("medicine");
     expect(result).not.toBeNull();

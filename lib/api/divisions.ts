@@ -29,8 +29,11 @@ import type { AuthorChip } from "@/components/publication/author-chip-row";
 import { formatRoleCategory } from "@/lib/role-display";
 import {
   isAuthorHidden,
+  isUnitSuppressed,
   loadHiddenAuthorshipCounts,
   loadPublicationSuppressions,
+  loadUnitFieldOverrides,
+  mergeUnitFields,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 
@@ -45,6 +48,9 @@ export type DivisionChief = {
   chiefTitle: string;
   primaryTitle: string | null;
   identityImageEndpoint: string;
+  /** Interim/acting qualifier — `field_override(leaderInterim)` (#540 / ADR-005
+   *  Amendment 1 § A1.1). Renders "Interim Chief"; default false. */
+  isInterim: boolean;
 };
 
 export type SiblingDivision = {
@@ -85,17 +91,30 @@ export async function getDivision(
   });
   if (!division) return null;
 
-  // Chief
+  // #540 — a retired (whole-unit-suppressed) division is a 404.
+  if (await isUnitSuppressed("division", division.code, prisma)) return null;
+
+  // #540 — field-override merge over `description`, `leaderCwid`,
+  // `leaderInterim` (ADR-005 Amendment 1 § A1.1). `slug` is consumed by
+  // `etl/ed`, not merged here.
+  const overrides = await loadUnitFieldOverrides("division", division.code, prisma);
+  const merged = mergeUnitFields(
+    { description: division.description, leaderCwid: division.chiefCwid },
+    overrides,
+  );
+
+  // Chief — three-state (#540 SPEC § 1): null = no row, "" = explicit vacancy,
+  // non-empty = the curated CWID.
   let chief: DivisionChief | null = null;
-  if (division.chiefCwid) {
+  if (merged.leaderCwid && merged.leaderCwid !== "") {
     const chiefScholar = await prisma.scholar.findUnique({
-      where: { cwid: division.chiefCwid },
+      where: { cwid: merged.leaderCwid },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chiefScholar) {
       const chiefAppt = await prisma.appointment.findFirst({
         where: {
-          cwid: division.chiefCwid,
+          cwid: merged.leaderCwid,
           endDate: null,
           OR: [
             { title: { startsWith: "Chief" } },
@@ -112,6 +131,7 @@ export async function getDivision(
         chiefTitle: chiefAppt?.title ?? "Chief",
         primaryTitle: chiefScholar.primaryTitle,
         identityImageEndpoint: identityImageEndpoint(chiefScholar.cwid),
+        isInterim: merged.leaderInterim,
       };
     }
   }
@@ -128,12 +148,26 @@ export async function getDivision(
   const topResearchAreas = await getDivisionTopResearchAreas(division.code);
 
   // Stats: distinct member count, distinct publications, active grants.
-  const memberCwids = await prisma.scholar
+  // #540 — a manually-created division unions LDAP scholars (whose `divCode`
+  // happens to match because LDAP has adopted the code, edge case 15) with
+  // its `DivisionMembership` rows. Dedup by CWID — a manually-rostered
+  // scholar may also be LDAP-attached to the same code.
+  const ldapMemberCwids = await prisma.scholar
     .findMany({
       where: { divCode: division.code, deletedAt: null, status: "active" },
       select: { cwid: true },
     })
     .then((rows) => rows.map((r) => r.cwid));
+  let memberCwids = ldapMemberCwids;
+  if (division.source === "manual") {
+    const manualRows = await prisma.divisionMembership.findMany({
+      where: { divisionCode: division.code },
+      select: { cwid: true },
+    });
+    const unioned = new Set<string>(ldapMemberCwids);
+    for (const r of manualRows) unioned.add(r.cwid);
+    memberCwids = [...unioned];
+  }
 
   const [pubCount, grantCount] = await Promise.all([
     memberCwids.length === 0
@@ -173,7 +207,7 @@ export async function getDivision(
       code: division.code,
       name: division.name,
       slug: division.slug,
-      description: division.description,
+      description: merged.description,
     },
     parentDept: { code: dept.code, name: dept.name, slug: dept.slug },
     chief,
