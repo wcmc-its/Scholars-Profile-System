@@ -10,18 +10,25 @@
  * capability (no greyed-out rows a user can hover but never click). The active
  * attribute comes from `?attr=`, defaulting to `description`.
  *
- * PR-7a wires the `description`, `leader`, and `access` panels. `roster`,
- * `slug`, `center-type`, and `retire` render a "Coming in a later PR"
- * placeholder — deliberate, so the PR boundary is visible to reviewers. The
- * rail filtering guarantees a Curator on a department never lands on those
- * rows; a Superuser who deep-links `?attr=slug` sees the placeholder until the
- * card ships (PR-7b).
+ * PR-7a wired `description`, `leader`, and `access`. PR-7b adds the center
+ * route and wires `slug`, `center-type`, and `retire`. The center `roster`
+ * (the rich #552 Member/Type/Program/Start/End/Status table + its history view)
+ * lands in a follow-up that depends on #552 Phase 1 (schema) + Phase 2
+ * (`/api/edit/roster` `set` action); until then `roster` keeps a placeholder —
+ * deliberate, so the PR boundary is visible to reviewers.
+ *
+ * Retired read-through (edge 11): a Superuser may open a retired unit (to
+ * restore it). The `retire` panel renders normally so they can Restore; every
+ * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
 import { SiblingDivisionsRail } from "@/components/edit/sibling-divisions-rail";
 import { UnitAccessCard } from "@/components/edit/unit-access-card";
 import { UnitDescriptionCard } from "@/components/edit/unit-description-card";
 import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
+import { UnitRetireCard } from "@/components/edit/unit-retire-card";
+import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
 
@@ -107,6 +114,11 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
 }
 
 function renderPanel(key: AttrKey, ctx: UnitEditContext) {
+  // Retired read-through (edge 11): every panel except `retire` is read-only
+  // while the unit is retired — the Superuser restores via the retire panel.
+  if (ctx.unit.suppression !== null && key !== "retire") {
+    return <RetiredNotice />;
+  }
   switch (key) {
     case "description":
       return (
@@ -142,14 +154,55 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
         />
       );
     case "roster":
-      return <UnwiredPanel heading="Members" pr="PR-7b" />;
+      // The rich center roster table (#552 §6.1) + its history view depend on
+      // #552 Phase 1 (schema) + Phase 2 (/api/edit/roster `set`); built in a
+      // follow-up once those land.
+      return <UnwiredPanel heading="Members" pr="a follow-up PR (depends on #552)" />;
     case "slug":
-      return <UnwiredPanel heading="Profile URL" pr="PR-7b" />;
+      return (
+        <UnitSlugCard
+          entityType={ctx.unit.unitType}
+          entityId={ctx.unit.code}
+          liveSlug={ctx.unit.slug}
+          initialOverride={ctx.unit.slugOverride}
+        />
+      );
     case "center-type":
-      return <UnwiredPanel heading="Center type" pr="PR-7b" />;
+      // The rail only surfaces this row for a center; centerType is non-null there.
+      return (
+        <CenterTypeCard
+          entityId={ctx.unit.code}
+          centerType={ctx.unit.centerType ?? "center"}
+        />
+      );
     case "retire":
-      return <UnwiredPanel heading="Retire unit" pr="PR-7b" />;
+      return (
+        <UnitRetireCard
+          entityType={ctx.unit.unitType}
+          entityId={ctx.unit.code}
+          unitName={ctx.unit.name}
+          suppression={
+            ctx.unit.suppression
+              ? { id: ctx.unit.suppression.id, suppressedAt: ctx.unit.suppression.suppressedAt }
+              : null
+          }
+        />
+      );
   }
+}
+
+/** Edge 11: shown on non-retire panels while the unit is retired. */
+function RetiredNotice() {
+  return (
+    <section data-slot="retired-notice" data-testid="retired-notice" className="flex flex-col gap-4">
+      <div className="bg-muted/40 border-border rounded-md border p-4">
+        <p className="text-muted-foreground text-sm">
+          This unit is retired. Restore it (under <span className="font-medium">Retire unit</span>)
+          to edit its other attributes.
+        </p>
+      </div>
+    </section>
+  );
 }
 
 /**

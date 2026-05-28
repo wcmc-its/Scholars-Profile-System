@@ -5,11 +5,10 @@
  * path, not Tiptap), a Save, and a Clear-override action gated on an existing
  * override.
  *
- * Save / Clear POST `/api/edit/field` (`{ entityType, entityId,
- * fieldName:"description", value, op }`). PR-7a wires the department route, so
- * the dept/div field-override path is the only one exercised; a center edits
- * its description in-row via `/api/edit/unit` and is wired when PR-7b adds the
- * center route (`canClear` is already false for a center).
+ * Dept/div Save / Clear POST `/api/edit/field` (`{ entityType, entityId,
+ * fieldName:"description", value, op }`). A center edits its description in-row:
+ * Save POSTs `/api/edit/unit` op:"update" (PR-7b) — centers have no
+ * `field_override`, so `canClear` is false and there is no Clear path.
  */
 "use client";
 
@@ -66,17 +65,32 @@ export function UnitDescriptionCard({
     setIsSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/edit/field", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          op: "set",
-          entityType,
-          entityId,
-          fieldName: "description",
-          value,
-        }),
-      });
+      // Centers edit in-row via /api/edit/unit op:"update" (no field_override);
+      // dept/div write a field_override row via /api/edit/field.
+      const res =
+        entityType === "center"
+          ? await fetch("/api/edit/unit", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                op: "update",
+                entityType,
+                entityId,
+                fieldName: "description",
+                value,
+              }),
+            })
+          : await fetch("/api/edit/field", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                op: "set",
+                entityType,
+                entityId,
+                fieldName: "description",
+                value,
+              }),
+            });
       const data = (await res.json()) as
         | { ok: true; value: string }
         | { ok: false; error: string };

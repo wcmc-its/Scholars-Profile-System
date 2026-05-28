@@ -118,13 +118,21 @@ describe("loadUnitEditContext — department", () => {
         fakeClient({
           department: DEPT,
           roleRows: [{ entityType: "department", entityId: "N1280", role: "curator" }],
-          overrides: [{ fieldName: "description", value: "Curated blurb" }],
+          overrides: [
+            { fieldName: "description", value: "Curated blurb" },
+            { fieldName: "slug", value: "internal-med" },
+          ],
           siblings: [{ code: "N2856", name: "Cardiology", slug: "cardiology" }],
         }),
       ),
     );
     expect(ctx!.unit.description).toBe("Curated blurb");
     expect(ctx!.unit.overriddenFields).toContain("description");
+    // slug override is surfaced separately (and excluded from overriddenFields —
+    // it is not runtime-merged into the live slug; the ETL consults it).
+    expect(ctx!.unit.slug).toBe("medicine");
+    expect(ctx!.unit.slugOverride).toBe("internal-med");
+    expect(ctx!.unit.overriddenFields).not.toContain("slug");
     expect(ctx!.actorRole).toBe("curator");
     expect(ctx!.siblingDivisions).toEqual([{ code: "N2856", name: "Cardiology", slug: "cardiology" }]);
     // roster + access are not available to a curator on a department.
@@ -253,6 +261,7 @@ describe("loadUnitEditContext — center", () => {
     expect(ctx!.unit.centerType).toBe("institute");
     expect(ctx!.unit.leader).toMatchObject({ cwid: "dir001", interim: true });
     expect(ctx!.unit.overriddenFields).toEqual([]); // centers never carry field_override
+    expect(ctx!.unit.slugOverride).toBeNull(); // centers edit slug in-row, no override
     expect(ctx!.roster).toEqual([{ cwid: "mem9", name: "mem9", title: null, source: "manual" }]);
   });
 });

@@ -80,4 +80,17 @@ describe("UnitDescriptionCard", () => {
     );
     expect(screen.queryByTestId("unit-description-clear")).toBeNull();
   });
+
+  it("a center Saves in-row via /api/edit/unit op:update", async () => {
+    const fetchMock = stubOk("edited");
+    render(
+      <UnitDescriptionCard entityType="center" entityId="man-x" description="seed" canClear={false} hasOverride={false} />,
+    );
+    fireEvent.change(screen.getByTestId("unit-description-textarea"), { target: { value: "edited" } });
+    fireEvent.click(screen.getByTestId("unit-description-save"));
+    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/edit/unit");
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(body).toMatchObject({ op: "update", entityType: "center", entityId: "man-x", fieldName: "description", value: "edited" });
+  });
 });
