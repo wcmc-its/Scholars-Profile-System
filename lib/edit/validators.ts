@@ -23,6 +23,8 @@
  * Node-runtime only (`isomorphic-dompurify` pulls in a DOM implementation;
  * Prisma is Node-only).
  */
+import { randomBytes } from "node:crypto";
+
 import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -612,12 +614,11 @@ export function mintSyntheticUnitCode(randomHex: () => string = defaultRandomHex
 }
 
 function defaultRandomHex(): string {
-  // 8 hex chars; randomUUID's hyphens would clutter the code. Node's
-  // `crypto.randomBytes` is the standard library; no extra dep.
-  // Lazily imported to keep this module Edge-runtime-friendly should a
-  // caller ever pull a non-unit validator out.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { randomBytes } = require("node:crypto") as typeof import("node:crypto");
+  // 8 hex chars; randomUUID's hyphens would clutter the code. The static
+  // top-level import of `randomBytes` from `node:crypto` keeps the Next.js
+  // bundler happy — a dynamic `require("node:crypto")` is rejected as an
+  // unhandled scheme. This file is already Node-runtime-only (DOMPurify +
+  // Prisma); the added import is consistent with `lib/edit/revalidation.ts`.
   return randomBytes(4).toString("hex");
 }
 
