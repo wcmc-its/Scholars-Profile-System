@@ -21,6 +21,7 @@
  * restore it). The `retire` panel renders normally so they can Restore; every
  * other panel shows a "Retired — restore to edit" notice instead of its editor.
  */
+import { CenterRosterCard } from "@/components/edit/center-roster-card";
 import { CenterTypeCard } from "@/components/edit/center-type-card";
 import { EditShell } from "@/components/edit/edit-shell";
 import { SiblingDivisionsRail } from "@/components/edit/sibling-divisions-rail";
@@ -157,12 +158,16 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
         />
       );
     case "roster":
-      // A manual division gets the simple add/remove list (PR-7c). A center's
-      // roster is the richer #552 §6.1 table (Member/Type/Program/…) + history
-      // view, which depends on #552 Phase 1 (schema) + Phase 2 (/api/edit/roster
-      // `set`); deferred to a follow-up once those land.
+      // A center gets the rich #552 §6.1 table (Member/Type/Program/Start/End/
+      // Status); a manual division gets the simple add/remove list (PR-7c).
       if (ctx.unit.unitType === "center") {
-        return <UnwiredPanel heading="Members" pr="a follow-up PR (depends on #552)" />;
+        return (
+          <CenterRosterCard
+            unitCode={ctx.unit.code}
+            members={ctx.roster ?? []}
+            programs={ctx.programs ?? []}
+          />
+        );
       }
       if (ctx.unit.unitType === "division") {
         return (
@@ -217,24 +222,6 @@ function RetiredNotice() {
           This unit is retired. Restore it (under <span className="font-medium">Retire unit</span>)
           to edit its other attributes.
         </p>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Placeholder for an attribute whose card ships in a later PR. The rail still
- * lists the row (a Superuser can deep-link to it); this makes the PR boundary
- * legible rather than 404-ing on a half-built route.
- */
-function UnwiredPanel({ heading, pr }: { heading: string; pr: string }) {
-  return (
-    <section data-slot="unwired-panel" data-pr={pr} className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{heading}</h2>
-      </header>
-      <div className="bg-muted/40 border-border rounded-md border p-4">
-        <p className="text-muted-foreground text-sm">This editor is coming in {pr}.</p>
       </div>
     </section>
   );

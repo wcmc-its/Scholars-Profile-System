@@ -27,6 +27,9 @@ vi.mock("@/components/edit/unit-retire-card", () => ({
 vi.mock("@/components/edit/unit-roster-card", () => ({
   UnitRosterCard: () => <div data-testid="panel-roster" />,
 }));
+vi.mock("@/components/edit/center-roster-card", () => ({
+  CenterRosterCard: () => <div data-testid="panel-center-roster" />,
+}));
 
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -59,6 +62,7 @@ function ctx(over: {
     },
     access: over.access ?? null,
     roster: null,
+    programs: unitType === "center" ? [] : null,
     siblingDivisions: over.siblings ?? null,
     actorRole: over.actorRole ?? "curator",
     actorCwid: "act001",
@@ -137,14 +141,14 @@ describe("UnitEditPage — active panel selection", () => {
     expect(screen.getByTestId("panel-retire")).toBeTruthy();
   });
 
-  it("the center roster panel is still an unwired placeholder (deferred to a #552 follow-up)", () => {
+  it("a center renders the rich roster table on ?attr=roster", () => {
     render(
       <UnitEditPage
         ctx={ctx({ unitType: "center", actorRole: "superuser", access: [] })}
         attr="roster"
       />,
     );
-    expect(screen.getByText(/depends on #552/i)).toBeTruthy();
+    expect(screen.getByTestId("panel-center-roster")).toBeTruthy();
   });
 
   it("a manual division renders the simple roster card on ?attr=roster", () => {

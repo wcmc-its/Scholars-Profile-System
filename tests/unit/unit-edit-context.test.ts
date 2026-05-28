@@ -29,7 +29,15 @@ type Opts = {
   suppression?: { id: string; createdAt: Date; createdBy: string } | null;
   scholars?: Array<{ cwid: string; preferredName: string; primaryTitle: string | null }>;
   siblings?: Array<{ code: string; name: string; slug: string }>;
-  centerMembers?: Array<{ cwid: string; source: string }>;
+  centerMembers?: Array<{
+    cwid: string;
+    source: string;
+    membershipType?: "research" | "clinical" | null;
+    programCode?: string | null;
+    startDate?: Date | null;
+    endDate?: Date | null;
+  }>;
+  centerPrograms?: Array<{ code: string; label: string; sortOrder: number }>;
   divisionMembers?: Array<{ cwid: string; source: string }>;
 };
 
@@ -50,6 +58,7 @@ function fakeClient(o: Opts) {
     suppression: { findFirst: vi.fn().mockResolvedValue(o.suppression ?? null) },
     scholar: { findMany: vi.fn().mockResolvedValue(o.scholars ?? []) },
     centerMembership: { findMany: vi.fn().mockResolvedValue(o.centerMembers ?? []) },
+    centerProgram: { findMany: vi.fn().mockResolvedValue(o.centerPrograms ?? []) },
     divisionMembership: { findMany: vi.fn().mockResolvedValue(o.divisionMembers ?? []) },
   };
 }
@@ -217,11 +226,22 @@ describe("loadUnitEditContext — manual division roster", () => {
         }),
       ),
     );
+    // A division's extended membership fields are always null (no such columns).
     expect(ctx!.roster).toEqual([
-      { cwid: "mem001", name: "Morgan Member", title: null, source: "manual-ui" },
+      {
+        cwid: "mem001",
+        name: "Morgan Member",
+        title: null,
+        source: "manual-ui",
+        membershipType: null,
+        programCode: null,
+        startDate: null,
+        endDate: null,
+      },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
     expect(ctx!.unit.deptSlug).toBe("medicine"); // drives the division preview URL
+    expect(ctx!.programs).toBeNull(); // programs are center-only
     expect(ctx!.siblingDivisions).toBeNull();
 
     const edDivision = { ...manual, source: "ED" };
@@ -253,7 +273,21 @@ describe("loadUnitEditContext — center", () => {
       asClient(
         fakeClient({
           center,
-          centerMembers: [{ cwid: "mem9", source: "manual" }],
+          centerMembers: [
+            {
+              cwid: "mem9",
+              source: "manual",
+              membershipType: "research",
+              programCode: "CT",
+              startDate: new Date("2024-07-01T00:00:00.000Z"),
+              endDate: null,
+            },
+          ],
+          // Provided in DB-sorted order (the mock doesn't apply orderBy).
+          centerPrograms: [
+            { code: "CB", label: "Cancer Biology", sortOrder: 10 },
+            { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
+          ],
           scholars: [{ cwid: "dir001", preferredName: "Dr Director", primaryTitle: "MD" }],
         }),
       ),
@@ -263,6 +297,23 @@ describe("loadUnitEditContext — center", () => {
     expect(ctx!.unit.leader).toMatchObject({ cwid: "dir001", interim: true });
     expect(ctx!.unit.overriddenFields).toEqual([]); // centers never carry field_override
     expect(ctx!.unit.slugOverride).toBeNull(); // centers edit slug in-row, no override
-    expect(ctx!.roster).toEqual([{ cwid: "mem9", name: "mem9", title: null, source: "manual" }]);
+    // #552 — extended fields surface; dates as YYYY-MM-DD strings.
+    expect(ctx!.roster).toEqual([
+      {
+        cwid: "mem9",
+        name: "mem9",
+        title: null,
+        source: "manual",
+        membershipType: "research",
+        programCode: "CT",
+        startDate: "2024-07-01",
+        endDate: null,
+      },
+    ]);
+    // #552 — the center program taxonomy rides along (sorted by sortOrder).
+    expect(ctx!.programs).toEqual([
+      { code: "CB", label: "Cancer Biology", sortOrder: 10 },
+      { code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
+    ]);
   });
 });
