@@ -14,6 +14,17 @@ if (typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.scrollInt
   HTMLElement.prototype.scrollIntoView = function () {};
 }
 
+// Radix primitives (e.g. RadioGroup's size hooks) observe element geometry via
+// ResizeObserver, which jsdom does not implement. A no-op stub is enough — the
+// callbacks have no effect on assertions in jsdom.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
 if (typeof Range !== "undefined") {
   if (typeof Range.prototype.getClientRects !== "function") {
     Range.prototype.getClientRects = function () {
