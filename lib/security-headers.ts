@@ -6,10 +6,15 @@
  * in the app and travels with every deploy. Once a CloudFront layer exists the
  * same values can move to a response-headers policy unchanged.
  *
- * The Content-Security-Policy ships as **report-only**: the browser reports
- * violations to its console but blocks nothing, so an imperfect policy cannot
- * break a page. Promoting it to the enforcing `Content-Security-Policy` header
- * is a deliberate later step, after the observation window (#120 AC).
+ * The Content-Security-Policy is **flag-gated** between report-only and
+ * enforcing modes (#374). `SECURITY_CSP_MODE=enforce` ships the policy as the
+ * enforcing `Content-Security-Policy` header; any other value (including
+ * unset) keeps it as `Content-Security-Policy-Report-Only`, the default.
+ * The policy **value** is identical in both modes (per docs/ADR-007 §
+ * Decision); only the header key changes, so flipping the flag is a name
+ * swap reversible by flipping it back. The intended rollout is to leave the
+ * default `report-only` until a launch-time observation window confirms a
+ * clean violation feed, then set `SECURITY_CSP_MODE=enforce` in prod.
  */
 
 /** One response header, shaped for `next.config.ts` `headers()`. */
@@ -82,6 +87,19 @@ export function buildContentSecurityPolicy(opts: {
     .join("; ");
 }
 
+/** CSP rollout mode. `report-only` is the default; `enforce` flips the header key. */
+export type CspMode = "report-only" | "enforce";
+
+/**
+ * Resolve the CSP mode from an env value. Defaults to `report-only` for any
+ * unset or unrecognized value so a typo in the env config can never silently
+ * promote the policy. Accepts `enforce` (with case/whitespace tolerance) as
+ * the single opt-in value.
+ */
+export function resolveCspMode(raw: string | undefined): CspMode {
+  return raw?.trim().toLowerCase() === "enforce" ? "enforce" : "report-only";
+}
+
 /**
  * The full security-header set applied to every response.
  *
@@ -89,11 +107,19 @@ export function buildContentSecurityPolicy(opts: {
  * four static headers named by #120. Permissions-Policy completes the set by
  * denying powerful browser features this app never uses. Reporting-Endpoints
  * names the `csp-endpoint` collector that the CSP `report-to` directive
- * targets. The CSP is report-only.
+ * targets. The CSP header key is selected by `cspMode`; the policy value is
+ * the same in both modes.
  */
 export function buildSecurityHeaders(opts: {
   isProduction: boolean;
+  cspMode?: CspMode;
 }): ResponseHeader[] {
+  const cspMode: CspMode = opts.cspMode ?? "report-only";
+  const cspHeaderKey =
+    cspMode === "enforce"
+      ? "Content-Security-Policy"
+      : "Content-Security-Policy-Report-Only";
+
   return [
     {
       key: "Strict-Transport-Security",
@@ -113,8 +139,8 @@ export function buildSecurityHeaders(opts: {
       value: 'csp-endpoint="/api/csp-report"',
     },
     {
-      key: "Content-Security-Policy-Report-Only",
-      value: buildContentSecurityPolicy(opts),
+      key: cspHeaderKey,
+      value: buildContentSecurityPolicy({ isProduction: opts.isProduction }),
     },
   ];
 }
