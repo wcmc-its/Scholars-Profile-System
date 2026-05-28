@@ -27,7 +27,18 @@ export type AuthzDenialReason =
   /** a superuser-only action by a non-superuser */
   | "not_superuser"
   /** a revoke of a suppression the actor did not create */
-  | "not_owner";
+  | "not_owner"
+  // ─── #540 / ADR-005 Amendment 1 § A1.2 unit-curation denials ───
+  /** a unit-edit POST by an actor with neither Owner nor Curator on the unit */
+  | "not_curator"
+  /** a `unit_admin` grant/revoke POST by an actor with no Owner role on the unit */
+  | "not_unit_owner"
+  /** `canGrant`: the target unit is outside the actor's owned subtree */
+  | "scope_violation"
+  /** `canGrant`: the actor's role is below the role they are trying to grant */
+  | "authority_violation"
+  /** a proxy edit whose target scholar's LDAP-primary unit is outside the actor's scope */
+  | "proxy_target_not_in_unit";
 
 export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
 
@@ -208,23 +219,208 @@ export function verifyRequestOrigin(request: HeaderCarrier): OriginCheckResult {
 }
 
 // ---------------------------------------------------------------------------
+// unit-curation predicates  (#540 / ADR-005 Amendment 1 § A1.2)
+//
+// Role membership is data-derived (a `UnitAdmin` row, not an SSO group) and
+// re-checked per POST. The per-unit lookup runs once, returns the actor's
+// effective role on that unit, then the pure predicates above consume it.
+// This keeps the existing module's "caller fetches, predicate is pure" shape
+// (see `authorizeRevoke`) for everything in /api/edit.
+// ---------------------------------------------------------------------------
+
+/** The three unit kinds — matches `EntityType` for unit-typed entries. */
+export type UnitKind = "department" | "division" | "center";
+
+/**
+ * A unit reference for predicate input. `parentDeptCode` is REQUIRED for a
+ * division (the dept→division cascade reads it). Callers pass `null` if a
+ * division's `deptCode` is unknown — the lookup then treats it as not-found
+ * for cascade purposes, never throws.
+ */
+export type UnitRef =
+  | { kind: "department"; code: string }
+  | { kind: "division"; code: string; parentDeptCode: string | null }
+  | { kind: "center"; code: string };
+
+/**
+ * The actor's effective role on a unit, **after** applying the dept→division
+ * cascade. `none` means the actor has no `UnitAdmin` row that covers this
+ * unit (`canEditUnit` and `canManageAccess` will deny with the appropriate
+ * reason). `owner` subsumes `curator` — Amendment 1 § A1.2.
+ */
+export type EffectiveUnitRole = "owner" | "curator" | "none";
+
+/** Minimal Prisma surface this module reads. Mock-friendly for unit tests. */
+export type UnitAdminLookup = {
+  unitAdmin: {
+    findMany: (args: {
+      where: {
+        cwid: string;
+        OR: Array<{ entityType: "department" | "division" | "center"; entityId: string }>;
+      };
+      select: { entityType: true; entityId: true; role: true };
+    }) => Promise<
+      Array<{
+        entityType: "department" | "division" | "center";
+        entityId: string;
+        role: "owner" | "curator";
+      }>
+    >;
+  };
+};
+
+/**
+ * Look up the actor's effective role on `unit`, applying the dept→division
+ * cascade (Amendment 1 § A1.2 — a department-level grant cascades to the
+ * department's divisions; division-level does not cascade upward).
+ *
+ * A Superuser is **not** considered here — superuser access is checked at the
+ * predicate level (`canEditUnit` / `canManageAccess`), not by minting a
+ * synthetic `owner` row, so the audit log records what role the actor
+ * actually held.
+ *
+ * Single `findMany` covers both the direct row and (for a division) the
+ * parent dept row in one query; the in-memory reduction below picks the
+ * highest role found.
+ */
+export async function getEffectiveUnitRole(
+  session: EditSession,
+  unit: UnitRef,
+  db: UnitAdminLookup,
+): Promise<EffectiveUnitRole> {
+  const lookups: Array<{ entityType: UnitKind; entityId: string }> = [
+    { entityType: unit.kind, entityId: unit.code },
+  ];
+  if (unit.kind === "division" && unit.parentDeptCode) {
+    lookups.push({ entityType: "department", entityId: unit.parentDeptCode });
+  }
+
+  const rows = await db.unitAdmin.findMany({
+    where: { cwid: session.cwid, OR: lookups },
+    select: { entityType: true, entityId: true, role: true },
+  });
+
+  // Owner > Curator > none. Any owner row wins; otherwise any curator row;
+  // otherwise none. The cascade is already encoded by including the parent
+  // department in the `OR` — a row in the result implicitly covers the unit.
+  let best: EffectiveUnitRole = "none";
+  for (const row of rows) {
+    if (row.role === "owner") return "owner";
+    if (row.role === "curator") best = "curator";
+  }
+  return best;
+}
+
+/**
+ * `canEditUnit` — Amendment 1 § A1.2. The actor may edit the unit's
+ * `description` / leadership / roster iff Superuser OR Owner OR Curator.
+ * Pure given the lookup result. Denial reason `not_curator` matches the
+ * SPEC's edge case 10 phrasing ("the actor lacks any unit-admin role").
+ */
+export function canEditUnit(
+  session: EditSession,
+  effectiveRole: EffectiveUnitRole,
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
+  return { ok: false, reason: "not_curator" };
+}
+
+/**
+ * `canManageAccess` — Amendment 1 § A1.2. Granting / revoking a `UnitAdmin`
+ * row requires Owner role on the target unit (or Superuser). A Curator can
+ * edit but cannot delegate — this is the load-bearing line that keeps
+ * Curators from widening their own access via a self-granted Owner row.
+ */
+export function canManageAccess(
+  session: EditSession,
+  effectiveRole: EffectiveUnitRole,
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  if (effectiveRole === "owner") return ALLOW;
+  return { ok: false, reason: "not_unit_owner" };
+}
+
+/**
+ * `canGrant` — Amendment 1 § A1.2 and § A1.3 T1/T2. A Superuser grants any
+ * role on any unit. An Owner of unit `V` may grant `owner` or `curator` on
+ * `V` (or, by cascade, on `V`'s child divisions when `V` is a department).
+ * Two distinct denials so triage can tell them apart:
+ *
+ *   - `scope_violation`: actor has no role on the target subtree at all —
+ *     they are reaching outside their scope (T2).
+ *   - `authority_violation`: actor is in scope but holds only Curator —
+ *     they cannot delegate (T1, the rule that Curators grant nothing).
+ *
+ * The split matches Amendment 1 § A1.5 #1 — the event payload also carries
+ * the target `role` so an `authority_violation` makes plain *which* role the
+ * actor failed to mint.
+ */
+export function canGrant(
+  session: EditSession,
+  effectiveRole: EffectiveUnitRole,
+  _targetRole: "owner" | "curator",
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  if (effectiveRole === "none") return { ok: false, reason: "scope_violation" };
+  if (effectiveRole === "curator") return { ok: false, reason: "authority_violation" };
+  // effectiveRole === "owner": Amendment 1 § A1.4 C — owner→owner is permitted
+  // (the deliberate widening; T1/T4 mitigated by the rest of the predicate).
+  return ALLOW;
+}
+
+/**
+ * `canProxyEdit` — Amendment 1 § A1.3 T3. An Owner or Curator may proxy-edit
+ * a scholar's `overview` (and per-author publication hide) iff the scholar's
+ * **LDAP-primary** `deptCode`/`divCode` falls within the actor's subtree.
+ * Roster membership never confers profile-edit rights — that is the whole
+ * point of T3. The caller resolves the scholar's home unit from the
+ * `Scholar` row (LDAP-authoritative columns, never `field_override`-able)
+ * and the actor's effective role on it.
+ *
+ * Denial `proxy_target_not_in_unit` keeps the triage clear: this is not a
+ * unit-edit denial, it is a scholar-edit denial whose scope key is the
+ * target's home unit, not the target CWID.
+ */
+export function canProxyEdit(
+  session: EditSession,
+  homeUnitRole: EffectiveUnitRole,
+): AuthzResult {
+  if (session.isSuperuser) return ALLOW;
+  // Self-edit is handled by the existing `authorizeFieldEdit` — proxy is
+  // strictly for someone else; the caller has already established that.
+  if (homeUnitRole === "owner" || homeUnitRole === "curator") return ALLOW;
+  return { ok: false, reason: "proxy_target_not_in_unit" };
+}
+
+// ---------------------------------------------------------------------------
 // denial telemetry
 // ---------------------------------------------------------------------------
 
 /**
  * Emit one `edit_authz_denied` line for a `403` on the edit surface (B02). The
  * route calls this whenever a predicate above returns `{ ok: false }`.
+ *
+ * Unit-curation callers (#540) pass `targetEntityType` + `targetEntityId` —
+ * Amendment 1 § A1.5 #1's generalized event payload — and `role` for grant
+ * denials (`authority_violation` / `scope_violation`).
  */
 export function logEditDenial(params: {
   actorCwid: string;
   targetCwid: string;
   path: string;
   reason: string;
+  targetEntityType?: UnitKind;
+  targetEntityId?: string;
+  role?: "owner" | "curator";
 }): void {
   logAuthzDenied({
     actor_cwid: params.actorCwid,
     target_cwid: params.targetCwid,
     path: params.path,
     reason: params.reason,
+    ...(params.targetEntityType ? { target_entity_type: params.targetEntityType } : {}),
+    ...(params.targetEntityId ? { target_entity_id: params.targetEntityId } : {}),
+    ...(params.role ? { role: params.role } : {}),
   });
 }

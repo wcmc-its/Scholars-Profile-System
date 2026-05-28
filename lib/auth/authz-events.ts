@@ -23,6 +23,20 @@ export interface AuthzDenial {
   path: string;
   /** Short stable reason, e.g. `not_superuser`, `not_self`, `not_owner`. */
   reason: string;
+  /**
+   * Org-unit target type when the denial concerns a department/division/center
+   * (#540 / ADR-005 Amendment 1 § A1.5 #1). Optional — scholar/publication
+   * denials keep emitting only `target_cwid`.
+   */
+  target_entity_type?: "department" | "division" | "center";
+  /** Unit `code` when `target_entity_type` is set. */
+  target_entity_id?: string;
+  /**
+   * The role the actor would have needed for a `canGrant` denial
+   * (#540 / Amendment 1 § A1.5 #1). Aids triage of `authority_violation` vs
+   * `scope_violation`.
+   */
+  role?: "owner" | "curator";
 }
 
 /** Emit one `edit_authz_denied` log line for a 403 on the edit surface. */

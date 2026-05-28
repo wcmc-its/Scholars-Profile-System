@@ -46,4 +46,29 @@ describe("logAuthzDenied", () => {
       }),
     );
   });
+
+  // #540 / Amendment 1 § A1.5 #1 — generalized event payload for unit denials.
+  it("emits the org-unit target fields when provided (Amendment 1 § A1.5 #1)", () => {
+    logAuthzDenied({
+      actor_cwid: "usr2002",
+      target_cwid: "DEPT-X", // the unit code, mirrored for legacy alarms
+      path: "/api/edit/grant",
+      reason: "authority_violation",
+      target_entity_type: "department",
+      target_entity_id: "DEPT-X",
+      role: "owner",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "edit_authz_denied",
+        actor_cwid: "usr2002",
+        target_cwid: "DEPT-X",
+        path: "/api/edit/grant",
+        reason: "authority_violation",
+        target_entity_type: "department",
+        target_entity_id: "DEPT-X",
+        role: "owner",
+      }),
+    );
+  });
 });
