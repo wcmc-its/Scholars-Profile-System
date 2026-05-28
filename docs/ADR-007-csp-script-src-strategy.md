@@ -103,6 +103,8 @@ This ADR settles #374 part 2, and ships its concrete output — `script-src-attr
 
 Part 1 — promoting report-only → enforcing — is execution-gated on the staging environment landing (`B13`, #112): an observation window must run there and come back clean first. The decision in this ADR is not gated; only its part-1 rollout is.
 
+The promotion mechanism is in the code as a single env-gated header swap: `SECURITY_CSP_MODE=enforce` flips `buildSecurityHeaders` to emit `Content-Security-Policy` instead of `Content-Security-Policy-Report-Only`; any other value (including unset) keeps the default report-only. The policy *value* is identical in both modes, so flipping the flag is reversible by flipping it back — no rebuild, only a deploy of the env change. The default fails safe: a typo in `SECURITY_CSP_MODE` resolves to `report-only`, never to `enforce`. The launch-time observation window therefore consists of running with `SECURITY_CSP_MODE` unset, watching the `/api/csp-report` collector for violations, and only setting `=enforce` once it is clean.
+
 Part 3 — the `/api/csp-report` collector — shipped in #378. It accepts both reporting payloads: `report-uri`'s `application/csp-report` and the Reporting-API's `application/reports+json`. `report-uri` is deprecated but honored by every current browser; `report-to` is the standard successor. Both directives are emitted; the collector parses whichever payload arrives.
 
 **Forward compatibility:**

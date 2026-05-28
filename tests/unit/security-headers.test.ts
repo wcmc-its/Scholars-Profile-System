@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildContentSecurityPolicy,
   buildSecurityHeaders,
+  resolveCspMode,
 } from "@/lib/security-headers";
 
 /** Split a CSP value into a `directive → sources` map for assertions. */
@@ -19,34 +20,109 @@ function parseCsp(csp: string): Record<string, string> {
 }
 
 describe("buildSecurityHeaders", () => {
-  const headers = buildSecurityHeaders({ isProduction: true });
-  const valueOf = (key: string): string | undefined =>
-    headers.find((header) => header.key === key)?.value;
+  const valueOfHeaders = (
+    headers: ReturnType<typeof buildSecurityHeaders>,
+    key: string,
+  ): string | undefined => headers.find((header) => header.key === key)?.value;
 
-  it("emits the four headers named by issue #120, plus Permissions-Policy", () => {
-    expect(valueOf("Strict-Transport-Security")).toBe(
-      "max-age=31536000; includeSubDomains; preload",
-    );
-    expect(valueOf("X-Frame-Options")).toBe("DENY");
-    expect(valueOf("X-Content-Type-Options")).toBe("nosniff");
-    expect(valueOf("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
-    expect(valueOf("Permissions-Policy")).toContain("camera=()");
+  describe("default mode (report-only)", () => {
+    const headers = buildSecurityHeaders({ isProduction: true });
+    const valueOf = (key: string): string | undefined =>
+      valueOfHeaders(headers, key);
+
+    it("emits the four headers named by issue #120, plus Permissions-Policy", () => {
+      expect(valueOf("Strict-Transport-Security")).toBe(
+        "max-age=31536000; includeSubDomains; preload",
+      );
+      expect(valueOf("X-Frame-Options")).toBe("DENY");
+      expect(valueOf("X-Content-Type-Options")).toBe("nosniff");
+      expect(valueOf("Referrer-Policy")).toBe(
+        "strict-origin-when-cross-origin",
+      );
+      expect(valueOf("Permissions-Policy")).toContain("camera=()");
+    });
+
+    it("ships CSP as report-only when no cspMode is supplied", () => {
+      expect(valueOf("Content-Security-Policy-Report-Only")).toBeDefined();
+      expect(valueOf("Content-Security-Policy")).toBeUndefined();
+    });
+
+    it("names the csp-report collector via the Reporting-Endpoints header", () => {
+      expect(valueOf("Reporting-Endpoints")).toBe(
+        'csp-endpoint="/api/csp-report"',
+      );
+    });
+
+    it("has no duplicate header keys", () => {
+      const keys = headers.map((header) => header.key);
+      expect(keys.length).toBe(new Set(keys).size);
+    });
   });
 
-  it("ships CSP as report-only, never as the enforcing header", () => {
-    expect(valueOf("Content-Security-Policy-Report-Only")).toBeDefined();
-    expect(valueOf("Content-Security-Policy")).toBeUndefined();
+  describe("cspMode: report-only (explicit)", () => {
+    const headers = buildSecurityHeaders({
+      isProduction: true,
+      cspMode: "report-only",
+    });
+    const valueOf = (key: string): string | undefined =>
+      valueOfHeaders(headers, key);
+
+    it("emits the report-only header and not the enforcing header", () => {
+      expect(valueOf("Content-Security-Policy-Report-Only")).toBeDefined();
+      expect(valueOf("Content-Security-Policy")).toBeUndefined();
+    });
   });
 
-  it("names the csp-report collector via the Reporting-Endpoints header", () => {
-    expect(valueOf("Reporting-Endpoints")).toBe(
-      'csp-endpoint="/api/csp-report"',
-    );
+  describe("cspMode: enforce", () => {
+    const enforced = buildSecurityHeaders({
+      isProduction: true,
+      cspMode: "enforce",
+    });
+    const reportOnly = buildSecurityHeaders({
+      isProduction: true,
+      cspMode: "report-only",
+    });
+    const valueOf = (key: string): string | undefined =>
+      valueOfHeaders(enforced, key);
+
+    it("emits the enforcing Content-Security-Policy header and drops report-only", () => {
+      expect(valueOf("Content-Security-Policy")).toBeDefined();
+      expect(valueOf("Content-Security-Policy-Report-Only")).toBeUndefined();
+    });
+
+    it("ships the same policy value as report-only (header-name swap only)", () => {
+      // docs/ADR-007: promotion is a header rename; the policy content is
+      // identical so the flip is reversible by flipping the flag back.
+      expect(valueOf("Content-Security-Policy")).toBe(
+        valueOfHeaders(reportOnly, "Content-Security-Policy-Report-Only"),
+      );
+    });
+
+    it("still emits the four #120 static headers and the collector hookup", () => {
+      expect(valueOf("Strict-Transport-Security")).toBe(
+        "max-age=31536000; includeSubDomains; preload",
+      );
+      expect(valueOf("X-Frame-Options")).toBe("DENY");
+      expect(valueOf("Reporting-Endpoints")).toBe(
+        'csp-endpoint="/api/csp-report"',
+      );
+    });
+  });
+});
+
+describe("resolveCspMode", () => {
+  it("returns report-only for unset / empty / unknown values (fail-safe default)", () => {
+    expect(resolveCspMode(undefined)).toBe("report-only");
+    expect(resolveCspMode("")).toBe("report-only");
+    expect(resolveCspMode("on")).toBe("report-only");
+    expect(resolveCspMode("true")).toBe("report-only");
+    expect(resolveCspMode("report-only")).toBe("report-only");
   });
 
-  it("has no duplicate header keys", () => {
-    const keys = headers.map((header) => header.key);
-    expect(keys.length).toBe(new Set(keys).size);
+  it("returns enforce only for the literal opt-in (case- and whitespace-tolerant)", () => {
+    expect(resolveCspMode("enforce")).toBe("enforce");
+    expect(resolveCspMode("ENFORCE")).toBe("enforce");
+    expect(resolveCspMode("  enforce  ")).toBe("enforce");
   });
 });
 
