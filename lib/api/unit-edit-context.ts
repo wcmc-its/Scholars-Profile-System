@@ -27,10 +27,10 @@
  *
  * PR-7a ships the `/edit/department/[code]` route only; the division and center
  * branches here are exercised by the context unit tests and consumed by the
- * PR-7b/7c routes. The `roster` shape is deliberately minimal — #552
- * (`center-management-spec.md`) widens it (membershipType / programCode /
- * dates + a per-center programs map) in PR-7b, colocated with the schema it
- * depends on; do not anticipate those fields here.
+ * unit-curation routes. #552 widened the center `roster` rows with
+ * membershipType / programCode / startDate / endDate and added a per-center
+ * `programs` taxonomy map (both null/empty for non-center units), consumed by
+ * the center roster table (`center-roster-card.tsx`).
  */
 import {
   loadUnitFieldOverrides,
@@ -98,13 +98,24 @@ export type UnitEditContext = {
     grantedBy: string | null;
     grantedAt: Date;
   }> | null;
-  /** Present iff the unit carries a roster (center, or manual division). */
+  /** Present iff the unit carries a roster (center, or manual division). The
+   *  extended fields (#552) are populated for a center; always null for a
+   *  manual division (DivisionMembership has no such columns). Dates are
+   *  `YYYY-MM-DD` strings — serializable to the client date pickers. */
   roster: ReadonlyArray<{
     cwid: string;
     name: string;
     title: string | null;
     source: string;
+    membershipType: "research" | "clinical" | null;
+    programCode: string | null;
+    startDate: string | null;
+    endDate: string | null;
   }> | null;
+  /** The center's program taxonomy (#552), present for a center (empty when the
+   *  center has none — the roster editor hides Type + Program then). null for a
+   *  department or division. */
+  programs: ReadonlyArray<{ code: string; label: string; sortOrder: number }> | null;
   /** Present on a department only — its child divisions for the sub-rail. */
   siblingDivisions: ReadonlyArray<{
     code: string;
@@ -134,6 +145,7 @@ export type UnitEditContextClient = Pick<
   | "scholar"
   | "centerMembership"
   | "divisionMembership"
+  | "centerProgram"
 >;
 
 /** Look up the leader / access / roster cwids' display name + title in one query. */
@@ -281,22 +293,52 @@ export async function loadUnitEditContext(
       })
     : [];
 
-  let rosterRows: Array<{ cwid: string; source: string }> = [];
+  type RosterRow = {
+    cwid: string;
+    source: string;
+    membershipType: "research" | "clinical" | null;
+    programCode: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  };
+  let rosterRows: RosterRow[] = [];
+  // A center's program taxonomy (#552) — empty for centers that don't use it.
+  let programs: Array<{ code: string; label: string; sortOrder: number }> | null = null;
   if (hasRoster) {
     if (unitType === "center") {
-      const rows = await client.centerMembership.findMany({
+      rosterRows = await client.centerMembership.findMany({
         where: { centerCode: code },
-        select: { cwid: true, source: true },
+        select: {
+          cwid: true,
+          source: true,
+          membershipType: true,
+          programCode: true,
+          startDate: true,
+          endDate: true,
+        },
         orderBy: { cwid: "asc" },
       });
-      rosterRows = rows;
+      const programRows = await client.centerProgram.findMany({
+        where: { centerCode: code },
+        select: { code: true, label: true, sortOrder: true },
+        orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
+      });
+      programs = programRows;
     } else {
       const rows = await client.divisionMembership.findMany({
         where: { divisionCode: code },
         select: { cwid: true, source: true },
         orderBy: { cwid: "asc" },
       });
-      rosterRows = rows;
+      // A division has no extended membership columns — pad with nulls.
+      rosterRows = rows.map((r) => ({
+        cwid: r.cwid,
+        source: r.source,
+        membershipType: null,
+        programCode: null,
+        startDate: null,
+        endDate: null,
+      }));
     }
   }
 
@@ -331,6 +373,10 @@ export async function loadUnitEditContext(
         name: nameMap.get(r.cwid)?.name ?? r.cwid,
         title: nameMap.get(r.cwid)?.title ?? null,
         source: r.source,
+        membershipType: r.membershipType,
+        programCode: r.programCode,
+        startDate: r.startDate ? r.startDate.toISOString().slice(0, 10) : null,
+        endDate: r.endDate ? r.endDate.toISOString().slice(0, 10) : null,
       }))
     : null;
 
@@ -379,6 +425,7 @@ export async function loadUnitEditContext(
     },
     access,
     roster,
+    programs,
     siblingDivisions,
     actorRole,
     actorCwid: session.cwid,
