@@ -901,18 +901,27 @@ export async function searchPeople(opts: {
     }
   }
 
-  // Issue #513 / baseline §5.4 — prominence factor for the name / department /
-  // hybrid bodies (the templates with no function_score of their own). Additive
-  // composition (`score_mode: sum`) so the final score is
-  //   text × (BASE + ln1p(FACTOR·publicationCount) + FACULTY[·faculty] + GRANT[·grant]).
-  // Publication count leads (log-saturated); BASE floors the multiplier at 1 so
-  // a no-pub non-faculty scholar keeps its text score rather than being zeroed
-  // by ln1p(0)=0; faculty / active-grant are additive boosts that can't override
-  // a large pub-count gap. Topic shape is excluded: it keeps PR-3's
-  // multiplicative modifiers (additive boosts would need a nested function_score
-  // — deferred to the §5.4 calibration follow-up).
+  // Issue #513 / baseline §5.4 — prominence factor across all v3 shapes. The
+  // composition is additive (`score_mode: sum`) so the final score is
+  //   inner_score × (BASE + ln1p(FACTOR·publicationCount) + FACULTY[·faculty] + GRANT[·grant])
+  // where `inner_score` is the raw text score for name / dept / hybrid, OR the
+  // topic template's multiplicative inner_score for the topic shape. For topic,
+  // the prominence factor is the OUTER function_score wrapping the existing
+  // multiplicative attribution + productive-author + sparse-decay layer
+  // (#513-followup: the deferred §5.4 calibration step). Additive-over-
+  // multiplicative is load-bearing — a blunt multiplicative pub-count factor
+  // composed with attribution × productivity blew up established authors
+  // disproportionately ("melanoma distortion") in the §5.4 probe; nesting keeps
+  // the topic-relevance shape intact and applies prominence once.
+  //
+  // BASE floors the multiplier at 1 so a no-pub non-faculty scholar keeps its
+  // inner score rather than being zeroed by ln1p(0)=0; faculty / active-grant
+  // are additive boosts that can't override a large pub-count gap.
   const applyProminence =
-    applyNameTemplate || applyDeptTemplate || applyHybridTemplate;
+    applyNameTemplate ||
+    applyDeptTemplate ||
+    applyHybridTemplate ||
+    applyTopicTemplate;
   const prominenceFunctions: Record<string, unknown>[] = applyProminence
     ? [
         { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
@@ -936,7 +945,10 @@ export async function searchPeople(opts: {
     : [];
 
   const baseQuery = { bool: { must, filter: queryFilter } };
-  const scoringQuery =
+  // Inner scoring: topic shape wraps `baseQuery` in the multiplicative
+  // attribution + productivity + sparse-decay function_score; every other
+  // shape uses the plain bool.
+  const innerScoringQuery =
     applyTopicTemplate && scoreFunctions.length > 0
       ? {
           function_score: {
@@ -946,16 +958,19 @@ export async function searchPeople(opts: {
             boost_mode: "multiply",
           },
         }
-      : applyProminence
-      ? {
-          function_score: {
-            query: baseQuery,
-            functions: prominenceFunctions,
-            score_mode: "sum",
-            boost_mode: "multiply",
-          },
-        }
       : baseQuery;
+  // Outer scoring: the additive prominence function_score wraps the inner
+  // score for all v3 shapes (#513 + the §5.4 topic follow-up).
+  const scoringQuery = applyProminence
+    ? {
+        function_score: {
+          query: innerScoringQuery,
+          functions: prominenceFunctions,
+          score_mode: "sum",
+          boost_mode: "multiply",
+        },
+      }
+    : innerScoringQuery;
 
   const body = {
     from: page * PAGE_SIZE,

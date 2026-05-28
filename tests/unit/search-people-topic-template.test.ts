@@ -50,6 +50,11 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^4",
   ],
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
+  PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
+  PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
+  PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
@@ -104,8 +109,27 @@ type FnScore = {
   boost_mode: string;
 };
 
+/**
+ * The body sent to OpenSearch now has TWO nested function_score layers under
+ * v3 + topic (#513 §5.4 follow-up):
+ *   outer (`sum`)  = prominence factor (BASE + ln1p(pub) + faculty + grant)
+ *   inner (`multiply`) = topic ladder (attribution × productivity × decay)
+ * This helper drills to the INNER topic function_score, which is what every
+ * existing §6.1.3 assertion in this file operates on.
+ */
 function functionScore(body: Record<string, unknown>): FnScore {
-  return (body.query as { function_score: FnScore }).function_score;
+  const outer = (body.query as { function_score: { query: Record<string, unknown> } })
+    .function_score;
+  return (outer.query as { function_score: FnScore }).function_score;
+}
+
+function outerProminence(body: Record<string, unknown>): {
+  score_mode: string;
+  boost_mode: string;
+  functions: Array<Record<string, unknown>>;
+} {
+  return (body.query as { function_score: { score_mode: string; boost_mode: string; functions: Array<Record<string, unknown>> } })
+    .function_score;
 }
 
 /** The topic body lives at function_score.query.bool.must[0].bool.should[1]. */
@@ -260,5 +284,47 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
     expect(capturedBodies[0].query).toHaveProperty("bool");
     expect(capturedBodies[0].query).not.toHaveProperty("function_score");
     expect(result.attributionBoostFired).toBeNull();
+  });
+
+  it("#513 §5.4 follow-up: outer additive prominence wraps the inner topic multiply", async () => {
+    // Additive-over-multiplicative: outer sum (prominence) × inner multiply
+    // (attribution × productivity × decay) × text. A blunt multiplicative
+    // pub-count factor composed with the topic ladder blew up established
+    // authors disproportionately ("melanoma distortion") in the §5.4 probe.
+    await searchPeople({
+      q: "ras signaling pancreatic cancer",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+
+    const outer = outerProminence(capturedBodies[0]);
+    expect(outer.score_mode).toBe("sum");
+    expect(outer.boost_mode).toBe("multiply");
+
+    // The four prominence functions, in any order.
+    expect(outer.functions).toHaveLength(4);
+    expect(outer.functions).toContainEqual({ weight: 1.0 });
+    expect(outer.functions).toContainEqual({
+      field_value_factor: {
+        field: "publicationCount",
+        modifier: "ln1p",
+        factor: 1,
+        missing: 0,
+      },
+    });
+    expect(outer.functions).toContainEqual({
+      filter: { term: { personType: "full_time_faculty" } },
+      weight: 1.0,
+    });
+    expect(outer.functions).toContainEqual({
+      filter: { term: { hasActiveGrants: true } },
+      weight: 0.5,
+    });
+
+    // Inner is still the multiplicative topic ladder, untouched.
+    const inner = functionScore(capturedBodies[0]);
+    expect(inner.score_mode).toBe("multiply");
+    expect(inner.boost_mode).toBe("multiply");
   });
 });
