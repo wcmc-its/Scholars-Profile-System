@@ -28,6 +28,7 @@ import { UnitAccessCard } from "@/components/edit/unit-access-card";
 import { UnitDescriptionCard } from "@/components/edit/unit-description-card";
 import { UnitLeaderCard } from "@/components/edit/unit-leader-card";
 import { UnitRetireCard } from "@/components/edit/unit-retire-card";
+import { UnitRosterCard } from "@/components/edit/unit-roster-card";
 import { UnitSlugCard } from "@/components/edit/unit-slug-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -91,7 +92,9 @@ export function UnitEditPage({ ctx, attr }: UnitEditPageProps) {
       ? `/departments/${ctx.unit.slug}`
       : ctx.unit.unitType === "center"
         ? `/centers/${ctx.unit.slug}`
-        : undefined; // division preview is wired in PR-7c (needs parent dept slug)
+        : ctx.unit.deptSlug
+          ? `/departments/${ctx.unit.deptSlug}/divisions/${ctx.unit.slug}`
+          : undefined; // a division with no resolvable parent slug has no preview
 
   const subRail =
     ctx.unit.unitType === "department" && ctx.siblingDivisions ? (
@@ -154,10 +157,24 @@ function renderPanel(key: AttrKey, ctx: UnitEditContext) {
         />
       );
     case "roster":
-      // The rich center roster table (#552 §6.1) + its history view depend on
-      // #552 Phase 1 (schema) + Phase 2 (/api/edit/roster `set`); built in a
-      // follow-up once those land.
-      return <UnwiredPanel heading="Members" pr="a follow-up PR (depends on #552)" />;
+      // A manual division gets the simple add/remove list (PR-7c). A center's
+      // roster is the richer #552 §6.1 table (Member/Type/Program/…) + history
+      // view, which depends on #552 Phase 1 (schema) + Phase 2 (/api/edit/roster
+      // `set`); deferred to a follow-up once those land.
+      if (ctx.unit.unitType === "center") {
+        return <UnwiredPanel heading="Members" pr="a follow-up PR (depends on #552)" />;
+      }
+      if (ctx.unit.unitType === "division") {
+        return (
+          <UnitRosterCard
+            entityType="division"
+            unitCode={ctx.unit.code}
+            members={ctx.roster ?? []}
+          />
+        );
+      }
+      // A department has no roster row in its rail — unreachable.
+      return null;
     case "slug":
       return (
         <UnitSlugCard

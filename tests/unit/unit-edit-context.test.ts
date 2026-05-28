@@ -203,7 +203,7 @@ describe("loadUnitEditContext — manual division roster", () => {
       chiefCwid: null,
       source: "manual",
       deptCode: "N1280",
-      department: { name: "Medicine" },
+      department: { name: "Medicine", slug: "medicine" },
     };
     const ctx = await loadUnitEditContext(
       "division",
@@ -221,6 +221,7 @@ describe("loadUnitEditContext — manual division roster", () => {
       { cwid: "mem001", name: "Morgan Member", title: null, source: "manual-ui" },
     ]);
     expect(ctx!.unit.deptName).toBe("Medicine");
+    expect(ctx!.unit.deptSlug).toBe("medicine"); // drives the division preview URL
     expect(ctx!.siblingDivisions).toBeNull();
 
     const edDivision = { ...manual, source: "ED" };
