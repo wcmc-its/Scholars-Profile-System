@@ -35,8 +35,13 @@ import {
 import {
   PEOPLE_ABSTRACTS_BOOST,
   PEOPLE_FIELD_BOOSTS,
+  PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
   PEOPLE_INDEX,
+  PEOPLE_PROMINENCE_BASE_WEIGHT,
+  PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+  PEOPLE_PROMINENCE_GRANT_WEIGHT,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
   PEOPLE_RESTRUCTURED_MSM,
   PEOPLE_TOPIC_ABSTRACTS_BOOST,
   PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
@@ -896,6 +901,40 @@ export async function searchPeople(opts: {
     }
   }
 
+  // Issue #513 / baseline §5.4 — prominence factor for the name / department /
+  // hybrid bodies (the templates with no function_score of their own). Additive
+  // composition (`score_mode: sum`) so the final score is
+  //   text × (BASE + ln1p(FACTOR·publicationCount) + FACULTY[·faculty] + GRANT[·grant]).
+  // Publication count leads (log-saturated); BASE floors the multiplier at 1 so
+  // a no-pub non-faculty scholar keeps its text score rather than being zeroed
+  // by ln1p(0)=0; faculty / active-grant are additive boosts that can't override
+  // a large pub-count gap. Topic shape is excluded: it keeps PR-3's
+  // multiplicative modifiers (additive boosts would need a nested function_score
+  // — deferred to the §5.4 calibration follow-up).
+  const applyProminence =
+    applyNameTemplate || applyDeptTemplate || applyHybridTemplate;
+  const prominenceFunctions: Record<string, unknown>[] = applyProminence
+    ? [
+        { weight: PEOPLE_PROMINENCE_BASE_WEIGHT },
+        {
+          field_value_factor: {
+            field: "publicationCount",
+            modifier: "ln1p",
+            factor: PEOPLE_PROMINENCE_PUBCOUNT_FACTOR,
+            missing: 0,
+          },
+        },
+        {
+          filter: { term: { personType: PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE } },
+          weight: PEOPLE_PROMINENCE_FACULTY_WEIGHT,
+        },
+        {
+          filter: { term: { hasActiveGrants: true } },
+          weight: PEOPLE_PROMINENCE_GRANT_WEIGHT,
+        },
+      ]
+    : [];
+
   const baseQuery = { bool: { must, filter: queryFilter } };
   const scoringQuery =
     applyTopicTemplate && scoreFunctions.length > 0
@@ -904,6 +943,15 @@ export async function searchPeople(opts: {
             query: baseQuery,
             functions: scoreFunctions,
             score_mode: "multiply",
+            boost_mode: "multiply",
+          },
+        }
+      : applyProminence
+      ? {
+          function_score: {
+            query: baseQuery,
+            functions: prominenceFunctions,
+            score_mode: "sum",
             boost_mode: "multiply",
           },
         }

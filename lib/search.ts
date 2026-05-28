@@ -546,6 +546,53 @@ export const PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
 export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
 
 /**
+ * Issue #513 / `docs/people-relevance-baseline.md` §5.4 — v3 prominence factor.
+ *
+ * The legacy baseline carries no prominence signal, so prominent scholars sink
+ * in large topic/department result sets and same-surname queries resolve
+ * arbitrarily (#4 `wong` = 0/3: zero-pub namesakes outranked the three
+ * high-output Wongs). These weights compose a function_score over the
+ * name / department / hybrid bodies as:
+ *
+ *   final = text_score × ( BASE + ln1p(FACTOR · publicationCount)
+ *                          + FACULTY·[full_time_faculty] + GRANT·[hasActiveGrants] )
+ *
+ * (`score_mode: sum`, `boost_mode: multiply`).
+ *
+ *   - **Publication count leads** — log-saturated (`ln1p`, so 250 vs 500 pubs
+ *     doesn't run away). The dense signal (60.9% of active scholars have ≥1
+ *     pub); the only variant that fixed #4 in the §5.4 probe (3/3).
+ *   - **BASE** floors the multiplier at 1 so a no-pub, non-faculty scholar is
+ *     left at its text score (×1) rather than zeroed (ln1p(0) = 0) — the
+ *     `× log1p(grantCount)` probe was rejected precisely because it zeroed the
+ *     84% with no grant.
+ *   - **Full-time-faculty — a *meaningful additive* boost**, deliberately NOT an
+ *     absolute first tier: FACULTY must stay below a typical publication-count
+ *     gap so a ≤17-pub full-time Wong can't outrank a 250-pub affiliated Wong
+ *     (1 + ln1p(17) + 1 = 4.89 < 1 + ln1p(250) = 6.52). #513 decision.
+ *   - **Active grants — a *small additive* boost** (a "currently funded"
+ *     tiebreaker), never a standalone multiplier (the signal is too sparse —
+ *     12.5% — to lead).
+ *
+ * Selection bias toward established faculty is **accepted** by the eval owner
+ * (prominent scholars should rank higher), overriding the SPEC §5.3 down-weight
+ * caution for this factor. Weights are INITIAL — the 12-query calibration sweep
+ * (which needs the production topic-template query + a reindexed cluster, the
+ * same gate as the PR-5 flip) tunes them against the §7 frozen baseline.
+ *
+ * Topic-shape prominence is deliberately out of scope here: that body already
+ * carries PR-3's multiplicative productive-author modifier, and additive boosts
+ * can't share its `multiply`-mode function_score without nesting — deferred to
+ * the calibration follow-up.
+ */
+export const PEOPLE_PROMINENCE_BASE_WEIGHT = 1.0;
+export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR = 1;
+export const PEOPLE_PROMINENCE_FACULTY_WEIGHT = 1.0;
+export const PEOPLE_PROMINENCE_GRANT_WEIGHT = 0.5;
+/** The `personType` (= `roleCategory`) value the faculty boost matches. */
+export const PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE = "full_time_faculty";
+
+/**
  * Boost weights used by the publications-index query builder.
  * (Not specified in spec for publications; reasonable defaults.)
  */

@@ -54,6 +54,11 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^4",
   ],
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
+  PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
+  PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
+  PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
@@ -98,11 +103,27 @@ vi.mock("@/lib/search", () => ({
 
 import { searchPeople } from "@/lib/api/search";
 
+/**
+ * Unwrap the #513 prominence `function_score` (dept + hybrid bodies are wrapped
+ * under v3) to the root bool query. Legacy mode isn't wrapped, so accept either.
+ */
+function rootQuery(body: Record<string, unknown>): Record<string, unknown> {
+  const q = body.query as Record<string, unknown>;
+  return ((q.function_score as { query?: Record<string, unknown> })?.query ??
+    q) as Record<string, unknown>;
+}
+
 /** The outer should clause holds [cwid term, queryBranch] (index 0 / 1). */
 function outerShould(body: Record<string, unknown>): Record<string, unknown>[] {
-  const q = body.query as Record<string, unknown>;
-  const must = (q.bool as { must: Record<string, unknown>[] }).must;
+  const must = (rootQuery(body).bool as { must: Record<string, unknown>[] }).must;
   return (must[0].bool as { should: Record<string, unknown>[] }).should;
+}
+
+/** The score functions on the #513 prominence wrapper, or [] if unwrapped. */
+function prominenceFunctions(body: Record<string, unknown>): Array<Record<string, unknown>> {
+  const fs = (body.query as { function_score?: { functions: Array<Record<string, unknown>> } })
+    .function_score;
+  return fs?.functions ?? [];
 }
 
 /** Index 1 of the outer should is the query branch (template body). */
@@ -193,10 +214,26 @@ describe("people-index department + hybrid templates — SPEC §6.1.4 (#311)", (
     });
   });
 
-  it("row 5: the department body is a plain bool — no function_score wrapper", async () => {
+  it("row 5: the department body is wrapped in the #513 prominence function_score (sum/multiply)", async () => {
     await searchPeople({ q: "cardiology", relevanceMode: "v3", shape: "department" });
-    expect(capturedBodies[0].query).toHaveProperty("bool");
-    expect(capturedBodies[0].query).not.toHaveProperty("function_score");
+    const fs = (capturedBodies[0].query as { function_score?: { score_mode: string; boost_mode: string } })
+      .function_score;
+    expect(fs).toBeDefined();
+    // Additive composition (not the topic template's multiply mode).
+    expect(fs!.score_mode).toBe("sum");
+    expect(fs!.boost_mode).toBe("multiply");
+    // The pub-count lead + faculty/grant additive boosts; NOT the topic
+    // attribution (1.5) / sparse-decay (0.7) multiplicative modifiers.
+    const fns = prominenceFunctions(capturedBodies[0]);
+    expect(fns).toContainEqual({
+      field_value_factor: {
+        field: "publicationCount",
+        modifier: "ln1p",
+        factor: 1,
+        missing: 0,
+      },
+    });
+    expect(fns.some((f) => "weight" in f && f.weight === 0.7)).toBe(false);
   });
 
   it("row 5: the cwid^100 short-circuit term is preserved for the department body", async () => {
@@ -216,8 +253,8 @@ describe("people-index department + hybrid templates — SPEC §6.1.4 (#311)", (
     });
 
     expect(result.queryShape).toBe("department_template");
-    const filter = (capturedBodies[0].query as { bool: { filter: Record<string, unknown>[] } })
-      .bool.filter;
+    const filter = (rootQuery(capturedBodies[0]).bool as { filter: Record<string, unknown>[] })
+      .filter;
     expect(filter).toContainEqual({ terms: { cwid: [FIXTURE_CWID] } });
   });
 
@@ -261,12 +298,18 @@ describe("people-index department + hybrid templates — SPEC §6.1.4 (#311)", (
     });
   });
 
-  it("row 4: the hybrid body is a plain bool — no function_score wrapper", async () => {
+  it("row 4: the hybrid body is wrapped in the #513 prominence function_score (sum/multiply)", async () => {
     await searchPeople({ q: "cantley ras", relevanceMode: "v3", shape: "hybrid" });
-    expect(capturedBodies[0].query).toHaveProperty("bool");
-    expect(capturedBodies[0].query).not.toHaveProperty("function_score");
-    // sparse decay / attribution are §6.1.3-only: telemetry stays null.
-    // (attributionBoostFired is only ever non-null under the topic template.)
+    const fs = (capturedBodies[0].query as { function_score?: { score_mode: string; boost_mode: string } })
+      .function_score;
+    expect(fs).toBeDefined();
+    expect(fs!.score_mode).toBe("sum");
+    expect(fs!.boost_mode).toBe("multiply");
+    // Additive prominence (pub-count lead + faculty/grant); NOT the topic
+    // attribution / sparse-decay multipliers (those are §6.1.3-only).
+    const fns = prominenceFunctions(capturedBodies[0]);
+    expect(fns.some((f) => "weight" in f && f.weight === 1.5)).toBe(false);
+    expect(fns.some((f) => "weight" in f && f.weight === 0.7)).toBe(false);
   });
 
   it("row 11: the WCM institutional-name hybrid routes the hybrid body", async () => {
