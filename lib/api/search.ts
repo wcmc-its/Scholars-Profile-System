@@ -241,16 +241,22 @@ export type DeptDivBucket = { value: string; label: string; count: number };
  * Issue #309 / SPEC §6.1.2 — `name_template` names the v3 name-shape body
  * (name fields only). Issue #310 / SPEC §6.1.3 — `topic_template` names the v3
  * topic-shape body (re-weighted cross_fields ladder wrapped in a
- * function_score). Both are independent of the #259 restructure flag: when the
- * relevance mode is `v3` and the classifier returns the matching shape, these
- * labels supersede `legacy_multi_match` / `restructured_msm` so analytics can
- * tell each v3 body apart from the cross_fields fallback families.
+ * function_score). Issue #311 / SPEC §6.1.4 — `department_template` names the
+ * v3 department-shape body (dept/title/name fields, no pub fields, no
+ * function_score) and `hybrid_template` names the additive name⊕topic body
+ * (name-template clauses + the topic boost ladder in a single bool, no
+ * function_score). All four are independent of the #259 restructure flag: when
+ * the relevance mode is `v3` and the classifier returns the matching shape,
+ * these labels supersede `legacy_multi_match` / `restructured_msm` so analytics
+ * can tell each v3 body apart from the cross_fields fallback families.
  */
 export type PeopleQueryShape =
   | "legacy_multi_match"
   | "restructured_msm"
   | "name_template"
   | "topic_template"
+  | "department_template"
+  | "hybrid_template"
   | "concept_filtered"
   | "concept_fallback";
 
@@ -347,9 +353,10 @@ export async function searchPeople(opts: {
   /**
    * Issue #309 / SPEC §6.1.1 — the classifier shape from the route
    * (`classifyPeopleQuery`). `name` routes to the §6.1.2 name template (#309);
-   * `topic` / `unclassified` route to the §6.1.3 topic template (#310). The
-   * remaining shapes ride the existing restructure/legacy body until PR-4
-   * (#311) adds the department + hybrid templates.
+   * `topic` / `unclassified` route to the §6.1.3 topic template (#310);
+   * `department` routes to the §6.1.4 department template and `hybrid` to the
+   * §6.1.4 additive name⊕topic template (#311). `cwid` / `empty` still ride the
+   * existing cwid short-circuit / `match_all` browse paths.
    */
   shape?: PeopleQueryClassification;
   /**
@@ -396,6 +403,28 @@ export async function searchPeople(opts: {
     (opts.shape === "topic" || opts.shape === "unclassified") &&
     trimmed.length > 0;
 
+  // Issue #311 / SPEC §6.1.4 — department-shape template. The classifier returns
+  // `department` only for a query that is exactly a known department name (an
+  // empty leftover after the dept-prefix strip); a dept name plus extra tokens
+  // is routed to `hybrid` instead. So this body never has to fold in "remaining
+  // topic tokens" — it is the dept/title/name ladder over the full query, with
+  // no pub-derived fields and no function_score wrapper (§6.1.5 decay is
+  // topic-shape-only).
+  const applyDeptTemplate =
+    relevanceMode === "v3" && opts.shape === "department" && trimmed.length > 0;
+
+  // Issue #311 / SPEC §6.1.4 — hybrid template. A surname anchor plus a topic
+  // signal (e.g. `cantley ras`), or a department name plus extra tokens. The
+  // name-template clauses and the topic boost ladder are combined additively in
+  // a single bool (BM25 sums matching should-clauses), so the strong name boost
+  // pins the anchored scholar at the top while the topic ladder still ranks the
+  // rest by topical evidence. The topic ladder rides as a no-msm cross_fields
+  // should-clause (soft/additive, not the topic template's must+msm) so a
+  // scholar matching only the topic token still scores. No function_score
+  // wrapper: attribution / productive-author / sparse decay are §6.1.3-scoped.
+  const applyHybridTemplate =
+    relevanceMode === "v3" && opts.shape === "hybrid" && trimmed.length > 0;
+
   // Descendant-UI set for the attribution boost — empty unless the route
   // resolved the query to a MeSH descriptor.
   const meshDescendantUis = opts.meshDescendantUis ?? [];
@@ -405,6 +434,8 @@ export async function searchPeople(opts: {
     : "legacy_multi_match";
   if (applyNameTemplate) queryShape = "name_template";
   if (applyTopicTemplate) queryShape = "topic_template";
+  if (applyDeptTemplate) queryShape = "department_template";
+  if (applyHybridTemplate) queryShape = "hybrid_template";
 
   // D-10 topic pre-filter: resolve cwids via Prisma before hitting OpenSearch.
   // This ensures the search is scoped to scholars attributed to the topic regardless
@@ -476,21 +507,77 @@ export async function searchPeople(opts: {
   // records", and/or are equivalent (msm requires all 3 anyway); they
   // diverge on 4+ tokens where msm allows 25% missing and "and" doesn't.
   //
+  // Issue #311 / SPEC §6.1.4 — name-template should-clauses, reused by the name
+  // template (#309) and as the name half of the hybrid template. The cwid^100
+  // term stays in the outer `should` (the existing short-circuit), so it is NOT
+  // repeated here.
+  const nameTemplateClauses: Record<string, unknown>[] = [
+    { match_phrase: { preferredName: { query: trimmed, slop: 2, boost: 30 } } },
+    { match: { preferredName: { query: trimmed, boost: 10 } } },
+    { match_phrase: { fullName: { query: trimmed, slop: 2, boost: 30 } } },
+    { match: { fullName: { query: trimmed, boost: 10 } } },
+    { term: { lastNameSort: { value: trimmed.toLowerCase(), boost: 25 } } },
+  ];
+
   // Issue #309 / SPEC §6.1.2 — name-shape template takes precedence over both
   // bodies above when active. Name fields only (preferredName, fullName,
   // lastNameSort): match_phrase (slop 2) rewards exact-order names, plain
   // match catches reversed/initial-only order, and the lastNameSort keyword
-  // term is the single-token surname exact hit. The cwid^100 term stays in the
-  // outer `should` (the existing short-circuit), so it is NOT repeated here.
+  // term is the single-token surname exact hit.
   const queryBranch: Record<string, unknown> = applyNameTemplate
     ? {
         bool: {
+          should: nameTemplateClauses,
+          minimum_should_match: 1,
+        },
+      }
+    : applyDeptTemplate
+    ? {
+        // Issue #311 / SPEC §6.1.4 — department-shape body. Dept/title/name
+        // ladder only: primaryDepartment as a match_phrase (boost 20; a
+        // single-token dept name behaves identically to `match`), title at 8,
+        // and a soft preferredName/fullName fallback at 2 so an ambiguous
+        // surname-like dept query can still surface people. areasOfInterest at
+        // 1 is the soft topical fallback. No pub-derived fields, no overview,
+        // no function_score (the §6.1.5 sparse decay is topic-shape-only).
+        bool: {
           should: [
-            { match_phrase: { preferredName: { query: trimmed, slop: 2, boost: 30 } } },
-            { match: { preferredName: { query: trimmed, boost: 10 } } },
-            { match_phrase: { fullName: { query: trimmed, slop: 2, boost: 30 } } },
-            { match: { fullName: { query: trimmed, boost: 10 } } },
-            { term: { lastNameSort: { value: trimmed.toLowerCase(), boost: 25 } } },
+            { match_phrase: { primaryDepartment: { query: trimmed, boost: 20 } } },
+            { match: { primaryTitle: { query: trimmed, boost: 8 } } },
+            { match: { preferredName: { query: trimmed, boost: 2 } } },
+            { match: { fullName: { query: trimmed, boost: 2 } } },
+            { match: { areasOfInterest: { query: trimmed, boost: 1 } } },
+          ],
+          minimum_should_match: 1,
+        },
+      }
+    : applyHybridTemplate
+    ? {
+        // Issue #311 / SPEC §6.1.4 — hybrid body. Name-template clauses ⊕ the
+        // topic boost ladder, summed by BM25 in one bool. The topic ladder
+        // rides as a no-msm cross_fields should-clause (soft/additive — unlike
+        // the §6.1.3 topic template's must+msm) so a scholar matching only the
+        // topic token still scores; the anchored name's boost (30/25/10) keeps
+        // the named scholar at rank 1 (§10 row 4: `cantley ras`).
+        bool: {
+          should: [
+            ...nameTemplateClauses,
+            {
+              multi_match: {
+                query: trimmed,
+                fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                type: "cross_fields",
+                operator: "or",
+              },
+            },
+            {
+              match: {
+                publicationAbstracts: {
+                  query: trimmed,
+                  boost: PEOPLE_TOPIC_ABSTRACTS_BOOST,
+                },
+              },
+            },
           ],
           minimum_should_match: 1,
         },

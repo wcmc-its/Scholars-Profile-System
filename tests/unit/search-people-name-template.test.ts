@@ -249,13 +249,14 @@ describe("people-index name-shape template — SPEC §6.1.2 (#309)", () => {
     expect(filter).toContainEqual({ terms: { cwid: [FIXTURE_CWID] } });
   });
 
-  it("a non-name, non-topic shape (department) keeps the #259 cross_fields body", async () => {
-    // department + hybrid templates are PR-4 (#311); until then those shapes
-    // ride the existing restructure body, so the name template must not fire.
+  it("a non-templated shape (cwid) keeps the #259 cross_fields body", async () => {
+    // name/topic/department/hybrid all route to a v3 template now (#309/#310/
+    // #311); `cwid` is the remaining classifier shape that still rides the
+    // existing restructure body, so the name template must not fire here.
     const result = await searchPeople({
-      q: "cardiology",
+      q: "lcc2010",
       relevanceMode: "v3",
-      shape: "department",
+      shape: "cwid",
     });
 
     expect(result.queryShape).toBe("restructured_msm");
