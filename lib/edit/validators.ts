@@ -549,3 +549,144 @@ export async function findUnit(
   });
   return r ? { ok: true, kind: "center", code: r.code, slug: r.slug } : { ok: false };
 }
+
+// ---------------------------------------------------------------------------
+// unit creation + center in-row update (#540 Phase 5b / SPEC § Manual unit creation)
+// ---------------------------------------------------------------------------
+
+/** Max length of a unit `name` — half the slug column for headroom. */
+export const UNIT_NAME_MAX_LENGTH = 255;
+
+/**
+ * Validate a unit `name` — non-empty, trimmed, bounded by the column. The
+ * name is rendered as text on the unit page; HTML sanitization is unnecessary
+ * because the value never reaches `dangerouslySetInnerHTML`.
+ */
+export function validateUnitName(input: string): UnitFieldResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_name" };
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return { ok: false, error: "invalid_name" };
+  if (trimmed.length > UNIT_NAME_MAX_LENGTH) {
+    return { ok: false, error: "name_too_long" };
+  }
+  return { ok: true, value: trimmed };
+}
+
+/** The two allowed `Center.centerType` values (Phase 1 schema). */
+export const CENTER_TYPES = ["center", "institute"] as const;
+export type CenterType = (typeof CENTER_TYPES)[number];
+
+export function isCenterType(value: string): value is CenterType {
+  return (CENTER_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Validate an N-code for the Superuser-only coded-division create path
+ * (SPEC § Manual unit creation). The LDAP convention at WCM is an
+ * uppercase `N` followed by 3-5 digits (e.g. `N1280`, `N101`); we accept
+ * a slightly wider shape — `N` + 2-8 alphanumeric — so an LDAP code we
+ * have not yet seen is not over-rejected. The "is it real LDAP?" guard
+ * is impossible to enforce at write time and is deferred to the audit-
+ * query C unadopted-division watch (SPEC § Edge case 24).
+ */
+export const LDAP_CODE_PATTERN = /^N[A-Z0-9]{2,8}$/;
+
+export function validateLdapCode(input: string): UnitFieldResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_code" };
+  const trimmed = input.trim();
+  if (!LDAP_CODE_PATTERN.test(trimmed)) {
+    return { ok: false, error: "invalid_code" };
+  }
+  return { ok: true, value: trimmed };
+}
+
+// ---------------------------------------------------------------------------
+// unit-slug uniqueness checks (#540 Phase 5b)
+//
+// Each unit kind has its own uniqueness scope:
+//   - center.slug                  — globally unique (`Center.slug @unique`)
+//   - division.(deptCode, slug)    — unique per parent dept
+//                                    (`@@unique([deptCode, slug])`)
+//   - department.slug              — globally unique (not used here; Phase 5b
+//                                    does not create departments)
+// The checks below are the *friendly* application-level guards; the DB
+// `@unique` constraints are the atomic backstops that catch a concurrent
+// duplicate the application check cannot.
+// ---------------------------------------------------------------------------
+
+type SlugCheckClient = Pick<PrismaClient, "center" | "division" | "department">;
+
+export type UnitSlugCheckResult =
+  | { ok: true }
+  | { ok: false; error: "slug_taken" | "reserved_slug" };
+
+export async function checkUnitSlugAvailable(
+  params:
+    | { kind: "center"; slug: string; excludeCode?: string }
+    | { kind: "division"; slug: string; deptCode: string; excludeCode?: string }
+    | { kind: "department"; slug: string; excludeCode?: string },
+  client: SlugCheckClient,
+): Promise<UnitSlugCheckResult> {
+  if (RESERVED_SLUGS.has(params.slug)) {
+    return { ok: false, error: "reserved_slug" };
+  }
+  if (params.kind === "center") {
+    const row = await client.center.findUnique({
+      where: { slug: params.slug },
+      select: { code: true },
+    });
+    if (row && row.code !== params.excludeCode) {
+      return { ok: false, error: "slug_taken" };
+    }
+    return { ok: true };
+  }
+  if (params.kind === "division") {
+    const row = await client.division.findFirst({
+      where: { deptCode: params.deptCode, slug: params.slug },
+      select: { code: true },
+    });
+    if (row && row.code !== params.excludeCode) {
+      return { ok: false, error: "slug_taken" };
+    }
+    return { ok: true };
+  }
+  const row = await client.department.findFirst({
+    where: { slug: params.slug },
+    select: { code: true },
+  });
+  if (row && row.code !== params.excludeCode) {
+    return { ok: false, error: "slug_taken" };
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// unit_admin grant role  (#540 Phase 5b / SPEC § /api/edit/grant)
+// ---------------------------------------------------------------------------
+
+/** The two `unit_admin.role` values (Phase 1 enum). */
+export const UNIT_ADMIN_ROLES = ["owner", "curator"] as const;
+export type UnitAdminRole = (typeof UNIT_ADMIN_ROLES)[number];
+
+export function isUnitAdminRole(value: string): value is UnitAdminRole {
+  return (UNIT_ADMIN_ROLES as readonly string[]).includes(value);
+}
+
+/** The two `grant` action values. */
+export const GRANT_ACTIONS = ["grant", "revoke"] as const;
+export type GrantAction = (typeof GRANT_ACTIONS)[number];
+
+export function isGrantAction(value: string): value is GrantAction {
+  return (GRANT_ACTIONS as readonly string[]).includes(value);
+}
+
+// ---------------------------------------------------------------------------
+// roster action  (#540 Phase 5b / SPEC § /api/edit/roster)
+// ---------------------------------------------------------------------------
+
+export const ROSTER_ACTIONS = ["add", "remove"] as const;
+export type RosterAction = (typeof ROSTER_ACTIONS)[number];
+
+export function isRosterAction(value: string): value is RosterAction {
+  return (ROSTER_ACTIONS as readonly string[]).includes(value);
+}
