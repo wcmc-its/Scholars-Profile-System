@@ -15,6 +15,8 @@ import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 
 export type EditShellProps = {
   mode: "self" | "superuser";
+  /** The entity display name (scholar preferred name, or a unit name). Kept as
+   *  `scholarName` for call-site stability — it is the top-bar + banner label. */
   scholarName: string;
   /** Attribute rail items + the active key + the base path for the links. */
   railItems: ReadonlyArray<RailItem>;
@@ -22,6 +24,10 @@ export type EditShellProps = {
   basePath: string;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
+  /** Optional block rendered inside the rail column, below the attribute rail
+   *  (e.g. a department's sibling-divisions list). Omitted ⇒ no visible change
+   *  for the existing /edit/scholar callers. */
+  subRail?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -32,6 +38,7 @@ export function EditShell({
   activeAttr,
   basePath,
   previewHref,
+  subRail,
   children,
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
@@ -66,7 +73,10 @@ export function EditShell({
 
       {/* Body — rail + detail. */}
       <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[16rem_1fr]">
-        <AttributeRail items={railItems} active={activeAttr} basePath={basePath} />
+        <div className="flex flex-col gap-3">
+          <AttributeRail items={railItems} active={activeAttr} basePath={basePath} />
+          {subRail}
+        </div>
 
         <main className="min-w-0">
           {previewHref && (

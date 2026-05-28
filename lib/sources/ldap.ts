@@ -992,3 +992,127 @@ function stripTrailingDegree(name: string): string {
   );
   return looksLikeDegree ? name.slice(0, m.index).trim() : name.trim();
 }
+
+// ---------------------------------------------------------------------------
+// directory people search  (#540 Phase 7 — the /api/directory/people endpoint)
+//
+// Backs the leader / access (and later roster / grant) typeaheads. Two modes:
+// a name-fragment search (`q`) and a batch CWID hydration (`cwids`). Grantees
+// are often non-Scholar administrative staff, so this reads ED directly rather
+// than the Scholars corpus. Minimal attribute list per the repo's LDAP policy
+// — name + title + department only, never PII.
+// ---------------------------------------------------------------------------
+
+/** One directory person, projected for a typeahead row. */
+export type DirectoryPerson = {
+  cwid: string;
+  name: string;
+  title: string | null;
+  dept: string | null;
+};
+
+/** Narrow per-call attribute list — name + title + department, nothing else. */
+const DIRECTORY_PEOPLE_ATTRS = [
+  "weillCornellEduCWID",
+  "displayName",
+  "givenName",
+  "sn",
+  "weillCornellEduPrimaryTitle",
+  "weillCornellEduDepartment",
+] as const;
+
+function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson | null {
+  const cwid = firstString(entry.weillCornellEduCWID);
+  if (!cwid) return null;
+  const displayName = firstString(entry.displayName);
+  const given = firstString(entry.givenName);
+  const sn = firstString(entry.sn);
+  const constructed = [given, sn].filter(Boolean).join(" ").trim();
+  const name = displayName ?? (constructed.length > 0 ? constructed : cwid);
+  return {
+    cwid,
+    name,
+    title: firstString(entry.weillCornellEduPrimaryTitle),
+    dept: firstString(entry.weillCornellEduDepartment),
+  };
+}
+
+/**
+ * Search the directory by name fragment. Builds a substring filter across
+ * `givenName`, `sn`, and `displayName`; caps the result at `limit` (default
+ * 20). The fragment is RFC-4515-escaped before the wildcards are added so a
+ * `*` typed by the user is literal, not an injection.
+ */
+export async function searchDirectoryPeopleByName(
+  q: string,
+  limit = 20,
+): Promise<DirectoryPerson[]> {
+  const frag = escapeLdapFilter(q);
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const filter = `(&(objectClass=eduPerson)(|(givenName=*${frag}*)(sn=*${frag}*)(displayName=*${frag}*)))`;
+  const client = await openLdap();
+  try {
+    const { searchEntries } = await client.search(searchBase, {
+      scope: "sub",
+      filter,
+      attributes: [...DIRECTORY_PEOPLE_ATTRS],
+      sizeLimit: limit,
+      paged: { pageSize: limit },
+    });
+    const out: DirectoryPerson[] = [];
+    for (const entry of searchEntries) {
+      const person = projectDirectoryPerson(entry);
+      if (person) out.push(person);
+      if (out.length >= limit) break;
+    }
+    return out;
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // non-fatal — see fetchPersonNamesByCwid.
+    }
+  }
+}
+
+/**
+ * Hydrate a batch of CWIDs to directory rows (name + title + dept). Used by
+ * the access card to resolve grantee names a Scholar lookup would miss. Batches
+ * the OR-of-CWIDs filter at 100 per query so a long list doesn't blow the LDAP
+ * filter-length limit. Missing CWIDs are simply absent from the result.
+ */
+export async function fetchDirectoryPeopleByCwid(
+  cwids: string[],
+): Promise<DirectoryPerson[]> {
+  if (cwids.length === 0) return [];
+  const searchBase = process.env.SCHOLARS_LDAP_SEARCH_BASE ?? DEFAULT_SEARCH_BASE;
+  const batchSize = 100;
+  const out: DirectoryPerson[] = [];
+  const client = await openLdap();
+  try {
+    for (let i = 0; i < cwids.length; i += batchSize) {
+      const batch = cwids.slice(i, i + batchSize);
+      const filter =
+        "(&(objectClass=eduPerson)(|" +
+        batch.map((c) => `(weillCornellEduCWID=${escapeLdapFilter(c)})`).join("") +
+        "))";
+      const { searchEntries } = await client.search(searchBase, {
+        scope: "sub",
+        filter,
+        attributes: [...DIRECTORY_PEOPLE_ATTRS],
+        paged: { pageSize: 500 },
+      });
+      for (const entry of searchEntries) {
+        const person = projectDirectoryPerson(entry);
+        if (person) out.push(person);
+      }
+    }
+    return out;
+  } finally {
+    try {
+      await client.unbind();
+    } catch {
+      // non-fatal — see fetchPersonNamesByCwid.
+    }
+  }
+}
