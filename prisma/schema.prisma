@@ -1020,7 +1020,7 @@ model FieldOverride {
   /// application collision check is not atomic). See migration
   /// add_slug_override_uniqueness_guard. @ignore keeps it out of the Prisma
   /// client — application code must never write a generated column.
-  slugGuard  String?    @map("slug_guard") @db.VarChar(64) @unique @ignore
+  slugGuard String? @unique @map("slug_guard") @ignore @db.VarChar(64)
 
   @@unique([entityType, entityId, fieldName])
   @@map("field_override")
@@ -1100,4 +1100,141 @@ enum SlugRequestStatus {
   rejected
   superseded
   withdrawn
+}
+
+/// Site-wide general-feedback submissions from the bottom-right feedback
+/// badge (#538 / docs/feedback-badge-spec.md). Distinct from /edit
+/// "Request a change" corrections (#160), which write nothing to this
+/// table. One row per submitted form.
+///
+/// v1 is anonymous-by-default. `cwid` is user-typed (pre-filled from
+/// session when present, but not server-enforced) — a `NULL` cwid is the
+/// common case, not an error. All free-text columns are server-truncated
+/// to their documented bounds before insert. `consent` is always true
+/// (the form blocks submission otherwise); the column documents *which
+/// version* of the consent text the respondent accepted.
+///
+/// Column names are intent-based (not Q-numbered) so reordering the form
+/// in v1.x revisions does not drag a DB migration. See SPEC §
+/// "The question instrument" for the rationale.
+///
+/// Conditional columns (`whatHelped`, `whatMissing`, `oneChange`,
+/// `taskFailureIntent`) are written only when their triggering response
+/// qualifies — see SPEC § "Conditional follow-ups". The submit server
+/// action drops text from these fields when the trigger predicate fails,
+/// so a hostile client cannot stuff prose into a non-qualifying row.
+///
+/// `mode` is load-bearing: a NULL `accuracy` row in contextual mode means
+/// "user skipped / N/A"; the same NULL in generic mode means "the question
+/// wasn't asked." Aggregating across modes without filtering is a
+/// category error — see SPEC § "NULL semantics for conditional columns".
+model FeedbackSubmission {
+  id          String   @id @default(uuid()) @db.VarChar(64)
+  submittedAt DateTime @default(now()) @map("submitted_at")
+
+  // Mode — "contextual" (badge launch, page anchor known) or "generic"
+  // (direct nav to /about/feedback, no anchor). Determines which questions
+  // appear; analysts must segment by this column before aggregating any
+  // per-page metric. Always set.
+  mode FeedbackMode
+
+  // Originating context. page_url is the client-reported URL, validated
+  // server-side as same-origin (else stored NULL). page_route is the
+  // matched Next.js route pattern (e.g. "/scholars/[slug]") derived
+  // server-side from page_url at insert time; makes aggregate analysis
+  // tractable without parsing URLs in SQL.
+  pageUrl   String? @map("page_url") @db.Text
+  pageRoute String? @map("page_route") @db.VarChar(255)
+
+  // Identity. User-typed, optional. NULL is the default.
+  cwid String? @db.VarChar(32)
+
+  // Q1 — purpose of visit
+  purpose      FeedbackPurpose?
+  purposeOther String?          @map("purpose_other") @db.VarChar(200)
+
+  // Q2 — task success
+  taskSuccess FeedbackTaskSuccess? @map("task_success")
+
+  // Q2a — task-failure detail (CONDITIONAL: stored only when task_success ∈ {no, partially})
+  taskFailureIntent String? @map("task_failure_intent") @db.VarChar(500)
+
+  // Q3 — perceived usefulness (1..5 or NULL for N/A / skipped)
+  usefulness Int? @db.TinyInt
+
+  // Q3a — what worked (CONDITIONAL: stored only when usefulness ∈ {4,5})
+  whatHelped String? @map("what_helped") @db.VarChar(500)
+
+  // Q3b — what was missing (CONDITIONAL: stored only when usefulness ∈ {1,2})
+  whatMissing String? @map("what_missing") @db.VarChar(500)
+
+  // Q4 — perceived accuracy (1..5 or NULL — also NULL if mode=generic or Q1=browse_unit, see SPEC)
+  accuracy Int? @db.TinyInt
+
+  // Q4a — what to change for accuracy (CONDITIONAL: stored only when accuracy ∈ {1,2,3})
+  oneChange String? @map("one_change") @db.VarChar(500)
+
+  // Q5 — would the respondent use Scholars again (1..5 or NULL).
+  // Replaces NPS; see SPEC § "The question instrument".
+  wouldUseAgain Int? @map("would_use_again") @db.TinyInt
+
+  // Q6 — respondent context
+  role      FeedbackRole?
+  roleOther String?       @map("role_other") @db.VarChar(100)
+
+  // Q7 — consent (always true; column records the accepted version)
+  consent        Boolean
+  consentVersion String  @map("consent_version") @db.VarChar(16)
+
+  // Q8 — contact + follow-up. `cwid` (declared above under Identity) is
+  // for WCM-internal follow-up; `contactEmail` is for everyone else. Both
+  // nullable, never required, never required-together.
+  contactEmail  String? @map("contact_email") @db.VarChar(255)
+  followupOptin Boolean @default(false) @map("followup_optin")
+
+  @@index([submittedAt]) // chronology, exports
+  @@index([cwid, submittedAt]) // per-CWID activity (sparse — most rows NULL)
+  @@index([pageRoute, submittedAt]) // per-surface aggregate
+  @@index([mode, submittedAt]) // mode-segmented aggregates (analysts MUST filter by mode)
+  @@map("feedback_submission")
+}
+
+/// Which mode the form was rendered in. Determines which downstream
+/// questions were even *asked*, which is load-bearing for analysis.
+enum FeedbackMode {
+  contextual
+  generic
+}
+
+/// Q1 — what the user was doing on the page.
+enum FeedbackPurpose {
+  lookup_person
+  lookup_topic
+  browse_unit
+  research_story
+  evaluate_scholars
+  other
+}
+
+/// Q2 — task-success CSAT.
+enum FeedbackTaskSuccess {
+  yes_completely
+  mostly
+  partially
+  no
+  not_looking
+}
+
+/// Q6 — respondent self-classification. Pre-selected from
+/// `Scholar.roleCategory` when a session is present (see SPEC §
+/// "Q6 inference from roleCategory"), always user-editable.
+enum FeedbackRole {
+  wcm_faculty
+  wcm_trainee
+  wcm_staff
+  external_researcher
+  journalist
+  patient_or_public
+  prefer_not_say
+  other
 }
