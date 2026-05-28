@@ -1,22 +1,38 @@
 /**
- * #362 — §4/§7 Recall@3 baseline harness for the People-relevance eval.
+ * #362 — §4/§7 Recall@3 harness for the People-relevance eval.
  *
  * Runs the frozen §3.1 labeled set (docs/people-relevance-baseline.md §6)
- * through `searchPeople()` under the current ("legacy") ranking and reports
- * Recall@3 per query shape. Bypasses the HTTP/route layer — calls the same
- * `searchPeople` the route does, so the ranking is faithful.
+ * through `searchPeople()` and reports Recall@3 per query shape. Bypasses the
+ * HTTP/route layer — calls the same `searchPeople` the route does, so the
+ * ranking is faithful.
  *
- * The legacy numbers this produces ARE the frozen §7 baseline (signed off
- * 2026-05-27, PR-2's rollback target). Re-running it reproduces those numbers;
- * never re-freeze from a refreshed run (SPEC §4). Requires OpenSearch up
- * (`npm run db:up`) and a current `scholars-people` index.
+ * Two modes (`SEARCH_PEOPLE_RELEVANCE_MODE`, mirroring the product env):
+ *   - unset / "legacy" → the frozen §7 baseline (signed off 2026-05-27, PR-2's
+ *     rollback target). Re-running reproduces those numbers; never re-freeze
+ *     from a refreshed run (SPEC §4).
+ *   - "v3" → the §6.1 shape-routed templates (#309–#311) + the #513 prominence
+ *     factor. Replicates the route's classify + MeSH-resolve so each query
+ *     routes to the same template production would use. Requires the index to
+ *     carry PR-3's v3 fields (publicationMeshUi etc.) — rebuild first via
+ *     `npm run search:index:people`.
+ *
+ * Requires OpenSearch up (`npm run db:up`) and a current `scholars-people`
+ * index.
  *
  * Run (host dev DB reached via the OS-user socket — see
  * memory/feedback_verify_db_target):
  *   DATABASE_URL='mysql://paulalbert@localhost/scholars?socketPath=/tmp/mysql.sock' \
- *     npx tsx scripts/people-relevance-dryrun.ts
+ *     npx tsx scripts/people-relevance-dryrun.ts                 # legacy
+ *   SEARCH_PEOPLE_RELEVANCE_MODE=v3 DATABASE_URL='…' \
+ *     npx tsx scripts/people-relevance-dryrun.ts                 # v3
  */
 import { searchPeople } from "@/lib/api/search";
+import {
+  classifyPeopleQuery,
+  type PeopleQueryShape,
+} from "@/lib/api/people-query-shape";
+import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
+import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 
 type Shape = "name" | "topic" | "department" | "hybrid";
 type Case = { n: number; shape: Shape; query: string; labeled: string[] };
@@ -38,26 +54,61 @@ const CASES: Case[] = [
 
 const SHAPES: Shape[] = ["name", "topic", "department", "hybrid"];
 
+const MODE: "legacy" | "v3" =
+  process.env.SEARCH_PEOPLE_RELEVANCE_MODE === "v3" ? "v3" : "legacy";
+
+/**
+ * Mirror the route's classify + MeSH-resolve so a v3 run routes each query to
+ * the same template production would. (Run in legacy mode too — the classified
+ * shape is shown for reference; it just doesn't drive ranking.)
+ */
+async function classify(
+  query: string,
+  sets: Awaited<ReturnType<typeof getPeopleClassifierSets>>,
+): Promise<{ shape: PeopleQueryShape; meshDescendantUis?: string[] }> {
+  const taxonomy = await matchQueryToTaxonomy(query);
+  const shape = classifyPeopleQuery({
+    query,
+    meshResolved: taxonomy.meshResolution != null,
+    knownCwids: sets.cwids,
+    knownSurnames: sets.surnames,
+    knownDepartments: sets.departments,
+  });
+  return { shape, meshDescendantUis: taxonomy.meshResolution?.descendantUis };
+}
+
 async function main() {
   const perShape: Record<Shape, { found: number; total: number }> = {
     name: { found: 0, total: 0 }, topic: { found: 0, total: 0 },
     department: { found: 0, total: 0 }, hybrid: { found: 0, total: 0 },
   };
   const ranks: number[] = [];
+  const sets = await getPeopleClassifierSets();
 
-  console.log("=== #362 People-relevance §4/§7 Recall@3 baseline (legacy ranking) ===\n");
+  const title =
+    MODE === "v3"
+      ? "v3 (§6.1 templates + #513 prominence)"
+      : "legacy (frozen §7 baseline)";
+  console.log(`=== #362 People-relevance Recall@3 — ${title} ===\n`);
   console.log(
-    " # | shape      | query                       | total | top-3 result slugs                              | hit",
+    " # | shape      | cls        | query                       | total | top-3 result slugs                              | hit",
   );
-  console.log("-".repeat(124));
+  console.log("-".repeat(140));
 
   for (const c of CASES) {
     let top3: string[] = [];
     let allHits: string[] = [];
     let total = 0;
     let err = "";
+    let cls = "-";
     try {
-      const r = await searchPeople({ q: c.query });
+      const { shape, meshDescendantUis } = await classify(c.query, sets);
+      cls = shape;
+      const r = await searchPeople(
+        MODE === "v3"
+          ? { q: c.query, relevanceMode: "v3", shape, meshDescendantUis }
+          : { q: c.query },
+      );
       total = r.total;
       allHits = r.hits.map((h: { slug: string }) => h.slug);
       top3 = allHits.slice(0, 3);
@@ -73,7 +124,7 @@ async function main() {
     }
     const miss = c.labeled.filter((s) => !top3.includes(s));
     console.log(
-      ` ${String(c.n).padStart(2)} | ${c.shape.padEnd(10)} | ${c.query.padEnd(27)} | ` +
+      ` ${String(c.n).padStart(2)} | ${c.shape.padEnd(10)} | ${cls.padEnd(10)} | ${c.query.padEnd(27)} | ` +
       `${String(total).padStart(5)} | ${(err ? "ERROR: " + err : top3.join(", ")).padEnd(47).slice(0, 47)} | ` +
       `${found.length}/${c.labeled.length}${miss.length ? "  miss: " + miss.join(",") : ""}`,
     );
@@ -97,7 +148,9 @@ async function main() {
     `\n§3.3 secondary — mean rank of labeled scholars appearing on page 1: ${meanRank} (n=${ranks.length})`,
   );
   console.log(
-    "\nFrozen §7 baseline (legacy). Name-shape floor is 0.95; topic 0.65 / dept 0.90 / hybrid 0.75 are directional.",
+    MODE === "v3"
+      ? "\nv3 run. Gate: name-shape floor 0.95 (must clear #4 `wong`); topic 0.65 / dept 0.90 / hybrid 0.75 directional. Frozen legacy baseline = 0.16 (name 0.50 / topic 0.00 / dept 0.00 / hybrid 0.25)."
+      : "\nFrozen §7 baseline (legacy). Name-shape floor is 0.95; topic 0.65 / dept 0.90 / hybrid 0.75 are directional.",
   );
   process.exit(0);
 }
