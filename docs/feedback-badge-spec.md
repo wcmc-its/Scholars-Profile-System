@@ -424,15 +424,16 @@ A single additive Prisma migration: `add_feedback_submission`. Generated offline
 
 ## Anti-spam (lightweight, not rate-limit)
 
-The form ships **without a rate-limit** ([§ Resolving issue #538's open questions](#resolving-issue-538s-open-questions) — Q5). Two minimal defenses keep the table from filling with obvious bot traffic:
+The form ships **without a per-IP rate-limit** ([§ Resolving issue #538's open questions](#resolving-issue-538s-open-questions) — Q5). Four minimal defenses keep the table from filling with obvious bot traffic:
 
 | Defense | Mechanism |
 |---|---|
 | **Honeypot field** | A visually-hidden text input named `website` (or similar plausible-bait name) is included in the form. Browser users never see it; bots that fill every field tag themselves. Server: if non-empty, respond `200` with the same confirmation HTML and write **no** row. Silent — telling the bot it failed teaches the bot to retry. |
-| **Same-origin URL validation** | The submitted `pageUrl` must parse as a same-origin URL (matching the configured site origin). Off-origin → stored `NULL` for `pageUrl` but the rest of the row is kept (the survey answers are still valid signal even if URL provenance is suspect). |
-| **Q5 size cap** | `q5_one_change` is server-truncated at 500 chars before insert. A bot trying to dump payloads gets truncated, not rejected. |
+| **Same-origin enforcement** | The submission endpoint rejects with 403 any request whose `Origin` header is missing or doesn't match the configured site origin. CORS-preflighted POSTs from a malicious site fail the check; drive-by botnet probes fail the check; a naked `curl` without `--header origin` fails the check. |
+| **Free-text bounds + null-byte fail-closed** | Every free-text field is server-truncated at the documented column bound before insert (purpose_other 200, role_other 100, all conditional textareas 500). A surviving null byte in any text field returns 400 — treated as a hostile probe, not a content artifact. See [§ Sanitization and input bounds](#sanitization-and-input-bounds). |
+| **Duplicate-content guard (option A)** | When any of the four conditional textareas (`what_helped`, `what_missing`, `one_change`, `task_failure_intent`) contains text identical to the same column in any row submitted in the last 60 minutes, the endpoint returns a silent `{ok:true}` with no INSERT — same pattern as the honeypot, so a spammer hitting "Submit" 50 times with copy-pasted text gets one row recorded, not 50. Pure-metric submissions (Likerts + role only, all textareas null) are not deduped — they are not the spam shape this guard targets. Implementation: `lib/feedback/dedup.ts` `isDuplicateSubmission`. |
 
-If real abuse appears post-launch, v2 adds a per-IP daily cap as the next layer. The schema is forward-compatible with that — adding `FeedbackRateLimit` and a per-IP bucket is additive.
+**Escalation path (option B, named here, not built).** If dedup proves insufficient against sustained abuse — a determined attacker spamming **metric-only** rows that dedup deliberately ignores, or distributing the same prose across many micro-variants — the next layer is a **per-IP daily cap**: a small `FeedbackRateLimit` table, identity = `sha256(ip + DAILY_SALT)` rotated at UTC midnight, default 10 submissions per IP per UTC day, 429 returned with a polite message when exceeded. Schema is additive-compatible; adding option B does not invalidate the dedup helper or any existing row. Operational triggers worth watching: submissions exceeding ~50/day, or a single source pattern (same `pageRoute`, same minute) repeating across many rows. The cost of (B) over (A) is one Prisma model + ~50 LOC + the operational decision to throw 429s at users, which is why it is held until the data argues for it.
 
 ---
 
@@ -568,6 +569,7 @@ lib/feedback/
   cwid.ts                                      ← validate + lowercase user-typed CWID
   q8-inference.ts                              ← roleCategory → Q8 option map
   consent.ts                                   ← current consent version + text loader
+  dedup.ts                                     ← option A duplicate-content guard (last-60min same-text suppression)
   digest.ts                                    ← aggregate + render the weekly digest body
 
 components/site/
@@ -663,7 +665,7 @@ Each round narrowed the instrument's surface area while sharpening the signal it
 None blocking implementation **once [§ Decisions still required](#decisions-still-required) is signed off**. Items deliberately deferred:
 
 1. **Per-page Q1 variants** (issue Q2). Deferred to a v2 protocol amendment, contingent on the first six-month dataset.
-2. **Rate-limit** (issue Q5). v1 ships without one; v2 adds a per-IP daily cap if abuse appears. The schema is additive-compatible.
+2. **Per-IP rate-limit, option B** (issue Q5). v1 ships with duplicate-content dedup (option A) but no per-IP cap. Escalate to option B if dedup proves insufficient — see [§ Anti-spam](#anti-spam-lightweight-not-rate-limit). The schema is additive-compatible.
 3. **Stronger origin trust** for `pageUrl`. If the dataset becomes load-bearing for a publication that depends on URL accuracy, the HMAC-token mechanism considered in the original SPEC draft can be added in v2.
 4. **Digest recipient identification.** The SPEC names `FEEDBACK_DIGEST_RECIPIENT` as the operator-set address; the operator (likely the Scholars project lead) names themselves or a shared address. Pending confirmation as part of [§ IRB / governance](#irb--governance) signoff.
 5. **In-app admin queue** at `/edit/feedback` (mirroring `/edit/slug-requests`). Considered for v1, deferred to v2 — the weekly digest is the v1 notification path. File the v2 if the lead wants triage / annotation / "mark as addressed" affordances inside the app.

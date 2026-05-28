@@ -23,6 +23,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { CURRENT_CONSENT_VERSION } from "@/lib/feedback/consent";
 import { normalizeUserCwid } from "@/lib/feedback/cwid";
+import { isDuplicateSubmission } from "@/lib/feedback/dedup";
 import { urlToPageRoute } from "@/lib/feedback/page-route";
 import { sanitizeFreeText } from "@/lib/feedback/sanitize";
 import { getAllowedOrigins, validateSameOriginUrl } from "@/lib/feedback/same-origin";
@@ -173,6 +174,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const cwid = normalizeUserCwid(body.cwid as string | null | undefined);
   const contactEmail = normalizeEmail(body.contact_email);
   const followupOptin = body.followup_optin === true;
+
+  // Duplicate-content guard (#538, SPEC § Anti-spam option A). Silent
+  // 200 with no INSERT when an identical text field appears in another
+  // recent row — mirrors the honeypot pattern. If this proves
+  // insufficient, escalate to option B (per-IP daily cap).
+  const isDuplicate = await isDuplicateSubmission(db.read, {
+    whatHelped,
+    whatMissing,
+    oneChange,
+    taskFailureIntent,
+  });
+  if (isDuplicate) {
+    return NextResponse.json({ ok: true });
+  }
 
   await db.write.feedbackSubmission.create({
     data: {
