@@ -580,10 +580,12 @@ export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
  * (which needs the production topic-template query + a reindexed cluster, the
  * same gate as the PR-5 flip) tunes them against the §7 frozen baseline.
  *
- * Topic-shape prominence is deliberately out of scope here: that body already
- * carries PR-3's multiplicative productive-author modifier, and additive boosts
- * can't share its `multiply`-mode function_score without nesting — deferred to
- * the calibration follow-up.
+ * Topic-shape prominence rides as the OUTER (`sum`) function_score wrapping
+ * the existing inner (`multiply`) attribution + productive-author + sparse-
+ * decay function_score (§5.4 calibration follow-up). Additive-over-
+ * multiplicative is load-bearing: composing a blunt multiplicative pub-count
+ * factor with the topic multipliers blew up established authors
+ * disproportionately ("melanoma distortion") in the §5.4 probe.
  */
 export const PEOPLE_PROMINENCE_BASE_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_PUBCOUNT_FACTOR = 1;

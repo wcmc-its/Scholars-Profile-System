@@ -9,9 +9,12 @@
  *
  * (`score_mode: sum`, `boost_mode: multiply`). Publication count leads
  * (log-saturated — the only §5.4 probe variant that fixed #4 `wong`); faculty
- * and active-grant are additive boosts. This file locks the wrapper shape, the
- * exact functions, the v3 gate, and that the topic template is NOT given the
- * prominence wrapper (it keeps PR-3's multiplicative modifiers).
+ * and active-grant are additive boosts. For the topic shape, the prominence
+ * `function_score` is the OUTER layer wrapping the inner multiplicative
+ * attribution + productive-author + sparse-decay `function_score` — the
+ * §5.4 calibration follow-up. This file locks the wrapper shape, the exact
+ * functions, the v3 gate, and the additive-over-multiplicative nesting for
+ * topic.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -158,27 +161,36 @@ describe("people-index prominence factor — issue #513 / §5.4", () => {
     });
   });
 
-  it("topic shape keeps PR-3's multiplicative modifiers — NOT the prominence wrapper", async () => {
+  it("topic shape is nested: outer additive prominence wraps inner multiply (#513 §5.4 follow-up)", async () => {
     await searchPeople({
       q: "ras signaling pancreatic cancer",
       relevanceMode: "v3",
       shape: "topic",
       meshDescendantUis: ["D012345"],
     });
-    const fs = functionScore(capturedBodies[0]);
-    expect(fs).toBeDefined();
-    // Multiply mode (the topic template), not the prominence sum mode.
-    expect(fs!.score_mode).toBe("multiply");
-    expect(fs!.boost_mode).toBe("multiply");
-    // No log-saturated pub-count factor and no additive faculty/grant boosts.
-    expect(fs!.functions.some((f) => "field_value_factor" in f)).toBe(false);
-    expect(
-      fs!.functions.some(
-        (f) =>
-          "filter" in f &&
-          JSON.stringify(f.filter).includes("full_time_faculty"),
-      ),
-    ).toBe(false);
+
+    // Outer = prominence (additive sum, the four functions).
+    const outer = functionScore(capturedBodies[0]);
+    expect(outer).toBeDefined();
+    expect(outer!.score_mode).toBe("sum");
+    expect(outer!.boost_mode).toBe("multiply");
+    expect(outer!.functions).toHaveLength(EXPECTED_PROMINENCE_FUNCTIONS.length);
+    for (const fn of EXPECTED_PROMINENCE_FUNCTIONS) {
+      expect(outer!.functions).toContainEqual(fn);
+    }
+
+    // Inner = the PR-3 multiplicative topic ladder, untouched.
+    const inner = (outer!.query as { function_score?: FnScore }).function_score;
+    expect(inner).toBeDefined();
+    expect(inner!.score_mode).toBe("multiply");
+    expect(inner!.boost_mode).toBe("multiply");
+    // The attribution ×1.5 still rides the inner layer.
+    expect(inner!.functions).toContainEqual({
+      filter: { terms: { publicationMeshUi: ["D012345"] } },
+      weight: 1.5,
+    });
+    // Innermost is the topic body bool.
+    expect(inner!.query).toHaveProperty("bool");
   });
 
   it("legacy mode does NOT apply the prominence factor (gated on v3)", async () => {
