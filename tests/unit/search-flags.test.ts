@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   parseMeshParam,
   resolveConceptMode,
+  resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
 } from "@/lib/api/search-flags";
 
@@ -130,5 +131,36 @@ describe("resolveFundingConceptEnabled (#295)", () => {
     expect(resolveFundingConceptEnabled()).toBe(false);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
     expect(resolveFundingConceptEnabled()).toBe(false);
+  });
+});
+
+describe("resolveDeptLeadershipBoost (#532)", () => {
+  const original = process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+  });
+  afterEach(() => {
+    if (original === undefined)
+      delete process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+    else process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = original;
+  });
+
+  it("defaults to false when the env is unset (opt-in rollout)", () => {
+    expect(resolveDeptLeadershipBoost()).toBe(false);
+  });
+
+  it("is true only for exactly 'on'", () => {
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "on";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+  });
+
+  it("is false for any other value (off / casing / truthy strings)", () => {
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "off";
+    expect(resolveDeptLeadershipBoost()).toBe(false);
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "ON";
+    expect(resolveDeptLeadershipBoost()).toBe(false);
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "true";
+    expect(resolveDeptLeadershipBoost()).toBe(false);
   });
 });

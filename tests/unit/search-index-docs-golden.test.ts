@@ -51,6 +51,11 @@ function mockPeopleClient(
           pubDates.map((d) => ({ publication: { dateAddedToEntrez: d } })),
         ),
     },
+    // Issue #532 — golden-doc scholars are not leadership-flagged; the
+    // omit-on-empty contract keeps the snapshots stable when no chair /
+    // chief rows match.
+    department: { findMany: vi.fn().mockResolvedValue([]) },
+    division: { findMany: vi.fn().mockResolvedValue([]) },
   } as unknown as Parameters<typeof buildPeopleDoc>[1];
 }
 

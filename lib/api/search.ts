@@ -34,6 +34,8 @@ import {
 } from "@/lib/api/search-ranking";
 import {
   PEOPLE_ABSTRACTS_BOOST,
+  PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT,
+  PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -374,6 +376,18 @@ export async function searchPeople(opts: {
    * boost function is simply omitted then.
    */
   meshDescendantUis?: string[];
+  /**
+   * Issue #532 — `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST` resolved at request
+   * time by the route (`resolveDeptLeadershipBoost()`). When true, the
+   * department-shape template wraps its body in a multiplicative
+   * `function_score` that promotes the queried dept's chair (×3.0) over
+   * other dept members. The signal source is `leadership.chairOf` on the
+   * scholars-people doc; if the index hasn't been rebuilt with that field
+   * (omit-on-empty when not chair / chief), the filter simply never fires
+   * and the template's behavior is unchanged. Headless callers default to
+   * `false` so the rollout is opt-in.
+   */
+  deptLeadershipBoost?: boolean;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -942,10 +956,37 @@ export async function searchPeople(opts: {
       ]
     : [];
 
+  // Issue #532 — dept-shape leadership boost. Mutually exclusive with the
+  // topic-shape body above (different `shape` values), so the inner
+  // function_score slot is shared. `score_mode: max` so a scholar who
+  // happens to be both a chair AND a chief (rare, but legal at WCM) takes
+  // the stronger of the two factors rather than the product. The chief
+  // filter is included for forward compatibility — today's classifier never
+  // routes division-name queries to dept-shape, so the chief filter is
+  // dormant on dept queries; it will fire once a future division-shape
+  // (or division-name expansion to `knownDepartments`) lands.
+  const applyDeptLeadershipBoost =
+    applyDeptTemplate &&
+    (opts.deptLeadershipBoost ?? false) &&
+    trimmed.length > 0;
+  const deptLeadershipFunctions: Record<string, unknown>[] = applyDeptLeadershipBoost
+    ? [
+        {
+          filter: { term: { "leadership.chairOf": trimmed.toLowerCase() } },
+          weight: PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT,
+        },
+        {
+          filter: { term: { "leadership.chiefOf": trimmed.toLowerCase() } },
+          weight: PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
+        },
+      ]
+    : [];
+
   const baseQuery = { bool: { must, filter: queryFilter } };
   // Inner scoring: topic shape wraps `baseQuery` in the multiplicative
-  // attribution + productivity + sparse-decay function_score; every other
-  // shape uses the plain bool.
+  // attribution + productivity + sparse-decay function_score; dept shape
+  // (when the leadership boost is on) wraps it in its own multiplicative
+  // leadership factor; every other shape uses the plain bool.
   const innerScoringQuery =
     applyTopicTemplate && scoreFunctions.length > 0
       ? {
@@ -953,6 +994,15 @@ export async function searchPeople(opts: {
             query: baseQuery,
             functions: scoreFunctions,
             score_mode: "multiply",
+            boost_mode: "multiply",
+          },
+        }
+      : applyDeptLeadershipBoost
+      ? {
+          function_score: {
+            query: baseQuery,
+            functions: deptLeadershipFunctions,
+            score_mode: "max",
             boost_mode: "multiply",
           },
         }

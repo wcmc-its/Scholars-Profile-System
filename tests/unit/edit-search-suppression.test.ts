@@ -21,6 +21,8 @@ const hoisted = vi.hoisted(() => ({
   mockPublicationFindFirst: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockDepartmentFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
   mockBulk: vi.fn(),
 }));
 
@@ -32,6 +34,10 @@ vi.mock("@/lib/db", () => ({
       publication: { findFirst: hoisted.mockPublicationFindFirst },
       publicationAuthor: { findMany: hoisted.mockPublicationAuthorFindMany },
       suppression: { findMany: hoisted.mockSuppressionFindMany },
+      // Issue #532 — leadership sidecar queries; this suite doesn't exercise
+      // leadership content, so both default to empty.
+      department: { findMany: hoisted.mockDepartmentFindMany },
+      division: { findMany: hoisted.mockDivisionFindMany },
     },
   },
 }));
@@ -116,6 +122,8 @@ beforeEach(() => {
   hoisted.mockSuppressionFindMany.mockResolvedValue([]);
   hoisted.mockPublicationAuthorFindMany.mockResolvedValue([]);
   hoisted.mockCenterMembershipFindMany.mockResolvedValue([]);
+  hoisted.mockDepartmentFindMany.mockResolvedValue([]);
+  hoisted.mockDivisionFindMany.mockResolvedValue([]);
 });
 
 describe("reflectSearchSuppression — scholar suppress", () => {

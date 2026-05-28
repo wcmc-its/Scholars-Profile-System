@@ -22,6 +22,7 @@ import { buildMeshHref } from "./url-helpers";
 import {
   parseMeshParam,
   resolveConceptMode,
+  resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -223,6 +224,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
       meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+      // Issue #532 — env-gated dept-shape leadership boost (also resolved
+      // on the SSR path so this result set ranks identically to /api/search).
+      deptLeadershipBoost: resolveDeptLeadershipBoost(),
     }),
     searchPublications({
       q,

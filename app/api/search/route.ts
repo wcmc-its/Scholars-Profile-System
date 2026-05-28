@@ -17,6 +17,7 @@ import {
   parseMeshParam,
   resolveConceptMode,
   resolveFundingConceptEnabled,
+  resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -290,6 +291,9 @@ export async function GET(request: NextRequest) {
     // drives the topic-shape attribution boost; searchPeople ignores it for
     // non-topic shapes.
     meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+    // Issue #532 — env-gated dept-shape leadership boost. Ignored for
+    // non-dept shapes inside `searchPeople`.
+    deptLeadershipBoost: resolveDeptLeadershipBoost(),
   });
   const searchLatencyMs = Date.now() - searchStart;
   // ANALYTICS-02 (D-02): structured search-query log (people branch).

@@ -91,3 +91,22 @@ export function parseMeshParam(
 export function resolveFundingConceptEnabled(): boolean {
   return process.env.SEARCH_FUNDING_TAB_CONCEPT === "on";
 }
+
+/**
+ * Issue #532 — dept-shape leadership boost (chair / division chief). When
+ * `on`, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
+ * body in a multiplicative `function_score` that promotes the dept's chair
+ * (and, in future, the chief of a queried division) above other dept members.
+ * The signal source is `leadership.chairOf` / `leadership.chiefOf` on the
+ * scholars-people doc, populated from `Department.chairCwid` /
+ * `Division.chiefCwid` (which already reflect ADR-002 prediction + Path C
+ * manual overrides).
+ *
+ * Default `off`: the new fields require an OpenSearch reindex on the
+ * people-v2 mapping before the boost has anything to read. Deliberately
+ * a separate flag from `SEARCH_PEOPLE_RELEVANCE_MODE` so the v3 default
+ * baseline established by PR #526 isn't disturbed by this rollout.
+ */
+export function resolveDeptLeadershipBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST === "on";
+}
