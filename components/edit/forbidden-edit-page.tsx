@@ -20,9 +20,43 @@ export type ForbiddenEditPageProps = {
    * The visible copy never names the target.
    */
   targetCwid?: string;
+  /**
+   * Which surface the denial is for. `"scholar"` (default) keeps the existing
+   * `/edit/scholar/[cwid]` copy + back link; `"unit"` is the #540 unit-curation
+   * denial (`/edit/{department,division,center}/[code]`). Diagnostics only —
+   * the visible copy never names the unit.
+   */
+  variant?: "scholar" | "unit";
+  /** Unit denials: the unit code, surfaced as `data-target-entity` for tests. */
+  targetEntity?: string;
 };
 
-export function ForbiddenEditPage({ targetCwid }: ForbiddenEditPageProps) {
+export function ForbiddenEditPage({
+  targetCwid,
+  variant = "scholar",
+  targetEntity,
+}: ForbiddenEditPageProps) {
+  if (variant === "unit") {
+    return (
+      <main
+        className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
+        data-slot="forbidden-edit-page"
+        data-variant="unit"
+        data-target-entity={targetEntity ?? ""}
+      >
+        <h1 className="page-title">You don&apos;t have permission to edit this unit.</h1>
+        <p className="text-muted-foreground mt-4">
+          Only an Owner, Curator, or administrator can edit this unit.
+        </p>
+        <p className="mt-8">
+          <Link href="/" className="underline">
+            Return to Scholars
+          </Link>
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main
       className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-16 text-center"
