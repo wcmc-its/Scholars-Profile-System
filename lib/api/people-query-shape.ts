@@ -100,14 +100,20 @@ function departmentLeftover(
  *
  *   1. empty query                       -> "empty"
  *   2. one CWID-shaped token             -> "cwid"
- *   3. surname anchor AND topic signal   -> "hybrid"
- *   4. department AND non-empty leftover -> "hybrid"
- *   5. surname anchor                    -> "name"
- *   6. department (leftover empty)       -> "department"
+ *   3. department (leftover empty)       -> "department"
+ *   4. surname anchor AND topic signal   -> "hybrid"
+ *   5. department AND non-empty leftover -> "hybrid"
+ *   6. surname anchor                    -> "name"
  *   7. topic signal                      -> "topic"
  *   8. otherwise                         -> "unclassified"
  *
- * Pure `name` (rule 5) is reached only when there is no topic signal, which
+ * Pure department is promoted above the surname-anchor rules (#528): a query
+ * that exactly matches a known department name is overwhelmingly a department
+ * search, even when one of its tokens also happens to be a known surname
+ * ("pediatrics", "population health sciences"). Without this, the dept-shape
+ * template (§6.1.4) never runs for those queries.
+ *
+ * Pure `name` (rule 6) is reached only when there is no topic signal, which
  * implies fewer than 4 tokens — so the SPEC's "1-3 token" name constraint
  * holds without a separate gate.
  */
@@ -141,10 +147,14 @@ export function classifyPeopleQuery(
   // Topic — resolved to a MeSH descriptor, or simply a long (>= 4 token) query.
   const topicSignal = input.meshResolved || tokens.length >= 4;
 
+  // Pure department wins before surname anchors (#528): a query that *is*
+  // exactly a known department phrase, with no extra tokens, routes to the
+  // department template regardless of any surname collision on its tokens.
+  if (departmentSignal && !departmentHasLeftover) return "department";
+
   if (surnameAnchor && topicSignal) return "hybrid";
   if (departmentHasLeftover) return "hybrid";
   if (surnameAnchor) return "name";
-  if (departmentSignal) return "department";
   if (topicSignal) return "topic";
   return "unclassified";
 }

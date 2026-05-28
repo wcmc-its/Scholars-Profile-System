@@ -130,3 +130,51 @@ describe("classifyPeopleQuery — department phrase matching", () => {
     expect(classify("population health sciences methods")).toBe("hybrid");
   });
 });
+
+describe("classifyPeopleQuery — #528 dept/surname collisions", () => {
+  // In production, `lastNameSort` contains surnames that collide with
+  // department tokens — e.g. scholars surnamed "Sciences" or "Pediatrics".
+  // The classifier must still route a pure-department query to `department`.
+  const COLLIDING_SURNAMES: ReadonlySet<string> = new Set([
+    "cantley",
+    "wong",
+    "smith",
+    "sciences",
+    "pediatrics",
+  ]);
+
+  function classifyWithCollision(
+    query: string,
+    meshResolved = false,
+  ): PeopleQueryShape {
+    return classifyPeopleQuery({
+      query,
+      meshResolved,
+      knownCwids: CWIDS,
+      knownSurnames: COLLIDING_SURNAMES,
+      knownDepartments: DEPARTMENTS,
+    });
+  }
+
+  it("multi-word dept whose tail token is also a surname -> department", () => {
+    // "sciences" is a known surname; without the #528 fix this misrouted to
+    // `name` via the surname-anchor (last-token) rule.
+    expect(classifyWithCollision("population health sciences")).toBe(
+      "department",
+    );
+  });
+
+  it("single-word dept that is also a surname AND MeSH-resolvable -> department", () => {
+    // "pediatrics" is a known surname AND resolves to a MeSH descriptor;
+    // without the #528 fix this misrouted to `hybrid` via surname+topic.
+    expect(classifyWithCollision("pediatrics", true)).toBe("department");
+  });
+
+  it("dept-name plus extra tokens still routes to hybrid (collision case)", () => {
+    // The #528 promotion only fires when the leftover is empty. A
+    // department-prefix-plus-extra-tokens query keeps its hybrid routing.
+    expect(classifyWithCollision("pediatrics oncology research", true)).toBe(
+      "hybrid",
+    );
+  });
+});
