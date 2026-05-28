@@ -56,7 +56,13 @@ export type UnitEditContext = {
     name: string;
     /** override-merged (dept/div); the in-row value for a center. */
     description: string | null;
+    /** The live public slug — the column value (dept/div is NOT runtime-merged;
+     *  the ETL consults the override before re-deriving). */
     slug: string;
+    /** dept/div: the `field_override(slug)` value if one exists, else null —
+     *  drives the slug card's "Clear override" + "pending ETL" copy. Always null
+     *  for a center (no `field_override`; the slug column is edited in-row). */
+    slugOverride: string | null;
     /** null for departments; the parent dept code for a division. */
     deptCode: string | null;
     /** parent dept display name — for the breadcrumb / sibling rail. */
@@ -342,6 +348,7 @@ export async function loadUnitEditContext(
       name,
       description: merged.description,
       slug,
+      slugOverride: unitType === "center" ? null : (overrides.slug ?? null),
       deptCode,
       deptName,
       source,

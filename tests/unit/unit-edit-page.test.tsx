@@ -15,6 +15,15 @@ vi.mock("@/components/edit/unit-leader-card", () => ({
 vi.mock("@/components/edit/unit-access-card", () => ({
   UnitAccessCard: () => <div data-testid="panel-access" />,
 }));
+vi.mock("@/components/edit/unit-slug-card", () => ({
+  UnitSlugCard: () => <div data-testid="panel-slug" />,
+}));
+vi.mock("@/components/edit/center-type-card", () => ({
+  CenterTypeCard: () => <div data-testid="panel-center-type" />,
+}));
+vi.mock("@/components/edit/unit-retire-card", () => ({
+  UnitRetireCard: () => <div data-testid="panel-retire" />,
+}));
 
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -25,6 +34,7 @@ function ctx(over: {
   source?: "ED" | "manual";
   siblings?: UnitEditContext["siblingDivisions"];
   access?: UnitEditContext["access"];
+  suppression?: UnitEditContext["unit"]["suppression"];
 }): UnitEditContext {
   const unitType = over.unitType ?? "department";
   return {
@@ -34,13 +44,14 @@ function ctx(over: {
       name: "Medicine",
       description: "blurb",
       slug: "medicine",
+      slugOverride: null,
       deptCode: unitType === "division" ? "N1000" : null,
       deptName: unitType === "division" ? "Parent" : null,
       source: over.source ?? "ED",
       centerType: unitType === "center" ? "center" : null,
       overriddenFields: [],
       leader: { cwid: null, explicitVacancy: false, interim: false, name: null, title: null },
-      suppression: null,
+      suppression: over.suppression ?? null,
     },
     access: over.access ?? null,
     roster: null,
@@ -102,9 +113,34 @@ describe("UnitEditPage — active panel selection", () => {
     expect(screen.getByTestId("panel-leader")).toBeTruthy();
   });
 
-  it("a Superuser deep-linking ?attr=slug sees the unwired placeholder", () => {
+  it("a Superuser deep-linking ?attr=slug sees the slug card", () => {
     render(<UnitEditPage ctx={ctx({ actorRole: "superuser", access: [] })} attr="slug" />);
-    expect(screen.getByText(/coming in PR-7b/i)).toBeTruthy();
+    expect(screen.getByTestId("panel-slug")).toBeTruthy();
+  });
+
+  it("a Superuser on a center deep-linking ?attr=center-type sees the center-type card", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "center", actorRole: "superuser", access: [] })}
+        attr="center-type"
+      />,
+    );
+    expect(screen.getByTestId("panel-center-type")).toBeTruthy();
+  });
+
+  it("a Superuser deep-linking ?attr=retire sees the retire card", () => {
+    render(<UnitEditPage ctx={ctx({ actorRole: "superuser", access: [] })} attr="retire" />);
+    expect(screen.getByTestId("panel-retire")).toBeTruthy();
+  });
+
+  it("the center roster panel is still an unwired placeholder (deferred to a #552 follow-up)", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "center", actorRole: "superuser", access: [] })}
+        attr="roster"
+      />,
+    );
+    expect(screen.getByText(/depends on #552/i)).toBeTruthy();
   });
 
   it("the department sub-rail lists sibling divisions", () => {
@@ -114,5 +150,25 @@ describe("UnitEditPage — active panel selection", () => {
       />,
     );
     expect(screen.getByTestId("sibling-division-N2856")).toBeTruthy();
+  });
+});
+
+describe("UnitEditPage — retired read-through (edge 11)", () => {
+  const retired = {
+    suppression: { id: "sup1", suppressedAt: new Date("2026-05-01"), actorCwid: "su001" },
+    actorRole: "superuser" as const,
+    access: [],
+  };
+
+  it("shows the read-only notice instead of the description editor when retired", () => {
+    render(<UnitEditPage ctx={ctx({ ...retired })} attr="description" />);
+    expect(screen.queryByTestId("panel-description")).toBeNull();
+    expect(screen.getByTestId("retired-notice")).toBeTruthy();
+  });
+
+  it("still renders the retire card on the retire panel when retired", () => {
+    render(<UnitEditPage ctx={ctx({ ...retired })} attr="retire" />);
+    expect(screen.queryByTestId("retired-notice")).toBeNull();
+    expect(screen.getByTestId("panel-retire")).toBeTruthy();
   });
 });
