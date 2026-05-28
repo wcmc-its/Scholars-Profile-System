@@ -312,6 +312,178 @@ export async function resolveDarkPmids(
   return dark;
 }
 
+// ---------------------------------------------------------------------------
+// Unit curation — field overrides + whole-unit suppression
+// (#540 / ADR-005 Amendment 1 § A1.1.)
+//
+// Two read shapes for organizational units:
+//
+//  1. `field_override` rows on Department / Division — `description`, `slug`,
+//     `leaderCwid`, `leaderInterim`. Merged at read time by the unit page.
+//     **Centers do not use `field_override`** — a center row is manually-owned
+//     (no ETL writes the `center` table), so its fields are edited in-row
+//     and the in-row values are authoritative.
+//
+//  2. Whole-unit suppression — a `suppression` row keyed on the unit `code`,
+//     with `contributorCwid` always NULL. A suppressed unit's public page
+//     returns 404; the search index drops its facet on the nightly rebuild.
+//
+// Unit reads are page-scoped (one unit per request), so the helpers below are
+// keyed on a single `(entityType, code)` pair, not the batch IN-list shape
+// the publication / grant suppressions use.
+// ---------------------------------------------------------------------------
+
+/** The three unit `EntityType` values manual-layer reads cover. */
+export type UnitEntityType = "department" | "division" | "center";
+
+/**
+ * The full set of unit `field_override` field names. Dept / div use all four;
+ * a `field_override` row for a center is rejected at write time
+ * (centers edit in-row), so a center read never observes one — but the type
+ * is shared because the merged-shape consumers do not branch on unit kind.
+ *
+ * - `description` — plain-text prose blurb (≤ 4,000 chars).
+ * - `slug` — URL segment; ETL consults it before re-deriving on `etl/ed`.
+ * - `leaderCwid` — Chair / Chief / Director CWID, or `""` for "no leader".
+ * - `leaderInterim` — `"true"` / `"false"`; renders the interim qualifier.
+ *
+ * Values are typed as the raw `field_override.value` (`string`) — boolean
+ * coercion is the merge helper's job, not this loader's.
+ */
+export type UnitFieldOverrideName =
+  | "description"
+  | "slug"
+  | "leaderCwid"
+  | "leaderInterim";
+
+/** A bag of `field_override` values keyed by `fieldName`, for one unit. */
+export type UnitFieldOverrides = Partial<Record<UnitFieldOverrideName, string>>;
+
+const UNIT_FIELD_OVERRIDE_NAMES: readonly UnitFieldOverrideName[] = [
+  "description",
+  "slug",
+  "leaderCwid",
+  "leaderInterim",
+];
+
+/**
+ * Load every active `field_override` row for one unit, returned as a bag
+ * keyed on `fieldName`. The empty result allocates nothing.
+ *
+ * One query, `@@unique([entityType, entityId, fieldName])` index serves it.
+ * The Aurora suppression-style immediacy rule (ADR-005 § Write-path failure
+ * model) applies: per-request, never cached — a TTL cache would reintroduce
+ * the staleness window the manual layer exists to close.
+ *
+ * Centers are accepted but always return `{}` — the write path rejects
+ * `field_override` writes for centers (they edit in-row), so the loader
+ * short-circuits before issuing a query.
+ */
+export async function loadUnitFieldOverrides(
+  entityType: UnitEntityType,
+  code: string,
+  client: OverrideReadClient,
+): Promise<UnitFieldOverrides> {
+  if (entityType === "center") return {};
+  const rows = await client.fieldOverride.findMany({
+    where: {
+      entityType,
+      entityId: code,
+      fieldName: { in: [...UNIT_FIELD_OVERRIDE_NAMES] },
+    },
+    select: { fieldName: true, value: true },
+  });
+  if (rows.length === 0) return {};
+  const out: UnitFieldOverrides = {};
+  for (const row of rows) {
+    // The write path validates `fieldName ∈ UNIT_FIELD_OVERRIDE_NAMES` per
+    // entity type, so the cast is safe. Unknown values are dropped rather
+    // than thrown — a forward-compatible read after a future field is added.
+    if ((UNIT_FIELD_OVERRIDE_NAMES as readonly string[]).includes(row.fieldName)) {
+      out[row.fieldName as UnitFieldOverrideName] = row.value;
+    }
+  }
+  return out;
+}
+
+/**
+ * The per-field merge over a Department / Division row.
+ *
+ * Field-level precedence (ADR-005 § read-merge):
+ *
+ * | Field           | Override wins on               | Read fallback             |
+ * |-----------------|--------------------------------|---------------------------|
+ * | `description`   | a non-undefined override row   | the column                |
+ * | `slug`          | (consumed by `etl/ed` write)   | the column (do not merge) |
+ * | `leaderCwid`    | a non-undefined override row,  | the column                |
+ * |                 | including `""` = no leader     |                           |
+ * | `leaderInterim` | a non-undefined override row   | `false` (no column)       |
+ *
+ * `slug` is **NOT runtime-merged**: the ETL consults the override before
+ * writing the column, so by the time a read happens the column already
+ * carries the override's value. Including it here would invite double-write
+ * lag. The function therefore takes the override bag and the row and emits
+ * the three columns that *are* runtime-merged.
+ *
+ * Returns the column when the override is `undefined`; passes `""` through
+ * for `leaderCwid` as "explicitly cleared" — the caller decides whether to
+ * render "No chair" / "Director vacant" or fall back to ADR-002 auto-detection.
+ *
+ * Boolean coercion for `leaderInterim`: `"true"` -> true, `"false"` -> false,
+ * any other override value -> the row's stored value (defensive; the write
+ * path validates).
+ */
+export type UnitRowFieldsForMerge = {
+  description: string | null;
+  leaderCwid: string | null;
+  /** For Center this is the in-row `leader_interim`; for dept/div there is no column. */
+  leaderInterim?: boolean;
+};
+
+export type MergedUnitFields = {
+  description: string | null;
+  /** `""` = explicitly cleared by curator (different from `null` = no row / no override). */
+  leaderCwid: string | null;
+  leaderInterim: boolean;
+};
+
+export function mergeUnitFields(
+  row: UnitRowFieldsForMerge,
+  overrides: UnitFieldOverrides,
+): MergedUnitFields {
+  const description = overrides.description !== undefined ? overrides.description : row.description;
+  const leaderCwid = overrides.leaderCwid !== undefined ? overrides.leaderCwid : row.leaderCwid;
+  let leaderInterim: boolean;
+  if (overrides.leaderInterim === "true") leaderInterim = true;
+  else if (overrides.leaderInterim === "false") leaderInterim = false;
+  else leaderInterim = row.leaderInterim ?? false;
+  return { description, leaderCwid, leaderInterim };
+}
+
+/**
+ * Is this unit suppressed?
+ *
+ * A whole-unit retire is a `suppression` row with `contributorCwid = NULL`
+ * targeting the unit `code`. One row is enough — the same target can be
+ * re-suppressed after a revoke, so the predicate is "any active row exists",
+ * not "exactly one".
+ *
+ * Returns `true` iff at least one matching `revokedAt IS NULL` row exists.
+ * Page-scoped helper (one unit per request); never cached — same ADR-005
+ * immediacy rule as the publication suppression loader.
+ */
+export async function isUnitSuppressed(
+  entityType: UnitEntityType,
+  code: string,
+  client: SuppressionReadClient,
+): Promise<boolean> {
+  const row = await client.suppression.findFirst({
+    where: { entityType, entityId: code, revokedAt: null },
+    select: { id: true },
+  });
+  return row !== null;
+}
+
 /**
  * Per-cwid count of active per-author publication hides — for adjusting a
  * scholar's publication-count badge. Each active per-author `suppression` row
