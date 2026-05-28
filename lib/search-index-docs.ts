@@ -545,7 +545,11 @@ export async function buildPeopleDoc(
   s: ScholarForIndex,
   client: Pick<
     PrismaClient,
-    "centerMembership" | "publicationAuthor" | "department" | "division"
+    | "centerMembership"
+    | "divisionMembership"
+    | "publicationAuthor"
+    | "department"
+    | "division"
   >,
   sup: PublicationSuppressions,
 ): Promise<Record<string, unknown> | null> {
@@ -759,6 +763,31 @@ export async function buildPeopleDoc(
   for (const row of centerRows) {
     deptDivKeys.push(`center:${row.centerCode}`);
   }
+  // #540 Phase 8 — manual-roster division facet keys. A scholar manually
+  // rostered into a `source='manual'` division contributes the division's
+  // facet bucket on their search document, so the division is filterable in
+  // /people search before LDAP adoption (SPEC line 162; edge 13). When LDAP
+  // later adopts the division (edge 15) the LDAP-derived
+  // `${deptCode}--${divCode}` key (above) collides with this roster-derived
+  // key and dedups naturally — see the `Array.from(new Set(...))` below.
+  // `DivisionMembership` is unrelated to `CenterMembership`'s `center:`
+  // prefix; division facet keys share the LDAP-side namespace.
+  const divRosterRows = await client.divisionMembership.findMany({
+    where: { cwid: s.cwid },
+    select: { divisionCode: true },
+  });
+  if (divRosterRows.length > 0) {
+    const divs = await client.division.findMany({
+      where: {
+        code: { in: divRosterRows.map((r) => r.divisionCode) },
+        source: "manual",
+      },
+      select: { code: true, deptCode: true },
+    });
+    for (const d of divs) {
+      deptDivKeys.push(`${d.deptCode}--${d.code}`);
+    }
+  }
   void divisionName; // retained for potential future enrichment
 
   // Issue #532 — leadership sidecar queries. `Department.chairCwid` and
@@ -804,7 +833,7 @@ export async function buildPeopleDoc(
     divCode: s.divCode,
     deptName,
     divisionName: s.division?.name ?? null,
-    deptDivKey: deptDivKeys,
+    deptDivKey: Array.from(new Set(deptDivKeys)),
     nameSuggest: nameSuggestInputs,
     areasOfInterest: aoi,
     overview: s.overview,

@@ -162,6 +162,7 @@ describe("buildPeopleDoc — suppression integration (C4)", () => {
   function mockClient(rows: ReadonlyArray<{ pmid: string; date: Date | null }>) {
     return {
       centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
+      divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
       publicationAuthor: {
         findMany: vi
           .fn()
