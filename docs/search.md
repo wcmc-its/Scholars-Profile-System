@@ -31,24 +31,20 @@ A single query string is fanned out to all three indices in parallel; each tab r
 
 ### People (`searchPeople` / `scholars-people`)
 
-A `multi_match` over a fixed field set with per-field boosts:
+People-tab relevance is **shape-routed** (people-relevance SPEC §6.1; the default since PR-5, #312). A lexical classifier labels each query — `name`, `topic`, `department`, `hybrid`, `cwid`, or `unclassified` — and each shape gets a ranking template tuned to it, because no single strategy wins across "cantley" (known-item lookup), "ras signaling pancreatic cancer" (topical), and "cardiology" (department):
 
-| Field | Boost | What it captures |
-|---|---|---|
-| `preferredName` | 10 | Display name (e.g. "Lewis C. Cantley") |
-| `fullName` | 10 | Full legal name + alternate forms |
-| `areasOfInterest` | 6 | Self-reported research interests (free-text) |
-| `primaryTitle` | 4 | "Professor of Medicine", etc. |
-| `primaryDepartment` | 3 | Department display string |
-| `overview` | 2 | Bio paragraph from Faculty Profiles / VIVO |
-| `publicationTitles` | 1 | Concatenated titles, **authorship-weighted** |
-| `publicationMesh` | 0.5 | MeSH terms from the scholar's pubs, authorship-weighted |
-| `publicationAbstracts` | 0.3 | Concatenated abstracts (one copy per pub) |
+- **`name`** — name fields only (`preferredName`/`fullName` phrase + match, `lastNameSort` term). A surname no longer fans in unrelated scholars through their publication text.
+- **`topic` / `unclassified`** — a `cross_fields` body that leads with publication-derived evidence (`publicationTitles`, `publicationMesh`) over self-reported `areasOfInterest`, wrapped in a multiplicative `function_score`: a topic-attribution boost (scholars whose pubs carry a descendant of the resolved MeSH descriptor), a productive-author multiplier, and a sparse-profile decay.
+- **`department`** — `primaryDepartment` (20) + `primaryTitle` (8) + a soft `preferredName`/`fullName` fallback (2). No publication fields.
+- **`hybrid`** (e.g. "cantley ras") — the name template's clauses plus the topic boost ladder, summed additively so the named scholar pins to the top while the remaining terms still rank everyone else by topical evidence.
+- **`cwid` / unrouted** — the **restructured body**: `cross_fields` + minimum-should-match (`2<-34%`) over the high-evidence fields, with `publicationAbstracts` in a scoring-only `should`. This is also the body the `legacy` rollback mode applies to every shape.
 
-Two extra wrinkles on top of the multi_match:
+Set `SEARCH_PEOPLE_RELEVANCE_MODE=legacy` to roll the whole tab back to the restructured body (the pre-#312 behavior) without redeploying. (PR-5 retired the older `SEARCH_PEOPLE_QUERY_RESTRUCTURE` flag and its flat `best_fields` body.)
+
+Cross-cutting mechanics (every shape):
 
 - **CWID short-circuit.** If the trimmed query lowercased exactly matches a `cwid` keyword, that doc gets `boost: 100`, so pasting `lcc2010` always pins Cantley at the top regardless of name overlap.
-- **Authorship weighting at index time.** Titles and MeSH for first/last-author papers are repeated 10× in the field; second/penultimate 4×; middle 1×. The query-time boost is then the spec value (×1, ×0.5) without further math. This is how a scholar who is consistently first-author on "kinase signaling" papers outranks one who appeared as middle author on a single such paper.
+- **Authorship weighting at index time.** Titles and MeSH for first/last-author papers are repeated 10× in the field; second/penultimate 4×; middle 1×. The query-time boost is then the spec value without further math — how a consistent first-author on "kinase signaling" outranks a one-time middle author.
 - **MeSH minimum-evidence threshold.** A MeSH term is contributed only when it appears in ≥2 of the scholar's pubs OR in ≥1 first/last-author pub. Filters drive-by single-mention noise before it ever reaches the index.
 - **English stemming + stopwords.** Custom `scholar_text` analyzer strips English stopwords and stems, so "comorbidity" / "comorbidities" are interchangeable and queries like "psychiatric comorbidities **in** serious illness" don't flood with profiles whose only commonality is "in".
 

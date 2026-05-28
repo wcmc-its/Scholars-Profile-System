@@ -428,33 +428,6 @@ export const FUNDING_FIELD_BOOSTS: ReadonlyArray<string> = [
 ];
 
 /**
- * Per-field boost weights used by the *legacy* flat-multimatch people-index
- * query (the path active when `SEARCH_PEOPLE_QUERY_RESTRUCTURE` is off).
- *
- * Issue #21 — abstract text contributes to thematic-query relevance
- * (e.g. "psychiatric comorbidities in serious illness") but at a low
- * boost so a single passing mention can't displace name/title/dept hits.
- * best_fields scoring (the multi_match default) keeps the strongest
- * single-field match dominant.
- *
- * Issue #259 §1.1 — when the restructure flag is on, the query is split
- * into a must clause over high-evidence fields and a should clause for the
- * publicationAbstracts blob. Use `PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS` +
- * `PEOPLE_ABSTRACTS_BOOST` for that path.
- */
-export const PEOPLE_FIELD_BOOSTS: ReadonlyArray<string> = [
-  "preferredName^10",
-  "fullName^10",
-  "areasOfInterest^6",
-  "primaryTitle^4",
-  "primaryDepartment^3",
-  "overview^2",
-  "publicationTitles^1",
-  "publicationMesh^0.5",
-  "publicationAbstracts^0.3",
-];
-
-/**
  * High-evidence per-field boosts for the restructured people-index query
  * (issue #259 §1.1). Used in the multi_match must clause where
  * `minimum_should_match` applies meaningfully — none of these are blob

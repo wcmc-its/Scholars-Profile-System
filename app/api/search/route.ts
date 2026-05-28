@@ -17,6 +17,7 @@ import {
   parseMeshParam,
   resolveConceptMode,
   resolveFundingConceptEnabled,
+  resolvePeopleRelevanceMode,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -253,22 +254,12 @@ export async function GET(request: NextRequest) {
     topic = topicRaw;
   }
 
-  // Issue #308 §6.1.1 — lexical query-shape classifier. PR-1 logs the
-  // classified shape for telemetry (SPEC §9); it does NOT route ranking.
-  // SEARCH_PEOPLE_RELEVANCE_MODE is plumbed but gates nothing until SPEC
-  // PR-2 (#309); an unrecognized value falls back to "legacy".
-  const rawRelevanceMode = process.env.SEARCH_PEOPLE_RELEVANCE_MODE;
-  if (
-    rawRelevanceMode &&
-    rawRelevanceMode !== "legacy" &&
-    rawRelevanceMode !== "v3"
-  ) {
-    console.warn(
-      `[search] ignoring unrecognized SEARCH_PEOPLE_RELEVANCE_MODE=` +
-        `"${rawRelevanceMode}"; using "legacy"`,
-    );
-  }
-  const appliedRelevanceMode = rawRelevanceMode === "v3" ? "v3" : "legacy";
+  // Issue #308 §6.1.1 — lexical query-shape classifier routes the §6.1
+  // per-shape ranking templates. SPEC §12 PR-5 (#312) flipped the default to
+  // `v3`; `SEARCH_PEOPLE_RELEVANCE_MODE=legacy` is the emergency rollback to
+  // the #259 restructured body. Resolution is shared with the SSR page via
+  // `resolvePeopleRelevanceMode` so both rank identically.
+  const appliedRelevanceMode = resolvePeopleRelevanceMode();
   const classifierSets = await getPeopleClassifierSets();
   const queryShape = classifyPeopleQuery({
     query: q,

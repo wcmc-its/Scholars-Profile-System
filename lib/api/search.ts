@@ -34,7 +34,6 @@ import {
 } from "@/lib/api/search-ranking";
 import {
   PEOPLE_ABSTRACTS_BOOST,
-  PEOPLE_FIELD_BOOSTS,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE,
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
   PEOPLE_INDEX,
@@ -252,11 +251,13 @@ export type DeptDivBucket = { value: string; label: string; count: number };
  * (name-template clauses + the topic boost ladder in a single bool, no
  * function_score). All four are independent of the #259 restructure flag: when
  * the relevance mode is `v3` and the classifier returns the matching shape,
- * these labels supersede `legacy_multi_match` / `restructured_msm` so analytics
- * can tell each v3 body apart from the cross_fields fallback families.
+ * these labels supersede `restructured_msm` so analytics can tell each v3 body
+ * apart from the cross_fields fallback. SPEC §12 PR-5 (#312) retired the
+ * `SEARCH_PEOPLE_QUERY_RESTRUCTURE` flag and its `legacy_multi_match`
+ * (flat best_fields) body; `restructured_msm` is now the sole non-template
+ * label (legacy rollback mode + unrouted shapes).
  */
 export type PeopleQueryShape =
-  | "legacy_multi_match"
   | "restructured_msm"
   | "name_template"
   | "topic_template"
@@ -379,22 +380,24 @@ export async function searchPeople(opts: {
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
 
-  // Issue #259 §1.1 — people-index query restructure. Now default-on after
-  // prod verification of the 4,303 → low-4-figure scholar-tab cut for
-  // "electronic health records" (#260 shipped flag-off; this is the
-  // promised default flip). Set SEARCH_PEOPLE_QUERY_RESTRUCTURE=off as an
-  // emergency rollback without redeploying.
-  const useRestructure =
-    (process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE ?? "on") === "on";
+  // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
+  // over high-evidence fields, abstracts in a scoring-only should). It was a
+  // prod-verified env flag (`SEARCH_PEOPLE_QUERY_RESTRUCTURE`) cutting the
+  // 4,303 → low-4-figure scholar-tab result for "electronic health records".
+  // SPEC §12 PR-5 (#312) retired the flag: the restructured body is now the
+  // unconditional non-template body — the body for the `legacy` rollback mode
+  // and the fallback for any shape the §6.1 templates don't route (cwid's
+  // secondary interpretation). The old `=off` flat best_fields path is gone.
 
   // Issue #309 / SPEC §6.1.2 — name-shape template. When the relevance mode is
   // `v3` and the route classified the query as `name`, the body restricts to
   // name fields only (the Problem #2 fix: a surname matching unrelated pubs no
-  // longer fans those scholars in via cross_fields). Independent of the #259
-  // restructure flag — `v3` supersedes it for this shape. Empty/whitespace
-  // queries fall through to the `match_all` browse branch, so gate on a
-  // non-empty trimmed query.
-  const relevanceMode = opts.relevanceMode ?? "legacy";
+  // longer fans those scholars in via cross_fields). Empty/whitespace queries
+  // fall through to the `match_all` browse branch, so gate on a non-empty
+  // trimmed query. SPEC §12 PR-5 flipped the default to `v3`; headless callers
+  // that don't pass `relevanceMode` get `v3` (a template still requires a
+  // matching `shape`, so a shape-less call stays on the restructured body).
+  const relevanceMode = opts.relevanceMode ?? "v3";
   const applyNameTemplate =
     relevanceMode === "v3" && opts.shape === "name" && trimmed.length > 0;
 
@@ -434,9 +437,7 @@ export async function searchPeople(opts: {
   // resolved the query to a MeSH descriptor.
   const meshDescendantUis = opts.meshDescendantUis ?? [];
 
-  let queryShape: PeopleQueryShape = useRestructure
-    ? "restructured_msm"
-    : "legacy_multi_match";
+  let queryShape: PeopleQueryShape = "restructured_msm";
   if (applyNameTemplate) queryShape = "name_template";
   if (applyTopicTemplate) queryShape = "topic_template";
   if (applyDeptTemplate) queryShape = "department_template";
@@ -619,8 +620,12 @@ export async function searchPeople(opts: {
           ],
         },
       }
-    : useRestructure
-    ? {
+    : {
+        // Issue #259 §1.1 / SPEC §12 PR-5 — the restructured body, now the
+        // unconditional non-template fallback (legacy rollback mode + any shape
+        // the §6.1 templates don't route). cross_fields + msm over the
+        // high-evidence fields; publicationAbstracts is a scoring-only should
+        // (the blob clears any per-field msm on its own, so it can't admit).
         bool: {
           must: [
             {
@@ -643,13 +648,6 @@ export async function searchPeople(opts: {
               },
             },
           ],
-        },
-      }
-    : {
-        multi_match: {
-          query: trimmed,
-          fields: [...PEOPLE_FIELD_BOOSTS],
-          type: "best_fields",
         },
       };
 
