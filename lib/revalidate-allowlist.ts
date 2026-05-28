@@ -30,6 +30,8 @@ export const ALLOWED_PATTERNS: readonly RegExp[] = [
   new RegExp(`^/topics/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}$`),
   new RegExp(`^/departments/${SLUG_RE_SOURCE}/divisions/${SLUG_RE_SOURCE}$`),
+  // Center retire / curation revalidates `/centers/{slug}` (#540 Phase 5).
+  new RegExp(`^/centers/${SLUG_RE_SOURCE}$`),
 ];
 
 /** Whether `path` may be revalidated — an exact match or a recognized pattern. */
