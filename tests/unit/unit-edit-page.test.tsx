@@ -24,6 +24,9 @@ vi.mock("@/components/edit/center-type-card", () => ({
 vi.mock("@/components/edit/unit-retire-card", () => ({
   UnitRetireCard: () => <div data-testid="panel-retire" />,
 }));
+vi.mock("@/components/edit/unit-roster-card", () => ({
+  UnitRosterCard: () => <div data-testid="panel-roster" />,
+}));
 
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import type { UnitActorRole, UnitEditContext } from "@/lib/api/unit-edit-context";
@@ -47,6 +50,7 @@ function ctx(over: {
       slugOverride: null,
       deptCode: unitType === "division" ? "N1000" : null,
       deptName: unitType === "division" ? "Parent" : null,
+      deptSlug: unitType === "division" ? "parent" : null,
       source: over.source ?? "ED",
       centerType: unitType === "center" ? "center" : null,
       overriddenFields: [],
@@ -141,6 +145,16 @@ describe("UnitEditPage — active panel selection", () => {
       />,
     );
     expect(screen.getByText(/depends on #552/i)).toBeTruthy();
+  });
+
+  it("a manual division renders the simple roster card on ?attr=roster", () => {
+    render(
+      <UnitEditPage
+        ctx={ctx({ unitType: "division", actorRole: "curator", source: "manual" })}
+        attr="roster"
+      />,
+    );
+    expect(screen.getByTestId("panel-roster")).toBeTruthy();
   });
 
   it("the department sub-rail lists sibling divisions", () => {

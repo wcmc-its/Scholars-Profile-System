@@ -67,6 +67,9 @@ export type UnitEditContext = {
     deptCode: string | null;
     /** parent dept display name — for the breadcrumb / sibling rail. */
     deptName: string | null;
+    /** parent dept slug — for a division's public-preview URL
+     *  (`/departments/{deptSlug}/divisions/{slug}`). null for dept/center. */
+    deptSlug: string | null;
     /** dept/div carry "ED" | "manual"; a center is always "manual". */
     source: "ED" | "manual";
     /** center only. */
@@ -163,6 +166,7 @@ export async function loadUnitEditContext(
   let slug: string;
   let deptCode: string | null = null;
   let deptName: string | null = null;
+  let deptSlug: string | null = null;
   let source: "ED" | "manual";
   let centerType: "center" | "institute" | null = null;
   let rowLeaderCwid: string | null;
@@ -190,7 +194,7 @@ export async function loadUnitEditContext(
         chiefCwid: true,
         source: true,
         deptCode: true,
-        department: { select: { name: true } },
+        department: { select: { name: true, slug: true } },
       },
     });
     if (!row) return null;
@@ -200,6 +204,7 @@ export async function loadUnitEditContext(
     source = row.source === "manual" ? "manual" : "ED";
     deptCode = row.deptCode;
     deptName = row.department?.name ?? null;
+    deptSlug = row.department?.slug ?? null;
     rowLeaderCwid = row.chiefCwid;
   } else {
     const row = await client.center.findUnique({
@@ -351,6 +356,7 @@ export async function loadUnitEditContext(
       slugOverride: unitType === "center" ? null : (overrides.slug ?? null),
       deptCode,
       deptName,
+      deptSlug,
       source,
       centerType,
       overriddenFields: (Object.keys(overrides) as UnitFieldOverrideName[]).filter(
