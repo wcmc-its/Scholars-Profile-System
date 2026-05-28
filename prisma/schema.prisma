@@ -781,11 +781,41 @@ model Center {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  members CenterMembership[]
+  members  CenterMembership[]
+  programs CenterProgram[]
 
   @@index([slug])
   @@index([sortOrder])
   @@map("center")
+}
+
+/// Per-center program taxonomy (#552). Empty for centers that don't use
+/// programs (most). The Meyer Cancer Center seeds five rows (CB, CGE, CPC, CT,
+/// ZY). Other centers may opt in later by inserting their own rows — no schema
+/// change. `membershipType` + `programCode` on a membership are surfaced in the
+/// roster editor ONLY for centers that have ≥1 row here (the Cancer-Center-only
+/// gate is data-driven, not a hardcoded center code).
+model CenterProgram {
+  centerCode String @map("center_code") @db.VarChar(64)
+  code       String @db.VarChar(16)
+  label      String @db.VarChar(255)
+  sortOrder  Int    @default(0) @map("sort_order")
+
+  center  Center             @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  members CenterMembership[]
+
+  @@id([centerCode, code])
+  @@map("center_program")
+}
+
+/// Research vs clinical membership flavor — a Cancer-Center concept (#552). Set
+/// alongside a program; independent of it at the schema level, but the roster
+/// editor only exposes it for centers that have a program taxonomy.
+enum CenterMembershipType {
+  research
+  clinical
+
+  @@map("center_membership_type")
 }
 
 /// Per-scholar membership in a Center. Sourced from manual exports
@@ -793,16 +823,33 @@ model Center {
 /// systems land. Composite unique on (centerCode, cwid). Scholars deleted
 /// from `scholar` cascade-remove the row; centers cascade-remove their
 /// memberships.
+///
+/// #552 added `membershipType`/`programCode`/`startDate`/`endDate` (all
+/// nullable). Legacy rows read as (null,null,null,null) = "active forever,
+/// unclassified". The active-filter predicate (start<=today<=end, inclusive,
+/// nulls open) drives the public roster + the editor's Active/Pending/Inactive
+/// status.
 model CenterMembership {
-  centerCode      String   @map("center_code") @db.VarChar(64)
-  cwid            String   @db.VarChar(32)
-  source          String   @default("manual") @db.VarChar(64)
-  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
+  centerCode      String                @map("center_code") @db.VarChar(64)
+  cwid            String                @db.VarChar(32)
+  membershipType  CenterMembershipType? @map("membership_type")
+  programCode     String?               @map("program_code") @db.VarChar(16)
+  startDate       DateTime?             @map("start_date") @db.Date
+  endDate         DateTime?             @map("end_date") @db.Date
+  source          String                @default("manual") @db.VarChar(64)
+  lastRefreshedAt DateTime              @default(now()) @map("last_refreshed_at")
 
-  center Center @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  center  Center         @relation(fields: [centerCode], references: [code], onDelete: Cascade)
+  // RESTRICT (not the spec's SET NULL): the FK is composite (centerCode,
+  // programCode) and centerCode is NOT NULL, so SET NULL is invalid in both
+  // Prisma and MySQL — it would null centerCode too. There is no program-delete
+  // surface in v1; a future one must clear members' programCode in-app first
+  // (with audit), then delete the program. (#552 §9 row 2 deviation.)
+  program CenterProgram? @relation(fields: [centerCode, programCode], references: [centerCode, code], onDelete: NoAction, onUpdate: NoAction)
 
   @@id([centerCode, cwid])
   @@index([cwid])
+  @@index([centerCode, programCode])
   @@map("center_membership")
 }
 

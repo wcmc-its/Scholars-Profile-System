@@ -96,6 +96,20 @@ const CENTERS: Seed[] = [
   },
 ];
 
+/**
+ * Per-center program taxonomy (#552). Only the Meyer Cancer Center uses programs
+ * in v1; membershipType + programCode are surfaced in the roster editor only for
+ * centers that have rows here. Keyed on the Center.code @id (`meyer_cancer_center`),
+ * NOT the slug. Mirrors the migration's seed so a fresh local DB matches deploy.
+ */
+const CENTER_PROGRAMS: { centerCode: string; code: string; label: string; sortOrder: number }[] = [
+  { centerCode: "meyer_cancer_center", code: "CB", label: "Cancer Biology", sortOrder: 10 },
+  { centerCode: "meyer_cancer_center", code: "CGE", label: "Cancer Genetics & Epigenetics", sortOrder: 20 },
+  { centerCode: "meyer_cancer_center", code: "CPC", label: "Cancer Prevention and Control", sortOrder: 30 },
+  { centerCode: "meyer_cancer_center", code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
+  { centerCode: "meyer_cancer_center", code: "ZY", label: "Non-aligned Clinical", sortOrder: 50 },
+];
+
 async function main() {
   let inserted = 0;
   let updated = 0;
@@ -123,6 +137,17 @@ async function main() {
     existing ? updated++ : inserted++;
   }
   console.log(`Centers seeded: ${inserted} new, ${updated} updated`);
+
+  let programs = 0;
+  for (const p of CENTER_PROGRAMS) {
+    await db.write.centerProgram.upsert({
+      where: { centerCode_code: { centerCode: p.centerCode, code: p.code } },
+      create: p,
+      update: { label: p.label, sortOrder: p.sortOrder },
+    });
+    programs++;
+  }
+  console.log(`Center programs seeded: ${programs}`);
 }
 
 main()
