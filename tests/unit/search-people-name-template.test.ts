@@ -70,6 +70,11 @@ vi.mock("@/lib/search", () => ({
     "publicationMesh^4",
   ],
   PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
+  PEOPLE_PROMINENCE_BASE_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_PUBCOUNT_FACTOR: 1,
+  PEOPLE_PROMINENCE_FACULTY_WEIGHT: 1.0,
+  PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
+  PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
@@ -114,10 +119,20 @@ vi.mock("@/lib/search", () => ({
 
 import { searchPeople } from "@/lib/api/search";
 
+/**
+ * Unwrap the optional #513 prominence `function_score` to the root bool query.
+ * Name shape under v3 wraps the body in a `function_score`; legacy / cwid /
+ * empty don't, so accept either shape.
+ */
+function rootQuery(body: Record<string, unknown>): Record<string, unknown> {
+  const q = body.query as Record<string, unknown>;
+  return ((q.function_score as { query?: Record<string, unknown> })?.query ??
+    q) as Record<string, unknown>;
+}
+
 /** The outer should clause holds [cwid term, queryBranch] (index 0 / 1). */
 function outerShould(body: Record<string, unknown>): Record<string, unknown>[] {
-  const q = body.query as Record<string, unknown>;
-  const must = (q.bool as { must: Record<string, unknown>[] }).must;
+  const must = (rootQuery(body).bool as { must: Record<string, unknown>[] }).must;
   return (must[0].bool as { should: Record<string, unknown>[] }).should;
 }
 
@@ -244,8 +259,8 @@ describe("people-index name-shape template — SPEC §6.1.2 (#309)", () => {
     const branch = queryBranch(capturedBodies[0]);
     expect(branch).toHaveProperty("bool");
     // ...and the D-10 topic cwid set rides in the query-level filter.
-    const filter = (capturedBodies[0].query as { bool: { filter: Record<string, unknown>[] } })
-      .bool.filter;
+    const filter = (rootQuery(capturedBodies[0]).bool as { filter: Record<string, unknown>[] })
+      .filter;
     expect(filter).toContainEqual({ terms: { cwid: [FIXTURE_CWID] } });
   });
 
