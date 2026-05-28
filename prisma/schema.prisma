@@ -758,22 +758,28 @@ model Division {
 /// when sources land, e.g. reporting_cancer_center for the Meyer Cancer Center).
 /// `code` is a stable slug-like identifier (e.g. "englander_ipm").
 model Center {
-  code         String   @id @db.VarChar(64)
-  name         String   @db.VarChar(255)
-  slug         String   @unique @db.VarChar(255)
-  description  String?  @db.Text
+  code          String   @id @db.VarChar(64)
+  name          String   @db.VarChar(255)
+  slug          String   @unique @db.VarChar(255)
+  description   String?  @db.Text
   /// Presentation kind: "center" (default) or "institute". Drives the badge
   /// color in autocomplete and search results — institutes (typically NCI/NIH-
   /// designated, larger, more endowed) get their own teal badge; centers get
   /// purple. Backfilled by name match in 20260508120000_add_center_type.
-  centerType   String   @default("center") @map("center_type") @db.VarChar(16)
-  directorCwid String?  @map("director_cwid") @db.VarChar(32)
-  scholarCount Int      @default(0) @map("scholar_count")
-  sortOrder    Int      @default(0) @map("sort_order")
-  source       String   @default("seed") @db.VarChar(32)
-  refreshedAt  DateTime @default(now()) @map("refreshed_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  centerType    String   @default("center") @map("center_type") @db.VarChar(16)
+  directorCwid  String?  @map("director_cwid") @db.VarChar(32)
+  /// Interim/acting qualifier for the director — renders "Interim Director".
+  /// Center-only column because the center row is manually-owned and no ETL
+  /// writes it; departments/divisions express the same qualifier as a
+  /// columnless `field_override(leaderInterim)` row instead.
+  /// Added by #540 Phase 1 (ADR-005 Amendment 1 § A1.1).
+  leaderInterim Boolean  @default(false) @map("leader_interim")
+  scholarCount  Int      @default(0) @map("scholar_count")
+  sortOrder     Int      @default(0) @map("sort_order")
+  source        String   @default("seed") @db.VarChar(32)
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   members CenterMembership[]
 
@@ -798,6 +804,48 @@ model CenterMembership {
   @@id([centerCode, cwid])
   @@index([cwid])
   @@map("center_membership")
+}
+
+/// Per-scholar membership in a manually-created Division (`Division.source =
+/// 'manual'`). Mirrors `CenterMembership` exactly — added rows carry
+/// `source='manual-ui'`. No FK to `Scholar` (a roster row may exist before the
+/// scholar's ED record arrives; ADR-003 / ADR-005 Amendment 1 § A1.1). The
+/// write path enforces `Division.source='manual'` — LDAP-sourced division
+/// membership stays on `Scholar.divCode` and is not represented here.
+/// Added by #540 Phase 1.
+model DivisionMembership {
+  divisionCode    String   @map("division_code") @db.VarChar(64)
+  cwid            String   @db.VarChar(32)
+  source          String   @default("manual-ui") @db.VarChar(64)
+  lastRefreshedAt DateTime @default(now()) @map("last_refreshed_at")
+
+  @@id([divisionCode, cwid])
+  @@index([cwid])
+  @@map("division_membership")
+}
+
+/// Per-unit administrator grant (ADR-005 Amendment 1 § A1.1 / #540). One row
+/// per (unit, cwid) — `@@unique([entityType, entityId, cwid])` is implicit via
+/// the compound `@@id`. Inserted on grant, **hard-deleted** on revoke (B03
+/// audits both). `role` is a `UnitRole` enum (owner subsumes curator).
+/// `grantedBy` is the actor CWID whose own role + scope made the grant legal
+/// (Amendment 1 § A1.2: authority ≤ own role, scope ⊆ own subtree).
+/// `entityType` is `department`, `division`, or `center` (a dept-level grant
+/// cascades to that dept's divisions; division-level does not cascade upward).
+/// No FK to the unit tables — a grant is a separate access fact, not a child
+/// row, and an Owner of a not-yet-coded informal subunit references a
+/// synthetic `code` only the manual layer knows about.
+model UnitAdmin {
+  entityType EntityType @map("entity_type")
+  entityId   String     @map("entity_id") @db.VarChar(64) // unit code
+  cwid       String     @db.VarChar(32) // grantee
+  role       UnitRole
+  grantedBy  String     @map("granted_by") @db.VarChar(32) // actor CWID
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  @@id([entityType, entityId, cwid])
+  @@index([cwid])
+  @@map("unit_admin")
 }
 
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
@@ -997,6 +1045,21 @@ enum EntityType {
   grant
   education
   appointment
+  // + ADR-005 Amendment 1 (#540): org-unit curation. Units key on a stable
+  // `code` PK that survives every ETL run, so they qualify for the manual
+  // layer with no #352 stable-key prerequisite.
+  department
+  division
+  center
+}
+
+/// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row
+/// per (unit, cwid) in `UnitAdmin`; `owner` subsumes `curator`. Owner adds
+/// access-management within the owned subtree; Curator edits only. Both are
+/// per-unit and data-derived (not an SSO group), re-checked per POST.
+enum UnitRole {
+  owner
+  curator
 }
 
 /// Manual scalar-field overrides applied over ETL-managed data at read time.

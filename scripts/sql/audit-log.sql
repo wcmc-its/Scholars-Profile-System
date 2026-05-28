@@ -63,10 +63,13 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 
   -- WHAT -- the target. #354 generalizes #102's single `scholar_cwid` to a
   -- (type, id) pair so a row can audit a publication or (publication, author)
-  -- target, not only a scholar. `target_entity_id` is scholar.cwid for a
-  -- scholar target, publication.pmid for a publication target; a per-author
-  -- publication suppression carries the contributor CWID in the JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment') NOT NULL,
+  -- target, not only a scholar. #540 Phase 1 extends the type set to org
+  -- units (department/division/center) for unit curation. `target_entity_id`
+  -- is scholar.cwid for a scholar target, publication.pmid for a publication
+  -- target, and the unit `code` for a department/division/center target; a
+  -- per-author publication suppression carries the contributor CWID in the
+  -- JSON payload.
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -75,8 +78,12 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- / `suppression_revoke` are suppression events; `request_change` is a
   -- "Request a change" email routed to the owning office (#160 Phase 2 -- a
   -- best-effort row written AFTER the send, so a missing INSERT grant degrades
-  -- to a logged audit gap, never a lost email).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn') NOT NULL,
+  -- to a logged audit gap, never a lost email). #540 Phase 1 adds three
+  -- unit-curation actions: `unit_create` (a manually-owned center or a
+  -- manually-created division, including informal no-code subunits);
+  -- `roster_change` (add/remove a CenterMembership / DivisionMembership row);
+  -- `grant_change` (a UnitAdmin INSERT or hard-DELETE).
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -130,11 +137,23 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --   #160 Phase 2:      + request_change        ("Request a change" server mailer)
 --   #497 PR-3:         + slug_request · slug_request_approved · slug_request_rejected
 --                        · slug_request_withdrawn  (slug-request queue)
+--   #540 Phase 1:      + unit_create · roster_change · grant_change
+--                        (org-unit curation; also extends target_entity_type
+--                         with department / division / center -- the second
+--                         MODIFY COLUMN below)
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change')
+    NOT NULL;
+
+-- target_entity_type history:
+--   #102/#354: scholar · publication · grant · education · appointment
+--   #540 Phase 1: + department · division · center
+ALTER TABLE `scholars_audit`.`manual_edit_audit`
+  MODIFY COLUMN `target_entity_type`
+    ENUM('scholar','publication','grant','education','appointment','department','division','center')
     NOT NULL;
 
 -- =============================================================================
