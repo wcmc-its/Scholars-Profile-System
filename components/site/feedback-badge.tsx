@@ -19,14 +19,22 @@ import * as React from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { MessageSquare } from "lucide-react";
 
+import { useFeedbackBadgeSuppressed } from "@/components/site/feedback-badge-context";
+
 /** Pathnames where the badge does NOT render. */
 const SUPPRESSED_PREFIXES = ["/about/feedback"];
 
 export function FeedbackBadge() {
   const router = useRouter();
   const pathname = usePathname();
+  const suppressedByModal = useFeedbackBadgeSuppressed();
 
   if (pathname && SUPPRESSED_PREFIXES.some((p) => pathname.startsWith(p))) {
+    return null;
+  }
+  // Any open Radix Dialog registers itself via the context; the badge
+  // hides while that registration is live and re-appears on close.
+  if (suppressedByModal) {
     return null;
   }
 

@@ -4,6 +4,7 @@ import * as React from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { XIcon } from "lucide-react";
 
+import { useSuppressFeedbackBadgeWhileMounted } from "@/components/site/feedback-badge-context";
 import { cn } from "@/lib/utils";
 
 function Dialog({
@@ -51,6 +52,11 @@ function DialogContent({
   children,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content>) {
+  // #538 — register dialog-open against the feedback-badge suppression
+  // count so the badge hides while this modal is on screen. The effect
+  // runs once per mount; DialogContent is only mounted while the dialog
+  // is open (via DialogPortal), so mount/unmount tracks open/close.
+  useSuppressFeedbackBadgeWhileMounted();
   return (
     <DialogPortal>
       <DialogOverlay />

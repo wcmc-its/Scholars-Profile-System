@@ -319,6 +319,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
                 "Value": "20",
               },
+              {
+                "Name": "FEEDBACK_BADGE_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "FEEDBACK_SITE_ORIGIN",
+                "Value": "https://scholars.weill.cornell.edu",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -2520,6 +2528,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
                 "Value": "20",
+              },
+              {
+                "Name": "FEEDBACK_BADGE_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "FEEDBACK_SITE_ORIGIN",
+                "Value": "https://scholars-staging.weill.cornell.edu",
               },
             ],
             "Essential": true,

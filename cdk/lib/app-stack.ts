@@ -696,6 +696,18 @@ export class AppStack extends Stack {
         // Surfaced here as an explicit, tunable knob: ratchet from the 429 logs
         // rather than redeploy code to change a number.
         SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT: "20",
+        // #538 -- site-wide feedback badge + /about/feedback form. When "on",
+        // the badge renders on every page (except /about/feedback itself,
+        // suppressed inside open Radix Dialogs) and the form route accepts
+        // submissions. When "off" the badge does not render and the form
+        // route returns 404. Enabled in both envs at launch; the IRB exempt-
+        // determination is being handled out of band by the project lead per
+        // docs/feedback-badge-spec.md § IRB / governance.
+        FEEDBACK_BADGE_ENABLED: "on",
+        // Origin allowlist the submit endpoint validates the request's
+        // `Origin` header against. Derived from the SAML ACS URL so the env
+        // can't drift between the two; same `https://<public-host>` value.
+        FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
