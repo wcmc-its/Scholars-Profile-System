@@ -28,6 +28,7 @@ import type {
 } from "@/lib/api/dept-lists";
 import {
   isAuthorHidden,
+  isUnitSuppressed,
   loadPublicationSuppressions,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
@@ -43,6 +44,10 @@ export type CenterDetail = {
     primaryTitle: string | null;
     slug: string;
     identityImageEndpoint: string;
+    /** Interim/acting qualifier — the in-row `Center.leaderInterim` column
+     *  (centers edit fields in-row; no `field_override` merge). #540 / ADR-005
+     *  Amendment 1 § A1.1. */
+    isInterim: boolean;
   } | null;
   scholarCount: number;
 };
@@ -62,6 +67,7 @@ type CenterRow = {
   slug: string;
   description: string | null;
   directorCwid: string | null;
+  leaderInterim: boolean;
   scholarCount: number;
 };
 
@@ -74,10 +80,15 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
       slug: true,
       description: true,
       directorCwid: true,
+      leaderInterim: true,
       scholarCount: true,
     },
   })) as CenterRow | null;
   if (!center) return null;
+
+  // #540 — a retired (whole-unit-suppressed) center is a 404. Centers edit
+  // their fields in-row, so no `field_override` merge happens here.
+  if (await isUnitSuppressed("center", center.code, prisma)) return null;
 
   let director: CenterDetail["director"] = null;
   if (center.directorCwid) {
@@ -92,6 +103,7 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
         primaryTitle: d.primaryTitle,
         slug: d.slug,
         identityImageEndpoint: identityImageEndpoint(d.cwid),
+        isInterim: center.leaderInterim,
       };
     }
   }

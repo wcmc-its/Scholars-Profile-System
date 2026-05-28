@@ -22,6 +22,11 @@ import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { LeaderRole } from "@/components/scholar/leader-card";
+import {
+  isUnitSuppressed,
+  loadUnitFieldOverrides,
+  mergeUnitFields,
+} from "@/lib/api/manual-layer";
 
 export type DepartmentChair = {
   cwid: string;
@@ -36,6 +41,10 @@ export type DepartmentChair = {
   /** Display label for the leader card. Administrative depts (Library) use
    *  "Director"; everything else uses "Chair". Issue #58. */
   role: LeaderRole;
+  /** Interim/acting qualifier — `field_override(leaderInterim)` for dept/div
+   *  (#540 / ADR-005 Amendment 1 § A1.1). Renders "Interim Chair" / "Acting
+   *  Director"; default false. */
+  isInterim: boolean;
 };
 
 export type DepartmentTopicArea = {
@@ -75,6 +84,18 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   const dept = await prisma.department.findUnique({ where: { slug } });
   if (!dept) return null;
 
+  // #540 — a retired (whole-unit-suppressed) department is a 404.
+  if (await isUnitSuppressed("department", dept.code, prisma)) return null;
+
+  // #540 — field-override merge. `description`, `leaderCwid`, `leaderInterim`
+  // override the ETL columns at read time (ADR-005 Amendment 1 § A1.1).
+  // `slug` is consumed by `etl/ed`, not merged here.
+  const overrides = await loadUnitFieldOverrides("department", dept.code, prisma);
+  const merged = mergeUnitFields(
+    { description: dept.description, leaderCwid: dept.chairCwid },
+    overrides,
+  );
+
   // --- Leader (Chair for non-admin depts, Director for admin depts) ---
   // Issue #58 — administrative departments (Library) are led by a Director,
   // not a Chair. Derive the role from category at read time so we don't need
@@ -83,9 +104,12 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   const leaderRole: LeaderRole =
     dept.category === "administrative" ? "Director" : "Chair";
   let chair: DepartmentChair | null = null;
-  if (dept.chairCwid) {
+  // Three-state leader (#540 SPEC § 1): null = no row → fall through; "" =
+  // explicit vacancy (curator's "no chair") → no card, do NOT auto-detect;
+  // non-empty string = use the CWID.
+  if (merged.leaderCwid && merged.leaderCwid !== "") {
     const chairScholar = await prisma.scholar.findUnique({
-      where: { cwid: dept.chairCwid },
+      where: { cwid: merged.leaderCwid },
       select: { cwid: true, preferredName: true, slug: true, primaryTitle: true },
     });
     if (chairScholar) {
@@ -101,7 +125,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
             ];
       const chairAppt = await prisma.appointment.findFirst({
         where: {
-          cwid: dept.chairCwid,
+          cwid: merged.leaderCwid,
           endDate: null,
           OR: titleStartsWith,
         },
@@ -116,6 +140,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         primaryTitle: chairScholar.primaryTitle ?? null,
         identityImageEndpoint: identityImageEndpoint(chairScholar.cwid),
         role: leaderRole,
+        isInterim: merged.leaderInterim,
       };
     }
   }
@@ -207,7 +232,7 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   };
 
   return {
-    dept: { code: dept.code, name: dept.name, slug: dept.slug, description: dept.description },
+    dept: { code: dept.code, name: dept.name, slug: dept.slug, description: merged.description },
     chair,
     topResearchAreas,
     divisions,
