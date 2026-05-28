@@ -495,6 +495,59 @@ above; the prominence headroom it reveals is addressed in §5.4.
 
 ---
 
+## 7b. v3 eval — CAPTURED 2026-05-27 (companion to §7; NOT a re-freeze)
+
+First v3 run of the same frozen §6 labeled set, after the §6.1 templates
+(#309–#311) + the #513 prominence factor landed. Index rebuilt immediately
+before (`npm run search:index:people` → `scholars-people-v2`, 8,937 docs, PR-3
+v3 fields now populated: `publicationMeshUi` 4,773 / `aoiTermCount`>0 1,550 /
+`overviewLength`>0 557). The harness's legacy mode reproduced §7's **0.160**
+exactly in the same session, so the rebuild is faithful. Reproduce:
+`SEARCH_PEOPLE_RELEVANCE_MODE=v3 DATABASE_URL='…' npx tsx scripts/people-relevance-dryrun.ts`.
+
+| Shape | Legacy (§7) | v3 | Gate | Verdict |
+| --- | --- | --- | --- | --- |
+| name | 0.500 | **1.000** | ≥ 0.95 hard floor | ✅ cleared — #4 `wong` 0/3 → 3/3 |
+| topic | 0.000 | 0.222 | 0.65 directional | below |
+| department | 0.000 | 0.000 | 0.90 directional | classifier misroute (#528) |
+| hybrid | 0.250 | 0.500 | 0.75 directional | below, improved |
+| **OVERALL** | **0.160** | **0.400** | — | mean rank 8.38 → 2.42 |
+
+**Findings:**
+
+1. **Name clears the 0.95 hard floor (1.000).** The #513 prominence factor
+   (publication-count `ln1p`) resolves #4 `wong` (0/3 → 3/3, the three
+   high-output Wongs). This is the one *hard* PR-5 (#312) gate criterion — met.
+
+2. **Department 0.000 is a classifier misroute, not a ranking result** — unlike
+   §7, where it was a ranking result. Both labeled department queries collide
+   with a surname on a department-name token, so `classifyPeopleQuery` routes
+   them off the department template before the department check fires
+   (`lastNameSort=sciences` matches 3 scholars → "population health sciences"
+   classifies as `name`; "pediatrics" → `hybrid`). The department template never
+   runs. Filed as **#528**; the directional target is unreachable until fixed.
+
+3. **Topic is coefficient-insensitive — prominence, not the attribution boost,
+   is the lever.** Sweeping the §6.1.3 attribution coefficient 1.5 → 1.75 → 2.0 →
+   3.0 left topic flat at 0.222: the labeled misses (Wolchok, Merghoub) *are*
+   attributed (Wolchok carries Melanoma D008545, 217 pubs), but so are the
+   scholars who outrank them, and the multiplicative boost is uniform across the
+   attributed cohort, so it can't reorder within it. A probe adding pub-count
+   `ln1p` prominence to the topic body lifted topic 0.222 → 0.333 (surfaced
+   Elemento for "spatial transcriptomics"), confirming prominence is the lever —
+   but the blunt *multiplicative* form distorted "melanoma" (toward low-relevance
+   high-pub dermatologists). The proper fix is the **additive/nested** topic
+   prominence deferred from #513 (outer `score_mode: sum` prominence over the
+   inner multiply-mode topic function_score), to be calibrated in the follow-up.
+
+**Bottom line:** PR-5's hard floor (name ≥ 0.95) is satisfiable with #513
+merged. The directional targets are not yet met — department blocked on the
+#528 classifier fix, topic on the deferred additive topic-prominence work (the
+attribution coefficient is a dead end). Weights remain initial; this is a
+12-query smoke eval, not the full calibration.
+
+---
+
 ## 8. Deferred — revisit when telemetry accrues
 
 No People-tab query log exists yet. The following depend on one and are
