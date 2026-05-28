@@ -18,6 +18,7 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { isPubliclyDisplayed, type RoleCategory } from "@/lib/eligibility";
 
 export type AuthorChip = {
   name: string;
@@ -26,6 +27,11 @@ export type AuthorChip = {
   identityImageEndpoint?: string | null;
   isFirst: boolean;
   isLast: boolean;
+  /** #536 — when the author is a hidden identity class (doctoral student), the
+   *  chip renders the name as plain text rather than a profile link, and the
+   *  navigating PersonPopover is downgraded to a static role tooltip. Omitted /
+   *  null is treated as publicly displayed (isPubliclyDisplayed fail-open). */
+  roleCategory?: RoleCategory | string | null;
 };
 
 const CHIP_CAP = 5;
@@ -122,7 +128,12 @@ export function AuthorChipRow({
           </>
         );
         const tooltipText = chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount);
-        const inlineChip = a.slug ? (
+        // #536 — a hidden identity class (doctoral student) keeps its name in
+        // the relational co-author context but gets no click target: the chip
+        // renders as a static span and the navigating PersonPopover is skipped
+        // (its profile would 404). Fail-open: missing role → linkable.
+        const linkable = isPubliclyDisplayed(a.roleCategory);
+        const inlineChip = a.slug && linkable ? (
           <a href={`/scholars/${a.slug}`} className={chipClass}>
             {inner}
           </a>
@@ -131,8 +142,9 @@ export function AuthorChipRow({
         );
         // PersonPopover supersedes HoverTooltip when we have authorship context
         // (the pmid + the author's cwid). Without context (no pmid passed by
-        // the caller), fall back to the legacy tooltip — same as today.
-        if (!pmid) {
+        // the caller) — or for a non-linkable author (#536) — fall back to the
+        // legacy tooltip so the name shows without a navigable popover.
+        if (!pmid || !linkable) {
           return (
             <HoverTooltip key={`${a.cwid}-${i}`} text={tooltipText}>
               {inlineChip}

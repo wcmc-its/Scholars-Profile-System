@@ -9,6 +9,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import type { SubtopicCard as SubtopicCardData } from "@/lib/api/home";
 
 export function SubtopicCard({ item }: { item: SubtopicCardData }) {
@@ -40,12 +41,19 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
                 />
                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                   {p.firstWcmAuthor ? (
-                    <a
-                      href={`/scholars/${p.firstWcmAuthor.slug}`}
-                      className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm hover:bg-zinc-200"
-                    >
-                      {p.firstWcmAuthor.preferredName}
-                    </a>
+                    isPubliclyDisplayed(p.firstWcmAuthor.roleCategory) ? (
+                      <a
+                        href={`/scholars/${p.firstWcmAuthor.slug}`}
+                        className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm hover:bg-zinc-200"
+                      >
+                        {p.firstWcmAuthor.preferredName}
+                      </a>
+                    ) : (
+                      // #536 — hidden identity class: name as plain text, no link.
+                      <span className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm">
+                        {p.firstWcmAuthor.preferredName}
+                      </span>
+                    )
                   ) : null}
                   {(p.journal || p.year) ? (
                     <span className="text-muted-foreground text-xs italic">

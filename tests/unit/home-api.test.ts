@@ -313,10 +313,12 @@ describe("getRecentContributions (RANKING-01)", () => {
     await getRecentContributions(NOW);
     expect(mockPubTopicFindMany).toHaveBeenCalled();
     const callArg = mockPubTopicFindMany.mock.calls[0][0];
-    // ELIGIBLE_ROLES check
+    // ELIGIBLE_ROLES check — #536 removed doctoral_student from the carve, so it
+    // must NOT appear in the recent-contributions role filter.
     expect(callArg.where.scholar.roleCategory.in).toEqual(
-      expect.arrayContaining(["full_time_faculty", "postdoc", "fellow", "doctoral_student"]),
+      expect.arrayContaining(["full_time_faculty", "postdoc", "fellow"]),
     );
+    expect(callArg.where.scholar.roleCategory.in).not.toContain("doctoral_student");
     // Author position first or last
     expect(callArg.where.authorPosition.in).toEqual(expect.arrayContaining(["first", "last"]));
     // Year floor (D-15 — 2020+)

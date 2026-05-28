@@ -498,13 +498,13 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
   const allCwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string };
+  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
   const scholars =
     allCwids.length === 0
       ? ([] as Sl[])
       : ((await prisma.scholar.findMany({
           where: { cwid: { in: allCwids } },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[]);
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
 
@@ -528,6 +528,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: a.isFirst,
           isLast: a.isLast,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null),
@@ -595,7 +596,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
       ? ([] as Sl[])
       : ((await prisma.scholar.findMany({
           where: { cwid: { in: grantCwids } },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[]);
   const grantScholarMap = new Map(grantScholars.map((s) => [s.cwid, s]));
 
@@ -615,6 +616,7 @@ export async function getDivisionHighlights(divCode: string): Promise<DeptHighli
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: false,
           isLast: false,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
@@ -693,12 +695,12 @@ export async function getDivisionPublicationsList(
   const cwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string };
+  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -723,6 +725,7 @@ export async function getDivisionPublicationsList(
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: a.isFirst,
           isLast: a.isLast,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null),
@@ -837,13 +840,13 @@ export async function getDivisionGrantsList(
   );
 
   const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
-  type Sl = { cwid: string; preferredName: string; slug: string };
+  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
   const scholars =
     cwids.length === 0
       ? ([] as Sl[])
       : ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids } },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[]);
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
 
@@ -860,6 +863,7 @@ export async function getDivisionGrantsList(
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: false,
           isLast: false,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

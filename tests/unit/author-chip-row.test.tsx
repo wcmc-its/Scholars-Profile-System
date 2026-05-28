@@ -84,3 +84,41 @@ describe("AuthorChipRow ordering", () => {
     expect(screen.getByText(/\+3 more/)).toBeTruthy();
   });
 });
+
+// #536 — a hidden identity class (doctoral student) keeps its name in the
+// co-authorship row but gets no profile link (the route 404s).
+describe("AuthorChipRow — hidden identity class (#536)", () => {
+  it("renders a hidden-role author as plain text, not a profile link", () => {
+    const authors: AuthorChip[] = [
+      baseChip({
+        name: "PI Faculty",
+        cwid: "pi001",
+        slug: "pi-faculty",
+        roleCategory: "full_time_faculty",
+        isFirst: true,
+      }),
+      baseChip({
+        name: "Grad Student",
+        cwid: "gs001",
+        slug: "grad-student",
+        roleCategory: "doctoral_student",
+        isLast: true,
+      }),
+    ];
+    render(<AuthorChipRow authors={authors} />);
+    // Faculty chip links to the profile; the doctoral student does not.
+    expect(document.querySelector('a[href="/scholars/pi-faculty"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/scholars/grad-student"]')).toBeNull();
+    // The hidden author's name is still visible (rendered as text).
+    expect(screen.getByText("Grad Student")).toBeTruthy();
+  });
+
+  it("treats a missing roleCategory as linkable (fail-open)", () => {
+    render(
+      <AuthorChipRow
+        authors={[baseChip({ name: "Unknown Role", cwid: "u001", slug: "unknown-role" })]}
+      />,
+    );
+    expect(document.querySelector('a[href="/scholars/unknown-role"]')).not.toBeNull();
+  });
+});

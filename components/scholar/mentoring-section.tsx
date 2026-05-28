@@ -7,6 +7,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import type { MenteeChip, CoPublication, MenteeSort } from "@/lib/api/mentoring";
 import {
   MENTORING_GROUPED_THRESHOLD,
@@ -368,7 +369,12 @@ function MenteeChipCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const isLinked = mentee.scholar !== null;
+  // #536 — a hidden identity class (doctoral student) keeps its name and the
+  // contextual popover but gets no profile link (the route 404s). Folding the
+  // display check into `isLinked` routes such mentees through the same
+  // no-clickable-profile path already used for mentees without a Scholar row.
+  const isLinked =
+    mentee.scholar !== null && isPubliclyDisplayed(mentee.scholar.roleCategory);
   // Issue #195 — prefer the human-readable program name (ED authoritative,
   // Jenzabar fallback) over the degree-bucket label. When neither source
   // has a record, fall back to "PhD" / "MD-PhD" / "MD mentee" etc.

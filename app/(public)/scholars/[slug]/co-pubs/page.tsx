@@ -86,7 +86,7 @@ export default async function MentorCoPubsRollupPage({
       ? []
       : await prisma.scholar.findMany({
           where: { cwid: { in: [...authorCwids] }, deletedAt: null, status: "active" },
-          select: { cwid: true, slug: true, preferredName: true },
+          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
         });
   const scholarByCwid = new Map(wcmScholars.map((s) => [s.cwid, s]));
 
@@ -197,7 +197,10 @@ function CoPubCitation({
   entry: MenteeCoPubEntry;
   mentorCwid: string;
   mentorSlug: string;
-  scholarByCwid: Map<string, { slug: string; preferredName: string }>;
+  scholarByCwid: Map<
+    string,
+    { slug: string; preferredName: string; roleCategory: string | null }
+  >;
 }) {
   const pub = entry.publication;
   const wcmRanks = pub.authors
@@ -220,6 +223,7 @@ function CoPubCitation({
       identityImageEndpoint: identityImageEndpoint(a.personIdentifier),
       isFirst: a.rank === minWcmRank,
       isLast: a.rank === maxRank,
+      roleCategory: s?.roleCategory ?? null,
     });
   }
 

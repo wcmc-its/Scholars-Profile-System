@@ -52,6 +52,10 @@ export type EditContextScholar = {
   slug: string;
   preferredName: string;
   fullName: string;
+  /** #536 — drives the edit-route guard: a hidden identity class (doctoral
+   *  student) has no public profile, so only a superuser may reach its edit
+   *  surface; a non-superuser (incl. the scholar themselves) 404s. */
+  roleCategory: string | null;
   /** The effective bio — `field_override(overview) ?? scholar.overview`, sanitized. Empty string = "no overview". */
   overview: string;
   /**
@@ -172,6 +176,7 @@ export async function loadEditContext(
       fullName: true,
       overview: true,
       deletedAt: true,
+      roleCategory: true,
     },
   });
   if (!scholar || scholar.deletedAt !== null) return null;
@@ -358,6 +363,7 @@ export async function loadEditContext(
         slug: scholar.slug,
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
+        roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
         suppression: {
@@ -469,6 +475,7 @@ export async function loadEditContext(
       slug: scholar.slug,
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
+      roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
       suppression: {

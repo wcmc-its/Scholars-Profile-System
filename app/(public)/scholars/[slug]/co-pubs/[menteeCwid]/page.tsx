@@ -85,7 +85,7 @@ export default async function CoPubsPage({
       ? []
       : await prisma.scholar.findMany({
           where: { cwid: { in: [...authorCwids] }, deletedAt: null, status: "active" },
-          select: { cwid: true, slug: true, preferredName: true },
+          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
         });
   const scholarByCwid = new Map(wcmScholars.map((s) => [s.cwid, s]));
 
@@ -176,7 +176,10 @@ function CoPubCitation({
   currentProfileCwid,
 }: {
   pub: CoPublicationFull;
-  scholarByCwid: Map<string, { slug: string; preferredName: string }>;
+  scholarByCwid: Map<
+    string,
+    { slug: string; preferredName: string; roleCategory: string | null }
+  >;
   pinnedCwids: ReadonlyArray<string>;
   currentProfileCwid: string;
 }) {
@@ -200,6 +203,7 @@ function CoPubCitation({
       identityImageEndpoint: identityImageEndpoint(a.personIdentifier),
       isFirst: a.rank === minWcmRank,
       isLast: a.rank === maxRank,
+      roleCategory: s?.roleCategory ?? null,
     });
   }
 

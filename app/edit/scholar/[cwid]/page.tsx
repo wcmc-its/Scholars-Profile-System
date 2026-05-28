@@ -25,6 +25,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { getEditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
@@ -70,6 +71,13 @@ export default async function EditScholarPage({
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the
     // route shape predictable — there is no profile to edit.
+    notFound();
+  }
+
+  // #536 — a hidden identity class (doctoral student) has no public profile, so
+  // only a superuser may reach its edit surface. A non-superuser — including the
+  // scholar themselves (isSelf) — 404s, matching the public route's posture.
+  if (!session.isSuperuser && !isPubliclyDisplayed(ctx.scholar.roleCategory)) {
     notFound();
   }
 

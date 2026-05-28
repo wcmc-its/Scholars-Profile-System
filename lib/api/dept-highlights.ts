@@ -64,13 +64,14 @@ type ScholarLite = {
   cwid: string;
   preferredName: string;
   slug: string;
+  roleCategory: string | null;
 };
 
 async function loadScholarLite(cwids: string[]): Promise<Map<string, ScholarLite>> {
   if (cwids.length === 0) return new Map();
   const rows = (await prisma.scholar.findMany({
     where: { cwid: { in: cwids }, deletedAt: null },
-    select: { cwid: true, preferredName: true, slug: true },
+    select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
   })) as ScholarLite[];
   return new Map(rows.map((r) => [r.cwid, r]));
 }
@@ -166,6 +167,7 @@ export async function getDeptRecentPublications(
             identityImageEndpoint: identityImageEndpoint(s.cwid),
             isFirst: a.isFirst,
             isLast: a.isLast,
+            roleCategory: s.roleCategory,
           } satisfies AuthorChip;
         })
         .filter((x): x is NonNullable<typeof x> => x !== null),
@@ -345,6 +347,7 @@ async function groupAndPickGrants(
           // with the spec.
           isFirst: true,
           isLast: false,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

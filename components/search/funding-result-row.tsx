@@ -8,6 +8,7 @@ import { FunderEyebrow } from "@/components/ui/funder-eyebrow";
 import { MechanismAbbr } from "@/components/ui/mechanism-abbr";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { sanitizePubTitle } from "@/lib/utils";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
@@ -110,24 +111,9 @@ export function FundingResultRow({
 
         {/* People row + inline pills. */}
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          {visiblePeople.map((p) => (
-            <PersonPopover
-              key={p.cwid}
-              cwid={p.cwid}
-              surface="grant-investigator"
-              contextGrant={{
-                projectId: hit.projectId,
-                role: p.role,
-                startYear: Number(startYear),
-                endYear: Number(endYear),
-                isMultiPi: hit.isMultiPi,
-              }}
-            >
-              <Link
-                href={`/scholars/${p.slug}`}
-                onClick={() => trackClick(p.cwid)}
-                className="inline-flex items-center gap-1.5 text-[13px] text-[#2c4f6e] hover:underline"
-              >
+          {visiblePeople.map((p) => {
+            const inner = (
+              <>
                 <HeadshotAvatar
                   cwid={p.cwid}
                   identityImageEndpoint={p.identityImageEndpoint}
@@ -135,9 +121,43 @@ export function FundingResultRow({
                   size="sm"
                 />
                 <span>{p.preferredName}</span>
-              </Link>
-            </PersonPopover>
-          ))}
+              </>
+            );
+            // #536 — a hidden identity class (e.g. an F31 predoctoral PI) keeps
+            // its name + headshot but gets no profile link / navigating popover.
+            if (!isPubliclyDisplayed(p.roleCategory)) {
+              return (
+                <span
+                  key={p.cwid}
+                  className="inline-flex items-center gap-1.5 text-[13px] text-[#444441]"
+                >
+                  {inner}
+                </span>
+              );
+            }
+            return (
+              <PersonPopover
+                key={p.cwid}
+                cwid={p.cwid}
+                surface="grant-investigator"
+                contextGrant={{
+                  projectId: hit.projectId,
+                  role: p.role,
+                  startYear: Number(startYear),
+                  endYear: Number(endYear),
+                  isMultiPi: hit.isMultiPi,
+                }}
+              >
+                <Link
+                  href={`/scholars/${p.slug}`}
+                  onClick={() => trackClick(p.cwid)}
+                  className="inline-flex items-center gap-1.5 text-[13px] text-[#2c4f6e] hover:underline"
+                >
+                  {inner}
+                </Link>
+              </PersonPopover>
+            );
+          })}
           {remainder > 0 ? (
             <span className="text-[13px] text-[#757575]">
               +{remainder} more

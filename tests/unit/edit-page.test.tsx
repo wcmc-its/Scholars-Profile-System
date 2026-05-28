@@ -26,6 +26,7 @@ const ctx: EditContext = {
     slug: "self-slug",
     preferredName: "Alex Self",
     fullName: "Alex Self, MD",
+    roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
     slugOverride: null,
     suppression: { ownRow: null, adminRow: null },
