@@ -22,8 +22,10 @@ const {
   mockUnitAdminFindMany,
   mockCenterMembershipFindUnique,
   mockDivisionMembershipFindUnique,
+  mockCenterProgramFindMany,
   mockTxCenterMembershipCreate,
   mockTxCenterMembershipDelete,
+  mockTxCenterMembershipUpsert,
   mockTxDivisionMembershipCreate,
   mockTxDivisionMembershipDelete,
   mockReflectUnitChange,
@@ -36,8 +38,10 @@ const {
   mockUnitAdminFindMany: vi.fn(),
   mockCenterMembershipFindUnique: vi.fn(),
   mockDivisionMembershipFindUnique: vi.fn(),
+  mockCenterProgramFindMany: vi.fn(),
   mockTxCenterMembershipCreate: vi.fn(),
   mockTxCenterMembershipDelete: vi.fn(),
+  mockTxCenterMembershipUpsert: vi.fn(),
   mockTxDivisionMembershipCreate: vi.fn(),
   mockTxDivisionMembershipDelete: vi.fn(),
   mockReflectUnitChange: vi.fn(),
@@ -52,6 +56,7 @@ vi.mock("@/lib/db", () => ({
       unitAdmin: { findMany: mockUnitAdminFindMany },
       centerMembership: { findUnique: mockCenterMembershipFindUnique },
       divisionMembership: { findUnique: mockDivisionMembershipFindUnique },
+      centerProgram: { findMany: mockCenterProgramFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -69,12 +74,23 @@ const fakeTx = {
   centerMembership: {
     create: mockTxCenterMembershipCreate,
     delete: mockTxCenterMembershipDelete,
+    upsert: mockTxCenterMembershipUpsert,
   },
   divisionMembership: {
     create: mockTxDivisionMembershipCreate,
     delete: mockTxDivisionMembershipDelete,
   },
   $executeRaw: mockExecuteRaw,
+};
+
+/** A blank CenterMembership snapshot row — the create/upsert mocks resolve this
+ *  so the route's audit snapshot() has a row to read. */
+const BLANK_ROW = {
+  cwid: "fac001",
+  membershipType: null,
+  programCode: null,
+  startDate: null,
+  endDate: null,
 };
 
 function post(body: unknown): NextRequest {
@@ -102,6 +118,10 @@ beforeEach(() => {
   });
   mockCenterMembershipFindUnique.mockResolvedValue(null);
   mockDivisionMembershipFindUnique.mockResolvedValue(null);
+  mockCenterProgramFindMany.mockResolvedValue([]);
+  mockTxCenterMembershipCreate.mockResolvedValue(BLANK_ROW);
+  mockTxCenterMembershipUpsert.mockResolvedValue(BLANK_ROW);
+  mockTxCenterMembershipDelete.mockResolvedValue(BLANK_ROW);
   mockUnitAdminFindMany.mockResolvedValue([
     { entityType: "center", entityId: "MEYER", role: "curator" },
   ]);
@@ -238,5 +258,111 @@ describe("/api/edit/roster — input validation", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "invalid_action" });
+  });
+});
+
+describe("/api/edit/roster — #552 set action + extended fields", () => {
+  it("set upserts a center membership with type + program + dates", async () => {
+    mockCenterProgramFindMany.mockResolvedValue([{ code: "CT" }, { code: "CB" }]);
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        membershipType: "research",
+        programCode: "CT",
+        startDate: "2024-07-01",
+        endDate: null,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, changed: true });
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toMatchObject({ membershipType: "research", programCode: "CT", endDate: null });
+    expect(call.update.startDate).toBeInstanceOf(Date);
+    expect(call.create).toMatchObject({ centerCode: "MEYER", cwid: "fac001", source: "manual-ui" });
+  });
+
+  it("set with explicit null clears a field (partial body)", async () => {
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", membershipType: null }),
+    );
+    expect(res.status).toBe(200);
+    const call = mockTxCenterMembershipUpsert.mock.calls[0][0];
+    expect(call.update).toEqual({ membershipType: null });
+  });
+
+  it("programCode on a center with no taxonomy → 400 no_taxonomy", async () => {
+    mockCenterProgramFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", programCode: "CT" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "no_taxonomy" });
+  });
+
+  it("programCode not in the center's taxonomy → 400 invalid_program_code", async () => {
+    mockCenterProgramFindMany.mockResolvedValue([{ code: "CB" }]);
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", programCode: "ZZ" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_program_code" });
+  });
+
+  it("endDate before startDate → 400 invalid_date_range", async () => {
+    const res = await POST(
+      post({
+        unitType: "center",
+        unitCode: "MEYER",
+        cwid: "fac001",
+        action: "set",
+        startDate: "2025-01-01",
+        endDate: "2024-01-01",
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_date_range" });
+  });
+
+  it("malformed date → 400 invalid_date", async () => {
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", startDate: "07/01/2024" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_date" });
+  });
+
+  it("invalid membershipType → 400 invalid_membership_type", async () => {
+    const res = await POST(
+      post({ unitType: "center", unitCode: "MEYER", cwid: "fac001", action: "set", membershipType: "faculty" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "invalid_membership_type" });
+  });
+
+  it("extended fields on a division → 400 roster_field_center_only", async () => {
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "CARDIO", role: "curator" },
+    ]);
+    const res = await POST(
+      post({ unitType: "division", unitCode: "CARDIO", cwid: "fac001", action: "set", programCode: "CT" }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "roster_field_center_only" });
+  });
+
+  it("set on a division with no extended fields upserts the base row", async () => {
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "division", entityId: "CARDIO", role: "curator" },
+    ]);
+    const res = await POST(
+      post({ unitType: "division", unitCode: "CARDIO", cwid: "fac001", action: "set" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxDivisionMembershipCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { divisionCode: "CARDIO", cwid: "fac001", source: "manual-ui" } }),
+    );
   });
 });
