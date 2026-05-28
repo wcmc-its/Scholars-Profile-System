@@ -27,6 +27,32 @@ export function resolveConceptMode(): ConceptMode {
   return "expanded";
 }
 
+export type PeopleRelevanceMode = "legacy" | "v3";
+
+/**
+ * SPEC §12 PR-5 (#312). Resolve the active People-tab relevance mode — the
+ * single source of truth shared by the API route and the SSR page so the
+ * server-rendered result set and any subsequent /api/search call rank
+ * identically.
+ *
+ *   `SEARCH_PEOPLE_RELEVANCE_MODE=legacy` → "legacy" (emergency rollback: the
+ *     #259 restructured cross_fields body for every shape, no §6.1 templates)
+ *   otherwise (unset / "v3") → "v3" (PR-5 default: the §6.1 shape-routed
+ *     name / topic / department / hybrid templates)
+ *
+ * Default flipped from "legacy" to "v3" in PR-5. An unrecognized value logs a
+ * warning and falls through to the "v3" default.
+ */
+export function resolvePeopleRelevanceMode(): PeopleRelevanceMode {
+  const v = process.env.SEARCH_PEOPLE_RELEVANCE_MODE;
+  if (v && v !== "legacy" && v !== "v3") {
+    console.warn(
+      `[search] ignoring unrecognized SEARCH_PEOPLE_RELEVANCE_MODE="${v}"; using "v3"`,
+    );
+  }
+  return v === "legacy" ? "legacy" : "v3";
+}
+
 /**
  * SPEC §6.2. Parse `?mesh=…` honoring off-wins precedence regardless of URL
  * order. Accepts either a Web `URLSearchParams` (route handler) or a Next.js

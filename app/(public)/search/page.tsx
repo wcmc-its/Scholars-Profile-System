@@ -19,7 +19,13 @@ import { ConceptEmptyState } from "@/components/search/concept-empty-state";
 import { SearchInterpretationPopover } from "@/components/search/search-interpretation-popover";
 import { buildSearchInterpretation } from "@/lib/api/search-interpretation";
 import { buildMeshHref } from "./url-helpers";
-import { parseMeshParam, resolveConceptMode } from "@/lib/api/search-flags";
+import {
+  parseMeshParam,
+  resolveConceptMode,
+  resolvePeopleRelevanceMode,
+} from "@/lib/api/search-flags";
+import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
+import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
   searchPeople,
   searchPublications,
@@ -185,6 +191,21 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // Promise.all (≈ the slowest of the three searches) — the search phase the
   // user actually waits on. Per-function p50/p95 comes from the /api/search
   // route handler, which runs one search per request.
+  // SPEC §12 PR-5 (#312) — classify the People-tab query and resolve the
+  // relevance mode here too, so this SSR result set ranks identically to a
+  // subsequent /api/search call (the route does the same). Without this the
+  // server-rendered people tab would stay on the legacy body after the flip
+  // while client-side requests went v3. Classifier sets are boot-cached.
+  const peopleRelevanceMode = resolvePeopleRelevanceMode();
+  const peopleClassifierSets = await getPeopleClassifierSets();
+  const peopleQueryShape = classifyPeopleQuery({
+    query: q,
+    meshResolved: taxonomyMatch.meshResolution != null,
+    knownCwids: peopleClassifierSets.cwids,
+    knownSurnames: peopleClassifierSets.surnames,
+    knownDepartments: peopleClassifierSets.departments,
+  });
+
   const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
@@ -198,6 +219,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         pi,
         piMin,
       },
+      // PR-5: route the §6.1 shape templates on the SSR path too.
+      relevanceMode: peopleRelevanceMode,
+      shape: peopleQueryShape,
+      meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
     }),
     searchPublications({
       q,

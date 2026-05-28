@@ -1,10 +1,13 @@
 /**
- * Issue #259 §1.1 — structural assertion on the people-index query body.
+ * Issue #259 §1.1 / SPEC §12 PR-5 (#312) — structural assertion on the
+ * people-index restructured query body.
  *
- * Captures the `body.query` sent to OpenSearch and checks shape, not
- * behavior. With the flag off, the existing flat multi_match shape must
- * be preserved bit-for-bit. With the flag on, the multimatch branch must
- * become a bool with:
+ * Captures the `body.query` sent to OpenSearch and checks shape, not behavior.
+ * PR-5 retired the `SEARCH_PEOPLE_QUERY_RESTRUCTURE` flag and its flat
+ * best_fields (`legacy_multi_match`) alternative, so the restructured body is
+ * now unconditional for any query the §6.1 templates don't route — a shape-less
+ * `searchPeople` call (no `shape` opt) lands here even under the v3 default.
+ * The multimatch branch must be a bool with:
  *   - must: [multi_match over high-evidence fields, msm "2<-34%"]
  *   - should: [match on publicationAbstracts with boost 0.3]
  * and `publicationAbstracts` must NOT appear in the must clause's fields.
@@ -30,17 +33,6 @@ const capturedBodies: Array<Record<string, unknown>> = [];
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
-  PEOPLE_FIELD_BOOSTS: [
-    "preferredName^10",
-    "fullName^10",
-    "areasOfInterest^6",
-    "primaryTitle^4",
-    "primaryDepartment^3",
-    "overview^2",
-    "publicationTitles^1",
-    "publicationMesh^0.5",
-    "publicationAbstracts^0.3",
-  ],
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS: [
     "preferredName^10",
     "fullName^10",
@@ -107,46 +99,21 @@ function multiMatchBranch(body: Record<string, unknown>): Record<string, unknown
   return innerBool[1] as Record<string, unknown>;
 }
 
-describe("people-index query shape — SEARCH_PEOPLE_QUERY_RESTRUCTURE", () => {
-  const originalEnv = process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE;
+import { searchPeople } from "@/lib/api/search";
 
+describe("people-index restructured body — SPEC §12 PR-5 (#312)", () => {
   beforeEach(() => {
     capturedBodies.length = 0;
-    // Force re-import on each test so the env-read in searchPeople reflects
-    // whatever the test set. Module cache lives outside vi.mock.
-    vi.resetModules();
   });
 
   afterEach(() => {
-    process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = originalEnv;
+    vi.clearAllMocks();
   });
 
-  it("flag explicitly off: emits a flat multi_match over all 9 PEOPLE_FIELD_BOOSTS", async () => {
-    // Default flipped on in this PR; explicit "off" exercises the legacy
-    // emergency-rollback path.
-    process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = "off";
-    const mod = (await import("@/lib/api/search")) as {
-      searchPeople: (opts: unknown) => Promise<{ queryShape: string }>;
-    };
-    const result = await mod.searchPeople({ q: "electronic health records", page: 0 });
-
-    expect(result.queryShape).toBe("legacy_multi_match");
-    expect(capturedBodies).toHaveLength(1);
-
-    const branch = multiMatchBranch(capturedBodies[0]);
-    expect(branch).toHaveProperty("multi_match");
-    const mm = branch.multi_match as { fields: string[]; type: string };
-    expect(mm.type).toBe("best_fields");
-    expect(mm.fields).toContain("publicationAbstracts^0.3");
-    expect(mm.fields).toHaveLength(9);
-  });
-
-  it("flag on: emits bool { must: [multi_match w/ msm], should: [abstracts] }", async () => {
-    process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = "on";
-    const mod = (await import("@/lib/api/search")) as {
-      searchPeople: (opts: unknown) => Promise<{ queryShape: string }>;
-    };
-    const result = await mod.searchPeople({ q: "electronic health records", page: 0 });
+  it("non-template query emits bool { must: [multi_match w/ msm], should: [abstracts] }", async () => {
+    // No `shape` opt → no §6.1 template fires (even under the v3 default), so
+    // the query lands on the unconditional restructured body.
+    const result = await searchPeople({ q: "electronic health records", page: 0 });
 
     expect(result.queryShape).toBe("restructured_msm");
     expect(capturedBodies).toHaveLength(1);
@@ -179,14 +146,9 @@ describe("people-index query shape — SEARCH_PEOPLE_QUERY_RESTRUCTURE", () => {
     expect(should.match.publicationAbstracts.boost).toBe(0.3);
   });
 
-  it("flag on, empty query: skips the multi_match branch entirely (match_all)", async () => {
-    process.env.SEARCH_PEOPLE_QUERY_RESTRUCTURE = "on";
-    const mod = (await import("@/lib/api/search")) as {
-      searchPeople: (opts: unknown) => Promise<{ queryShape: string }>;
-    };
-    const result = await mod.searchPeople({ q: "", page: 0 });
+  it("empty query skips the multi_match branch entirely (match_all)", async () => {
+    const result = await searchPeople({ q: "", page: 0 });
 
-    // queryShape still reflects the flag, even when no query body is built.
     expect(result.queryShape).toBe("restructured_msm");
     expect(capturedBodies).toHaveLength(1);
 
