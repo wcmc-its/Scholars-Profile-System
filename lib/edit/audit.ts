@@ -38,22 +38,32 @@ export type AuditAction =
   /** a superuser rejected a slug request (#497 PR-3) */
   | "slug_request_rejected"
   /** a scholar withdrew their own pending slug request (#497 PR-3) */
-  | "slug_request_withdrawn";
+  | "slug_request_withdrawn"
+  /** a manually-owned center or manually-created division was created (#540 Phase 1) */
+  | "unit_create"
+  /** a CenterMembership / DivisionMembership row was added or removed (#540 Phase 1) */
+  | "roster_change"
+  /** a UnitAdmin row was inserted or hard-deleted (#540 Phase 1) */
+  | "grant_change";
 
-/** The target type — mirrors the table ENUM; v1 emits only `scholar` / `publication`. */
+/** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
   | "scholar"
   | "publication"
   | "grant"
   | "education"
-  | "appointment";
+  | "appointment"
+  /** org-unit targets (#540 Phase 1); `targetEntityId` is the unit `code` */
+  | "department"
+  | "division"
+  | "center";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {
   /** the signed-in actor (B01 SSO session subject) */
   actorCwid: string;
   targetEntityType: AuditEntityType;
-  /** `scholar.cwid` or `publication.pmid` */
+  /** `scholar.cwid`, `publication.pmid`, or unit `code` (department/division/center) */
   targetEntityId: string;
   action: AuditAction;
   /** field names for a `field_override` (e.g. `["overview"]`); `null` for a suppression */

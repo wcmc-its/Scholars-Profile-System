@@ -115,4 +115,31 @@ describe("appendAuditRow", () => {
   it("throws — failing the transaction — if the insert does not affect exactly one row", async () => {
     await expect(appendAuditRow(fakeTx(0) as unknown as Tx, BASE_ROW)).rejects.toThrow();
   });
+
+  // #540 Phase 1: the table ENUM gained three actions and three target types;
+  // exercise each so a future enum drift between the TS types and the SQL
+  // column is a unit-test failure rather than a runtime INSERT rejection.
+  it.each([
+    ["unit_create", "center", "meyer-cancer-center"],
+    ["roster_change", "division", "N101"],
+    ["grant_change", "department", "1010000"],
+  ] as const)(
+    "writes the %s action against a %s target",
+    async (action, targetEntityType, targetEntityId) => {
+      const tx = fakeTx(1);
+      await appendAuditRow(tx as unknown as Tx, {
+        ...BASE_ROW,
+        action,
+        targetEntityType,
+        targetEntityId,
+        fieldsChanged: null,
+        beforeValues: null,
+        afterValues: { code: targetEntityId },
+      });
+      const args = tx.$executeRaw.mock.calls[0];
+      expect(args[2]).toBe(targetEntityType);
+      expect(args[3]).toBe(targetEntityId);
+      expect(args[4]).toBe(action);
+    },
+  );
 });
