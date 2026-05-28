@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { FeedbackBadge } from "@/components/site/feedback-badge";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -24,9 +25,16 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // #538 — render the feedback badge on every page when the flag is on.
+  // The server-side decision is made here so the client component is
+  // never even shipped to the browser when the flag is off.
+  const showFeedbackBadge = process.env.FEEDBACK_BADGE_ENABLED === "on";
   return (
     <html lang="en" className={inter.variable}>
-      <body className="bg-background text-foreground antialiased">{children}</body>
+      <body className="bg-background text-foreground antialiased">
+        {children}
+        {showFeedbackBadge ? <FeedbackBadge /> : null}
+      </body>
     </html>
   );
 }
