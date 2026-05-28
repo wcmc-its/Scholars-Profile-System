@@ -25,6 +25,11 @@ import path from "node:path";
 
 import { db } from "../../lib/db";
 import { detectDivisionChief, type ChiefVerdict } from "./chief-detection";
+import {
+  loadUnitOverridesForETL,
+  resolveUnitLeaderForETL,
+  resolveUnitSlugForETL,
+} from "./unit-overrides";
 import { DEPARTMENT_CATEGORIES } from "@/lib/department-categories";
 import type { RoleCategory } from "@/lib/eligibility";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
@@ -649,18 +654,33 @@ async function main() {
       return deptAlias.get(code) ?? code;
     }
 
+    // #540 — load the dept/div `field_override` consult once per run. A
+    // curated `slug` wins over `deriveSlug`; a curated `leaderCwid` wins
+    // over the chair regex / chief detection further below. Two queries.
+    const unitOverrides = await loadUnitOverridesForETL(db.write);
+
     // Upsert dept + division rows now (before scholar updates would
     // FK-reference them). Slug collisions (two distinct codes producing the
     // same name-derived slug — e.g. legacy "1280000000" vs modern "N1280"
     // both → "medicine") are disambiguated by appending the code suffix
-    // to whichever row is upserted second.
+    // to whichever row is upserted second. A `field_override(slug)` row
+    // bypasses that pipeline — curator intent is final (SPEC § etl/ed
+    // precedence consult).
     const usedDeptSlugs = new Set<string>();
     let deptUpsertsPre = 0;
+    let deptSlugOverridesApplied = 0;
     for (const dept of seenDepts.values()) {
-      let slug = deriveSlug(dept.name) || dept.code.toLowerCase();
-      if (usedDeptSlugs.has(slug)) {
-        slug = `${slug}-${dept.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      const derivedBase = deriveSlug(dept.name) || dept.code.toLowerCase();
+      let derived = derivedBase;
+      if (!unitOverrides.deptSlugs.has(dept.code) && usedDeptSlugs.has(derived)) {
+        derived = `${derived}-${dept.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
       }
+      const { slug, fromOverride } = resolveUnitSlugForETL(
+        dept.code,
+        derived,
+        unitOverrides.deptSlugs,
+      );
+      if (fromOverride) deptSlugOverridesApplied += 1;
       usedDeptSlugs.add(slug);
       const seedCategory = DEPARTMENT_CATEGORIES[dept.code] ?? "clinical";
       await db.write.department.upsert({
@@ -686,11 +706,19 @@ async function main() {
     }
     const usedDivSlugs = new Set<string>();
     let divUpsertsPre = 0;
+    let divSlugOverridesApplied = 0;
     for (const div of seenDivs.values()) {
-      let slug = deriveSlug(div.name) || div.code.toLowerCase();
-      if (usedDivSlugs.has(slug)) {
-        slug = `${slug}-${div.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      const derivedBase = deriveSlug(div.name) || div.code.toLowerCase();
+      let derived = derivedBase;
+      if (!unitOverrides.divSlugs.has(div.code) && usedDivSlugs.has(derived)) {
+        derived = `${derived}-${div.code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
       }
+      const { slug, fromOverride } = resolveUnitSlugForETL(
+        div.code,
+        derived,
+        unitOverrides.divSlugs,
+      );
+      if (fromOverride) divSlugOverridesApplied += 1;
       usedDivSlugs.add(slug);
       await db.write.division.upsert({
         where: { code: div.code },
@@ -712,7 +740,8 @@ async function main() {
       divUpsertsPre += 1;
     }
     console.log(
-      `[ED] pre-upserted ${deptUpsertsPre} departments, ${divUpsertsPre} divisions`,
+      `[ED] pre-upserted ${deptUpsertsPre} departments, ${divUpsertsPre} divisions ` +
+        `(slug overrides applied: ${deptSlugOverridesApplied} dept, ${divSlugOverridesApplied} div)`,
     );
 
     for (const f of allEntries) {
@@ -882,7 +911,24 @@ async function main() {
     // Tiebreak on isPrimary DESC then startDate DESC.
     const chairTitleVariants = new Set<string>();
     let chairAssignments = 0;
+    let deptLeaderOverridesApplied = 0;
     for (const dept of seenDepts.values()) {
+      // #540 — a `field_override(department, code, 'leaderCwid')` row wins
+      // outright. Non-empty value writes the curated CWID; `""` writes null
+      // (explicit vacancy — three-state, do NOT fall through to regex).
+      const leaderOverride = resolveUnitLeaderForETL(
+        dept.code,
+        unitOverrides.deptLeaders,
+      );
+      if (leaderOverride.applied) {
+        await db.write.department.update({
+          where: { code: dept.code },
+          data: { chairCwid: leaderOverride.cwid },
+        });
+        deptLeaderOverridesApplied += 1;
+        if (leaderOverride.cwid) chairAssignments += 1;
+        continue;
+      }
       // Look up category so we know whether to match "Chair of X" or
       // "Director of X". Falls back to "clinical" for depts the seed file
       // doesn't know about; same default the upsert step uses.
@@ -941,7 +987,10 @@ async function main() {
         chairAssignments += 1;
       }
     }
-    console.log(`[ED] assigned leaders to ${chairAssignments}/${seenDepts.size} departments`);
+    console.log(
+      `[ED] assigned leaders to ${chairAssignments}/${seenDepts.size} departments ` +
+        `(field_override consult: ${deptLeaderOverridesApplied} dept rows wrote from override)`,
+    );
     console.log(`[ED] distinct leader-title variants observed:`, [...chairTitleVariants]);
 
     // Issue #58 — admin-dept leader overrides. The chair/director regex above
@@ -955,6 +1004,12 @@ async function main() {
     };
     let adminOverridesApplied = 0;
     for (const [code, cwid] of Object.entries(ADMIN_DEPT_LEADER_OVERRIDES)) {
+      // #540 — a `field_override(leaderCwid)` row beats this hardcoded
+      // fallback in either direction. A non-empty override already wrote
+      // chairCwid above (`dept.chairCwid` truthy, caught below); an empty
+      // override wrote null as an explicit vacancy and MUST NOT be silently
+      // re-filled here (that would defeat the three-state model).
+      if (unitOverrides.deptLeaders.has(code)) continue;
       const dept = await db.write.department.findUnique({
         where: { code },
         select: { code: true, category: true, chairCwid: true },
@@ -1251,8 +1306,25 @@ async function main() {
       HIGH: 0, MEDIUM: 0, LOW: 0, NONE: 0, GAP: 0,
     };
     let chiefAssignments = 0;
+    let divLeaderOverridesApplied = 0;
     if (!chiefDetectionDisabled && employeeRecords.length > 0) {
       for (const div of divisionsForChief) {
+        // #540 — a `field_override(division, code, 'leaderCwid')` row wins
+        // over Path B and Path C both. Non-empty -> that CWID; "" ->
+        // null (explicit vacancy, no fallback).
+        const leaderOverride = resolveUnitLeaderForETL(
+          div.code,
+          unitOverrides.divLeaders,
+        );
+        if (leaderOverride.applied) {
+          await db.write.division.update({
+            where: { code: div.code },
+            data: { chiefCwid: leaderOverride.cwid },
+          });
+          divLeaderOverridesApplied += 1;
+          if (leaderOverride.cwid) chiefAssignments += 1;
+          continue;
+        }
         const parentChair = deptChairs.get(div.deptCode) ?? null;
         const members = Array.from(divisionMembers.get(div.code) ?? []);
         const result = detectDivisionChief({
@@ -1275,7 +1347,8 @@ async function main() {
       console.log(
         `[ED] Path B: assigned chiefs to ${chiefAssignments}/${divisionsForChief.length} divisions ` +
           `(verdicts — HIGH=${chiefVerdictTally.HIGH} MEDIUM=${chiefVerdictTally.MEDIUM} ` +
-          `LOW=${chiefVerdictTally.LOW} NONE=${chiefVerdictTally.NONE} GAP=${chiefVerdictTally.GAP})`,
+          `LOW=${chiefVerdictTally.LOW} NONE=${chiefVerdictTally.NONE} GAP=${chiefVerdictTally.GAP}; ` +
+          `field_override consult: ${divLeaderOverridesApplied} divisions wrote from override)`,
       );
     } else {
       console.log(
@@ -1287,8 +1360,28 @@ async function main() {
       );
       // Even when Path B is skipped, clear stale chief assignments before
       // the override pass writes — keeps the table consistent with intent.
+      // #540 — but first apply any `field_override(leaderCwid)` rows so an
+      // explicit curator pin / vacancy survives even when Path B is off.
       if (!chiefDetectionDisabled) {
         await db.write.division.updateMany({ data: { chiefCwid: null } });
+        for (const div of divisionsForChief) {
+          const leaderOverride = resolveUnitLeaderForETL(
+            div.code,
+            unitOverrides.divLeaders,
+          );
+          if (!leaderOverride.applied) continue;
+          await db.write.division.update({
+            where: { code: div.code },
+            data: { chiefCwid: leaderOverride.cwid },
+          });
+          divLeaderOverridesApplied += 1;
+        }
+        if (divLeaderOverridesApplied > 0) {
+          console.log(
+            `[ED] field_override consult applied to ${divLeaderOverridesApplied} divisions ` +
+              `(Path B was off)`,
+          );
+        }
       }
     }
 
@@ -1335,6 +1428,16 @@ async function main() {
           console.warn(
             `[ED] division-chiefs override skipped — division ${row.divCode} not found`,
           );
+          overrideSkipped += 1;
+          continue;
+        }
+        // #540 — `field_override(division, code, 'leaderCwid')` is the
+        // structured successor to this file. When a row exists for this
+        // division, the override-consult above has already written the
+        // authoritative value; Path C must not stomp it (the explicit
+        // "" vacancy case in particular). Phase 9 will backfill this
+        // file's contents into `field_override` rows and retire Path C.
+        if (unitOverrides.divLeaders.has(row.divCode)) {
           overrideSkipped += 1;
           continue;
         }
