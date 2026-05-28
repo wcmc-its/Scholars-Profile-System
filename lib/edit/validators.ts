@@ -684,9 +684,47 @@ export function isGrantAction(value: string): value is GrantAction {
 // roster action  (#540 Phase 5b / SPEC § /api/edit/roster)
 // ---------------------------------------------------------------------------
 
-export const ROSTER_ACTIONS = ["add", "remove"] as const;
+export const ROSTER_ACTIONS = ["add", "remove", "set"] as const;
 export type RosterAction = (typeof ROSTER_ACTIONS)[number];
 
 export function isRosterAction(value: string): value is RosterAction {
   return (ROSTER_ACTIONS as readonly string[]).includes(value);
+}
+
+// ---------------------------------------------------------------------------
+// Center membership extended fields (#552 Phase 2). membershipType + programCode
+// + dates apply to CenterMembership only; the roster route rejects them for a
+// division (DivisionMembership has no such columns).
+// ---------------------------------------------------------------------------
+
+export const CENTER_MEMBERSHIP_TYPES = ["research", "clinical"] as const;
+export type CenterMembershipTypeValue = (typeof CENTER_MEMBERSHIP_TYPES)[number];
+
+export function isCenterMembershipType(value: string): value is CenterMembershipTypeValue {
+  return (CENTER_MEMBERSHIP_TYPES as readonly string[]).includes(value);
+}
+
+const ROSTER_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export type RosterDateResult = { ok: true; value: Date | null } | { ok: false; error: string };
+
+/**
+ * Parse a roster date payload value: `null` (clear), or an ISO `YYYY-MM-DD`
+ * string → a UTC-midnight `Date` for the `@db.Date` column. Any other shape is
+ * `invalid_date`.
+ */
+export function validateRosterDate(input: unknown): RosterDateResult {
+  if (input === null) return { ok: true, value: null };
+  if (typeof input !== "string" || !ROSTER_DATE_PATTERN.test(input)) {
+    return { ok: false, error: "invalid_date" };
+  }
+  const d = new Date(`${input}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return { ok: false, error: "invalid_date" };
+  return { ok: true, value: d };
+}
+
+/** `end >= start` when both are present; either-null is an open-ended range. */
+export function isValidDateRange(start: Date | null, end: Date | null): boolean {
+  if (start === null || end === null) return true;
+  return end.getTime() >= start.getTime();
 }
