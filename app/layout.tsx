@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { FeedbackBadge } from "@/components/site/feedback-badge";
+import { FeedbackBadgeProvider } from "@/components/site/feedback-badge-context";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -32,8 +33,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="bg-background text-foreground antialiased">
-        {children}
-        {showFeedbackBadge ? <FeedbackBadge /> : null}
+        <FeedbackBadgeProvider>
+          {children}
+          {showFeedbackBadge ? <FeedbackBadge /> : null}
+        </FeedbackBadgeProvider>
       </body>
     </html>
   );
