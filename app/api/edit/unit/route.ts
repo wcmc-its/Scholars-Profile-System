@@ -36,13 +36,13 @@ import {
   logEditDenial,
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
+import { mintSyntheticUnitCode } from "@/lib/edit/mint-code";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
 import {
   checkUnitSlugAvailable,
   findUnit,
   isCenterType,
-  mintSyntheticUnitCode,
   validateLdapCode,
   validateSlugFormat,
   validateUnitDescription,

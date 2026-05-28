@@ -23,8 +23,6 @@
  * Node-runtime only (`isomorphic-dompurify` pulls in a DOM implementation;
  * Prisma is Node-only).
  */
-import { randomBytes } from "node:crypto";
-
 import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -600,26 +598,6 @@ export function validateLdapCode(input: string): UnitFieldResult {
     return { ok: false, error: "invalid_code" };
   }
   return { ok: true, value: trimmed };
-}
-
-/**
- * Mint a synthetic `code` for an Owner-creatable informal center. The
- * prefix `man-` is deliberately lowercase so a synthetic code is never
- * mistaken for an LDAP N-code (uppercase `N` + digits). 8 hex chars =
- * 4·10^9 possibilities; the caller retries the insert on the (rare)
- * collision against `Center.code @id`.
- */
-export function mintSyntheticUnitCode(randomHex: () => string = defaultRandomHex): string {
-  return `man-${randomHex()}`;
-}
-
-function defaultRandomHex(): string {
-  // 8 hex chars; randomUUID's hyphens would clutter the code. The static
-  // top-level import of `randomBytes` from `node:crypto` keeps the Next.js
-  // bundler happy — a dynamic `require("node:crypto")` is rejected as an
-  // unhandled scheme. This file is already Node-runtime-only (DOMPurify +
-  // Prisma); the added import is consistent with `lib/edit/revalidation.ts`.
-  return randomBytes(4).toString("hex");
 }
 
 // ---------------------------------------------------------------------------
