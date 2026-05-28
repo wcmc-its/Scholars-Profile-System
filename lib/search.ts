@@ -178,6 +178,24 @@ export const peopleIndexMapping = {
       // For "most recent publication" sort (spec line 194) and the
       // "Published in last 2 years" activity filter (issue #8 item 15).
       mostRecentPubDate: { type: "date" },
+      // Issue #532 — dept-shape leadership signal. `chairOf` / `chiefOf` carry
+      // the lowercased department / division name(s) this scholar leads. The
+      // dept-template's function_score boost matches on `term { chairOf:
+      // trimmed.toLowerCase() }`; the classifier's `knownDepartments` set is
+      // built from the SAME lowercased dept names (lib/api/people-classifier-
+      // sets.ts), so the field IS the same vocabulary the classifier already
+      // used to route the shape. `is*` flags are convenience for downstream
+      // sorts / filters and not consulted by the dept template. OMITTED on
+      // scholars who are neither chair nor chief (omit-on-empty).
+      leadership: {
+        type: "object",
+        properties: {
+          isChair: { type: "boolean" },
+          chairOf: { type: "keyword" },
+          isChief: { type: "boolean" },
+          chiefOf: { type: "keyword" },
+        },
+      },
     },
   },
 };
@@ -566,6 +584,22 @@ export const PEOPLE_PROMINENCE_FACULTY_WEIGHT = 1.0;
 export const PEOPLE_PROMINENCE_GRANT_WEIGHT = 0.5;
 /** The `personType` (= `roleCategory`) value the faculty boost matches. */
 export const PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE = "full_time_faculty";
+
+/**
+ * Issue #532 — multiplicative weights for the dept-shape leadership boost.
+ * The factor wraps the dept body in a `function_score` with `score_mode:
+ * max` so a scholar who is both a chair AND a chief (rare) takes the
+ * stronger of the two factors, not the product. Chair is weighted higher
+ * than chief: dept-chair eminence > division-chief eminence on a dept-name
+ * query. The initial weights are set conservatively — the boost must
+ * promote a chair past *strong-publisher dept members*, which the v3
+ * additive prominence factor already lifts; tuned by visual inspection of
+ * the §3.2 12-query eval and revisited on production telemetry. Calibration
+ * sweeping on the current 6-label dept set is calibration-on-noisy-set
+ * territory (same finding as #312 PR-5 Open Q1 on the attribution factor).
+ */
+export const PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT = 3.0;
+export const PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT = 1.5;
 
 /**
  * Boost weights used by the publications-index query builder.

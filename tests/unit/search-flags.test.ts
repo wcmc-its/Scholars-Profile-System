@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   parseMeshParam,
   resolveConceptMode,
+  resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
 } from "@/lib/api/search-flags";
 
@@ -130,5 +131,41 @@ describe("resolveFundingConceptEnabled (#295)", () => {
     expect(resolveFundingConceptEnabled()).toBe(false);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
     expect(resolveFundingConceptEnabled()).toBe(false);
+  });
+});
+
+describe("resolveDeptLeadershipBoost (#532)", () => {
+  const original = process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+
+  beforeEach(() => {
+    delete process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+  });
+  afterEach(() => {
+    if (original === undefined)
+      delete process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST;
+    else process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = original;
+  });
+
+  it("defaults to true when the env is unset (post-2026-05-28 default-on)", () => {
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+  });
+
+  it("is false only for exactly 'off' (the documented rollback literal)", () => {
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "off";
+    expect(resolveDeptLeadershipBoost()).toBe(false);
+  });
+
+  it("is true for any value that is not 'off' (including 'on' and casing variants of 'off')", () => {
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "on";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+    // Casing only matters for the literal 'off' — 'OFF' is NOT the rollback
+    // string. Documenting via test so a future operator doesn't assume
+    // lenient casing on the rollback path.
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "OFF";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "true";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
   });
 });

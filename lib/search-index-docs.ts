@@ -512,7 +512,7 @@ export function buildPublicationDoc(
  * they hid it the per-author rule already skips. Same reasoning as the
  * 4a plan §4 profile.ts own-list.
  *
- * Two sidecar queries are issued via the same `client` (the complete
+ * Four sidecar queries are issued via the same `client` (the complete
  * extra-data surface — `PEOPLE_INDEX_SELECT` alone is not sufficient):
  *
  *   - **`mostRecentPubDate`** (`index.ts:406`-style query) — an inline
@@ -525,6 +525,14 @@ export function buildPublicationDoc(
  *     accepts N per-scholar queries here in exchange for the fast-path
  *     getting the one-cwid variant naturally; the prior whole-table
  *     `centerCodesByCwid` preload is dropped.
+ *   - **`chairedDepartments`** (issue #532) — `Department` rows where
+ *     `chairCwid = s.cwid`. The DB column already reflects ADR-002 chair
+ *     detection AND the Path C manual override, so reading it here surfaces
+ *     the authoritative chair set with no new ingestion. Usually 0 rows;
+ *     occasionally 1; rarely >1 (cross-dept chairs do exist at WCM).
+ *   - **`chieffedDivisions`** (issue #532) — same shape for
+ *     `Division.chiefCwid`. ADR-002 Path B (`detectDivisionChief`) + Path C
+ *     overrides have already settled the value the column carries.
  *
  * Returns `null` when the scholar is not indexable (forward-compat: with
  * current callers the scholar row is always `PEOPLE_INDEX_WHERE`-filtered,
@@ -535,7 +543,10 @@ export function buildPublicationDoc(
  */
 export async function buildPeopleDoc(
   s: ScholarForIndex,
-  client: Pick<PrismaClient, "centerMembership" | "publicationAuthor">,
+  client: Pick<
+    PrismaClient,
+    "centerMembership" | "publicationAuthor" | "department" | "division"
+  >,
   sup: PublicationSuppressions,
 ): Promise<Record<string, unknown> | null> {
   // Title-field repetition by authorship position.
@@ -750,6 +761,35 @@ export async function buildPeopleDoc(
   }
   void divisionName; // retained for potential future enrichment
 
+  // Issue #532 — leadership sidecar queries. `Department.chairCwid` and
+  // `Division.chiefCwid` are populated by the ED ETL with override-applied
+  // values (ADR-002 Path B prediction + Path C `data/division-chiefs.txt`
+  // manual overrides), so reading them here yields the authoritative chair /
+  // chief set. Both queries are point lookups on indexed columns; the
+  // expected row count for any one scholar is 0 (almost all), 1 (chairs /
+  // chiefs), or rarely >1 (cross-dept appointments). Stored lowercased
+  // because the dept-template's `function_score` term filter is matched
+  // against `query.trim().toLowerCase()` and the classifier's
+  // `knownDepartments` set is itself lowercased.
+  const [chairedDepartments, chieffedDivisions] = await Promise.all([
+    client.department.findMany({
+      where: { chairCwid: s.cwid },
+      select: { name: true },
+    }),
+    client.division.findMany({
+      where: { chiefCwid: s.cwid },
+      select: { name: true },
+    }),
+  ]);
+  const chairOf = chairedDepartments.map((d) => d.name.toLowerCase());
+  const chiefOf = chieffedDivisions.map((d) => d.name.toLowerCase());
+  const isChair = chairOf.length > 0;
+  const isChief = chiefOf.length > 0;
+  const leadershipField =
+    isChair || isChief
+      ? { leadership: { isChair, chairOf, isChief, chiefOf } }
+      : {};
+
   return {
     cwid: s.cwid,
     slug: s.slug,
@@ -793,5 +833,9 @@ export async function buildPeopleDoc(
     publicationCount: kept,
     grantCount: s.grants.length,
     mostRecentPubDate,
+    // Issue #532 — leadership signal (OMIT-on-empty: scholars who are
+    // neither chair nor chief write nothing for this field, mirroring
+    // `publicationMeshUi` / `topicImpacts`).
+    ...leadershipField,
   };
 }

@@ -91,3 +91,30 @@ export function parseMeshParam(
 export function resolveFundingConceptEnabled(): boolean {
   return process.env.SEARCH_FUNDING_TAB_CONCEPT === "on";
 }
+
+/**
+ * Issue #532 — dept-shape leadership boost (chair / division chief). When
+ * on, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
+ * body in a multiplicative `function_score` that promotes the dept's chair
+ * (and, in future, the chief of a queried division) above other dept members.
+ * The signal source is `leadership.chairOf` / `leadership.chiefOf` on the
+ * scholars-people doc, populated from `Department.chairCwid` /
+ * `Division.chiefCwid` (which already reflect ADR-002 prediction + Path C
+ * manual overrides).
+ *
+ * Default `on` — confirmed against the local §3.2 eval (2026-05-28) on a
+ * reindexed cluster: the boost promotes the actual chair to rank-1 on
+ * both labeled dept queries (Sallie Permar on `pediatrics`, Rainu Kaushal
+ * on `population health sciences`) without displacing previously-top-3
+ * labeled hits. `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST=off` is the
+ * emergency rollback. Safe before the post-launch reindex too: the term
+ * filter against a not-yet-indexed `leadership.chairOf` simply does not
+ * fire, so dept ranking falls back to the pre-#532 body.
+ *
+ * Deliberately a separate flag from `SEARCH_PEOPLE_RELEVANCE_MODE` so the
+ * v3 default established by PR #526 has an independent rollback lever
+ * from this orthogonal signal.
+ */
+export function resolveDeptLeadershipBoost(): boolean {
+  return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST !== "off";
+}
