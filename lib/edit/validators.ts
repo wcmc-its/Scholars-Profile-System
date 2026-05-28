@@ -377,3 +377,175 @@ export async function isChairAppointment(
   if (!dept) return false;
   return isChairTitleFor(title, dept.name);
 }
+
+// ---------------------------------------------------------------------------
+// unit-curation fields (#540 Phase 5 / SPEC § 1)
+//
+// Department and division `field_override` rows curate four fields:
+//   `description`, `slug`, `leaderCwid`, `leaderInterim`.
+// Each has its own validator. The route picks the validator by `fieldName`.
+//
+// Centers do NOT use `field_override` — they edit in-row through
+// `/api/edit/unit op:"update"` (Phase 5b). The validators below are reused by
+// that endpoint for the same field semantics.
+// ---------------------------------------------------------------------------
+
+/** The dept/div `field_override.fieldName` allowlist. */
+export const EDITABLE_UNIT_FIELDS = [
+  "description",
+  "slug",
+  "leaderCwid",
+  "leaderInterim",
+] as const;
+export type EditableUnitField = (typeof EDITABLE_UNIT_FIELDS)[number];
+
+/** Narrow an untrusted `fieldName` to the unit allowlist. */
+export function isEditableUnitField(value: string): value is EditableUnitField {
+  return (EDITABLE_UNIT_FIELDS as readonly string[]).includes(value);
+}
+
+/** Max length of a unit `description` blurb — SPEC § 1. */
+export const UNIT_DESCRIPTION_MAX_LENGTH = 4_000;
+
+export type UnitFieldResult =
+  | { ok: true; value: string }
+  | { ok: false; error: string };
+
+/**
+ * Validate a unit `description`.
+ *
+ * Plain-text only — the description is rendered as text on the unit page, never
+ * as HTML, so the validator does not sanitize HTML; it just trims trailing
+ * whitespace and bounds the length. An empty string is accepted (the curator
+ * clears the blurb); `op:"clear"` deletes the override row, which is a
+ * different write path.
+ */
+export function validateUnitDescription(input: string): UnitFieldResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_value" };
+  const trimmed = input.replace(/[ \t]+$/gm, "").trim();
+  if (trimmed.length > UNIT_DESCRIPTION_MAX_LENGTH) {
+    return { ok: false, error: "description_too_long" };
+  }
+  return { ok: true, value: trimmed };
+}
+
+/** Format of a CWID — 3-9 lowercase letters/digits. */
+export const CWID_PATTERN = /^[a-z][a-z0-9]{2,8}$/;
+
+/**
+ * Validate a unit `leaderCwid` override value — the three-state model
+ * (SPEC § 1):
+ *  - `""`        → explicit vacancy (the curator's "no leader"); accepted
+ *  - `"<cwid>"`  → explicit leader; CWID format required
+ *  - anything else → `400`
+ *
+ * The override is stored verbatim; the read-merge surfaces `null`-vs-`""`-vs-
+ * value via `mergeUnitFields` (`lib/api/manual-layer.ts`). The CWID is NOT
+ * cross-checked against the scholar table here — an override pinned ahead of
+ * an incoming hire (SPEC edge 19) must not be rejected; the read-side resolves
+ * a missing scholar gracefully.
+ */
+export function validateUnitLeaderCwid(input: string): UnitFieldResult {
+  if (typeof input !== "string") return { ok: false, error: "invalid_value" };
+  if (input === "") return { ok: true, value: "" };
+  if (!CWID_PATTERN.test(input)) return { ok: false, error: "invalid_cwid" };
+  return { ok: true, value: input };
+}
+
+/**
+ * Validate a unit `leaderInterim` override — exactly `"true"` or `"false"`
+ * (the column-less qualifier; SPEC § 1). Any other value is `400`. The
+ * read-side coerces `"true"`/`"false"` → boolean (`mergeUnitFields`); the
+ * store-as-string shape lets the same `field_override.value VARCHAR` carry
+ * every dept/div curated field.
+ */
+export function validateUnitLeaderInterim(input: string): UnitFieldResult {
+  if (input === "true" || input === "false") return { ok: true, value: input };
+  return { ok: false, error: "invalid_leader_interim" };
+}
+
+/** Per-field unit-value validation. The route dispatches on `fieldName`. */
+export function validateUnitFieldValue(
+  fieldName: EditableUnitField,
+  value: string,
+): UnitFieldResult {
+  if (fieldName === "description") return validateUnitDescription(value);
+  if (fieldName === "slug") return validateSlugFormat(value);
+  if (fieldName === "leaderCwid") return validateUnitLeaderCwid(value);
+  return validateUnitLeaderInterim(value);
+}
+
+// ---------------------------------------------------------------------------
+// unit existence + parent-dept lookup (#540 Phase 5)
+//
+// Every `/api/edit/*` POST targeting a unit needs the unit row exists (a 400
+// `unit_not_found` precedes the 403 — SPEC § Authorization), AND for a
+// division it needs the parent `deptCode` to feed the authz cascade
+// (`getEffectiveUnitRole`, `UnitRef` for kind `"division"`).
+// ---------------------------------------------------------------------------
+
+/** Prisma surface for the unit existence/parent lookup. */
+type UnitLookupClient = Pick<PrismaClient, "department" | "division" | "center">;
+
+export type UnitLookupResult =
+  | { ok: true; kind: "department"; code: string; slug: string }
+  | {
+      ok: true;
+      kind: "division";
+      code: string;
+      slug: string;
+      parentDeptCode: string | null;
+      parentDeptSlug: string | null;
+    }
+  | { ok: true; kind: "center"; code: string; slug: string }
+  | { ok: false };
+
+/**
+ * Look up a unit row by `(entityType, code)`. Returns the kind + code + slug
+ * (and the parent `deptCode`/slug for a division) on hit; `{ ok: false }` if
+ * the row does not exist. The lookup is by primary key (`code`) — slug
+ * overrides only flip the URL, not the canonical id.
+ *
+ * `slug` is returned so the route's post-commit `revalidatePath` knows which
+ * unit page to bust (`reflectUnitChange`); the parent dept slug feeds the
+ * division case (the parent dept page lists the chief).
+ */
+export async function findUnit(
+  entityType: "department" | "division" | "center",
+  code: string,
+  client: UnitLookupClient,
+): Promise<UnitLookupResult> {
+  if (entityType === "department") {
+    const r = await client.department.findUnique({
+      where: { code },
+      select: { code: true, slug: true },
+    });
+    return r ? { ok: true, kind: "department", code: r.code, slug: r.slug } : { ok: false };
+  }
+  if (entityType === "division") {
+    const r = await client.division.findUnique({
+      where: { code },
+      select: {
+        code: true,
+        slug: true,
+        deptCode: true,
+        department: { select: { slug: true } },
+      },
+    });
+    return r
+      ? {
+          ok: true,
+          kind: "division",
+          code: r.code,
+          slug: r.slug,
+          parentDeptCode: r.deptCode,
+          parentDeptSlug: r.department?.slug ?? null,
+        }
+      : { ok: false };
+  }
+  const r = await client.center.findUnique({
+    where: { code },
+    select: { code: true, slug: true },
+  });
+  return r ? { ok: true, kind: "center", code: r.code, slug: r.slug } : { ok: false };
+}

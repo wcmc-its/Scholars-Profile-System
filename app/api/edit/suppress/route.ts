@@ -14,10 +14,15 @@ import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
-import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
+import {
+  reflectUnitChange,
+  reflectVisibilityChange,
+  resolveAffectedProfiles,
+} from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import {
   findSuppressibleEntityOwner,
+  findUnit,
   isChairAppointment,
   publicationAuthorshipExists,
 } from "@/lib/edit/validators";
@@ -36,15 +41,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- body shape ---
   const { entityType, entityId, contributorCwid, reason } = body;
   // #160 — scholar + publication (PR #356), education + appointment (PR-A),
-  // grant (PR-B). A grant row is per-(award, investigator), so suppressing it
-  // hides that one investigator's role; a funding project goes dark only when
-  // all its rows are suppressed.
+  // grant (PR-B). #540 Phase 5 — department + division + center (whole-unit
+  // retire, Superuser only). A grant row is per-(award, investigator), so
+  // suppressing it hides that one investigator's role; a funding project
+  // goes dark only when all its rows are suppressed.
   if (
     entityType !== "scholar" &&
     entityType !== "publication" &&
     entityType !== "education" &&
     entityType !== "appointment" &&
-    entityType !== "grant"
+    entityType !== "grant" &&
+    entityType !== "department" &&
+    entityType !== "division" &&
+    entityType !== "center"
   ) {
     return editError(400, "invalid_entity_type", "entityType");
   }
@@ -58,10 +67,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     contributor = contributorCwid;
   }
-  // Only a publication suppression carries a contributor. Scholar and the
-  // whole-entity types (education / appointment) are always whole-entity.
+  // Only a publication suppression carries a contributor. Scholar, the
+  // whole-entity types (education / appointment / grant), and a unit retire
+  // (#540) are always whole-entity.
   if (entityType !== "publication" && contributor !== null) {
     return editError(400, "invalid_contributor", "contributorCwid");
+  }
+
+  // #540 Phase 5 — unit retire: existence + Superuser gate, then fall into
+  // the shared write path below. SPEC § Authorization — unit retire is
+  // structural, Superuser only; SPEC § Write-path behavior — the page 404s
+  // (via `lib/url-resolver.ts`'s suppression lookup) and the facet drops on
+  // the next nightly rebuild; soft and revocable; members untouched.
+  const isUnit =
+    entityType === "department" ||
+    entityType === "division" ||
+    entityType === "center";
+  let unitForReflection: {
+    kind: "department" | "division" | "center";
+    slug: string;
+    parentDeptSlug?: string;
+  } | null = null;
+  if (isUnit) {
+    const unit = await findUnit(entityType, entityId, db.read);
+    if (!unit.ok) return editError(400, "unit_not_found", "entityId");
+    if (!session.isSuperuser) {
+      logEditDenial({
+        actorCwid: session.cwid,
+        targetCwid: entityId,
+        path: PATH,
+        reason: "not_superuser",
+        targetEntityType: entityType,
+        targetEntityId: entityId,
+      });
+      return editError(403, "not_superuser");
+    }
+    unitForReflection = {
+      kind: unit.kind,
+      slug: unit.slug,
+      parentDeptSlug:
+        unit.kind === "division" ? (unit.parentDeptSlug ?? undefined) : undefined,
+    };
   }
 
   // --- whole-entity types (#160): resolve the owning scholar by stable
@@ -85,22 +131,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // --- authorization (403) ---
-  const authz = authorizeSuppress(session, {
-    entityType,
-    entityId,
-    contributorCwid: contributor,
-    ownerCwid,
-  });
-  if (!authz.ok) {
-    logEditDenial({
-      actorCwid: session.cwid,
-      targetCwid:
-        entityType === "scholar" ? entityId : (contributor ?? ownerCwid ?? entityId),
-      path: PATH,
-      reason: authz.reason,
+  // --- authorization (403) — unit retire bypasses authorizeSuppress (its
+  //     contract covers scholar / publication / grant / education /
+  //     appointment); the Superuser gate above (`isUnit` branch) is the
+  //     unit-specific authz. ---
+  if (!isUnit) {
+    const authz = authorizeSuppress(session, {
+      entityType,
+      entityId,
+      contributorCwid: contributor,
+      ownerCwid,
     });
-    return editError(403, authz.reason);
+    if (!authz.ok) {
+      logEditDenial({
+        actorCwid: session.cwid,
+        targetCwid:
+          entityType === "scholar" ? entityId : (contributor ?? ownerCwid ?? entityId),
+        path: PATH,
+        reason: authz.reason,
+      });
+      return editError(403, authz.reason);
+    }
   }
 
   // --- per-author publication hide: the authorship must exist (400, edge 18) ---
@@ -123,7 +174,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } else if (isSelfAuthorHide) {
     reasonValue = SELF_HIDE_REASON;
   } else {
-    // A superuser suppression's reason is mandatory (self-edit-spec.md).
+    // A superuser suppression's reason is mandatory (self-edit-spec.md;
+    // unit retire too — SPEC § Authorization is silent on it but the
+    // shared write path keeps the surface uniform).
     return editError(400, "reason_required", "reason");
   }
 
@@ -190,6 +243,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         request_id: requestId,
       }),
     );
+  }
+  // #540 — unit retire: revalidate the unit page (which now 404s via the
+  // suppression lookup in `lib/url-resolver.ts`) + `/browse`. The search
+  // facet drops on the next nightly rebuild — SPEC § Write-path behavior
+  // explicitly disowns the fast-path / reconciler urgency split for units.
+  if (unitForReflection) {
+    reflectUnitChange({
+      unitKind: unitForReflection.kind,
+      unitSlug: unitForReflection.slug,
+      parentDeptSlug: unitForReflection.parentDeptSlug,
+    });
+    return editOk({ suppressionId });
   }
   const affected = await resolveAffectedProfiles(entityType, entityId, contributor);
   await reflectVisibilityChange(affected.map((a) => a.slug));

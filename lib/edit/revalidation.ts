@@ -97,6 +97,44 @@ export function reflectOverviewEdit(slug: string): void {
 }
 
 /**
+ * Reflect a dept/div/center field edit or retire: revalidate the unit page
+ * (and, for a division, the parent department whose divisions list shows
+ * the chief) and `/browse` (the unit facet). #540 SPEC § Write-path behavior.
+ *
+ * `slug` field edits on dept/div have no immediate URL flip — that rides the
+ * next `etl/ed` run; the route therefore skips this helper for `slug`.
+ * Centers update slug in-row, so the route passes both the old and new slug
+ * here.
+ */
+export function reflectUnitChange(params: {
+  unitKind: "department" | "division" | "center";
+  /** For dept/center: the dept/center slug. For division: the division slug. */
+  unitSlug: string;
+  /** For division: the parent department slug (its page lists the chief). */
+  parentDeptSlug?: string;
+  /** For a center slug change: the previous slug whose URL flips. */
+  previousSlug?: string | null;
+}): void {
+  const paths: string[] = ["/browse"];
+  if (params.unitKind === "department") {
+    paths.push(`/departments/${params.unitSlug}`);
+  } else if (params.unitKind === "division") {
+    if (params.parentDeptSlug) {
+      paths.push(`/departments/${params.parentDeptSlug}`);
+      paths.push(
+        `/departments/${params.parentDeptSlug}/divisions/${params.unitSlug}`,
+      );
+    }
+  } else {
+    paths.push(`/centers/${params.unitSlug}`);
+    if (params.previousSlug && params.previousSlug !== params.unitSlug) {
+      paths.push(`/centers/${params.previousSlug}`);
+    }
+  }
+  revalidatePaths(paths);
+}
+
+/**
  * Reflect a suppression or its revoke (scholar or publication): revalidate AND
  * issue a CloudFront invalidation for the affected profile pages and the
  * browse hub. `profileSlugs` is the set of `/scholars/{slug}` pages the change
