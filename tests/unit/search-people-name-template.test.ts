@@ -59,6 +59,17 @@ vi.mock("@/lib/search", () => ({
   ],
   PEOPLE_ABSTRACTS_BOOST: 0.3,
   PEOPLE_RESTRUCTURED_MSM: "2<-34%",
+  PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: [
+    "preferredName^1",
+    "fullName^1",
+    "areasOfInterest^3",
+    "primaryTitle^3",
+    "primaryDepartment^1",
+    "overview^2",
+    "publicationTitles^6",
+    "publicationMesh^4",
+  ],
+  PEOPLE_TOPIC_ABSTRACTS_BOOST: 0.5,
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
@@ -238,11 +249,13 @@ describe("people-index name-shape template — SPEC §6.1.2 (#309)", () => {
     expect(filter).toContainEqual({ terms: { cwid: [FIXTURE_CWID] } });
   });
 
-  it("topic shape under v3 keeps the #259 cross_fields body (no name template)", async () => {
+  it("a non-name, non-topic shape (department) keeps the #259 cross_fields body", async () => {
+    // department + hybrid templates are PR-4 (#311); until then those shapes
+    // ride the existing restructure body, so the name template must not fire.
     const result = await searchPeople({
-      q: "ras signaling pancreatic cancer",
+      q: "cardiology",
       relevanceMode: "v3",
-      shape: "topic",
+      shape: "department",
     });
 
     expect(result.queryShape).toBe("restructured_msm");

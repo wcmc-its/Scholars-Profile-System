@@ -425,6 +425,24 @@ async function assertPeopleIndexHealth(
       "[smoke] scholars-people: no scholar's publicationMesh contains \"Neoplasms\" — extractMeshLabels regression suspected (see #278)",
     );
   }
+
+  // Issue #310 — publicationMeshUi is the descriptor-UI rollup the v3
+  // topic-shape attribution boost filters on. Same silent-regression class as
+  // the publications-side meshDescriptorUi smoke: a change to the JSON column
+  // shape (or to extractMeshDescriptorUis) could zero it out on every doc.
+  // Probe D001943 (Breast Neoplasms), the densest content descriptor in the
+  // WCM corpus — many scholars clear the min-evidence threshold on it. `term`
+  // (keyword) here, unlike the analyzed-text match_phrase above.
+  const withMeshUi = await client.count({
+    index: PEOPLE_INDEX,
+    body: { query: { term: { publicationMeshUi: "D001943" } } },
+  });
+  if (withMeshUi.body.count === 0) {
+    throw new Error(
+      "[smoke] scholars-people: no scholar carries publicationMeshUi = \"D001943\" — " +
+        "extractMeshDescriptorUis rollup regression suspected (see #310 / SPEC §6.1.3)",
+    );
+  }
 }
 
 async function assertPublicationsIndexHealth(

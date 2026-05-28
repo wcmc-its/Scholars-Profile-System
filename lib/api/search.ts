@@ -38,6 +38,8 @@ import {
   PEOPLE_HIGH_EVIDENCE_FIELD_BOOSTS,
   PEOPLE_INDEX,
   PEOPLE_RESTRUCTURED_MSM,
+  PEOPLE_TOPIC_ABSTRACTS_BOOST,
+  PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS,
   PUBLICATION_FIELD_BOOSTS,
   PUBLICATIONS_INDEX,
   PUBLICATIONS_RESTRUCTURED_MSM,
@@ -237,15 +239,18 @@ export type DeptDivBucket = { value: string; label: string; count: number };
  * future §1.6 shapes up front to avoid a schema migration later.
  *
  * Issue #309 / SPEC §6.1.2 — `name_template` names the v3 name-shape body
- * (name fields only). It is independent of the #259 restructure flag: when
- * the relevance mode is `v3` and the classifier returns `name`, this label
- * supersedes `legacy_multi_match` / `restructured_msm` so analytics can tell
- * a name-only body apart from the cross_fields fallback families.
+ * (name fields only). Issue #310 / SPEC §6.1.3 — `topic_template` names the v3
+ * topic-shape body (re-weighted cross_fields ladder wrapped in a
+ * function_score). Both are independent of the #259 restructure flag: when the
+ * relevance mode is `v3` and the classifier returns the matching shape, these
+ * labels supersede `legacy_multi_match` / `restructured_msm` so analytics can
+ * tell each v3 body apart from the cross_fields fallback families.
  */
 export type PeopleQueryShape =
   | "legacy_multi_match"
   | "restructured_msm"
   | "name_template"
+  | "topic_template"
   | "concept_filtered"
   | "concept_fallback";
 
@@ -256,6 +261,13 @@ export type PeopleSearchResult = {
   pageSize: number;
   /** Which query shape served this request — telemetry-only (issue #259). */
   queryShape: PeopleQueryShape;
+  /**
+   * Issue #310 / SPEC §9 — did the §6.1.3 attribution boost move any result?
+   * `true` / `false` when the v3 topic template ran against a resolved
+   * descriptor; `null` when the boost wasn't in play (non-topic shape, legacy
+   * mode, or no MeSH resolution). Per-request, not per-result.
+   */
+  attributionBoostFired: boolean | null;
   facets: {
     deptDivs: DeptDivBucket[];
     personTypes: SearchFacetBucket[];
@@ -334,11 +346,21 @@ export async function searchPeople(opts: {
   relevanceMode?: "legacy" | "v3";
   /**
    * Issue #309 / SPEC §6.1.1 — the classifier shape from the route
-   * (`classifyPeopleQuery`). Only `name` triggers a body change in PR-2; the
-   * remaining shapes ride the existing restructure/legacy body until PR-3/PR-4
-   * add their templates.
+   * (`classifyPeopleQuery`). `name` routes to the §6.1.2 name template (#309);
+   * `topic` / `unclassified` route to the §6.1.3 topic template (#310). The
+   * remaining shapes ride the existing restructure/legacy body until PR-4
+   * (#311) adds the department + hybrid templates.
    */
   shape?: PeopleQueryClassification;
+  /**
+   * Issue #310 / SPEC §6.1.3 — the resolved MeSH descriptor's `descendantUis`
+   * (descriptor UIs subsumed by the resolved descriptor's tree numbers),
+   * computed once by the route via `matchQueryToTaxonomy()`. Drives the
+   * topic-shape attribution boost (`terms { publicationMeshUi: descendantUis }`,
+   * ×1.5). Empty/absent when the query didn't resolve to a descriptor — the
+   * boost function is simply omitted then.
+   */
+  meshDescendantUis?: string[];
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -364,10 +386,25 @@ export async function searchPeople(opts: {
   const applyNameTemplate =
     relevanceMode === "v3" && opts.shape === "name" && trimmed.length > 0;
 
+  // Issue #310 / SPEC §6.1.3 — topic-shape template. `topic` (MeSH-resolvable
+  // or long queries) and `unclassified` (the soft fallback per §6.1.1) both
+  // route here: a re-weighted cross_fields body (pub evidence leads over
+  // self-reported AOI, the Problem #1 fix) wrapped in a multiplicative
+  // function_score (attribution + productive-author boosts, sparse decay).
+  const applyTopicTemplate =
+    relevanceMode === "v3" &&
+    (opts.shape === "topic" || opts.shape === "unclassified") &&
+    trimmed.length > 0;
+
+  // Descendant-UI set for the attribution boost — empty unless the route
+  // resolved the query to a MeSH descriptor.
+  const meshDescendantUis = opts.meshDescendantUis ?? [];
+
   let queryShape: PeopleQueryShape = useRestructure
     ? "restructured_msm"
     : "legacy_multi_match";
   if (applyNameTemplate) queryShape = "name_template";
+  if (applyTopicTemplate) queryShape = "topic_template";
 
   // D-10 topic pre-filter: resolve cwids via Prisma before hitting OpenSearch.
   // This ensures the search is scoped to scholars attributed to the topic regardless
@@ -391,6 +428,8 @@ export async function searchPeople(opts: {
         page,
         pageSize: PAGE_SIZE,
         queryShape,
+        // No OpenSearch call ran, so the attribution boost was never evaluated.
+        attributionBoostFired: null,
         facets: {
           deptDivs: [],
           personTypes: [],
@@ -454,6 +493,38 @@ export async function searchPeople(opts: {
             { term: { lastNameSort: { value: trimmed.toLowerCase(), boost: 25 } } },
           ],
           minimum_should_match: 1,
+        },
+      }
+    : applyTopicTemplate
+    ? {
+        // Issue #310 / SPEC §6.1.3 — topic-shape body. Same cross_fields + msm
+        // shape as the #259 restructure body, but the re-weighted ladder
+        // (PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS) leads with pub-derived
+        // evidence over self-reported AOI. publicationAbstracts stays in the
+        // scoring-only `should` at the raised topic boost. The three
+        // multiplicative modifiers wrap this body via function_score below.
+        bool: {
+          must: [
+            {
+              multi_match: {
+                query: trimmed,
+                fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                type: "cross_fields",
+                operator: "or",
+                minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
+              },
+            },
+          ],
+          should: [
+            {
+              match: {
+                publicationAbstracts: {
+                  query: trimmed,
+                  boost: PEOPLE_TOPIC_ABSTRACTS_BOOST,
+                },
+              },
+            },
+          ],
         },
       }
     : useRestructure
@@ -670,7 +741,86 @@ export async function searchPeople(opts: {
         },
       },
     },
+    // Issue #310 / SPEC §9 — `attributionBoostFired` telemetry. Counts docs in
+    // the scored set (must + always-on filters, i.e. the function_score scope,
+    // before post_filter) that ALSO carry a descendant UI. `doc_count > 0`
+    // means the ×1.5 boost moved at least one result. Only added when the
+    // topic template is active AND the query resolved to a descriptor.
+    ...(applyTopicTemplate && meshDescendantUis.length > 0
+      ? {
+          attributionMatch: {
+            filter: {
+              bool: {
+                must,
+                filter: [
+                  ...queryFilter,
+                  { terms: { publicationMeshUi: meshDescendantUis } },
+                ],
+              },
+            },
+          },
+        }
+      : {}),
   };
+
+  // Issue #310 / SPEC §6.1.3 — the three multiplicative function_score
+  // modifiers that wrap the topic-shape body. All `boost_mode: multiply`,
+  // composed via `score_mode: multiply`; a function whose filter doesn't match
+  // a doc contributes a factor of 1, so they compose cleanly.
+  //
+  //   1. Attribution: ×1.5 for scholars whose publicationMeshUi intersects the
+  //      resolved descriptor's descendantUis (the §0.3 Phase-2A mechanism).
+  //      Omitted when the query didn't resolve to a descriptor.
+  //   2. Productive-author: ×1.2 for >= 20 pubs, ×1.1 for [5, 20). Mutually
+  //      exclusive ranges so a prolific author gets 1.2, not 1.1×1.2.
+  //   3. Sparse decay (§6.1.5): ×0.7 for scholars lacking ALL of a non-trivial
+  //      overview (> 200 chars), >= 3 AOI terms, and any publications. Gated
+  //      off when the #152 hard cull is on (test row 7 — no double-up).
+  const applySparseDecay = applyTopicTemplate && !applySparseFilter;
+  const scoreFunctions: Record<string, unknown>[] = [];
+  if (applyTopicTemplate) {
+    if (meshDescendantUis.length > 0) {
+      scoreFunctions.push({
+        filter: { terms: { publicationMeshUi: meshDescendantUis } },
+        weight: 1.5,
+      });
+    }
+    scoreFunctions.push({
+      filter: { range: { publicationCount: { gte: 20 } } },
+      weight: 1.2,
+    });
+    scoreFunctions.push({
+      filter: { range: { publicationCount: { gte: 5, lt: 20 } } },
+      weight: 1.1,
+    });
+    if (applySparseDecay) {
+      scoreFunctions.push({
+        filter: {
+          bool: {
+            must: [
+              { range: { overviewLength: { lte: 200 } } },
+              { range: { aoiTermCount: { lt: 3 } } },
+              { term: { publicationCount: 0 } },
+            ],
+          },
+        },
+        weight: 0.7,
+      });
+    }
+  }
+
+  const baseQuery = { bool: { must, filter: queryFilter } };
+  const scoringQuery =
+    applyTopicTemplate && scoreFunctions.length > 0
+      ? {
+          function_score: {
+            query: baseQuery,
+            functions: scoreFunctions,
+            score_mode: "multiply",
+            boost_mode: "multiply",
+          },
+        }
+      : baseQuery;
 
   const body = {
     from: page * PAGE_SIZE,
@@ -680,7 +830,10 @@ export async function searchPeople(opts: {
     // there are 90k. Costs more on truly broad queries but the people
     // index is small (~9k docs) so the impact is negligible.
     track_total_hits: true,
-    query: { bool: { must, filter: queryFilter } },
+    // Issue #310 — `scoringQuery` is the plain bool for every shape except the
+    // v3 topic template, which wraps it in the multiplicative function_score.
+    // Aggregations keep using the un-scored `must` (counts don't need scoring).
+    query: scoringQuery,
     // User-axis filters live here so aggregations see the unfiltered hit
     // set and can compute excluding-self counts. Hits returned by the
     // main response still respect every active filter (post_filter is
@@ -731,8 +884,17 @@ export async function searchPeople(opts: {
       piAny?: { doc_count: number };
       piActive?: { doc_count: number };
       piMulti?: { doc_count: number };
+      attributionMatch?: { doc_count: number };
     };
   };
+
+  // Issue #310 / SPEC §9 — null unless the topic template ran against a
+  // resolved descriptor; otherwise true iff at least one scored doc carried a
+  // descendant UI (the agg counts the function_score's attribution scope).
+  const attributionBoostFired =
+    applyTopicTemplate && meshDescendantUis.length > 0
+      ? (r.aggregations?.attributionMatch?.doc_count ?? 0) > 0
+      : null;
 
   return {
     hits: r.hits.hits.map((h) => ({
@@ -754,6 +916,7 @@ export async function searchPeople(opts: {
     page,
     pageSize: PAGE_SIZE,
     queryShape,
+    attributionBoostFired,
     facets: {
       deptDivs: (r.aggregations?.deptDivs?.keys.buckets ?? []).map((b) => ({
         value: b.key,
