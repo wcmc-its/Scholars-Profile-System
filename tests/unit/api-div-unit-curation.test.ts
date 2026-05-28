@@ -183,13 +183,29 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
   it("source='manual' unions DivisionMembership with LDAP scholars; stats reflect the union (edge 15)", async () => {
     defaultBaselineMocks();
     mockDivisionFindFirst.mockResolvedValue({ ...DIVISION, source: "manual" });
-    // LDAP-attached after adoption. Both the top-research-areas member fetch
-    // and the stats member fetch issue the same scholar.findMany query, so a
-    // shared `mockResolvedValue` covers both.
-    mockScholarFindMany.mockResolvedValue([
-      { cwid: "ldap0001" },
-      { cwid: "shared" },
-    ]);
+    // #540 Phase 8 — `loadDivisionMemberCwids` issues two distinct
+    // scholar.findMany shapes:
+    //   - `where.divCode` for the LDAP attach lookup
+    //   - `where.cwid.in` for the activity gate on roster-only CWIDs (edge 19:
+    //     a rostered CWID with no active Scholar row does not surface).
+    // The shared mock routes by where shape so a single fixture covers both
+    // `getDivision` stats and `getDivisionTopResearchAreas` (each calls the
+    // helper independently in this test path).
+    const ALL_CWIDS = ["ldap0001", "shared", "manual0001"];
+    mockScholarFindMany.mockImplementation((args?: {
+      where?: { divCode?: string; cwid?: { in?: string[] } };
+    }) => {
+      if (args?.where?.divCode) {
+        return Promise.resolve([{ cwid: "ldap0001" }, { cwid: "shared" }]);
+      }
+      if (args?.where?.cwid?.in) {
+        const ins = args.where.cwid.in;
+        return Promise.resolve(
+          ins.filter((c) => ALL_CWIDS.includes(c)).map((cwid) => ({ cwid })),
+        );
+      }
+      return Promise.resolve([]);
+    });
     // Manual roster — `shared` already in LDAP, so dedup keeps it once.
     mockDivisionMembershipFindMany.mockResolvedValue([
       { cwid: "shared" },
@@ -210,7 +226,19 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
   it("source='manual' with empty LDAP attaches the manual roster wholesale (pre-adoption, edge 13)", async () => {
     defaultBaselineMocks();
     mockDivisionFindFirst.mockResolvedValue({ ...DIVISION, source: "manual" });
-    mockScholarFindMany.mockResolvedValue([]); // no LDAP scholars yet
+    const ALL_CWIDS = ["manualA", "manualB"];
+    mockScholarFindMany.mockImplementation((args?: {
+      where?: { divCode?: string; cwid?: { in?: string[] } };
+    }) => {
+      if (args?.where?.divCode) return Promise.resolve([]); // no LDAP scholars yet
+      if (args?.where?.cwid?.in) {
+        const ins = args.where.cwid.in;
+        return Promise.resolve(
+          ins.filter((c) => ALL_CWIDS.includes(c)).map((cwid) => ({ cwid })),
+        );
+      }
+      return Promise.resolve([]);
+    });
     mockDivisionMembershipFindMany.mockResolvedValue([
       { cwid: "manualA" },
       { cwid: "manualB" },
@@ -220,6 +248,35 @@ describe("getDivision — unit-curation read-merge (#540)", () => {
 
     const result = await getDivision("medicine", "cardiology");
     expect(result?.stats.scholars).toBe(2);
+  });
+
+  it("source='manual' drops a rostered CWID with no active Scholar row (edge 19)", async () => {
+    // The membership table has no Scholar FK; a roster row for an incoming
+    // hire is stored but does NOT surface on public reads until the Scholar
+    // record lands. Phase 8's activity gate is what enforces that.
+    defaultBaselineMocks();
+    mockDivisionFindFirst.mockResolvedValue({ ...DIVISION, source: "manual" });
+    mockScholarFindMany.mockImplementation((args?: {
+      where?: { divCode?: string; cwid?: { in?: string[] } };
+    }) => {
+      if (args?.where?.divCode) return Promise.resolve([{ cwid: "ldap0001" }]);
+      if (args?.where?.cwid?.in) {
+        // Only `ldap0001` has an active Scholar row; `incomingHire0001` does not.
+        const ins = args.where.cwid.in;
+        return Promise.resolve(
+          ins.filter((c) => c === "ldap0001").map((cwid) => ({ cwid })),
+        );
+      }
+      return Promise.resolve([]);
+    });
+    mockDivisionMembershipFindMany.mockResolvedValue([
+      { cwid: "incomingHire0001" },
+    ]);
+    mockPublicationAuthorFindMany.mockResolvedValue([]);
+    mockGrantFindMany.mockResolvedValue([]);
+
+    const result = await getDivision("medicine", "cardiology");
+    expect(result?.stats.scholars).toBe(1);
   });
 
   it("the suppression check runs against entityType='division' + division.code", async () => {

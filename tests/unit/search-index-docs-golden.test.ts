@@ -44,6 +44,10 @@ function mockPeopleClient(
         .fn()
         .mockResolvedValue(centerCodes.map((c) => ({ centerCode: c }))),
     },
+    // #540 Phase 8 — manual-roster division facet sidecar; golden-doc scholars
+    // are LDAP-attached, so the default empty result keeps the snapshots
+    // stable on the LDAP-only `${deptCode}--${divCode}` key path.
+    divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: {
       findMany: vi
         .fn()

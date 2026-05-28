@@ -23,6 +23,7 @@ function mockClient(opts: {
 } = {}): Parameters<typeof buildPeopleDoc>[1] {
   return {
     centerMembership: { findMany: vi.fn().mockResolvedValue([]) },
+    divisionMembership: { findMany: vi.fn().mockResolvedValue([]) },
     publicationAuthor: { findMany: vi.fn().mockResolvedValue([]) },
     department: {
       findMany: vi.fn().mockResolvedValue(opts.chairedDepartments ?? []),

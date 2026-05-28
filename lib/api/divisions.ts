@@ -41,6 +41,60 @@ const FACULTY_PAGE_SIZE = 20;
 const PUB_PAGE_SIZE = 20;
 const GRANT_PAGE_SIZE = 20;
 
+/**
+ * Return the active CWID set for a division — LDAP-attached scholars
+ * (`Scholar.divCode = code`) plus, when `Division.source = 'manual'`, the
+ * `DivisionMembership` roster. Deduped by CWID, filtered through `Scholar`
+ * so a manual-roster row pointing at a soft-deleted / inactive scholar or
+ * one whose ED record has not yet landed (#540 SPEC edge 19) never surfaces
+ * on public reads. Issue #540 Phase 8.
+ *
+ * `opts.source` is an optional shortcut for callers that already loaded the
+ * division row; passing it elides one point lookup.
+ */
+async function loadDivisionMemberCwids(
+  divCode: string,
+  opts: { source?: string } = {},
+): Promise<string[]> {
+  const ldapRows = await prisma.scholar.findMany({
+    where: { divCode, deletedAt: null, status: "active" },
+    select: { cwid: true },
+  });
+  let source = opts.source;
+  if (source === undefined) {
+    const div = await prisma.division.findFirst({
+      where: { code: divCode },
+      select: { source: true },
+    });
+    source = div?.source;
+  }
+  if (source !== "manual") {
+    return ldapRows.map((r) => r.cwid);
+  }
+  const manualRows = await prisma.divisionMembership.findMany({
+    where: { divisionCode: divCode },
+    select: { cwid: true },
+  });
+  if (manualRows.length === 0) {
+    return ldapRows.map((r) => r.cwid);
+  }
+  const union = new Set<string>(ldapRows.map((r) => r.cwid));
+  for (const r of manualRows) union.add(r.cwid);
+  // Filter the unioned set through Scholar to (a) preserve activity gating for
+  // manual-roster CWIDs and (b) drop CWIDs with no Scholar row yet — edge 19's
+  // "stored, attaches when the row lands". An LDAP-side scholar passes
+  // trivially (we already filtered them above).
+  const activeRows = await prisma.scholar.findMany({
+    where: {
+      cwid: { in: Array.from(union) },
+      deletedAt: null,
+      status: "active",
+    },
+    select: { cwid: true },
+  });
+  return activeRows.map((r) => r.cwid);
+}
+
 export type DivisionChief = {
   cwid: string;
   preferredName: string;
@@ -148,26 +202,12 @@ export async function getDivision(
   const topResearchAreas = await getDivisionTopResearchAreas(division.code);
 
   // Stats: distinct member count, distinct publications, active grants.
-  // #540 — a manually-created division unions LDAP scholars (whose `divCode`
-  // happens to match because LDAP has adopted the code, edge case 15) with
-  // its `DivisionMembership` rows. Dedup by CWID — a manually-rostered
-  // scholar may also be LDAP-attached to the same code.
-  const ldapMemberCwids = await prisma.scholar
-    .findMany({
-      where: { divCode: division.code, deletedAt: null, status: "active" },
-      select: { cwid: true },
-    })
-    .then((rows) => rows.map((r) => r.cwid));
-  let memberCwids = ldapMemberCwids;
-  if (division.source === "manual") {
-    const manualRows = await prisma.divisionMembership.findMany({
-      where: { divisionCode: division.code },
-      select: { cwid: true },
-    });
-    const unioned = new Set<string>(ldapMemberCwids);
-    for (const r of manualRows) unioned.add(r.cwid);
-    memberCwids = [...unioned];
-  }
+  // #540 Phase 8 — `loadDivisionMemberCwids` unions LDAP-attached scholars
+  // with the `DivisionMembership` roster (when `source='manual'`, edge 15),
+  // filtered through `Scholar` for active gating.
+  const memberCwids = await loadDivisionMemberCwids(division.code, {
+    source: division.source,
+  });
 
   const [pubCount, grantCount] = await Promise.all([
     memberCwids.length === 0
@@ -224,12 +264,8 @@ export async function getDivision(
 export async function getDivisionTopResearchAreas(
   divCode: string,
 ): Promise<DepartmentTopicArea[]> {
-  const memberCwids = await prisma.scholar
-    .findMany({
-      where: { divCode, deletedAt: null, status: "active" },
-      select: { cwid: true },
-    })
-    .then((rows) => rows.map((r) => r.cwid));
+  // #540 Phase 8 — include `DivisionMembership` roster for manual divisions.
+  const memberCwids = await loadDivisionMemberCwids(divCode);
 
   if (memberCwids.length === 0) return [];
 
@@ -293,16 +329,28 @@ export async function getDivisionFaculty(
   opts: { page?: number },
 ): Promise<DivisionFacultyResult> {
   const page = Math.max(0, opts.page ?? 0);
-  const where = {
-    divCode,
-    deletedAt: null,
-    status: "active" as const,
-  };
 
-  const total = await prisma.scholar.count({ where });
+  // #540 Phase 8 — one division-row lookup feeds both `loadDivisionMemberCwids`
+  // (for `source`) and the chief lookup (for `chiefCwid`).
+  const div = await prisma.division.findFirst({
+    where: { code: divCode },
+    select: { chiefCwid: true, source: true },
+  });
+  const chiefCwid = div?.chiefCwid ?? null;
+
+  const memberCwids = await loadDivisionMemberCwids(divCode, {
+    source: div?.source,
+  });
+  const total = memberCwids.length;
   if (total === 0) {
     return { hits: [], total: 0, roleCategoryCounts: {}, page, pageSize: FACULTY_PAGE_SIZE };
   }
+  const memberCwidSet = new Set(memberCwids);
+  const where = {
+    cwid: { in: memberCwids },
+    deletedAt: null,
+    status: "active" as const,
+  };
 
   const roleCategoryCounts = await (async () => {
     const rows = await prisma.scholar.groupBy({
@@ -319,21 +367,15 @@ export async function getDivisionFaculty(
     return out;
   })();
 
-  const div = await prisma.division.findFirst({
-    where: { code: divCode },
-    select: { chiefCwid: true },
-  });
-  const chiefCwid = div?.chiefCwid ?? null;
-
   const includeClause = {
     department: { select: { name: true } },
     division: { select: { name: true } },
   } as const;
 
   let chiefRow: Awaited<ReturnType<typeof prisma.scholar.findFirst>> | null = null;
-  if (chiefCwid && page === 0) {
+  if (chiefCwid && page === 0 && memberCwidSet.has(chiefCwid)) {
     chiefRow = await prisma.scholar.findFirst({
-      where: { cwid: chiefCwid, ...where },
+      where: { cwid: chiefCwid, deletedAt: null, status: "active" },
       include: includeClause,
     });
   }
@@ -413,12 +455,8 @@ export async function getDivisionFaculty(
  * fresh query bounded to division members.
  */
 export async function getDivisionHighlights(divCode: string): Promise<DeptHighlights> {
-  const memberCwids = await prisma.scholar
-    .findMany({
-      where: { divCode, deletedAt: null, status: "active" },
-      select: { cwid: true },
-    })
-    .then((rows) => rows.map((r) => r.cwid));
+  // #540 Phase 8 — include `DivisionMembership` roster for manual divisions.
+  const memberCwids = await loadDivisionMemberCwids(divCode);
 
   if (memberCwids.length === 0) {
     return { publications: [], grants: [] };
@@ -603,10 +641,15 @@ export async function getDivisionPublicationsList(
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
 
+  // #540 Phase 8 — include `DivisionMembership` roster for manual divisions.
+  const memberCwids = await loadDivisionMemberCwids(divCode);
+  if (memberCwids.length === 0) {
+    return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
+  }
   const memberPmidRows = (await prisma.publicationAuthor.findMany({
     where: {
       isConfirmed: true,
-      scholar: { divCode, deletedAt: null, status: "active" },
+      cwid: { in: memberCwids },
     },
     select: { pmid: true },
     distinct: ["pmid"],
@@ -696,8 +739,13 @@ export async function getDivisionGrantsList(
   const sort: GrantSort = opts.sort ?? "most_recent";
   const now = new Date();
 
+  // #540 Phase 8 — include `DivisionMembership` roster for manual divisions.
+  const memberCwids = await loadDivisionMemberCwids(divCode);
+  if (memberCwids.length === 0) {
+    return { hits: [], total: 0, page, pageSize: GRANT_PAGE_SIZE };
+  }
   const baseWhere = {
-    scholar: { divCode, deletedAt: null, status: "active" as const },
+    cwid: { in: memberCwids },
     endDate: { gte: now },
   };
 

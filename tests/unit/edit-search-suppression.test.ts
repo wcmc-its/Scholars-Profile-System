@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const hoisted = vi.hoisted(() => ({
   mockScholarFindFirst: vi.fn(),
   mockCenterMembershipFindMany: vi.fn(),
+  mockDivisionMembershipFindMany: vi.fn(),
   mockPublicationFindFirst: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock("@/lib/db", () => ({
     read: {
       scholar: { findFirst: hoisted.mockScholarFindFirst },
       centerMembership: { findMany: hoisted.mockCenterMembershipFindMany },
+      // #540 Phase 8 — `buildPeopleDoc` issues a `divisionMembership` sidecar
+      // for the manual-roster division facet keys. This suite doesn't seed
+      // manual rosters; the default empty result is the LDAP-only baseline.
+      divisionMembership: { findMany: hoisted.mockDivisionMembershipFindMany },
       publication: { findFirst: hoisted.mockPublicationFindFirst },
       publicationAuthor: { findMany: hoisted.mockPublicationAuthorFindMany },
       suppression: { findMany: hoisted.mockSuppressionFindMany },
@@ -122,6 +127,7 @@ beforeEach(() => {
   hoisted.mockSuppressionFindMany.mockResolvedValue([]);
   hoisted.mockPublicationAuthorFindMany.mockResolvedValue([]);
   hoisted.mockCenterMembershipFindMany.mockResolvedValue([]);
+  hoisted.mockDivisionMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
   hoisted.mockDivisionFindMany.mockResolvedValue([]);
 });
