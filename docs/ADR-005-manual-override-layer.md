@@ -5,7 +5,7 @@
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
-**Amendments:** [Amendment 1 (2026-05-27) — org-unit curation & three-tier access model](#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) — **Proposed** · [Amendment 2 (2026-05-27) — slug override reconcile-on-write & hard-delete prohibition](#amendment-2-2026-05-27--slug-override-reconcile-on-write-d5-and-the-scholar-hard-delete-prohibition) — **Accepted**
+**Amendments:** [Amendment 1 (2026-05-27) — org-unit curation & three-tier access model](#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) — **Accepted** · [Amendment 2 (2026-05-27) — slug override reconcile-on-write & hard-delete prohibition](#amendment-2-2026-05-27--slug-override-reconcile-on-write-d5-and-the-scholar-hard-delete-prohibition) — **Accepted**
 **Tracks:** [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) (slug override), [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) (suppression), [#358](https://github.com/wcmc-its/Scholars-Profile-System/issues/358) (org-unit curation — Amendment 1), [#497](https://github.com/wcmc-its/Scholars-Profile-System/issues/497) (slug personalization — Amendment 2)
 **Gates:** B01–B03 ([#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100)/[#101](https://github.com/wcmc-its/Scholars-Profile-System/issues/101)/[#102](https://github.com/wcmc-its/Scholars-Profile-System/issues/102)) — self-edit auth, authorization, and audit
 
@@ -321,8 +321,9 @@ GROUP BY s.entity_id;
 
 ## Amendment 1 (2026-05-27) — Org-unit curation: entity-type extension and three-tier access model
 
-**Status:** Proposed
-**Date:** 2026-05-27
+**Status:** Accepted
+**Date:** 2026-05-27 (ratified 2026-05-28)
+**Implementation:** [#540](https://github.com/wcmc-its/Scholars-Profile-System/issues/540)
 **Amends:** § Two tables (enum extension), § Keying and v1 entity scope (units qualify with no stable-key prerequisite), § Non-goals ("Manually-created records" — closed). Authoritative source for the org-unit access model that [`unit-curation-spec.md`](./unit-curation-spec.md) (#358) consumes.
 **Driver:** The base ADR's actor model is binary — a scholar edits their own record; a `scholars-admins` **superuser** does everything else (§ Non-goals, "Broad admin field-editing"). Org-unit curation needs an actor *between* those two: the person who maintains a department's page and its faculty is, in the institution's words, "never the Chair — usually some admin." A 2026-05-27 design review ratified (A1.2) a three-tier, per-unit access model to fill that gap without making every grant flow through a site-wide superuser. This amendment is **additive**: no base-ADR mechanism (the two tables, the read-merge, the write-path failure model, the search reflection layers) changes.
 
