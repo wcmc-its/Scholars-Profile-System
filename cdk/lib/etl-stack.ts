@@ -400,6 +400,14 @@ export class EtlStack extends Stack {
         OPENSEARCH_NODE: `https://${Fn.importValue(
           `Sps-Data-${env}-OpenSearchDomainEndpoint`,
         )}`,
+        // #479 — cadence revalidate step POSTs to /api/revalidate on the
+        // VPC-private internal ALB (HTTP :80; no TLS on the internal listener).
+        // The ETL SG -> internal-ALB-SG :80 ingress is already opened at the
+        // top of this stack. `etl/revalidate/index.ts` validates this origin
+        // against its allowlist before sending the bearer token.
+        SCHOLARS_BASE_URL: `http://${Fn.importValue(
+          `Sps-App-${env}-InternalAlbDns`,
+        )}`,
       },
       secrets: containerSecrets,
     });
@@ -533,12 +541,14 @@ export class EtlStack extends Stack {
     // first (orchestrate.ts already aborts the cascade on ED failure --
     // we do the same here implicitly via the Catch block on the first
     // step). Both cadences close with a full OpenSearch rebuild
-    // (`search:index` -- atomic alias-swap, so reads never see a gap).
-    // mesh-coverage runs nightly only: it recomputes the
-    // publication.mesh_terms numerator off ReCiter, which is a nightly
-    // source, so a weekly pass would recompute against an unchanged
-    // snapshot. No ISR-revalidate step here -- a real /api/revalidate sweep
-    // is a tracked follow-on (#479); ISR refreshes on its TTL meanwhile.
+    // (`search:index` -- atomic alias-swap, so reads never see a gap)
+    // then an ISR revalidate sweep (#479 — POSTs to /api/revalidate on
+    // the internal ALB; without it ISR pages only refresh on their 6h
+    // TTL after a cadence run). mesh-coverage runs nightly only: it
+    // recomputes the publication.mesh_terms numerator off ReCiter, which
+    // is a nightly source, so a weekly pass would recompute against an
+    // unchanged snapshot. Per-cadence step ids keep `Task${id}` unique
+    // (otherwise the `Task${id}` construct id collides across machines).
     // (vivo-redirect is a manual cutover-prep tool, never a cadence step.)
     // ------------------------------------------------------------------
     const nightlySteps: ReadonlyArray<StepSpec> = [
@@ -549,12 +559,14 @@ export class EtlStack extends Stack {
       { id: "Coi", npmScript: "etl:coi", external: true },
       { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false },
+      { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
       { id: "Completeness", npmScript: "etl:completeness", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
+      { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
     ];
     const annualSteps: ReadonlyArray<StepSpec> = [
       { id: "Hierarchy", npmScript: "etl:hierarchy", external: true },

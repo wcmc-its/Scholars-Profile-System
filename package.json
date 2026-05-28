@@ -58,6 +58,7 @@
     "etl:mesh-coverage": "tsx etl/mesh-coverage/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
+    "etl:revalidate": "tsx etl/revalidate/index.ts",
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
   },
   "dependencies": {

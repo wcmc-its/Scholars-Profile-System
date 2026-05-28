@@ -236,6 +236,23 @@ describe("EtlStack", () => {
           },
         );
       });
+
+      describe("#479 -- cadences POST /api/revalidate after search:index", () => {
+        it.each(["nightly", "weekly"])(
+          "%s machine closes with `etl:revalidate` after `search:index`",
+          (cadence) => {
+            const text = getStateMachineDefinitionText(
+              template,
+              `scholars-${cadence}-prod`,
+            );
+            expect(text).toMatch(/"etl:revalidate"/);
+            const lastSearchIndex = text.lastIndexOf("search:index");
+            const lastRevalidate = text.lastIndexOf("etl:revalidate");
+            expect(lastSearchIndex).toBeGreaterThan(-1);
+            expect(lastRevalidate).toBeGreaterThan(lastSearchIndex);
+          },
+        );
+      });
     });
 
     describe("EventBridge schedules (D7)", () => {
@@ -499,6 +516,22 @@ describe("EtlStack", () => {
           Name?: string;
         }>;
         expect(envEntries.map((e) => e.Name)).toContain("OPENSEARCH_NODE");
+      });
+
+      it("sets SCHOLARS_BASE_URL pointing at the internal ALB (#479)", () => {
+        // The cadence revalidate step calls /api/revalidate on the VPC-private
+        // ALB. The value is an Fn::Join that interpolates the cross-stack
+        // import of InternalAlbDns; assert by string-matching the JSON shape
+        // rather than the resolved value (which is a CloudFormation token).
+        const envEntries = (etlContainerDef().Environment ?? []) as Array<{
+          Name?: string;
+          Value?: unknown;
+        }>;
+        const baseUrl = envEntries.find((e) => e.Name === "SCHOLARS_BASE_URL");
+        expect(baseUrl).toBeDefined();
+        const valueJson = JSON.stringify(baseUrl?.Value ?? {});
+        expect(valueJson).toContain("http://");
+        expect(valueJson).toContain("Sps-App-prod-InternalAlbDns");
       });
     });
 
