@@ -94,7 +94,7 @@ export function resolveFundingConceptEnabled(): boolean {
 
 /**
  * Issue #532 — dept-shape leadership boost (chair / division chief). When
- * `on`, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
+ * on, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
  * body in a multiplicative `function_score` that promotes the dept's chair
  * (and, in future, the chief of a queried division) above other dept members.
  * The signal source is `leadership.chairOf` / `leadership.chiefOf` on the
@@ -102,11 +102,19 @@ export function resolveFundingConceptEnabled(): boolean {
  * `Division.chiefCwid` (which already reflect ADR-002 prediction + Path C
  * manual overrides).
  *
- * Default `off`: the new fields require an OpenSearch reindex on the
- * people-v2 mapping before the boost has anything to read. Deliberately
- * a separate flag from `SEARCH_PEOPLE_RELEVANCE_MODE` so the v3 default
- * baseline established by PR #526 isn't disturbed by this rollout.
+ * Default `on` — confirmed against the local §3.2 eval (2026-05-28) on a
+ * reindexed cluster: the boost promotes the actual chair to rank-1 on
+ * both labeled dept queries (Sallie Permar on `pediatrics`, Rainu Kaushal
+ * on `population health sciences`) without displacing previously-top-3
+ * labeled hits. `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST=off` is the
+ * emergency rollback. Safe before the post-launch reindex too: the term
+ * filter against a not-yet-indexed `leadership.chairOf` simply does not
+ * fire, so dept ranking falls back to the pre-#532 body.
+ *
+ * Deliberately a separate flag from `SEARCH_PEOPLE_RELEVANCE_MODE` so the
+ * v3 default established by PR #526 has an independent rollback lever
+ * from this orthogonal signal.
  */
 export function resolveDeptLeadershipBoost(): boolean {
-  return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST === "on";
+  return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST !== "off";
 }

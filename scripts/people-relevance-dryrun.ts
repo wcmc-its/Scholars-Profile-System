@@ -32,6 +32,7 @@ import {
   type PeopleQueryShape,
 } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
+import { resolveDeptLeadershipBoost } from "@/lib/api/search-flags";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 
 type Shape = "name" | "topic" | "department" | "hybrid";
@@ -106,7 +107,16 @@ async function main() {
       cls = shape;
       const r = await searchPeople(
         MODE === "v3"
-          ? { q: c.query, relevanceMode: "v3", shape, meshDescendantUis }
+          ? {
+              q: c.query,
+              relevanceMode: "v3",
+              shape,
+              meshDescendantUis,
+              // Issue #532 — surface the env-gated dept-leadership boost so
+              // the dryrun mirrors the route's behavior under either flag
+              // state. Toggle by exporting SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST.
+              deptLeadershipBoost: resolveDeptLeadershipBoost(),
+            }
           : { q: c.query },
       );
       total = r.total;

@@ -146,21 +146,26 @@ describe("resolveDeptLeadershipBoost (#532)", () => {
     else process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = original;
   });
 
-  it("defaults to false when the env is unset (opt-in rollout)", () => {
-    expect(resolveDeptLeadershipBoost()).toBe(false);
-  });
-
-  it("is true only for exactly 'on'", () => {
-    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "on";
+  it("defaults to true when the env is unset (post-2026-05-28 default-on)", () => {
     expect(resolveDeptLeadershipBoost()).toBe(true);
   });
 
-  it("is false for any other value (off / casing / truthy strings)", () => {
+  it("is false only for exactly 'off' (the documented rollback literal)", () => {
     process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "off";
     expect(resolveDeptLeadershipBoost()).toBe(false);
-    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "ON";
-    expect(resolveDeptLeadershipBoost()).toBe(false);
+  });
+
+  it("is true for any value that is not 'off' (including 'on' and casing variants of 'off')", () => {
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "on";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+    // Casing only matters for the literal 'off' — 'OFF' is NOT the rollback
+    // string. Documenting via test so a future operator doesn't assume
+    // lenient casing on the rollback path.
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "OFF";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
     process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "true";
-    expect(resolveDeptLeadershipBoost()).toBe(false);
+    expect(resolveDeptLeadershipBoost()).toBe(true);
+    process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "";
+    expect(resolveDeptLeadershipBoost()).toBe(true);
   });
 });
