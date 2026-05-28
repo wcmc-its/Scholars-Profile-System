@@ -1379,7 +1379,12 @@ export class AppStack extends Stack {
     });
     new CfnOutput(this, "InternalAlbDns", {
       value: this.internalAlb.loadBalancerDnsName,
-      description: "SPS internal ALB DNS name (consumed by EtlStack)",
+      // Issue #479 — EtlStack reads this via `Fn::ImportValue` to point the
+      // cadence revalidate step's `SCHOLARS_BASE_URL` at the VPC-private ALB.
+      // Cross-stack imports require a named export — the auto-generated
+      // logical-id name isn't addressable by `importValue`.
+      exportName: `Sps-App-${env}-InternalAlbDns`,
+      description: "SPS internal ALB DNS name (consumed by EtlStack).",
     });
     // Additive output for EtlStack — admits the ETL SG on :80 of the
     // internal ALB SG via SG-to-SG ingress. Consumed by EtlStack through

@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { prisma } from "../lib/db";
+import { runRevalidate } from "./revalidate";
 
 type StepResult = { source: string; ok: boolean; durationMs: number; error?: string };
 
@@ -106,89 +106,18 @@ async function main() {
   // 4. ISR cache invalidation. Per ADR-008: profile, home, and topic pages are
   //    rendered with `export const revalidate` time-based ISR; on-demand
   //    revalidation is what actually keeps the cache fresh after an ETL run.
-  //    Phase 2 Plan 09 wires the home page + all topic pages here. Per-scholar
-  //    `/scholars/{slug}` revalidations are emitted by the source-system ETLs
-  //    that touch individual scholar records (not blanket here, since 8,943
-  //    profiles × per-CWID HTTP call is wasteful when most are unchanged).
+  //    The sweep lives in `etl/revalidate/index.ts` so each cadence Step
+  //    Function can invoke it as a standalone closing step (#479) — the daily
+  //    orchestrator just delegates to the same module here, preserving the
+  //    inline behavior.
   //
   //    Failures are logged via console.warn but do NOT fail the ETL run —
   //    the 6h ISR TTL ensures the cache eventually refreshes even if the
-  //    revalidate endpoint is unreachable. Phase 6 adds an alert if the
-  //    stale-cache rate exceeds threshold.
-  console.log("\n=== Revalidate ISR caches ===");
-  await revalidatePath("/");
-  // Single try/finally wraps both Prisma queries so $disconnect() is always
-  // called even if the topics query throws before reaching the depts block.
-  // WR-01: previously only the depts block had a finally; a topics-query
-  // failure left the connection open.
-  try {
-    const topics = await prisma.topic.findMany({ select: { id: true } });
-    for (const t of topics) {
-      await revalidatePath(`/topics/${t.id}`);
-    }
-    console.log(`[Revalidate] queued / + ${topics.length} topic page(s)`);
-
-    const depts = await prisma.department.findMany({ select: { slug: true } });
-    // Phase 4 — Browse hub aggregates department scholar counts; revalidate
-    // alongside the per-department pages. Best-effort, same as below.
-    await revalidatePath("/browse");
-    console.log("[Revalidate] queued /browse");
-
-    for (const d of depts) {
-      await revalidatePath(`/departments/${d.slug}`);
-    }
-    console.log(`[Revalidate] queued ${depts.length} department page(s)`);
-
-    await revalidatePath("/sitemap.xml");
-    console.log("[Revalidate] queued /sitemap.xml");
-  } catch (err) {
-    console.warn("[Revalidate] could not enumerate paths:", err);
-  } finally {
-    await prisma.$disconnect();
-  }
+  //    revalidate endpoint is unreachable.
+  await runRevalidate();
 
   summarize(results, overall);
   if (results.some((r) => !r.ok)) process.exit(1);
-}
-
-/**
- * POST /api/revalidate?path={p} with the shared SCHOLARS_REVALIDATE_TOKEN
- * sent as an `Authorization: Bearer` token. Best-effort: failures are warned,
- * never thrown — see ADR-008 ISR fallback. Token is the only auth barrier per
- * Plan 09 threat register (T-02-09-01); base URL defaults to localhost for the
- * prototype but is overridable via SCHOLARS_BASE_URL for AWS deployment.
- */
-const ALLOWED_BASE_ORIGINS = [
-  "http://localhost:3000",
-  "https://scholars.weill.cornell.edu",
-];
-
-async function revalidatePath(p: string): Promise<void> {
-  const token = process.env.SCHOLARS_REVALIDATE_TOKEN;
-  const baseUrl = process.env.SCHOLARS_BASE_URL ?? "http://localhost:3000";
-  if (!token) {
-    console.warn(`[Revalidate] SCHOLARS_REVALIDATE_TOKEN unset; skipping ${p}`);
-    return;
-  }
-  // WR-02: validate baseUrl against known origins to prevent token exfiltration
-  // if SCHOLARS_BASE_URL is misconfigured or injected.
-  if (!ALLOWED_BASE_ORIGINS.some((o) => baseUrl.startsWith(o))) {
-    console.warn(
-      `[Revalidate] SCHOLARS_BASE_URL "${baseUrl}" not in allowed list; skipping ${p}`,
-    );
-    return;
-  }
-  try {
-    const resp = await fetch(`${baseUrl}/api/revalidate?path=${encodeURIComponent(p)}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!resp.ok) {
-      console.warn(`[Revalidate] ${p} → ${resp.status} ${resp.statusText}`);
-    }
-  } catch (err) {
-    console.warn(`[Revalidate] ${p} threw:`, err);
-  }
 }
 
 function summarize(results: StepResult[], overall: number) {

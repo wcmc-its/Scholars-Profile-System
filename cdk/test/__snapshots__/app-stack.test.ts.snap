@@ -161,7 +161,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
       },
     },
     "InternalAlbDns": {
-      "Description": "SPS internal ALB DNS name (consumed by EtlStack)",
+      "Description": "SPS internal ALB DNS name (consumed by EtlStack).",
+      "Export": {
+        "Name": "Sps-App-prod-InternalAlbDns",
+      },
       "Value": {
         "Fn::GetAtt": [
           "InternalAlb58CEEAE8",
@@ -2360,7 +2363,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
       },
     },
     "InternalAlbDns": {
-      "Description": "SPS internal ALB DNS name (consumed by EtlStack)",
+      "Description": "SPS internal ALB DNS name (consumed by EtlStack).",
+      "Export": {
+        "Name": "Sps-App-staging-InternalAlbDns",
+      },
       "Value": {
         "Fn::GetAtt": [
           "InternalAlb58CEEAE8",
