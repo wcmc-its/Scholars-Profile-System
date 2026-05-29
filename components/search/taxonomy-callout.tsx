@@ -80,6 +80,11 @@ export function TaxonomyCallout({ result }: { result: TaxonomyMatchResult }) {
         <div
           id="taxonomy-callout-secondary"
           aria-hidden={!expanded}
+          // When collapsed the row clips to 0fr but its links remain in the
+          // DOM; `inert` takes them out of the tab order and a11y tree so a
+          // keyboard user can't tab into the hidden list (WCAG 4.1.2, axe
+          // `aria-hidden-focus`). #575.
+          inert={!expanded}
           className={`grid transition-[grid-template-rows] duration-200 ease-out ${
             expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
           }`}

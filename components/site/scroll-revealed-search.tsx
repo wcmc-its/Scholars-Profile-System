@@ -35,6 +35,11 @@ export function ScrollRevealedSearch({ sentinelId }: { sentinelId: string }) {
   return (
     <div
       aria-hidden={!revealed}
+      // While hidden the search is visually gone (opacity-0) but its input and
+      // button stay in the DOM; `inert` removes them from the tab order and the
+      // a11y tree so keyboard users can't focus an invisible control (WCAG 4.1.2,
+      // axe `aria-hidden-focus`). #575.
+      inert={!revealed}
       className={`transition-opacity duration-200 ${
         revealed ? "opacity-100" : "pointer-events-none opacity-0"
       }`}

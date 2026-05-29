@@ -90,7 +90,7 @@ function DeptGrantsListInner({
           {total.toLocaleString()} active grants
         </span>
         <Select value={sort} onValueChange={(v) => setSort(v as GrantSort)}>
-          <SelectTrigger className="h-8 w-[180px] text-sm">
+          <SelectTrigger aria-label="Sort by" className="h-8 w-[180px] text-sm">
             <SelectValue placeholder="Sort by" />
           </SelectTrigger>
           <SelectContent>

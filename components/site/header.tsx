@@ -68,7 +68,7 @@ export async function SiteHeader({
           <div className="flex-1" />
         )}
 
-        <nav className="flex shrink-0 items-center gap-6">
+        <nav aria-label="Primary" className="flex shrink-0 items-center gap-6">
           <Link href="/search" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
             Browse
           </Link>

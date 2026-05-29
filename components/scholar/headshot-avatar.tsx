@@ -71,7 +71,11 @@ export function HeadshotAvatar({
       {!noImage && (
         <AvatarImage
           src={identityImageEndpoint}
-          alt={preferredName}
+          // Decorative: every headshot is rendered next to the scholar's name as
+          // visible text, so naming the image too makes a screen reader announce
+          // the name twice. Empty alt drops it from the a11y tree (axe
+          // `image-redundant-alt`). #575.
+          alt=""
           className="aspect-square h-full w-full object-cover object-top"
           onLoadingStatusChange={(s) =>
             setImgStatus(
