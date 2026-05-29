@@ -1167,6 +1167,160 @@ service:
       },
       "Type": "AWS::ECS::Service",
     },
+    "EcsServiceTaskCountTarget02FCCE22": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "MaxCapacity": 6,
+        "MinCapacity": 2,
+        "ResourceId": {
+          "Fn::Join": [
+            "",
+            [
+              "service/",
+              {
+                "Ref": "EcsCluster97242B84",
+              },
+              "/",
+              {
+                "Fn::GetAtt": [
+                  "EcsService81FC6EF6",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+        "RoleARN": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":iam::123456789012:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService",
+            ],
+          ],
+        },
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs",
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    },
+    "EcsServiceTaskCountTargetCpuScalingA9C91D4C": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "PolicyName": "SpsAppprodEcsServiceTaskCountTargetCpuScalingEBB138A7",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "EcsServiceTaskCountTarget02FCCE22",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageCPUUtilization",
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 60,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+    },
+    "EcsServiceTaskCountTargetRequestScaling41EBB189": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "PolicyName": "SpsAppprodEcsServiceTaskCountTargetRequestScaling18380323",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "EcsServiceTaskCountTarget02FCCE22",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ALBRequestCountPerTarget",
+            "ResourceLabel": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      1,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      2,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::GetAtt": [
+                      "PublicAppTargetGroup68798009",
+                      "TargetGroupFullName",
+                    ],
+                  },
+                ],
+              ],
+            },
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 1000,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+    },
     "EtlEcrRepository058F5EEC": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -3511,6 +3665,160 @@ service:
         },
       },
       "Type": "AWS::ECS::Service",
+    },
+    "EcsServiceTaskCountTarget02FCCE22": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "MaxCapacity": 3,
+        "MinCapacity": 1,
+        "ResourceId": {
+          "Fn::Join": [
+            "",
+            [
+              "service/",
+              {
+                "Ref": "EcsCluster97242B84",
+              },
+              "/",
+              {
+                "Fn::GetAtt": [
+                  "EcsService81FC6EF6",
+                  "Name",
+                ],
+              },
+            ],
+          ],
+        },
+        "RoleARN": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":iam::123456789012:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService",
+            ],
+          ],
+        },
+        "ScalableDimension": "ecs:service:DesiredCount",
+        "ServiceNamespace": "ecs",
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+    },
+    "EcsServiceTaskCountTargetCpuScalingA9C91D4C": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "PolicyName": "SpsAppstagingEcsServiceTaskCountTargetCpuScalingFE6EC224",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "EcsServiceTaskCountTarget02FCCE22",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ECSServiceAverageCPUUtilization",
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 60,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+    },
+    "EcsServiceTaskCountTargetRequestScaling41EBB189": {
+      "DependsOn": [
+        "InternalAlbInternalHttpListener9436A291",
+        "InternalAppTargetGroup9E028644",
+        "OriginVerifiedForwardC0422D52",
+        "PublicAlbPublicHttpListener8CAA0E91",
+        "PublicAppTargetGroup68798009",
+        "TaskRole30FC0FBB",
+      ],
+      "Properties": {
+        "PolicyName": "SpsAppstagingEcsServiceTaskCountTargetRequestScaling02C35464",
+        "PolicyType": "TargetTrackingScaling",
+        "ScalingTargetId": {
+          "Ref": "EcsServiceTaskCountTarget02FCCE22",
+        },
+        "TargetTrackingScalingPolicyConfiguration": {
+          "PredefinedMetricSpecification": {
+            "PredefinedMetricType": "ALBRequestCountPerTarget",
+            "ResourceLabel": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      1,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      2,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          "/",
+                          {
+                            "Ref": "PublicAlbPublicHttpListener8CAA0E91",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  "/",
+                  {
+                    "Fn::GetAtt": [
+                      "PublicAppTargetGroup68798009",
+                      "TargetGroupFullName",
+                    ],
+                  },
+                ],
+              ],
+            },
+          },
+          "ScaleInCooldown": 300,
+          "ScaleOutCooldown": 60,
+          "TargetValue": 1000,
+        },
+      },
+      "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
     },
     "EtlEcrRepository058F5EEC": {
       "DeletionPolicy": "Retain",

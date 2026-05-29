@@ -70,8 +70,26 @@ export interface SpsEnvConfig {
    * fully offline. Tunable here so the bootstrap deploy can be temporarily
    * driven to zero via `-c appDesiredCount=0` while the first image is
    * pushed to ECR (see `feat-infra-phase2-appstack.md § Deploy strategy`).
+   *
+   * Doubles as the autoscaling MIN capacity (#596) — the service never
+   * scales below this floor, so a single-AZ failure still leaves the
+   * prod minimum (2) spread across AZs.
    */
   readonly appDesiredCount: number;
+  /**
+   * Autoscaling MAX task count for the app service (#596). The ECS service
+   * scales between {@link appDesiredCount} (min) and this ceiling on CPU and
+   * ALB request-count target-tracking. Sized to absorb a launch / outreach-
+   * wave spike on the uncacheable origin paths (`/api/search*`, `/edit*`,
+   * `/api/auth/*`) without manual intervention; cacheable traffic is shed by
+   * CloudFront + ISR upstream and does not reach a task.
+   *
+   * These are conservative placeholders pending the #554 load-test numbers
+   * (P0, Gate A) — revisit the ceiling and the target thresholds once real
+   * RPS / CPU-per-task figures exist. Must be >= {@link appDesiredCount}
+   * (asserted at synth time in app-stack.test.ts).
+   */
+  readonly appMaxCount: number;
   /**
    * Fargate CPU units for the app task definition. Must combine with
    * {@link appMemoryMiB} to form a valid Fargate (cpu, memory) pair —
@@ -157,6 +175,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchDataNodeInstanceType: "t3.small.search",
     awsBackupRetentionDays: 14,
     appDesiredCount: 1,
+    // #596 — staging is low-traffic (internal QA + VPN circulation); a small
+    // ceiling proves the scaling path works without provisioning prod-sized
+    // headroom. Revisit with #554 numbers.
+    appMaxCount: 3,
     appCpu: 512,
     appMemoryMiB: 1024,
     migrationTaskCpu: 512,
@@ -200,6 +222,11 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     opensearchDataNodeInstanceType: "m6g.large.search",
     awsBackupRetentionDays: 35,
     appDesiredCount: 2,
+    // #596 — 3x the 2-task floor gives room to absorb a Wave-4 (WCM-wide,
+    // #506 Gate D5) spike on the uncacheable origin paths before the ALB
+    // queue saturates. Conservative placeholder; the true ceiling is a
+    // function of the #554 RPS / CPU-per-task numbers (P0, Gate A).
+    appMaxCount: 6,
     appCpu: 1024,
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,

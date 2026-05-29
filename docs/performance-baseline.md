@@ -80,9 +80,13 @@ run. **Do not infer the TBDs from the Observed column** — they are different r
 
 ## Scaling characteristics
 
-- **App tier:** ECS Fargate, prod 2 tasks (1024 CPU / 2048 MiB), autoscaling target on
-  RPS/CPU. Rolling deploys briefly run 2→3 tasks. Blue/green is intentionally deferred
-  until steady-state > 4 tasks or sustained > 100 RPS ([`DEPLOY-RUNBOOK.md § Why rolling`](./DEPLOY-RUNBOOK.md)).
+- **App tier:** ECS Fargate, prod 1024 CPU / 2048 MiB per task. Target-tracking
+  autoscaling (#596) between min 2 (= `appDesiredCount`, AZ-spread) and max 6
+  (= `appMaxCount`) on avg CPU (60%) and ALB request-count-per-target; the max and
+  the thresholds are conservative placeholders pending the #554 load test. Rolling
+  deploys stand up replacement tasks before draining (minHealthy 100% / max 200%).
+  Blue/green is intentionally deferred until steady-state > 4 tasks or sustained
+  > 100 RPS ([`DEPLOY-RUNBOOK.md § Why rolling`](./DEPLOY-RUNBOOK.md)).
 - **DB tier:** Aurora Serverless v2 auto-scales 1–8 ACU (prod); prod has a reader endpoint
   for `db.read`. Connection budget: 15/task; alarm at 80 connections.
 - **Search tier:** OpenSearch prod = 2 × `m6g.large.search`, multi-AZ. Sizing is
