@@ -155,7 +155,14 @@ export default function DocsPage() {
           synopsis). Different systems, different jobs.
         </p>
 
-        <h3>Common questions</h3>
+        {/* Top-level section directly under the page h1 — semantically an h2
+            (clears the heading-order skip). Pinned to the smaller 18px/spacing
+            of the page's h3 scale so the visual teaser hierarchy is unchanged;
+            MAIN_CLASS sizes bare `h2` via a `[&_h2]` descendant variant whose
+            class+element specificity beats plain utilities, hence the `!`. */}
+        <h2 className="!mt-7 !text-lg !font-semibold !tracking-normal">
+          Common questions
+        </h2>
         <div className="mt-3 max-w-[820px] overflow-hidden rounded-[10px] border border-border bg-[#fafbfc]">
           {[
             {

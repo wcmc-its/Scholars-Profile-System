@@ -46,20 +46,40 @@ function PaginationLink({
   className,
   isActive,
   size = "icon",
+  href,
   ...props
 }: PaginationLinkProps) {
+  const classes = cn(
+    buttonVariants({
+      variant: isActive ? "outline" : "ghost",
+      size,
+    }),
+    className
+  )
+  // With no href the control performs an in-page action (client-side page
+  // change), not navigation — render a real <button>. An <a> without href is a
+  // generic element, where aria-label / aria-current are prohibited (axe
+  // `aria-prohibited-attr`, WCAG 4.1.2) and which is not operable as a link by
+  // keyboard. buttonVariants keeps it pixel-identical to the anchor form.
+  if (href === undefined) {
+    return (
+      <button
+        type="button"
+        aria-current={isActive ? "page" : undefined}
+        data-slot="pagination-link"
+        data-active={isActive}
+        className={classes}
+        {...(props as unknown as React.ComponentProps<"button">)}
+      />
+    )
+  }
   return (
     <a
+      href={href}
       aria-current={isActive ? "page" : undefined}
       data-slot="pagination-link"
       data-active={isActive}
-      className={cn(
-        buttonVariants({
-          variant: isActive ? "outline" : "ghost",
-          size,
-        }),
-        className
-      )}
+      className={classes}
       {...props}
     />
   )
