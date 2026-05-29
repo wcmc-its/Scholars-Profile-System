@@ -1,0 +1,17 @@
+[
+  { "matchGroup": "cancer genomics", "institution": "WCM", "name": "Olivier Elemento", "verified": true, "note": "WCM — computational genomics / precision oncology" },
+  { "matchGroup": "cancer genomics", "institution": "Johns Hopkins", "name": "Bert Vogelstein", "verified": true, "note": "cancer genetics" },
+  { "matchGroup": "cancer genomics", "institution": "Stanford", "name": "Michael Snyder", "verified": true, "note": "genomics / genetics chair" },
+  { "matchGroup": "cancer genomics", "institution": "UCSF", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable UCSF cancer-genomics PI" },
+  { "matchGroup": "cancer genomics", "institution": "Harvard", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable HMS cancer-genomics PI" },
+  { "matchGroup": "cancer genomics", "institution": "Duke", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable Duke cancer-genomics PI" },
+
+  { "matchGroup": "cardiac surgery", "institution": "WCM", "name": "Mario Gaudino", "verified": true, "note": "WCM — cardiothoracic surgery" },
+  { "matchGroup": "cardiac surgery", "institution": "Duke", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable Duke cardiac-surgery PI" },
+  { "matchGroup": "cardiac surgery", "institution": "Penn", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable Penn cardiac-surgery PI" },
+  { "matchGroup": "cardiac surgery", "institution": "Northwestern", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable Northwestern cardiac-surgery PI" },
+
+  { "matchGroup": "infectious disease epidemiology", "institution": "WCM", "name": "Laith Jamal Abu-Raddad", "verified": true, "note": "WCM(-Q) — infectious disease epidemiology" },
+  { "matchGroup": "infectious disease epidemiology", "institution": "Johns Hopkins", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable JHU ID-epi PI" },
+  { "matchGroup": "infectious disease epidemiology", "institution": "Minnesota", "name": "REPLACE_ME", "verified": false, "note": "comms: name a comparable UMN ID-epi PI" }
+]

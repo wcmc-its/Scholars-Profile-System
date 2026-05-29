@@ -79,20 +79,45 @@ export function hostMatches(link: string | undefined | null, target: string): bo
 }
 
 /**
+ * Does `link`'s path start with `pathPrefix`? Used to scope a target to a
+ * sub-path of a shared host — e.g. Penn has no dedicated profiles host, so its
+ * profile pages live under `www.med.upenn.edu/apps/faculty/`. Without this, a
+ * bare host match would count any PSOM page and break the profiles-only scope.
+ * No prefix → always true (host-level match, the default for every other
+ * target). Unparseable link → false.
+ */
+export function pathMatches(
+  link: string | undefined | null,
+  pathPrefix: string | undefined,
+): boolean {
+  if (!pathPrefix) return true;
+  if (!link) return false;
+  try {
+    return new URL(link).pathname.startsWith(pathPrefix);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Best (lowest-numbered) organic placement of `targets` in `results`.
  * `targets` is one or more hosts treated as aliases of the same property
  * (VIVO ran at both `vivo.weill.cornell.edu` and `vivo.med.cornell.edu`), so a
- * hit on any alias counts and we keep the highest-ranked one.
+ * hit on any alias counts and we keep the highest-ranked one. An optional
+ * `pathPrefix` further restricts matches to URLs whose path starts with it
+ * (Penn's `/apps/faculty/`); omitted = host-level match as before.
  */
 export function findDomainRank(
   results: SerpOrganicResult[] | undefined,
   targets: string | string[],
+  pathPrefix?: string,
 ): DomainPlacement {
   const hosts = Array.isArray(targets) ? targets : [targets];
   let best: DomainPlacement = { position: null, url: null, title: null };
   for (const r of results ?? []) {
     if (typeof r.position !== "number") continue;
     if (!hosts.some((h) => hostMatches(r.link, h))) continue;
+    if (!pathMatches(r.link, pathPrefix)) continue;
     if (best.position === null || r.position < best.position) {
       best = { position: r.position, url: r.link ?? null, title: r.title ?? null };
     }

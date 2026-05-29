@@ -63,7 +63,9 @@
     "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts",
     "seo:basket": "tsx scripts/seo/build-basket.ts",
     "seo:track": "tsx scripts/seo/track-rank.ts",
-    "seo:diff": "tsx scripts/seo/diff-rank.ts"
+    "seo:diff": "tsx scripts/seo/diff-rank.ts",
+    "seo:standings": "tsx scripts/seo/standings-rank.ts",
+    "seo:enrich-matched": "tsx scripts/seo/enrich-matched.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudfront": "^3.1049.0",

@@ -55,8 +55,8 @@ function parseArgs(argv: string[]): Args {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const type = (get("--type") ?? "all") as Args["type"];
-  if (!["all", "topical", "branded"].includes(type)) {
-    throw new Error(`--type must be all|topical|branded, got ${type}`);
+  if (!["all", "topical", "branded", "expert"].includes(type)) {
+    throw new Error(`--type must be all|topical|branded|expert, got ${type}`);
   }
   const limitRaw = get("--limit");
   return {
@@ -117,12 +117,15 @@ async function main(): Promise<void> {
 
   // ── Dry run: report the plan and estimated spend, make zero API calls. ──
   if (args.dryRun) {
-    const topical = queries.filter((q) => q.type === "topical").length;
-    const branded = queries.filter((q) => q.type === "branded").length;
+    const byType = queries.reduce<Record<string, number>>((acc, q) => {
+      acc[q.type] = (acc[q.type] ?? 0) + 1;
+      return acc;
+    }, {});
+    const typeSummary = Object.entries(byType).map(([t, n]) => `${n} ${t}`).join(", ");
     console.log(`[seo:track] DRY RUN — no API calls, no SERPAPI_KEY required.`);
     console.log(`  basket:   ${args.basket} (generated ${basket.generatedAt})`);
-    console.log(`  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}]`).join("  |  ")}`);
-    console.log(`  selected: ${queries.length} queries (${topical} topical, ${branded} branded)`);
+    console.log(`  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}${t.pathPrefix ? " " + t.pathPrefix : ""}]`).join("  |  ")}`);
+    console.log(`  selected: ${queries.length} queries (${typeSummary})`);
     console.log(`  cost:     ~${queries.length} SerpAPI searches (1 per query; all targets share each search)`);
     console.log(
       `  throttle: ${args.maxPerHour > 0 ? `<= ${args.maxPerHour}/hour` : "disabled"}` +
@@ -168,9 +171,15 @@ async function main(): Promise<void> {
       type: q.type,
       topicId: q.topicId,
       label: q.label,
+      // Carried through so single-snapshot standings can segment (flagship,
+      // matched cohort) and surface eminence covariates without the basket.
+      flagship: q.flagship,
+      matchGroup: q.matchGroup,
+      hIndex: q.hIndex,
+      academicAge: q.academicAge,
       placements: basket.targets.map((t) => ({
         targetKey: t.key,
-        ...findDomainRank(res.organic_results, t.hosts),
+        ...findDomainRank(res.organic_results, t.hosts, t.pathPrefix),
       })),
     });
     done++;

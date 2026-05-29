@@ -4,6 +4,7 @@ import {
   normalizeHost,
   hostOf,
   hostMatches,
+  pathMatches,
   findDomainRank,
   buildRequestParams,
   serpApiKeyFromEnv,
@@ -15,7 +16,26 @@ import {
   summarize,
   toCsv,
   type RankSnapshot,
+  type BasketTarget,
 } from "@/lib/seo/rank-basket";
+import {
+  groupByInstitution,
+  groupByPlatform,
+  bestPlacement,
+  computeStandings,
+  headToHead,
+  gapList,
+  matchedCohorts,
+} from "@/lib/seo/standings";
+import {
+  parseHIndex,
+  pickBestAuthor,
+  earliestYearFromWorks,
+  academicAge,
+  openAlexKey,
+  institutionNamesOf,
+  type OpenAlexAuthor,
+} from "@/lib/seo/openalex";
 
 describe("serpapi host matching", () => {
   it("normalizes case and strips www", () => {
@@ -274,5 +294,219 @@ describe("toCsv", () => {
     );
     expect(lines[1]).toContain('"cancer, genomics ""test"""');
     expect(lines[1]).toContain(",improved");
+  });
+});
+
+// ── pathPrefix scoping (Penn shares a host with non-profile pages) ─────────
+
+describe("pathMatches + findDomainRank pathPrefix", () => {
+  it("matches only paths under the prefix", () => {
+    expect(pathMatches("https://www.med.upenn.edu/apps/faculty/p123", "/apps/faculty/")).toBe(true);
+    expect(pathMatches("https://www.med.upenn.edu/news/story", "/apps/faculty/")).toBe(false);
+    expect(pathMatches("https://x.edu/y", undefined)).toBe(true); // no prefix → host-level
+    expect(pathMatches(null, "/apps/faculty/")).toBe(false);
+  });
+
+  it("scopes a shared host to its profile sub-path", () => {
+    const results: SerpOrganicResult[] = [
+      { position: 2, link: "https://www.med.upenn.edu/news/x", title: "News" },
+      { position: 6, link: "https://www.med.upenn.edu/apps/faculty/p9", title: "Prof" },
+    ];
+    expect(findDomainRank(results, "med.upenn.edu", "/apps/faculty/").position).toBe(6);
+    expect(findDomainRank(results, "med.upenn.edu").position).toBe(2); // no prefix
+  });
+});
+
+// ── cross-sectional standings ─────────────────────────────────────────────
+
+const RIVAL_TARGETS: BasketTarget[] = [
+  { key: "wcm-new", label: "Scholars (new)", hosts: ["scholars.weill.cornell.edu"], institution: "WCM", platform: "custom", surfaceType: "research-profiles" },
+  { key: "wcm-vivo", label: "VIVO (legacy)", hosts: ["vivo.weill.cornell.edu"], institution: "WCM", platform: "VIVO", surfaceType: "research-profiles" },
+  { key: "wcm-clinical", label: "WCM clinical", hosts: ["weillcornell.org"], institution: "WCM", platform: "clinical", surfaceType: "clinical" },
+  { key: "ucsf", label: "UCSF", hosts: ["profiles.ucsf.edu"], institution: "UCSF", platform: "Profiles RNS", surfaceType: "research-profiles" },
+  { key: "hopkins", label: "Johns Hopkins", hosts: ["pure.johnshopkins.edu"], institution: "Johns Hopkins", platform: "Elsevier Pure", surfaceType: "research-profiles" },
+  { key: "penn", label: "Penn", hosts: ["med.upenn.edu"], institution: "Penn", platform: "custom", surfaceType: "research-profiles", pathPrefix: "/apps/faculty/" },
+];
+
+function place(targetKey: string, position: number | null) {
+  return { targetKey, position, url: position === null ? null : `https://x/${targetKey}`, title: null };
+}
+
+const rivalSnap: RankSnapshot = {
+  capturedAt: "2026-05-29T00:00:00Z",
+  basketSource: "test",
+  targets: RIVAL_TARGETS,
+  rows: [
+    {
+      id: "expert:breast_cancer:researcher",
+      query: "breast cancer researcher",
+      type: "expert",
+      placements: [place("wcm-new", 8), place("wcm-vivo", null), place("ucsf", 3), place("hopkins", 5), place("penn", null)],
+    },
+    {
+      id: "expert:cardiology:expert",
+      query: "cardiology expert",
+      type: "expert",
+      placements: [place("wcm-new", 2), place("ucsf", 4), place("hopkins", 2), place("penn", null)],
+    },
+    {
+      id: "expert:genomics:researcher",
+      query: "genomics researcher",
+      type: "expert",
+      flagship: true,
+      placements: [place("wcm-new", null), place("ucsf", null), place("hopkins", 6), place("penn", null)],
+    },
+    {
+      id: "matched:cardiology:wcm",
+      query: "Jane Smith",
+      type: "branded",
+      matchGroup: "cardiology",
+      hIndex: 40,
+      academicAge: 20,
+      placements: [place("wcm-new", 1), place("ucsf", null)],
+    },
+    {
+      id: "matched:cardiology:ucsf",
+      query: "John Doe",
+      type: "branded",
+      matchGroup: "cardiology",
+      hIndex: 38,
+      academicAge: 22,
+      placements: [place("ucsf", 1)],
+    },
+  ],
+};
+
+describe("grouping", () => {
+  it("groups RP surfaces by institution and excludes clinical", () => {
+    const insts = groupByInstitution(RIVAL_TARGETS, "research-profiles");
+    const wcm = insts.find((g) => g.key === "WCM")!;
+    expect(wcm.targetKeys.sort()).toEqual(["wcm-new", "wcm-vivo"]); // no clinical
+    expect(insts.map((g) => g.key).sort()).toEqual(["Johns Hopkins", "Penn", "UCSF", "WCM"]);
+  });
+
+  it("includes clinical under WCM when surface=all", () => {
+    const wcm = groupByInstitution(RIVAL_TARGETS, "all").find((g) => g.key === "WCM")!;
+    expect(wcm.targetKeys).toContain("wcm-clinical");
+  });
+
+  it("groups by platform", () => {
+    const plats = groupByPlatform(RIVAL_TARGETS, "research-profiles").map((g) => g.key).sort();
+    expect(plats).toEqual(["Elsevier Pure", "Profiles RNS", "VIVO", "custom"]);
+  });
+});
+
+describe("bestPlacement", () => {
+  it("returns the lowest position across a group's targets", () => {
+    const row = rivalSnap.rows[0];
+    expect(bestPlacement(row, ["wcm-new", "wcm-vivo"]).position).toBe(8);
+    expect(bestPlacement(row, ["wcm-vivo"]).position).toBeNull();
+  });
+});
+
+describe("computeStandings", () => {
+  const insts = groupByInstitution(RIVAL_TARGETS, "research-profiles");
+  const standings = computeStandings(rivalSnap, insts, "expert");
+  const get = (k: string) => standings.find((s) => s.key === k)!;
+
+  it("counts appearance, top-k and median best per institution", () => {
+    const wcm = get("WCM");
+    expect(wcm.queries).toBe(3);
+    expect(wcm.appeared).toBe(2); // 8, 2
+    expect(wcm.top3).toBe(1); // 2
+    expect(wcm.top10).toBe(2); // 8, 2
+    expect(wcm.medianBest).toBe(5); // median(2,8)
+
+    const hop = get("Johns Hopkins");
+    expect(hop.appeared).toBe(3);
+    expect(hop.medianBest).toBe(5); // median(2,5,6)
+  });
+
+  it("counts wins with shared ties and strict sole wins", () => {
+    expect(get("UCSF").wins).toBe(1); // Q1 sole
+    expect(get("UCSF").soleWins).toBe(1);
+    expect(get("Johns Hopkins").wins).toBe(2); // Q2 tie + Q3 sole
+    expect(get("Johns Hopkins").soleWins).toBe(1); // only Q3
+    expect(get("WCM").wins).toBe(1); // Q2 tie
+    expect(get("WCM").soleWins).toBe(0);
+    expect(get("Penn").wins).toBe(0);
+  });
+
+  it("sorts by wins desc then median asc", () => {
+    expect(standings.map((s) => s.key)).toEqual(["Johns Hopkins", "UCSF", "WCM", "Penn"]);
+  });
+});
+
+describe("headToHead + gapList", () => {
+  const insts = groupByInstitution(RIVAL_TARGETS, "research-profiles");
+  const h2h = headToHead(rivalSnap, insts, "WCM", "expert");
+  const get = (id: string) => h2h.find((r) => r.id === id)!;
+
+  it("picks the best rival and classifies the winner", () => {
+    expect(get("expert:breast_cancer:researcher").winner).toBe("rival"); // 8 vs UCSF 3
+    expect(get("expert:cardiology:expert").winner).toBe("tie"); // 2 vs Hopkins 2
+    expect(get("expert:genomics:researcher").winner).toBe("rival"); // null vs Hopkins 6
+    expect(get("expert:cardiology:expert").home.targetKey).toBe("wcm-new");
+  });
+
+  it("flags queries where a rival is top-10 but WCM is not", () => {
+    const gaps = gapList(rivalSnap, insts, "WCM", "expert").map((r) => r.id);
+    expect(gaps).toEqual(["expert:genomics:researcher"]); // WCM absent, Hopkins @6
+  });
+});
+
+describe("matchedCohorts", () => {
+  it("groups matched name queries and attributes the ranking surface", () => {
+    const insts = groupByInstitution(RIVAL_TARGETS, "research-profiles");
+    const cohorts = matchedCohorts(rivalSnap, insts);
+    expect(cohorts).toHaveLength(1);
+    const c = cohorts[0];
+    expect(c.matchGroup).toBe("cardiology");
+    const wcm = c.entries.find((e) => e.institution === "WCM")!;
+    expect(wcm.hIndex).toBe(40);
+    expect(wcm.academicAge).toBe(20);
+    expect(wcm.position).toBe(1);
+    expect(wcm.targetKey).toBe("wcm-new");
+    expect(c.entries.find((e) => e.institution === "UCSF")!.position).toBe(1);
+  });
+});
+
+// ── OpenAlex pure parsers ─────────────────────────────────────────────────
+
+describe("openalex parsers", () => {
+  it("reads h-index from summary stats", () => {
+    expect(parseHIndex({ id: "A1", display_name: "X", summary_stats: { h_index: 42 } })).toBe(42);
+    expect(parseHIndex({ id: "A1", display_name: "X" })).toBeNull();
+    expect(parseHIndex(null)).toBeNull();
+  });
+
+  it("derives earliest year and academic age", () => {
+    expect(earliestYearFromWorks([{ publication_year: 2008 }, { publication_year: 2003 }, {}])).toBe(2003);
+    expect(earliestYearFromWorks([])).toBeNull();
+    expect(academicAge(2003, 2026)).toBe(23);
+    expect(academicAge(null, 2026)).toBeNull();
+    expect(academicAge(2030, 2026)).toBe(0); // never negative
+  });
+
+  it("normalizes openalex ids and institution names", () => {
+    expect(openAlexKey("https://openalex.org/A5023888391")).toBe("A5023888391");
+    expect(openAlexKey("A123")).toBe("A123");
+    const a: OpenAlexAuthor = {
+      id: "A1",
+      display_name: "X",
+      last_known_institutions: [{ id: "I1", display_name: "UCSF" }],
+      affiliations: [{ institution: { id: "I1", display_name: "UCSF" } }],
+    };
+    expect(institutionNamesOf(a)).toEqual(["ucsf"]); // deduped, lowercased
+  });
+
+  it("picks the institution-matching author, else the most prolific", () => {
+    const authors: OpenAlexAuthor[] = [
+      { id: "A1", display_name: "Jane Smith", works_count: 200, last_known_institutions: [{ id: "I", display_name: "Stanford University" }] },
+      { id: "A2", display_name: "Jane Smith", works_count: 50, last_known_institutions: [{ id: "I", display_name: "UCSF" }] },
+    ];
+    expect(pickBestAuthor(authors, { institution: "UCSF" })?.id).toBe("A2"); // institution wins over works
+    expect(pickBestAuthor(authors)?.id).toBe("A1"); // no institution → most prolific
+    expect(pickBestAuthor([])).toBeNull();
   });
 });

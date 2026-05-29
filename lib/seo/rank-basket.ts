@@ -15,7 +15,10 @@
 
 import type { DomainPlacement } from "./serpapi";
 
-export type QueryType = "topical" | "branded";
+// "topical" = bare-topic / brand-control queries (the cutover instrument);
+// "expert" = funder-style "{topic} researcher/expert" (the rival sweep);
+// "branded" = "<name>" name queries (cutover control + matched head-to-head).
+export type QueryType = "topical" | "branded" | "expert";
 
 /** One query in the basket. */
 export interface BasketQuery {
@@ -24,23 +27,43 @@ export interface BasketQuery {
   /** The literal Google query string. */
   query: string;
   type: QueryType;
-  /** Source ReciterAI topic id, for topical queries (lets the diff group by topic). */
+  /** Source ReciterAI topic id, for topical/expert queries (lets reports group by topic). */
   topicId?: string;
   /** Human label (topic label or scholar name) for report readability. */
   label?: string;
   /** Scholar cwid/slug for branded queries (lets us sanity-check the expected target URL). */
   cwid?: string;
   slug?: string;
+  /** True for the curated flagship expert queries (segments the flagship leaderboard). */
+  flagship?: boolean;
+  /** Matched-cohort id (e.g. a flagship topic) grouping one researcher per institution. */
+  matchGroup?: string;
+  /** Eminence covariates for matched researchers (single source — see eminenceSource). */
+  hIndex?: number;
+  academicAge?: number;
+  /** Provenance of hIndex/academicAge, e.g. "openalex". */
+  eminenceSource?: string;
 }
 
 /** A named tracking target. A property may answer to several host aliases. */
 export interface BasketTarget {
-  /** Short key used in snapshots/diffs, e.g. "new" or "vivo". */
+  /** Short key used in snapshots/diffs, e.g. "new" or "ucsf". */
   key: string;
   /** Human label for reports, e.g. "Scholars (new)". */
   label: string;
   /** One or more hosts treated as aliases of the same property. */
   hosts: string[];
+  /** Institution this surface belongs to (groups e.g. wcm-new + wcm-vivo as "WCM"). */
+  institution?: string;
+  /** Platform software, for the platform rollup (e.g. "Elsevier Pure", "VIVO"). */
+  platform?: string;
+  /**
+   * "research-profiles" (the apples-to-apples leaderboard) vs "clinical"
+   * (weillcornell.org — diagnostic only, excluded from the platform leaderboard).
+   */
+  surfaceType?: "research-profiles" | "clinical";
+  /** Restrict matches to URLs whose path starts with this (Penn: "/apps/faculty/"). */
+  pathPrefix?: string;
 }
 
 export interface Basket {
@@ -72,6 +95,11 @@ export interface SnapshotRow {
   type: QueryType;
   topicId?: string;
   label?: string;
+  /** Carried through from the basket so single-snapshot reports can segment. */
+  flagship?: boolean;
+  matchGroup?: string;
+  hIndex?: number;
+  academicAge?: number;
   placements: SnapshotPlacement[];
 }
 
@@ -184,7 +212,7 @@ function mean(nums: number[]): number | null {
  */
 export function summarize(rows: DiffRow[]): DiffSummary[] {
   const targetKeys = [...new Set(rows.map((r) => r.targetKey))];
-  const types: (QueryType | "all")[] = ["all", "topical", "branded"];
+  const types: (QueryType | "all")[] = ["all", "topical", "branded", "expert"];
   const out: DiffSummary[] = [];
 
   for (const targetKey of targetKeys) {
