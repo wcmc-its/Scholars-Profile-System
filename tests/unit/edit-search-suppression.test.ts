@@ -22,6 +22,7 @@ const hoisted = vi.hoisted(() => ({
   mockPublicationFindFirst: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
+  mockSuppressionUpdate: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockBulk: vi.fn(),
@@ -44,6 +45,8 @@ vi.mock("@/lib/db", () => ({
       department: { findMany: hoisted.mockDepartmentFindMany },
       division: { findMany: hoisted.mockDivisionFindMany },
     },
+    // #393 — the reconciler sentinel stamp on a successful reflect.
+    write: { suppression: { update: hoisted.mockSuppressionUpdate } },
   },
 }));
 
@@ -123,6 +126,8 @@ beforeEach(() => {
   for (const m of Object.values(hoisted)) m.mockReset();
   // Default: bulk succeeds with no errors.
   hoisted.mockBulk.mockResolvedValue(OK_BULK_RESPONSE);
+  // Default: the sentinel stamp succeeds.
+  hoisted.mockSuppressionUpdate.mockResolvedValue({});
   // Default: no suppression rows, no publication-author rows, no center memberships.
   hoisted.mockSuppressionFindMany.mockResolvedValue([]);
   hoisted.mockPublicationAuthorFindMany.mockResolvedValue([]);
@@ -137,18 +142,25 @@ describe("reflectSearchSuppression — scholar suppress", () => {
     // Suppressed scholar (status !== 'active') → findFirst returns null.
     hoisted.mockScholarFindFirst.mockResolvedValue(null);
 
-    await reflectSearchSuppression({
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-scholar",
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
       affectedCwids: ["ann1234"],
     });
 
+    expect(result).toEqual({ ok: true });
     expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
     expect(hoisted.mockBulk).toHaveBeenCalledWith({
       refresh: true,
       body: [{ delete: { _index: "scholars-people", _id: "ann1234" } }],
     });
+    // #393 — full success stamps the reconciler sentinel on the row.
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
+    const stamp = hoisted.mockSuppressionUpdate.mock.calls[0][0];
+    expect(stamp.where).toEqual({ id: "sup-scholar" });
+    expect(stamp.data.searchReflectedAt).toBeInstanceOf(Date);
   });
 });
 
@@ -169,6 +181,7 @@ describe("reflectSearchSuppression — publication per-author hide", () => {
     hoisted.mockScholarFindFirst.mockResolvedValue(activeScholarRow("ann"));
 
     await reflectSearchSuppression({
+      suppressionId: "sup-perauthor",
       entityType: "publication",
       entityId: "12345",
       contributorCwid: "ann",
@@ -212,6 +225,7 @@ describe("reflectSearchSuppression — publication whole-pub takedown", () => {
       .mockResolvedValueOnce(activeScholarRow("bob"));
 
     await reflectSearchSuppression({
+      suppressionId: "sup-takedown",
       entityType: "publication",
       entityId: "12345",
       contributorCwid: null,
@@ -244,18 +258,22 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
     hoisted.mockBulk.mockRejectedValue(new Error("OpenSearch unreachable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(
-      reflectSearchSuppression({
-        entityType: "scholar",
-        entityId: "ann1234",
-        contributorCwid: null,
-        affectedCwids: ["ann1234"],
-      }),
-    ).resolves.toBeUndefined();
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-throw",
+      entityType: "scholar",
+      entityId: "ann1234",
+      contributorCwid: null,
+      affectedCwids: ["ann1234"],
+    });
 
+    // Returns a failure result rather than throwing (best-effort contract).
+    expect(result.ok).toBe(false);
+    // A failed reflect must NOT stamp — the row stays NULL for the reconciler.
+    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalledTimes(1);
     const logged = JSON.parse(consoleError.mock.calls[0][0] as string);
     expect(logged.event).toBe("edit_search_reflect_failed");
+    expect(logged.suppressionId).toBe("sup-throw");
     expect(logged.entityType).toBe("scholar");
     expect(logged.entityId).toBe("ann1234");
     expect(logged.contributorCwid).toBeNull();
@@ -276,7 +294,8 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await reflectSearchSuppression({
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-409",
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
@@ -284,6 +303,9 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
     });
 
     expect(consoleError).toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+    // A per-item error is a failure — no sentinel stamp.
+    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
 
@@ -299,7 +321,8 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await reflectSearchSuppression({
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-404",
       entityType: "scholar",
       entityId: "ann1234",
       contributorCwid: null,
@@ -307,18 +330,25 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
     });
 
     expect(consoleError).not.toHaveBeenCalled();
+    // 404-on-delete is treated as success (idempotent missing doc) — stamped.
+    expect(result).toEqual({ ok: true });
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
     consoleError.mockRestore();
   });
 });
 
 describe("reflectSearchSuppression — unknown entity type", () => {
   it("is a no-op (no bulk call) — out-of-v1-scope types (grant, education, appointment)", async () => {
-    await reflectSearchSuppression({
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-grant",
       entityType: "grant",
       entityId: "g1",
       contributorCwid: null,
       affectedCwids: [],
     });
     expect(hoisted.mockBulk).not.toHaveBeenCalled();
+    // No ops → ok, but no stamp (the reconciler excludes these by entity type).
+    expect(result).toEqual({ ok: true });
+    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
   });
 });

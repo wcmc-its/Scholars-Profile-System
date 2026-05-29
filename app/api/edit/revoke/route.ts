@@ -65,7 +65,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const revokedAt = new Date();
       await tx.suppression.update({
         where: { id: suppressionId },
-        data: { revokedAt, revokedBy: session.cwid },
+        // Reset the #393 reconciler sentinel: a revoke is a new index-relevant
+        // transition, so the prior suppress's stamp no longer applies. NULL
+        // until the post-commit reflect re-stamps it; if that reflect is lost,
+        // the reconciler sees NULL and re-reflects the revoke.
+        data: { revokedAt, revokedBy: session.cwid, searchReflectedAt: null },
       });
       if (suppression.entityType === "scholar") {
         // Restore status only when no other un-revoked whole-scholar
@@ -118,6 +122,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // `affectedCwids` shares the same `resolveAffectedProfiles` query as the
   // slug fan-out above (plan §3 tightening C7).
   await reflectSearchSuppression({
+    suppressionId: suppression.id,
     entityType: suppression.entityType,
     entityId: suppression.entityId,
     contributorCwid: suppression.contributorCwid,

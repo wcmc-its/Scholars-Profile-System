@@ -1151,6 +1151,16 @@ model Suppression {
   createdAt       DateTime   @default(now()) @map("created_at")
   revokedBy       String?    @map("revoked_by") @db.VarChar(32)
   revokedAt       DateTime?  @map("revoked_at")
+  /// ADR-005 failure-model layer 3 reconciler sentinel (#393). A freshness
+  /// flag, not a timestamp of record: NULL means "this row's latest state
+  /// transition has not been reflected into the OpenSearch index." It defaults
+  /// NULL on create and is RESET to NULL on revoke; a successful
+  /// `reflectSearchSuppression` stamps it to now(). The reconciler treats any
+  /// scholar/publication row with NULL past a short grace as stale and
+  /// re-reflects it. Scoped to scholar/publication — other entity types have no
+  /// OpenSearch fast-path, so this stays NULL for them and the reconciler
+  /// excludes them by entity type.
+  searchReflectedAt DateTime? @map("search_reflected_at")
 
   @@index([entityType, entityId])
   @@map("suppression")
