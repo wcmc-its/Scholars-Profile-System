@@ -86,7 +86,7 @@ export function DepartmentFacultyClient({
           Showing {start}–{end} of {total.toLocaleString()} {scholarsLabel}
         </span>
         <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as typeof sortOrder)}>
-          <SelectTrigger className="h-8 w-[160px] text-sm">
+          <SelectTrigger aria-label="Sort by" className="h-8 w-[160px] text-sm">
             <SelectValue placeholder="Sort by" />
           </SelectTrigger>
           <SelectContent>
