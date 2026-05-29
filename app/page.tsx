@@ -39,8 +39,19 @@ export default async function HomePage() {
 
   return (
     <div className="flex min-h-screen flex-col">
+      {/*
+        Skip link — the home page renders its own header/main outside the
+        app/(public) layout, so it needs its own copy (WCAG 2.4.1 Bypass
+        Blocks, Level A). Mirrors app/(public)/layout.tsx. #575.
+      */}
+      <a
+        href="#main-content"
+        className="sr-only rounded focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-[100] focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[var(--color-primary-cornell-red)] focus:shadow-md focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--color-accent-slate)]"
+      >
+        Skip to main content
+      </a>
       <SiteHeader revealOnScrollPast="home-hero-search-sentinel" />
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
         <section className="border-border border-b bg-gradient-to-b from-white to-zinc-50 px-6 py-16">
           <div className="mx-auto max-w-[760px] text-center">
             <h1 className="page-title text-4xl font-semibold tracking-tight sm:text-5xl">
