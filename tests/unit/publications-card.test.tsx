@@ -11,7 +11,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: mockRefresh, push: vi.fn(), replace: vi.fn() }),
 }));
 
-import { PublicationsCard } from "@/components/edit/publications-card";
+import {
+  PublicationsCard,
+  FIRST_HIDE_NOTICE_ACK_KEY,
+} from "@/components/edit/publications-card";
 import type { EditContextPublication } from "@/lib/api/edit-context";
 
 const CWID = "self01";
@@ -38,6 +41,11 @@ function stubFetch(body: object, status = 200) {
 beforeEach(() => {
   vi.restoreAllMocks();
   mockRefresh.mockReset();
+  // Default to "first-hide notice already seen this session" so the existing
+  // hide/show/sole-author specs exercise the post-acknowledgment path directly.
+  // The first-hide notice block below clears this to test the notice itself.
+  window.sessionStorage.clear();
+  window.sessionStorage.setItem(FIRST_HIDE_NOTICE_ACK_KEY, "1");
 });
 
 describe("PublicationsCard — empty + count", () => {
@@ -267,5 +275,154 @@ describe("PublicationsCard — show (revoke)", () => {
     // The Show button is back — reverted. Same transition-end timing as the
     // hide-failure case above; await the revert.
     expect(await screen.findByTestId("pub-show-a")).toBeTruthy();
+  });
+});
+
+describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
+  const NOTICE_TITLE = "You're about to hide this paper.";
+
+  beforeEach(() => {
+    // Un-acknowledge — this block tests the notice itself (the global beforeEach
+    // pre-acknowledges it for every other block).
+    window.sessionStorage.clear();
+  });
+
+  it("the first hide of the session shows the notice and does not POST yet", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />,
+    );
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    expect(await screen.findByText(NOTICE_TITLE)).toBeTruthy();
+    expect(f).not.toHaveBeenCalled();
+    // Still shown — nothing committed.
+    expect(screen.getByTestId("pub-hide-a")).toBeTruthy();
+  });
+
+  it("'Hide it' proceeds with the hide the scholar initiated", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />,
+    );
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    fireEvent.click(await screen.findByTestId("first-hide-confirm"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
+  });
+
+  it("subsequent hides in the same session skip the notice and POST directly", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[
+          pub({ pmid: "a", state: "shown" }),
+          pub({ pmid: "b", state: "shown" }),
+        ]}
+      />,
+    );
+    // First hide → notice → acknowledge.
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    fireEvent.click(await screen.findByTestId("first-hide-confirm"));
+    await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
+    // Second hide → no notice, posts straight away.
+    fireEvent.click(screen.getByTestId("pub-hide-b"));
+    expect(screen.queryByText(NOTICE_TITLE)).toBeNull();
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(2));
+    const [, opts] = f.mock.calls[1] as [string, RequestInit];
+    expect(JSON.parse(opts.body as string).entityId).toBe("b");
+  });
+
+  it("'It's not mine' opens Publication Manager in a new tab and does not hide", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />,
+    );
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    const notMine = await screen.findByTestId("first-hide-not-mine");
+    expect(notMine.getAttribute("href")).toBe("https://reciter.weill.cornell.edu/");
+    expect(notMine.getAttribute("target")).toBe("_blank");
+    fireEvent.click(notMine);
+    expect(f).not.toHaveBeenCalled();
+    // Notice closed, publication still visible.
+    await waitFor(() => expect(screen.queryByText(NOTICE_TITLE)).toBeNull());
+    expect(screen.getByTestId("pub-hide-a")).toBeTruthy();
+  });
+
+  it("'Cancel' leaves the publication visible, does not POST, and does NOT acknowledge", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />,
+    );
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    fireEvent.click(await screen.findByTestId("first-hide-cancel"));
+    expect(f).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(NOTICE_TITLE)).toBeNull());
+    expect(screen.getByTestId("pub-hide-a")).toBeTruthy();
+    // Backing out does not acknowledge — hiding again re-shows the notice.
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    expect(await screen.findByText(NOTICE_TITLE)).toBeTruthy();
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("'It's not mine' acknowledges — a later hide skips the notice", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null);
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[
+          pub({ pmid: "a", state: "shown" }),
+          pub({ pmid: "b", state: "shown" }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    fireEvent.click(await screen.findByTestId("first-hide-not-mine"));
+    await waitFor(() => expect(screen.queryByText(NOTICE_TITLE)).toBeNull());
+    expect(f).not.toHaveBeenCalled();
+    // Acknowledged — hiding another paper proceeds straight to the write.
+    fireEvent.click(screen.getByTestId("pub-hide-b"));
+    expect(screen.queryByText(NOTICE_TITLE)).toBeNull();
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+  });
+
+  it("composes with the sole-author confirm — notice first, then the site-wide warning, no double-prompt", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", state: "shown", isSoleDisplayedAuthor: true })]}
+      />,
+    );
+    // First click → the educational notice (NOT the sole-author confirm yet).
+    fireEvent.click(screen.getByTestId("pub-hide-a"));
+    expect(await screen.findByText(NOTICE_TITLE)).toBeTruthy();
+    expect(screen.queryByText("Hide this publication?")).toBeNull();
+    expect(f).not.toHaveBeenCalled();
+    // 'Hide it' → the sole-author site-wide-removal confirm, still no POST.
+    fireEvent.click(screen.getByTestId("first-hide-confirm"));
+    expect(await screen.findByText("Hide this publication?")).toBeTruthy();
+    expect(f).not.toHaveBeenCalled();
+    // 'Hide it anyway' → the write finally fires.
+    fireEvent.click(screen.getByRole("button", { name: "Hide it anyway" }));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
+  });
+
+  it("Show / restore never triggers the notice", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "sup-a" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", state: "hidden_by_self", suppressionId: "sup-a" })]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-show-a"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/revoke");
+    expect(screen.queryByText(NOTICE_TITLE)).toBeNull();
   });
 });

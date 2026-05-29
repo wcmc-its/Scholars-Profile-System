@@ -35,7 +35,10 @@
  */
 
 const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
-const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
+/** Publication Manager (ReCiter) front door — the single source of truth for
+ *  the "reject a misattributed paper at the source" link, reused by the
+ *  publications "Request a change" path and the first-hide notice (#570). */
+export const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
 /** ORCID self-management; `{cwid}` is substituted by the panel at render. */
 const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
 
