@@ -7,6 +7,7 @@ import {
   findDomainRank,
   buildRequestParams,
   serpApiKeyFromEnv,
+  throttleWaitMs,
   type SerpOrganicResult,
 } from "@/lib/seo/serpapi";
 import {
@@ -101,6 +102,44 @@ describe("serpApiKeyFromEnv", () => {
   });
   it("throws a helpful error when unset", () => {
     expect(() => serpApiKeyFromEnv({})).toThrow(/SERPAPI_KEY is not set/);
+  });
+});
+
+describe("throttleWaitMs", () => {
+  const HOUR = 3_600_000;
+  const now = 1_000_000_000_000;
+
+  it("returns 0 when the cap is disabled", () => {
+    const times = Array.from({ length: 500 }, (_, i) => now - i * 1000);
+    expect(throttleWaitMs(times, 0, now)).toBe(0);
+    expect(throttleWaitMs(times, -1, now)).toBe(0);
+  });
+
+  it("returns 0 when under the cap (the common single-snapshot case)", () => {
+    // 164 recent calls, cap 200 → free slot, no wait
+    const times = Array.from({ length: 164 }, (_, i) => now - i * 1200);
+    expect(throttleWaitMs(times, 200, now)).toBe(0);
+  });
+
+  it("ignores calls older than an hour", () => {
+    // 200 calls but all >1h ago → window empty → no wait
+    const times = Array.from({ length: 200 }, (_, i) => now - HOUR - 1000 - i * 1000);
+    expect(throttleWaitMs(times, 200, now)).toBe(0);
+  });
+
+  it("waits until the oldest in-window call ages out when the window is full", () => {
+    // Exactly `cap` calls in-window; oldest was 10 min ago → wait 50 min.
+    const oldest = now - 10 * 60_000;
+    const times = [oldest, ...Array.from({ length: 4 }, (_, i) => now - (i + 1) * 1000)];
+    // cap = 5, window full → must wait until oldest + 1h
+    expect(throttleWaitMs(times, 5, now)).toBe(oldest + HOUR - now);
+  });
+
+  it("frees a slot as soon as enough old calls have aged out", () => {
+    // cap 3; calls at -90m, -50m, -40m, -30m. In-window: -50,-40,-30 (3 = full).
+    const times = [now - 90 * 60_000, now - 50 * 60_000, now - 40 * 60_000, now - 30 * 60_000];
+    // must wait until the -50m call ages out → 10 more minutes
+    expect(throttleWaitMs(times, 3, now)).toBe(now - 50 * 60_000 + HOUR - now);
   });
 });
 

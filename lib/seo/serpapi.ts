@@ -140,6 +140,31 @@ export function buildRequestParams(
   return params;
 }
 
+/**
+ * How long (ms) to wait before making another call so that no more than
+ * `maxPerHour` calls land in any trailing 60-minute window. Pure: the caller
+ * passes the timestamps of prior calls and the current clock.
+ *
+ * Returns 0 when a slot is free (the common case — a single ~164-query snapshot
+ * is well under SerpAPI's Starter cap of 200/hour, so this never throttles it),
+ * or when the cap is disabled (`maxPerHour <= 0`). When the trailing window is
+ * already full, returns the ms until the oldest in-window call ages out — i.e.
+ * we burst up to the cap, then wait, rather than artificially spacing every call.
+ */
+export function throttleWaitMs(
+  callTimestamps: number[],
+  maxPerHour: number,
+  now: number,
+): number {
+  if (maxPerHour <= 0) return 0;
+  const windowStart = now - 3_600_000;
+  const inWindow = callTimestamps.filter((t) => t > windowStart).sort((a, b) => a - b);
+  if (inWindow.length < maxPerHour) return 0;
+  // The call at this index must exit the window before we can proceed.
+  const mustExit = inWindow[inWindow.length - maxPerHour];
+  return Math.max(0, mustExit + 3_600_000 - now);
+}
+
 /** Read the SerpAPI key from the environment, or throw a clear error. */
 export function serpApiKeyFromEnv(
   env: Record<string, string | undefined> = process.env,

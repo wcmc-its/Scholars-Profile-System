@@ -85,6 +85,16 @@ npm run seo:diff -- --before <a.json> --after <b.json> --csv data/seo/rank-diff.
 
 Cheap test run: `npm run seo:track -- --limit 5 --no-cache`.
 
+### Plan rate limits
+
+`seo:track` self-throttles to **200 searches/hour by default**, matching
+SerpAPI's Starter plan cap. A single snapshot (~164 searches) is under the cap,
+so it never pauses; the throttle only bites if you run several snapshots
+back-to-back within an hour. On a higher tier, lift it: `--max-per-hour 1000`
+(Developer) / `--max-per-hour 3000` (Production), or `--max-per-hour 0` to
+disable. Starter ($25/mo, 1,000 searches/mo) comfortably covers the whole
+before/after program (~3 snapshots ≈ 500 searches).
+
 ## Files
 
 | Path | Role | Committed? |

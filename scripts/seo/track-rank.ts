@@ -24,6 +24,7 @@ import {
   fetchSerpResult,
   findDomainRank,
   serpApiKeyFromEnv,
+  throttleWaitMs,
   type SerpRequestOptions,
 } from "@/lib/seo/serpapi";
 import type {
@@ -43,6 +44,7 @@ interface Args {
   type: QueryType | "all";
   limit: number | null;
   delayMs: number;
+  maxPerHour: number;
   noCache: boolean;
   out: string | null;
 }
@@ -63,6 +65,9 @@ function parseArgs(argv: string[]): Args {
     type,
     limit: limitRaw === undefined ? null : Number(limitRaw),
     delayMs: Number(get("--delay") ?? 1200),
+    // Default matches SerpAPI's Starter plan cap (200 searches/hour). 0 disables.
+    // Higher tiers: pass e.g. --max-per-hour 1000 (Developer) / 3000 (Production).
+    maxPerHour: Number(get("--max-per-hour") ?? 200),
     noCache: argv.includes("--no-cache"),
     out: get("--out") ?? null,
   };
@@ -119,6 +124,10 @@ async function main(): Promise<void> {
     console.log(`  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}]`).join("  |  ")}`);
     console.log(`  selected: ${queries.length} queries (${topical} topical, ${branded} branded)`);
     console.log(`  cost:     ~${queries.length} SerpAPI searches (1 per query; all targets share each search)`);
+    console.log(
+      `  throttle: ${args.maxPerHour > 0 ? `<= ${args.maxPerHour}/hour` : "disabled"}` +
+        (args.maxPerHour > 0 && queries.length <= args.maxPerHour ? " (under cap — no pause this run)" : ""),
+    );
     console.log(`  sample:`);
     for (const q of queries.slice(0, 8)) {
       console.log(`    [${q.type}] ${q.query}`);
@@ -138,8 +147,20 @@ async function main(): Promise<void> {
   };
 
   const rows: SnapshotRow[] = [];
+  const callTimes: number[] = []; // sliding-window throttle state
   let done = 0;
   for (const q of queries) {
+    // Self-throttle so we never exceed the plan's per-hour cap. A single
+    // snapshot is under the Starter cap, so this is a no-op in practice; it
+    // only bites if you run several snapshots back-to-back within an hour.
+    const wait = throttleWaitMs(callTimes, args.maxPerHour, Date.now());
+    if (wait > 0) {
+      console.log(
+        `[seo:track] per-hour cap (${args.maxPerHour}) reached — pausing ${Math.ceil(wait / 1000)}s`,
+      );
+      await sleep(wait);
+    }
+    callTimes.push(Date.now());
     const res = await fetchWithRetry(q.query, apiKey, searchOpts);
     rows.push({
       id: q.id,
