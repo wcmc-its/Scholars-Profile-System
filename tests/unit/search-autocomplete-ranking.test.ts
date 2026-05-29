@@ -25,6 +25,10 @@ const person = (
   text: string,
   lastNameSort: string | null,
   personType: string | null = "full_time_faculty",
+  // §6 key 1 (#254 §10). Defaults to a fixed mid bucket so existing cases —
+  // which exercise keys 2–4 (role → surname → cwid) — see equal buckets and
+  // fall through to those keys unchanged.
+  pubCountBucket = 2,
 ): PersonRanking => ({
   cwid,
   text,
@@ -33,6 +37,7 @@ const person = (
   primaryDepartment: null,
   personType,
   lastNameSort,
+  pubCountBucket,
 });
 
 describe("classifyQueryShape (§2)", () => {
@@ -252,6 +257,33 @@ describe("tryFullNameCarveOut (§3)", () => {
 });
 
 describe("tiebreakPeople (§6)", () => {
+  it("output bucket (key 1) dominates role rank — a prolific postdoc outranks a low-output professor (#254 §10)", () => {
+    const rows = [
+      person("prof", "Pat Professor", "professor", "full_time_faculty", 1),
+      person("post", "Polly Postdoc", "postdoc", "postdoc", 4),
+    ];
+    // Spec: "output bucket dominates [role rank] when it lands." Bucket 4 wins
+    // despite the lower role rank.
+    expect(tiebreakPeople(rows).map((r) => r.cwid)).toEqual(["post", "prof"]);
+  });
+
+  it("orders by bucket descending across mixed buckets", () => {
+    const rows = [
+      person("b0", "A A", "a", "full_time_faculty", 0),
+      person("b4", "B B", "b", "full_time_faculty", 4),
+      person("b2", "C C", "c", "full_time_faculty", 2),
+    ];
+    expect(tiebreakPeople(rows).map((r) => r.cwid)).toEqual(["b4", "b2", "b0"]);
+  });
+
+  it("falls through to role rank within the same bucket", () => {
+    const rows = [
+      person("a1", "Alice Adams", "adams", "postdoc", 3),
+      person("a2", "Bob Brown", "brown", "full_time_faculty", 3),
+    ];
+    expect(tiebreakPeople(rows).map((r) => r.cwid)).toEqual(["a2", "a1"]);
+  });
+
   it("orders by role rank (faculty before postdoc)", () => {
     const rows = [
       person("a1", "Alice Adams", "adams", "postdoc"),

@@ -21,6 +21,10 @@ export type PersonRanking = {
   primaryDepartment: string | null;
   personType: string | null;
   lastNameSort: string | null;
+  /** §6 key 1 — global output bucket (0..4; 4 = most prolific), from the OS
+   *  people doc (#254 §10). Higher sorts first. 0 for a doc indexed before the
+   *  §10 re-index, so it degrades to the v1 role→name→cwid order. */
+  pubCountBucket: number;
 };
 
 export type TopicRanking = { id: string; label: string };
@@ -256,17 +260,26 @@ function normalizeNameTokens(name: string): string[] {
 }
 
 /**
- * §6 — deterministic person ordering. v1 drops key 1 (`pubCountBucket`,
- * deferred with §10). Remaining stable-sort keys:
+ * §6 — deterministic person ordering. Stable-sort keys, in order:
+ *   1. output bucket DESCENDING (`pubCountBucket` 0..4; #254 §10). The spec is
+ *      explicit that the bucket *dominates* role rank when it lands — a more
+ *      prolific scholar surfaces first for a given prefix regardless of role.
  *   2. role rank (full_time_faculty < voluntary_faculty < postdoc < ...)
  *   3. sortable surname via Intl.Collator base sensitivity
  *   4. cwid ascending (final deterministic key)
+ *
+ * Pre-§10-reindex, every row's bucket is 0, so this collapses to the v1
+ * role→name→cwid order with no behavior change.
  */
 export function tiebreakPeople(rows: PersonRanking[]): PersonRanking[] {
   const collator = new Intl.Collator("en", { sensitivity: "base" });
   return rows
     .map((r, idx) => ({ r, idx }))
     .sort((a, b) => {
+      // Key 1: output bucket, descending (higher = more prolific = first).
+      if (a.r.pubCountBucket !== b.r.pubCountBucket) {
+        return b.r.pubCountBucket - a.r.pubCountBucket;
+      }
       const ra = personRoleRank(a.r.personType);
       const rb = personRoleRank(b.r.personType);
       if (ra !== rb) return ra - rb;

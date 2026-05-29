@@ -1816,6 +1816,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
     primaryDepartment: string | null;
     personType: string | null;
     lastNameSort: string | null;
+    pubCountBucket: number;
   }>
 > {
   const trimmed = prefix.trim();
@@ -1855,6 +1856,7 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       primaryDepartment?: string | null;
       personType?: string | null;
       lastNameSort?: string | null;
+      pubCountBucket?: number;
     };
   };
   const sourceByCwid = new Map<string, MGetDoc["_source"]>();
@@ -1877,6 +1879,11 @@ export async function suggestNames(prefix: string, size = 5): Promise<
       primaryDepartment: src?.primaryDepartment ?? null,
       personType: src?.personType ?? null,
       lastNameSort: src?.lastNameSort ?? null,
+      // #254 §10 — the §6 primary tiebreak key. Defaults to 0 (lowest) for a
+      // doc missing the field (pre-reindex index) so it can never outrank a
+      // bucketed peer; degrades to the v1 role→name→cwid order when every row
+      // is 0.
+      pubCountBucket: src?.pubCountBucket ?? 0,
     };
   });
 }
