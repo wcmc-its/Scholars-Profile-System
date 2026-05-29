@@ -177,7 +177,7 @@ function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
                 </div>
               ) : null}
               {scholar.primaryDepartment ? (
-                <div className="text-xs text-muted-foreground/80">
+                <div className="text-xs text-muted-foreground">
                   {scholar.primaryDepartment}
                 </div>
               ) : null}

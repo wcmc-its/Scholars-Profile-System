@@ -534,7 +534,7 @@ function SearchMeta({
           "Browse"
         )}
       </h1>
-      <div className="text-[13px] text-[#757575]">
+      <div className="text-[13px] text-muted-foreground">
         {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
         {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
       </div>
@@ -608,7 +608,7 @@ function ModeTab({
       {label}
       <span
         className={`inline-flex h-5 min-w-[28px] items-center justify-center rounded-full px-1.5 text-[11px] font-medium ${
-          active ? "bg-[#eaf0f5] text-[#2c4f6e]" : "bg-[#f7f6f3] text-[#757575]"
+          active ? "bg-[#eaf0f5] text-[#2c4f6e]" : "bg-[#f7f6f3] text-muted-foreground"
         }`}
       >
         {count.toLocaleString()}
@@ -1227,7 +1227,7 @@ async function FundingResults({
       label: desc ? (
         <>
           <span>{v}</span>
-          <span className="text-[#7a98ad]"> - {desc}</span>
+          <span className="text-muted-foreground"> - {desc}</span>
         </>
       ) : (
         v
@@ -1287,7 +1287,7 @@ async function FundingResults({
       <section className="min-w-0">
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-[13px] text-[#757575]">
+          <span className="text-[13px] text-muted-foreground">
             {result.total === 0
               ? "No results"
               : `Showing ${result.page * result.pageSize + 1}–${Math.min(
@@ -1388,7 +1388,7 @@ function FacetSidebarFunding({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
+        <span className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -1470,7 +1470,7 @@ function FacetSidebarFunding({
                   desc ? (
                     <>
                       <span>{m.value}</span>
-                      <span className="text-[#8a8a8a]"> - {desc}</span>
+                      <span className="text-muted-foreground"> - {desc}</span>
                     </>
                   ) : (
                     m.value
@@ -1552,7 +1552,7 @@ function FundingSortLinks({
     <div className="inline-flex items-center gap-2">
       {opts.map((opt, i) => (
         <span key={opt.value}>
-          {i > 0 ? <span className="text-[#bbb]"> · </span> : null}
+          {i > 0 ? <span className="text-muted-foreground"> · </span> : null}
           <Link
             href={buildHref(opt.value)}
             className={
@@ -1600,7 +1600,7 @@ function ActiveFilterChips({
           </Link>
         );
       })}
-      <Link href={clearAllHref} className="ml-1 text-xs text-[#757575] hover:text-[#2c4f6e]">
+      <Link href={clearAllHref} className="ml-1 text-xs text-muted-foreground hover:text-[#2c4f6e]">
         Clear all
       </Link>
     </div>
@@ -1678,7 +1678,7 @@ function ResultsToolbar({
   const showAboutImpact = tab === "publications" && pubImpactOn && total > 0;
 
   return (
-    <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-[#757575]">
+    <div className="mb-2 flex items-center border-b border-[#e3e2dd] pb-3 text-[13px] text-muted-foreground">
       {total > 0 ? (
         <span>
           Showing {start}–{end} of{" "}
@@ -1751,7 +1751,7 @@ function FacetSidebar({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
+        <span className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -1945,7 +1945,7 @@ function FacetSidebarPubs({
   return (
     <aside className="text-[13px]">
       <div className="mb-4 flex items-baseline justify-between">
-        <span className="text-xs font-semibold tracking-[0.08em] text-[#757575] uppercase">
+        <span className="text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase">
           Filters
         </span>
         {hasActiveFilters ? (
@@ -2164,7 +2164,7 @@ function FacetCheckbox({
               />
               <span className="min-w-0 flex-1 truncate">{label}</span>
               {count !== undefined ? (
-                <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
+                <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
                   {count.toLocaleString()}
                 </span>
               ) : null}
@@ -2197,7 +2197,7 @@ function FacetCheckbox({
             />
             <span className="min-w-0 flex-1 break-words">{label}</span>
             {count !== undefined ? (
-              <span className="mt-[1px] shrink-0 text-[12px] text-[#757575] tabular-nums">
+              <span className="mt-[1px] shrink-0 text-[12px] text-muted-foreground tabular-nums">
                 {count.toLocaleString()}
               </span>
             ) : null}
@@ -2228,7 +2228,7 @@ function FacetCheckbox({
             on hover for the rare overflow. */}
           <span className="min-w-0 flex-1 truncate">{label}</span>
           {count !== undefined ? (
-            <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
+            <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
               {count.toLocaleString()}
             </span>
           ) : null}
@@ -2245,7 +2245,7 @@ function EmptyState({ query, tip }: { query: string; tip: string }) {
   return (
     <div className="mt-12 flex flex-col items-center text-center">
       <div className="text-lg font-medium">No results{query ? ` for "${query}"` : ""}</div>
-      <div className="mt-1 text-sm text-[#757575]">{tip}</div>
+      <div className="mt-1 text-sm text-muted-foreground">{tip}</div>
     </div>
   );
 }
@@ -2291,7 +2291,7 @@ function Pagination({
       <PaginationButton href={page > 0 ? buildHref(page - 1) : null} label="‹ Prev" />
       {cells.map((c) =>
         c.kind === "ellipsis" ? (
-          <span key={c.key} className="px-1 text-[13px] text-[#757575]">
+          <span key={c.key} className="px-1 text-[13px] text-muted-foreground">
             …
           </span>
         ) : (

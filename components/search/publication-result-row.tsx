@@ -46,7 +46,7 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         pmcid={hit.pmcid}
         doi={hit.doi}
         abstract={hit.abstract}
-        className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#757575]"
+        className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
       />
     </li>
   );

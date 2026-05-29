@@ -209,7 +209,7 @@ function DepartmentsGridInner({
             value={nameFilter}
             onChange={(e) => setNameFilter(e.target.value)}
             placeholder="Filter departments..."
-            className="w-full rounded-md border border-border bg-white py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground/70 focus:border-zinc-400 focus:outline-none"
+            className="w-full rounded-md border border-border bg-white py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-zinc-400 focus:outline-none"
           />
         </label>
 

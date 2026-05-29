@@ -71,7 +71,7 @@ export function InvestigatorFacet({
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold text-[#1a1a1a]">
           Investigator{" "}
-          <span className="ml-1 text-[12px] font-normal text-[#757575] tabular-nums">
+          <span className="ml-1 text-[12px] font-normal text-muted-foreground tabular-nums">
             {totalDistinct.toLocaleString()}
           </span>
         </h3>
@@ -86,14 +86,14 @@ export function InvestigatorFacet({
       </div>
 
       <label className="mb-2 flex items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[12.5px] focus-within:border-[#2c4f6e]">
-        <Search aria-hidden className="h-3.5 w-3.5 shrink-0 text-[#757575]" strokeWidth={2} />
+        <Search aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search investigators…"
           aria-label="Search investigators"
-          className="min-w-0 flex-1 bg-transparent text-[#1a1a1a] outline-none placeholder:text-[#9a9890]"
+          className="min-w-0 flex-1 bg-transparent text-[#1a1a1a] outline-none placeholder:text-muted-foreground"
         />
       </label>
 
@@ -115,7 +115,7 @@ export function InvestigatorFacet({
       </ul>
 
       {visible.length === 0 && hasQuery ? (
-        <div className="px-1 py-1 text-[12px] text-[#9a9890]">No matching investigators</div>
+        <div className="px-1 py-1 text-[12px] text-muted-foreground">No matching investigators</div>
       ) : null}
 
       {!hasQuery && !showAll && hiddenCount > 0 ? (
@@ -174,7 +174,7 @@ function InvestigatorRow({ investigator }: { investigator: InvestigatorFacetItem
           <span className="min-w-0 flex-1 truncate" title={investigator.displayName}>
             {investigator.displayName}
           </span>
-          <span className="shrink-0 text-[12px] text-[#757575] tabular-nums">
+          <span className="shrink-0 text-[12px] text-muted-foreground tabular-nums">
             {investigator.count.toLocaleString()}
           </span>
         </Link>

@@ -159,7 +159,7 @@ export function FundingResultRow({
             );
           })}
           {remainder > 0 ? (
-            <span className="text-[13px] text-[#757575]">
+            <span className="text-[13px] text-muted-foreground">
               +{remainder} more
             </span>
           ) : null}
@@ -169,7 +169,7 @@ export function FundingResultRow({
             </span>
           ) : null}
           {typeLabel ? (
-            <span className="inline-flex h-5 items-center rounded-sm border border-[#d6d4ce] px-2 text-[10px] font-medium uppercase tracking-wide text-[#757575]">
+            <span className="inline-flex h-5 items-center rounded-sm border border-[#d6d4ce] px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {typeLabel}
             </span>
           ) : null}
