@@ -51,9 +51,8 @@ export async function GET() {
 
   sections.push("## About");
   sections.push("");
-  sections.push(`- [About this directory](${BASE}/about): scope and intended audience.`);
   sections.push(
-    `- [Methodology](${BASE}/about/methodology): data sources, refresh cadence, and how publication–scholar attributions are produced.`,
+    `- [About this directory](${BASE}/about): scope, intended audience, data sources, refresh cadence, and how publication–scholar attributions are produced.`,
   );
   sections.push(
     `- [Sitemap](${BASE}/sitemap.xml): complete list of indexed URLs (every scholar, topic, department, and center).`,

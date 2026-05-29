@@ -69,6 +69,13 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Retired /about/* sub-pages folded into the single /about documentation
+  // page (#573 follow-up). `/about/help` was removed in #573 and `/about/
+  // methodology` is now a redirect stub (app/(public)/about/methodology); this
+  // 308s `/about/help` so stale links land on /about rather than 404.
+  async redirects() {
+    return [{ source: "/about/help", destination: "/about", permanent: true }];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) return config;
     const externals = config.externals;

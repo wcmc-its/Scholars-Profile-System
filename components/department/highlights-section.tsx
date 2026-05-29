@@ -38,7 +38,7 @@ export function HighlightsSection({
         <span className="text-[12px] italic text-[var(--color-text-secondary)]">
           Three {caveatItem} surfaced by ReCiterAI &middot;{" "}
           <Link
-            href="/about/methodology#department-highlights"
+            href="/about#showcase"
             className="not-italic text-[var(--color-accent-slate)] hover:underline"
           >
             how this works

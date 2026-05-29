@@ -1,35 +1,51 @@
 /**
- * Anchor IDs on /about/methodology referenced by the four algorithmic
- * surfaces. Hard-coded here so surface components and the methodology
- * page cannot drift (RESEARCH.md §Pitfall 6).
+ * Section / row anchors on /about referenced by the algorithmic surfaces (the
+ * (i) info buttons and "how this works" links). Hard-coded here so surface
+ * components and the /about page cannot drift (RESEARCH.md §Pitfall 6).
  *
- * Source of truth: 02-CONTEXT.md D-04 — locked anchor IDs.
+ * History: these used to point at a standalone /about/methodology page. That
+ * page was retired (#573 follow-up) and its content folded into the single
+ * /about documentation page; the values below map each surface to the /about
+ * anchor that explains it. Surfaces reference these by KEY, so repoints are a
+ * values-only change here. `/about/methodology` 308-redirects to `/about`.
+ *
+ * Anchor granularity rule: a surface deep-links to its own row anchor when the
+ * landing section's heading doesn't already name it (Recent contributions,
+ * Selected highlights, Recent highlights, Top scholars all live under the
+ * "Spotlight & Selected research" heading, so each has a row id). Spotlight and
+ * Selected research land on the `showcase` section itself — the heading is
+ * literally their name, so a row anchor would be redundant.
  */
 export const METHODOLOGY_ANCHORS = {
+  // Showcase surfaces — table rows in the #showcase section.
   recentContributions: "recent-contributions",
-  /**
-   * @deprecated Use `spotlight`. Kept so existing inbound links to
-   * `/about/methodology#selected-research` resolve. Drop after one release.
-   */
-  selectedResearch: "selected-research",
-  spotlight: "spotlight",
-  topScholars: "top-scholars",
-  recentHighlights: "recent-highlights",
-  // Phase 4 additions — anchor IDs become part of the public URL; must be stable.
   selectedHighlights: "selected-highlights",
-  eligibilityCarves: "eligibility-carves",
-  exclusions: "exclusions",
-  dataCadence: "data-cadence",
-  // Issue #176 — aggregate topic ranking shown on dept/division/center pages.
-  topResearchAreas: "top-research-areas",
-  // Issue #176 — skeptic-oriented intro: what AI does and doesn't do.
-  whyAi: "why-ai",
-  // Issue #285 — explainer for the 0–100 impact score surfaced inline in
-  // pub-tab meta rows (#284) and on the topic page once #305 ships.
+  recentHighlights: "recent-highlights",
+  topScholars: "top-scholars",
+  // Spotlight / Selected research — the #showcase heading already names these,
+  // so they land on the section rather than a row.
+  spotlight: "showcase",
+  /**
+   * @deprecated Use `spotlight`. Retained so older inbound links resolve to a
+   * sensible section. Drop after one release.
+   */
+  selectedResearch: "showcase",
+  // Eligibility carve-outs (which roles appear on algorithmic surfaces) live in
+  // the #showcase "Who appears on these surfaces" note.
+  eligibilityCarves: "showcase",
+  // Aggregate topic ranking on dept/division/center pages (#176).
+  topResearchAreas: "topics",
+  // Topic derivation / "why a model assigns this" — the Topics info button.
+  whyAi: "topics",
+  // Publication-type weighting and hard exclusions are described in #impact.
+  exclusions: "impact",
+  // Refresh cadence is part of the provenance map.
+  dataCadence: "provenance",
+  // 0–100 impact score surfaced inline (publication modal, search) — #285.
   impact: "impact",
 } as const;
 
-export const METHODOLOGY_BASE = "/about/methodology" as const;
+export const METHODOLOGY_BASE = "/about" as const;
 
 /** Ergonomic helper: build a full deeplink for a given surface anchor. */
 export function methodologyHref(

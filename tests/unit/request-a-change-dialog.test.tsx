@@ -151,8 +151,8 @@ describe("RequestAChangeDialog", () => {
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
 
     expect(await screen.findByText(/email client should have opened/i)).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("ofa@med.cornell.edu");
-    expect(window.location.href.startsWith("mailto:ofa@med.cornell.edu")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("facultyaffairs@med.cornell.edu");
+    expect(window.location.href.startsWith("mailto:facultyaffairs@med.cornell.edu")).toBe(true);
   });
 
   it("the fallback mailto carries cc + item label (funding → OSRA)", async () => {

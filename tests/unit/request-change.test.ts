@@ -29,7 +29,7 @@ describe("resolveRequestChange", () => {
     const r = resolveRequestChange("education", "education-wrong");
     expect(r).toMatchObject({
       kind: "send",
-      to: "ofa@med.cornell.edu",
+      to: "facultyaffairs@med.cornell.edu",
       office: "Office of Faculty Affairs",
       sourceSystem: "ASMS",
       attributeLabel: "Education",

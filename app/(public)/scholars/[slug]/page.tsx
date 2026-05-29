@@ -571,7 +571,7 @@ export default async function ScholarProfilePage({
               })()}
               <p className="text-muted-foreground mt-6 border-t border-border pt-4 text-sm">
                 <Link
-                  href="/about/methodology#disclosures"
+                  href="/about#disclosures"
                   className="text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
                 >
                   About these disclosures →

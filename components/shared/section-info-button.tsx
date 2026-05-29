@@ -22,7 +22,7 @@ interface SectionInfoButtonProps {
 /**
  * Small (i) info button placed next to a section heading wherever ReCiterAI
  * or LLM-generated content is on display. Click toggles a popover with a
- * brief explanation and a link to the matching anchor on /about/methodology.
+ * brief explanation and a link to the matching section on /about.
  *
  * Click outside or Escape closes; Escape returns focus to the trigger.
  * Tooltip primitives don't host interactive content (links) reliably, so
