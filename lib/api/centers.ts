@@ -33,6 +33,60 @@ import {
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 
+/**
+ * #552 § 3.3 — the load-bearing membership active predicate. A membership is
+ * active when today falls within `[startDate, endDate]`, both ends inclusive,
+ * with a null bound treated as open. This mirrors the editor's `statusOf`
+ * (`components/edit/center-roster-card.tsx`) exactly: `today` is a `YYYY-MM-DD`
+ * string and the `@db.Date` bounds are compared as their UTC date strings, so
+ * the date-only columns never get mis-compared against a time-carrying instant.
+ */
+export function isCenterMembershipActive(
+  startDate: Date | null,
+  endDate: Date | null,
+  today: string,
+): boolean {
+  const start = startDate ? startDate.toISOString().slice(0, 10) : null;
+  const end = endDate ? endDate.toISOString().slice(0, 10) : null;
+  if (start && start > today) return false; // pending
+  if (end && end < today) return false; // inactive
+  return true;
+}
+
+/** UTC date string for "now", matching the editor's `todayIso`. */
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Active CWID set for a center's public surfaces. Reads the membership rows,
+ * keeps only those active per § 3.3 (a center's roster is small, so the
+ * date filter is an in-memory scan), then filters the survivors through
+ * `Scholar` (non-deleted + `status='active'`) so a dormant or soft-deleted
+ * scholar never surfaces — edge 10, and the same `Scholar` gate Phase 8's
+ * `loadDivisionMemberCwids` applies. Every public center read funnels through
+ * this so the page, stats, highlights, topics, publications, grants and
+ * spotlight all agree on who counts.
+ */
+export async function loadActiveCenterMemberCwids(
+  centerCode: string,
+): Promise<string[]> {
+  const today = todayIso();
+  const rows = (await prisma.centerMembership.findMany({
+    where: { centerCode },
+    select: { cwid: true, startDate: true, endDate: true },
+  })) as Array<{ cwid: string; startDate: Date | null; endDate: Date | null }>;
+  const activeCwids = rows
+    .filter((r) => isCenterMembershipActive(r.startDate, r.endDate, today))
+    .map((r) => r.cwid);
+  if (activeCwids.length === 0) return [];
+  const scholars = await prisma.scholar.findMany({
+    where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
+    select: { cwid: true },
+  });
+  return scholars.map((s) => s.cwid);
+}
+
 export type CenterDetail = {
   code: string;
   name: string;
@@ -52,12 +106,31 @@ export type CenterDetail = {
   scholarCount: number;
 };
 
-export type CenterMembersResult = {
-  hits: DepartmentFacultyHit[];
-  total: number;
-  page: number;
-  pageSize: number;
+/** A program section on the public roster (#552 § 6.2). */
+export type CenterMemberGroup = {
+  label: string;
+  members: DepartmentFacultyHit[];
 };
+
+/**
+ * #552 Phase 4 — the public roster is either a flat, paginated list (centers
+ * with no program taxonomy, today's behavior) or a single page of all active
+ * members grouped under program-label headers (programmed centers). The two
+ * shapes are discriminated by `mode` so the page renders each correctly.
+ */
+export type CenterMembersResult =
+  | {
+      mode: "flat";
+      hits: DepartmentFacultyHit[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }
+  | {
+      mode: "grouped";
+      groups: CenterMemberGroup[];
+      total: number;
+    };
 
 const MEMBERS_PAGE_SIZE = 20;
 
@@ -68,7 +141,6 @@ type CenterRow = {
   description: string | null;
   directorCwid: string | null;
   leaderInterim: boolean;
-  scholarCount: number;
 };
 
 export async function getCenter(slug: string): Promise<CenterDetail | null> {
@@ -81,7 +153,6 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
       description: true,
       directorCwid: true,
       leaderInterim: true,
-      scholarCount: true,
     },
   })) as CenterRow | null;
   if (!center) return null;
@@ -108,75 +179,49 @@ export async function getCenter(slug: string): Promise<CenterDetail | null> {
     }
   }
 
+  // #552 Phase 4 — the header/tab "scholars" count reflects the active roster
+  // (§ 3.3), not the denormalized `center.scholar_count` seed column, so a
+  // lapsed member drops out of the count just as they drop off the roster.
+  const scholarCount = (await loadActiveCenterMemberCwids(center.code)).length;
+
   return {
     code: center.code,
     name: center.name,
     slug: center.slug,
     description: center.description,
     director,
-    scholarCount: center.scholarCount,
+    scholarCount,
   };
 }
 
-/**
- * Returns paginated members of a center, shaped as `DepartmentFacultyHit`
- * so `PersonRow` / `RoleChipRow` work unchanged. `divisionName` is null on
- * center members; `departmentName` falls back to the scholar's
- * `primaryDepartment` text when no FK department is resolved (auto-promoted
- * departments may have null deptCode for unmatched names).
- */
-export async function getCenterMembers(
-  centerCode: string,
-  opts: { page?: number } = {},
-): Promise<CenterMembersResult> {
-  const page = Math.max(0, opts.page ?? 0);
+type CenterScholarRow = {
+  cwid: string;
+  preferredName: string;
+  slug: string;
+  primaryTitle: string | null;
+  primaryDepartment: string | null;
+  roleCategory: string | null;
+  overview: string | null;
+  department: { name: string } | null;
+  division: { name: string } | null;
+};
 
-  const memberships = (await prisma.centerMembership.findMany({
-    where: { centerCode },
-    select: { cwid: true },
-  })) as Array<{ cwid: string }>;
-  const cwids = memberships.map((m) => m.cwid);
-
-  const baseWhere = {
-    cwid: { in: cwids },
-    deletedAt: null,
-    status: "active" as const,
-  };
-  const total = await prisma.scholar.count({ where: baseWhere });
-  if (total === 0) {
-    return { hits: [], total: 0, page, pageSize: MEMBERS_PAGE_SIZE };
-  }
-
-  const rows = await prisma.scholar.findMany({
-    where: baseWhere,
-    skip: page * MEMBERS_PAGE_SIZE,
-    take: MEMBERS_PAGE_SIZE,
-    orderBy: [{ preferredName: "asc" }],
-    select: {
-      cwid: true,
-      preferredName: true,
-      slug: true,
-      primaryTitle: true,
-      primaryDepartment: true,
-      roleCategory: true,
-      overview: true,
-      department: { select: { name: true } },
-      division: { select: { name: true } },
-    },
-  });
-
-  const pageCwids = rows.map((s) => s.cwid);
+/** Hydrate scholar rows into `DepartmentFacultyHit`s with pub/grant counts. */
+async function buildCenterMemberHits(
+  rows: CenterScholarRow[],
+): Promise<DepartmentFacultyHit[]> {
+  const cwids = rows.map((s) => s.cwid);
   const now = new Date();
-  const [pubCounts, grantCounts] = pageCwids.length > 0
+  const [pubCounts, grantCounts] = cwids.length > 0
     ? await Promise.all([
         prisma.publicationTopic.groupBy({
           by: ["cwid"],
-          where: { cwid: { in: pageCwids } },
+          where: { cwid: { in: cwids } },
           _count: { pmid: true },
         }) as unknown as Promise<Array<{ cwid: string; _count: { pmid: number } }>>,
         prisma.grant.groupBy({
           by: ["cwid"],
-          where: { cwid: { in: pageCwids }, endDate: { gte: now } },
+          where: { cwid: { in: cwids }, endDate: { gte: now } },
           _count: { _all: true },
         }) as unknown as Promise<Array<{ cwid: string; _count: { _all: number } }>>,
       ])
@@ -185,7 +230,7 @@ export async function getCenterMembers(
   const pubMap = new Map(pubCounts.map((p) => [p.cwid, p._count.pmid]));
   const grantMap = new Map(grantCounts.map((g) => [g.cwid, g._count._all]));
 
-  const hits: DepartmentFacultyHit[] = rows.map((s) => ({
+  return rows.map((s) => ({
     cwid: s.cwid,
     preferredName: s.preferredName,
     slug: s.slug,
@@ -198,8 +243,114 @@ export async function getCenterMembers(
     pubCount: pubMap.get(s.cwid) ?? 0,
     grantCount: grantMap.get(s.cwid) ?? 0,
   }));
+}
 
-  return { hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
+/**
+ * Returns the active members of a center (§ 3.3), shaped as
+ * `DepartmentFacultyHit` so `PersonRow` / `RoleChipRow` work unchanged.
+ * `divisionName` is null on center members; `departmentName` falls back to the
+ * scholar's `primaryDepartment` text when no FK department is resolved
+ * (auto-promoted departments may have null deptCode for unmatched names). A
+ * center with a program taxonomy and ≥1 programmed active member returns a
+ * grouped, single-page shape (§ 6.2); otherwise a flat paginated list.
+ */
+export async function getCenterMembers(
+  centerCode: string,
+  opts: { page?: number } = {},
+): Promise<CenterMembersResult> {
+  const page = Math.max(0, opts.page ?? 0);
+  const today = todayIso();
+  const emptyFlat = {
+    mode: "flat" as const,
+    hits: [] as DepartmentFacultyHit[],
+    total: 0,
+    page,
+    pageSize: MEMBERS_PAGE_SIZE,
+  };
+
+  // §3.3 active filter — read every membership, keep the active ones, and
+  // remember each one's program for grouping.
+  const memberships = (await prisma.centerMembership.findMany({
+    where: { centerCode },
+    select: { cwid: true, programCode: true, startDate: true, endDate: true },
+  })) as Array<{
+    cwid: string;
+    programCode: string | null;
+    startDate: Date | null;
+    endDate: Date | null;
+  }>;
+  const activeMemberships = memberships.filter((m) =>
+    isCenterMembershipActive(m.startDate, m.endDate, today),
+  );
+  const activeCwids = activeMemberships.map((m) => m.cwid);
+  if (activeCwids.length === 0) return emptyFlat;
+
+  // edge 10 — drop dormant / soft-deleted scholars from the public roster.
+  const scholars = (await prisma.scholar.findMany({
+    where: { cwid: { in: activeCwids }, deletedAt: null, status: "active" },
+    orderBy: [{ preferredName: "asc" }],
+    select: {
+      cwid: true,
+      preferredName: true,
+      slug: true,
+      primaryTitle: true,
+      primaryDepartment: true,
+      roleCategory: true,
+      overview: true,
+      department: { select: { name: true } },
+      division: { select: { name: true } },
+    },
+  })) as CenterScholarRow[];
+  const total = scholars.length;
+  if (total === 0) return emptyFlat;
+
+  // Is this a programmed center with at least one active programmed member?
+  // (§6.2 / edge 9 — zero programmed actives renders flat, never an empty
+  //  taxonomy.) Only then do we group.
+  const programByCwid = new Map<string, string | null>();
+  for (const m of activeMemberships) programByCwid.set(m.cwid, m.programCode);
+  const programs = (await prisma.centerProgram.findMany({
+    where: { centerCode },
+    orderBy: [{ sortOrder: "asc" }, { label: "asc" }],
+    select: { code: true, label: true },
+  })) as Array<{ code: string; label: string }>;
+  const programmed =
+    programs.length > 0 &&
+    scholars.some((s) => programByCwid.get(s.cwid) != null);
+
+  if (!programmed) {
+    // Flat, paginated list — today's behavior for unprogrammed centers.
+    const pageRows = scholars.slice(
+      page * MEMBERS_PAGE_SIZE,
+      (page + 1) * MEMBERS_PAGE_SIZE,
+    );
+    const hits = await buildCenterMemberHits(pageRows);
+    return { mode: "flat", hits, total, page, pageSize: MEMBERS_PAGE_SIZE };
+  }
+
+  // Grouped: all active members on one page (#552 §6.2; decision: grouped =
+  // single page). Members bucket under their program in (sortOrder, label)
+  // order; anything not placed in a program (null program, or a stale code)
+  // falls into an "Other" group rendered last, header only if non-empty
+  // (edge 8).
+  const hits = await buildCenterMemberHits(scholars);
+  const hitByCwid = new Map(hits.map((h) => [h.cwid, h]));
+  const placed = new Set<string>();
+  const groups: CenterMemberGroup[] = [];
+  for (const p of programs) {
+    const members = scholars
+      .filter((s) => programByCwid.get(s.cwid) === p.code)
+      .map((s) => hitByCwid.get(s.cwid))
+      .filter((h): h is DepartmentFacultyHit => Boolean(h));
+    if (members.length > 0) {
+      members.forEach((h) => placed.add(h.cwid));
+      groups.push({ label: p.label, members });
+    }
+  }
+  const other = hits.filter((h) => !placed.has(h.cwid));
+  if (other.length > 0) groups.push({ label: "Other", members: other });
+
+  return { mode: "grouped", groups, total };
 }
 
 const PUB_PAGE_SIZE = 20;
@@ -220,11 +371,7 @@ export async function getCenterPublicationsList(
   const page = Math.max(0, opts.page ?? 0);
   const sort: PubSort = opts.sort ?? "newest";
 
-  const memberRows = (await prisma.centerMembership.findMany({
-    where: { centerCode },
-    select: { cwid: true },
-  })) as Array<{ cwid: string }>;
-  const memberCwids = memberRows.map((m) => m.cwid);
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
   if (memberCwids.length === 0) {
     return { hits: [], total: 0, page, pageSize: PUB_PAGE_SIZE };
   }
@@ -313,14 +460,6 @@ export async function getCenterPublicationsList(
 
 const GRANT_PAGE_SIZE = 20;
 
-async function getCenterMemberCwids(centerCode: string): Promise<string[]> {
-  const rows = await prisma.centerMembership.findMany({
-    where: { centerCode },
-    select: { cwid: true },
-  });
-  return rows.map((r) => r.cwid);
-}
-
 /**
  * Top research areas computed from the center's member-authored work.
  * Returns up to 3 topic chips ranked by distinct PMID count.
@@ -328,7 +467,7 @@ async function getCenterMemberCwids(centerCode: string): Promise<string[]> {
 export async function getCenterTopResearchAreas(
   centerCode: string,
 ): Promise<DepartmentTopicArea[]> {
-  const memberCwids = await getCenterMemberCwids(centerCode);
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
   if (memberCwids.length === 0) return [];
 
   type CountRow = {
@@ -372,7 +511,7 @@ export async function getCenterTopResearchAreas(
 export async function getCenterHighlights(
   centerCode: string,
 ): Promise<DeptHighlights> {
-  const memberCwids = await getCenterMemberCwids(centerCode);
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
   if (memberCwids.length === 0) {
     return { publications: [], grants: [] };
   }
@@ -551,7 +690,7 @@ export async function getCenterGrantsList(
 ): Promise<DeptListGrantResult> {
   const page = Math.max(0, opts.page ?? 0);
   const sort: GrantSort = opts.sort ?? "most_recent";
-  const memberCwids = await getCenterMemberCwids(centerCode);
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
   if (memberCwids.length === 0) {
     return { hits: [], total: 0, page, pageSize: GRANT_PAGE_SIZE };
   }

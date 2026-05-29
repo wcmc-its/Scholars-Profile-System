@@ -16,36 +16,30 @@ import {
   PaginationNext,
   PaginationEllipsis,
 } from "@/components/ui/pagination";
-import type { DepartmentFacultyHit } from "@/lib/api/departments";
+import type {
+  CenterMemberGroup,
+  CenterMembersResult,
+} from "@/lib/api/centers";
 
 export function CenterMembersClient({
-  members,
-  total,
-  page,
-  pageSize,
+  result,
   centerSlug,
 }: {
-  members: DepartmentFacultyHit[];
-  total: number;
-  page: number;
-  pageSize: number;
+  result: CenterMembersResult;
   centerSlug: string;
 }) {
   const [activeCategory, setActiveCategory] = useState<RoleCategory>("All");
 
-  const filtered = useMemo(
-    () => filterByRoleCategory(members, activeCategory),
-    [members, activeCategory],
+  // The role-chip row counts over the full active roster regardless of layout.
+  const allMembers = useMemo(
+    () =>
+      result.mode === "grouped"
+        ? result.groups.flatMap((g) => g.members)
+        : result.hits,
+    [result],
   );
 
-  const buildHref = (p: number) =>
-    p === 1
-      ? `/centers/${centerSlug}`
-      : `/centers/${centerSlug}?page=${p}`;
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  if (members.length === 0) {
+  if (allMembers.length === 0) {
     return (
       <div className="py-8 text-center">
         <h3 className="text-base font-semibold">No members listed</h3>
@@ -56,6 +50,89 @@ export function CenterMembersClient({
     );
   }
 
+  return (
+    <>
+      <div className="mb-6">
+        <RoleChipRow
+          faculty={allMembers}
+          active={activeCategory}
+          onChange={setActiveCategory}
+        />
+      </div>
+      {result.mode === "grouped" ? (
+        <GroupedMembers
+          groups={result.groups}
+          total={result.total}
+          activeCategory={activeCategory}
+        />
+      ) : (
+        <FlatMembers
+          result={result}
+          centerSlug={centerSlug}
+          activeCategory={activeCategory}
+        />
+      )}
+    </>
+  );
+}
+
+/** Programmed center: all active members on one page, sectioned by program. */
+function GroupedMembers({
+  groups,
+  total,
+  activeCategory,
+}: {
+  groups: CenterMemberGroup[];
+  total: number;
+  activeCategory: RoleCategory;
+}) {
+  const filtered = groups
+    .map((g) => ({
+      label: g.label,
+      members: filterByRoleCategory(g.members, activeCategory),
+    }))
+    .filter((g) => g.members.length > 0);
+
+  return (
+    <>
+      <div className="mb-4 text-sm text-muted-foreground">
+        {total.toLocaleString()} {total === 1 ? "member" : "members"}
+      </div>
+      <div className="flex flex-col gap-8">
+        {filtered.map((g) => (
+          <section key={g.label}>
+            <h2 className="mb-3 text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              {g.label}
+            </h2>
+            <div className="flex flex-col">
+              {g.members.map((hit) => (
+                <PersonRow key={hit.cwid} hit={hit} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Unprogrammed center: flat list, paginated (today's behavior). */
+function FlatMembers({
+  result,
+  centerSlug,
+  activeCategory,
+}: {
+  result: Extract<CenterMembersResult, { mode: "flat" }>;
+  centerSlug: string;
+  activeCategory: RoleCategory;
+}) {
+  const { hits, total, page, pageSize } = result;
+  const filtered = filterByRoleCategory(hits, activeCategory);
+
+  const buildHref = (p: number) =>
+    p === 1 ? `/centers/${centerSlug}` : `/centers/${centerSlug}?page=${p}`;
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, total);
 
@@ -63,13 +140,6 @@ export function CenterMembersClient({
     <>
       <div className="mb-4 text-sm text-muted-foreground">
         Showing {start}&ndash;{end} of {total.toLocaleString()} members
-      </div>
-      <div className="mb-6">
-        <RoleChipRow
-          faculty={members}
-          active={activeCategory}
-          onChange={setActiveCategory}
-        />
       </div>
       <div className="flex flex-col">
         {filtered.map((hit) => (
