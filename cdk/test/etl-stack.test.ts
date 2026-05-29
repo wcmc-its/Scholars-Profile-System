@@ -123,18 +123,22 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates three state machines, three EventBridge rules, one SNS topic", () => {
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 3);
-        template.resourceCountIs("AWS::Events::Rule", 3);
+      it("creates four state machines (3 cadence + #393 reconciler), four EventBridge rules, one SNS topic", () => {
+        // 3 cadence machines + the #393 reconciler (PR-2).
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 4);
+        template.resourceCountIs("AWS::Events::Rule", 4);
+        // The reconciler reuses the cadence failure topic -- still one.
         template.resourceCountIs("AWS::SNS::Topic", 1);
       });
 
-      it("creates exactly five CloudWatch alarms (3 status + nightly/weekly cadence; annual has no cadence alarm)", () => {
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 5);
+      it("creates seven CloudWatch alarms (3 cadence status + nightly/weekly cadence + reconciler status/cadence)", () => {
+        // 5 cadence alarms (3 status + 2 cadence) + 2 reconciler alarms (#393).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 7);
       });
 
-      it("creates one ECS task definition and one SG-to-SG ingress rule on the internal ALB SG", () => {
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 1);
+      it("creates two ECS task definitions (ETL + lean reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
+        // The fat ETL task def + the lean #393 reconcile task def.
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
         template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 1);
       });
 
@@ -266,20 +270,36 @@ describe("EtlStack", () => {
         },
       );
 
-      it("prod schedules ship disabled (etlSchedulesEnabled=false)", () => {
+      it("prod CADENCE schedules ship disabled (etlSchedulesEnabled=false)", () => {
         const rules = template.findResources("AWS::Events::Rule");
-        for (const [id, rule] of Object.entries(rules)) {
+        // The #393 reconciler runs on its own flag (reconcileScheduleEnabled),
+        // enabled in prod -- so scope this to the three cadence rules.
+        const cadenceRules = Object.entries(rules).filter(([, rule]) => {
+          const name = rule.Properties?.Name as string | undefined;
+          return typeof name === "string" && name.startsWith("sps-etl-");
+        });
+        expect(cadenceRules).toHaveLength(3);
+        for (const [id, rule] of cadenceRules) {
           const state = rule.Properties?.State as string | undefined;
           // CDK serializes enabled=false as State=DISABLED.
           expect({ id, state }).toEqual({ id, state: "DISABLED" });
         }
+      });
+
+      it("the #393 reconciler schedule ships ENABLED in prod (continuous backstop, not runbook-gated)", () => {
+        template.hasResourceProperties("AWS::Events::Rule", {
+          Name: "sps-reconcile-prod",
+          ScheduleExpression: "rate(5 minutes)",
+          State: "ENABLED",
+        });
       });
     });
 
     describe("Alarms (D4 -- ExecutionsFailed sum>0 + ExecutionsStarted sum<1)", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
-        expect(Object.keys(alarms)).toHaveLength(5);
+        // 5 cadence alarms + 2 reconciler alarms (#393); all share the topic.
+        expect(Object.keys(alarms)).toHaveLength(7);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -289,11 +309,17 @@ describe("EtlStack", () => {
         }
       });
 
-      it("status alarms watch ExecutionsFailed sum > 0", () => {
+      it("cadence status alarms watch ExecutionsFailed sum > 0", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
+        // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
+        // status alarm has its own focused test below.
         const statusAlarms = Object.values(alarms).filter((a) => {
           const name = a.Properties?.AlarmName as string | undefined;
-          return typeof name === "string" && name.includes("-status-");
+          return (
+            typeof name === "string" &&
+            name.startsWith("sps-etl-") &&
+            name.includes("-status-")
+          );
         });
         expect(statusAlarms).toHaveLength(3);
         for (const a of statusAlarms) {
@@ -308,9 +334,15 @@ describe("EtlStack", () => {
 
       it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly only)", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
+        // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
+        // cadence alarm has its own focused test below.
         const cadenceAlarms = Object.entries(alarms).filter(([, a]) => {
           const name = a.Properties?.AlarmName as string | undefined;
-          return typeof name === "string" && name.includes("-cadence-");
+          return (
+            typeof name === "string" &&
+            name.startsWith("sps-etl-") &&
+            name.includes("-cadence-")
+          );
         });
         // Annual has no cadence alarm -- CloudWatch can't express a yearly
         // no-execution window (see EtlStack alarm note + the guard below).
@@ -351,6 +383,144 @@ describe("EtlStack", () => {
           }
         }
         expect(violations).toEqual([]);
+      });
+    });
+
+    describe("#393 reconciler (PR-2 -- schedule + lean task + alarms)", () => {
+      it("fires the reconciler on a rate(5 minutes) EventBridge rule", () => {
+        template.hasResourceProperties("AWS::Events::Rule", {
+          Name: "sps-reconcile-prod",
+          ScheduleExpression: "rate(5 minutes)",
+        });
+      });
+
+      it("the reconcile state machine runs `npm run search:reconcile`", () => {
+        const text = getStateMachineDefinitionText(
+          template,
+          "scholars-reconcile-prod",
+        );
+        expect(text).toMatch(/"search:reconcile"/);
+        // Single-step machine: no $.startFrom Choice, no cadence steps.
+        expect(text).not.toMatch(/"etl:ed"/);
+        expect(text).not.toMatch(/search:index/);
+      });
+
+      function reconcileTaskDef() {
+        const tds = template.findResources("AWS::ECS::TaskDefinition");
+        const td = Object.values(tds).find(
+          (t) => t.Properties?.Family === "sps-reconcile-prod",
+        );
+        expect(td).toBeDefined();
+        return td!;
+      }
+
+      it("uses a lean 256/512 task def (not the 8 GB ETL task def)", () => {
+        const td = reconcileTaskDef();
+        expect(td.Properties?.Cpu).toBe("256");
+        expect(td.Properties?.Memory).toBe("512");
+      });
+
+      it("injects exactly the three secrets the worker reads, and no SCHOLARS_* / ETL_*_SECRET", () => {
+        const td = reconcileTaskDef();
+        const container = (
+          td.Properties?.ContainerDefinitions as
+            | Array<Record<string, unknown>>
+            | undefined
+        )?.find((c) => c.Name === "reconcile");
+        expect(container).toBeDefined();
+        const secretNames = (
+          container?.Secrets as Array<{ Name?: string }> | undefined
+        )?.map((s) => s.Name);
+        expect((secretNames ?? []).sort()).toEqual([
+          "DATABASE_URL",
+          "OPENSEARCH_PASS",
+          "OPENSEARCH_USER",
+        ]);
+        // No per-source ETL credentials leak onto the reconcile task.
+        const leaked = (secretNames ?? []).filter(
+          (n) => /^SCHOLARS_/.test(n ?? "") || /^ETL_.*_SECRET$/.test(n ?? ""),
+        );
+        expect(leaked).toEqual([]);
+        // OPENSEARCH_NODE rides in the plaintext environment block.
+        const envNames = (
+          container?.Environment as Array<{ Name?: string }> | undefined
+        )?.map((e) => e.Name);
+        expect(envNames).toContain("OPENSEARCH_NODE");
+      });
+
+      it("the reconcile exec role lists exactly the 2 consumer ARNs (db/etl + opensearch/etl; no *)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("ReconcileTaskExecutionRole"),
+          );
+        });
+        expect(execPolicy).toBeDefined();
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const secretsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("secretsmanager:GetSecretValue")
+            : action === "secretsmanager:GetSecretValue";
+        });
+        expect(secretsStmt).toBeDefined();
+        const resourceList = Array.isArray(secretsStmt?.Resource)
+          ? (secretsStmt?.Resource as unknown[])
+          : [secretsStmt?.Resource];
+        expect(resourceList).toHaveLength(2);
+        for (const r of resourceList) {
+          expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+        }
+      });
+
+      it("the reconcile task role has zero secretsmanager:* actions", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const taskRolePolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("ReconcileTaskRole") &&
+              !r.Ref.includes("ReconcileTaskExecutionRole"),
+          );
+        });
+        if (taskRolePolicy !== undefined) {
+          const serialized = JSON.stringify(
+            taskRolePolicy.Properties?.PolicyDocument,
+          );
+          expect(serialized).not.toMatch(/secretsmanager:/);
+        }
+      });
+
+      it("the status alarm watches ExecutionsFailed sum > 0 (idle window not breaching)", () => {
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+          AlarmName: "sps-reconcile-status-prod",
+          MetricName: "ExecutionsFailed",
+          Statistic: "Sum",
+          ComparisonOperator: "GreaterThanThreshold",
+          Threshold: 0,
+          TreatMissingData: "notBreaching",
+        });
+      });
+
+      it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+          AlarmName: "sps-reconcile-cadence-prod",
+          MetricName: "ExecutionsStarted",
+          Statistic: "Sum",
+          ComparisonOperator: "LessThanThreshold",
+          Threshold: 1,
+          TreatMissingData: "breaching",
+          Period: 900,
+        });
       });
     });
 
@@ -444,11 +614,15 @@ describe("EtlStack", () => {
 
     describe("ETL var injection (#442 -- granular SCHOLARS_*, not blob ETL_*_SECRET)", () => {
       function etlContainerDef(): Record<string, unknown> {
+        // Two task defs now (fat ETL + lean #393 reconcile); select the ETL one
+        // by its family, then its `etl` container.
         const tds = template.findResources("AWS::ECS::TaskDefinition");
-        expect(Object.keys(tds)).toHaveLength(1);
-        const td = Object.values(tds)[0];
+        const etlTd = Object.values(tds).find(
+          (td) => td.Properties?.Family === "sps-etl-prod",
+        );
+        expect(etlTd).toBeDefined();
         const container = (
-          td.Properties?.ContainerDefinitions as
+          etlTd?.Properties?.ContainerDefinitions as
             | Array<Record<string, unknown>>
             | undefined
         )?.find((c) => c.Name === "etl");
@@ -619,21 +793,40 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled=true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled both true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
-      expect(Object.keys(rules)).toHaveLength(3);
+      // 3 cadence rules + the #393 reconciler rule; all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(4);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
       }
     });
 
-    it("staging task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {
+    it("staging ETL task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {
       const tds = template.findResources("AWS::ECS::TaskDefinition");
-      expect(Object.keys(tds)).toHaveLength(1);
-      const td = Object.values(tds)[0];
-      expect(td.Properties?.Cpu).toBe("2048");
-      expect(td.Properties?.Memory).toBe("8192");
+      // Two task defs now (ETL + lean #393 reconcile); select the ETL one.
+      const td = Object.values(tds).find(
+        (t) => t.Properties?.Family === "sps-etl-staging",
+      );
+      expect(td).toBeDefined();
+      expect(td?.Properties?.Cpu).toBe("2048");
+      expect(td?.Properties?.Memory).toBe("8192");
+    });
+
+    it("staging lean reconcile task definition uses 256 cpu / 512 MiB and ships its rule enabled", () => {
+      const tds = template.findResources("AWS::ECS::TaskDefinition");
+      const td = Object.values(tds).find(
+        (t) => t.Properties?.Family === "sps-reconcile-staging",
+      );
+      expect(td).toBeDefined();
+      expect(td?.Properties?.Cpu).toBe("256");
+      expect(td?.Properties?.Memory).toBe("512");
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-reconcile-staging",
+        ScheduleExpression: "rate(5 minutes)",
+        State: "ENABLED",
+      });
     });
 
     it("uses 30-day log retention for staging", () => {
