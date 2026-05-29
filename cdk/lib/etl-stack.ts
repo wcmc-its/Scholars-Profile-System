@@ -96,10 +96,12 @@ export class EtlStack extends Stack {
   public readonly failureTopic: sns.Topic;
   /** Fargate task family every state-machine step launches. */
   public readonly etlTaskDefinition: ecs.FargateTaskDefinition;
-  /** Three state machines: nightly, weekly, annual. */
+  /** Three cadence state machines: nightly, weekly, annual. */
   public readonly nightlyStateMachine: sfn.StateMachine;
   public readonly weeklyStateMachine: sfn.StateMachine;
   public readonly annualStateMachine: sfn.StateMachine;
+  /** #393 suppression search-index reconciler (ADR-005 layer 3), ~5 min cadence. */
+  public readonly reconcileStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
@@ -771,6 +773,291 @@ export class EtlStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // #393 PR-2 -- suppression search-index reconciler (ADR-005 layer 3).
+    //
+    // PR-1 (#580) shipped the worker: `npm run search:reconcile` ->
+    // `tsx etl/search-reconcile/index.ts`, exit 0 = every stale row reflected
+    // (or none were stale), exit 1 = >=1 row failed to reflect again. This
+    // wires the continuous ~5 min cadence + alarms that drive it.
+    //
+    // Compute: a dedicated LEAN Fargate task def (256/512) on the SAME ETL
+    // image, run by a minimal single-step STANDARD state machine -- the same
+    // EcsRunTask `.sync` + retry/catch + AWS/States alarm shape the cadence
+    // machines use (ETL D1 "no Lambda"; #353 also targets the ECS task role,
+    // not a Lambda). Lean on CPU/RAM/secrets, not on image (same fat image,
+    // so the cold start is unchanged ~30-60s -- fine for a background backstop
+    // on a 5 min cadence).
+    //
+    // Least-privilege: the worker reads the suppression/scholar/pub rows
+    // (db.read), stamps the sentinel (db.write -> single DATABASE_URL, no RO
+    // split in-container), and talks to OpenSearch (searchClient: OPENSEARCH_NODE
+    // env + OPENSEARCH_USER/PASS). So its exec role lists EXACTLY 2 secret ARNs
+    // (db/etl + opensearch/etl) vs the ETL task's 8 -- no per-source SCHOLARS_*
+    // secrets, no revalidate token, no IAM-source bucket config, and no
+    // NODE_OPTIONS heap cap (it never loads the 178k-pub corpus; its memory is
+    // bounded by the worker's `take: batchSize`=200).
+    //
+    // Backstop, not propagation path: ADR-005 layer 1 is the synchronous
+    // fast-path the suppress/revoke routes call inline post-commit (<1s p95).
+    // This layer-3 reconciler only recovers fast-path writes lost to a crash /
+    // outage / `bulk` partial-failure; the ~5 min SLA is that recovery floor,
+    // not everyday hide latency.
+    //
+    // #353 (durable CloudFront invalidation) shares this schedule/alarm shape
+    // but is blocked on the #502 WAF-topology decision and uses a
+    // non-recomputable invalidation outbox rather than this recomputable
+    // sentinel, so it is NOT combined here -- it can graft on later.
+    // ------------------------------------------------------------------
+    const reconcileLogGroup = new logs.LogGroup(this, "ReconcileLogGroup", {
+      logGroupName: `/aws/ecs/sps-reconcile-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    const reconcileExecutionRole = new iam.Role(
+      this,
+      "ReconcileTaskExecutionRole",
+      {
+        roleName: `sps-reconcile-task-exec-${env}`,
+        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        description: `SPS reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl + opensearch/etl secrets, writes logs.`,
+      },
+    );
+    reconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    reconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: [etlEcrRepository.repositoryArn],
+      }),
+    );
+    // Exactly the two secrets the reconcile worker reads -- never the 8 the
+    // ETL task carries (asserted in the tests).
+    reconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [dbEtlSecret.secretArn, opensearchEtlSecret.secretArn],
+      }),
+    );
+    reconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [
+          reconcileLogGroup.logGroupArn,
+          `${reconcileLogGroup.logGroupArn}:*`,
+        ],
+      }),
+    );
+
+    const reconcileTaskRole = new iam.Role(this, "ReconcileTaskRole", {
+      roleName: `sps-reconcile-task-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS reconciler ECS task role (${env}). Runtime identity; zero AWS API permissions (reads everything via injected env).`,
+    });
+
+    const reconcileTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "ReconcileTaskDefinition",
+      {
+        family: `sps-reconcile-${env}`,
+        // Lean: the worker processes <=200 rows, not the corpus. 256/512 with
+        // wide headroom; ~16x cheaper than reusing the 8 GB ETL task def at a
+        // 5 min cadence.
+        cpu: 256,
+        memoryLimitMiB: 512,
+        executionRole: reconcileExecutionRole,
+        taskRole: reconcileTaskRole,
+      },
+    );
+    const reconcileContainer = reconcileTaskDefinition.addContainer(
+      "reconcile",
+      {
+        image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
+        // Container name `reconcile` (not `etl`) keeps the two task defs'
+        // containers unambiguous for the tests.
+        containerName: "reconcile",
+        essential: true,
+        logging: ecs.LogDriver.awsLogs({
+          logGroup: reconcileLogGroup,
+          streamPrefix: "reconcile",
+        }),
+        environment: {
+          NODE_ENV: "production",
+          // searchClient() reads OPENSEARCH_NODE; OPENSEARCH_USER/PASS arrive
+          // as secrets below. Same cross-stack import the ETL container uses.
+          OPENSEARCH_NODE: `https://${Fn.importValue(
+            `Sps-Data-${env}-OpenSearchDomainEndpoint`,
+          )}`,
+        },
+        secrets: {
+          // db.read + db.write collapse onto this single DSN (no
+          // DATABASE_URL_RO in-container), exactly as the search:index step
+          // runs.
+          DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+          OPENSEARCH_USER: ecs.Secret.fromSecretsManager(
+            opensearchEtlSecret,
+            "username",
+          ),
+          OPENSEARCH_PASS: ecs.Secret.fromSecretsManager(
+            opensearchEtlSecret,
+            "password",
+          ),
+        },
+      },
+    );
+
+    const reconcileTask = new tasks.EcsRunTask(this, "TaskReconcile", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: reconcileTaskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: reconcileContainer,
+          command: ["npm", "run", "search:reconcile"],
+        },
+      ],
+      // Bounded well under the 15 min state-machine timeout so a wedged run
+      // dies before the next 5 min fire stacks on it.
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(14)),
+    });
+    reconcileTask.addRetry({
+      errors: ["States.TaskFailed", "States.Timeout"],
+      maxAttempts: 2,
+      backoffRate: 2,
+      interval: Duration.seconds(30),
+    });
+    reconcileTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyReconcile", {
+        topic: this.failureTopic,
+        subject: `SPS reconciler ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "Reconcile",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(
+        new sfn.Fail(this, "FailReconcile", { cause: "reconcile run failed" }),
+      ),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const reconcileSmLogGroup = new logs.LogGroup(this, "ReconcileSmLogGroup", {
+      logGroupName: `/aws/states/reconcile-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    this.reconcileStateMachine = new sfn.StateMachine(
+      this,
+      "ReconcileStateMachine",
+      {
+        stateMachineName: `scholars-reconcile-${env}`,
+        stateMachineType: sfn.StateMachineType.STANDARD,
+        definitionBody: sfn.DefinitionBody.fromChainable(reconcileTask),
+        // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
+        // <=200 rows, so a longer-running execution is wedged and must not
+        // pile up at the 5 min cadence.
+        timeout: Duration.minutes(15),
+        logs: {
+          destination: reconcileSmLogGroup,
+          level: sfn.LogLevel.ERROR,
+          includeExecutionData: false,
+        },
+        tracingEnabled: true,
+      },
+    );
+
+    // EventBridge rate(5 min) schedule. `reconcileScheduleEnabled` is true in
+    // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
+    // -- a missed fire is recovered by the next 5 min fire and the idempotent
+    // worker makes an overlapping run benign, so neither a delivery retry nor a
+    // DLQ is wanted.
+    const reconcileRule = new events.Rule(this, "ReconcileScheduleRule", {
+      ruleName: `sps-reconcile-${env}`,
+      description: `SPS suppression search-index reconciler -- 5 min cadence (${env}). #393.`,
+      schedule: events.Schedule.rate(Duration.minutes(5)),
+      enabled: envConfig.reconcileScheduleEnabled,
+    });
+    reconcileRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.reconcileStateMachine, {
+        input: events.RuleTargetInput.fromObject({}),
+        retryAttempts: 0,
+      }),
+    );
+
+    // Alarms. The cadence alarm is the load-bearing one: silent schedule death
+    // (rule disabled, IAM gap) is the failure mode that actually hurts a
+    // backstop, more than any single run failing. Both periods are 15 min
+    // (< 1h) so the <=604800s evaluation-window cap above does not apply.
+    const reconcileDimensions = {
+      StateMachineArn: this.reconcileStateMachine.stateMachineArn,
+    };
+    const reconcileStatusAlarm = new cloudwatch.Alarm(
+      this,
+      "ReconcileStatusAlarm",
+      {
+        alarmName: `sps-reconcile-status-${env}`,
+        alarmDescription: `SPS reconciler (${env}) -- run failed (>=1 suppression row could not be reflected into the index).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsFailed",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.minutes(15),
+          dimensionsMap: reconcileDimensions,
+        }),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        // An idle 15 min window (no executions) is not a failure -- the cadence
+        // alarm below owns absence.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    reconcileStatusAlarm.addAlarmAction(alarmAction);
+
+    const reconcileCadenceAlarm = new cloudwatch.Alarm(
+      this,
+      "ReconcileCadenceAlarm",
+      {
+        alarmName: `sps-reconcile-cadence-${env}`,
+        alarmDescription: `SPS reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.minutes(15),
+          dimensionsMap: reconcileDimensions,
+        }),
+        evaluationPeriods: 1,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // Total metric absence => the schedule is dead => breach.
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      },
+    );
+    reconcileCadenceAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
     // Outputs. Surface the SNS topic ARN (B23 subscribes PagerDuty),
     // each state-machine ARN (operator runbook uses them in
     // start-execution / describe-execution calls), and the ETL task
@@ -795,6 +1082,11 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "AnnualStateMachineArn", {
       value: this.annualStateMachine.stateMachineArn,
       description: "SPS annual ETL state machine ARN.",
+    });
+    new CfnOutput(this, "ReconcileStateMachineArn", {
+      value: this.reconcileStateMachine.stateMachineArn,
+      description:
+        "SPS suppression search-index reconciler state machine ARN (#393).",
     });
   }
 }

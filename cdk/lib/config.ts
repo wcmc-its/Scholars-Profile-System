@@ -122,6 +122,18 @@ export interface SpsEnvConfig {
    */
   readonly etlSchedulesEnabled: boolean;
   /**
+   * Whether the EventBridge rule that fires the #393 suppression search-index
+   * reconciler (ADR-005 layer 3) is enabled at deploy time. Distinct from
+   * {@link etlSchedulesEnabled} on purpose: the reconciler is a CONTINUOUS
+   * durability backstop that must run in prod from launch, whereas the
+   * nightly / weekly / annual cadences ship disabled in prod behind a one-time
+   * runbook gate. Reusing the cadence flag would couple the two — flipping the
+   * reconciler on would also auto-start the heavy cadences. `true` in both envs;
+   * safe to enable in prod pre-launch because the candidate query returns empty
+   * (no suppressions yet) so the run is a no-op.
+   */
+  readonly reconcileScheduleEnabled: boolean;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -159,6 +171,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     samlSpAcsUrl:
       "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
     etlSchedulesEnabled: true,
+    // #393 — continuous reconciler backstop; enabled both envs (see flag JSDoc).
+    reconcileScheduleEnabled: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -196,6 +210,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // runbook review, then `aws events enable-rule` flips them on (see
     // PRODUCTION_ADDENDUM § EtlStack).
     etlSchedulesEnabled: false,
+    // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
+    // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
+    reconcileScheduleEnabled: true,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.
