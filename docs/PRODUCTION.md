@@ -35,8 +35,8 @@ Reading order: edge → app → data → background.
                                  ▼
                     ┌─────────────────────────┐
                     │  ECS Fargate             │  ← `next start` (Node 22)
-                    │  task: scholars-app      │     2+ tasks min, autoscaled on RPS
-                    │  image: ghcr.io/.../app  │     and Active CPU
+                    │  task: scholars-app      │     prod 2-6 tasks, autoscaled on
+                    │  image: ghcr.io/.../app  │     avg CPU + ALB req/target
                     └────┬───────────┬────────┘
                          │           │
                          │           └──────────► OpenSearch Service (managed)
@@ -106,7 +106,7 @@ A typical crawl pattern for this site is `GET /sitemap.xml` (8,919 scholar URLs 
 If a bot somehow ignores caching headers, two layers protect us:
 
 1. **AWS WAF rate rule**: 1000 req / 5 min per IP (`RateBasedRule`). Borderline-aggressive crawlers see 429s; well-behaved Googlebot/Bingbot stay well under.
-2. **Origin concurrency**: ALB target group caps in-flight requests per task (default 2x healthy task count). If the burst still gets through WAF, the queue absorbs and 503s start; the ECS service autoscaler triggers within 60 s.
+2. **Origin concurrency**: ALB target group caps in-flight requests per task (default 2x healthy task count). If the burst still gets through WAF, the queue absorbs and 503s start; the ECS service autoscaler (target-tracking on avg CPU 60% + ALB request-count-per-target) adds tasks toward the `appMaxCount` ceiling (prod 6) — scale-out cooldown is 60 s.
 
 Lighter mitigation appropriate for `robots.txt`:
 
@@ -196,7 +196,9 @@ The AWS Backup plan's `copyAction` (`cdk/lib/data-stack.ts:355-361`) writes each
 This is the runbook for the symptom we hit in dev. In production the resolution is different at each layer:
 
 1. **Check CloudFront cache hit rate** (Edge dashboard). Healthy = >85%. If <50%, something is generating cache misses — most often a recent deploy with a different cache key or a hot ETL invalidation cycle. Roll back the deploy or back off the invalidation rate.
-2. **Check Fargate task count and CPU** (App dashboard). If tasks are pegged but the autoscaler hasn't reacted, manually scale out. Investigate why the policy didn't fire (cooldown? metric lag?).
+2. **Check Fargate task count and CPU** (App dashboard). The service target-tracks on avg CPU (60%) and ALB request-count-per-target between `appDesiredCount` (prod 2) and `appMaxCount` (prod 6); thresholds are conservative placeholders pending the #554 load test.
+   - **Pegged AT the max** (running 6/6): the policy can't add more. For immediate relief, raise `MaxCapacity` on the App Auto Scaling target in the console; to make it durable, bump `appMaxCount` in `cdk/lib/config.ts` and redeploy `Sps-App-prod`.
+   - **Pegged BELOW the max but no scale-out**: check the two target-tracking CloudWatch alarms for metric lag or an active cooldown window (scale-out 60 s / scale-in 300 s); confirm the scalable target is attached (it is skipped only on a `-c appDesiredCount=0` bootstrap deploy).
 3. **Check Aurora connections + slow query log** (Data dashboard). If the connection pool is exhausted, scale tasks (more pools) before scaling the DB. If a single query plan changed (Aurora occasionally swaps plans after stats updates), force-run `ANALYZE TABLE` on the affected tables.
 4. **Check OpenSearch query latency** if `/search` is slow but profile pages aren't. Cluster needs more data nodes, or a query is hitting an unindexed field.
 

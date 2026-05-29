@@ -262,6 +262,62 @@ describe("AppStack", () => {
         });
       });
 
+      it("attaches one application-autoscaling target on the ECS DesiredCount dimension, min=appDesiredCount(2) / max=appMaxCount(6) (#596)", () => {
+        template.resourceCountIs(
+          "AWS::ApplicationAutoScaling::ScalableTarget",
+          1,
+        );
+        template.hasResourceProperties(
+          "AWS::ApplicationAutoScaling::ScalableTarget",
+          {
+            ServiceNamespace: "ecs",
+            ScalableDimension: "ecs:service:DesiredCount",
+            MinCapacity: 2,
+            MaxCapacity: 6,
+          },
+        );
+      });
+
+      it("scales on CPU (60%) and ALB request-count (1000/target) — both target-tracking, scale-out 60s / scale-in 300s (#596)", () => {
+        // Two policies, both target-tracking, on the single scalable target.
+        template.resourceCountIs(
+          "AWS::ApplicationAutoScaling::ScalingPolicy",
+          2,
+        );
+        template.hasResourceProperties(
+          "AWS::ApplicationAutoScaling::ScalingPolicy",
+          {
+            PolicyType: "TargetTrackingScaling",
+            TargetTrackingScalingPolicyConfiguration: Match.objectLike({
+              PredefinedMetricSpecification: {
+                PredefinedMetricType: "ECSServiceAverageCPUUtilization",
+              },
+              TargetValue: 60,
+              ScaleOutCooldown: 60,
+              ScaleInCooldown: 300,
+            }),
+          },
+        );
+        template.hasResourceProperties(
+          "AWS::ApplicationAutoScaling::ScalingPolicy",
+          {
+            PolicyType: "TargetTrackingScaling",
+            TargetTrackingScalingPolicyConfiguration: Match.objectLike({
+              // ResourceLabel binds to the PUBLIC target group (origin-
+              // forwarded traffic). Its value is a synth-time Fn::Join over
+              // the LB + TG full names, so assert only the metric type +
+              // target here, not the label internals.
+              PredefinedMetricSpecification: Match.objectLike({
+                PredefinedMetricType: "ALBRequestCountPerTarget",
+              }),
+              TargetValue: 1000,
+              ScaleOutCooldown: 60,
+              ScaleInCooldown: 300,
+            }),
+          },
+        );
+      });
+
       it("uses an env-config-valid Fargate (cpu, memory) pair on both task definitions", () => {
         // L2 helper accepts invalid (cpu, memory) combinations; AWS rejects
         // them only at run time. Lock the allowlist at synth time.
@@ -1462,6 +1518,17 @@ describe("AppStack", () => {
       });
     });
 
+    it("autoscales between min=1 and max=3 for staging (#596)", () => {
+      template.hasResourceProperties(
+        "AWS::ApplicationAutoScaling::ScalableTarget",
+        {
+          ScalableDimension: "ecs:service:DesiredCount",
+          MinCapacity: 1,
+          MaxCapacity: 3,
+        },
+      );
+    });
+
     it("owns (creates) the account-scoped OIDC provider (#491)", () => {
       // staging is the designated owner: it creates the single account-scoped
       // provider that prod (and any other env) imports.
@@ -1557,6 +1624,12 @@ describe("AppStack", () => {
       });
       const t = Template.fromStack(stack);
       t.hasResourceProperties("AWS::ECS::Service", { DesiredCount: 0 });
+      // The bootstrap deploy must NOT attach a scalable target: a non-zero
+      // MinCapacity would make App Auto Scaling immediately schedule the
+      // floor tasks against an empty ECR, re-creating the failing-pull wait
+      // the bootstrap exists to avoid (#596).
+      t.resourceCountIs("AWS::ApplicationAutoScaling::ScalableTarget", 0);
+      t.resourceCountIs("AWS::ApplicationAutoScaling::ScalingPolicy", 0);
     });
   });
 });

@@ -1131,6 +1131,60 @@ export class AppStack extends Stack {
     this.ecsService.node.addDependency(internalListener);
 
     // ------------------------------------------------------------------
+    // Application autoscaling (#596).
+    //
+    // Caching (CloudFront + ISR) sheds the cacheable read traffic that
+    // dominates, but the uncacheable paths -- /api/search*, /edit*,
+    // /api/auth/* (and /api/auth/session, which fires on every public page
+    // per the cookie-strip workaround), exports -- are deliberately routed
+    // straight to the origin. A launch-window or outreach-wave spike
+    // (Wave 4 = WCM-wide, #506 Gate D5) on those paths can peg the fixed
+    // task count, saturate the ALB queue and start 503-ing with no
+    // automatic recovery. A target-tracking scaling policy gives that
+    // recovery; without it the docs/PRODUCTION.md incident runbook sends
+    // the on-call operator chasing a policy that does not exist.
+    //
+    // Skipped during the bootstrap deploy (desiredCount driven to 0 via
+    // `-c appDesiredCount=0`): attaching a scalable target with a non-zero
+    // MinCapacity would make App Auto Scaling immediately schedule the
+    // floor tasks against an empty ECR, re-introducing the guaranteed-
+    // failing-pull wait the bootstrap exists to avoid. The real deploy
+    // (desiredCount back to the env default) attaches the policy.
+    //
+    // MinCapacity == appDesiredCount: the service never scales BELOW the
+    // current floor, so the prod minimum (2) stays AZ-spread. MaxCapacity
+    // and the target thresholds are conservative placeholders pending the
+    // #554 load-test numbers (P0, Gate A) -- see config.ts appMaxCount.
+    if (desiredCount > 0) {
+      const scalableTaskCount = this.ecsService.autoScaleTaskCount({
+        minCapacity: envConfig.appDesiredCount,
+        maxCapacity: envConfig.appMaxCount,
+      });
+      // CPU target-tracking. 60% leaves headroom for the lag between the
+      // metric breach and a replacement task passing its ALB health check.
+      // scaleOut fast (60s -- matches the runbook's "triggers within 60s"),
+      // scaleIn slow (5min) so a brief lull does not flap tasks down into
+      // the next request burst.
+      scalableTaskCount.scaleOnCpuUtilization("CpuScaling", {
+        targetUtilizationPercent: 60,
+        scaleInCooldown: Duration.seconds(300),
+        scaleOutCooldown: Duration.seconds(60),
+      });
+      // ALB request-count target-tracking on the PUBLIC target group -- the
+      // origin-forwarded request rate. Only requests carrying the valid
+      // X-Origin-Verify header forward to a target (the listener's default
+      // action is a fixed-response 403), so blocked/junk traffic never
+      // inflates the metric; we scale on real served load. requestsPerTarget
+      // is a placeholder until #554 measures sustainable RPS per task.
+      scalableTaskCount.scaleOnRequestCount("RequestScaling", {
+        requestsPerTarget: 1000,
+        targetGroup: publicAppTargetGroup,
+        scaleInCooldown: Duration.seconds(300),
+        scaleOutCooldown: Duration.seconds(60),
+      });
+    }
+
+    // ------------------------------------------------------------------
     // GitHub Actions OIDC deploy role.
     //
     // The OIDC provider is account-scoped — only one

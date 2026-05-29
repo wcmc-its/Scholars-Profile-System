@@ -185,7 +185,7 @@ an existing doc, mostly blocked on post-launch traffic or an external team.
 | Residual item | Lives in | Blocked on / trigger |
 |---|---|---|
 | Per-surface latency p50/p95/p99 + load-test numbers (cells marked `TBD (measure)`) | [`performance-baseline.md`](./performance-baseline.md) | Post-launch traffic or a 1000-scholar synthetic crawl; the 30-day-post-EdgeStack SLO review. |
-| **App-tier autoscaling claim is aspirational** — `PRODUCTION.md` (architecture diagram, the rate-burst note, and an incident-runbook step) and `performance-baseline.md § Scaling characteristics` describe an ECS autoscaler, but the CDK ships a fixed `desiredCount` (1 staging / 2 prod) with **no scaling policy**. Reconcile the docs, or add a target-tracking policy to `AppStack`. | [`PRODUCTION.md`](./PRODUCTION.md), [`performance-baseline.md`](./performance-baseline.md) | #596 — the implement-vs-document choice gates on the #554 load-test numbers; the doc reconciliation should land before flip regardless. |
+| **App-tier autoscaling thresholds are placeholders** — `AppStack` now ships a target-tracking policy (#596: avg CPU 60% + ALB request-count-per-target, min `appDesiredCount` / max `appMaxCount` = prod 2/6, staging 1/3), and the `PRODUCTION.md` + `performance-baseline.md` claims are reconciled to match. The max and the target values are conservative placeholders. | [`PRODUCTION.md`](./PRODUCTION.md), [`performance-baseline.md`](./performance-baseline.md), [`config.ts`](../cdk/lib/config.ts) | #554 load-test numbers (P0, Gate A) — tune the ceiling + thresholds once real RPS / CPU-per-task figures exist. |
 | Post-Edge/Etl cost baseline (current `$425/mo` predates CloudFront + ETL) and per-service `est.` → actuals from Cost Explorer | [`cost-model.md`](./cost-model.md) | EdgeStack + EtlStack active in prod; re-audit at the budget-review trigger. |
 | Production WAF topology (AWS-native WebACL vs on-prem NetScaler) | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) | ITSOPS decision on RITM0792011 (#502). |
 | WCM-internal ETL routing (TGW attachment + WCM firewall for the VPC CIDR) | [`network-security-topology.md`](./network-security-topology.md), [`data-population-runbook.md`](./data-population-runbook.md) | Central Services / WCM network team (not SPS-owned). |
@@ -220,7 +220,9 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-05-29 — §10 adds the app-tier autoscaling doc/infra mismatch (#596);
+*Last updated: 2026-05-29 — §10 app-tier autoscaling resolved: `AppStack` now ships a
+target-tracking policy (#596) and the docs are reconciled; the row is narrowed to
+threshold-tuning pending #554. Earlier 2026-05-29 — §10 added the app-tier autoscaling doc/infra mismatch (#596);
 added §9 launch-window outreach drafts (Waves 1–4 + skeleton, #506 D5) and the ServiceNow KB
 article drafts (#506 D3); fixed the footer "Help & support" link to point at `/about` (the public
 help surface). 2026-05-28 — eight operational gap docs added; §10 tracks residual data-collection
