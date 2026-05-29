@@ -171,6 +171,7 @@ Bound to `session.cwid`; no CWID in the URL. Page title **"Edit my profile"**, i
 
 - **Hide / Show is optimistic:** the row flips state immediately; the "Show" / "Hide" button beside it *is* the undo. On a write error the row reverts and an inline message appears.
 - **Sole-displayed-author guard:** if `edit-context` reports the scholar is the only displayed WCM author, **Hide** opens a [confirm dialog](#suppression-and-confirmation-dialogs) first — hiding will take the whole publication dark site-wide (`self-edit-spec.md` edge case 7).
+- **First-hide-of-session notice (#570):** the **first time in a browser session** the scholar hides any publication, an educational [notice](#suppression-and-confirmation-dialogs) appears before the hide commits — Hide is display-only and the right tool for "mine but I'd rather not show it"; a paper that *isn't* theirs should be rejected in Publication Manager instead. Acknowledged via `sessionStorage` on an informed choice (Hide it / not-mine), not on Cancel; subsequent hides then proceed without it. It **composes** with the sole-author guard (notice first, then the site-wide-removal confirm — never both prompts at once) and never fires on Show/restore.
 - **Empty:** *"No publications are currently associated with your profile."*
 
 ---
@@ -253,6 +254,20 @@ Every destructive or hard-to-notice action confirms through one `dialog.tsx` pat
 
 **The rule:** an action confirms **iff it removes something from public view by default** — hide a profile, hide a sole-author publication, take a publication down. Its inverse — every **revoke / restore / un-hide**, and a non-sole-author publication hide (freely reversible from the same control) — does **not** confirm; a dialog there would only add friction. Confirmation gates the *loss* of visibility, never its restoration.
 
+### The first-hide-of-session notice (#570) — an educational interstitial, *not* a confirm
+
+Distinct from the confirm pattern above. The **first time per browser session** a scholar hides any publication, this notice precedes the hide. Its job is to put the *correct* tool in front of them at the moment of action — and it is the one dialog on the surface where **Hide is the primary, default-variant button**, not Cancel. That deliberate inversion is safe: the notice gates an action the scholar already initiated, the co-authored hide it usually precedes is display-only and freely reversible, and the genuinely destructive sole-author path still falls through to the Cancel-focused confirm above (the two compose; they never double-prompt).
+
+| Property | Value |
+|---|---|
+| **Title** | "You're about to hide this paper." |
+| **Body** | "Hiding removes it from your Scholars profile only — it's display-only and reversible, and it changes nothing upstream. If this paper is yours and you'd just rather not show it, hiding is exactly right." Then, gated behind **"Is this paper not actually yours?"**: route to Publication Manager to reject it at the source, with the algorithm-integrity warning — *"Only reject papers that genuinely aren't yours"* (rejecting one's own work feeds a false negative into ReCiter's matching and degrades attribution for the whole corpus). |
+| **Buttons** | **"Hide it"** (`variant="default"`, primary, autofocused) · **"It's not mine — go to Publication Manager"** (`variant="outline"`, opens `reciter.weill.cornell.edu` in a new tab, does **not** hide) · **"Cancel"** (`variant="ghost"`, leaves it visible). |
+| **Persistence** | `sessionStorage` flag, set on an **informed choice** — "Hide it" or "It's not mine" — but **not** on Cancel/Esc: a scholar who backs out before deciding is re-educated on the next hide (harmless, and the safer direction). Storage-unavailable degrades to always-show (informational, never blocking). |
+| **Scope** | Publication self-hide only. Never on Show/restore, never on other entity types, never on the superuser whole-publication takedown. |
+
+The reject link reuses the single-source-of-truth `PUBLICATION_MANAGER_URL` from `lib/edit/request-a-change.ts`.
+
 ---
 
 ## Feedback, dirty state, and interaction
@@ -292,6 +307,10 @@ Covers what the **user sees**; `self-edit-spec.md`'s edge-case table covers the 
 | 19 | "My publications" is empty | *"No publications are currently associated with your profile."* |
 | 20 | Superuser views the Overview card on `/edit/scholar/[other-cwid]` | Bio shown read-only; note *"Only the profile owner can edit the bio."*; no toolbar, no Save. |
 | 21 | Scholar opens the sole-author hide dialog; a co-author is attributed (by ReCiter) before they confirm | The per-author hide still writes correctly; the publication does **not** go dark, because a displayed author now remains. The dialog's warning was conservative but harmless. v1 does not re-validate an open dialog against mid-interaction data changes — the window (a dialog open across a nightly ETL run) is vanishingly small. |
+| 22 | Scholar hides their first publication of the session | The [first-hide notice](#the-first-hide-of-session-notice-570--an-educational-interstitial-not-a-confirm) appears before anything commits; nothing is hidden until they choose "Hide it". "It's not mine" opens Publication Manager in a new tab and leaves the paper visible; "Cancel" leaves it visible. (#570) |
+| 23 | Scholar hides a second publication later in the same session, after an informed first choice | No notice — the `sessionStorage` acknowledgment from the first hide (or "it's not mine") suppresses it; the hide proceeds straight to the sole-author guard (if any) or the optimistic write. (#570) |
+| 24 | Scholar's first-of-session hide is a sole-displayed-author publication | Notice first; on "Hide it" the sole-author site-wide-removal confirm follows — two sequential dialogs, never one stacked on the other, and the write fires only after the second confirm. (#570) |
+| 25 | Scholar opens the notice but Cancels (or presses Esc) without deciding | Nothing is hidden and the session is **not** acknowledged — the next hide re-shows the notice. (#570) |
 
 ---
 
@@ -339,6 +358,7 @@ The user-facing strings, collected for the build. Tone: plain, second-person, no
 | Visibility — hidden (self) | "Your profile is hidden. It is not visible to the public or in search." / "Make my profile visible" |
 | Visibility — hidden (admin) | "Your profile has been hidden by a site administrator." |
 | Publications card | "My publications" / "Hide a publication to remove yourself as an author from it across the site. Use this for a paper that isn't yours, too." |
+| First-hide notice (#570) | "You're about to hide this paper." / "Hide it" · "It's not mine — go to Publication Manager" · "Cancel" (full body in [§ Dialogs](#the-first-hide-of-session-notice-570--an-educational-interstitial-not-a-confirm)). |
 | Publication removed (admin) | "An administrator removed this publication site-wide; hiding or showing it here has no effect." |
 | Publications empty | "No publications are currently associated with your profile." |
 | Superuser banner | "You are editing **{Name}**'s profile as an administrator." |

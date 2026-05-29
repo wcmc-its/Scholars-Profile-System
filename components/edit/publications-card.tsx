@@ -20,6 +20,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { FieldSourceLine } from "@/components/edit/field-source-line";
+import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
 import { cn } from "@/lib/utils";
 import type { EditContextPublication } from "@/lib/api/edit-context";
 
@@ -40,6 +42,35 @@ export type PublicationsCardProps = {
   cwid: string;
   publications: ReadonlyArray<EditContextPublication>;
 };
+
+/**
+ * sessionStorage key for the first-hide-of-a-session notice (#570). Set when the
+ * scholar makes an *informed choice* on the notice — "Hide it" or "It's not
+ * mine" — but NOT on Cancel/Esc: a scholar who backs out before deciding is
+ * re-educated on the next hide (harmless, and the safer direction). Exported
+ * for deterministic test setup.
+ */
+export const FIRST_HIDE_NOTICE_ACK_KEY = "sps.edit.first-hide-notice-ack";
+
+/** Has the scholar already seen the first-hide notice this session? */
+function hasAcknowledgedFirstHide(): boolean {
+  try {
+    return window.sessionStorage.getItem(FIRST_HIDE_NOTICE_ACK_KEY) === "1";
+  } catch {
+    // sessionStorage unavailable (private mode quota, disabled storage) —
+    // degrade to always-show; the notice is informational, never blocking.
+    return false;
+  }
+}
+
+/** Record that the notice has been shown this session. */
+function acknowledgeFirstHide(): void {
+  try {
+    window.sessionStorage.setItem(FIRST_HIDE_NOTICE_ACK_KEY, "1");
+  } catch {
+    // No-op — see hasAcknowledgedFirstHide.
+  }
+}
 
 type Pub = EditContextPublication;
 type OptimisticUpdate =
@@ -65,6 +96,9 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
   const [filter, setFilter] = React.useState("");
   // The sole-author confirm dialog is keyed by pmid — open is null when closed.
   const [confirmPmid, setConfirmPmid] = React.useState<string | null>(null);
+  // The first-hide-of-a-session notice (#570), keyed by the pmid that triggered
+  // it — null when closed.
+  const [noticePmid, setNoticePmid] = React.useState<string | null>(null);
 
   const totalCount = list.length;
   const hiddenCount = list.filter((p) => p.state !== "shown").length;
@@ -91,11 +125,31 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
   }
 
   function startHide(p: Pub) {
+    // First publication-hide of the session shows the educational notice before
+    // anything commits (#570). After it's been seen once, hides proceed straight
+    // to the sole-author guard (if any) or the optimistic hide.
+    if (!hasAcknowledgedFirstHide()) {
+      setNoticePmid(p.pmid);
+      return;
+    }
+    proceedHide(p);
+  }
+
+  // The hide path once the first-hide notice is out of the way: the existing
+  // sole-displayed-author guard, then the optimistic write.
+  function proceedHide(p: Pub) {
     if (p.isSoleDisplayedAuthor) {
       setConfirmPmid(p.pmid);
       return;
     }
     hide(p.pmid);
+  }
+
+  // Close the notice without recording an acknowledgment — the Cancel / Esc /
+  // backdrop path. The scholar backed out before deciding, so the notice can
+  // resurface on their next hide.
+  function closeNotice() {
+    setNoticePmid(null);
   }
 
   function hide(pmid: string) {
@@ -168,6 +222,8 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
 
   const confirmingPub =
     confirmPmid !== null ? list.find((p) => p.pmid === confirmPmid) ?? null : null;
+  const noticePub =
+    noticePmid !== null ? list.find((p) => p.pmid === noticePmid) ?? null : null;
 
   return (
     <Card data-slot="publications-card">
@@ -180,7 +236,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
           appearing on internal reports and the Faculty Review Tool until
           it&apos;s corrected in{" "}
           <a
-            href="https://reciter.weill.cornell.edu/"
+            href={PUBLICATION_MANAGER_URL}
             target="_blank"
             rel="noreferrer"
             className="underline"
@@ -253,6 +309,31 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
           </ScrollArea>
         )}
       </CardContent>
+
+      <FirstHideNoticeDialog
+        open={noticePmid !== null}
+        onOpenChange={(open) => {
+          // Cancel / Esc / backdrop / X — backed out without deciding. Close
+          // but do NOT acknowledge, so the notice can resurface next time.
+          if (!open) closeNotice();
+        }}
+        onHide={() => {
+          // Informed choice — acknowledge for the session, then resume the hide
+          // the scholar initiated, which for a sole-displayed-author paper opens
+          // the site-wide removal confirm rather than hiding straight away (no
+          // double-prompt).
+          const p = noticePub;
+          acknowledgeFirstHide();
+          closeNotice();
+          if (p) proceedHide(p);
+        }}
+        onNotMine={() => {
+          // Informed choice — acknowledge, then let the scholar leave for
+          // Publication Manager (the <a> opens it in a new tab). Do NOT hide.
+          acknowledgeFirstHide();
+          closeNotice();
+        }}
+      />
 
       <ConfirmDialog
         open={confirmPmid !== null}
