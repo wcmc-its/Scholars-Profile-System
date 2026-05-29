@@ -230,7 +230,7 @@ export function GrantsSection({ grants }: { grants: Grant[] }) {
               }
             >
               {label}
-              <span className={active ? "text-[11px] opacity-90" : "text-[11px] opacity-70"}>
+              <span className={active ? "text-[11px] text-white/90" : "text-[11px] text-muted-foreground"}>
                 {roleCounts[key]}
               </span>
             </button>

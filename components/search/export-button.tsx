@@ -170,11 +170,11 @@ function ExportMenuItem({
       {busy ? (
         <Loader2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#2c4f6e]" />
       ) : (
-        <Icon aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-[#757575]" strokeWidth={2} />
+        <Icon aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
       )}
       <span className="flex-1">
         <span className="block font-medium">{label}</span>
-        <span className="block text-[12px] text-[#757575]">{hint}</span>
+        <span className="block text-[12px] text-muted-foreground">{hint}</span>
       </span>
     </button>
   );

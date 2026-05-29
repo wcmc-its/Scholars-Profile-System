@@ -15,7 +15,11 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* Darkened from oklch(0.556)=#737373 to clear WCAG 2.2 AA 1.4.3 (4.5:1) on
+     tinted card/chip backgrounds, not only pure white (#587). #666 holds
+     >=4.9:1 on every surface tint in the palette. Dark-mode value unchanged
+     (already ~5.8-7.6:1). */
+  --muted-foreground: oklch(0.51 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);

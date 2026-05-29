@@ -41,7 +41,7 @@ export function ConceptEmptyState({
       <div className="text-lg font-medium">
         No publications tagged with this concept{headingTail}
       </div>
-      <div className="mt-1 max-w-[520px] text-sm text-[#757575]">
+      <div className="mt-1 max-w-[520px] text-sm text-muted-foreground">
         No publication in this corpus is MeSH-tagged with{" "}
         <span className="font-medium text-[#4a4a4a]">{descriptorName}</span>.
         {broadCount !== null && broadCount === 0 ? (

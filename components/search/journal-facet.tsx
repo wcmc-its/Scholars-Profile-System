@@ -37,13 +37,13 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
     <div className="mb-5">
       <h3 className="mb-2 text-[13px] font-semibold text-[#1a1a1a]">Journal</h3>
       <label className="mb-2 flex items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[12.5px] focus-within:border-[#2c4f6e]">
-        <Search aria-hidden className="h-3.5 w-3.5 shrink-0 text-[#757575]" strokeWidth={2} />
+        <Search aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search journals…"
-          className="min-w-0 flex-1 bg-transparent text-[#1a1a1a] outline-none placeholder:text-[#9a9890]"
+          className="min-w-0 flex-1 bg-transparent text-[#1a1a1a] outline-none placeholder:text-muted-foreground"
         />
       </label>
       <ul className="m-0 flex list-none flex-col p-0">
@@ -65,7 +65,7 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
                 className="mt-[3px] cursor-pointer accent-[#2c4f6e]"
               />
               <span className="min-w-0 flex-1 break-words">{j.value}</span>
-              <span className="mt-[1px] shrink-0 text-[12px] text-[#757575] tabular-nums">
+              <span className="mt-[1px] shrink-0 text-[12px] text-muted-foreground tabular-nums">
                 {j.count.toLocaleString()}
               </span>
             </Link>
@@ -73,7 +73,7 @@ export function JournalFacet({ items }: { items: JournalFacetItem[] }) {
         ))}
       </ul>
       {visible.length === 0 && query ? (
-        <div className="px-1 py-1 text-[12px] text-[#9a9890]">
+        <div className="px-1 py-1 text-[12px] text-muted-foreground">
           No journals match &ldquo;{query}&rdquo;
         </div>
       ) : null}

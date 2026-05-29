@@ -65,7 +65,7 @@ export function SortLinks({
         className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e]"
       >
         {activeLabel}
-        <ChevronDown aria-hidden className="h-3.5 w-3.5 text-[#757575]" strokeWidth={2} />
+        <ChevronDown aria-hidden className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={2} />
       </button>
       {open ? (
         <ul

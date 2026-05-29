@@ -34,7 +34,7 @@ export type PeopleResultCardProps = {
  */
 function RoleTag({ role }: { role: string }) {
   return (
-    <span className="ml-2 inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#8a8377]">
+    <span className="ml-2 inline-flex h-[16px] items-center rounded-sm bg-[#f0eeea] px-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
       {role}
     </span>
   );
@@ -146,7 +146,7 @@ export function PeopleResultCard({
           </div>
         ) : null}
         {deptLine ? (
-          <div className="mb-2 text-xs text-[#757575]">{deptLine}</div>
+          <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
         {snippet ? (
           <div className="text-[13px] leading-snug text-[#4a4a4a]">
@@ -154,7 +154,7 @@ export function PeopleResultCard({
           </div>
         ) : null}
       </div>
-      <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-[#757575]">
+      <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
         {hit.pubCount > 0 ? (
           <span>
             <span className="text-[16px] font-semibold tabular-nums text-[#1a1a1a]">
