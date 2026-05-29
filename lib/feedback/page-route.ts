@@ -25,7 +25,8 @@ const PATTERNS: ReadonlyArray<{ match: RegExp; route: string }> = [
   { match: /^\/edit\/slug-requests$/, route: "/edit/slug-requests" },
   { match: /^\/edit$/, route: "/edit" },
   { match: /^\/about\/feedback$/, route: "/about/feedback" },
-  // /about, /about/help, /about/methodology — collapse the rest of /about to one bucket
+  // /about plus any retired /about/* (methodology, help) that 301 here —
+  // collapse the rest of /about to one analytical bucket
   { match: /^\/about(\/[^/]+)?$/, route: "/about" },
   { match: /^\/search$/, route: "/search" },
   { match: /^\/browse$/, route: "/browse" },

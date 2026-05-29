@@ -396,9 +396,9 @@ describe("PublicationModal — content sections", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     // Info link sits adjacent to the SectionHeading and opens the
-    // methodology deeplink in a new tab.
+    // /about deeplink in a new tab.
     const info = screen.getByRole("link", { name: /About Impact/ });
-    expect(info.getAttribute("href")).toBe("/about/methodology#impact");
+    expect(info.getAttribute("href")).toBe("/about#impact");
     expect(info.getAttribute("target")).toBe("_blank");
     expect(info.getAttribute("rel")).toContain("noopener");
   });
@@ -409,7 +409,7 @@ describe("PublicationModal — content sections", () => {
     fireEvent.click(screen.getByTestId("harness-trigger"));
     await waitFor(() => expect(screen.getByRole("dialog")).toBeDefined());
     const info = screen.getByRole("link", { name: /About Topics/ });
-    expect(info.getAttribute("href")).toBe("/about/methodology#why-ai");
+    expect(info.getAttribute("href")).toBe("/about#topics");
     expect(info.getAttribute("target")).toBe("_blank");
     expect(info.getAttribute("rel")).toContain("noopener");
   });

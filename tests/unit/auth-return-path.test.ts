@@ -24,7 +24,7 @@ describe("isSafeReturnPath", () => {
     expect(isSafeReturnPath("/topics/precision-oncology")).toBe(true);
     expect(isSafeReturnPath("/topics/precision-oncology/scholars")).toBe(true);
     expect(isSafeReturnPath("/about")).toBe(true);
-    expect(isSafeReturnPath("/about/methodology")).toBe(true);
+    expect(isSafeReturnPath("/about/feedback")).toBe(true);
     expect(isSafeReturnPath("/search?q=mRNA")).toBe(true);
   });
 

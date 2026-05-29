@@ -4,7 +4,7 @@ import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
 
 describe("isAllowedRevalidatePath", () => {
   it("allows the exact paths", () => {
-    for (const p of ["/", "/about", "/about/methodology", "/browse", "/sitemap.xml"]) {
+    for (const p of ["/", "/about", "/browse", "/sitemap.xml"]) {
       expect(isAllowedRevalidatePath(p)).toBe(true);
     }
   });

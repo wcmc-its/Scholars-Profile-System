@@ -19,7 +19,6 @@ const SLUG_RE_SOURCE = "[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?";
 export const ALLOWED_EXACT: ReadonlySet<string> = new Set([
   "/",
   "/about",
-  "/about/methodology",
   "/browse",
   "/sitemap.xml",
 ]);

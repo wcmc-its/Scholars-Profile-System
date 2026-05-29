@@ -12,8 +12,7 @@ import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
  *
  * Whitelist (Phase 2 surfaces):
  *   - "/"                    home page
- *   - "/about"               about stub
- *   - "/about/methodology"   methodology page
+ *   - "/about"               documentation page
  *   - "/scholars/{slug}"     profile page (slug = [a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)
  *   - "/topics/{slug}"       topic detail / placeholder
  *   - "/sitemap.xml"         dynamic sitemap (Phase 5)

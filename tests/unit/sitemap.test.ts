@@ -10,7 +10,7 @@
  *       Home: 1.0 / weekly
  *       Scholars: 0.8 / weekly
  *       Topics / depts: 0.6 / monthly
- *       Static (browse, about, about/methodology): 0.5 / monthly
+ *       Static (browse, about): 0.5 / monthly
  *
  * Mocks: @/lib/db prisma; no real DB connections.
  */
@@ -99,15 +99,9 @@ describe("app/sitemap — static pages", () => {
     );
   });
 
-  it("includes /about/methodology with priority 0.5 and changeFrequency monthly", async () => {
+  it("does NOT include /about/methodology (retired — 308s to /about)", async () => {
     const entries = await mod.default();
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        url: "https://scholars.weill.cornell.edu/about/methodology",
-        priority: 0.5,
-        changeFrequency: "monthly",
-      }),
-    );
+    expect(entries.find((e) => e.url.endsWith("/about/methodology"))).toBeUndefined();
   });
 
   it("does NOT include /search (noindex page excluded from sitemap)", async () => {

@@ -43,7 +43,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/`, lastModified: now, changeFrequency: "weekly" as const, priority: 1.0 },
     { url: `${BASE}/browse`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
     { url: `${BASE}/about`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
-    { url: `${BASE}/about/methodology`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
   ];
 
   const scholarEntries: MetadataRoute.Sitemap = scholars.map(

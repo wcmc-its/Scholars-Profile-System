@@ -4,7 +4,7 @@
  * Names the system of record for each sourced attribute so a faculty member
  * understands why a field isn't editable in Scholars and where to fix it. The
  * inline "Source: …" line in each panel header is the per-field complement of
- * the global `/about/help/where-does-the-data-come-from` page (#515 / #508).
+ * the global provenance map at `/about#provenance` (#515 / #508).
  *
  * Keyed off `RequestAttribute` — the same union the panels and the
  * "Request a change" routing already share, which is exactly the set of sourced
