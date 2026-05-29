@@ -97,7 +97,7 @@ describe("POST /api/edit/request-change", () => {
     expect(await res.json()).toMatchObject({ ok: true, sent: true });
     expect(mockSendMail).toHaveBeenCalledTimes(1);
     const arg = mockSendMail.mock.calls[0][0];
-    expect(arg.to).toBe("ofa@med.cornell.edu");
+    expect(arg.to).toBe("facultyaffairs@med.cornell.edu");
     expect(arg.subject).toBe("Scholars profile correction — Education");
     expect(arg.text).toContain("Item: Ph.D., Stanford");
     expect(arg.text).toContain("Year is wrong");

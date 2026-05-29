@@ -51,7 +51,7 @@ describe("REQUEST_A_CHANGE — structure", () => {
   it("routes only ever target the three approved mailboxes", () => {
     const allowed = new Set([
       "support@med.cornell.edu",
-      "ofa@med.cornell.edu",
+      "facultyaffairs@med.cornell.edu",
       "osra-operations@med.cornell.edu",
     ]);
     for (const a of ATTRS) {
@@ -102,10 +102,10 @@ describe("operator routing decisions", () => {
 
   it("degrees + education route to Faculty Affairs; appointments to support", () => {
     expect((issue("name-title", "degrees-wrong").action as { email?: string }).email).toBe(
-      "ofa@med.cornell.edu",
+      "facultyaffairs@med.cornell.edu",
     );
     expect((issue("education", "education-wrong").action as { email?: string }).email).toBe(
-      "ofa@med.cornell.edu",
+      "facultyaffairs@med.cornell.edu",
     );
     expect((issue("appointments", "appointment-title-wrong").action as { email?: string }).email).toBe(
       "support@med.cornell.edu",
