@@ -100,7 +100,13 @@ const CENTERS: Seed[] = [
  * Per-center program taxonomy (#552). Only the Meyer Cancer Center uses programs
  * in v1; membershipType + programCode are surfaced in the roster editor only for
  * centers that have rows here. Keyed on the Center.code @id (`meyer_cancer_center`),
- * NOT the slug. Mirrors the migration's seed so a fresh local DB matches deploy.
+ * NOT the slug.
+ *
+ * This is the SOLE source of the program seed. It is NOT seeded in the
+ * 20260528160000_center_management migration: `center_program` FKs to `center`,
+ * which is empty at `migrate deploy` time, so seeding there fails on a fresh DB
+ * (1452). The loop below upserts programs AFTER the parent center rows above, so
+ * the FK is always satisfied. Idempotent — safe to re-run. (#584)
  */
 const CENTER_PROGRAMS: { centerCode: string; code: string; label: string; sortOrder: number }[] = [
   { centerCode: "meyer_cancer_center", code: "CB", label: "Cancer Biology", sortOrder: 10 },
