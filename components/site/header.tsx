@@ -75,9 +75,6 @@ export async function SiteHeader({
           <Link href="/about" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
             About
           </Link>
-          <Link href="/support" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
-            Support
-          </Link>
           <HeaderAuthSlot isAuthenticated={session !== null} scholar={scholar} />
         </nav>
       </div>
