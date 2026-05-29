@@ -263,14 +263,14 @@ export default function DocsPage() {
           thing that distinguishes you from a student here.
         </p>
         <p>
-          You can appear as a scholar. Your publications appear the way a faculty member&apos;s do,
-          through attribution, with one rule worth knowing: scoring and the showcase surfaces are
-          centered on publications that involve full-time WCM faculty (see{" "}
+          You can appear as a scholar, and your publications appear through attribution. One rule
+          worth knowing: the scoring scope is full-time WCM faculty only (see{" "}
           <Link href="#impact" className={LINK}>
             the Impact score
           </Link>
-          ). A paper you co-authored with WCM faculty will generally appear and be scored; a paper
-          with no full-time WCM faculty link may not be. That is scope, not a quality judgment.
+          ). A paper you co-authored with a full-time WCM faculty member is scored and appears with
+          its Impact; a paper with no full-time WCM faculty author is outside the scope and is not
+          scored. That is scope, not a quality judgment.
         </p>
         <p>
           To correct your academic appointment, use Request a change in your self-edit interface (it
@@ -674,11 +674,13 @@ export default function DocsPage() {
           </p>
         </Callout>
         <p>
-          <strong>Which publications are scored.</strong> Scoring and the showcase surfaces are
-          centered on publications that involve full-time WCM faculty; co-authors of those
-          publications, including trainees, see the scored publication on their own view. Publication
-          type is weighted: Academic Articles at full weight; Reviews and Case Reports down-weighted,
-          so they need a higher score to surface; Letters and Editorials hard-excluded.
+          <strong>Which publications are scored.</strong> The scoring scope is full-time WCM faculty
+          only: ReciterAI scores publications authored by a full-time WCM faculty member, and the
+          Impact then appears on that publication wherever it shows, including on a co-author&apos;s
+          or trainee&apos;s view. A publication with no full-time WCM faculty author is outside the
+          scope and is not scored. Publication type is weighted: Academic Articles at full weight;
+          Reviews and Case Reports down-weighted, so they need a higher score to surface; Letters and
+          Editorials hard-excluded.
         </p>
         <p>
           <strong>How often it updates.</strong> Impact scores and synopses refresh on a weekly batch
