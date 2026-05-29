@@ -169,10 +169,10 @@ The Apollo layout surfaces a question every scholar asks on this screen: *"this 
 
 | Attribute | Issue → resolution |
 |---|---|
-| **Name & Title** | name / email / email-visibility / ORCID → **self-service** (Web Directory; ORCID in ReCiter). title / department / division → **route** `support@med.cornell.edu` (derived from the primary appointment; explain that). degrees → **route** `ofa@med.cornell.edu` (ASMS). |
+| **Name & Title** | name / email / email-visibility / ORCID → **self-service** (Web Directory; ORCID in ReCiter). title / department / division → **route** `support@med.cornell.edu` (derived from the primary appointment; explain that). degrees → **route** `facultyaffairs@med.cornell.edu` (ASMS). |
 | **Photo** | wrong / outdated / missing / "don't show" → **self-service** (Web Directory “Publish to”). |
 | **Appointments** | title / dates / missing / not-mine / chair-ended → **route** `support@med.cornell.edu` (ASMS / ED source data). |
-| **Education** | wrong / missing / not-mine → **route** `ofa@med.cornell.edu` (ASMS). duplicate → **route** `support@med.cornell.edu` (import error). |
+| **Education** | wrong / missing / not-mine → **route** `facultyaffairs@med.cornell.edu` (ASMS). duplicate → **route** `support@med.cornell.edu` (import error). |
 | **Funding** | wrong / missing / **not-mine (wrongly listed)** → **route** `osra-operations@med.cornell.edu` cc `scholars@weill.cornell.edu`. "Active but expired" → **explain** (NCE grace). |
 | **Publications** | **not mine / missing** → **self-service** (reject / claim in Publication Manager — *never Hide*; the attribution otherwise persists in reports + the FRT). non-PubMed missing → **explain** (PubMed-only). metadata wrong / duplicate → **route** `support@med.cornell.edu`. |
 
@@ -537,7 +537,7 @@ WHERE s.entity_type IN ('appointment','education','grant')
 | D3 | **CloudFront edge invalidation for suppression** — `revalidatePath` alone leaves the edge serving a hidden entity for ≤ 24h. | [#353](https://github.com/wcmc-its/Scholars-Profile-System/issues/353) | edge freshness of any suppression | open follow-on |
 | D4 | **Slug freezing at launch** + the broader slug policy. | [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) | the superuser Profile-URL attribute's launch posture | open |
 | D5 | **Apollo design tokens** — confirm the real maroon, the top-bar tab set, and the sub-nav labels (the mockup's values are estimates). | this SPEC / design | pixel fidelity to Apollo; not function | open |
-| D6 | **"Request a Change" routing destinations — SUPPLIED.** Self-service tools (Web Directory; Publication Manager / ReCiter for publications + ORCID) + three office mailboxes (`support@med.cornell.edu` catch-all, `ofa@med.cornell.edu` for degrees/education, `osra-operations@med.cornell.edu` cc `scholars@weill.cornell.edu` for funding), encoded in `lib/edit/request-a-change.ts`. (There is no "WOOFA"; ASMS-sourced data is owned by Faculty Affairs.) The email **subject/body format** remains deferred. | operator | the Request-a-Change links resolving to the right office | **resolved** (subject format deferred) |
+| D6 | **"Request a Change" routing destinations — SUPPLIED.** Self-service tools (Web Directory; Publication Manager / ReCiter for publications + ORCID) + three office mailboxes (`support@med.cornell.edu` catch-all, `facultyaffairs@med.cornell.edu` for degrees/education, `osra-operations@med.cornell.edu` cc `scholars@weill.cornell.edu` for funding), encoded in `lib/edit/request-a-change.ts`. (There is no "WOOFA"; ASMS-sourced data is owned by Faculty Affairs.) The email **subject/body format** remains deferred. | operator | the Request-a-Change links resolving to the right office | **resolved** (subject format deferred) |
 | C1 | **#356 carryovers** — real HTTP-403 status on the 403 page; dynamic-import `OverviewEditor`; the staging SAML walkthrough; `scripts/sql/audit-log.sql` ALTER for existing deploys. | #356 follow-ups | polish / parity | open |
 
 **Phasing — three tiers, by construction.** This SPEC's client work (shell + panels + edit-context + roster UI) has **no dependency on D1–D4 or C1**. Production gating splits along the role boundary:

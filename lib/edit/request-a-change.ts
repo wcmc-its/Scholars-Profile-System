@@ -40,7 +40,7 @@ const PUBLICATION_MANAGER_URL = "https://reciter.weill.cornell.edu/";
 const ORCID_MANAGE_URL = "https://reciter.weill.cornell.edu/manageprofile/{cwid}";
 
 const SUPPORT_EMAIL = "support@med.cornell.edu"; // ITS — ED/ASMS source data, appointments, imports (catch-all)
-const FACULTY_AFFAIRS_EMAIL = "ofa@med.cornell.edu"; // degrees + education (ASMS)
+const FACULTY_AFFAIRS_EMAIL = "facultyaffairs@med.cornell.edu"; // degrees + education (ASMS)
 const OSRA_EMAIL = "osra-operations@med.cornell.edu";
 const OSRA_CC = "scholars@weill.cornell.edu";
 

@@ -129,7 +129,7 @@ Mirrors `app/api/edit/suppress/route.ts`:
 
 | Area | Assertion |
 |---|---|
-| `resolveRequestChange` route | `(education, education-wrong)` → send to `ofa@`, source ASMS |
+| `resolveRequestChange` route | `(education, education-wrong)` → send to `facultyaffairs@`, source ASMS |
 | `resolveRequestChange` cc | `(funding, funding-wrong)` → to `osra-operations@`, cc `scholars@` |
 | `resolveRequestChange` no-send | a `self-service` and a pure `explain` issue → `no-send` |
 | `resolveRequestChange` fallback | `(funding, funding-active-expired)` → send to `osra-operations@` |
