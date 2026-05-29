@@ -491,14 +491,16 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the ten consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the task-execution role policy lists exactly the eleven consumer secret ARNs for secretsmanager:GetSecretValue", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro,
+        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro,
         // opensearch/app, revalidate-token, session-cookie-key, the SAML SP
         // private key, etl/reciter (ReciterDB connection for funding/mentoring
         // surfaces), saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
-        // db/bootstrap (the least-priv db-bootstrap login, #493).
+        // saml-sp/prod/cert (the SP public cert for metadata, #466),
+        // db/bootstrap (the least-priv db-bootstrap login, #493), and
+        // newrelic-license-key (the New Relic ingest key for the ADOT
+        // collector's otlphttp/newrelic exporter, B24).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -521,7 +523,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(10);
+        expect(resourceList).toHaveLength(11);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1023,6 +1025,33 @@ describe("AppStack", () => {
         expect(envEntry?.Value).toMatch(/awsxray:/);
         expect(envEntry?.Value).toMatch(/sampling_percentage:\s*5/);
         expect(envEntry?.Value).toMatch(/threshold_ms:\s*1500/);
+        // Dual-export to New Relic (B24): the otlphttp/newrelic exporter, the
+        // US OTLP endpoint, the env-substituted ingest key, and both exporters
+        // on the traces pipeline.
+        expect(envEntry?.Value).toMatch(/otlphttp\/newrelic:/);
+        expect(envEntry?.Value).toMatch(/https:\/\/otlp\.nr-data\.net/);
+        expect(envEntry?.Value).toMatch(/api-key:\s*\$\{env:NEW_RELIC_LICENSE_KEY\}/);
+        expect(envEntry?.Value).toMatch(/exporters:\s*\[awsxray,\s*otlphttp\/newrelic\]/);
+      });
+
+      it("the otel-collector container receives the New Relic ingest key as a secret (collector-only, not the app container)", () => {
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const appTaskDef = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        const containers = appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Secrets?: Array<{ Name?: string }> }>
+          | undefined;
+        const collector = containers?.find((c) => c.Name === "otel-collector");
+        const collectorSecretNames = (collector?.Secrets ?? []).map(
+          (s) => s.Name,
+        );
+        expect(collectorSecretNames).toContain("NEW_RELIC_LICENSE_KEY");
+        // The app container owns no part of the trace exporter, so it must not
+        // carry the ingest key -- only the collector that holds the exporter.
+        const app = containers?.find((c) => c.Name === "app");
+        const appSecretNames = (app?.Secrets ?? []).map((s) => s.Name);
+        expect(appSecretNames).not.toContain("NEW_RELIC_LICENSE_KEY");
       });
 
       it("the app container has exactly the four OTEL_* env vars (no sampler env vars)", () => {
@@ -1205,6 +1234,8 @@ describe("AppStack", () => {
           "scholars/prod/saml/idp-cert",
           // SAML SP public cert (#466) -- published in SP metadata.
           "scholars/saml-sp/prod/cert",
+          // New Relic ingest key (B24) -- ADOT collector otlphttp/newrelic.
+          "scholars/prod/newrelic-license-key",
         ];
         const json = JSON.stringify(template.toJSON());
         for (const name of expected) {
