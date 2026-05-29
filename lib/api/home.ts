@@ -97,7 +97,13 @@ export type SubtopicCard = {
     title: string;
     journal: string | null;
     year: number | null;
-    firstWcmAuthor: { cwid: string; slug: string; preferredName: string } | null;
+    firstWcmAuthor: {
+      cwid: string;
+      slug: string;
+      preferredName: string;
+      /** #536 — card renders the author name without a profile link for hidden roles. */
+      roleCategory: string | null;
+    } | null;
   }>;
 };
 
@@ -129,6 +135,8 @@ export type SpotlightAuthor = {
   displayName: string;
   identityImageEndpoint: string;
   profileSlug: string;
+  /** #536 — author chip renders as plain text for hidden roles. */
+  roleCategory: string | null;
 };
 
 export type SpotlightPaperCard = {
@@ -468,7 +476,7 @@ export async function getSelectedResearch(
       publication: { publicationType: { notIn: [...FEED_EXCLUDED_TYPES] } },
     },
     include: {
-      scholar: { select: { cwid: true, slug: true, preferredName: true } },
+      scholar: { select: { cwid: true, slug: true, preferredName: true, roleCategory: true } },
       publication: { select: { pmid: true, title: true, journal: true, year: true } },
     },
     orderBy: [{ score: "desc" }],
@@ -514,6 +522,7 @@ export async function getSelectedResearch(
               cwid: s.row.scholar.cwid,
               slug: s.row.scholar.slug,
               preferredName: s.row.scholar.preferredName,
+              roleCategory: s.row.scholar.roleCategory,
             }
           : null,
       })),
@@ -603,7 +612,7 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
             scholar: { deletedAt: null, status: "active" },
           },
           include: {
-            scholar: { select: { cwid: true, slug: true, preferredName: true } },
+            scholar: { select: { cwid: true, slug: true, preferredName: true, roleCategory: true } },
           },
           orderBy: { position: "asc" },
         })
@@ -619,6 +628,7 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
       displayName: row.scholar.preferredName,
       identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
       profileSlug: row.scholar.slug,
+      roleCategory: row.scholar.roleCategory,
     });
     authorsByPmid.set(row.pmid, list);
   }

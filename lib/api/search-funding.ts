@@ -86,6 +86,10 @@ export type FundingPersonChip = {
   /** Per-person role on this grant: PI | Multi-PI | Co-I | Sub-PI | KP. */
   role: string;
   identityImageEndpoint: string;
+  /** #536 — scholar role category (enriched from the DB; the funding index
+   *  does not store it). Drives investigator-chip link suppression for hidden
+   *  identity classes (e.g. an F31 predoctoral PI). Null when unresolved. */
+  roleCategory: string | null;
 };
 
 export type FundingHit = {
@@ -533,6 +537,25 @@ export async function searchFunding(opts: {
     };
   };
 
+  // #536 — the funding index stores no role category on its `people`, so
+  // enrich the per-row investigator chips with one bounded DB lookup (mirrors
+  // the investigator-facet hydration below) to suppress profile links for
+  // hidden identity classes.
+  const personCwids = [
+    ...new Set(r.hits.hits.flatMap((h) => (h._source.people ?? []).map((p) => p.cwid))),
+  ];
+  const roleByCwid =
+    personCwids.length > 0
+      ? new Map(
+          (
+            await prisma.scholar.findMany({
+              where: { cwid: { in: personCwids } },
+              select: { cwid: true, roleCategory: true },
+            })
+          ).map((s) => [s.cwid, s.roleCategory]),
+        )
+      : new Map<string, string | null>();
+
   const hits: FundingHit[] = r.hits.hits.map((h) => {
     const src = h._source;
     const endDate = new Date(src.endDate);
@@ -566,6 +589,7 @@ export async function searchFunding(opts: {
         preferredName: p.preferredName,
         role: p.role,
         identityImageEndpoint: identityImageEndpoint(p.cwid),
+        roleCategory: roleByCwid.get(p.cwid) ?? null,
       })),
     };
   });

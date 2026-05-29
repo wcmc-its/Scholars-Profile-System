@@ -5,6 +5,9 @@
  *   - design-spec-v1.7.1.md:352-356 — derivation rule (in ED ETL, see etl/ed/index.ts)
  *   - design-spec-v1.7.1.md:377-385 — general eligibility carve (Recent contributions, Selected research, Recent highlights)
  *   - 02-CONTEXT.md D-14 — Top scholars chip row narrowed override (Phase 2)
+ *   - issue #536 — public-display carve (hide doctoral students from directed-traffic
+ *     surfaces: search, browse, profile route, algorithmic home; relational mentions
+ *     keep the name as plain text). See PUBLICLY_DISPLAYED_ROLES / isPubliclyDisplayed.
  */
 
 /** All role categories derivable from ED ETL. Stored in scholar.role_category. */
@@ -21,6 +24,50 @@ export type RoleCategory =
   | "emeritus";
 
 /**
+ * Public-display carve (issue #536).
+ *
+ * Doctoral students are not surfaced on any directed-traffic surface — people
+ * search + autocomplete, /browse, the `/scholars/[slug]` profile route, and the
+ * algorithmic home surfaces. They remain only as *relational* mentions (PhD-mentee
+ * names on a PI's profile, co-authorship chips), where the name renders as plain
+ * text rather than a link.
+ *
+ * This is an identity-class display rule, distinct from ELIGIBLE_ROLES (algorithmic
+ * relevance) and TOP_SCHOLARS_ELIGIBLE_ROLES (PI-only chip row): a hidden role is
+ * removed everywhere a profile link would be generated, not just from ranked surfaces.
+ *
+ * Every RoleCategory *except* `doctoral_student` is publicly displayed.
+ */
+export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
+  "full_time_faculty",
+  "affiliated_faculty",
+  "postdoc",
+  "fellow",
+  "non_faculty_academic",
+  "non_academic",
+  "instructor",
+  "lecturer",
+  "emeritus",
+] as const;
+
+const HIDDEN_DISPLAY_ROLES: ReadonlySet<RoleCategory> = new Set(["doctoral_student"]);
+
+/**
+ * Whether a scholar with this role may be surfaced on a public directed-traffic
+ * surface (search/browse/profile/home) and rendered as a clickable profile link.
+ *
+ * Fail-open for display: a `null`/`undefined`/unknown role is treated as publicly
+ * displayed — only the explicit hidden identity class (`doctoral_student`) is
+ * suppressed. This mirrors the index/route/link sites all reading the same column.
+ */
+export function isPubliclyDisplayed(
+  role: RoleCategory | string | null | undefined,
+): boolean {
+  if (role == null) return true;
+  return !HIDDEN_DISPLAY_ROLES.has(role as RoleCategory);
+}
+
+/**
  * General eligibility carve — applies to scholar-attributed algorithmic surfaces:
  * Recent contributions (RANKING-01), Selected research carousel filtering (HOME-02),
  * Recent highlights (RANKING-02).
@@ -35,7 +82,6 @@ export const ELIGIBLE_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
   "postdoc",
   "fellow",
-  "doctoral_student",
 ] as const;
 
 /**

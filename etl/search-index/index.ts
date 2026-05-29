@@ -32,6 +32,7 @@ import {
   loadAllPublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   FUNDING_INDEX,
   PEOPLE_INDEX,
@@ -175,6 +176,10 @@ async function indexPeople(concreteIndex: string) {
   // closed-over by `(s, client, sup)`.
   const docs: Array<{ cwid: string; doc: Record<string, unknown> }> = [];
   for (const s of scholars) {
+    // #536 — hidden identity classes (doctoral students) never enter the people
+    // index, so they don't surface on the people tab or in autocomplete. Skipped
+    // before buildPeopleDoc to avoid the per-scholar centerMembership query.
+    if (!isPubliclyDisplayed(s.roleCategory)) continue;
     const doc = await buildPeopleDoc(s, prisma, sup);
     if (doc !== null) docs.push({ cwid: s.cwid, doc });
   }

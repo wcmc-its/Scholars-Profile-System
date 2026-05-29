@@ -3,6 +3,7 @@ import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
 import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -39,15 +40,21 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
       </div>
       <div className="flex min-w-0 flex-col">
         <div className="mb-[3px] flex flex-wrap items-center gap-2 text-[15px] font-medium leading-[1.3]">
-          <PersonPopover cwid={hit.cwid} surface="facet">
-            <a
-              href={`/scholars/${hit.slug}`}
-              className="hover:underline"
-              style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
-            >
-              {hit.preferredName}
-            </a>
-          </PersonPopover>
+          {isPubliclyDisplayed(hit.roleCategory) ? (
+            <PersonPopover cwid={hit.cwid} surface="facet">
+              <a
+                href={`/scholars/${hit.slug}`}
+                className="hover:underline"
+                style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
+              >
+                {hit.preferredName}
+              </a>
+            </PersonPopover>
+          ) : (
+            // #536 — hidden identity class: name + role tag stay, but no
+            // profile link (the route 404s) and no navigating popover.
+            <span style={{ color: "var(--color-text-primary)" }}>{hit.preferredName}</span>
+          )}
           {hit.roleCategory && (() => {
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;

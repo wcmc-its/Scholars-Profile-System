@@ -153,6 +153,8 @@ export type ProfilePublication = ScoredPublication<{
     isFirst: boolean;
     isLast: boolean;
     position: number;
+    /** #536 — co-author chip link suppression for hidden roles. */
+    roleCategory: string | null;
   }>;
 }>;
 
@@ -160,6 +162,10 @@ export type ProfilePayload = {
   cwid: string;
   slug: string;
   preferredName: string;
+  /** #536 — role category of the profile owner. The `/scholars/[slug]` route
+   *  404s when this is a hidden identity class (doctoral student); also lets
+   *  callers reason about display eligibility. */
+  roleCategory: string | null;
   /** Postnominal degree string from LDAP `weillCornellEduDegree`, e.g. "MD".
    *  Null when absent. Combine with preferredName via `publishedName` for
    *  display surfaces. */
@@ -285,6 +291,9 @@ export type ProfilePayload = {
     publishedName: string;
     primaryTitle: string | null;
     identityImageEndpoint: string;
+    /** #536 — the sidebar card renders the mentor name as plain text rather
+     *  than a profile link when the mentor is a hidden identity class. */
+    roleCategory: string | null;
   } | null;
   /** Issue #90 — preferred NIH RePORTER PI profile_id, when the scholar
    *  has appeared on at least one NIH grant we could resolve. Drives the
@@ -436,6 +445,7 @@ export async function getScholarFullProfileBySlug(
           primaryTitle: true,
           deletedAt: true,
           status: true,
+          roleCategory: true,
         },
       },
     },
@@ -474,6 +484,7 @@ export async function getScholarFullProfileBySlug(
                   preferredName: true,
                   deletedAt: true,
                   status: true,
+                  roleCategory: true,
                 },
               },
             },
@@ -588,6 +599,7 @@ export async function getScholarFullProfileBySlug(
           isFirst: au.isFirst,
           isLast: au.isLast,
           position: au.position,
+          roleCategory: au.scholar!.roleCategory,
         })),
       scholar.cwid,
     ),
@@ -659,6 +671,7 @@ export async function getScholarFullProfileBySlug(
     cwid: scholar.cwid,
     slug: scholar.slug,
     preferredName: scholar.preferredName,
+    roleCategory: scholar.roleCategory,
     postnominal: scholar.postnominal,
     publishedName: scholar.postnominal
       ? `${scholar.preferredName}, ${scholar.postnominal}`
@@ -788,6 +801,7 @@ export async function getScholarFullProfileBySlug(
             identityImageEndpoint: identityImageEndpoint(
               scholar.postdoctoralMentor.cwid,
             ),
+            roleCategory: scholar.postdoctoralMentor.roleCategory,
           }
         : null,
     nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,

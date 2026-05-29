@@ -105,12 +105,12 @@ export async function getDeptPublicationsList(
   const cwids = Array.from(
     new Set(pubs.flatMap((p) => p.authors.map((a) => a.cwid!))),
   );
-  type Sl = { cwid: string; preferredName: string; slug: string };
+  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -135,6 +135,7 @@ export async function getDeptPublicationsList(
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: a.isFirst,
           isLast: a.isLast,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null),
@@ -250,12 +251,12 @@ export async function getDeptGrantsList(
   );
 
   const cwids = Array.from(new Set(pageSlice.flatMap((g) => g.cwids)));
-  type Sl = { cwid: string; preferredName: string; slug: string };
+  type Sl = { cwid: string; preferredName: string; slug: string; roleCategory: string | null };
   const scholars =
     cwids.length > 0
       ? ((await prisma.scholar.findMany({
           where: { cwid: { in: cwids }, deletedAt: null },
-          select: { cwid: true, preferredName: true, slug: true },
+          select: { cwid: true, preferredName: true, slug: true, roleCategory: true },
         })) as Sl[])
       : [];
   const scholarMap = new Map(scholars.map((s) => [s.cwid, s]));
@@ -273,6 +274,7 @@ export async function getDeptGrantsList(
           identityImageEndpoint: identityImageEndpoint(s.cwid),
           isFirst: true,
           isLast: false,
+          roleCategory: s.roleCategory,
         } satisfies AuthorChip;
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);

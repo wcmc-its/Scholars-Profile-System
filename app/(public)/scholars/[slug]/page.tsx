@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/profile";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { resolveBySlugOrHistory } from "@/lib/url-resolver";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { redirect } from "next/navigation";
 
@@ -122,6 +123,11 @@ export default async function ScholarProfilePage({
 
   const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
+
+  // #536 — hidden identity classes (doctoral students) have no public profile
+  // page. The route 404s rather than rendering a thin profile or leaving a
+  // Google-indexable orphan; superusers manage these scholars via /edit instead.
+  if (!isPubliclyDisplayed(profile.roleCategory)) notFound();
 
   // #356 Phase 5 — surface the "Edit my profile" affordance to the signed-in
   // profile owner only. UI-SPEC § Signing in: the button is rendered by the
@@ -260,29 +266,44 @@ export default async function ScholarProfilePage({
 
             {profile.postdoctoralMentor ? (
               <SidebarCard title="Postdoctoral Mentor">
-                <a
-                  href={`/scholars/${profile.postdoctoralMentor.slug}`}
-                  className="flex items-center gap-3 rounded-md bg-zinc-50 px-3 py-2.5 hover:bg-zinc-100 dark:bg-zinc-900/40 dark:hover:bg-zinc-900/60"
-                >
-                  <HeadshotAvatar
-                    size="sm"
-                    cwid={profile.postdoctoralMentor.cwid}
-                    preferredName={profile.postdoctoralMentor.publishedName}
-                    identityImageEndpoint={
-                      profile.postdoctoralMentor.identityImageEndpoint
-                    }
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold">
-                      {profile.postdoctoralMentor.publishedName}
-                    </div>
-                    {profile.postdoctoralMentor.primaryTitle ? (
-                      <div className="truncate text-xs text-muted-foreground">
-                        {profile.postdoctoralMentor.primaryTitle}
+                {(() => {
+                  const mentor = profile.postdoctoralMentor;
+                  // #536 — render the mentor card as a non-link when the mentor
+                  // is a hidden identity class (the linked profile would 404).
+                  const mentorLinkable = isPubliclyDisplayed(mentor.roleCategory);
+                  const baseCls =
+                    "flex items-center gap-3 rounded-md bg-zinc-50 px-3 py-2.5 dark:bg-zinc-900/40";
+                  const inner = (
+                    <>
+                      <HeadshotAvatar
+                        size="sm"
+                        cwid={mentor.cwid}
+                        preferredName={mentor.publishedName}
+                        identityImageEndpoint={mentor.identityImageEndpoint}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold">
+                          {mentor.publishedName}
+                        </div>
+                        {mentor.primaryTitle ? (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {mentor.primaryTitle}
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                </a>
+                    </>
+                  );
+                  return mentorLinkable ? (
+                    <a
+                      href={`/scholars/${mentor.slug}`}
+                      className={`${baseCls} hover:bg-zinc-100 dark:hover:bg-zinc-900/60`}
+                    >
+                      {inner}
+                    </a>
+                  ) : (
+                    <div className={baseCls}>{inner}</div>
+                  );
+                })()}
               </SidebarCard>
             ) : null}
 

@@ -27,6 +27,7 @@ import {
   type TopicScholarRow,
   type TopicScholarsResult,
 } from "@/lib/api/topics";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 
 const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyof TopicScholarsResult["roleCounts"] }> = [
   { id: "all", label: "All", countKey: "all" },
@@ -67,42 +68,52 @@ function ScholarRow({ scholar }: { scholar: TopicScholarRow }) {
   const displayName = scholar.postnominal
     ? `${scholar.preferredName}, ${scholar.postnominal}`
     : scholar.preferredName;
+  // #536 — hidden identity class (doctoral student): keep the row + name but
+  // render it as a non-link (the profile route 404s).
+  const linkable = isPubliclyDisplayed(scholar.roleCategory);
+  const rowClass = "flex items-start gap-3 rounded-md p-1.5 -mx-1.5";
+  const inner = (
+    <>
+      <HeadshotAvatar
+        size="sm"
+        cwid={scholar.cwid}
+        preferredName={scholar.preferredName}
+        identityImageEndpoint={scholar.identityImageEndpoint}
+        className="size-7"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium leading-tight">
+          {displayName}
+        </div>
+        {scholar.primaryTitle ? (
+          <div className="truncate text-[11.5px] leading-tight text-muted-foreground">
+            {scholar.primaryTitle}
+          </div>
+        ) : null}
+        {scholar.subtopics.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {scholar.subtopics.map((s) => (
+              <span
+                key={s.id}
+                className="inline-flex items-center rounded-full bg-[var(--color-cream,#f5f0e8)] px-2 py-0.5 text-[10.5px] text-muted-foreground"
+              >
+                {s.displayName}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
   return (
     <li className="break-inside-avoid py-2">
-      <a
-        href={`/scholars/${scholar.slug}`}
-        className="flex items-start gap-3 rounded-md p-1.5 -mx-1.5 hover:bg-muted/50"
-      >
-        <HeadshotAvatar
-          size="sm"
-          cwid={scholar.cwid}
-          preferredName={scholar.preferredName}
-          identityImageEndpoint={scholar.identityImageEndpoint}
-          className="size-7"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-medium leading-tight">
-            {displayName}
-          </div>
-          {scholar.primaryTitle ? (
-            <div className="truncate text-[11.5px] leading-tight text-muted-foreground">
-              {scholar.primaryTitle}
-            </div>
-          ) : null}
-          {scholar.subtopics.length > 0 ? (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {scholar.subtopics.map((s) => (
-                <span
-                  key={s.id}
-                  className="inline-flex items-center rounded-full bg-[var(--color-cream,#f5f0e8)] px-2 py-0.5 text-[10.5px] text-muted-foreground"
-                >
-                  {s.displayName}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </a>
+      {linkable ? (
+        <a href={`/scholars/${scholar.slug}`} className={`${rowClass} hover:bg-muted/50`}>
+          {inner}
+        </a>
+      ) : (
+        <div className={rowClass}>{inner}</div>
+      )}
     </li>
   );
 }

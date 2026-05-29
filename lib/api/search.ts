@@ -183,6 +183,8 @@ export type PublicationHit = {
     identityImageEndpoint: string;
     isFirst: boolean;
     isLast: boolean;
+    /** #536 — drives co-author chip link suppression for hidden roles. */
+    roleCategory: string | null;
   }>;
   /**
    * Issue #259 §1.8 — doc-level MAX `impactScore` across this pub's
@@ -1754,6 +1756,7 @@ export async function searchPublications(opts: {
                   identityImageEndpoint: a.identityImageEndpoint,
                   isFirst: a.isFirst,
                   isLast: a.isLast,
+                  roleCategory: a.roleCategory,
                 },
               ]
             : [],

@@ -14,6 +14,7 @@
  * All callers are Server Components / ISR pages. Public-data only — no auth.
  */
 import { prisma } from "@/lib/db";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import type {
   DepartmentCategory,
 } from "@/lib/department-categories";
@@ -90,6 +91,7 @@ type ScholarAZRow = {
   preferredName: string;
   slug: string;
   primaryDepartment: string | null;
+  roleCategory: string | null;
 };
 
 const TOPIC_CHIP_LIMIT = 2;
@@ -259,12 +261,16 @@ export async function getAZBuckets(): Promise<AZBucket[]> {
       preferredName: true,
       slug: true,
       primaryDepartment: true,
+      roleCategory: true,
     },
     orderBy: { preferredName: "asc" },
   })) as ScholarAZRow[];
 
   const bucketMap = new Map<string, AZScholar[]>();
   for (const s of scholars) {
+    // #536 — hidden identity classes (doctoral students) are not listed in the
+    // public A-Z directory. Fail-open: unknown/null role still appears.
+    if (!isPubliclyDisplayed(s.roleCategory)) continue;
     const tokens = s.preferredName.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
     const lastName = tokens[tokens.length - 1];

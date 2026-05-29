@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
 const AUTO_ADVANCE_MS = 10_000;
@@ -280,11 +281,8 @@ function PaperRow({
 }
 
 function AuthorChip({ author }: { author: SpotlightAuthor }) {
-  return (
-    <a
-      href={`/scholars/${author.profileSlug}`}
-      className="inline-flex items-center gap-1.5 hover:text-zinc-900 hover:underline"
-    >
+  const inner = (
+    <>
       <HeadshotAvatar
         size="sm"
         cwid={author.cwid}
@@ -292,6 +290,18 @@ function AuthorChip({ author }: { author: SpotlightAuthor }) {
         identityImageEndpoint={author.identityImageEndpoint}
       />
       <span className="text-zinc-700">{author.displayName}</span>
+    </>
+  );
+  // #536 — hidden identity class (doctoral student): name + headshot, no link.
+  if (!isPubliclyDisplayed(author.roleCategory)) {
+    return <span className="inline-flex items-center gap-1.5">{inner}</span>;
+  }
+  return (
+    <a
+      href={`/scholars/${author.profileSlug}`}
+      className="inline-flex items-center gap-1.5 hover:text-zinc-900 hover:underline"
+    >
+      {inner}
     </a>
   );
 }

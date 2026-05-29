@@ -34,7 +34,7 @@
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { scorePublication, type RankablePublication } from "@/lib/ranking";
-import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
+import { TOP_SCHOLARS_ELIGIBLE_ROLES, type RoleCategory } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isAuthorHidden,
@@ -510,6 +510,8 @@ export type TopicPublicationHit = {
     identityImageEndpoint: string;
     isFirst: boolean;
     isLast: boolean;
+    /** #536 — co-author chip link suppression for hidden roles. */
+    roleCategory: RoleCategory | null;
   }>;
   /** Plain-text article abstract from `Publication.abstract` (#288 PR-A).
    *  Null when the publication has no abstract. Rendered inline via
@@ -878,6 +880,9 @@ export type WcmAuthorChip = {
   identityImageEndpoint: string;
   isFirst: boolean;
   isLast: boolean;
+  /** #536 — carried onto the AuthorChip so a hidden identity class (doctoral
+   *  student) renders as plain text, not a profile link. */
+  roleCategory: RoleCategory | null;
 };
 
 /**
@@ -909,7 +914,9 @@ export async function fetchWcmAuthorsForPmids(
         pmid: true,
         isFirst: true,
         isLast: true,
-        scholar: { select: { cwid: true, slug: true, preferredName: true } },
+        scholar: {
+          select: { cwid: true, slug: true, preferredName: true, roleCategory: true },
+        },
       },
     }),
     loadPublicationSuppressions(pmids, prisma),
@@ -929,6 +936,7 @@ export async function fetchWcmAuthorsForPmids(
       identityImageEndpoint: identityImageEndpoint(row.scholar.cwid),
       isFirst: row.isFirst,
       isLast: row.isLast,
+      roleCategory: (row.scholar.roleCategory as RoleCategory | null) ?? null,
     });
     byPmid.set(row.pmid, arr);
   }
