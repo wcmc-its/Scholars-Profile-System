@@ -42,7 +42,7 @@ unattended mailbox and cannot click a verification link. Verify the **domain**
 A new SES account is sandboxed (can only send to verified addresses, low quota).
 Open an AWS Support **"Request production access"** case for SES in the AppStack
 region. State: transactional profile-correction emails to WCM offices
-(`support@`, `ofa@`, `osra-operations@`), low volume, with the verified domain
+(`support@`, `facultyaffairs@`, `osra-operations@`), low volume, with the verified domain
 identity. Approval is usually < 24h.
 
 ## 3. Confirm the audit dependency (#493)

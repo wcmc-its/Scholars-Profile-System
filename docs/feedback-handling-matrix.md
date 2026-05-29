@@ -61,9 +61,9 @@ Rows marked **✅** are **locked** — the destination is already encoded in `li
 | ORCID | ReCiter | self-service | — (ReCiter) | n/a |
 | Photo | Enterprise Directory (Web Directory) | self-service | — (Web Directory "Publish to") | n/a |
 | Title / department / division | Enterprise Directory | route | ✅ `support@med.cornell.edu` | ASMS / Directory |
-| Degrees / post-nominals | ASMS | route | ✅ `ofa@med.cornell.edu` | Faculty Affairs |
+| Degrees / post-nominals | ASMS | route | ✅ `facultyaffairs@med.cornell.edu` | Faculty Affairs |
 | WCM appointments (title / dates / missing / not-mine / chair-ended) | ASMS by way of Enterprise Directory | route | ✅ `support@med.cornell.edu` | ASMS / Directory |
-| Education (wrong / missing / not-mine) | ASMS | route | ✅ `ofa@med.cornell.edu` | Faculty Affairs |
+| Education (wrong / missing / not-mine) | ASMS | route | ✅ `facultyaffairs@med.cornell.edu` | Faculty Affairs |
 | Education (duplicate) | ASMS import | route | ✅ `support@med.cornell.edu` | ASMS / Directory |
 | Funding (wrong / missing / not-mine) | InfoEd (federal abstracts: NIH RePORTER) | route | ✅ `osra-operations@med.cornell.edu` cc `scholars@weill.cornell.edu` | Sponsored Research Admin |
 | Funding "active but expired" | InfoEd | explain (NCE grace) | — | n/a |
@@ -86,7 +86,7 @@ Rows marked **✅** are **locked** — the destination is already encoded in `li
 The locked destinations are not duplicated here as a second authority — they are read from `lib/edit/request-a-change.ts` (`REQUEST_A_CHANGE`, the operator-validated config). The matrix above is the human-readable projection; if a destination changes, change it there and update this table. The known mailboxes:
 
 - `support@med.cornell.edu` — ASMS / Enterprise-Directory source data, import errors, publication metadata (catch-all).
-- `ofa@med.cornell.edu` — Office of Faculty Affairs (degrees, education).
+- `facultyaffairs@med.cornell.edu` — Office of Faculty Affairs (degrees, education).
 - `osra-operations@med.cornell.edu` (cc `scholars@weill.cornell.edu`) — Office of Sponsored Research Administration (funding).
 - `scholars@weill.cornell.edu` — Scholars team.
 - `no-reply-scholars@weill.cornell.edu` — SES sender identity (the #160 Phase-2 server-send `From`; not a destination).
@@ -98,7 +98,7 @@ The integration sends an **assignment group**, not an email address. Each known 
 | Mailbox (today) | Proposed SN assignment group |
 |---|---|
 | `support@med.cornell.edu` | ASMS / Directory |
-| `ofa@med.cornell.edu` | Faculty Affairs |
+| `facultyaffairs@med.cornell.edu` | Faculty Affairs |
 | `osra-operations@med.cornell.edu` | Sponsored Research Admin |
 | `scholars@weill.cornell.edu` | Scholars team |
 
