@@ -14,7 +14,7 @@ import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as events from "aws-cdk-lib/aws-events";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as opensearchservice from "aws-cdk-lib/aws-opensearchservice";
 import * as rds from "aws-cdk-lib/aws-rds";
@@ -291,6 +291,15 @@ export class DataStack extends Stack {
           DB_PORT: Token.asString(this.auroraCluster.clusterEndpoint.port),
         },
         bundling: {
+          // Emit an ESM bundle. The handler sources are ESM-native (`import`
+          // syntax, `.js` relative specifiers) and `mariadb`@3's `promise`
+          // entry is ESM-only. A default CJS bundle compiles the import down to
+          // `require("mariadb")`, which throws `require() of ES Module
+          // .../mariadb/promise.js not supported` at load on the Node 22
+          // runtime — so the seeder crashed before opening a connection and
+          // had never run on any environment. ESM output keeps the static
+          // `import`, which Node resolves against the installed driver.
+          format: OutputFormat.ESM,
           // Provided by the Lambda runtime; bundling it inflates cold start.
           externalModules: ["@aws-sdk/client-secrets-manager"],
           // mariadb is a runtime dep (the driver) — CDK npm-installs it into the
