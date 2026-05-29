@@ -231,41 +231,31 @@ export class DataStack extends Stack {
     // a task definition. That is the whole point of the two-runner split: the
     // recurring audit provisioning runs as the least-priv `sps_bootstrap` user
     // in the deploy pipeline, while the one-time master use that mints that user
-    // is confined here, in the stack that already owns the master secret.
+    // is confined here, in the stack that already owns the master secret. The
+    // security boundary is that IAM role, not the network SG: only this role can
+    // read the master secret, regardless of which SG the Lambda's ENI shares.
     //
-    // In-VPC on a dedicated SG the Aurora SG admits on 3306 — the same path the
-    // RDS rotation Lambda above already takes to reach the cluster.
+    // Networking: the seeder runs in-VPC on the **ETL security group**. It needs
+    // exactly two reachable endpoints — Secrets Manager (read master, read/write
+    // the bootstrap stub) and Aurora (CREATE USER + GRANT) — and the ETL SG is
+    // already admitted on both: AppStack admits it on the Secrets Manager
+    // interface VPC endpoint (443) and this stack admits it on Aurora (3306).
+    //
+    // A *dedicated* seeder SG is not viable. The Secrets Manager interface
+    // endpoint has private DNS enabled, so every in-VPC call to
+    // `secretsmanager.<region>.amazonaws.com` resolves to the endpoint's private
+    // IP — meaning the seeder's SG must be admitted on the *endpoint* SG, which
+    // lives in AppStack, downstream of this stack. The seeder runs at this
+    // stack's deploy, before AppStack, so a fresh SG could not be blessed there
+    // without inverting the stack dependency. (That inversion is exactly the bug:
+    // a dedicated seeder SG hung ~49s on the master-secret read — never reaching
+    // Aurora — because the endpoint dropped its 443 SYN.) Reusing the ETL SG,
+    // already blessed on both the endpoint and Aurora, sidesteps the layering.
     // ------------------------------------------------------------------
     const bootstrapSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
       "BootstrapSecret",
       `scholars/${envConfig.envName}/db/bootstrap`,
-    );
-
-    const seederSecurityGroup = new ec2.SecurityGroup(
-      this,
-      "DbBootstrapSeederSg",
-      {
-        vpc,
-        description: `SPS db-bootstrap seeder Lambda (${envConfig.envName})`,
-        allowAllOutbound: true,
-      },
-    );
-    // Explicit ingress (rather than `addIngressRule`) so the seeder custom
-    // resource can take an ordering dependency on THIS rule below. Without it
-    // CloudFormation invokes the seeder Lambda before Aurora admits the seeder
-    // SG on 3306, so `onEvent`'s `createConnection` times out (ETIMEDOUT).
-    const seederAuroraIngress = new ec2.CfnSecurityGroupIngress(
-      this,
-      "AuroraIngressFromSeeder",
-      {
-        groupId: auroraSecurityGroup.securityGroupId,
-        sourceSecurityGroupId: seederSecurityGroup.securityGroupId,
-        ipProtocol: "tcp",
-        fromPort: 3306,
-        toPort: 3306,
-        description: "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
-      },
     );
 
     const seederLogGroup = new logs.LogGroup(this, "DbBootstrapSeederLogGroup", {
@@ -293,7 +283,10 @@ export class DataStack extends Stack {
         timeout: Duration.minutes(2),
         vpc,
         vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-        securityGroups: [seederSecurityGroup],
+        // ETL SG: already admitted on the Secrets Manager interface endpoint
+        // (443, AppStack) and on Aurora (3306, this stack) — see the block
+        // comment above for why a dedicated seeder SG can't reach the endpoint.
+        securityGroups: [etlSecurityGroup],
         logGroup: seederLogGroup,
         environment: {
           MASTER_SECRET_ARN: this.auroraMasterSecret.secretArn,
@@ -331,22 +324,20 @@ export class DataStack extends Stack {
     const seederProvider = new cr.Provider(this, "DbBootstrapSeederProvider", {
       onEventHandler: seederFunction,
     });
-    const seederResource = new CustomResource(
-      this,
-      "DbBootstrapSeederResource",
-      {
-        serviceToken: seederProvider.serviceToken,
-        properties: {
-          // Bump to force a re-assert of the user + grants on a future change to
-          // the seeded grant set (the handler is idempotent, so re-runs are safe).
-          Revision: "1",
-        },
+    // No explicit ingress-ordering dependency is needed: the seeder reaches
+    // Secrets Manager and Aurora over the ETL SG's grants, both of which exist
+    // before it runs — the Aurora 3306 ingress is created with the cluster SG
+    // here (and the resource already orders after the cluster via the Lambda's
+    // env vars), and the endpoint's 443 ingress is owned by AppStack. The
+    // serviceToken dependency orders the resource after the provider Lambda.
+    new CustomResource(this, "DbBootstrapSeederResource", {
+      serviceToken: seederProvider.serviceToken,
+      properties: {
+        // Bump to force a re-assert of the user + grants on a future change to
+        // the seeded grant set (the handler is idempotent, so re-runs are safe).
+        Revision: "1",
       },
-    );
-    // The seeder's onEvent opens a TCP connection to Aurora, so it must not run
-    // until the 3306 ingress above exists (else ETIMEDOUT). The implicit
-    // serviceToken dependency only orders it after the provider Lambda.
-    seederResource.node.addDependency(seederAuroraIngress);
+    });
 
     // ------------------------------------------------------------------
     // OpenSearch domain.

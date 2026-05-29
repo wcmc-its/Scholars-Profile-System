@@ -284,10 +284,11 @@ describe("DataStack", () => {
     });
 
     describe("Security groups", () => {
-      it("Aurora SG admits the app, ETL, and db-bootstrap-seeder SGs on 3306", () => {
-        // Three ingress rules declared explicitly: app + ETL + the #493 PR-2
-        // seeder Lambda (which mints sps_bootstrap using master). The Secrets
-        // Manager rotation Lambda's reachability is added by
+      it("Aurora SG admits the app + ETL SGs on 3306", () => {
+        // Two ingress rules declared explicitly: app + ETL. The #493 PR-2
+        // seeder reuses the ETL SG (so this same rule covers it) rather than a
+        // dedicated SG — see the "db-bootstrap seeder" describe block for why.
+        // The Secrets Manager rotation Lambda's reachability is added by
         // `cluster.addRotationSingleUser()` separately; that connection
         // path is verified by the RotationSchedule + Serverless application
         // resources in the "RDS rotation" describe block.
@@ -300,7 +301,7 @@ describe("DataStack", () => {
             r.Properties?.ToPort === 3306 &&
             r.Properties?.IpProtocol === "tcp",
         );
-        expect(aurora3306).toHaveLength(3);
+        expect(aurora3306).toHaveLength(2);
       });
 
       it("OpenSearch SG admits the app + ETL SGs on 443 — and nothing else", () => {
@@ -353,14 +354,46 @@ describe("DataStack", () => {
         expect(env.DB_HOST).toBeDefined();
       });
 
-      it("adds a dedicated seeder security group (the Aurora 3306 ingress above references it)", () => {
+      it("runs the seeder on the shared ETL SG (Aurora-admitted) — no dedicated seeder SG", () => {
+        // The Secrets Manager interface endpoint (AppStack, private DNS) forces
+        // the seeder's SM calls through the endpoint, so its SG must be one the
+        // endpoint admits. The ETL SG already is — and is Aurora-admitted — so
+        // the seeder reuses it rather than a dedicated SG that the downstream
+        // AppStack endpoint SG could not bless. Guard both halves: no dedicated
+        // SG exists, and the seeder's SG is one Aurora admits on 3306.
         const sgs = template.findResources("AWS::EC2::SecurityGroup");
-        const seederSg = Object.values(sgs).find((r) =>
+        const dedicated = Object.values(sgs).find((r) =>
           (r.Properties?.GroupDescription as string | undefined)?.includes(
             "db-bootstrap seeder",
           ),
         );
-        expect(seederSg).toBeDefined();
+        expect(dedicated).toBeUndefined();
+
+        const ingress = template.findResources("AWS::EC2::SecurityGroupIngress");
+        const aurora3306Sources = Object.values(ingress)
+          .filter(
+            (r) =>
+              r.Properties?.FromPort === 3306 &&
+              r.Properties?.ToPort === 3306 &&
+              r.Properties?.IpProtocol === "tcp",
+          )
+          .map((r) => JSON.stringify(r.Properties?.SourceSecurityGroupId));
+
+        const fns = template.findResources("AWS::Lambda::Function");
+        const seeder = Object.values(fns).find(
+          (r) => r.Properties?.FunctionName === "sps-db-bootstrap-seed-prod",
+        );
+        const seederSgIds = (
+          (
+            seeder?.Properties?.VpcConfig as
+              | { SecurityGroupIds?: unknown[] }
+              | undefined
+          )?.SecurityGroupIds ?? []
+        ).map((x) => JSON.stringify(x));
+        expect(seederSgIds.length).toBeGreaterThanOrEqual(1);
+        expect(seederSgIds.some((s) => aurora3306Sources.includes(s))).toBe(
+          true,
+        );
       });
 
       it("grants the seeder PutSecretValue (DSN write) without a wildcard resource", () => {
