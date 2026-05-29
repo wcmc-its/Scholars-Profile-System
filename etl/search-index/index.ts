@@ -49,6 +49,7 @@ import {
   PUBLICATION_INDEX_WHERE,
   buildPeopleDoc,
   buildPublicationDoc,
+  computePubCountBuckets,
 } from "@/lib/search-index-docs";
 import { rebuildAliasedIndex } from "./alias-swap";
 
@@ -185,6 +186,17 @@ async function indexPeople(concreteIndex: string) {
   }
 
   if (docs.length === 0) return 0;
+
+  // #254 §10 — second pass: stamp `pubCountBucket` (autocomplete §6 primary
+  // tiebreak) from the GLOBAL quartile of authored-pub count. `buildPeopleDoc`
+  // can't set it per-doc (it can't see the distribution), so we classify here
+  // over the fully materialized `docs[]` — one in-memory sort, no extra query.
+  const { bucketOf } = computePubCountBuckets(
+    docs.map(({ doc }) => (doc.publicationCount as number) ?? 0),
+  );
+  for (const { doc } of docs) {
+    doc.pubCountBucket = bucketOf((doc.publicationCount as number) ?? 0);
+  }
 
   // Byte-aware bulk chunking (#485) to stay under the 10 MB request limit.
   await bulkIndexDocs(

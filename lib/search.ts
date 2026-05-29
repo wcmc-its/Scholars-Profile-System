@@ -174,6 +174,12 @@ export const peopleIndexMapping = {
       personType: { type: "keyword" }, // person-type filter (spec line 195)
       // Counters used in result snippets.
       publicationCount: { type: "integer" },
+      // Issue #254 §10 — global-quartile output bucket (0..4; 4 = most
+      // prolific). Drives the autocomplete §6 primary tiebreak (descending) in
+      // `tiebreakPeople`; the ETL stamps it in a second pass over the people
+      // docs (`etl/search-index/index.ts`). Not consulted by the people-tab
+      // function_score, which reads raw `publicationCount` (#513).
+      pubCountBucket: { type: "integer" },
       grantCount: { type: "integer" },
       // For "most recent publication" sort (spec line 194) and the
       // "Published in last 2 years" activity filter (issue #8 item 15).

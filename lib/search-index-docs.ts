@@ -889,3 +889,56 @@ export async function buildPeopleDoc(
     ...leadershipField,
   };
 }
+
+/**
+ * Issue #254 §10 — global output-bucket classifier for the autocomplete §6
+ * primary tiebreak. Buckets a scholar's displayed `publicationCount` into
+ * `pubCountBucket ∈ {0..4}`:
+ *
+ *   - 0    — zero displayed publications
+ *   - 1..4 — quartiles of the *nonzero* population (4 = most prolific)
+ *
+ * Quartiling the nonzero population (not the whole corpus) keeps the large
+ * mass of zero / low-output scholars from collapsing all four cut points into
+ * a single bucket. The value bucketed is the same `publicationCount` already on
+ * the people doc (`= kept`, the post-suppression displayed count), so the
+ * bucket can never disagree with the count the user sees.
+ *
+ * `buildPeopleDoc` cannot set this itself — the bucket needs the whole
+ * distribution — so the ETL builds every doc, then calls this once and stamps
+ * `bucketOf(doc.publicationCount)` on each (`etl/search-index/index.ts`).
+ *
+ * Pure: same `counts` → same thresholds + classifier. Thresholds are recomputed
+ * per index build, so ordering is deterministic per build (all §6 requires).
+ */
+export function computePubCountBuckets(counts: number[]): {
+  /** Q1/Q2/Q3 cut points over the sorted nonzero population. */
+  thresholds: [number, number, number];
+  bucketOf: (n: number) => 0 | 1 | 2 | 3 | 4;
+} {
+  const nonzero = counts.filter((c) => c > 0).sort((a, b) => a - b);
+  const n = nonzero.length;
+  if (n === 0) {
+    // No nonzero scholars in the corpus (degenerate / empty index): keep zeros
+    // at 0; any positive count tops out rather than throwing.
+    return { thresholds: [0, 0, 0], bucketOf: (v) => (v > 0 ? 4 : 0) };
+  }
+  // Quarter-boundary thresholds: `at(k)` is the count at the end of quarter k
+  // of the sorted nonzero population, so `v <= t_k` partitions counts into
+  // contiguous, (near-)equal quarters. Equal-value runs that straddle a
+  // boundary fall to the lower bucket — you can't split tied counts. Indices
+  // are clamped so single-element / tiny populations don't underflow.
+  const at = (k: number) =>
+    nonzero[Math.min(n - 1, Math.max(0, Math.floor((k * n) / 4) - 1))]!;
+  const t1 = at(1);
+  const t2 = at(2);
+  const t3 = at(3);
+  const bucketOf = (v: number): 0 | 1 | 2 | 3 | 4 => {
+    if (v <= 0) return 0;
+    if (v <= t1) return 1;
+    if (v <= t2) return 2;
+    if (v <= t3) return 3;
+    return 4;
+  };
+  return { thresholds: [t1, t2, t3], bucketOf };
+}
