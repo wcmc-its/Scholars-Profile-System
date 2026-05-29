@@ -618,15 +618,16 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "# ADOT collector configuration for SPS app tasks.
 #
 # Pipeline shape: OTLP/HTTP receiver -> memory_limiter -> tail_sampling ->
-# batch -> awsxray exporter. The tail_sampling processor is the load-bearing
-# piece -- issue #123's "5% baseline + 100% on errors" cannot be delivered
-# by an SDK-side head sampler (NotSampled decisions can't be reversed once
-# the span is dropped), so the promotion happens here after the trace has
-# ended and its status is known.
+# batch -> [awsxray, otlphttp/newrelic] exporters. The tail_sampling processor
+# is the load-bearing piece -- issue #123's "5% baseline + 100% on errors"
+# cannot be delivered by an SDK-side head sampler (NotSampled decisions can't
+# be reversed once the span is dropped), so the promotion happens here after
+# the trace has ended and its status is known.
 #
-# Drops happen before the awsxray exporter, so the X-Ray bill tracks the
-# kept-trace rate (~5% baseline + every error + every >1500ms trace),
-# not the SDK's 100% recording rate.
+# Drops happen before the exporters, so BOTH the X-Ray bill and the New Relic
+# ingest track the kept-trace rate (~5% baseline + every error + every >1500ms
+# trace), not the SDK's 100% recording rate. See the exporters block for the
+# soft/transitional dual-export rationale.
 #
 # Tunable in place: edit this file + cdk deploy --exclusively Sps-App-<env>.
 # No app-image rebuild required because the file is baked into the
@@ -668,6 +669,19 @@ processors:
     send_batch_size: 50
 
 exporters:
+  # New Relic OTLP/HTTP ingest, US datacenter. The api-key header is the New
+  # Relic *ingest license key*, injected into THIS collector container from
+  # Secrets Manager (scholars/<env>/newrelic-license-key) as NEW_RELIC_LICENSE_KEY;
+  # \${env:...} expands it at collector start. The otlphttp exporter appends
+  # /v1/traces to the endpoint -- the exact URL the key was verified against.
+  # gzip per New Relic's ingest guidance. EU accounts would use
+  # https://otlp.eu01.nr-data.net instead.
+  otlphttp/newrelic:
+    endpoint: https://otlp.nr-data.net
+    compression: gzip
+    headers:
+      api-key: \${env:NEW_RELIC_LICENSE_KEY}
+
   awsxray:
     # Region resolved from the ECS task metadata; no need to hard-code.
 
@@ -676,7 +690,13 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, tail_sampling, batch]
-      exporters: [awsxray]
+      # Dual-export is a SOFT, transitional choice (2026-05-29): X-Ray and New
+      # Relic both receive the same tail-sampled traces while New Relic is
+      # validated. Making New Relic the sole backend later is a one-liner --
+      # drop \`awsxray\` here (and optionally its exporter block above + the
+      # task-role xray:Put* policy in app-stack.ts). To revert to X-Ray-only,
+      # drop \`otlphttp/newrelic\`. Neither side is load-bearing for the other.
+      exporters: [awsxray, otlphttp/newrelic]
 ",
               },
             ],
@@ -693,6 +713,23 @@ service:
               },
             },
             "Name": "otel-collector",
+            "Secrets": [
+              {
+                "Name": "NEW_RELIC_LICENSE_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/newrelic-license-key",
+                    ],
+                  ],
+                },
+              },
+            ],
           },
         ],
         "Cpu": "1024",
@@ -1711,6 +1748,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/newrelic-license-key",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -1996,6 +2045,25 @@ service:
                 "Fn::GetAtt": [
                   "OtelCollectorLogGroup0FD207F7",
                   "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/newrelic-license-key-??????",
+                  ],
                 ],
               },
             },
@@ -2828,15 +2896,16 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "# ADOT collector configuration for SPS app tasks.
 #
 # Pipeline shape: OTLP/HTTP receiver -> memory_limiter -> tail_sampling ->
-# batch -> awsxray exporter. The tail_sampling processor is the load-bearing
-# piece -- issue #123's "5% baseline + 100% on errors" cannot be delivered
-# by an SDK-side head sampler (NotSampled decisions can't be reversed once
-# the span is dropped), so the promotion happens here after the trace has
-# ended and its status is known.
+# batch -> [awsxray, otlphttp/newrelic] exporters. The tail_sampling processor
+# is the load-bearing piece -- issue #123's "5% baseline + 100% on errors"
+# cannot be delivered by an SDK-side head sampler (NotSampled decisions can't
+# be reversed once the span is dropped), so the promotion happens here after
+# the trace has ended and its status is known.
 #
-# Drops happen before the awsxray exporter, so the X-Ray bill tracks the
-# kept-trace rate (~5% baseline + every error + every >1500ms trace),
-# not the SDK's 100% recording rate.
+# Drops happen before the exporters, so BOTH the X-Ray bill and the New Relic
+# ingest track the kept-trace rate (~5% baseline + every error + every >1500ms
+# trace), not the SDK's 100% recording rate. See the exporters block for the
+# soft/transitional dual-export rationale.
 #
 # Tunable in place: edit this file + cdk deploy --exclusively Sps-App-<env>.
 # No app-image rebuild required because the file is baked into the
@@ -2878,6 +2947,19 @@ processors:
     send_batch_size: 50
 
 exporters:
+  # New Relic OTLP/HTTP ingest, US datacenter. The api-key header is the New
+  # Relic *ingest license key*, injected into THIS collector container from
+  # Secrets Manager (scholars/<env>/newrelic-license-key) as NEW_RELIC_LICENSE_KEY;
+  # \${env:...} expands it at collector start. The otlphttp exporter appends
+  # /v1/traces to the endpoint -- the exact URL the key was verified against.
+  # gzip per New Relic's ingest guidance. EU accounts would use
+  # https://otlp.eu01.nr-data.net instead.
+  otlphttp/newrelic:
+    endpoint: https://otlp.nr-data.net
+    compression: gzip
+    headers:
+      api-key: \${env:NEW_RELIC_LICENSE_KEY}
+
   awsxray:
     # Region resolved from the ECS task metadata; no need to hard-code.
 
@@ -2886,7 +2968,13 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, tail_sampling, batch]
-      exporters: [awsxray]
+      # Dual-export is a SOFT, transitional choice (2026-05-29): X-Ray and New
+      # Relic both receive the same tail-sampled traces while New Relic is
+      # validated. Making New Relic the sole backend later is a one-liner --
+      # drop \`awsxray\` here (and optionally its exporter block above + the
+      # task-role xray:Put* policy in app-stack.ts). To revert to X-Ray-only,
+      # drop \`otlphttp/newrelic\`. Neither side is load-bearing for the other.
+      exporters: [awsxray, otlphttp/newrelic]
 ",
               },
             ],
@@ -2903,6 +2991,23 @@ service:
               },
             },
             "Name": "otel-collector",
+            "Secrets": [
+              {
+                "Name": "NEW_RELIC_LICENSE_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/newrelic-license-key",
+                    ],
+                  ],
+                },
+              },
+            ],
           },
         ],
         "Cpu": "512",
@@ -4007,6 +4112,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/newrelic-license-key",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -4292,6 +4409,25 @@ service:
                 "Fn::GetAtt": [
                   "OtelCollectorLogGroup0FD207F7",
                   "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/newrelic-license-key-??????",
+                  ],
                 ],
               },
             },

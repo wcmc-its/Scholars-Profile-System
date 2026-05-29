@@ -163,9 +163,10 @@ export class AppStack extends Stack {
 
     // ------------------------------------------------------------------
     // Secrets lookup. SecretsStack defines the full set; AppStack reads the
-    // nine the running app consumes (db read/write, opensearch app,
+    // eleven the app + sidecars consume (db read/write, opensearch app,
     // revalidate token, session-cookie secret, SAML SP private key, ReciterDB
-    // connection, SAML IdP cert, SAML SP cert). Looked up by name so the two
+    // connection, SAML IdP cert, SAML SP cert, db-bootstrap DSN, and the New
+    // Relic ingest key consumed by the ADOT collector). Looked up by name so the two
     // stacks stay loosely coupled — no
     // shared stack prop, no cross-stack export. ARNs feed both the
     // task-execution role's tightly-scoped policy and the task definition's
@@ -249,8 +250,18 @@ export class AppStack extends Stack {
       "SamlSpCertSecret",
       `scholars/saml-sp/${env}/cert`,
     );
+    // New Relic ingest license key (B24 observability). Injected into the ADOT
+    // collector sidecar (NOT the app container) as NEW_RELIC_LICENSE_KEY and
+    // read by otel-collector-config.yaml's otlphttp/newrelic exporter via
+    // ${env:...}. The "-key" tail (3 chars) sidesteps the Secrets Manager
+    // 6-char-tail partial-ARN gotcha. SecretsStack defines the stub.
+    const newRelicLicenseKeySecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "NewRelicLicenseKeySecret",
+      `scholars/${env}/newrelic-license-key`,
+    );
 
-    // The exhaustive list of ten consumer ARNs. The task-execution role's
+    // The exhaustive list of eleven consumer ARNs. The task-execution role's
     // `secretsmanager:GetSecretValue` resource list is this exact array
     // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
     const consumerSecretArns: string[] = [
@@ -266,6 +277,9 @@ export class AppStack extends Stack {
       // db-bootstrap task (#493): both DSNs it consumes -- its own least-priv
       // login, and the app-rw DSN it reads only to resolve the grantee username.
       bootstrapDsnSecret.secretArn,
+      // New Relic ingest key (B24): consumed by the ADOT collector sidecar,
+      // not the app container. Execution role still needs GetSecretValue on it.
+      newRelicLicenseKeySecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -377,7 +391,7 @@ export class AppStack extends Stack {
     // - **Task-execution role** is the role ECS itself assumes to pull the
     //   image, inject secrets into the container, and write log streams.
     //   Permissions are tightly scoped: ECR auth + Batch* on the SPS repo
-    //   only; secrets:GetSecretValue on the nine consumer ARNs only; logs
+    //   only; secrets:GetSecretValue on the eleven consumer ARNs only; logs
     //   on the two log groups only. No `*` resource anywhere.
     // - **Task role** is the role the *application code* runs as. The
     //   running Next.js + Prisma code does not call any AWS API today;
@@ -414,7 +428,7 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets — exactly the nine consumer ARNs. Asserted in tests.
+    // Secrets — exactly the eleven consumer ARNs. Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -773,8 +787,11 @@ export class AppStack extends Stack {
     //
     // The collector container runs under the same task role as the app,
     // which carries the inline X-Ray PutTraceSegments +
-    // PutTelemetryRecords grant added above. No additional permissions
-    // requested. Image pinned by digest per ADOT_COLLECTOR_IMAGE.
+    // PutTelemetryRecords grant added above. It also exports the same
+    // tail-sampled traces to New Relic (otlphttp/newrelic in the config);
+    // that path needs no IAM -- it authenticates with the NEW_RELIC_LICENSE_KEY
+    // secret injected below, not the task role. Image pinned by digest per
+    // ADOT_COLLECTOR_IMAGE.
     //
     // Log group is the env-prefixed /aws/ecs/sps-otel-${env}.
     // ------------------------------------------------------------------
@@ -793,6 +810,16 @@ export class AppStack extends Stack {
       }),
       environment: {
         AOT_CONFIG_CONTENT: collectorConfigYaml,
+      },
+      secrets: {
+        // New Relic ingest license key for the otlphttp/newrelic exporter in
+        // otel-collector-config.yaml. Injected here (collector container, not
+        // the app) and read as ${env:NEW_RELIC_LICENSE_KEY} in that config.
+        // Pull from Secrets Manager via the execution role -- the ARN is in
+        // consumerSecretArns above.
+        NEW_RELIC_LICENSE_KEY: ecs.Secret.fromSecretsManager(
+          newRelicLicenseKeySecret,
+        ),
       },
     });
 

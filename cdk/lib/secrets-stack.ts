@@ -184,6 +184,20 @@ export class SecretsStack extends Stack {
         name: `scholars/${env}/saml/idp-cert`,
         description: `SPS SAML IdP signing certificate(s) (${env}) — PEM trust anchor for assertion-signature verification. Seed with both rollover certs concatenated; rotate before the 2026-08-19 IdP cert expiry. See docs/saml-sp.md.`,
       },
+      // New Relic ingest license key for OTLP trace export (B24 observability).
+      // Injected into the ADOT collector sidecar (NOT the app container) as
+      // NEW_RELIC_LICENSE_KEY; otel-collector-config.yaml's otlphttp/newrelic
+      // exporter reads it via ${env:...}. A secret because it is a write
+      // credential to the New Relic account (ingest is billable). Seed
+      // out-of-band with the 40-char INGEST-LICENSE key (US datacenter); the
+      // same value works for both envs since entities separate by service.name
+      // (sps-app-<env>). The "-key" tail is 3 chars, so it sidesteps the
+      // Secrets Manager 6-char-tail partial-ARN gotcha (cf. session-cookie-key).
+      {
+        constructId: "NewRelicLicenseKey",
+        name: `scholars/${env}/newrelic-license-key`,
+        description: `SPS New Relic ingest license key (${env}) — OTLP/HTTP trace export from the ADOT collector sidecar. Read as NEW_RELIC_LICENSE_KEY; seed out-of-band with the 40-char INGEST-LICENSE key (US datacenter).`,
+      },
       // Per-source ETL credential stubs (Phase 3, EtlStack). Each source
       // in the nightly/weekly/annual Step Functions state machines that
       // calls an external system gets its own secret so credentials can
