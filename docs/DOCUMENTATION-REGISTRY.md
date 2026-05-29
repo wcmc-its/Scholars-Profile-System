@@ -163,7 +163,13 @@ Listed here for completeness so §1–§8 stay focused.
 - Slug personalization: `slug-personalization-spec.md`, `slug-personalization-ui-spec.md`
 - Unit curation: `unit-curation-spec.md`, `unit-curation-edit-ui-spec.md`,
   `center-management-spec.md`
-- Outreach: `outreach/wave1-center-admins.md`
+- Outreach (launch-window, #506 D5): `outreach/_skeleton.md` (shared 5-part template) + per-audience
+  drafts `outreach/wave1-center-admins.md`, `outreach/wave1-superusers-library.md`,
+  `outreach/wave1-pilot-dept-admins.md`, `outreach/wave2-scholars.md`,
+  `outreach/wave3-doctoral-students.md`, `outreach/wave4-public-launch.md`
+- ServiceNow KB (launch support, #506 D3): `kb/01-scholars.md`, `kb/03-superusers.md`,
+  `kb/04-itsops.md` drafted; `kb/02-dept-admins.md` deferred (gated on #540); index in `kb/README.md`.
+  Routing destinations are owned by `feedback-handling-matrix.md` (§8), not restated in the articles.
 - Snapshots/fixtures: `spec-snapshots/`
 
 ---
@@ -213,5 +219,7 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-05-28 — eight operational gap docs added; §10 tracks residual
+*Last updated: 2026-05-29 — added §9 launch-window outreach drafts (Waves 1–4 + skeleton, #506 D5)
+and the ServiceNow KB article drafts (#506 D3); fixed the footer "Help & support" link to point at
+`/about` (the public help surface). 2026-05-28 — eight operational gap docs added; §10 tracks residual
 data-collection follow-ons; §11 tracks open questions (see issue #560).*
