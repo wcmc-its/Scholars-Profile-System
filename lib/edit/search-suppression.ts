@@ -77,11 +77,27 @@ import {
  * co-author's cwid.
  */
 export type ReflectSearchSuppressionArgs = {
+  /**
+   * The `suppression` row this reflection corresponds to. On full success the
+   * reflector stamps `searchReflectedAt = now()` on this row so the #393
+   * reconciler skips it; on failure it is left NULL for the reconciler to
+   * retry. Both call sites (suppress / revoke routes) and the reconciler hold
+   * this id.
+   */
+  suppressionId: string;
   entityType: string;
   entityId: string;
   contributorCwid: string | null;
   affectedCwids: readonly string[];
 };
+
+/**
+ * The outcome of a reflection. The route call sites ignore it (best-effort
+ * contract unchanged); the #393 reconciler reads `.ok` to log a retry-shaped
+ * failure. Note the stamp-on-success lives inside the reflector itself, so
+ * `{ ok: true }` already means the sentinel was advanced (best-effort).
+ */
+export type ReflectResult = { ok: true } | { ok: false; error: unknown };
 
 type Op =
   | { type: "delete"; index: string; id: string }
@@ -94,10 +110,15 @@ type BulkItem = {
 
 export async function reflectSearchSuppression(
   args: ReflectSearchSuppressionArgs,
-): Promise<void> {
+): Promise<ReflectResult> {
   try {
     const ops = await buildReflectionOps(args);
-    if (ops.length === 0) return;
+    if (ops.length === 0) {
+      // Non-search entity type (education / appointment / grant): nothing to
+      // reflect. We do NOT stamp — the reconciler excludes these by entity
+      // type, so the sentinel staying NULL for them is inert.
+      return { ok: true };
+    }
     const client = searchClient();
     const body: Array<Record<string, unknown>> = [];
     for (const op of ops) {
@@ -120,10 +141,33 @@ export async function reflectSearchSuppression(
       });
       if (failed.length > 0) {
         logReflectFailure(args, failed);
+        return { ok: false, error: failed };
       }
     }
+    // Full success — advance the reconciler sentinel so this row is not
+    // re-processed. Best-effort: a stamp failure leaves the (already-correct)
+    // index untouched and the reconciler re-reflects idempotently.
+    await markSearchReflected(args.suppressionId);
+    return { ok: true };
   } catch (err) {
     logReflectFailure(args, err);
+    return { ok: false, error: err };
+  }
+}
+
+/**
+ * Stamp `searchReflectedAt = now()` on a suppression row after a successful
+ * reflection. Never throws — the OpenSearch write already succeeded; only the
+ * sentinel advance can fail here, and the reconciler is the backstop.
+ */
+async function markSearchReflected(suppressionId: string): Promise<void> {
+  try {
+    await db.write.suppression.update({
+      where: { id: suppressionId },
+      data: { searchReflectedAt: new Date() },
+    });
+  } catch {
+    // Swallow — see the function contract above.
   }
 }
 
@@ -224,6 +268,7 @@ function logReflectFailure(
   console.error(
     JSON.stringify({
       event: "edit_search_reflect_failed",
+      suppressionId: args.suppressionId,
       entityType: args.entityType,
       entityId: args.entityId,
       contributorCwid: args.contributorCwid,

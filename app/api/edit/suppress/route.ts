@@ -263,7 +263,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // so they cannot roll back the already-committed write. `affectedCwids` is
   // the cwid half of the same `resolveAffectedProfiles` query — one upstream
   // Prisma read feeds both reflections (plan §3 tightening C7).
+  // The result is ignored here (best-effort); on success the reflector stamps
+  // `searchReflectedAt`, on failure it leaves it NULL for the #393 reconciler.
   await reflectSearchSuppression({
+    suppressionId,
     entityType,
     entityId,
     contributorCwid: contributor,
