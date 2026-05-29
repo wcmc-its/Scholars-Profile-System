@@ -61,6 +61,11 @@ data/*
 !data/seo/
 data/seo/*
 !data/seo/rank-basket.json
+# Same rationale for the rival-benchmark instrument: the generated rival basket
+# plus its two hand-authored inputs are committed and reviewed; snapshots stay ignored.
+!data/seo/rival-basket.json
+!data/seo/flagship-queries.json
+!data/seo/matched-researchers.json
 # Exception: Next.js dynamic route segment that happens to look like a CSV
 # filename — the literal `citations.csv` directory is the route path that
 # serves /api/publications/[pmid]/citations.csv. Brackets are escaped so
