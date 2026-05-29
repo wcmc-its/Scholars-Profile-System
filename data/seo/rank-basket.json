@@ -1,0 +1,1207 @@
+{
+  "generatedAt": "2026-05-29T04:55:17.281Z",
+  "source": "reciterai topic taxonomy (134 topical) + top-30 scholars by publication count (30 branded)",
+  "targets": [
+    {
+      "key": "new",
+      "label": "Scholars (new)",
+      "hosts": [
+        "scholars.weill.cornell.edu"
+      ]
+    },
+    {
+      "key": "vivo",
+      "label": "VIVO (legacy)",
+      "hosts": [
+        "vivo.weill.cornell.edu",
+        "vivo.med.cornell.edu"
+      ]
+    }
+  ],
+  "searchDefaults": {
+    "country": "us",
+    "language": "en",
+    "googleDomain": "google.com",
+    "num": 20
+  },
+  "queries": [
+    {
+      "id": "topic:aging_geroscience:plain",
+      "query": "aging & geroscience",
+      "type": "topical",
+      "topicId": "aging_geroscience",
+      "label": "Aging & Geroscience"
+    },
+    {
+      "id": "topic:aging_geroscience:brand",
+      "query": "aging & geroscience weill cornell",
+      "type": "topical",
+      "topicId": "aging_geroscience",
+      "label": "Aging & Geroscience (weill cornell)"
+    },
+    {
+      "id": "topic:autoimmune_rheumatologic_disease:plain",
+      "query": "autoimmune & rheumatologic disease",
+      "type": "topical",
+      "topicId": "autoimmune_rheumatologic_disease",
+      "label": "Autoimmune & Rheumatologic Disease"
+    },
+    {
+      "id": "topic:autoimmune_rheumatologic_disease:brand",
+      "query": "autoimmune & rheumatologic disease weill cornell",
+      "type": "topical",
+      "topicId": "autoimmune_rheumatologic_disease",
+      "label": "Autoimmune & Rheumatologic Disease (weill cornell)"
+    },
+    {
+      "id": "topic:biochemistry_biophysics:plain",
+      "query": "biochemistry & biophysics",
+      "type": "topical",
+      "topicId": "biochemistry_biophysics",
+      "label": "Biochemistry & Biophysics"
+    },
+    {
+      "id": "topic:biochemistry_biophysics:brand",
+      "query": "biochemistry & biophysics weill cornell",
+      "type": "topical",
+      "topicId": "biochemistry_biophysics",
+      "label": "Biochemistry & Biophysics (weill cornell)"
+    },
+    {
+      "id": "topic:bioethics_medical_humanities:plain",
+      "query": "bioethics, medical humanities & clinician wellbeing",
+      "type": "topical",
+      "topicId": "bioethics_medical_humanities",
+      "label": "Bioethics, Medical Humanities & Clinician Wellbeing"
+    },
+    {
+      "id": "topic:bioethics_medical_humanities:brand",
+      "query": "bioethics, medical humanities & clinician wellbeing weill cornell",
+      "type": "topical",
+      "topicId": "bioethics_medical_humanities",
+      "label": "Bioethics, Medical Humanities & Clinician Wellbeing (weill cornell)"
+    },
+    {
+      "id": "topic:biomedical_engineering:plain",
+      "query": "biomedical engineering",
+      "type": "topical",
+      "topicId": "biomedical_engineering",
+      "label": "Biomedical Engineering"
+    },
+    {
+      "id": "topic:biomedical_engineering:brand",
+      "query": "biomedical engineering weill cornell",
+      "type": "topical",
+      "topicId": "biomedical_engineering",
+      "label": "Biomedical Engineering (weill cornell)"
+    },
+    {
+      "id": "topic:biomedical_informatics:plain",
+      "query": "biomedical informatics",
+      "type": "topical",
+      "topicId": "biomedical_informatics",
+      "label": "Biomedical Informatics"
+    },
+    {
+      "id": "topic:biomedical_informatics:brand",
+      "query": "biomedical informatics weill cornell",
+      "type": "topical",
+      "topicId": "biomedical_informatics",
+      "label": "Biomedical Informatics (weill cornell)"
+    },
+    {
+      "id": "topic:biostatistics_quantitative_sciences:plain",
+      "query": "biostatistics & quantitative health sciences",
+      "type": "topical",
+      "topicId": "biostatistics_quantitative_sciences",
+      "label": "Biostatistics & Quantitative Health Sciences"
+    },
+    {
+      "id": "topic:biostatistics_quantitative_sciences:brand",
+      "query": "biostatistics & quantitative health sciences weill cornell",
+      "type": "topical",
+      "topicId": "biostatistics_quantitative_sciences",
+      "label": "Biostatistics & Quantitative Health Sciences (weill cornell)"
+    },
+    {
+      "id": "topic:breast_cancer:plain",
+      "query": "breast cancer",
+      "type": "topical",
+      "topicId": "breast_cancer",
+      "label": "Breast Cancer"
+    },
+    {
+      "id": "topic:breast_cancer:brand",
+      "query": "breast cancer weill cornell",
+      "type": "topical",
+      "topicId": "breast_cancer",
+      "label": "Breast Cancer (weill cornell)"
+    },
+    {
+      "id": "topic:cancer_biology_general:plain",
+      "query": "cancer biology (general)",
+      "type": "topical",
+      "topicId": "cancer_biology_general",
+      "label": "Cancer Biology (General)"
+    },
+    {
+      "id": "topic:cancer_biology_general:brand",
+      "query": "cancer biology (general) weill cornell",
+      "type": "topical",
+      "topicId": "cancer_biology_general",
+      "label": "Cancer Biology (General) (weill cornell)"
+    },
+    {
+      "id": "topic:cardiovascular_disease:plain",
+      "query": "cardiovascular disease",
+      "type": "topical",
+      "topicId": "cardiovascular_disease",
+      "label": "Cardiovascular Disease"
+    },
+    {
+      "id": "topic:cardiovascular_disease:brand",
+      "query": "cardiovascular disease weill cornell",
+      "type": "topical",
+      "topicId": "cardiovascular_disease",
+      "label": "Cardiovascular Disease (weill cornell)"
+    },
+    {
+      "id": "topic:cell_molecular_biology:plain",
+      "query": "cell & molecular biology",
+      "type": "topical",
+      "topicId": "cell_molecular_biology",
+      "label": "Cell & Molecular Biology"
+    },
+    {
+      "id": "topic:cell_molecular_biology:brand",
+      "query": "cell & molecular biology weill cornell",
+      "type": "topical",
+      "topicId": "cell_molecular_biology",
+      "label": "Cell & Molecular Biology (weill cornell)"
+    },
+    {
+      "id": "topic:dermatology_skin_disease:plain",
+      "query": "dermatology & skin disease",
+      "type": "topical",
+      "topicId": "dermatology_skin_disease",
+      "label": "Dermatology & Skin Disease"
+    },
+    {
+      "id": "topic:dermatology_skin_disease:brand",
+      "query": "dermatology & skin disease weill cornell",
+      "type": "topical",
+      "topicId": "dermatology_skin_disease",
+      "label": "Dermatology & Skin Disease (weill cornell)"
+    },
+    {
+      "id": "topic:developmental_biology:plain",
+      "query": "developmental biology",
+      "type": "topical",
+      "topicId": "developmental_biology",
+      "label": "Developmental Biology"
+    },
+    {
+      "id": "topic:developmental_biology:brand",
+      "query": "developmental biology weill cornell",
+      "type": "topical",
+      "topicId": "developmental_biology",
+      "label": "Developmental Biology (weill cornell)"
+    },
+    {
+      "id": "topic:digital_health_telemedicine:plain",
+      "query": "digital health & telemedicine",
+      "type": "topical",
+      "topicId": "digital_health_telemedicine",
+      "label": "Digital Health & Telemedicine"
+    },
+    {
+      "id": "topic:digital_health_telemedicine:brand",
+      "query": "digital health & telemedicine weill cornell",
+      "type": "topical",
+      "topicId": "digital_health_telemedicine",
+      "label": "Digital Health & Telemedicine (weill cornell)"
+    },
+    {
+      "id": "topic:drug_discovery_pharmacology:plain",
+      "query": "drug discovery & pharmacology",
+      "type": "topical",
+      "topicId": "drug_discovery_pharmacology",
+      "label": "Drug Discovery & Pharmacology"
+    },
+    {
+      "id": "topic:drug_discovery_pharmacology:brand",
+      "query": "drug discovery & pharmacology weill cornell",
+      "type": "topical",
+      "topicId": "drug_discovery_pharmacology",
+      "label": "Drug Discovery & Pharmacology (weill cornell)"
+    },
+    {
+      "id": "topic:emergency_critical_care_medicine:plain",
+      "query": "emergency & critical care medicine",
+      "type": "topical",
+      "topicId": "emergency_critical_care_medicine",
+      "label": "Emergency & Critical Care Medicine"
+    },
+    {
+      "id": "topic:emergency_critical_care_medicine:brand",
+      "query": "emergency & critical care medicine weill cornell",
+      "type": "topical",
+      "topicId": "emergency_critical_care_medicine",
+      "label": "Emergency & Critical Care Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:environmental_planetary_health:plain",
+      "query": "environmental & planetary health",
+      "type": "topical",
+      "topicId": "environmental_planetary_health",
+      "label": "Environmental & Planetary Health"
+    },
+    {
+      "id": "topic:environmental_planetary_health:brand",
+      "query": "environmental & planetary health weill cornell",
+      "type": "topical",
+      "topicId": "environmental_planetary_health",
+      "label": "Environmental & Planetary Health (weill cornell)"
+    },
+    {
+      "id": "topic:epidemiology_population_health:plain",
+      "query": "epidemiology & population health",
+      "type": "topical",
+      "topicId": "epidemiology_population_health",
+      "label": "Epidemiology & Population Health"
+    },
+    {
+      "id": "topic:epidemiology_population_health:brand",
+      "query": "epidemiology & population health weill cornell",
+      "type": "topical",
+      "topicId": "epidemiology_population_health",
+      "label": "Epidemiology & Population Health (weill cornell)"
+    },
+    {
+      "id": "topic:gastroenterology_hepatology:plain",
+      "query": "gastroenterology, hepatology & pancreatic disease",
+      "type": "topical",
+      "topicId": "gastroenterology_hepatology",
+      "label": "Gastroenterology, Hepatology & Pancreatic Disease"
+    },
+    {
+      "id": "topic:gastroenterology_hepatology:brand",
+      "query": "gastroenterology, hepatology & pancreatic disease weill cornell",
+      "type": "topical",
+      "topicId": "gastroenterology_hepatology",
+      "label": "Gastroenterology, Hepatology & Pancreatic Disease (weill cornell)"
+    },
+    {
+      "id": "topic:gene_cell_therapy:plain",
+      "query": "gene & cell therapy",
+      "type": "topical",
+      "topicId": "gene_cell_therapy",
+      "label": "Gene & Cell Therapy"
+    },
+    {
+      "id": "topic:gene_cell_therapy:brand",
+      "query": "gene & cell therapy weill cornell",
+      "type": "topical",
+      "topicId": "gene_cell_therapy",
+      "label": "Gene & Cell Therapy (weill cornell)"
+    },
+    {
+      "id": "topic:genetics_genomics_precision_medicine:plain",
+      "query": "genetics, genomics & precision medicine",
+      "type": "topical",
+      "topicId": "genetics_genomics_precision_medicine",
+      "label": "Genetics, Genomics & Precision Medicine"
+    },
+    {
+      "id": "topic:genetics_genomics_precision_medicine:brand",
+      "query": "genetics, genomics & precision medicine weill cornell",
+      "type": "topical",
+      "topicId": "genetics_genomics_precision_medicine",
+      "label": "Genetics, Genomics & Precision Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:gi_cancer:plain",
+      "query": "gastrointestinal cancer",
+      "type": "topical",
+      "topicId": "gi_cancer",
+      "label": "Gastrointestinal Cancer"
+    },
+    {
+      "id": "topic:gi_cancer:brand",
+      "query": "gastrointestinal cancer weill cornell",
+      "type": "topical",
+      "topicId": "gi_cancer",
+      "label": "Gastrointestinal Cancer (weill cornell)"
+    },
+    {
+      "id": "topic:global_public_health:plain",
+      "query": "global & public health",
+      "type": "topical",
+      "topicId": "global_public_health",
+      "label": "Global & Public Health"
+    },
+    {
+      "id": "topic:global_public_health:brand",
+      "query": "global & public health weill cornell",
+      "type": "topical",
+      "topicId": "global_public_health",
+      "label": "Global & Public Health (weill cornell)"
+    },
+    {
+      "id": "topic:gynecologic_oncology:plain",
+      "query": "gynecologic oncology",
+      "type": "topical",
+      "topicId": "gynecologic_oncology",
+      "label": "Gynecologic Oncology"
+    },
+    {
+      "id": "topic:gynecologic_oncology:brand",
+      "query": "gynecologic oncology weill cornell",
+      "type": "topical",
+      "topicId": "gynecologic_oncology",
+      "label": "Gynecologic Oncology (weill cornell)"
+    },
+    {
+      "id": "topic:health_economics:plain",
+      "query": "health economics",
+      "type": "topical",
+      "topicId": "health_economics",
+      "label": "Health Economics"
+    },
+    {
+      "id": "topic:health_economics:brand",
+      "query": "health economics weill cornell",
+      "type": "topical",
+      "topicId": "health_economics",
+      "label": "Health Economics (weill cornell)"
+    },
+    {
+      "id": "topic:health_equity_social_determinants:plain",
+      "query": "health equity & social determinants of health",
+      "type": "topical",
+      "topicId": "health_equity_social_determinants",
+      "label": "Health Equity & Social Determinants of Health"
+    },
+    {
+      "id": "topic:health_equity_social_determinants:brand",
+      "query": "health equity & social determinants of health weill cornell",
+      "type": "topical",
+      "topicId": "health_equity_social_determinants",
+      "label": "Health Equity & Social Determinants of Health (weill cornell)"
+    },
+    {
+      "id": "topic:health_services_policy:plain",
+      "query": "health services research & health policy",
+      "type": "topical",
+      "topicId": "health_services_policy",
+      "label": "Health Services Research & Health Policy"
+    },
+    {
+      "id": "topic:health_services_policy:brand",
+      "query": "health services research & health policy weill cornell",
+      "type": "topical",
+      "topicId": "health_services_policy",
+      "label": "Health Services Research & Health Policy (weill cornell)"
+    },
+    {
+      "id": "topic:hematology:plain",
+      "query": "hematology",
+      "type": "topical",
+      "topicId": "hematology",
+      "label": "Hematology"
+    },
+    {
+      "id": "topic:hematology:brand",
+      "query": "hematology weill cornell",
+      "type": "topical",
+      "topicId": "hematology",
+      "label": "Hematology (weill cornell)"
+    },
+    {
+      "id": "topic:immunology_inflammation:plain",
+      "query": "immunology & inflammation",
+      "type": "topical",
+      "topicId": "immunology_inflammation",
+      "label": "Immunology & Inflammation"
+    },
+    {
+      "id": "topic:immunology_inflammation:brand",
+      "query": "immunology & inflammation weill cornell",
+      "type": "topical",
+      "topicId": "immunology_inflammation",
+      "label": "Immunology & Inflammation (weill cornell)"
+    },
+    {
+      "id": "topic:implementation_science:plain",
+      "query": "implementation science",
+      "type": "topical",
+      "topicId": "implementation_science",
+      "label": "Implementation Science"
+    },
+    {
+      "id": "topic:implementation_science:brand",
+      "query": "implementation science weill cornell",
+      "type": "topical",
+      "topicId": "implementation_science",
+      "label": "Implementation Science (weill cornell)"
+    },
+    {
+      "id": "topic:infectious_disease_immunology:plain",
+      "query": "infectious disease & host defense",
+      "type": "topical",
+      "topicId": "infectious_disease_immunology",
+      "label": "Infectious Disease & Host Defense"
+    },
+    {
+      "id": "topic:infectious_disease_immunology:brand",
+      "query": "infectious disease & host defense weill cornell",
+      "type": "topical",
+      "topicId": "infectious_disease_immunology",
+      "label": "Infectious Disease & Host Defense (weill cornell)"
+    },
+    {
+      "id": "topic:lung_cancer:plain",
+      "query": "lung cancer",
+      "type": "topical",
+      "topicId": "lung_cancer",
+      "label": "Lung Cancer"
+    },
+    {
+      "id": "topic:lung_cancer:brand",
+      "query": "lung cancer weill cornell",
+      "type": "topical",
+      "topicId": "lung_cancer",
+      "label": "Lung Cancer (weill cornell)"
+    },
+    {
+      "id": "topic:maternal_child_health:plain",
+      "query": "maternal & child health",
+      "type": "topical",
+      "topicId": "maternal_child_health",
+      "label": "Maternal & Child Health"
+    },
+    {
+      "id": "topic:maternal_child_health:brand",
+      "query": "maternal & child health weill cornell",
+      "type": "topical",
+      "topicId": "maternal_child_health",
+      "label": "Maternal & Child Health (weill cornell)"
+    },
+    {
+      "id": "topic:medical_education_workforce:plain",
+      "query": "medical education & healthcare workforce",
+      "type": "topical",
+      "topicId": "medical_education_workforce",
+      "label": "Medical Education & Healthcare Workforce"
+    },
+    {
+      "id": "topic:medical_education_workforce:brand",
+      "query": "medical education & healthcare workforce weill cornell",
+      "type": "topical",
+      "topicId": "medical_education_workforce",
+      "label": "Medical Education & Healthcare Workforce (weill cornell)"
+    },
+    {
+      "id": "topic:melanoma_skin_cancer:plain",
+      "query": "melanoma & skin cancer",
+      "type": "topical",
+      "topicId": "melanoma_skin_cancer",
+      "label": "Melanoma & Skin Cancer"
+    },
+    {
+      "id": "topic:melanoma_skin_cancer:brand",
+      "query": "melanoma & skin cancer weill cornell",
+      "type": "topical",
+      "topicId": "melanoma_skin_cancer",
+      "label": "Melanoma & Skin Cancer (weill cornell)"
+    },
+    {
+      "id": "topic:mental_health_psychiatry:plain",
+      "query": "mental health & psychiatry",
+      "type": "topical",
+      "topicId": "mental_health_psychiatry",
+      "label": "Mental Health & Psychiatry"
+    },
+    {
+      "id": "topic:mental_health_psychiatry:brand",
+      "query": "mental health & psychiatry weill cornell",
+      "type": "topical",
+      "topicId": "mental_health_psychiatry",
+      "label": "Mental Health & Psychiatry (weill cornell)"
+    },
+    {
+      "id": "topic:metabolic_endocrine_disease:plain",
+      "query": "metabolic & endocrine disease",
+      "type": "topical",
+      "topicId": "metabolic_endocrine_disease",
+      "label": "Metabolic & Endocrine Disease"
+    },
+    {
+      "id": "topic:metabolic_endocrine_disease:brand",
+      "query": "metabolic & endocrine disease weill cornell",
+      "type": "topical",
+      "topicId": "metabolic_endocrine_disease",
+      "label": "Metabolic & Endocrine Disease (weill cornell)"
+    },
+    {
+      "id": "topic:microbiome_research:plain",
+      "query": "microbiome research",
+      "type": "topical",
+      "topicId": "microbiome_research",
+      "label": "Microbiome Research"
+    },
+    {
+      "id": "topic:microbiome_research:brand",
+      "query": "microbiome research weill cornell",
+      "type": "topical",
+      "topicId": "microbiome_research",
+      "label": "Microbiome Research (weill cornell)"
+    },
+    {
+      "id": "topic:musculoskeletal_orthopedic_medicine:plain",
+      "query": "musculoskeletal & orthopedic medicine",
+      "type": "topical",
+      "topicId": "musculoskeletal_orthopedic_medicine",
+      "label": "Musculoskeletal & Orthopedic Medicine"
+    },
+    {
+      "id": "topic:musculoskeletal_orthopedic_medicine:brand",
+      "query": "musculoskeletal & orthopedic medicine weill cornell",
+      "type": "topical",
+      "topicId": "musculoskeletal_orthopedic_medicine",
+      "label": "Musculoskeletal & Orthopedic Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:nephrology_renal_disease:plain",
+      "query": "nephrology & renal disease",
+      "type": "topical",
+      "topicId": "nephrology_renal_disease",
+      "label": "Nephrology & Renal Disease"
+    },
+    {
+      "id": "topic:nephrology_renal_disease:brand",
+      "query": "nephrology & renal disease weill cornell",
+      "type": "topical",
+      "topicId": "nephrology_renal_disease",
+      "label": "Nephrology & Renal Disease (weill cornell)"
+    },
+    {
+      "id": "topic:neuro_oncology:plain",
+      "query": "neuro-oncology",
+      "type": "topical",
+      "topicId": "neuro_oncology",
+      "label": "Neuro-Oncology"
+    },
+    {
+      "id": "topic:neuro_oncology:brand",
+      "query": "neuro-oncology weill cornell",
+      "type": "topical",
+      "topicId": "neuro_oncology",
+      "label": "Neuro-Oncology (weill cornell)"
+    },
+    {
+      "id": "topic:neurodegenerative_disease:plain",
+      "query": "neurodegenerative disease",
+      "type": "topical",
+      "topicId": "neurodegenerative_disease",
+      "label": "Neurodegenerative Disease"
+    },
+    {
+      "id": "topic:neurodegenerative_disease:brand",
+      "query": "neurodegenerative disease weill cornell",
+      "type": "topical",
+      "topicId": "neurodegenerative_disease",
+      "label": "Neurodegenerative Disease (weill cornell)"
+    },
+    {
+      "id": "topic:neuroscience_neurology:plain",
+      "query": "neuroscience & neurology",
+      "type": "topical",
+      "topicId": "neuroscience_neurology",
+      "label": "Neuroscience & Neurology"
+    },
+    {
+      "id": "topic:neuroscience_neurology:brand",
+      "query": "neuroscience & neurology weill cornell",
+      "type": "topical",
+      "topicId": "neuroscience_neurology",
+      "label": "Neuroscience & Neurology (weill cornell)"
+    },
+    {
+      "id": "topic:nutrition_metabolism:plain",
+      "query": "nutrition & metabolism",
+      "type": "topical",
+      "topicId": "nutrition_metabolism",
+      "label": "Nutrition & Metabolism"
+    },
+    {
+      "id": "topic:nutrition_metabolism:brand",
+      "query": "nutrition & metabolism weill cornell",
+      "type": "topical",
+      "topicId": "nutrition_metabolism",
+      "label": "Nutrition & Metabolism (weill cornell)"
+    },
+    {
+      "id": "topic:ophthalmology_vision_science:plain",
+      "query": "ophthalmology & vision science",
+      "type": "topical",
+      "topicId": "ophthalmology_vision_science",
+      "label": "Ophthalmology & Vision Science"
+    },
+    {
+      "id": "topic:ophthalmology_vision_science:brand",
+      "query": "ophthalmology & vision science weill cornell",
+      "type": "topical",
+      "topicId": "ophthalmology_vision_science",
+      "label": "Ophthalmology & Vision Science (weill cornell)"
+    },
+    {
+      "id": "topic:oral_craniofacial_health:plain",
+      "query": "oral & craniofacial health",
+      "type": "topical",
+      "topicId": "oral_craniofacial_health",
+      "label": "Oral & Craniofacial Health"
+    },
+    {
+      "id": "topic:oral_craniofacial_health:brand",
+      "query": "oral & craniofacial health weill cornell",
+      "type": "topical",
+      "topicId": "oral_craniofacial_health",
+      "label": "Oral & Craniofacial Health (weill cornell)"
+    },
+    {
+      "id": "topic:otolaryngology_head_neck:plain",
+      "query": "otolaryngology & head and neck medicine",
+      "type": "topical",
+      "topicId": "otolaryngology_head_neck",
+      "label": "Otolaryngology & Head and Neck Medicine"
+    },
+    {
+      "id": "topic:otolaryngology_head_neck:brand",
+      "query": "otolaryngology & head and neck medicine weill cornell",
+      "type": "topical",
+      "topicId": "otolaryngology_head_neck",
+      "label": "Otolaryngology & Head and Neck Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:pain_management_anesthesiology:plain",
+      "query": "pain management & anesthesiology",
+      "type": "topical",
+      "topicId": "pain_management_anesthesiology",
+      "label": "Pain Management & Anesthesiology"
+    },
+    {
+      "id": "topic:pain_management_anesthesiology:brand",
+      "query": "pain management & anesthesiology weill cornell",
+      "type": "topical",
+      "topicId": "pain_management_anesthesiology",
+      "label": "Pain Management & Anesthesiology (weill cornell)"
+    },
+    {
+      "id": "topic:palliative_end_of_life_care:plain",
+      "query": "palliative & end-of-life care",
+      "type": "topical",
+      "topicId": "palliative_end_of_life_care",
+      "label": "Palliative & End-of-Life Care"
+    },
+    {
+      "id": "topic:palliative_end_of_life_care:brand",
+      "query": "palliative & end-of-life care weill cornell",
+      "type": "topical",
+      "topicId": "palliative_end_of_life_care",
+      "label": "Palliative & End-of-Life Care (weill cornell)"
+    },
+    {
+      "id": "topic:pathology_laboratory_medicine:plain",
+      "query": "pathology & laboratory medicine",
+      "type": "topical",
+      "topicId": "pathology_laboratory_medicine",
+      "label": "Pathology & Laboratory Medicine"
+    },
+    {
+      "id": "topic:pathology_laboratory_medicine:brand",
+      "query": "pathology & laboratory medicine weill cornell",
+      "type": "topical",
+      "topicId": "pathology_laboratory_medicine",
+      "label": "Pathology & Laboratory Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:pediatrics_neonatology:plain",
+      "query": "pediatrics & neonatology",
+      "type": "topical",
+      "topicId": "pediatrics_neonatology",
+      "label": "Pediatrics & Neonatology"
+    },
+    {
+      "id": "topic:pediatrics_neonatology:brand",
+      "query": "pediatrics & neonatology weill cornell",
+      "type": "topical",
+      "topicId": "pediatrics_neonatology",
+      "label": "Pediatrics & Neonatology (weill cornell)"
+    },
+    {
+      "id": "topic:primary_care_general_medicine:plain",
+      "query": "primary care & general internal medicine",
+      "type": "topical",
+      "topicId": "primary_care_general_medicine",
+      "label": "Primary Care & General Internal Medicine"
+    },
+    {
+      "id": "topic:primary_care_general_medicine:brand",
+      "query": "primary care & general internal medicine weill cornell",
+      "type": "topical",
+      "topicId": "primary_care_general_medicine",
+      "label": "Primary Care & General Internal Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:prostate_urologic_cancer:plain",
+      "query": "prostate & urologic cancer",
+      "type": "topical",
+      "topicId": "prostate_urologic_cancer",
+      "label": "Prostate & Urologic Cancer"
+    },
+    {
+      "id": "topic:prostate_urologic_cancer:brand",
+      "query": "prostate & urologic cancer weill cornell",
+      "type": "topical",
+      "topicId": "prostate_urologic_cancer",
+      "label": "Prostate & Urologic Cancer (weill cornell)"
+    },
+    {
+      "id": "topic:pulmonary_critical_care:plain",
+      "query": "pulmonary & critical care medicine",
+      "type": "topical",
+      "topicId": "pulmonary_critical_care",
+      "label": "Pulmonary & Critical Care Medicine"
+    },
+    {
+      "id": "topic:pulmonary_critical_care:brand",
+      "query": "pulmonary & critical care medicine weill cornell",
+      "type": "topical",
+      "topicId": "pulmonary_critical_care",
+      "label": "Pulmonary & Critical Care Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:radiology_medical_imaging:plain",
+      "query": "radiology, medical imaging & medical physics",
+      "type": "topical",
+      "topicId": "radiology_medical_imaging",
+      "label": "Radiology, Medical Imaging & Medical Physics"
+    },
+    {
+      "id": "topic:radiology_medical_imaging:brand",
+      "query": "radiology, medical imaging & medical physics weill cornell",
+      "type": "topical",
+      "topicId": "radiology_medical_imaging",
+      "label": "Radiology, Medical Imaging & Medical Physics (weill cornell)"
+    },
+    {
+      "id": "topic:rehabilitation_disability_medicine:plain",
+      "query": "rehabilitation & disability medicine",
+      "type": "topical",
+      "topicId": "rehabilitation_disability_medicine",
+      "label": "Rehabilitation & Disability Medicine"
+    },
+    {
+      "id": "topic:rehabilitation_disability_medicine:brand",
+      "query": "rehabilitation & disability medicine weill cornell",
+      "type": "topical",
+      "topicId": "rehabilitation_disability_medicine",
+      "label": "Rehabilitation & Disability Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:research_infrastructure_workforce:plain",
+      "query": "research infrastructure & scientific workforce",
+      "type": "topical",
+      "topicId": "research_infrastructure_workforce",
+      "label": "Research Infrastructure & Scientific Workforce"
+    },
+    {
+      "id": "topic:research_infrastructure_workforce:brand",
+      "query": "research infrastructure & scientific workforce weill cornell",
+      "type": "topical",
+      "topicId": "research_infrastructure_workforce",
+      "label": "Research Infrastructure & Scientific Workforce (weill cornell)"
+    },
+    {
+      "id": "topic:single_cell_spatial_biology:plain",
+      "query": "single-cell & spatial biology",
+      "type": "topical",
+      "topicId": "single_cell_spatial_biology",
+      "label": "Single-Cell & Spatial Biology"
+    },
+    {
+      "id": "topic:single_cell_spatial_biology:brand",
+      "query": "single-cell & spatial biology weill cornell",
+      "type": "topical",
+      "topicId": "single_cell_spatial_biology",
+      "label": "Single-Cell & Spatial Biology (weill cornell)"
+    },
+    {
+      "id": "topic:sleep_medicine_circadian_biology:plain",
+      "query": "sleep medicine & circadian biology",
+      "type": "topical",
+      "topicId": "sleep_medicine_circadian_biology",
+      "label": "Sleep Medicine & Circadian Biology"
+    },
+    {
+      "id": "topic:sleep_medicine_circadian_biology:brand",
+      "query": "sleep medicine & circadian biology weill cornell",
+      "type": "topical",
+      "topicId": "sleep_medicine_circadian_biology",
+      "label": "Sleep Medicine & Circadian Biology (weill cornell)"
+    },
+    {
+      "id": "topic:stem_cell_regenerative_medicine:plain",
+      "query": "stem cell & regenerative medicine",
+      "type": "topical",
+      "topicId": "stem_cell_regenerative_medicine",
+      "label": "Stem Cell & Regenerative Medicine"
+    },
+    {
+      "id": "topic:stem_cell_regenerative_medicine:brand",
+      "query": "stem cell & regenerative medicine weill cornell",
+      "type": "topical",
+      "topicId": "stem_cell_regenerative_medicine",
+      "label": "Stem Cell & Regenerative Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:substance_use_addiction_medicine:plain",
+      "query": "substance use & addiction medicine",
+      "type": "topical",
+      "topicId": "substance_use_addiction_medicine",
+      "label": "Substance Use & Addiction Medicine"
+    },
+    {
+      "id": "topic:substance_use_addiction_medicine:brand",
+      "query": "substance use & addiction medicine weill cornell",
+      "type": "topical",
+      "topicId": "substance_use_addiction_medicine",
+      "label": "Substance Use & Addiction Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:surgery_perioperative_medicine:plain",
+      "query": "surgery & perioperative medicine",
+      "type": "topical",
+      "topicId": "surgery_perioperative_medicine",
+      "label": "Surgery & Perioperative Medicine"
+    },
+    {
+      "id": "topic:surgery_perioperative_medicine:brand",
+      "query": "surgery & perioperative medicine weill cornell",
+      "type": "topical",
+      "topicId": "surgery_perioperative_medicine",
+      "label": "Surgery & Perioperative Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:systems_biology:plain",
+      "query": "systems biology",
+      "type": "topical",
+      "topicId": "systems_biology",
+      "label": "Systems Biology"
+    },
+    {
+      "id": "topic:systems_biology:brand",
+      "query": "systems biology weill cornell",
+      "type": "topical",
+      "topicId": "systems_biology",
+      "label": "Systems Biology (weill cornell)"
+    },
+    {
+      "id": "topic:translational_clinical_science:plain",
+      "query": "translational & clinical science",
+      "type": "topical",
+      "topicId": "translational_clinical_science",
+      "label": "Translational & Clinical Science"
+    },
+    {
+      "id": "topic:translational_clinical_science:brand",
+      "query": "translational & clinical science weill cornell",
+      "type": "topical",
+      "topicId": "translational_clinical_science",
+      "label": "Translational & Clinical Science (weill cornell)"
+    },
+    {
+      "id": "topic:transplantation_medicine:plain",
+      "query": "transplantation medicine",
+      "type": "topical",
+      "topicId": "transplantation_medicine",
+      "label": "Transplantation Medicine"
+    },
+    {
+      "id": "topic:transplantation_medicine:brand",
+      "query": "transplantation medicine weill cornell",
+      "type": "topical",
+      "topicId": "transplantation_medicine",
+      "label": "Transplantation Medicine (weill cornell)"
+    },
+    {
+      "id": "topic:urology_mens_health:plain",
+      "query": "urology & men's health",
+      "type": "topical",
+      "topicId": "urology_mens_health",
+      "label": "Urology & Men's Health"
+    },
+    {
+      "id": "topic:urology_mens_health:brand",
+      "query": "urology & men's health weill cornell",
+      "type": "topical",
+      "topicId": "urology_mens_health",
+      "label": "Urology & Men's Health (weill cornell)"
+    },
+    {
+      "id": "topic:womens_health_reproductive_medicine:plain",
+      "query": "women's health & reproductive medicine",
+      "type": "topical",
+      "topicId": "womens_health_reproductive_medicine",
+      "label": "Women's Health & Reproductive Medicine"
+    },
+    {
+      "id": "topic:womens_health_reproductive_medicine:brand",
+      "query": "women's health & reproductive medicine weill cornell",
+      "type": "topical",
+      "topicId": "womens_health_reproductive_medicine",
+      "label": "Women's Health & Reproductive Medicine (weill cornell)"
+    },
+    {
+      "id": "scholar:mms9024",
+      "query": "Monika M Safford weill cornell",
+      "type": "branded",
+      "cwid": "mms9024",
+      "slug": "monika-m-safford",
+      "label": "Monika M Safford"
+    },
+    {
+      "id": "scholar:ole2001",
+      "query": "Olivier Elemento weill cornell",
+      "type": "branded",
+      "cwid": "ole2001",
+      "slug": "olivier-elemento",
+      "label": "Olivier Elemento"
+    },
+    {
+      "id": "scholar:lja2002",
+      "query": "Laith Jamal Abu-Raddad weill cornell",
+      "type": "branded",
+      "cwid": "lja2002",
+      "slug": "laith-jamal-abu-raddad",
+      "label": "Laith Jamal Abu-Raddad"
+    },
+    {
+      "id": "scholar:pag9051",
+      "query": "Parag Goyal weill cornell",
+      "type": "branded",
+      "cwid": "pag9051",
+      "slug": "parag-goyal",
+      "label": "Parag Goyal"
+    },
+    {
+      "id": "scholar:mfg9004",
+      "query": "Mario Fl Gaudino weill cornell",
+      "type": "branded",
+      "cwid": "mfg9004",
+      "slug": "mario-fl-gaudino",
+      "label": "Mario Fl Gaudino"
+    },
+    {
+      "id": "scholar:hok9010",
+      "query": "Hooman Kamel weill cornell",
+      "type": "branded",
+      "cwid": "hok9010",
+      "slug": "hooman-kamel",
+      "label": "Hooman Kamel"
+    },
+    {
+      "id": "scholar:hsc2001",
+      "query": "Hiam Souheil Chemaitelly weill cornell",
+      "type": "branded",
+      "cwid": "hsc2001",
+      "slug": "hiam-souheil-chemaitelly",
+      "label": "Hiam Souheil Chemaitelly"
+    },
+    {
+      "id": "scholar:lcp2003",
+      "query": "Laura Pinheiro weill cornell",
+      "type": "branded",
+      "cwid": "lcp2003",
+      "slug": "laura-pinheiro",
+      "label": "Laura Pinheiro"
+    },
+    {
+      "id": "scholar:few2001",
+      "query": "Fei Wang weill cornell",
+      "type": "branded",
+      "cwid": "few2001",
+      "slug": "fei-wang",
+      "label": "Fei Wang"
+    },
+    {
+      "id": "scholar:ram2045",
+      "query": "Rayaz A. Malik weill cornell",
+      "type": "branded",
+      "cwid": "ram2045",
+      "slug": "rayaz-a-malik",
+      "label": "Rayaz A. Malik"
+    },
+    {
+      "id": "scholar:emm4010",
+      "query": "Beth McGinty weill cornell",
+      "type": "branded",
+      "cwid": "emm4010",
+      "slug": "beth-mcginty",
+      "label": "Beth McGinty"
+    },
+    {
+      "id": "scholar:chm2042",
+      "query": "Christopher E Mason weill cornell",
+      "type": "branded",
+      "cwid": "chm2042",
+      "slug": "christopher-e-mason",
+      "label": "Christopher E Mason"
+    },
+    {
+      "id": "scholar:mrs9012",
+      "query": "Madeline R. Sterling weill cornell",
+      "type": "branded",
+      "cwid": "mrs9012",
+      "slug": "madeline-r-sterling",
+      "label": "Madeline R. Sterling"
+    },
+    {
+      "id": "scholar:ban9003",
+      "query": "Babak Benjamin Navi weill cornell",
+      "type": "branded",
+      "cwid": "ban9003",
+      "slug": "babak-benjamin-navi",
+      "label": "Babak Benjamin Navi"
+    },
+    {
+      "id": "scholar:rmt4001",
+      "query": "Rulla Tamimi weill cornell",
+      "type": "branded",
+      "cwid": "rmt4001",
+      "slug": "rulla-tamimi",
+      "label": "Rulla Tamimi"
+    },
+    {
+      "id": "scholar:mcr2004",
+      "query": "M. Cary Reid weill cornell",
+      "type": "branded",
+      "cwid": "mcr2004",
+      "slug": "m-cary-reid",
+      "label": "M. Cary Reid"
+    },
+    {
+      "id": "scholar:kas2049",
+      "query": "Karsten Suhre weill cornell",
+      "type": "branded",
+      "cwid": "kas2049",
+      "slug": "karsten-suhre",
+      "label": "Karsten Suhre"
+    },
+    {
+      "id": "scholar:ans2077",
+      "query": "Andrea Sboner weill cornell",
+      "type": "branded",
+      "cwid": "ans2077",
+      "slug": "andrea-sboner",
+      "label": "Andrea Sboner"
+    },
+    {
+      "id": "scholar:inp2002",
+      "query": "Ioannis Nikolaos Petropoulos weill cornell",
+      "type": "branded",
+      "cwid": "inp2002",
+      "slug": "ioannis-nikolaos-petropoulos",
+      "label": "Ioannis Nikolaos Petropoulos"
+    },
+    {
+      "id": "scholar:jmm9018",
+      "query": "Juan Miguel Mosquera weill cornell",
+      "type": "branded",
+      "cwid": "jmm9018",
+      "slug": "juan-miguel-mosquera",
+      "label": "Juan Miguel Mosquera"
+    },
+    {
+      "id": "scholar:res2025",
+      "query": "Robert E. Schwartz weill cornell",
+      "type": "branded",
+      "cwid": "res2025",
+      "slug": "robert-e-schwartz",
+      "label": "Robert E. Schwartz"
+    },
+    {
+      "id": "scholar:jzx2002",
+      "query": "Jenny Zhaoying Xiang weill cornell",
+      "type": "branded",
+      "cwid": "jzx2002",
+      "slug": "jenny-zhaoying-xiang",
+      "label": "Jenny Zhaoying Xiang"
+    },
+    {
+      "id": "scholar:mmr2011",
+      "query": "Mohamed Mohamed Rahouma Ahmed weill cornell",
+      "type": "branded",
+      "cwid": "mmr2011",
+      "slug": "mohamed-mohamed-rahouma-ahmed",
+      "label": "Mohamed Mohamed Rahouma Ahmed"
+    },
+    {
+      "id": "scholar:lngirard",
+      "query": "Leonard N Girardi weill cornell",
+      "type": "branded",
+      "cwid": "lngirard",
+      "slug": "leonard-n-girardi",
+      "label": "Leonard N Girardi"
+    },
+    {
+      "id": "scholar:roh9005",
+      "query": "Roger Hartl weill cornell",
+      "type": "branded",
+      "cwid": "roh9005",
+      "slug": "roger-hartl",
+      "label": "Roger Hartl"
+    },
+    {
+      "id": "scholar:sab2028",
+      "query": "Samprit Banerjee weill cornell",
+      "type": "branded",
+      "cwid": "sab2028",
+      "slug": "samprit-banerjee",
+      "label": "Samprit Banerjee"
+    },
+    {
+      "id": "scholar:lmk2003",
+      "query": "Lisa M Kern weill cornell",
+      "type": "branded",
+      "cwid": "lmk2003",
+      "slug": "lisa-m-kern",
+      "label": "Lisa M Kern"
+    },
+    {
+      "id": "scholar:alm9097",
+      "query": "Alexander Merkler weill cornell",
+      "type": "branded",
+      "cwid": "alm9097",
+      "slug": "alexander-merkler",
+      "label": "Alexander Merkler"
+    },
+    {
+      "id": "scholar:rnp2002",
+      "query": "Rob N. Peck weill cornell",
+      "type": "branded",
+      "cwid": "rnp2002",
+      "slug": "rob-n-peck",
+      "label": "Rob N. Peck"
+    },
+    {
+      "id": "scholar:ggi9001",
+      "query": "Giorgio Ga. Inghirami weill cornell",
+      "type": "branded",
+      "cwid": "ggi9001",
+      "slug": "giorgio-ga-inghirami",
+      "label": "Giorgio Ga. Inghirami"
+    }
+  ]
+}
