@@ -1,6 +1,5 @@
 import type { MetadataRoute } from "next";
 import { prisma } from "@/lib/db";
-import { HELP_ENTRIES } from "@/lib/docs/help-content";
 
 // ISR — falls back to 24h revalidation if no on-demand revalidate fires.
 // ETL orchestrator calls /api/revalidate?path=/sitemap.xml after each successful run.
@@ -45,13 +44,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE}/browse`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
     { url: `${BASE}/about`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
     { url: `${BASE}/about/methodology`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
-    { url: `${BASE}/about/help`, lastModified: now, changeFrequency: "monthly" as const, priority: 0.5 },
-    ...HELP_ENTRIES.map((e) => ({
-      url: `${BASE}/about/help/${e.slug}`,
-      lastModified: now,
-      changeFrequency: "monthly" as const,
-      priority: 0.4,
-    })),
   ];
 
   const scholarEntries: MetadataRoute.Sitemap = scholars.map(
