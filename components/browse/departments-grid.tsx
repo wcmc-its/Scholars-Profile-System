@@ -349,7 +349,7 @@ function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
       <div className="min-w-0 flex-1">
         <Link
           href={`/departments/${dept.slug}`}
-          className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
+          className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
         >
           {dept.name}
         </Link>
@@ -377,7 +377,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
         <div className="min-w-0 flex-1">
           <Link
             href={`/departments/${dept.slug}`}
-            className="text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
+            className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
           >
             {dept.name}
           </Link>

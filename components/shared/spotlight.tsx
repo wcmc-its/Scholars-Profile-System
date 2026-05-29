@@ -96,12 +96,18 @@ function SpotlightPubCard({
           {card.kicker}
         </span>
       )}
-      <h3 className="m-0 text-[15px] font-medium leading-[1.35] tracking-[-0.005em] text-foreground line-clamp-3">
+      {/* line-clamp lives on the <a>, not the <h3>: the link is the text+click
+          target, and clamping it keeps its bounding box equal to the visible 3
+          lines. With the clamp on the h3 instead, the inner <a>'s box spanned the
+          full (un-clamped) title and overlapped the author-chip row below it,
+          tripping axe target-size (WCAG 2.5.8) even though the layout looked fine
+          (#586). Same visual result, link box now matches the clamp. */}
+      <h3 className="m-0 text-[15px] font-medium leading-[1.35] tracking-[-0.005em] text-foreground">
         <a
           href={titleHref}
           target={isExternal ? "_blank" : undefined}
           rel={isExternal ? "noopener noreferrer" : undefined}
-          className="text-foreground no-underline hover:underline"
+          className="line-clamp-3 text-foreground no-underline hover:underline"
           dangerouslySetInnerHTML={{ __html: titleHtml }}
         />
       </h3>
