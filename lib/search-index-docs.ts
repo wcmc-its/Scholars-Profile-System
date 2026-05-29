@@ -28,6 +28,7 @@ import {
   type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { isFundingActive } from "@/lib/api/search-funding";
+import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 
@@ -756,12 +757,32 @@ export async function buildPeopleDoc(
   // Per-scholar center memberships — sidecar query (see JSDoc). The batch
   // indexer now issues N of these instead of one whole-table preload; the
   // fast-path gets the one-cwid variant for free.
+  //
+  // #552 Phase 6 — gate the facet keys on the §3.3 active predicate (the same
+  // `isCenterMembershipActive` the public page uses). An inactive (lapsed) or
+  // pending membership emits NO facet key, so an expired member drops out of
+  // the center's People-tab bucket on the next nightly rebuild — consistent
+  // with PR-4's public page. The new `centerProgram:` key is additionally
+  // gated on a non-null program code. Date-derived status re-evaluates every
+  // rebuild automatically; no new step.
+  const centerToday = new Date().toISOString().slice(0, 10);
   const centerRows = await client.centerMembership.findMany({
     where: { cwid: s.cwid },
-    select: { centerCode: true },
+    select: {
+      centerCode: true,
+      programCode: true,
+      startDate: true,
+      endDate: true,
+    },
   });
   for (const row of centerRows) {
+    if (!isCenterMembershipActive(row.startDate, row.endDate, centerToday)) {
+      continue;
+    }
     deptDivKeys.push(`center:${row.centerCode}`);
+    if (row.programCode) {
+      deptDivKeys.push(`centerProgram:${row.programCode}`);
+    }
   }
   // #540 Phase 8 — manual-roster division facet keys. A scholar manually
   // rostered into a `source='manual'` division contributes the division's
