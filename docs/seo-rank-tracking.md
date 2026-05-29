@@ -125,3 +125,85 @@ Defined in `scripts/seo/build-basket.ts`:
 **Confirm** `vivo.weill.cornell.edu` is the canonical legacy host for your
 baseline window before trusting the VIVO column. Edit `TARGETS` if WCM points a
 different host at VIVO.
+
+---
+
+# Rival benchmark (cross-sectional)
+
+A second, independent instrument: instead of WCM-over-time, it compares WCM's
+research-profiles platform against **peer institutions' profiles platforms** for
+the kind of query a funder uses to find an expert. Same SerpAPI plumbing — the
+rivals are just extra `targets` read out of the same organic-results list, so
+they cost **zero** extra searches.
+
+## What it measures, honestly
+
+- **Share of voice, not absolute rank.** Broad expert queries (`breast cancer
+  researcher`) are nationally competitive (NCI centers, NIH, Google Scholar,
+  news). No school owns #1. Report relative standings across the named schools.
+- **Profiles platform vs platform.** Scope is each school's research-profiles
+  host only. `weillcornell.org` (WCM's clinical find-a-doctor site) is tracked
+  as a `clinical` surface for diagnosis — "is Scholars even the WCM result, or
+  does the clinical site already own this name?" — but is **excluded** from the
+  platform leaderboard (rivals' clinical sites aren't targets).
+- **New site, mature rivals.** Scholars is freshly indexed; rivals' platforms
+  have years of SEO/backlinks. So "WCM" = best of `wcm-new` + `wcm-vivo`, and
+  the baseline is a starting point, not a verdict. Re-run as Scholars matures.
+
+## Workflow
+
+```bash
+# 1. Build the rival basket (needs DB for the topic taxonomy).
+npm run seo:basket -- --mode rivals                 # → data/seo/rival-basket.json
+npm run seo:basket -- --mode rivals --expert-templates "{topic} researcher,{topic} expert"
+
+# 2. (Optional) seed eminence covariates for the matched researchers.
+#    Edit data/seo/matched-researchers.json first — replace every REPLACE_ME.
+npm run seo:enrich-matched                          # OpenAlex h-index + academic age
+
+# 3. Validate + cost, then capture.
+npm run seo:track -- --basket data/seo/rival-basket.json --dry-run
+npm run seo:track -- --basket data/seo/rival-basket.json   # → snapshots/rank-<ts>.json
+
+# 4. Standings report (markdown to stdout + optional full matrix CSV).
+npm run seo:standings                               # latest snapshot
+npm run seo:standings -- --snapshot data/seo/snapshots/rank-<ts>.json \
+  --csv data/seo/standings-matrix.csv
+```
+
+## Targets (verified May 2026)
+
+17 institutions across 5 platforms — Elsevier Pure ×10 (JHU, Mayo, Minnesota,
+Penn State, Northwestern, Indiana, Case Western, Miami, OHSU, Einstein),
+Profiles RNS ×2 (UCSF, Harvard), VIVO ×2 (Duke, WCM-legacy), Esploro
+(Vanderbilt), Stanford CAP, Penn (custom). Full host list in
+`scripts/seo/build-basket.ts` (`RIVAL_TARGETS`). Notes:
+
+- **Penn** has no dedicated profiles host; it's scoped to `med.upenn.edu`
+  `/apps/faculty/` via the target's `pathPrefix`.
+- **Elsevier-hosted Pure** instances canonicalize to `<inst>.elsevierpure.com`
+  (the URL Google indexes) — that's what's listed.
+- Some Pure portals (Mayo, Penn State, Northwestern, OHSU) sit behind a
+  Cloudflare bot-gate. Irrelevant here: we read rank from Google's SERP, we
+  never fetch those sites. (Don't "verify" a Mayo URL by curl and panic.)
+
+## Cost & cadence
+
+Rivals are free (same SERP), so cost is driven by queries: ~67 topics × 3 expert
+templates + ~24 flagship + matched ≈ **~250 searches/snapshot**. On the Starter
+plan (1,000/mo) that's ~3 full rival snapshots/mo. Recommended: sweep quarterly,
+flagship monthly. A ~250-query run trips the default 200/hr throttle once
+(brief pause); lift with `--max-per-hour` on a paid tier.
+
+## Eminence control (matched set)
+
+A platform head-to-head on names is confounded by researcher eminence — a
+famous name ranks regardless of platform. `matched-researchers.json` pairs one
+comparable researcher per institution per flagship topic; `seo:enrich-matched`
+attaches **h-index + scholarly age from OpenAlex** (one source for everyone, by
+design — never mix in our PubMed counts). Match within a topic × h-index-band ×
+academic-age band so the head-to-head isolates platform SEO. The starter file
+ships with real WCM anchors and `REPLACE_ME` placeholders — **comms must
+validate the names** before the matched panel means anything; the enrich script
+skips placeholders and never invents a name.
+
