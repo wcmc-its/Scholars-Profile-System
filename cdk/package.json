@@ -7,7 +7,8 @@
     "node": ">=20"
   },
   "workspaces": [
-    "lambda/oncall-relay"
+    "lambda/oncall-relay",
+    "lambda/db-bootstrap-seed"
   ],
   "scripts": {
     "synth": "cdk synth",
