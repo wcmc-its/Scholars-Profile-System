@@ -251,10 +251,21 @@ export class DataStack extends Stack {
         allowAllOutbound: true,
       },
     );
-    auroraSecurityGroup.addIngressRule(
-      seederSecurityGroup,
-      ec2.Port.tcp(3306),
-      "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
+    // Explicit ingress (rather than `addIngressRule`) so the seeder custom
+    // resource can take an ordering dependency on THIS rule below. Without it
+    // CloudFormation invokes the seeder Lambda before Aurora admits the seeder
+    // SG on 3306, so `onEvent`'s `createConnection` times out (ETIMEDOUT).
+    const seederAuroraIngress = new ec2.CfnSecurityGroupIngress(
+      this,
+      "AuroraIngressFromSeeder",
+      {
+        groupId: auroraSecurityGroup.securityGroupId,
+        sourceSecurityGroupId: seederSecurityGroup.securityGroupId,
+        ipProtocol: "tcp",
+        fromPort: 3306,
+        toPort: 3306,
+        description: "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
+      },
     );
 
     const seederLogGroup = new logs.LogGroup(this, "DbBootstrapSeederLogGroup", {
@@ -320,14 +331,22 @@ export class DataStack extends Stack {
     const seederProvider = new cr.Provider(this, "DbBootstrapSeederProvider", {
       onEventHandler: seederFunction,
     });
-    new CustomResource(this, "DbBootstrapSeederResource", {
-      serviceToken: seederProvider.serviceToken,
-      properties: {
-        // Bump to force a re-assert of the user + grants on a future change to
-        // the seeded grant set (the handler is idempotent, so re-runs are safe).
-        Revision: "1",
+    const seederResource = new CustomResource(
+      this,
+      "DbBootstrapSeederResource",
+      {
+        serviceToken: seederProvider.serviceToken,
+        properties: {
+          // Bump to force a re-assert of the user + grants on a future change to
+          // the seeded grant set (the handler is idempotent, so re-runs are safe).
+          Revision: "1",
+        },
       },
-    });
+    );
+    // The seeder's onEvent opens a TCP connection to Aurora, so it must not run
+    // until the 3306 ingress above exists (else ETIMEDOUT). The implicit
+    // serviceToken dependency only orders it after the provider Lambda.
+    seederResource.node.addDependency(seederAuroraIngress);
 
     // ------------------------------------------------------------------
     // OpenSearch domain.
