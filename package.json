@@ -60,7 +60,10 @@
     "etl:spotlight": "tsx etl/spotlight/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:revalidate": "tsx etl/revalidate/index.ts",
-    "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts"
+    "etl:vivo-redirect": "tsx etl/vivo-redirect/generate-map.ts",
+    "seo:basket": "tsx scripts/seo/build-basket.ts",
+    "seo:track": "tsx scripts/seo/track-rank.ts",
+    "seo:diff": "tsx scripts/seo/diff-rank.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudfront": "^3.1049.0",

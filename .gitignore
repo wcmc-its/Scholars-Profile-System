@@ -54,6 +54,13 @@ seed-output/
 !data/
 data/*
 !data/vivo-redirects.json
+# Exception: the SEO rank-tracker query basket is the fixed instrument that
+# makes before/after comparable, so it is committed and reviewed. SerpAPI
+# *output* (data/seo/snapshots/*, any rank-diff.csv) stays ignored — it can be
+# large and is re-derivable. (scripts/seo/*, lib/seo/rank-basket.ts)
+!data/seo/
+data/seo/*
+!data/seo/rank-basket.json
 # Exception: Next.js dynamic route segment that happens to look like a CSV
 # filename — the literal `citations.csv` directory is the route path that
 # serves /api/publications/[pmid]/citations.csv. Brackets are escaped so
