@@ -192,13 +192,7 @@ export async function CenterPage({
         />
 
         {tab === "scholars" && members && (
-          <CenterMembersClient
-            members={members.hits}
-            total={members.total}
-            page={members.page + 1}
-            pageSize={members.pageSize}
-            centerSlug={detail.slug}
-          />
+          <CenterMembersClient result={members} centerSlug={detail.slug} />
         )}
 
         {tab === "publications" && (

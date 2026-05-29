@@ -30,6 +30,7 @@
 import { prisma } from "@/lib/db";
 import { fetchWcmAuthorsForPmids, type WcmAuthorChip } from "@/lib/api/topics";
 import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
+import { loadActiveCenterMemberCwids } from "@/lib/api/centers";
 
 const RECITERAI_YEAR_FLOOR = 2020;
 const HIGHLIGHTS_IMPACT_FLOOR = 40;
@@ -504,11 +505,10 @@ export function getSpotlightCardsForDivision(
 export async function getSpotlightCardsForCenter(
   centerCode: string,
 ): Promise<SpotlightCard[] | null> {
-  const memberRows = await prisma.centerMembership.findMany({
-    where: { centerCode },
-    select: { cwid: true },
-  });
-  if (memberRows.length === 0) return null;
-  const memberCwids = memberRows.map((r) => r.cwid);
+  // #552 Phase 4 — only active members (§ 3.3) seed the center's spotlight,
+  // consistent with the public roster; a lapsed member's work no longer
+  // surfaces here.
+  const memberCwids = await loadActiveCenterMemberCwids(centerCode);
+  if (memberCwids.length === 0) return null;
   return getSpotlightCardsForEntity({ cwid: { in: memberCwids } });
 }

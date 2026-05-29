@@ -15,11 +15,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockCenterFindUnique,
   mockScholarFindUnique,
+  mockScholarFindMany,
+  mockCenterMembershipFindMany,
   mockSuppressionFindFirst,
   mockFieldOverrideFindMany,
 } = vi.hoisted(() => ({
   mockCenterFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
+  mockScholarFindMany: vi.fn(),
+  mockCenterMembershipFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
 }));
@@ -27,7 +31,8 @@ const {
 vi.mock("@/lib/db", () => ({
   prisma: {
     center: { findUnique: mockCenterFindUnique },
-    scholar: { findUnique: mockScholarFindUnique },
+    scholar: { findUnique: mockScholarFindUnique, findMany: mockScholarFindMany },
+    centerMembership: { findMany: mockCenterMembershipFindMany },
     suppression: { findFirst: mockSuppressionFindFirst },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
   },
@@ -55,6 +60,11 @@ const DIRECTOR_SCHOLAR = {
 function defaultBaselineMocks() {
   mockCenterFindUnique.mockResolvedValue(CENTER);
   mockScholarFindUnique.mockResolvedValue(DIRECTOR_SCHOLAR);
+  // #552 Phase 4 — getCenter now recomputes scholarCount from the active
+  // roster; an empty membership read is fine for these director/suppression
+  // assertions (none of which inspect scholarCount).
+  mockCenterMembershipFindMany.mockResolvedValue([]);
+  mockScholarFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
   mockFieldOverrideFindMany.mockResolvedValue([]);
 }
