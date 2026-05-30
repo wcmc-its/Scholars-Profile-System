@@ -42,12 +42,13 @@ beforeEach(() => {
 });
 
 describe("reconcileSearchSuppressions — stale-row selection", () => {
-  it("scopes to scholar/publication, sentinel NULL, grace cutoff, and batch", async () => {
+  it("scopes to fast-path entity types, sentinel NULL, grace cutoff, and batch", async () => {
     await reconcileSearchSuppressions({ batchSize: 50, graceSeconds: 120, now: NOW });
 
     expect(hoisted.mockFindMany).toHaveBeenCalledTimes(1);
     const arg = hoisted.mockFindMany.mock.calls[0][0];
-    expect(arg.where.entityType).toEqual({ in: ["scholar", "publication"] });
+    // #481(a) — grant joins scholar/publication now that it has a fast-path.
+    expect(arg.where.entityType).toEqual({ in: ["scholar", "publication", "grant"] });
     expect(arg.where.searchReflectedAt).toBeNull();
     const cutoff = new Date("2026-05-29T11:58:00.000Z"); // NOW - 120s
     expect(arg.where.OR).toEqual([
@@ -100,6 +101,24 @@ describe("reconcileSearchSuppressions — reflect each stale row", () => {
       entityId: "999",
       contributorCwid: "bob",
       affectedCwids: ["bob"],
+    });
+  });
+
+  it("reflects a stale grant row (#481(a) funding fast-path)", async () => {
+    hoisted.mockFindMany.mockResolvedValue([
+      { id: "g1", entityType: "grant", entityId: "INFOED-ACCT1-ann", contributorCwid: null },
+    ]);
+    hoisted.mockResolveAffected.mockResolvedValue([]);
+
+    const summary = await reconcileSearchSuppressions({ now: NOW });
+
+    expect(summary).toEqual({ scanned: 1, reflected: 1, failed: 0 });
+    expect(hoisted.mockReflect).toHaveBeenCalledWith({
+      suppressionId: "g1",
+      entityType: "grant",
+      entityId: "INFOED-ACCT1-ann",
+      contributorCwid: null,
+      affectedCwids: [],
     });
   });
 

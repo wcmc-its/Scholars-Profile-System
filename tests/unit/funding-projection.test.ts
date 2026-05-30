@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { projectFromRows, type GrantRowForIndex } from "@/lib/funding-projection";
+import {
+  groupGrantsByProject,
+  projectFromRows,
+  type GrantRowForIndex,
+} from "@/lib/funding-projection";
 
 const SCHOLAR_A = {
   slug: "alice-aaron",
@@ -369,5 +373,54 @@ describe("projectFromRows", () => {
       }),
     ])!;
     expect(doc.meshDescriptorUi).toEqual([]);
+  });
+});
+
+describe("groupGrantsByProject", () => {
+  it("collapses multiple Account_Numbers under one coreProjectNum into one group", () => {
+    // Two InfoEd rows on the same NIH award (a renewal under a new
+    // Account_Number) must group into one funding project.
+    const groups = groupGrantsByProject(
+      [
+        { externalId: "INFOED-A1-alice", awardNumber: "1R01 HL123456-01" },
+        { externalId: "INFOED-A2-alice", awardNumber: "R01 HL123456" },
+      ],
+      new Set(),
+    );
+    expect(groups.size).toBe(1);
+    expect(groups.get("R01HL123456")).toHaveLength(2);
+  });
+
+  it("falls back to Account_Number for non-NIH awards", () => {
+    const groups = groupGrantsByProject(
+      [{ externalId: "INFOED-OCRA-77-bob", awardNumber: "OCRA-2024-091" }],
+      new Set(),
+    );
+    // parseExternalId is greedy on the account segment: "OCRA-77" / cwid "bob".
+    expect(groups.has("OCRA-77")).toBe(true);
+  });
+
+  it("drops suppressed externalIds before grouping", () => {
+    const groups = groupGrantsByProject(
+      [
+        { externalId: "INFOED-A1-alice", awardNumber: "R01 HL123456" },
+        { externalId: "INFOED-A1-bob", awardNumber: "R01 HL123456" },
+      ],
+      new Set(["INFOED-A1-bob"]),
+    );
+    const project = groups.get("R01HL123456")!;
+    expect(project).toHaveLength(1);
+    expect(project[0].externalId).toBe("INFOED-A1-alice");
+  });
+
+  it("skips rows whose externalId is null or unparseable", () => {
+    const groups = groupGrantsByProject(
+      [
+        { externalId: "garbage", awardNumber: "R01 HL123456" },
+        { externalId: null, awardNumber: "R01 HL123456" },
+      ],
+      new Set(),
+    );
+    expect(groups.size).toBe(0);
   });
 });

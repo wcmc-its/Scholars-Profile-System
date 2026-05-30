@@ -14,6 +14,8 @@
  * the UI layer.
  */
 
+import { coreProjectNum } from "@/lib/award-number";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { getSponsor } from "@/lib/sponsor-lookup";
 
@@ -166,6 +168,97 @@ export function parseExternalId(
   const m = externalId.match(/^INFOED-(.+)-([^-]+)$/);
   if (!m) return null;
   return { accountNumber: m[1], cwid: m[2] };
+}
+
+/**
+ * Prisma `where` for the grant rows that feed the funding index — active,
+ * non-deleted scholars only. Shared by the nightly index build
+ * (`etl/search-index/index.ts`) and the synchronous suppression fast-path
+ * (`lib/edit/search-suppression.ts`) so both walk an identical population.
+ */
+export const GRANT_INDEX_WHERE = {
+  scholar: { deletedAt: null, status: "active" },
+} satisfies Prisma.GrantWhereInput;
+
+/**
+ * Prisma `select` for the grant rows that feed `projectFromRows`. Shared by the
+ * nightly build and the fast-path so a fast-path re-projection is byte-identical
+ * to what the next rebuild would produce — the whole point of the fast-path is
+ * to converge on the rebuild, so the two must read the same columns.
+ */
+export const GRANT_INDEX_SELECT = {
+  cwid: true,
+  externalId: true,
+  title: true,
+  role: true,
+  startDate: true,
+  endDate: true,
+  awardNumber: true,
+  programType: true,
+  primeSponsor: true,
+  primeSponsorRaw: true,
+  directSponsor: true,
+  directSponsorRaw: true,
+  mechanism: true,
+  nihIc: true,
+  isSubaward: true,
+  // Issue #86 — sort (pubCount), full-text relevance (abstract), and the inline
+  // publications-expand UX on result rows.
+  abstract: true,
+  abstractSource: true,
+  applId: true,
+  // Issue #291 — RePORTER project keywords, indexed as a topical signal.
+  keywords: true,
+  // Issue #295 — RePORTER keywords resolved to NLM MeSH descriptor UIs.
+  meshDescriptorUis: true,
+  publications: {
+    select: {
+      pmid: true,
+      sourceReporter: true,
+      sourceReciterdb: true,
+      reciterdbFirstSeen: true,
+      publication: {
+        select: { title: true, journal: true, year: true, citationCount: true },
+      },
+    },
+  },
+  scholar: {
+    select: { slug: true, preferredName: true, primaryDepartment: true },
+  },
+} satisfies Prisma.GrantSelect;
+
+/**
+ * Group active grant rows into funding projects, dropping suppressed roles.
+ *
+ * The group key is `coreProjectNum(awardNumber) ?? accountNumber` — the funding
+ * doc `_id`. InfoEd sometimes splits one NIH award across multiple
+ * Account_Numbers (rebookings, supplements, administrative continuations);
+ * `coreProjectNum` collapses those into one search result, and non-NIH grants
+ * fall back to Account_Number. The key is derived in app code, NOT a queryable
+ * column, so both the nightly build (over the full corpus) and the fast-path
+ * (locating one project's surviving rows) must re-group to compute it — this is
+ * the single shared implementation.
+ *
+ * Generic over the row shape because the fast-path groups a cheap
+ * `{ externalId, awardNumber }` projection while the ETL groups full
+ * {@link GRANT_INDEX_SELECT} rows; only those two fields drive the key.
+ */
+export function groupGrantsByProject<
+  T extends { externalId: string | null; awardNumber: string | null },
+>(rows: readonly T[], suppressedExternalIds: ReadonlySet<string>): Map<string, T[]> {
+  const byProject = new Map<string, T[]>();
+  for (const r of rows) {
+    // #160 — drop a suppressed grant role before grouping/projection. A project
+    // with no surviving rows never forms a group (-> dark, never indexed).
+    if (r.externalId && suppressedExternalIds.has(r.externalId)) continue;
+    const ext = parseExternalId(r.externalId);
+    if (!ext) continue;
+    const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;
+    const arr = byProject.get(key) ?? [];
+    arr.push(r);
+    byProject.set(key, arr);
+  }
+  return byProject;
 }
 
 /** Per-row role bucket — Multi-PI is a project-level fact (≥2 PI rows on
