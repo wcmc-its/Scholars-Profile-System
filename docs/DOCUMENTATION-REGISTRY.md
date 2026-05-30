@@ -30,7 +30,7 @@ in **§10**.
 
 | The question | Go to |
 |---|---|
-| Show me how this hangs together (the diagram) | [`architecture-overview.md`](./architecture-overview.md) |
+| Show me how this hangs together (the diagram) | [`architecture/`](./architecture/index.html) — 5 visual diagrams; or [`architecture-overview.md`](./architecture-overview.md) (prose + mermaid) |
 | What is this system, end to end? | [`architecture-overview.md`](./architecture-overview.md) → [`PRODUCTION.md`](./PRODUCTION.md) → [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) |
 | Why is a page slow? / What's cached where? | [`performance-baseline.md`](./performance-baseline.md), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) |
 | Is it healthy? What are the SLOs/alarms? | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
@@ -56,6 +56,7 @@ in **§10**.
 | Doc | Answers |
 |---|---|
 | [`architecture-overview.md`](./architecture-overview.md) | **The one-page map** — request path, write path, ETL pipeline (with diagrams), the six CDK stacks, environments, and a "which doc for which concern" index. **Read this first.** |
+| [`architecture/index.html`](./architecture/index.html) | **Five presentation-grade diagrams** — system context, app & AWS topology, app internals (C4 component), network topology, and the edge-topology decision (#502). Open in a browser or export to slides; `.svg`/`.png` per view sit alongside. Regenerate with `npm run diagrams` (source: [`scripts/diagrams/`](../scripts/diagrams/)). |
 | [`PRODUCTION.md`](./PRODUCTION.md) | The operational counterpart to the dev README: the shape of production, why each piece exists, and how it runs. (Predates a couple of decisions — see the corrections note in `architecture-overview.md`.) |
 | [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) | Closes the biggest gaps in `PRODUCTION.md`: how writer endpoints authenticate, observability wiring, and other operational specifics. |
 | [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) | Every external system SPS depends on and exactly what breaks (vs stays up) if each is unavailable. |

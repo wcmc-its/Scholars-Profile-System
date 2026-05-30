@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "audit:db-writes": "tsx scripts/audit-db-writes.ts",
+    "diagrams": "node scripts/diagrams/build.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
