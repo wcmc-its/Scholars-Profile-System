@@ -673,7 +673,11 @@ export class AppStack extends Stack {
         // tail_sampling processor; the SDK runs ParentBased(AlwaysOn) so the
         // collector sees every span. Setting an env-driven head sampler here
         // would drop traces before the collector could evaluate them.
-        OTEL_SERVICE_NAME: `sps-app-${env}`,
+        // service.name resource attr -- this is the entity name in BOTH New
+        // Relic (otlphttp/newrelic exporter) and the X-Ray service map, so the
+        // two stay consistent. Per-env (Scholars-staging / Scholars-prod) keeps
+        // staging and prod as distinct entities so alerts never mix them.
+        OTEL_SERVICE_NAME: `Scholars-${env}`,
         OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318",
         OTEL_PROPAGATORS: "tracecontext,xray",
         SPS_ENV: env,
