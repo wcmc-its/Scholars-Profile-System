@@ -2,7 +2,6 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
-import { EdgeStack } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { makeFixture } from "./test-utils";
@@ -43,11 +42,6 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     etlSecurityGroup: network.etlSecurityGroup,
     albSecurityGroup: network.albSecurityGroup,
   });
-  const edge = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
-    env: fixture.env,
-    envConfig: fixture.envConfig,
-    publicAlb: app.publicAlb,
-  });
   const stack = new SpsObservabilityStack(
     fixture.app,
     `Sps-Observability-${envName}`,
@@ -56,7 +50,6 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
       envConfig: fixture.envConfig,
       appStack: app,
       dataStack: data,
-      edgeStack: edge,
     },
   );
   return {

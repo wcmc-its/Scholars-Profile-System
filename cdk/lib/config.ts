@@ -188,6 +188,24 @@ export interface SpsEnvConfig {
    * without a code change.
    */
   readonly usageRollupScheduleEnabled: boolean;
+  /**
+   * CloudFront distribution id, referenced by NAME (literal) for the
+   * reliability dashboard's CloudFront row -- deliberately NOT via the EdgeStack
+   * L2 handle. Importing it would force an Edge redeploy, and EdgeStack is
+   * frozen behind the NetScaler/WAF (#502) decision; a redeploy without the live
+   * `-c edgeCustomDomain/edgeCertArn/edgeAllowedCidrs` context would strip the
+   * prod alias/cert/WAF off the live distribution. The id is stable (the
+   * distribution is RETAIN). Switch back to edgeStack.distribution.distributionId
+   * once Edge unfreezes if the synth-time handle is preferred.
+   */
+  readonly cloudFrontDistributionId: string;
+  /**
+   * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
+   * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
+   * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
+   * CFN-generated name, stable (the bucket is RETAIN).
+   */
+  readonly cloudFrontLogsBucketName: string;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -236,6 +254,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     etlTaskMemoryMiB: 8192,
     // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
     usageRollupScheduleEnabled: true,
+    // Live EdgeStack-owned resources, referenced by name to decouple the
+    // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
+    cloudFrontDistributionId: "E17NRWINXLP3B3",
+    cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
   },
   prod: {
     envName: "prod",
@@ -286,6 +308,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     etlTaskMemoryMiB: 8192,
     // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
     usageRollupScheduleEnabled: true,
+    // Live EdgeStack-owned resources, referenced by name to decouple the
+    // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
+    cloudFrontDistributionId: "E28NKDFXC7K2ZL",
+    cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
   },
 };
 

@@ -1,8 +1,5 @@
 import { Template } from "aws-cdk-lib/assertions";
 import { AnalyticsStack } from "../lib/analytics-stack";
-import { AppStack } from "../lib/app-stack";
-import { EdgeStack } from "../lib/edge-stack";
-import { NetworkStack } from "../lib/network-stack";
 import { makeFixture } from "./test-utils";
 
 function buildAnalyticsStack(envName: "staging" | "prod"): {
@@ -10,30 +7,13 @@ function buildAnalyticsStack(envName: "staging" | "prod"): {
   stack: AnalyticsStack;
 } {
   const fixture = makeFixture(envName);
-  // AnalyticsStack consumes only the EdgeStack (its CloudFront log bucket);
-  // EdgeStack needs the AppStack public ALB, which needs the NetworkStack.
-  // DataStack is not in this chain, so the fixture stops at App -> Edge.
-  const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
-    env: fixture.env,
-    envConfig: fixture.envConfig,
-  });
-  const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
-    env: fixture.env,
-    envConfig: fixture.envConfig,
-    vpc: network.vpc,
-    appSecurityGroup: network.appSecurityGroup,
-    etlSecurityGroup: network.etlSecurityGroup,
-    albSecurityGroup: network.albSecurityGroup,
-  });
-  const edge = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
-    env: fixture.env,
-    envConfig: fixture.envConfig,
-    publicAlb: app.publicAlb,
-  });
+  // AnalyticsStack references the raw CloudFront log bucket BY NAME
+  // (envConfig.cloudFrontLogsBucketName) rather than via an EdgeStack handle,
+  // so it stands alone with no prerequisite stacks (it deploys while EdgeStack
+  // is frozen behind #502).
   const stack = new AnalyticsStack(fixture.app, `Sps-Analytics-${envName}`, {
     env: fixture.env,
     envConfig: fixture.envConfig,
-    edgeStack: edge,
   });
   return { template: Template.fromStack(stack), stack };
 }

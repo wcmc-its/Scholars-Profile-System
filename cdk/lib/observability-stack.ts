@@ -17,7 +17,6 @@ import { type Construct } from "constructs";
 import { type AppStack } from "./app-stack";
 import { type SpsEnvConfig } from "./config";
 import { type DataStack } from "./data-stack";
-import { type EdgeStack } from "./edge-stack";
 
 /**
  * The email subscribed to the **notify** topic (cost guardrails + low-urgency
@@ -83,14 +82,6 @@ export interface ObservabilityStackProps extends StackProps {
   readonly appStack: AppStack;
   /** DataStack instance — read Aurora cluster / OpenSearch domain references. */
   readonly dataStack: DataStack;
-  /**
-   * EdgeStack instance — supplies the CloudFront distribution id for the
-   * reliability dashboard's CloudFront row. Passed as an L2 handle (not a
-   * string-interpolated id) for the synth-time name guarantee, per the
-   * bin-comment convention. Creates a synth-time cross-stack reference on
-   * Edge; Edge is instantiated before this stack in bin/sps-infra.ts.
-   */
-  readonly edgeStack: EdgeStack;
 }
 
 /**
@@ -138,7 +129,7 @@ export class SpsObservabilityStack extends Stack {
   constructor(scope: Construct, id: string, props: ObservabilityStackProps) {
     super(scope, id, props);
 
-    const { envConfig, appStack, dataStack, edgeStack } = props;
+    const { envConfig, appStack, dataStack } = props;
     const env = envConfig.envName;
 
     // ------------------------------------------------------------------
@@ -654,12 +645,16 @@ export class SpsObservabilityStack extends Stack {
     // dimension and do not pin the metric region -- so a graph built from
     // them shows no data. Every CloudFront series below is therefore a raw
     // `cloudwatch.Metric` with the full dimension set + `region: "us-east-1"`
-    // via the `cfMetric` helper. OriginLatency is a paid CloudFront additional
-    // metric; EdgeStack enables it (`publishAdditionalMetrics: true`, which
-    // synthesizes a MonitoringSubscription) so the origin-latency panel below
-    // has data. The rest of the CF row graphs the always-available standard
-    // metrics. Cache-hit rate is another additional metric available behind the
-    // same EdgeStack flag if a panel is ever wanted.
+    // via the `cfMetric` helper. The DistributionId comes from config
+    // (`envConfig.cloudFrontDistributionId`), NOT the EdgeStack L2 handle: this
+    // stack deploys standalone while EdgeStack is frozen behind the #502
+    // NetScaler/WAF decision (importing the handle would force an Edge redeploy
+    // that, without the live domain/cert/cidr context, would strip prod's alias
+    // + cert + WAF). OriginLatency is a paid CloudFront additional metric that
+    // needs `publishAdditionalMetrics: true` on the distribution; that flag is
+    // set in edge-stack.ts but only takes effect on the NEXT Edge deploy, so
+    // the OriginLatency panel below stays empty until Edge is redeployed. The
+    // rest of the CF row graphs the always-available standard metrics.
     // ------------------------------------------------------------------
 
     /**
@@ -667,7 +662,8 @@ export class SpsObservabilityStack extends Stack {
      * namespace AWS/CloudFront, dimensions { DistributionId, Region: "Global" },
      * pinned to us-east-1. The 2.254 L2 `distribution.metric*` helpers omit
      * the Region dimension, which yields an empty graph -- hence this raw
-     * fallback. DistributionId comes off the L2 handle (synth-time guarantee).
+     * fallback. DistributionId comes from config (decoupled from the frozen
+     * EdgeStack -- see the caveat comment above).
      */
     const cfMetric = (
       metricName: string,
@@ -678,7 +674,7 @@ export class SpsObservabilityStack extends Stack {
         namespace: "AWS/CloudFront",
         metricName,
         dimensionsMap: {
-          DistributionId: edgeStack.distribution.distributionId,
+          DistributionId: envConfig.cloudFrontDistributionId,
           Region: "Global",
         },
         statistic,

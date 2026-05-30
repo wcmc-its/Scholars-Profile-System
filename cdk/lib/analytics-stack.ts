@@ -17,20 +17,11 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import { type Construct } from "constructs";
 import { type SpsEnvConfig } from "./config";
-import { type EdgeStack } from "./edge-stack";
 
 /** Props for {@link AnalyticsStack}. */
 export interface AnalyticsStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /**
-   * EdgeStack instance — read its CloudFront access-logs bucket
-   * (`edgeStack.logsBucket`, raw logs at prefix `cf/<env>/`). Passed as an L2
-   * handle (not a string-interpolated name) for the synth-time name guarantee.
-   * Creates a cross-stack reference on Edge; Edge is instantiated before this
-   * stack in bin/sps-infra.ts.
-   */
-  readonly edgeStack: EdgeStack;
 }
 
 /**
@@ -74,8 +65,20 @@ export class AnalyticsStack extends Stack {
   constructor(scope: Construct, id: string, props: AnalyticsStackProps) {
     super(scope, id, props);
 
-    const { envConfig, edgeStack } = props;
+    const { envConfig } = props;
     const env = envConfig.envName;
+
+    // Raw CloudFront access-log bucket, referenced by NAME (not the EdgeStack
+    // L2 handle) so this stack deploys standalone while EdgeStack is frozen
+    // behind the #502 NetScaler/WAF decision -- importing edgeStack.logsBucket
+    // would force an Edge redeploy that, without the live domain/cert/cidr
+    // context, would strip prod's alias + cert + WAF. The name is config-pinned
+    // and stable (the bucket is RETAIN).
+    const rawLogsBucket = s3.Bucket.fromBucketName(
+      this,
+      "RawLogsBucket",
+      envConfig.cloudFrontLogsBucketName,
+    );
 
     // Object-key prefixes (kept as consts so the table LOCATION, the Lambda
     // env, and the IAM scoping all reference the same literal -- a drift
@@ -178,7 +181,7 @@ export class AnalyticsStack extends Stack {
             { name: "sc_range_start", type: "bigint" },
             { name: "sc_range_end", type: "bigint" },
           ],
-          location: edgeStack.logsBucket.s3UrlForObject(`cf/${env}/`),
+          location: rawLogsBucket.s3UrlForObject(`cf/${env}/`),
           inputFormat: "org.apache.hadoop.mapred.TextInputFormat",
           outputFormat:
             "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
@@ -453,7 +456,7 @@ export class AnalyticsStack extends Stack {
     // the catalog/db/tables + the two analytics-bucket prefixes and the raw
     // cf/<env>/ prefix. NEVER s3:* or athena:* (asserted at synth time).
     // ------------------------------------------------------------------
-    const rawBucketArn = edgeStack.logsBucket.bucketArn;
+    const rawBucketArn = rawLogsBucket.bucketArn;
     const analyticsBucketArn = this.analyticsBucket.bucketArn;
     // The Lambda only ever runs queries in the rollup workgroup -- scope the
     // Athena grant to it (not the operator workgroup).

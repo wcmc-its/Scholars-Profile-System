@@ -233,18 +233,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
               },
             ],
             "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
-            "Location": {
-              "Fn::Join": [
-                "",
-                [
-                  "s3://",
-                  {
-                    "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputRefLogsBucket9C4D88434A6140BD",
-                  },
-                  "/cf/prod/",
-                ],
-              ],
-            },
+            "Location": "s3://sps-edge-prod-logsbucket9c4d8843-8swcfno13icn/cf/prod/",
             "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
             "SerdeInfo": {
               "Parameters": {
@@ -440,7 +429,16 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
               },
               "Effect": "Allow",
               "Resource": {
-                "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputFnGetAttLogsBucket9C4D8843Arn695CF659",
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+                  ],
+                ],
               },
             },
             {
@@ -471,10 +469,11 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                 "Fn::Join": [
                   "",
                   [
+                    "arn:",
                     {
-                      "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputFnGetAttLogsBucket9C4D8843Arn695CF659",
+                      "Ref": "AWS::Partition",
                     },
-                    "/cf/prod/*",
+                    ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn/cf/prod/*",
                   ],
                 ],
               },
@@ -1120,18 +1119,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
               },
             ],
             "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
-            "Location": {
-              "Fn::Join": [
-                "",
-                [
-                  "s3://",
-                  {
-                    "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputRefLogsBucket9C4D88434A6140BD",
-                  },
-                  "/cf/staging/",
-                ],
-              ],
-            },
+            "Location": "s3://sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz/cf/staging/",
             "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
             "SerdeInfo": {
               "Parameters": {
@@ -1327,7 +1315,16 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
               },
               "Effect": "Allow",
               "Resource": {
-                "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputFnGetAttLogsBucket9C4D8843Arn695CF659",
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+                  ],
+                ],
               },
             },
             {
@@ -1358,10 +1355,11 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                 "Fn::Join": [
                   "",
                   [
+                    "arn:",
                     {
-                      "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputFnGetAttLogsBucket9C4D8843Arn695CF659",
+                      "Ref": "AWS::Partition",
                     },
-                    "/cf/staging/*",
+                    ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz/cf/staging/*",
                   ],
                 ],
               },

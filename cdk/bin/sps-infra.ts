@@ -96,31 +96,15 @@ new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 
-// EdgeStack — CloudFront cache-behavior split + VIVO/legacy 301 redirect
-// front for the public ALB (B07 + B14). Receives the AppStack instance as a
-// prop so the CloudFront origin can reference the public ALB directly; CDK
-// auto-wires the cross-stack reference. Custom domain + ACM cert attach when
-// `-c edgeCustomDomain=...` and `-c edgeCertArn=...` are both supplied
-// (see plan D2's bootstrap two-step).
-//
-// Instantiated BEFORE ObservabilityStack and AnalyticsStack: both downstream
-// stacks consume the EdgeStack instance (the reliability dashboard reads the
-// CloudFront distribution id off the L2 handle; the analytics stack reads the
-// raw CloudFront log bucket), so Edge must exist first to create the
-// synth-time cross-stack references.
-const edgeStack = new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
-  env,
-  envConfig,
-  publicAlb: appStack.publicAlb,
-  description: `SPS edge — CloudFront distribution fronting the public ALB, ${envConfig.envName} (ADR-008 B07+B14).`,
-});
-
 // ObservabilityStack — SLO alarms, SNS topic, the reliability dashboard, and
 // (prod only) the account cost guardrails (B22). Receives the AppStack +
-// DataStack + EdgeStack instances as props so the alarm definitions and the
-// dashboard widgets reference the L2 ALB / target group / Aurora / OpenSearch
-// / CloudFront constructs directly — string-interpolating against env-known
-// resource names would lose the synth-time guarantee that the names line up.
+// DataStack instances as props so the alarm + dashboard definitions reference
+// the L2 ALB / target group / Aurora / OpenSearch constructs directly —
+// string-interpolating against env-known resource names would lose the
+// synth-time guarantee that the names line up. The dashboard's CloudFront
+// widgets read the distribution id from config (envConfig.cloudFrontDistributionId),
+// NOT an EdgeStack handle, so this stack deploys standalone while EdgeStack is
+// frozen behind the NetScaler/WAF (#502) decision.
 new SpsObservabilityStack(
   app,
   `Sps-Observability-${envConfig.envName}`,
@@ -129,20 +113,33 @@ new SpsObservabilityStack(
     envConfig,
     appStack,
     dataStack,
-    edgeStack,
     description: `SPS observability — alarms, SNS, dashboard, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
   },
 );
 
+// EdgeStack — CloudFront cache-behavior split + VIVO/legacy 301 redirect
+// front for the public ALB (B07 + B14). Receives the AppStack instance as a
+// prop so the CloudFront origin can reference the public ALB directly; CDK
+// auto-wires the cross-stack reference. Custom domain + ACM cert attach when
+// `-c edgeCustomDomain=...` and `-c edgeCertArn=...` are both supplied
+// (see plan D2's bootstrap two-step).
+new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
+  env,
+  envConfig,
+  publicAlb: appStack.publicAlb,
+  description: `SPS edge — CloudFront distribution fronting the public ALB, ${envConfig.envName} (ADR-008 B07+B14).`,
+});
+
 // AnalyticsStack — CloudFront usage analytics (ADR-008's 9th stack). Reads the
-// raw CloudFront access-log bucket from the EdgeStack instance and rolls the
-// logs into a durable, pre-aggregated `daily_usage` table (Glue + Athena +
-// a nightly rollup Lambda) for marketing metrics. Aggregates only — no raw
-// client IPs land in the durable table (PII posture, see stack JSDoc).
+// raw CloudFront access-log bucket BY NAME (envConfig.cloudFrontLogsBucketName)
+// and rolls the logs into a durable, pre-aggregated `daily_usage` table (Glue +
+// Athena + a nightly rollup Lambda) for marketing metrics. Aggregates only — no
+// raw client IPs land in the durable table (PII posture, see stack JSDoc).
+// Referenced by name (not an EdgeStack handle) so it deploys standalone while
+// EdgeStack is frozen (#502).
 new AnalyticsStack(app, `Sps-Analytics-${envConfig.envName}`, {
   env,
   envConfig,
-  edgeStack,
   description: `SPS usage analytics — Glue + Athena over CloudFront logs + nightly rollup, ${envConfig.envName} (ADR-008 9th stack).`,
 });
 
