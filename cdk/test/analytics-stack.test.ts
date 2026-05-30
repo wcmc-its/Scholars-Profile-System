@@ -1,0 +1,285 @@
+import { Template } from "aws-cdk-lib/assertions";
+import { AnalyticsStack } from "../lib/analytics-stack";
+import { AppStack } from "../lib/app-stack";
+import { EdgeStack } from "../lib/edge-stack";
+import { NetworkStack } from "../lib/network-stack";
+import { makeFixture } from "./test-utils";
+
+function buildAnalyticsStack(envName: "staging" | "prod"): {
+  template: Template;
+  stack: AnalyticsStack;
+} {
+  const fixture = makeFixture(envName);
+  // AnalyticsStack consumes only the EdgeStack (its CloudFront log bucket);
+  // EdgeStack needs the AppStack public ALB, which needs the NetworkStack.
+  // DataStack is not in this chain, so the fixture stops at App -> Edge.
+  const network = new NetworkStack(fixture.app, `Sps-Network-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+  });
+  const app = new AppStack(fixture.app, `Sps-App-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    vpc: network.vpc,
+    appSecurityGroup: network.appSecurityGroup,
+    etlSecurityGroup: network.etlSecurityGroup,
+    albSecurityGroup: network.albSecurityGroup,
+  });
+  const edge = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    publicAlb: app.publicAlb,
+  });
+  const stack = new AnalyticsStack(fixture.app, `Sps-Analytics-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    edgeStack: edge,
+  });
+  return { template: Template.fromStack(stack), stack };
+}
+
+// Reuse the observability-stack printable-ASCII invariant (Footgun #6): names
+// + descriptions that become AWS properties must be plain ASCII, since non-
+// ASCII passes synth and fails at deploy.
+const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
+
+describe("AnalyticsStack", () => {
+  for (const env of ["prod", "staging"] as const) {
+    describe(env, () => {
+      const { template } = buildAnalyticsStack(env);
+
+      it("matches the snapshot", () => {
+        expect(template.toJSON()).toMatchSnapshot();
+      });
+
+      // ---- S3 durable bucket -----------------------------------------
+      it("creates exactly one durable analytics bucket", () => {
+        template.resourceCountIs("AWS::S3::Bucket", 1);
+      });
+
+      it("analytics bucket is RETAIN with no expiry lifecycle, SSE + block-public", () => {
+        const buckets = template.findResources("AWS::S3::Bucket");
+        const b = Object.values(buckets)[0];
+        // RETAIN deletion policy (durable home for rollups).
+        expect(b?.DeletionPolicy).toBe("Retain");
+        const props = b?.Properties as {
+          LifecycleConfiguration?: unknown;
+          PublicAccessBlockConfiguration?: Record<string, boolean>;
+          BucketEncryption?: unknown;
+        };
+        // NO lifecycle rule -- rollups must survive the 90-day raw-log expiry.
+        expect(props?.LifecycleConfiguration).toBeUndefined();
+        expect(props?.BucketEncryption).toBeDefined();
+        const pab = props?.PublicAccessBlockConfiguration;
+        expect(pab?.BlockPublicAcls).toBe(true);
+        expect(pab?.BlockPublicPolicy).toBe(true);
+        expect(pab?.IgnorePublicAcls).toBe(true);
+        expect(pab?.RestrictPublicBuckets).toBe(true);
+      });
+
+      it("enforces SSL on the analytics bucket (deny non-TLS)", () => {
+        // enforceSSL synthesizes a bucket policy with a denyInsecure statement.
+        template.resourceCountIs("AWS::S3::BucketPolicy", 1);
+      });
+
+      // ---- Glue ------------------------------------------------------
+      it("creates the env-suffixed Glue database", () => {
+        template.resourceCountIs("AWS::Glue::Database", 1);
+        template.hasResourceProperties("AWS::Glue::Database", {
+          DatabaseInput: { Name: `sps_usage_${env}` },
+        });
+      });
+
+      it("creates exactly two Glue tables (cf_access_logs + daily_usage)", () => {
+        template.resourceCountIs("AWS::Glue::Table", 2);
+        const tables = template.findResources("AWS::Glue::Table");
+        const names = Object.values(tables)
+          .map(
+            (t) =>
+              (t.Properties as { TableInput?: { Name?: string } })?.TableInput
+                ?.Name,
+          )
+          .filter((n): n is string => typeof n === "string")
+          .sort();
+        expect(names).toEqual(["cf_access_logs", "daily_usage"]);
+      });
+
+      it("raw table skips 2 header lines + TAB delim + 33 CF columns", () => {
+        const tables = template.findResources("AWS::Glue::Table");
+        const raw = Object.values(tables).find(
+          (t) =>
+            (t.Properties as { TableInput?: { Name?: string } })?.TableInput
+              ?.Name === "cf_access_logs",
+        );
+        const ti = (raw?.Properties as { TableInput?: Record<string, unknown> })
+          ?.TableInput as {
+          Parameters?: Record<string, string>;
+          StorageDescriptor?: {
+            Columns?: unknown[];
+            SerdeInfo?: { Parameters?: Record<string, string> };
+          };
+        };
+        expect(ti?.Parameters?.["skip.header.line.count"]).toBe("2");
+        expect(
+          ti?.StorageDescriptor?.SerdeInfo?.Parameters?.["field.delim"],
+        ).toBe("\t");
+        expect(ti?.StorageDescriptor?.Columns).toHaveLength(33);
+      });
+
+      it("daily_usage is partition-projected on dt with the literal dt template", () => {
+        const tables = template.findResources("AWS::Glue::Table");
+        const daily = Object.values(tables).find(
+          (t) =>
+            (t.Properties as { TableInput?: { Name?: string } })?.TableInput
+              ?.Name === "daily_usage",
+        );
+        const ti = (
+          daily?.Properties as { TableInput?: Record<string, unknown> }
+        )?.TableInput as {
+          Parameters?: Record<string, string>;
+          PartitionKeys?: Array<{ Name: string; Type: string }>;
+          StorageDescriptor?: { Columns?: Array<{ Name: string }> };
+        };
+        expect(ti?.Parameters?.["projection.enabled"]).toBe("true");
+        // Regression guard: the ${dt} literal must NOT be interpolated away.
+        // The template is an Fn::Join (the analytics bucket name is a
+        // CFN-generated Ref), so serialize it and grep the literal fragment.
+        expect(
+          JSON.stringify(ti?.Parameters?.["storage.location.template"]),
+        ).toContain("dt=${dt}/");
+        expect(ti?.PartitionKeys).toEqual([{ Name: "dt", Type: "string" }]);
+        const cols = (ti?.StorageDescriptor?.Columns ?? []).map((c) => c.Name);
+        expect(cols).toEqual(["metric", "dimension", "cnt"]);
+      });
+
+      // ---- Athena ----------------------------------------------------
+      it("creates the env-suffixed workgroup enforcing config + SSE-S3 + bytes cap", () => {
+        template.resourceCountIs("AWS::Athena::WorkGroup", 1);
+        template.hasResourceProperties("AWS::Athena::WorkGroup", {
+          Name: `sps-usage-${env}`,
+          WorkGroupConfiguration: {
+            EnforceWorkGroupConfiguration: true,
+            PublishCloudWatchMetricsEnabled: true,
+            BytesScannedCutoffPerQuery: 1073741824,
+            ResultConfiguration: {
+              EncryptionConfiguration: { EncryptionOption: "SSE_S3" },
+            },
+          },
+        });
+      });
+
+      it("creates the six saved marketing named queries", () => {
+        template.resourceCountIs("AWS::Athena::NamedQuery", 6);
+        const qs = template.findResources("AWS::Athena::NamedQuery");
+        const names = Object.values(qs)
+          .map((q) => (q.Properties as { Name?: string })?.Name)
+          .filter((n): n is string => typeof n === "string")
+          .sort();
+        expect(names).toEqual(
+          [
+            `sps-usage-daily-pageviews-${env}`,
+            `sps-usage-device-${env}`,
+            `sps-usage-geo-${env}`,
+            `sps-usage-referrers-${env}`,
+            `sps-usage-search-terms-${env}`,
+            `sps-usage-top-profiles-${env}`,
+          ].sort(),
+        );
+      });
+
+      // ---- Lambda ----------------------------------------------------
+      it("creates exactly one rollup Lambda (no logRetention custom resource)", () => {
+        template.resourceCountIs("AWS::Lambda::Function", 1);
+        template.hasResourceProperties("AWS::Lambda::Function", {
+          FunctionName: `sps-cf-usage-rollup-${env}`,
+          Runtime: "nodejs22.x",
+          Handler: "index.handler",
+          MemorySize: 256,
+          Timeout: 600,
+        });
+      });
+
+      it("Lambda owns one explicit log group (3-month retention)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 1);
+        template.hasResourceProperties("AWS::Logs::LogGroup", {
+          LogGroupName: `/aws/lambda/sps-cf-usage-rollup-${env}`,
+          RetentionInDays: 90,
+        });
+      });
+
+      it("rollup IAM never grants s3:* or athena:* (least-priv)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        for (const p of Object.values(policies)) {
+          const stmts = (
+            p.Properties as {
+              PolicyDocument?: { Statement?: Array<{ Action?: unknown }> };
+            }
+          ).PolicyDocument?.Statement;
+          for (const stmt of stmts ?? []) {
+            const actions = Array.isArray(stmt.Action)
+              ? stmt.Action
+              : [stmt.Action];
+            expect(actions).not.toContain("s3:*");
+            expect(actions).not.toContain("athena:*");
+            expect(actions).not.toContain("*");
+          }
+        }
+      });
+
+      // ---- EventBridge -----------------------------------------------
+      it("creates the nightly rollup rule, enabled per env config", () => {
+        template.resourceCountIs("AWS::Events::Rule", 1);
+        template.hasResourceProperties("AWS::Events::Rule", {
+          Name: `sps-cf-usage-rollup-${env}`,
+          ScheduleExpression: "cron(0 8 * * ? *)",
+          // staging usageRollupScheduleEnabled=true; prod=true (see config).
+          State: "ENABLED",
+        });
+      });
+
+      // ---- ASCII / descriptions --------------------------------------
+      it("all descriptions + named-query names are printable ASCII (Footgun #6)", () => {
+        const collect: string[] = [];
+        for (const [type, key] of [
+          ["AWS::Glue::Database", "DatabaseInput"],
+        ] as const) {
+          for (const r of Object.values(template.findResources(type))) {
+            const d = (
+              r.Properties as { [k: string]: { Description?: string } }
+            )?.[key]?.Description;
+            if (typeof d === "string") collect.push(d);
+          }
+        }
+        for (const r of Object.values(
+          template.findResources("AWS::Glue::Table"),
+        )) {
+          const d = (r.Properties as { TableInput?: { Description?: string } })
+            ?.TableInput?.Description;
+          if (typeof d === "string") collect.push(d);
+        }
+        for (const r of Object.values(
+          template.findResources("AWS::Athena::WorkGroup"),
+        )) {
+          const d = (r.Properties as { Description?: string })?.Description;
+          if (typeof d === "string") collect.push(d);
+        }
+        for (const r of Object.values(
+          template.findResources("AWS::Events::Rule"),
+        )) {
+          const d = (r.Properties as { Description?: string })?.Description;
+          if (typeof d === "string") collect.push(d);
+        }
+        for (const r of Object.values(
+          template.findResources("AWS::Athena::NamedQuery"),
+        )) {
+          const n = (r.Properties as { Name?: string })?.Name;
+          const d = (r.Properties as { Description?: string })?.Description;
+          if (typeof n === "string") collect.push(n);
+          if (typeof d === "string") collect.push(d);
+        }
+        expect(collect.length).toBeGreaterThan(0);
+        for (const s of collect) expect(s).toMatch(PRINTABLE_ASCII);
+      });
+    });
+  }
+});

@@ -171,6 +171,23 @@ export interface SpsEnvConfig {
   readonly etlTaskCpu: number;
   /** Fargate memory (MiB) for the ETL task family. */
   readonly etlTaskMemoryMiB: number;
+
+  // --- AnalyticsStack (the 9th stack) ---
+
+  /**
+   * Whether the EventBridge rule that fires the nightly CloudFront-usage
+   * rollup Lambda is enabled at deploy time. `true` in BOTH envs: the rollup
+   * is idempotent (it delete-then-inserts each dt partition) and cheap (it
+   * scans only the WCM-only pre-launch CF log volume), so leaving it on from
+   * the first deploy means the durable `daily_usage` history starts
+   * accumulating immediately -- and the rollups must survive the raw CF
+   * logs' 90-day expiry, so the earlier they start the more history we keep.
+   * Distinct from {@link etlSchedulesEnabled} (which ships prod disabled
+   * behind a runbook gate) because this rollup reads existing logs only and
+   * never starts an ETL run. Flip to `false` to ship the rollup paused
+   * without a code change.
+   */
+  readonly usageRollupScheduleEnabled: boolean;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -217,6 +234,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
     etlTaskCpu: 2048,
     etlTaskMemoryMiB: 8192,
+    // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
+    usageRollupScheduleEnabled: true,
   },
   prod: {
     envName: "prod",
@@ -265,6 +284,8 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // m6g.large.search domain already handles the bulk write rate.
     etlTaskCpu: 2048,
     etlTaskMemoryMiB: 8192,
+    // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
+    usageRollupScheduleEnabled: true,
   },
 };
 

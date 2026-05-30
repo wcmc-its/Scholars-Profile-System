@@ -2,6 +2,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
+import { EdgeStack } from "../lib/edge-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { makeFixture } from "./test-utils";
@@ -42,6 +43,11 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     etlSecurityGroup: network.etlSecurityGroup,
     albSecurityGroup: network.albSecurityGroup,
   });
+  const edge = new EdgeStack(fixture.app, `Sps-Edge-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    publicAlb: app.publicAlb,
+  });
   const stack = new SpsObservabilityStack(
     fixture.app,
     `Sps-Observability-${envName}`,
@@ -50,6 +56,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
       envConfig: fixture.envConfig,
       appStack: app,
       dataStack: data,
+      edgeStack: edge,
     },
   );
   return {
@@ -639,6 +646,63 @@ describe("SpsObservabilityStack", () => {
     it("emits the OncallRelayFunctionArn CFN output", () => {
       template.hasOutput("OncallRelayFunctionArn", {});
     });
+
+    // --------------------------------------------------------------------
+    // Build A -- reliability dashboard
+    // --------------------------------------------------------------------
+    it("creates exactly one reliability dashboard", () => {
+      template.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+    });
+
+    it("dashboard name carries the env literal (Footgun #4)", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Dashboard", {
+        DashboardName: "sps-reliability-prod",
+      });
+    });
+
+    it("dashboard body references a metric token for every surface", () => {
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const body = Object.values(dashboards)[0]?.Properties?.DashboardBody;
+      // DashboardBody is an Fn::Join of literal JSON fragments + token refs
+      // (the CloudFront DistributionId import etc.); metric NAMES are always
+      // literals. Serialize the whole structure and grep the literals.
+      const serialized = JSON.stringify(body);
+      expect(serialized).toContain("TargetResponseTime"); // ALB latency
+      expect(serialized).toContain("RequestCount"); // ALB traffic
+      expect(serialized).toContain("HTTPCode_Target_5XX_Count"); // ALB 5xx
+      expect(serialized).toContain("AWS/CloudFront"); // CF namespace
+      expect(serialized).toContain("TotalErrorRate"); // CF error rate
+      expect(serialized).toContain("CPUUtilization"); // ECS + Aurora CPU
+      expect(serialized).toContain("DatabaseConnections"); // Aurora connections
+      expect(serialized).toContain("SelectLatency"); // Aurora select latency
+      expect(serialized).toContain("RunningTaskCount"); // ECS tasks
+    });
+
+    it("CloudFront dashboard metrics carry the mandatory Region=Global dimension and us-east-1 pin", () => {
+      // Regression guard: the L2 distribution.metric* helpers omit Region in
+      // 2.254 (empty graph). cfMetric() must set Region: "Global" + region pin.
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const serialized = JSON.stringify(
+        Object.values(dashboards)[0]?.Properties?.DashboardBody,
+      );
+      // The dashboard body is an Fn::Join, so after JSON.stringify the
+      // dimension key surfaces as the escaped token `\"Region\"`; assert on
+      // the bare token (same convention as the metric-name greps above).
+      expect(serialized).toContain("Region");
+      expect(serialized).toContain("Global");
+      expect(serialized).toContain("us-east-1");
+    });
+
+    it("dashboard name is printable ASCII (Footgun #6)", () => {
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const name = (
+        Object.values(dashboards)[0]?.Properties as
+          | { DashboardName?: string }
+          | undefined
+      )?.DashboardName;
+      expect(name).toBeDefined();
+      expect(name!).toMatch(PRINTABLE_ASCII);
+    });
   });
 
   // ----------------------------------------------------------------------
@@ -829,6 +893,63 @@ describe("SpsObservabilityStack", () => {
         .filter((s): s is string => typeof s === "string");
       expect(services).not.toContain("budgets.amazonaws.com");
       expect(services).not.toContain("costalerts.amazonaws.com");
+    });
+
+    // --------------------------------------------------------------------
+    // Build A -- reliability dashboard
+    // --------------------------------------------------------------------
+    it("creates exactly one reliability dashboard", () => {
+      template.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+    });
+
+    it("dashboard name carries the env literal (Footgun #4)", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Dashboard", {
+        DashboardName: "sps-reliability-staging",
+      });
+    });
+
+    it("dashboard body references a metric token for every surface", () => {
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const body = Object.values(dashboards)[0]?.Properties?.DashboardBody;
+      // DashboardBody is an Fn::Join of literal JSON fragments + token refs
+      // (the CloudFront DistributionId import etc.); metric NAMES are always
+      // literals. Serialize the whole structure and grep the literals.
+      const serialized = JSON.stringify(body);
+      expect(serialized).toContain("TargetResponseTime"); // ALB latency
+      expect(serialized).toContain("RequestCount"); // ALB traffic
+      expect(serialized).toContain("HTTPCode_Target_5XX_Count"); // ALB 5xx
+      expect(serialized).toContain("AWS/CloudFront"); // CF namespace
+      expect(serialized).toContain("TotalErrorRate"); // CF error rate
+      expect(serialized).toContain("CPUUtilization"); // ECS + Aurora CPU
+      expect(serialized).toContain("DatabaseConnections"); // Aurora connections
+      expect(serialized).toContain("SelectLatency"); // Aurora select latency
+      expect(serialized).toContain("RunningTaskCount"); // ECS tasks
+    });
+
+    it("CloudFront dashboard metrics carry the mandatory Region=Global dimension and us-east-1 pin", () => {
+      // Regression guard: the L2 distribution.metric* helpers omit Region in
+      // 2.254 (empty graph). cfMetric() must set Region: "Global" + region pin.
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const serialized = JSON.stringify(
+        Object.values(dashboards)[0]?.Properties?.DashboardBody,
+      );
+      // The dashboard body is an Fn::Join, so after JSON.stringify the
+      // dimension key surfaces as the escaped token `\"Region\"`; assert on
+      // the bare token (same convention as the metric-name greps above).
+      expect(serialized).toContain("Region");
+      expect(serialized).toContain("Global");
+      expect(serialized).toContain("us-east-1");
+    });
+
+    it("dashboard name is printable ASCII (Footgun #6)", () => {
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const name = (
+        Object.values(dashboards)[0]?.Properties as
+          | { DashboardName?: string }
+          | undefined
+      )?.DashboardName;
+      expect(name).toBeDefined();
+      expect(name!).toMatch(PRINTABLE_ASCII);
     });
   });
 });
