@@ -57,6 +57,9 @@ seed-output/
 !data/
 data/*
 !data/vivo-redirects.json
+# Exception: hand-built VIVO org-unit redirect crosswalk (runbook D-10..D-13).
+# Reviewed by PR like data/vivo-redirects.json; consumed by etl:vivo-redirect.
+!data/vivo-org-redirects.json
 # Exception: the SEO rank-tracker query basket is the fixed instrument that
 # makes before/after comparable, so it is committed and reviewed. SerpAPI
 # *output* (data/seo/snapshots/*, any rank-diff.csv) stays ignored — it can be
