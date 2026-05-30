@@ -441,27 +441,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::EC2::SecurityGroupIngress",
     },
-    "AuroraSecurityGroupfromSpsDataprodDbBootstrapSeederSg4CBE4B4D33065911FAD2": {
-      "Properties": {
-        "Description": "db-bootstrap seeder Lambda to Aurora (CREATE USER + GRANT)",
-        "FromPort": 3306,
-        "GroupId": {
-          "Fn::GetAtt": [
-            "AuroraSecurityGroup75F699F6",
-            "GroupId",
-          ],
-        },
-        "IpProtocol": "tcp",
-        "SourceSecurityGroupId": {
-          "Fn::GetAtt": [
-            "DbBootstrapSeederSg35FF8349",
-            "GroupId",
-          ],
-        },
-        "ToPort": 3306,
-      },
-      "Type": "AWS::EC2::SecurityGroupIngress",
-    },
     "AuroraSecurityGroupfromSpsNetworkprodAppSecurityGroupCFA0D3063306972DA0A5": {
       "Properties": {
         "Description": "ECS app tasks to Aurora writer/reader endpoints",
@@ -692,7 +671,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "c3e8fe452dcf35a798a5853b9a3797129ce8ae874b0afae0e2f6e3a010f76ecc.zip",
+          "S3Key": "29cda965fdc939c261a73a11e1ffef28bc608579d55bd1931377090e3d6b0e58.zip",
         },
         "Environment": {
           "Variables": {
@@ -744,10 +723,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
         "VpcConfig": {
           "SecurityGroupIds": [
             {
-              "Fn::GetAtt": [
-                "DbBootstrapSeederSg35FF8349",
-                "GroupId",
-              ],
+              "Fn::ImportValue": "Sps-Network-prod:ExportsOutputFnGetAttEtlSecurityGroup5D059AE5GroupId2BECA072",
             },
           ],
           "SubnetIds": [
@@ -1012,22 +988,6 @@ exports[`DataStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFormation::CustomResource",
       "UpdateReplacePolicy": "Delete",
-    },
-    "DbBootstrapSeederSg35FF8349": {
-      "Properties": {
-        "GroupDescription": "SPS db-bootstrap seeder Lambda (prod)",
-        "SecurityGroupEgress": [
-          {
-            "CidrIp": "0.0.0.0/0",
-            "Description": "Allow all outbound traffic by default",
-            "IpProtocol": "-1",
-          },
-        ],
-        "VpcId": {
-          "Fn::ImportValue": "Sps-Network-prod:ExportsOutputRefVpc8378EB38272D6E3A",
-        },
-      },
-      "Type": "AWS::EC2::SecurityGroup",
     },
     "ExportsReader8B249524": {
       "DeletionPolicy": "Delete",

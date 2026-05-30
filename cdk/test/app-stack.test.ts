@@ -143,6 +143,39 @@ describe("AppStack", () => {
         expect(types.filter((t) => t === "Gateway")).toHaveLength(1);
       });
 
+      it("the interface-endpoint SG admits :443 from the app + ETL SGs (load-bearing for the #493 seeder)", () => {
+        // Private DNS routes every in-VPC Secrets Manager call to this endpoint,
+        // so a Lambda can only reach SM if its SG is admitted here on 443. The
+        // #493 db-bootstrap seeder (DataStack) reuses the ETL SG precisely
+        // because of this ingress -- and it cannot be given a dedicated SG, as
+        // this endpoint SG lives downstream of DataStack and could not bless it.
+        // If either rule is dropped, the seeder silently hangs on master read.
+        const descriptions: string[] = [];
+        for (const sg of Object.values(
+          template.findResources("AWS::EC2::SecurityGroup"),
+        )) {
+          for (const r of (sg.Properties?.SecurityGroupIngress ?? []) as Array<
+            Record<string, unknown>
+          >) {
+            if (r.FromPort === 443 && r.ToPort === 443)
+              descriptions.push(String(r.Description));
+          }
+        }
+        for (const r of Object.values(
+          template.findResources("AWS::EC2::SecurityGroupIngress"),
+        )) {
+          const p = r.Properties ?? {};
+          if (p.FromPort === 443 && p.ToPort === 443)
+            descriptions.push(String(p.Description));
+        }
+        expect(
+          descriptions.some((d) => d.includes("App SG to interface endpoints")),
+        ).toBe(true);
+        expect(
+          descriptions.some((d) => d.includes("ETL SG to interface endpoints")),
+        ).toBe(true);
+      });
+
       it("emits no VPC endpoint with a `.es` service name (deploy-only-validation guard, #429)", () => {
         // CFN only validates VPC endpoint ServiceName strings against the
         // regional service catalog at deploy time. `com.amazonaws.<region>.es`
