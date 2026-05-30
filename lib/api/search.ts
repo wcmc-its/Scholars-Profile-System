@@ -390,6 +390,18 @@ export async function searchPeople(opts: {
    * `false` so the rollout is opt-in.
    */
   deptLeadershipBoost?: boolean;
+  /**
+   * Perf — count-only mode for the inactive search tabs. The /search page
+   * runs all three corpora on every request, but the two tabs the user
+   * isn't viewing need only their total for the "{n} people · {n} pubs ·
+   * {n} funding" subhead + tab badges. When true, skip the facet
+   * aggregations, scoring, highlighting, and hit emission and return just
+   * `total` (with empty hits/facets). `hits.total.value` is computed from
+   * the query predicate, so the count is identical to the full search;
+   * `post_filter` and scoring don't affect the total, so omitting them is
+   * safe. Headless callers default to a full search.
+   */
+  countOnly?: boolean;
 }): Promise<PeopleSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -741,6 +753,39 @@ export async function searchPeople(opts: {
   const queryFilter: Record<string, unknown>[] = [];
   if (sparseClause) queryFilter.push(sparseClause);
   if (topicClause) queryFilter.push(topicClause);
+
+  // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
+  // the query predicate (must + always-on filters); scoring, post_filter,
+  // aggs, and highlight don't change it, so a bare size:0 query returns the
+  // same total the full search would, far cheaper. Returns the same empty
+  // shape as the no-topic short-circuit above.
+  if (opts.countOnly) {
+    const countResp = await searchClient().search({
+      index: PEOPLE_INDEX,
+      body: {
+        size: 0,
+        track_total_hits: true,
+        query: { bool: { must, filter: queryFilter } },
+      } as object,
+    });
+    const total =
+      (countResp.body as unknown as { hits: { total: { value: number } } })
+        .hits.total.value;
+    return {
+      hits: [],
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      queryShape,
+      attributionBoostFired: null,
+      facets: {
+        deptDivs: [],
+        personTypes: [],
+        activity: { hasGrants: 0, recentPub: 0 },
+        pi: { none: 0, any: 0, active: 0, multi: 0 },
+      },
+    };
+  }
 
   const userAxisFilters: Record<string, unknown>[] = [];
   if (deptDivClause) userAxisFilters.push(deptDivClause);
@@ -1169,6 +1214,14 @@ export async function searchPublications(opts: {
    * and `app/(public)/search/page.tsx` via `parseMeshParam`.
    */
   meshStrict?: boolean;
+  /**
+   * Perf — count-only mode for the inactive search tabs. See the
+   * `searchPeople` `countOnly` doc: skips the facet aggregations and the
+   * Prisma author/co-author hydration (the dominant cost on this corpus),
+   * returning just `total` for the tab badge. The total is computed from
+   * the same query predicate, so the badge is identical to a full search.
+   */
+  countOnly?: boolean;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -1494,6 +1547,58 @@ export async function searchPublications(opts: {
     return { bool: { must, filter } };
   };
 
+  const query = {
+    bool: {
+      // §5.2 — `concept_expanded` admission lives entirely in the
+      // top-level should, so `must` is empty in that branch. Spread
+      // conditionally so the body omits the `must` key (matches SPEC
+      // §5.2's literal). Strict / §1.2 paths always populate `must`,
+      // so this is a no-op for them — strict-mode body remains
+      // byte-identical to pre-PR-3 (§7.2 rollback target).
+      ...(must.length > 0 ? { must } : {}),
+      // §1.6 — top-level BM25 scoring clause under strict modes; empty
+      // array spreads to nothing so the §1.2 path produces a byte-
+      // identical body.
+      ...(topLevelShould.length > 0 ? { should: topLevelShould } : {}),
+      // §5.2 — minimum_should_match: 1 only under `concept_expanded`
+      // (the only shape where should-as-admission carries msm at the
+      // outer bool). Strict-mode top-level `should` is BM25-scoring-
+      // only; adding msm there would break the §7.2 byte-identical
+      // guarantee.
+      ...(queryShape === "concept_expanded" ? { minimum_should_match: 1 } : {}),
+    },
+  };
+
+  // Perf — count-only fast path (inactive tab). Same `query` as the full
+  // body, so the badge total is identical; skips the facet aggregations and
+  // the Prisma author / co-author hydration below.
+  if (opts.countOnly) {
+    const countResp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: { size: 0, track_total_hits: true, query } as object,
+    });
+    const total =
+      (countResp.body as unknown as { hits: { total: { value: number } } })
+        .hits.total.value;
+    return {
+      hits: [],
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      queryShape,
+      meshDescendantSetSize: resolution?.descendantUis.length ?? null,
+      meshAnchorCount: resolution?.curatedTopicAnchors.length ?? null,
+      facets: {
+        publicationTypes: [],
+        journals: [],
+        wcmAuthorRoles: { first: 0, senior: 0, middle: 0 },
+        wcmAuthors: [],
+        wcmAuthorsTotal: 0,
+        mentoringPrograms: { md: 0, mdphd: 0, phd: 0, postdoc: 0, ecr: 0 },
+      },
+    };
+  }
+
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
@@ -1503,29 +1608,7 @@ export async function searchPublications(opts: {
     // counts a few thousand extra docs on broad queries, but it's needed
     // for an accurate count line.
     track_total_hits: true,
-    query: {
-      bool: {
-        // §5.2 — `concept_expanded` admission lives entirely in the
-        // top-level should, so `must` is empty in that branch. Spread
-        // conditionally so the body omits the `must` key (matches SPEC
-        // §5.2's literal). Strict / §1.2 paths always populate `must`,
-        // so this is a no-op for them — strict-mode body remains
-        // byte-identical to pre-PR-3 (§7.2 rollback target).
-        ...(must.length > 0 ? { must } : {}),
-        // §1.6 — top-level BM25 scoring clause under strict modes; empty
-        // array spreads to nothing so the §1.2 path produces a byte-
-        // identical body.
-        ...(topLevelShould.length > 0 ? { should: topLevelShould } : {}),
-        // §5.2 — minimum_should_match: 1 only under `concept_expanded`
-        // (the only shape where should-as-admission carries msm at the
-        // outer bool). Strict-mode top-level `should` is BM25-scoring-
-        // only; adding msm there would break the §7.2 byte-identical
-        // guarantee.
-        ...(queryShape === "concept_expanded"
-          ? { minimum_should_match: 1 }
-          : {}),
-      },
-    },
+    query,
     // post_filter applies all user-axis filters to hits AFTER the
     // aggregations run, so each per-facet agg can compute correct
     // excluding-self counts (see searchPeople for the rationale).

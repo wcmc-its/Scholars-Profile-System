@@ -95,7 +95,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // Issue #294 PR-5 — time the taxonomy resolver. `taxonomyMatchMs` is null
   // when q is under 3 chars: the resolver call is skipped entirely, so the
   // log records "skipped" rather than a misleading ~0ms measurement.
-  const [azBuckets, taxonomyTimed] = await Promise.all([
+  const [azBuckets, taxonomyTimed, peopleClassifierSets] = await Promise.all([
     showAZ ? getAZBuckets() : Promise.resolve(null),
     q.trim().length >= 3
       ? timed(() => matchQueryToTaxonomy(q))
@@ -103,6 +103,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           result: { state: "none" as const, meshResolution: null },
           ms: null,
         }),
+    // Perf — boot-cached classifier sets fetched in parallel with the
+    // taxonomy resolver rather than sequentially after it. The two are
+    // independent; only the synchronous classify() below consumes both.
+    getPeopleClassifierSets(),
   ]);
   const taxonomyMatch = taxonomyTimed.result;
   const taxonomyMatchMs = taxonomyTimed.ms;
@@ -198,7 +202,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // server-rendered people tab would stay on the legacy body after the flip
   // while client-side requests went v3. Classifier sets are boot-cached.
   const peopleRelevanceMode = resolvePeopleRelevanceMode();
-  const peopleClassifierSets = await getPeopleClassifierSets();
+  // `peopleClassifierSets` is resolved in the parallel block above (Perf).
   const peopleQueryShape = classifyPeopleQuery({
     query: q,
     meshResolved: taxonomyMatch.meshResolution != null,
@@ -227,6 +231,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // Issue #532 — env-gated dept-shape leadership boost (also resolved
       // on the SSR path so this result set ranks identically to /api/search).
       deptLeadershipBoost: resolveDeptLeadershipBoost(),
+      // Perf — the two tabs the user isn't viewing need only their total for
+      // the subhead + tab badge, so skip facets/scoring/hydration for them.
+      countOnly: type !== "people",
     }),
     searchPublications({
       q,
@@ -254,6 +261,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // §6.2 — chip-engaged narrow-mode opt-in (`?mesh=strict`). Forces
       // strict-mode admission under flag = `expanded`.
       meshStrict,
+      // Perf — count-only when publications isn't the active tab.
+      countOnly: type !== "publications",
     }),
     searchFunding({
       q,
@@ -265,6 +274,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // `effectiveMeshResolution` (honors `?mesh=off`) passed to
       // searchPublications above.
       meshResolution: effectiveMeshResolution,
+      // Perf — count-only when funding isn't the active tab.
+      countOnly: type !== "funding",
     }),
   ]);
   const searchesMs = Math.round(performance.now() - searchesStart);
