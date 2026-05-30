@@ -145,7 +145,7 @@ describe("assertInsertOnlyAuditGrant (#102 criterion)", () => {
 });
 
 describe("bootstrap", () => {
-  function fakeConn(grantLines: string[]): SqlConn & { calls: string[] } {
+  function fakeConn(grantLines: string[] = []): SqlConn & { calls: string[] } {
     const calls: string[] = [];
     return {
       calls,
@@ -160,21 +160,26 @@ describe("bootstrap", () => {
     };
   }
 
-  it("applies every DDL statement, then the grant, then verifies", async () => {
-    const conn = fakeConn([
+  it("applies DDL + grant on the bootstrap conn, then verifies on the grantee conn", async () => {
+    const conn = fakeConn();
+    const verifyConn = fakeConn([
       "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
     ]);
-    await bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app" });
+    await bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn });
 
     const ddl = extractStatements(AUDIT_SQL);
-    // DDL (3) + GRANT (1) + SHOW GRANTS (1)
-    expect(conn.calls).toHaveLength(ddl.length + 2);
-    expect(conn.calls.slice(0, ddl.length)).toEqual(ddl);
-    expect(conn.calls[ddl.length]).toBe(buildGrantSql("sps_app"));
-    expect(conn.calls[ddl.length + 1]).toMatch(/^SHOW GRANTS FOR 'sps_app'@'%'/);
+    // The privileged connection runs exactly the DDL + the GRANT, and NO
+    // `SHOW GRANTS`: the least-priv bootstrap user cannot read app-rw's grants,
+    // so verification moved to the grantee's own connection.
+    expect(conn.calls).toEqual([...ddl, buildGrantSql("sps_app")]);
+    expect(conn.calls.some((c) => /^SHOW GRANTS/i.test(c))).toBe(false);
+    // Verification runs as the grantee itself (CURRENT_USER), never as a named
+    // account (which would need SELECT on mysql.user).
+    expect(verifyConn.calls).toEqual(["SHOW GRANTS FOR CURRENT_USER()"]);
   });
 
   it("fails-closed: a DDL error propagates (non-zero exit upstream)", async () => {
+    const verifyConn = fakeConn();
     const conn: SqlConn = {
       query: vi.fn(async (sql: string) => {
         if (/CREATE TABLE/i.test(sql)) throw new Error("CREATE command denied");
@@ -182,17 +187,18 @@ describe("bootstrap", () => {
       }),
       end: vi.fn(async () => {}),
     };
-    await expect(bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app" })).rejects.toThrow(
-      /CREATE command denied/,
-    );
+    await expect(
+      bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+    ).rejects.toThrow(/CREATE command denied/);
   });
 
   it("fails-closed: a non-INSERT-only verification result throws", async () => {
-    const conn = fakeConn([
+    const conn = fakeConn();
+    const verifyConn = fakeConn([
       "GRANT INSERT, DELETE ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
     ]);
-    await expect(bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app" })).rejects.toThrow(
-      /forbidden privilege on scholars_audit/,
-    );
+    await expect(
+      bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+    ).rejects.toThrow(/forbidden privilege on scholars_audit/);
   });
 });
