@@ -47,6 +47,9 @@ seed-output/
 # Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
 # so curation-team edits flow through PR review.
 !etl/mesh-anchors/curated.csv
+# Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
+# in so the baseline isn't a secondary analysis. Public URLs only (no PII).
+!docs/data/vivo-pageview-baseline/*.csv
 # Exception: B14 legacy-VIVO redirect set is build-time generated from ED
 # (scripts/etl/generate-vivo-redirect-set.ts) and consumed by middleware as
 # a static import. The file is intentionally checked in so prod deploys
@@ -54,6 +57,9 @@ seed-output/
 !data/
 data/*
 !data/vivo-redirects.json
+# Exception: hand-built VIVO org-unit redirect crosswalk (runbook D-10..D-13).
+# Reviewed by PR like data/vivo-redirects.json; consumed by etl:vivo-redirect.
+!data/vivo-org-redirects.json
 # Exception: the SEO rank-tracker query basket is the fixed instrument that
 # makes before/after comparable, so it is committed and reviewed. SerpAPI
 # *output* (data/seo/snapshots/*, any rank-diff.csv) stays ignored — it can be
