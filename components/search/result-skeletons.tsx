@@ -70,3 +70,58 @@ export function FundingResultSkeleton() {
     </div>
   );
 }
+
+/** Mirrors the FacetSidebar <aside> — "Filters" header + facet groups. */
+export function FacetRailSkeleton() {
+  return (
+    <aside className="text-[13px]">
+      <div className="mb-4">
+        <Skeleton className="h-3 w-16" />
+      </div>
+      {[5, 4, 3].map((rowCount, group) => (
+        <div key={group} className="mb-5 space-y-2.5">
+          <Skeleton className="h-3 w-32" />
+          {Array.from({ length: rowCount }).map((_, row) => (
+            <Skeleton key={row} className="h-3 w-full" />
+          ))}
+        </div>
+      ))}
+    </aside>
+  );
+}
+
+/**
+ * Issue #610-followup (perf streaming) — the two grid children (facet rail +
+ * results column) shown as the inner <Suspense> fallback while the active
+ * tab's full faceted search streams in. The page renders this inside the
+ * existing `md:grid-cols-[240px_1fr]` grid, so it must emit exactly the same
+ * two-column shape the real results components do (`<FacetSidebar/>` +
+ * `<section>`). Row skeleton matches the active tab so the swap to real
+ * content barely shifts. Mirrors the static markup in /search/loading.tsx.
+ */
+export function ResultsGridFallback({
+  type,
+}: {
+  type: "people" | "publications" | "funding";
+}) {
+  const Row =
+    type === "publications"
+      ? PublicationResultSkeleton
+      : type === "funding"
+        ? FundingResultSkeleton
+        : PeopleResultSkeleton;
+  return (
+    <>
+      <FacetRailSkeleton />
+      <section>
+        <div className="mb-2 flex items-center justify-between border-b border-[#e3e2dd] pb-3">
+          <Skeleton className="h-3 w-44" />
+          <Skeleton className="h-3 w-36" />
+        </div>
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <Row key={i} />
+        ))}
+      </section>
+    </>
+  );
+}

@@ -12,6 +12,7 @@ import { AuthorFacet } from "@/components/search/author-facet";
 import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
+import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
 import { ConceptChip } from "@/components/search/concept-chip";
@@ -49,7 +50,7 @@ import {
 import { FundingResultsList } from "@/components/search/funding-results-list";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
-import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
 import { timed } from "@/lib/api/search-timing";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -211,6 +212,11 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     knownDepartments: peopleClassifierSets.departments,
   });
 
+  // Tab badge counts for all three corpora, count-only (size:0, no aggs, no
+  // hydration). The active tab's hits + facets come from a separate full search
+  // streamed inside <Suspense> below, so the shell (header, chip, tabs, counts)
+  // paints without waiting on the faceted query. `hits.total.value` is computed
+  // from the same query predicate, so these badge counts equal a full search.
   const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
@@ -228,12 +234,12 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
       meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
-      // Issue #532 — env-gated dept-shape leadership boost (also resolved
-      // on the SSR path so this result set ranks identically to /api/search).
+      // Issue #532 — env-gated dept-shape leadership boost (kept so the count
+      // matches the streamed full search's predicate; it's a scoring function
+      // and doesn't change the total, but passing it keeps the calls aligned).
       deptLeadershipBoost: resolveDeptLeadershipBoost(),
-      // Perf — the two tabs the user isn't viewing need only their total for
-      // the subhead + tab badge, so skip facets/scoring/hydration for them.
-      countOnly: type !== "people",
+      // Perf — badge count only; the people tab's full result streams below.
+      countOnly: true,
     }),
     searchPublications({
       q,
@@ -261,8 +267,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // §6.2 — chip-engaged narrow-mode opt-in (`?mesh=strict`). Forces
       // strict-mode admission under flag = `expanded`.
       meshStrict,
-      // Perf — count-only when publications isn't the active tab.
-      countOnly: type !== "publications",
+      // Perf — badge count only; the pub tab's full result streams below.
+      countOnly: true,
     }),
     searchFunding({
       q,
@@ -274,53 +280,15 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // `effectiveMeshResolution` (honors `?mesh=off`) passed to
       // searchPublications above.
       meshResolution: effectiveMeshResolution,
-      // Perf — count-only when funding isn't the active tab.
-      countOnly: type !== "funding",
+      // Perf — badge count only; the funding tab's full result streams below.
+      countOnly: true,
     }),
   ]);
   const searchesMs = Math.round(performance.now() - searchesStart);
 
-  // Issue #274 — when the pub-tab concept search lands on zero hits, we
-  // want to offer the broad-text count as a concrete affordance. Run the
-  // fallback count only when the empty-state path can actually fire (pub
-  // tab, a MeSH resolution was applied, AND the main result is empty).
-  // This is a single extra OS query, paid only on the dead-end pages
-  // where the user is otherwise stuck staring at "no results".
-  let conceptEmptyBroadCount: number | null = null;
-  // Issue #294 PR-5 — `broadCountMs` times the #274 dead-end fallback count
-  // when it runs; null on every render where the fallback does not fire.
-  let broadCountMs: number | null = null;
-  if (
-    type === "publications" &&
-    effectiveMeshResolution &&
-    pubsResult.total === 0 &&
-    // SPEC §6.1 — empty state with broad-count CTA fires whenever the
-    // active shape gates on the resolved concept. `concept_expanded`
-    // doesn't gate (admission via top-level should), so it's excluded —
-    // expanded mode falls through to the generic empty state instead.
-    (pubsResult.queryShape === "concept_filtered" || pubsResult.queryShape === "concept_fallback")
-  ) {
-    const broadStart = performance.now();
-    const broad = await searchPublications({
-      q,
-      page: 0,
-      sort: "relevance",
-      filters: {
-        yearMin,
-        yearMax,
-        publicationType: publicationType || undefined,
-        journal: journal.length > 0 ? journal : undefined,
-        wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
-        wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
-        mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
-      },
-      // Suppress the resolution → falls through to the §1.2 shape, same
-      // as the user clicking "Search broadly instead" on the chip.
-      meshResolution: null,
-    });
-    conceptEmptyBroadCount = broad.total;
-    broadCountMs = Math.round(performance.now() - broadStart);
-  }
+  // Issue #274 — the concept-aware empty state (and its broad-count fallback
+  // search) now lives in PublicationsResults so it streams with the results
+  // instead of blocking this shell. See that component for the logic.
 
   // Issue #294 PR-5 — structured render-timing log. The /search page is a
   // Server Component and cannot set a Server-Timing response header (the
@@ -337,11 +305,15 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       pubCount: pubsResult.total,
       fundingCount: fundingResult.total,
       // Timing, whole ms. `taxonomyMatchMs` is null when q < 3 chars (the
-      // resolver is skipped); `searchesMs` is the parallel wall time of the
-      // three searches; `broadCountMs` is null unless the #274 fallback ran.
+      // resolver is skipped). `searchesMs` is now the parallel wall time of
+      // the three count-only badge queries (the active tab's full faceted
+      // search streams separately inside <Suspense>, so its latency shows in
+      // the /api/search route handler's per-function timing, not here).
+      // `broadCountMs` retired with the page-level #274 fallback (moved into
+      // PublicationsResults); kept as null so the log schema is stable.
       taxonomyMatchMs,
       searchesMs,
-      broadCountMs,
+      broadCountMs: null,
       // MeSH-resolution context — same field names as the route handler's
       // `search_query` log so the two streams join cleanly.
       meshResolutionDescriptorUi: taxonomyMatch.meshResolution?.descriptorUi ?? null,
@@ -431,56 +403,102 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       ) : null}
       <SearchTransitionProvider>
         <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
-          {type === "publications" ? (
-            <PublicationsResults
-              q={q}
-              page={page}
-              sort={sort as PublicationsSort}
-              yearMin={yearMin}
-              yearMax={yearMax}
-              publicationType={publicationType || undefined}
-              journal={journal}
-              wcmAuthorRole={wcmAuthorRole}
-              wcmAuthor={wcmAuthor}
-              mentoringProgram={mentoringProgram}
-              result={pubsResult}
-              conceptEmpty={
-                effectiveMeshResolution &&
-                pubsResult.total === 0 &&
-                // SPEC §6.1 row 2 — suppress the concept-aware empty state
-                // under default expanded mode; concept_expanded won't return
-                // 0 unless `mesh=off` would also. Fall through to the
-                // generic empty state in that case.
-                chipMode !== "expanded_default"
-                  ? {
-                      descriptorName: effectiveMeshResolution.name,
-                      broadCount: conceptEmptyBroadCount,
-                      broadenHref: buildMeshHref(sp, "off"),
-                    }
-                  : null
-              }
-            />
-          ) : type === "funding" ? (
-            <FundingResults
-              q={q}
-              page={page}
-              sort={sort as FundingSort}
-              filters={fundingFilters}
-              result={fundingResult}
-            />
-          ) : (
-            <PeopleResults
-              q={q}
-              page={page}
-              sort={sort as PeopleSort}
-              deptDiv={deptDiv}
-              personType={personType}
-              activity={activity}
-              pi={pi}
-              piMin={piMin}
-              result={peopleResult}
-            />
-          )}
+          {/* Perf streaming — the active tab's full faceted search runs inside
+              this Suspense boundary so the shell above (header, chip, tabs,
+              counts) paints first and the results grid fills in when ready. The
+              fallback mirrors the real two-column shape (facet rail + result
+              rows) to minimize layout shift. The result component awaits the
+              promise internally and so suspends here. */}
+          <React.Suspense
+            fallback={
+              <ResultsGridFallback
+                type={
+                  type === "publications"
+                    ? "publications"
+                    : type === "funding"
+                      ? "funding"
+                      : "people"
+                }
+              />
+            }
+          >
+            {type === "publications" ? (
+              <PublicationsResults
+                q={q}
+                page={page}
+                sort={sort as PublicationsSort}
+                yearMin={yearMin}
+                yearMax={yearMax}
+                publicationType={publicationType || undefined}
+                journal={journal}
+                wcmAuthorRole={wcmAuthorRole}
+                wcmAuthor={wcmAuthor}
+                mentoringProgram={mentoringProgram}
+                resultPromise={searchPublications({
+                  q,
+                  page,
+                  sort: sort as PublicationsSort,
+                  filters: {
+                    yearMin,
+                    yearMax,
+                    publicationType: publicationType || undefined,
+                    journal: journal.length > 0 ? journal : undefined,
+                    wcmAuthorRole:
+                      wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+                    wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+                    mentoringPrograms:
+                      mentoringProgram.length > 0 ? mentoringProgram : undefined,
+                  },
+                  meshResolution: effectiveMeshResolution,
+                  meshStrict,
+                })}
+                meshResolution={effectiveMeshResolution}
+                chipMode={chipMode}
+                broadenHref={buildMeshHref(sp, "off")}
+              />
+            ) : type === "funding" ? (
+              <FundingResults
+                q={q}
+                page={page}
+                sort={sort as FundingSort}
+                filters={fundingFilters}
+                resultPromise={searchFunding({
+                  q,
+                  page,
+                  sort: sort as FundingSort,
+                  filters: fundingFilters,
+                  meshResolution: effectiveMeshResolution,
+                })}
+              />
+            ) : (
+              <PeopleResults
+                q={q}
+                page={page}
+                sort={sort as PeopleSort}
+                deptDiv={deptDiv}
+                personType={personType}
+                activity={activity}
+                pi={pi}
+                piMin={piMin}
+                resultPromise={searchPeople({
+                  q,
+                  page,
+                  sort: sort as PeopleSort,
+                  filters: {
+                    deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+                    personType: personType.length > 0 ? personType : undefined,
+                    activity: activity.length > 0 ? activity : undefined,
+                    pi,
+                    piMin,
+                  },
+                  relevanceMode: peopleRelevanceMode,
+                  shape: peopleQueryShape,
+                  meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+                  deptLeadershipBoost: resolveDeptLeadershipBoost(),
+                })}
+              />
+            )}
+          </React.Suspense>
         </div>
       </SearchTransitionProvider>
     </main>
@@ -673,7 +691,7 @@ async function PeopleResults({
   activity,
   pi,
   piMin,
-  result,
+  resultPromise,
 }: {
   q: string;
   page: number;
@@ -683,9 +701,15 @@ async function PeopleResults({
   activity: ActivityFilter[];
   pi: PiFilter | undefined;
   piMin: number;
-  result: PeopleResultData;
+  /** Perf streaming — the active full search, awaited here so this component
+   *  suspends and the page shell (header + tabs + counts) paints first. */
+  resultPromise: Promise<PeopleResultData>;
 }) {
-  const deptDivLabelMap = await resolveDeptDivLabels();
+  // Overlap the search round-trip with the dept/div label lookup.
+  const [result, deptDivLabelMap] = await Promise.all([
+    resultPromise,
+    resolveDeptDivLabels(),
+  ]);
   // Two URL builders share one base. `resetPage` is true for any link that
   // changes the result set (toggle a facet, change sort, swap tab) — those
   // should land on page 0. Pagination links pass `resetPage: false` so the
@@ -880,8 +904,10 @@ async function PublicationsResults({
   wcmAuthorRole,
   wcmAuthor,
   mentoringProgram,
-  result,
-  conceptEmpty,
+  resultPromise,
+  meshResolution,
+  chipMode,
+  broadenHref,
 }: {
   q: string;
   page: number;
@@ -893,19 +919,63 @@ async function PublicationsResults({
   wcmAuthorRole: Array<"first" | "senior" | "middle">;
   wcmAuthor: string[];
   mentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
-  result: PubsResultData;
+  /** Perf streaming — see PeopleResults.resultPromise. */
+  resultPromise: Promise<PubsResultData>;
   /**
-   * Issue #274 — when populated, the empty state for the pub tab swaps for
-   * a concept-aware variant that names the resolved descriptor and offers
-   * a broad-search escape with a concrete result count. Null when the
-   * query didn't resolve to a MeSH concept or when there are non-zero hits.
+   * Issue #274 — concept-aware empty-state inputs. When the query resolved to
+   * a MeSH descriptor and the active concept shape gates on it, a zero-hit
+   * result swaps the generic empty state for one that names the descriptor and
+   * offers a broad-search escape with a concrete count. Computed below (after
+   * the result resolves) rather than passed in, so the broad-count fallback
+   * streams with the results instead of blocking the page shell.
    */
-  conceptEmpty: {
+  meshResolution: MeshResolution | null;
+  chipMode: "strict" | "expanded_default" | "expanded_narrow";
+  broadenHref: string;
+}) {
+  const result = await resultPromise;
+  // Issue #274 — concept-aware empty state (moved here from the page so the
+  // broad-count fallback streams with the results). Fires only when a
+  // descriptor resolved, the result is empty, and we're not in default-expanded
+  // mode (which admits via the top-level should and so doesn't gate on the
+  // concept). The broad-count CTA runs one extra text-only search, paid only on
+  // these dead-end pages.
+  let conceptEmpty: {
     descriptorName: string;
     broadCount: number | null;
     broadenHref: string;
-  } | null;
-}) {
+  } | null = null;
+  if (meshResolution && result.total === 0 && chipMode !== "expanded_default") {
+    let broadCount: number | null = null;
+    if (
+      result.queryShape === "concept_filtered" ||
+      result.queryShape === "concept_fallback"
+    ) {
+      const broad = await searchPublications({
+        q,
+        page: 0,
+        sort: "relevance",
+        filters: {
+          yearMin,
+          yearMax,
+          publicationType: publicationType || undefined,
+          journal: journal.length > 0 ? journal : undefined,
+          wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+          wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+          mentoringPrograms:
+            mentoringProgram.length > 0 ? mentoringProgram : undefined,
+        },
+        // Suppress the resolution → §1.2 shape, same as "Search broadly instead".
+        meshResolution: null,
+      });
+      broadCount = broad.total;
+    }
+    conceptEmpty = {
+      descriptorName: meshResolution.name,
+      broadCount,
+      broadenHref,
+    };
+  }
   const buildUrl = (
     mut: (sp: URLSearchParams) => void,
     { resetPage = true }: { resetPage?: boolean } = {},
@@ -1152,14 +1222,16 @@ async function FundingResults({
   page,
   sort,
   filters,
-  result,
+  resultPromise,
 }: {
   q: string;
   page: number;
   sort: FundingSort;
   filters: FundingFilters;
-  result: FundingResultData;
+  /** Perf streaming — see PeopleResults.resultPromise. */
+  resultPromise: Promise<FundingResultData>;
 }) {
+  const result = await resultPromise;
   const buildUrl = (
     mut: (sp: URLSearchParams) => void,
     { resetPage = true }: { resetPage?: boolean } = {},
