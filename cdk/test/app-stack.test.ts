@@ -96,19 +96,25 @@ describe("AppStack", () => {
         expect(schemes).toEqual(["internal", "internet-facing"]);
       });
 
-      it("creates the two task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
+      it("creates the three task-side IAM roles plus the GitHub Actions OIDC deploy role", () => {
         // Match by role name rather than raw count: in the owner env the OIDC
         // provider custom resource adds its own Lambda execution role, and any
         // env may carry other framework-generated roles. prod imports the
         // provider (issue #491) so has no such custom-resource role, but the
-        // name-based assertion holds either way.
+        // name-based assertion holds either way. The deploy execution role
+        // (sps-deploy-exec, ADR-009) is the third task-side role.
         const roles = template.findResources("AWS::IAM::Role");
         const roleNames = Object.values(roles)
           .map((r) => r.Properties?.RoleName as string | undefined)
           .filter((n): n is string => typeof n === "string")
           .sort();
         expect(roleNames).toEqual(
-          ["sps-deploy-prod", "sps-task-exec-prod", "sps-task-prod"].sort(),
+          [
+            "sps-deploy-prod",
+            "sps-deploy-exec-prod",
+            "sps-task-exec-prod",
+            "sps-task-prod",
+          ].sort(),
         );
       });
 
@@ -531,7 +537,7 @@ describe("AppStack", () => {
         expect(envByName.get("SAML_CWID_ATTRIBUTE")).toBe("CWID");
       });
 
-      it("the migration task definition has the prisma migrate deploy entrypoint and only the writer secret", () => {
+      it("the migration task runs prisma migrate deploy under the migrate DSN, never app-rw (ADR-009 Phase 2 / req 1)", () => {
         const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
         const migrate = Object.values(taskDefs).find(
           (r) => r.Properties?.Family === "sps-migrate-prod",
@@ -546,10 +552,19 @@ describe("AppStack", () => {
           "migrate",
           "deploy",
         ]);
-        const secretNames = (
-          container?.Secrets as Array<{ Name?: string }> | undefined
-        )?.map((s) => s.Name);
+        const secrets = container?.Secrets as
+          | Array<{ Name?: string; ValueFrom?: unknown }>
+          | undefined;
+        const secretNames = secrets?.map((s) => s.Name);
         expect(secretNames).toEqual(["DATABASE_URL"]);
+        // req 1 (synth guard): DATABASE_URL MUST resolve to the migrate DSN
+        // (scholars/<env>/db/migrate), never app-rw. The cutover is the whole
+        // point of Phase 2 -- migrations run as sps_migrate, not app_rw.
+        const valueFrom = JSON.stringify(
+          secrets?.find((s) => s.Name === "DATABASE_URL")?.ValueFrom,
+        );
+        expect(valueFrom).toContain("db/migrate");
+        expect(valueFrom).not.toContain("db/app-rw");
       });
 
       it("the db-bootstrap task runs the tsx runner on the ETL image with both DSNs (#493)", () => {
@@ -589,12 +604,12 @@ describe("AppStack", () => {
         expect(envByName.get("GRANTEE_HOST")).toBe("%");
       });
 
-      it("the verify-grants task runs the tsx verify on the ETL image with the three Phase 0 role DSNs (ADR-009)", () => {
+      it("the verify-grants task runs the tsx verify on the ETL image with all four role DSNs (ADR-009 Phase 2)", () => {
         // Synth-time guard (deploy-only-validation pattern): the grant-equality
         // verify runs scripts/verify-db-grants.ts on the ETL image (the only one
         // with tsx + source + the mariadb client), connects AS each role, and so
-        // must inject each role's own DSN. VERIFY_ROLES pins the Phase 0 set; the
-        // injected DSNs must cover exactly those roles (no silent skip).
+        // must inject each role's own DSN. Phase 2 adds sps_migrate; the injected
+        // DSNs must cover exactly the roles in VERIFY_ROLES (no silent skip).
         const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
         const verify = Object.values(taskDefs).find(
           (r) => r.Properties?.Family === "sps-verify-grants-prod",
@@ -608,13 +623,19 @@ describe("AppStack", () => {
         // ETL image, not the app image (same Join-over-ETL-repo-URI shape as
         // db-bootstrap).
         expect(JSON.stringify(container?.Image)).toMatch(/EtlEcrRepository/);
-        // A DSN per role named in VERIFY_ROLES -- app-ro, app-rw, sps_bootstrap.
+        // A DSN per role named in VERIFY_ROLES -- app-ro, app-rw, sps_migrate,
+        // sps_bootstrap (Phase 2 adds the migrate DSN).
         const secretNames = (
           container?.Secrets as Array<{ Name?: string }> | undefined
         )
           ?.map((s) => s.Name)
           .sort();
-        expect(secretNames).toEqual(["APP_RO_DSN", "APP_RW_DSN", "BOOTSTRAP_DSN"]);
+        expect(secretNames).toEqual([
+          "APP_RO_DSN",
+          "APP_RW_DSN",
+          "BOOTSTRAP_DSN",
+          "MIGRATE_DSN",
+        ]);
         const envByName = new Map(
           (
             (container?.Environment as
@@ -622,21 +643,27 @@ describe("AppStack", () => {
               | undefined) ?? []
           ).map((e) => [e.Name, e.Value]),
         );
-        expect(envByName.get("VERIFY_ROLES")).toBe("app-ro,app-rw,sps_bootstrap");
+        expect(envByName.get("VERIFY_ROLES")).toBe(
+          "app-ro,app-rw,sps_migrate,sps_bootstrap",
+        );
+        // No silent skip: one injected DSN per role named in VERIFY_ROLES.
+        const verifyRoles = envByName.get("VERIFY_ROLES") ?? "";
+        expect(secretNames).toHaveLength(verifyRoles.split(",").length);
       });
     });
 
     describe("IAM role split (B06)", () => {
-      it("the task-execution role policy lists exactly the eleven consumer secret ARNs for secretsmanager:GetSecretValue", () => {
+      it("the app task-execution role policy lists exactly the ten app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro,
-        // opensearch/app, revalidate-token, session-cookie-key, the SAML SP
-        // private key, etl/reciter (ReciterDB connection for funding/mentoring
-        // surfaces), saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // saml-sp/prod/cert (the SP public cert for metadata, #466),
-        // db/bootstrap (the least-priv db-bootstrap login, #493), and
+        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // revalidate-token, session-cookie-key, the SAML SP private key,
+        // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
+        // saml/idp-cert (the IdP signing-cert trust anchor, #466),
+        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
         // newrelic-license-key (the New Relic ingest key for the ADOT
-        // collector's otlphttp/newrelic exporter, B24).
+        // collector's otlphttp/newrelic exporter, B24). ADR-009 moved
+        // db/bootstrap to the deploy execution role and keeps db/migrate off
+        // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -659,10 +686,110 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(11);
+        expect(resourceList).toHaveLength(10);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+        }
+      });
+
+      it("the deploy execution role can read exactly the four deploy DSNs -- app-ro, app-rw, bootstrap, migrate (ADR-009)", () => {
+        // The parallel deploy-time execution role (migrate / verify-grants /
+        // db-bootstrap). Its GetSecretValue resource list is exactly these four;
+        // the migrate DSN lives here and -- per the req-4 test below -- nowhere
+        // else.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployExecPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" && r.Ref.includes("DeployExecutionRole"),
+          );
+        });
+        expect(deployExecPolicy).toBeDefined();
+        const statements = deployExecPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const secretsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("secretsmanager:GetSecretValue")
+            : action === "secretsmanager:GetSecretValue";
+        });
+        expect(secretsStmt).toBeDefined();
+        const resourceList = Array.isArray(secretsStmt?.Resource)
+          ? (secretsStmt?.Resource as unknown[])
+          : [secretsStmt?.Resource];
+        expect(resourceList).toHaveLength(4);
+        const serialized = JSON.stringify(resourceList);
+        expect(serialized).toContain("db/migrate");
+        expect(serialized).toContain("db/bootstrap");
+        expect(serialized).toContain("db/app-rw");
+        expect(serialized).toContain("db/app-ro");
+      });
+
+      it("the migrate DSN is readable ONLY by the deploy execution role, never the app role (ADR-009 req 4)", () => {
+        // The DDL-capable migrate credential must be unreachable from the 24/7,
+        // internet-adjacent app task -- not even GetSecretValue on it. A runtime
+        // compromise of the app process cannot read it. (Positive half -- it IS
+        // on the deploy role -- is asserted above; this is the negative half.)
+        const policies = template.findResources("AWS::IAM::Policy");
+        const appExecPolicies = Object.values(policies).filter((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) => typeof r.Ref === "string" && r.Ref.includes("TaskExecutionRole"),
+          );
+        });
+        expect(appExecPolicies.length).toBeGreaterThan(0);
+        for (const policy of appExecPolicies) {
+          const serialized = JSON.stringify(policy.Properties?.PolicyDocument);
+          expect(serialized).not.toContain("db/migrate");
+        }
+        // Belt-and-suspenders on the task def itself: the app TASK never injects
+        // the migrate DSN as a container secret, on any container.
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const app = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-app-prod",
+        );
+        const containers = (app?.Properties?.ContainerDefinitions ??
+          []) as Array<{ Secrets?: Array<{ ValueFrom?: unknown }> }>;
+        for (const c of containers) {
+          for (const s of c.Secrets ?? []) {
+            expect(JSON.stringify(s.ValueFrom)).not.toContain("db/migrate");
+          }
+        }
+      });
+
+      it("the deploy execution role policy uses `*` only on ecr:GetAuthorizationToken (ADR-009)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const deployExecPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" && r.Ref.includes("DeployExecutionRole"),
+          );
+        });
+        expect(deployExecPolicy).toBeDefined();
+        const statements = deployExecPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        for (const stmt of statements ?? []) {
+          const action = stmt.Action as string | string[];
+          const resource = stmt.Resource as unknown;
+          const isAuthOnly = Array.isArray(action)
+            ? action.length === 1 && action[0] === "ecr:GetAuthorizationToken"
+            : action === "ecr:GetAuthorizationToken";
+          if (isAuthOnly) {
+            continue;
+          }
+          const list = Array.isArray(resource) ? resource : [resource];
+          for (const r of list) {
+            expect(r).not.toBe("*");
+          }
         }
       });
 
@@ -1374,6 +1501,9 @@ describe("AppStack", () => {
           "scholars/saml-sp/prod/cert",
           // New Relic ingest key (B24) -- ADOT collector otlphttp/newrelic.
           "scholars/prod/newrelic-license-key",
+          // Deploy-time migration DSN (ADR-009) -- injected into the migrate +
+          // verify-grants tasks on the deploy execution role.
+          "scholars/prod/db/migrate",
         ];
         const json = JSON.stringify(template.toJSON());
         for (const name of expected) {
@@ -1422,11 +1552,12 @@ describe("AppStack", () => {
 
       // -- Category 3b: deploy-role iam:PassRole posture --
       //
-      // The deploy role grants iam:PassRole on the two task-side roles.
-      // Without the `iam:PassedToService=ecs-tasks.amazonaws.com`
-      // condition, the deploy workflow could pass either role to *any*
-      // service principal (Lambda, EC2, EMR, ...). The condition is the
-      // confused-deputy guard; assert it stays.
+      // The deploy role grants iam:PassRole on the three task-side roles (app
+      // exec, deploy exec, task role). Without the
+      // `iam:PassedToService=ecs-tasks.amazonaws.com` condition, the deploy
+      // workflow could pass any of them to *any* service principal (Lambda,
+      // EC2, EMR, ...). The condition is the confused-deputy guard; assert it
+      // stays, and assert the deploy exec role is passable (ADR-009).
       it("deploy role iam:PassRole is conditioned to ecs-tasks.amazonaws.com", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const deployPolicy = Object.values(policies).find((p) => {
@@ -1451,6 +1582,12 @@ describe("AppStack", () => {
           | undefined;
         expect(condition?.StringEquals?.["iam:PassedToService"]).toBe(
           "ecs-tasks.amazonaws.com",
+        );
+        // ADR-009: the deploy execution role must be passable too, or RunTask
+        // for the migrate / verify-grants / db-bootstrap tasks fails on
+        // iam:PassRole at deploy time.
+        expect(JSON.stringify(passRoleStmt?.Resource)).toContain(
+          "DeployExecutionRole",
         );
       });
 
@@ -1688,7 +1825,7 @@ describe("AppStack", () => {
       expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
     });
 
-    it("provisions the verify-grants task on staging with the three Phase 0 role DSNs (ADR-009)", () => {
+    it("provisions the verify-grants task on staging with all four role DSNs (ADR-009 Phase 2)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const verify = Object.values(taskDefs).find(
         (r) => r.Properties?.Family === "sps-verify-grants-staging",
@@ -1701,7 +1838,12 @@ describe("AppStack", () => {
       )?.find((c) => c.Name === "verify-grants");
       expect(container).toBeDefined();
       const secretNames = container?.Secrets?.map((s) => s.Name).sort();
-      expect(secretNames).toEqual(["APP_RO_DSN", "APP_RW_DSN", "BOOTSTRAP_DSN"]);
+      expect(secretNames).toEqual([
+        "APP_RO_DSN",
+        "APP_RW_DSN",
+        "BOOTSTRAP_DSN",
+        "MIGRATE_DSN",
+      ]);
     });
 
     it("uses 30-day log retention for staging (vs 90 days in prod)", () => {

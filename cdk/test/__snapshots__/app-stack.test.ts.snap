@@ -880,7 +880,7 @@ service:
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
@@ -898,6 +898,334 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "DeployExecutionRoleBCBD9CEE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ECS deploy-time task-execution role (prod). Migrate/verify/db-bootstrap only; the sole reader of the migrate DSN.",
+        "RoleName": "sps-deploy-exec-prod",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "DeployExecutionRoleDefaultPolicy0759ACD6": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EcrRepository4D7B3EE1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlEcrRepository058F5EEC",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-rw",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "MigrationLogGroupFD140541",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "MigrationLogGroupFD140541",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DbBootstrapLogGroupAF64F8C3",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DbBootstrapLogGroupAF64F8C3",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "VerifyGrantsLogGroupD90AC2C4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "VerifyGrantsLogGroupD90AC2C4",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EcrRepository4D7B3EE1",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "MigrationLogGroupFD140541",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DbBootstrapLogGroupAF64F8C3",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-rw-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "VerifyGrantsLogGroupD90AC2C4",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DeployExecutionRoleDefaultPolicy0759ACD6",
+        "Roles": [
+          {
+            "Ref": "DeployExecutionRoleBCBD9CEE",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "DeployRole885297C3": {
       "Properties": {
@@ -1050,6 +1378,12 @@ service:
                 {
                   "Fn::GetAtt": [
                     "TaskExecutionRole250D2532",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DeployExecutionRoleBCBD9CEE",
                     "Arn",
                   ],
                 },
@@ -1548,7 +1882,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-rw",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate",
                     ],
                   ],
                 },
@@ -1559,7 +1893,7 @@ service:
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
@@ -1920,18 +2254,6 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/newrelic-license-key",
                     ],
                   ],
@@ -1958,46 +2280,6 @@ service:
                       {
                         "Fn::GetAtt": [
                           "AppLogGroup7D8CD952",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "MigrationLogGroupFD140541",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "MigrationLogGroupFD140541",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "DbBootstrapLogGroupAF64F8C3",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "DbBootstrapLogGroupAF64F8C3",
                           "Arn",
                         ],
                       },
@@ -2243,78 +2525,6 @@ service:
                 ],
               },
             },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "MigrationLogGroupFD140541",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "EtlEcrRepository058F5EEC",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "DbBootstrapLogGroupAF64F8C3",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "VerifyGrantsLogGroupD90AC2C4",
-                  "Arn",
-                ],
-              },
-            },
           ],
           "Version": "2012-10-17",
         },
@@ -2419,7 +2629,7 @@ service:
             "Environment": [
               {
                 "Name": "VERIFY_ROLES",
-                "Value": "app-ro,app-rw,sps_bootstrap",
+                "Value": "app-ro,app-rw,sps_migrate,sps_bootstrap",
               },
             ],
             "Essential": true,
@@ -2529,13 +2739,28 @@ service:
                   ],
                 },
               },
+              {
+                "Name": "MIGRATE_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
@@ -3568,7 +3793,7 @@ service:
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
@@ -3586,6 +3811,334 @@ service:
         },
       },
       "Type": "AWS::ECS::TaskDefinition",
+    },
+    "DeployExecutionRoleBCBD9CEE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "Description": "SPS ECS deploy-time task-execution role (staging). Migrate/verify/db-bootstrap only; the sole reader of the migrate DSN.",
+        "RoleName": "sps-deploy-exec-staging",
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "DeployExecutionRoleDefaultPolicy0759ACD6": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "ecr:GetAuthorizationToken",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "EcrRepository4D7B3EE1",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EtlEcrRepository058F5EEC",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "secretsmanager:GetSecretValue",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-rw",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/migrate",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "MigrationLogGroupFD140541",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "MigrationLogGroupFD140541",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DbBootstrapLogGroupAF64F8C3",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DbBootstrapLogGroupAF64F8C3",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "VerifyGrantsLogGroupD90AC2C4",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "VerifyGrantsLogGroupD90AC2C4",
+                          "Arn",
+                        ],
+                      },
+                      ":*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EcrRepository4D7B3EE1",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "MigrationLogGroupFD140541",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/migrate-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EtlEcrRepository058F5EEC",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DbBootstrapLogGroupAF64F8C3",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-rw-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "VerifyGrantsLogGroupD90AC2C4",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro-??????",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DeployExecutionRoleDefaultPolicy0759ACD6",
+        "Roles": [
+          {
+            "Ref": "DeployExecutionRoleBCBD9CEE",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "DeployRole885297C3": {
       "Properties": {
@@ -3740,6 +4293,12 @@ service:
                 {
                   "Fn::GetAtt": [
                     "TaskExecutionRole250D2532",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "DeployExecutionRoleBCBD9CEE",
                     "Arn",
                   ],
                 },
@@ -4257,7 +4816,7 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-rw",
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/migrate",
                     ],
                   ],
                 },
@@ -4268,7 +4827,7 @@ service:
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
@@ -4629,18 +5188,6 @@ service:
                       {
                         "Ref": "AWS::Partition",
                       },
-                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      "arn:",
-                      {
-                        "Ref": "AWS::Partition",
-                      },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/newrelic-license-key",
                     ],
                   ],
@@ -4667,46 +5214,6 @@ service:
                       {
                         "Fn::GetAtt": [
                           "AppLogGroup7D8CD952",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "MigrationLogGroupFD140541",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "MigrationLogGroupFD140541",
-                          "Arn",
-                        ],
-                      },
-                      ":*",
-                    ],
-                  ],
-                },
-                {
-                  "Fn::GetAtt": [
-                    "DbBootstrapLogGroupAF64F8C3",
-                    "Arn",
-                  ],
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "DbBootstrapLogGroupAF64F8C3",
                           "Arn",
                         ],
                       },
@@ -4952,78 +5459,6 @@ service:
                 ],
               },
             },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "MigrationLogGroupFD140541",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "EtlEcrRepository058F5EEC",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "DbBootstrapLogGroupAF64F8C3",
-                  "Arn",
-                ],
-              },
-            },
-            {
-              "Action": [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    "arn:",
-                    {
-                      "Ref": "AWS::Partition",
-                    },
-                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap-??????",
-                  ],
-                ],
-              },
-            },
-            {
-              "Action": [
-                "logs:CreateLogStream",
-                "logs:PutLogEvents",
-              ],
-              "Effect": "Allow",
-              "Resource": {
-                "Fn::GetAtt": [
-                  "VerifyGrantsLogGroupD90AC2C4",
-                  "Arn",
-                ],
-              },
-            },
           ],
           "Version": "2012-10-17",
         },
@@ -5128,7 +5563,7 @@ service:
             "Environment": [
               {
                 "Name": "VERIFY_ROLES",
-                "Value": "app-ro,app-rw,sps_bootstrap",
+                "Value": "app-ro,app-rw,sps_migrate,sps_bootstrap",
               },
             ],
             "Essential": true,
@@ -5238,13 +5673,28 @@ service:
                   ],
                 },
               },
+              {
+                "Name": "MIGRATE_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/migrate",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
         "Cpu": "512",
         "ExecutionRoleArn": {
           "Fn::GetAtt": [
-            "TaskExecutionRole250D2532",
+            "DeployExecutionRoleBCBD9CEE",
             "Arn",
           ],
         },
