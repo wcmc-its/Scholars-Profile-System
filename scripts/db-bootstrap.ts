@@ -154,6 +154,16 @@ export async function bootstrap(
     sqlText: string;
     grantee: string;
     granteeHost?: string;
+    /**
+     * The grantee's OWN connection (app-rw), used solely to verify the audit
+     * grant. The check runs `SHOW GRANTS FOR CURRENT_USER()` here rather than
+     * `SHOW GRANTS FOR '<grantee>'` on `conn`, because the least-privilege
+     * `sps_bootstrap` cannot read another account's grants -- that needs SELECT
+     * on `mysql.user`, a privilege it deliberately lacks (#102/#493). A role can
+     * always read its own grants, so this both works under least privilege and
+     * verifies the grant from the perspective that matters: what app-rw sees.
+     */
+    verifyConn: SqlConn;
     log?: (msg: string) => void;
   },
 ): Promise<void> {
@@ -170,9 +180,12 @@ export async function bootstrap(
   log(`Granting INSERT on ${AUDIT_DB}.${AUDIT_TABLE} to '${opts.grantee}'@'${host}'`);
   await conn.query(grantSql);
 
-  // Verify the #102 acceptance criterion: INSERT-only on the audit db.
-  const rows = (await conn.query(
-    `SHOW GRANTS FOR '${opts.grantee}'@'${host}'`,
+  // Verify the #102 acceptance criterion (INSERT-only on the audit db) as the
+  // grantee itself -- see `verifyConn` above for why this runs on app-rw's
+  // connection and not the privileged bootstrap one. `SHOW GRANTS` reads the
+  // live grant tables, so it reflects the GRANT just issued on `conn`.
+  const rows = (await opts.verifyConn.query(
+    "SHOW GRANTS FOR CURRENT_USER()",
   )) as Array<Record<string, string>>;
   const grantLines = rows.map((r) => Object.values(r)[0]);
   assertInsertOnlyAuditGrant(grantLines);
@@ -221,10 +234,31 @@ async function main(): Promise<void> {
     multipleStatements: false,
   })) as unknown as SqlConn;
 
+  // A second connection AS the grantee (app-rw), used only to self-verify the
+  // audit grant: a role can `SHOW GRANTS` for itself without the SELECT-on-
+  // `mysql` privilege the least-privilege bootstrap user lacks (see `bootstrap`).
+  const verifyParts = parseDsn(appRwDsn);
+  const verifyConn = (await createConnection({
+    host: verifyParts.host,
+    port: verifyParts.port,
+    user: verifyParts.user,
+    password: verifyParts.password,
+    ssl: verifyParts.ssl || undefined,
+    bigIntAsNumber: true,
+    multipleStatements: false,
+  })) as unknown as SqlConn;
+
   try {
-    await bootstrap(conn, { sqlText, grantee, granteeHost, log: (m) => console.log(m) });
+    await bootstrap(conn, {
+      sqlText,
+      grantee,
+      granteeHost,
+      verifyConn,
+      log: (m) => console.log(m),
+    });
     console.log(JSON.stringify({ event: "db_bootstrap_ok", grantee, grantee_host: granteeHost }));
   } finally {
+    await verifyConn.end().catch(() => {});
     await conn.end();
   }
 }
