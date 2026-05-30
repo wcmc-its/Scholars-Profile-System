@@ -16,9 +16,10 @@
  * **stale ⟺ `searchReflectedAt IS NULL`** (past a short grace) — no
  * column-to-column comparison, and the `suppression` table is itself the queue.
  *
- * Scope — scholar / publication only. Education / appointment / grant / org-unit
- * have no OpenSearch fast-path, so their sentinel stays NULL inertly and is
- * excluded here by entity type.
+ * Scope — scholar / publication / grant: the entity types with an OpenSearch
+ * fast-path (grant added in #481(a) for the funding index). Education /
+ * appointment / org-unit have no fast-path, so their sentinel stays NULL
+ * inertly and is excluded here by entity type.
  *
  * Idempotent — each candidate is re-derived from CURRENT DB state via
  * `resolveAffectedProfiles` + `reflectSearchSuppression` (the exact path the
@@ -42,7 +43,11 @@ import { EntityType } from "@/lib/generated/prisma/client";
  * Entity types with an OpenSearch fast-path — the only rows the reconciler
  * considers. All others have no search projection (see module header).
  */
-const RECONCILABLE_ENTITY_TYPES = [EntityType.scholar, EntityType.publication] as const;
+const RECONCILABLE_ENTITY_TYPES = [
+  EntityType.scholar,
+  EntityType.publication,
+  EntityType.grant,
+] as const;
 
 const DEFAULT_BATCH_SIZE = 200;
 const DEFAULT_GRACE_SECONDS = 60;
@@ -82,8 +87,8 @@ export async function reconcileSearchSuppressions(
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - graceSeconds * 1000);
 
-  // Stale candidates: scholar / publication rows with the sentinel NULL whose
-  // latest transition is older than the grace cutoff. The transition is
+  // Stale candidates: rows of a reconcilable entity type with the sentinel NULL
+  // whose latest transition is older than the grace cutoff. The transition is
   // `revokedAt` when present (a revoke always post-dates its create), else
   // `createdAt` — expressed as the OR below because Prisma cannot COALESCE
   // across columns in a typed filter. Because the filter selects EXACTLY the

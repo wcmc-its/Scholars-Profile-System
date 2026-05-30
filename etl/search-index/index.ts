@@ -26,12 +26,16 @@
  * for the actual `_source` shape.
  */
 import { prisma } from "../../lib/db";
-import { coreProjectNum } from "@/lib/award-number";
 import {
   loadAllGrantSuppressions,
   loadAllPublicationSuppressions,
 } from "@/lib/api/manual-layer";
-import { parseExternalId, projectFromRows } from "@/lib/funding-projection";
+import {
+  GRANT_INDEX_SELECT,
+  GRANT_INDEX_WHERE,
+  groupGrantsByProject,
+  projectFromRows,
+} from "@/lib/funding-projection";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
   FUNDING_INDEX,
@@ -275,75 +279,15 @@ async function indexFunding(concreteIndex: string) {
   // with no surviving rows never forms a group below (-> dark, never indexed).
   const suppressedGrants = await loadAllGrantSuppressions(prisma);
   const rows = await prisma.grant.findMany({
-    where: { scholar: { deletedAt: null, status: "active" } },
-    select: {
-      cwid: true,
-      externalId: true,
-      title: true,
-      role: true,
-      startDate: true,
-      endDate: true,
-      awardNumber: true,
-      programType: true,
-      primeSponsor: true,
-      primeSponsorRaw: true,
-      directSponsor: true,
-      directSponsorRaw: true,
-      mechanism: true,
-      nihIc: true,
-      isSubaward: true,
-      // Issue #86 — pulled into the OpenSearch funding doc for sort
-      // (pubCount), full-text relevance (abstract), and the inline
-      // publications-expand UX on result rows.
-      abstract: true,
-      abstractSource: true,
-      applId: true,
-      // Issue #291 — RePORTER project keywords, indexed as a topical signal.
-      keywords: true,
-      // Issue #295 — RePORTER keywords resolved to NLM MeSH descriptor UIs.
-      meshDescriptorUis: true,
-      publications: {
-        select: {
-          pmid: true,
-          sourceReporter: true,
-          sourceReciterdb: true,
-          reciterdbFirstSeen: true,
-          publication: {
-            select: {
-              title: true,
-              journal: true,
-              year: true,
-              citationCount: true,
-            },
-          },
-        },
-      },
-      scholar: {
-        select: {
-          slug: true,
-          preferredName: true,
-          primaryDepartment: true,
-        },
-      },
-    },
+    where: GRANT_INDEX_WHERE,
+    select: GRANT_INDEX_SELECT,
   });
 
-  // Group key: coreProjectNum when available, else Account_Number.
-  // InfoEd sometimes splits one NIH award across multiple Account_Numbers
-  // (rebookings, supplements, administrative continuations); coreProjectNum
-  // collapses those into one search result. Non-NIH grants fall back to
-  // Account_Number since they have no coreProjectNum.
-  const byProject = new Map<string, typeof rows>();
-  for (const r of rows) {
-    // #160 — drop a suppressed grant role before grouping/projection.
-    if (r.externalId && suppressedGrants.has(r.externalId)) continue;
-    const ext = parseExternalId(r.externalId);
-    if (!ext) continue;
-    const key = coreProjectNum(r.awardNumber) ?? ext.accountNumber;
-    const arr = byProject.get(key) ?? [];
-    arr.push(r);
-    byProject.set(key, arr);
-  }
+  // Group by funding project (coreProjectNum ?? Account_Number), dropping
+  // suppressed roles. The grouping is shared with the suppression fast-path
+  // (lib/edit/search-suppression.ts) so both compute the funding doc `_id`
+  // identically — see groupGrantsByProject.
+  const byProject = groupGrantsByProject(rows, suppressedGrants);
 
   const docs: Array<{ projectId: string; doc: Record<string, unknown> }> = [];
   for (const [key, projectRows] of byProject.entries()) {

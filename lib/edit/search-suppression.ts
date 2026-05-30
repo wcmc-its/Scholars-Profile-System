@@ -29,6 +29,10 @@
  *   - publication whole-pub takedown / its revoke:
  *       re-index the pub doc (delete if dark) PLUS re-index every
  *       confirmed WCM co-author's people doc.
+ *   - grant suppress / revoke (#481(a)):
+ *       re-project the affected funding project from its surviving rows
+ *       (delete the funding doc if the project goes dark). Funding index
+ *       only — no people-doc fan-out.
  *
  * The publication-side people-doc set is supplied by the caller as
  * `affectedCwids` — the cwid half of `resolveAffectedProfiles`'s result
@@ -50,9 +54,21 @@
  * pre-launch), the `bulk` call throws and we log + swallow — exactly
  * as `invalidateCloudFront` is dormant without its distribution ID.
  */
-import { loadPublicationSuppressions } from "@/lib/api/manual-layer";
+import {
+  loadAllGrantSuppressions,
+  loadPublicationSuppressions,
+} from "@/lib/api/manual-layer";
+import { coreProjectNum } from "@/lib/award-number";
 import { db } from "@/lib/db";
 import {
+  GRANT_INDEX_SELECT,
+  GRANT_INDEX_WHERE,
+  groupGrantsByProject,
+  parseExternalId,
+  projectFromRows,
+} from "@/lib/funding-projection";
+import {
+  FUNDING_INDEX,
   PEOPLE_INDEX,
   PUBLICATIONS_INDEX,
   searchClient,
@@ -180,17 +196,91 @@ async function buildReflectionOps(
   if (args.entityType === "publication") {
     return buildPublicationOps(args.entityId, args.affectedCwids);
   }
+  if (args.entityType === "grant") {
+    // #481(a) — synchronous funding-search fast-path. entityId is the grant's
+    // stable externalId (#352). Suppressing a grant role does NOT touch the
+    // people index: the people-doc grant facets (hasActiveGrants,
+    // activePiGrantCount) are NOT suppression-filtered in the nightly build
+    // either, so the fast-path stays consistent with a rebuild by emitting
+    // funding ops only.
+    return buildGrantOps(args.entityId);
+  }
   // Education / appointment (#160) have no search index, so a suppression
   // reflects only through ISR (lib/edit/revalidation.ts) — no op here.
-  //
-  // Grant (#160 PR-B): the profile reflects immediately via ISR, and the
-  // funding INDEX BUILD excludes suppressed rows, so a suppressed grant clears
-  // from search on the next nightly rebuild. A synchronous funding fast-path is
-  // deferred (it must re-project a whole funding project, keyed on
-  // coreProjectNum which is not a queryable column) — tracked as a follow-on;
-  // this is the same nightly-rebuild fallback the publication fast-path
-  // degrades to on failure.
   return [];
+}
+
+/**
+ * Funding-search fast-path for a grant suppress / revoke (#481(a)).
+ *
+ * A funding doc represents one project, keyed on the group key
+ * `coreProjectNum(awardNumber) ?? accountNumber` — derived in app code, NOT a
+ * queryable column. So we re-group the active grant set (a cheap two-column
+ * scan) to compute this grant's project key and find the project's SURVIVING
+ * sibling rows after the just-committed transition, then re-project ONLY that
+ * project (or delete it when it goes dark). Never re-projects the whole index.
+ *
+ * This is the latency counterpart to the nightly rebuild, which already
+ * excludes suppressed grant rows; on a best-effort failure it degrades to that
+ * same rebuild (≤24h) and the #393 reconciler (≤5 min). Heavier than the
+ * scholar / publication paths (one full-corpus key scan), but a grant suppress
+ * is a rare curator / self action.
+ */
+async function buildGrantOps(externalId: string): Promise<Op[]> {
+  const ext = parseExternalId(externalId);
+  if (!ext) return []; // Not an InfoEd grant id — never indexed, nothing to do.
+
+  const suppressed = await loadAllGrantSuppressions(db.read);
+  // Cheap two-column scan: only externalId + awardNumber drive the group key,
+  // so we avoid pulling the heavy GRANT_INDEX_SELECT (nested publications,
+  // abstracts) across the whole corpus just to locate one project.
+  const keyRows = await db.read.grant.findMany({
+    where: GRANT_INDEX_WHERE,
+    select: { externalId: true, awardNumber: true },
+  });
+  const byProject = groupGrantsByProject(keyRows, suppressed);
+
+  // This grant's project key — the same derivation groupGrantsByProject uses,
+  // so it matches the key its surviving siblings group under. The target row is
+  // dropped from `byProject` when it is the suppressed role, but its
+  // awardNumber is still present in the pre-drop scan.
+  const targetAward =
+    keyRows.find((r) => r.externalId === externalId)?.awardNumber ?? null;
+  const projectKey = coreProjectNum(targetAward) ?? ext.accountNumber;
+
+  const survivors = byProject.get(projectKey) ?? [];
+  if (survivors.length === 0) {
+    // No surviving role on any active scholar — the project goes dark.
+    return [{ type: "delete", index: FUNDING_INDEX, id: projectKey }];
+  }
+
+  // Re-project from the surviving rows only: pull the full index select for
+  // just this project (usually 1-5 rows) and run it through the SAME
+  // projectFromRows the nightly build uses, so the fast-path doc is identical
+  // to a rebuild's.
+  const survivingIds = survivors
+    .map((r) => r.externalId)
+    .filter((id): id is string => id !== null);
+  const projectRows = await db.read.grant.findMany({
+    where: { externalId: { in: survivingIds }, ...GRANT_INDEX_WHERE },
+    select: GRANT_INDEX_SELECT,
+  });
+  const doc = projectFromRows(projectRows);
+  if (!doc) {
+    return [{ type: "delete", index: FUNDING_INDEX, id: projectKey }];
+  }
+  // Pin the OpenSearch _id to the group key so it stays stable across
+  // re-indexes even as merged Account_Numbers under one coreProjectNum change
+  // (mirrors the ETL's projectId override).
+  doc.projectId = projectKey;
+  return [
+    {
+      type: "index",
+      index: FUNDING_INDEX,
+      id: projectKey,
+      doc: doc as unknown as Record<string, unknown>,
+    },
+  ];
 }
 
 async function buildScholarOps(cwid: string): Promise<Op[]> {

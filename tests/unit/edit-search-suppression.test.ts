@@ -21,6 +21,7 @@ const hoisted = vi.hoisted(() => ({
   mockDivisionMembershipFindMany: vi.fn(),
   mockPublicationFindFirst: vi.fn(),
   mockPublicationAuthorFindMany: vi.fn(),
+  mockGrantFindMany: vi.fn(),
   mockSuppressionFindMany: vi.fn(),
   mockSuppressionUpdate: vi.fn(),
   mockDepartmentFindMany: vi.fn(),
@@ -39,6 +40,9 @@ vi.mock("@/lib/db", () => ({
       divisionMembership: { findMany: hoisted.mockDivisionMembershipFindMany },
       publication: { findFirst: hoisted.mockPublicationFindFirst },
       publicationAuthor: { findMany: hoisted.mockPublicationAuthorFindMany },
+      // #481(a) — the grant fast-path scans the active grant set (key columns)
+      // then refetches the affected project's surviving rows.
+      grant: { findMany: hoisted.mockGrantFindMany },
       suppression: { findMany: hoisted.mockSuppressionFindMany },
       // Issue #532 — leadership sidecar queries; this suite doesn't exercise
       // leadership content, so both default to empty.
@@ -53,6 +57,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/search", () => ({
   PEOPLE_INDEX: "scholars-people",
   PUBLICATIONS_INDEX: "scholars-publications",
+  FUNDING_INDEX: "scholars-funding",
   searchClient: () => ({ bulk: hoisted.mockBulk }),
 }));
 
@@ -131,6 +136,7 @@ beforeEach(() => {
   // Default: no suppression rows, no publication-author rows, no center memberships.
   hoisted.mockSuppressionFindMany.mockResolvedValue([]);
   hoisted.mockPublicationAuthorFindMany.mockResolvedValue([]);
+  hoisted.mockGrantFindMany.mockResolvedValue([]);
   hoisted.mockCenterMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDivisionMembershipFindMany.mockResolvedValue([]);
   hoisted.mockDepartmentFindMany.mockResolvedValue([]);
@@ -337,12 +343,147 @@ describe("reflectSearchSuppression — failure handling (D4b.4 best-effort)", ()
   });
 });
 
-describe("reflectSearchSuppression — unknown entity type", () => {
-  it("is a no-op (no bulk call) — out-of-v1-scope types (grant, education, appointment)", async () => {
+describe("reflectSearchSuppression — grant funding fast-path (#481(a))", () => {
+  // Full GRANT_INDEX_SELECT-shaped row for the refetch + real projectFromRows.
+  // A non-NIH awardNumber makes coreProjectNum null so the project key is the
+  // Account_Number, keeping the funding `_id` deterministic in assertions.
+  function grantRow(cwid: string, account: string, role: string) {
+    return {
+      cwid,
+      externalId: `INFOED-${account}-${cwid}`,
+      title: "Cohort study",
+      role,
+      startDate: new Date("2024-01-01"),
+      endDate: new Date("2027-01-01"),
+      awardNumber: "OCRA-2024-091",
+      programType: "Grant",
+      primeSponsor: "NIH",
+      primeSponsorRaw: "NIH",
+      directSponsor: "NIH",
+      directSponsorRaw: "NIH",
+      mechanism: null,
+      nihIc: null,
+      isSubaward: false,
+      scholar: { slug: cwid, preferredName: cwid, primaryDepartment: "Medicine" },
+    };
+  }
+  // Cheap key-scan row shape (externalId + awardNumber only).
+  function keyRow(cwid: string, account: string) {
+    return { externalId: `INFOED-${account}-${cwid}`, awardNumber: "OCRA-2024-091" };
+  }
+
+  it("re-projects the surviving project without the suppressed investigator", async () => {
+    // bob's role on project ACCT1 is suppressed; ann (PI) survives.
+    hoisted.mockSuppressionFindMany.mockResolvedValueOnce([
+      { entityId: "INFOED-ACCT1-bob" },
+    ]);
+    hoisted.mockGrantFindMany
+      .mockResolvedValueOnce([keyRow("ann", "ACCT1"), keyRow("bob", "ACCT1")])
+      .mockResolvedValueOnce([grantRow("ann", "ACCT1", "PI")]);
+
     const result = await reflectSearchSuppression({
-      suppressionId: "sup-grant",
+      suppressionId: "sup-grant-hide",
       entityType: "grant",
-      entityId: "g1",
+      entityId: "INFOED-ACCT1-bob",
+      contributorCwid: null,
+      affectedCwids: [],
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(hoisted.mockBulk).toHaveBeenCalledTimes(1);
+    const body = hoisted.mockBulk.mock.calls[0][0].body as Array<
+      Record<string, unknown>
+    >;
+    // [index action on the funding _id (= Account_Number), then the doc].
+    expect(body[0]).toEqual({
+      index: { _index: "scholars-funding", _id: "ACCT1" },
+    });
+    const doc = body[1] as { projectId: string; wcmInvestigatorCwids: string[] };
+    expect(doc.projectId).toBe("ACCT1");
+    expect(doc.wcmInvestigatorCwids).toEqual(["ann"]);
+    // Funding-only: no people-doc op in the bulk body.
+    expect(
+      body.some(
+        (b) =>
+          "index" in b &&
+          (b.index as { _index: string })._index === "scholars-people",
+      ),
+    ).toBe(false);
+    expect(hoisted.mockSuppressionUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("DELETES the funding doc when the project's last role goes dark", async () => {
+    // ann is the only role on ACCT2 and it is suppressed → project goes dark.
+    hoisted.mockSuppressionFindMany.mockResolvedValueOnce([
+      { entityId: "INFOED-ACCT2-ann" },
+    ]);
+    // Only the key scan runs; survivors is empty so the full refetch is skipped.
+    hoisted.mockGrantFindMany.mockResolvedValueOnce([keyRow("ann", "ACCT2")]);
+
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-grant-dark",
+      entityType: "grant",
+      entityId: "INFOED-ACCT2-ann",
+      contributorCwid: null,
+      affectedCwids: [],
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(hoisted.mockGrantFindMany).toHaveBeenCalledTimes(1);
+    expect(hoisted.mockBulk).toHaveBeenCalledWith({
+      refresh: true,
+      body: [{ delete: { _index: "scholars-funding", _id: "ACCT2" } }],
+    });
+  });
+
+  it("re-indexes the project on revoke (suppression cleared)", async () => {
+    // Revoke: loadAllGrantSuppressions returns empty, so ann's role survives.
+    hoisted.mockSuppressionFindMany.mockResolvedValueOnce([]);
+    hoisted.mockGrantFindMany
+      .mockResolvedValueOnce([keyRow("ann", "ACCT3")])
+      .mockResolvedValueOnce([grantRow("ann", "ACCT3", "PI")]);
+
+    await reflectSearchSuppression({
+      suppressionId: "sup-grant-revoke",
+      entityType: "grant",
+      entityId: "INFOED-ACCT3-ann",
+      contributorCwid: null,
+      affectedCwids: [],
+    });
+
+    const body = hoisted.mockBulk.mock.calls[0][0].body as Array<
+      Record<string, unknown>
+    >;
+    expect(body[0]).toEqual({
+      index: { _index: "scholars-funding", _id: "ACCT3" },
+    });
+    expect((body[1] as { wcmInvestigatorCwids: string[] }).wcmInvestigatorCwids).toEqual([
+      "ann",
+    ]);
+  });
+
+  it("is a no-op for an unparseable (non-InfoEd) grant id", async () => {
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-grant-bad",
+      entityType: "grant",
+      entityId: "not-an-infoed-id",
+      contributorCwid: null,
+      affectedCwids: [],
+    });
+    // parseExternalId fails before any query → no scan, no bulk, no stamp.
+    expect(result).toEqual({ ok: true });
+    expect(hoisted.mockGrantFindMany).not.toHaveBeenCalled();
+    expect(hoisted.mockBulk).not.toHaveBeenCalled();
+    expect(hoisted.mockSuppressionUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("reflectSearchSuppression — unsupported entity type", () => {
+  it("is a no-op (no bulk, no stamp) for education / appointment", async () => {
+    const result = await reflectSearchSuppression({
+      suppressionId: "sup-edu",
+      entityType: "education",
+      entityId: "e1",
       contributorCwid: null,
       affectedCwids: [],
     });
