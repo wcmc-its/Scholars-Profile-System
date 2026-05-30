@@ -576,6 +576,16 @@ describe("AppStack", () => {
           ?.map((s) => s.Name)
           .sort();
         expect(secretNames).toEqual(["APP_RW_DSN", "BOOTSTRAP_DSN"]);
+        // Grants the audit INSERT to `'app_rw'@'%'` on prod -- prod's app user
+        // is host-pattern `%` (the per-env appRwGranteeHost; #493 staging fix).
+        const envByName = new Map(
+          (
+            (container?.Environment as
+              | Array<{ Name?: string; Value?: string }>
+              | undefined) ?? []
+          ).map((e) => [e.Name, e.Value]),
+        );
+        expect(envByName.get("GRANTEE_HOST")).toBe("%");
       });
     });
 
@@ -1614,6 +1624,29 @@ describe("AppStack", () => {
       expect(appTaskDef).toBeDefined();
       expect(appTaskDef?.Properties?.Cpu).toBe("512");
       expect(appTaskDef?.Properties?.Memory).toBe("1024");
+    });
+
+    it("grants the audit INSERT to `'app_rw'@'10.20.%'` on staging (#493 staging fix)", () => {
+      // Staging's app user is host-pattern `10.20.%` (VPC-CIDR-scoped), not the
+      // `%` the bootstrap defaulted to -- the cause of the MySQL 1410 at GRANT.
+      // Guards the per-env appRwGranteeHost wiring on the bootstrap task def.
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const bootstrap = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-db-bootstrap-staging",
+      );
+      expect(bootstrap).toBeDefined();
+      const container = (
+        bootstrap?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "db-bootstrap");
+      const envByName = new Map(
+        (container?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
     });
 
     it("uses 30-day log retention for staging (vs 90 days in prod)", () => {

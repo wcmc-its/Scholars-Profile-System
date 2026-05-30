@@ -109,6 +109,19 @@ export interface SpsEnvConfig {
   /** Fargate memory (MiB) for the migration task definition. */
   readonly migrationTaskMemoryMiB: number;
   /**
+   * Host pattern of the `app_rw` account the #493 db-bootstrap grants
+   * `INSERT ON scholars_audit.manual_edit_audit` to. Read by db-bootstrap.ts as
+   * GRANTEE_HOST. Per-env because the app users were provisioned with different
+   * host scopes: prod is `'app_rw'@'%'`, staging is `'app_rw'@'10.20.%'` (scoped
+   * to the staging VPC CIDR; confirmed 2026-05-30 via SELECT CURRENT_USER() from
+   * an in-VPC app_rw connection). A wrong value fails the deploy loud at the
+   * GRANT -- MySQL 1410, since the least-privilege sps_bootstrap can't
+   * auto-create the missing `@'host'` account -- so it is fail-closed, not
+   * silent. NOT derivable from {@link vpcCidr}: prod uses `%` despite its
+   * 10.10/16 CIDR.
+   */
+  readonly appRwGranteeHost: string;
+  /**
    * SAML SP entityID this environment registers with the WCM IdP (#466).
    * The app advertises it in `/api/auth/saml/metadata` and the IdP must have
    * the exact same value on file, else login fails with a SAML Responder
@@ -183,6 +196,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 1024,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    // Staging's app user is `'app_rw'@'10.20.%'` (VPC-CIDR-scoped), confirmed
+    // 2026-05-30 via SELECT CURRENT_USER() from an in-VPC app_rw connection.
+    // The bootstrap default of `%` 1410'd here because that account is absent.
+    appRwGranteeHost: "10.20.%",
     // Staging announces the PROD SP entityID, not its own host (#466). WCM
     // registered a single SP (the prod entityID, tied to the filed cert) and
     // confirmed it covers staging too -- the staging-host entityID is not
@@ -231,6 +248,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appMemoryMiB: 2048,
     migrationTaskCpu: 512,
     migrationTaskMemoryMiB: 1024,
+    // Prod's app user is `'app_rw'@'%'` (the bootstrap GRANT + verify both
+    // passed on prod, which proves `'app_rw'@'%'` exists). Unchanged behavior.
+    appRwGranteeHost: "%",
     samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
     samlSpAcsUrl: "https://scholars.weill.cornell.edu/api/auth/saml/callback",
     // Prod schedules ship disabled — first run is operator-driven after

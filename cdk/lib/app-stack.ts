@@ -892,6 +892,12 @@ export class AppStack extends Stack {
       containerName: "db-bootstrap",
       essential: true,
       entryPoint: ["npx", "tsx", "scripts/db-bootstrap.ts"],
+      environment: {
+        // The app-rw account's host pattern (per-env: staging is VPC-scoped
+        // `10.20.%`, prod is `%`). db-bootstrap grants the audit INSERT to
+        // `'app_rw'@'<this>'`; a wrong value 1410s at the GRANT (#493 staging).
+        GRANTEE_HOST: envConfig.appRwGranteeHost,
+      },
       logging: ecs.LogDriver.awsLogs({
         logGroup: dbBootstrapLogGroup,
         streamPrefix: "db-bootstrap",
