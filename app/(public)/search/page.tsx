@@ -2168,7 +2168,7 @@ function FacetGroup({
   const tail = shouldCollapse ? items.slice(collapseAfter!) : [];
   return (
     <div className="mb-5">
-      <h3 className="mb-2 text-[13px] font-semibold text-[#1a1a1a]">{label}</h3>
+      <h2 className="mb-2 text-[13px] font-semibold text-[#1a1a1a]">{label}</h2>
       <ul className="m-0 flex list-none flex-col p-0">{head}</ul>
       {tail.length > 0 ? (
         // Tailwind 4 lacks `group-open:` directly; arbitrary descendant

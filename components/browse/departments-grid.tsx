@@ -26,7 +26,7 @@
  */
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useId, useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
 
@@ -361,6 +361,9 @@ function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
 }
 
 function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+
   const divisionCount =
     dept.divisions.length > 0
       ? `${dept.divisions.length} ${
@@ -368,12 +371,37 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
         }`
       : null;
 
+  // Custom disclosure rather than <details>/<summary>: a <summary> *is* the
+  // toggle, so the department-name <Link> nested inside it is a focusable
+  // element inside another focusable element — WCAG 4.1.2 `nested-interactive`
+  // (issue #575). Instead the caret <button> (toggle) and the name <Link>
+  // (navigation) are non-overlapping siblings: the two actions live in
+  // separate controls and nothing focusable is nested. The caret keeps its
+  // 12px column (so names stay aligned with the flat rows) while px-2 plus
+  // compensating -mx-2 give it a ≥24px-wide hit target without shifting the
+  // name; `self-stretch` makes it as tall as the 24px name line.
   return (
-    <details className="group">
-      <summary className="flex cursor-pointer list-none items-center gap-3 py-3 hover:bg-muted/40 [&::-webkit-details-marker]:hidden">
-        <span className="inline-block w-3 text-[10px] text-muted-foreground transition-transform group-open:rotate-90">
-          ▶
-        </span>
+    <div>
+      <div className="flex items-center gap-3 py-3 hover:bg-muted/40">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          aria-label={`${open ? "Collapse" : "Expand"} ${dept.name}${
+            divisionCount ? `, ${divisionCount}` : ""
+          }`}
+          className="-mx-2 flex shrink-0 cursor-pointer items-center self-stretch rounded-sm px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)] focus-visible:ring-offset-1"
+        >
+          <span
+            aria-hidden="true"
+            className={`inline-block w-3 text-[10px] text-muted-foreground transition-transform ${
+              open ? "rotate-90" : ""
+            }`}
+          >
+            ▶
+          </span>
+        </button>
         <div className="min-w-0 flex-1">
           <Link
             href={`/departments/${dept.slug}`}
@@ -389,8 +417,8 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           </div>
         ) : null}
         <TypeBadge category={dept.category} />
-      </summary>
-      <div className="pb-4 pl-6">
+      </div>
+      <div id={panelId} hidden={!open} className="pb-4 pl-6">
         {dept.divisions.length > 0 ? (
           <div className="mt-1">
             <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
@@ -434,6 +462,6 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           View {dept.name} &rarr;
         </Link>
       </div>
-    </details>
+    </div>
   );
 }
