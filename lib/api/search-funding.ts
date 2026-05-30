@@ -236,6 +236,14 @@ export async function searchFunding(opts: {
    * `meshDescriptorUi`. Null/undefined → today's text-only query.
    */
   meshResolution?: MeshResolution | null;
+  /**
+   * Perf — count-only mode for the inactive search tabs. See the
+   * `searchPeople` `countOnly` doc: skips the facet aggregations and the
+   * Prisma investigator hydration, returning just `total` for the tab
+   * badge. The total comes from the same query predicate, so it matches a
+   * full search.
+   */
+  countOnly?: boolean;
 }): Promise<FundingSearchResult> {
   const { q } = opts;
   const page = Math.max(0, opts.page ?? 0);
@@ -461,6 +469,40 @@ export async function searchFunding(opts: {
       filter: { bool: { must, filter: [...statusBaseFilters, recentlyEndedRange] } },
     },
   };
+
+  // Perf — count-only fast path (inactive tab). Same `{ bool: { must } }`
+  // query as the full body, so the badge total is identical; skips the
+  // facet aggregations and the Prisma investigator hydration below.
+  if (opts.countOnly) {
+    const countResp = await searchClient().search({
+      index: FUNDING_INDEX,
+      body: {
+        size: 0,
+        track_total_hits: true,
+        query: { bool: { must } },
+      } as object,
+    });
+    const total =
+      (countResp.body as unknown as { hits: { total: { value: number } } })
+        .hits.total.value;
+    return {
+      hits: [],
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      facets: {
+        funders: [],
+        directFunders: [],
+        programTypes: [],
+        mechanisms: [],
+        status: { active: 0, endingSoon: 0, recentlyEnded: 0 },
+        departments: [],
+        roles: { pi: 0, multiPi: 0, coI: 0 },
+        investigators: [],
+        investigatorsTotal: 0,
+      },
+    };
+  }
 
   const body = {
     from: page * PAGE_SIZE,
