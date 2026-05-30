@@ -93,4 +93,40 @@ describe("getPeopleClassifierSets", () => {
     const second = await getPeopleClassifierSets();
     expect([...second.surnames]).toEqual(["jones"]);
   });
+
+  // Issue #610 — a wedged refresh (a Prisma pool / OpenSearch connection that
+  // never settles) must not hang the People search. Without the timeout the
+  // memoized `inflight` promise never resolves, so every subsequent request
+  // returns that same pending promise until the process restarts.
+  it("times out a wedged refresh, degrading to empty sets without hanging", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.useFakeTimers();
+    try {
+      // findMany never settles — the failure mode the issue describes.
+      findMany.mockReturnValue(new Promise(() => {}));
+      osSearch.mockResolvedValue(osResponse(["smith"]));
+
+      const { getPeopleClassifierSets } = await import(
+        "@/lib/api/people-classifier-sets"
+      );
+      const pending = getPeopleClassifierSets();
+      // Trip the 2s ceiling; the request resolves rather than hanging forever.
+      await vi.advanceTimersByTimeAsync(2000);
+      const sets = await pending;
+      expect(sets.surnames.size).toBe(0);
+      expect(sets.cwids.size).toBe(0);
+      expect(sets.departments.size).toBe(0);
+
+      // The timeout was not cached — once the backend recovers, a retry
+      // rebuilds the real sets.
+      findMany.mockResolvedValue([
+        { cwid: "mno5005", primaryDepartment: "Surgery" },
+      ]);
+      const recovered = await getPeopleClassifierSets();
+      expect([...recovered.cwids]).toEqual(["mno5005"]);
+      expect([...recovered.departments]).toEqual(["surgery"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
