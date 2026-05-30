@@ -1,8 +1,9 @@
 name: Deploy
 
-# Drives the five-step deploy pipeline contract documented in
+# Drives the deploy pipeline contract documented in
 # docs/PRODUCTION_ADDENDUM.md § Schema migration policy and
-# docs/DEPLOY-RUNBOOK.md: build -> push -> migrate -> roll -> settle.
+# docs/DEPLOY-RUNBOOK.md:
+#   build -> push -> bootstrap -> verify-grants -> migrate -> roll -> settle.
 #
 # Triggers
 # - push to master         -> staging deploy (auto)
@@ -95,6 +96,11 @@ jobs:
           # self-skips (with a warning) rather than bricking discovery. Once the
           # family exists, a FAILED bootstrap hard-fails the deploy (fails-closed).
           bootstrap_family=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EcsDbBootstrapTaskFamily").OutputValue // empty')
+          # grant-equality verify task family (ADR-009). Same non-fatal pattern:
+          # absent until `cdk deploy Sps-App-<env>` ships the new task def, so the
+          # step below self-skips (with a warning). Once present, a FAILED verify
+          # hard-fails the deploy (fails-closed -- the load-bearing grant gate).
+          verify_family=$(echo "$out" | jq -r '.[]|select(.OutputKey=="EcsVerifyGrantsTaskFamily").OutputValue // empty')
           {
             echo "ecr_uri=$ecr_uri"
             echo "cluster=$cluster"
@@ -103,6 +109,7 @@ jobs:
             echo "alb_dns=$alb_dns"
             echo "etl_ecr_uri=$etl_ecr_uri"
             echo "bootstrap_family=$bootstrap_family"
+            echo "verify_family=$verify_family"
           } >> "$GITHUB_OUTPUT"
 
       - name: ECR login
@@ -181,6 +188,46 @@ jobs:
         if: ${{ steps.outputs.outputs.bootstrap_family == '' }}
         run: |
           echo "::warning::EcsDbBootstrapTaskFamily not found on ${{ steps.target.outputs.stack }}. scholars_audit provisioning skipped (#493). Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create sps-db-bootstrap-${{ steps.target.outputs.env }}, then re-run this workflow."
+
+      # grant-equality verify (ADR-009) — assert every managed DB role's live
+      # grants EXACTLY equal its pinned golden list, AFTER db-bootstrap (so app-rw
+      # already holds the audit INSERT) and BEFORE migrate / the service roll.
+      # Read-only; fails-closed (a delta in either direction exits non-zero and
+      # halts the deploy) — the gate that kills the manual-grant drift class.
+      - name: Run verify-grants task
+        id: verify_grants
+        if: ${{ steps.outputs.outputs.verify_family != '' }}
+        run: |
+          set -euo pipefail
+          # Reuse the app service's network config (same private subnets + app SG,
+          # which already has Aurora 3306 ingress + the Secrets Manager endpoint).
+          netcfg=$(aws ecs describe-services \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --services "${{ steps.outputs.outputs.service }}" \
+            --query 'services[0].networkConfiguration' --output json)
+          task_arn=$(aws ecs run-task \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --task-definition "${{ steps.outputs.outputs.verify_family }}" \
+            --launch-type FARGATE \
+            --network-configuration "$netcfg" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "verify-grants task: $task_arn"
+          aws ecs wait tasks-stopped \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn"
+          exit_code=$(aws ecs describe-tasks \
+            --cluster "${{ steps.outputs.outputs.cluster }}" \
+            --tasks "$task_arn" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+          if [ "$exit_code" != "0" ]; then
+            echo "::error::verify-grants task exited $exit_code (DB role grants drifted from the golden list). Service NOT rolled. Logs: /aws/ecs/sps-verify-grants-${{ steps.target.outputs.env }}"
+            exit 1
+          fi
+
+      - name: Skipped verify-grants (task family not yet provisioned)
+        if: ${{ steps.outputs.outputs.verify_family == '' }}
+        run: |
+          echo "::warning::EcsVerifyGrantsTaskFamily not found on ${{ steps.target.outputs.stack }}. DB grant-equality verify skipped (ADR-009). Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create sps-verify-grants-${{ steps.target.outputs.env }}, then re-run this workflow."
 
       - name: Run migration task
         id: migrate

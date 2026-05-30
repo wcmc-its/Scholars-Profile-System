@@ -9,6 +9,11 @@ import { randomInt } from "node:crypto";
 
 /** The least-privilege bootstrap role. Created `@'%'` to match Aurora app users. */
 export const BOOTSTRAP_USER = "sps_bootstrap";
+/** The deploy-time migration role (ADR-009). Like the bootstrap role it is a
+ *  one-shot, task-only login created `@'%'`; unlike it, it holds the DDL set on
+ *  the application `scholars` schema (the credential `prisma migrate deploy`
+ *  runs under once Phase 2 cuts over) and NOTHING on `scholars_audit`. */
+export const MIGRATE_USER = "sps_migrate";
 /** The audit database the bootstrap role is scoped to — and nothing else. */
 export const AUDIT_DB = "scholars_audit";
 
@@ -52,11 +57,49 @@ export function dropStatements(): string[] {
   return [`DROP USER IF EXISTS '${BOOTSTRAP_USER}'@'%'`];
 }
 
+/** The proven `app_rw` `scholars.*` DDL set, inherited verbatim (ADR-009
+ *  Decision 1 — neither extended nor pruned). Exactly the set every migration to
+ *  date has run under; the verify's `sps_migrate` golden list in
+ *  `scripts/verify-db-grants.ts` must stay equal to it (a change to either is a
+ *  conscious, paired edit — ADR-009 Downstream req 6). */
+const MIGRATE_SCHOLARS_PRIVILEGES =
+  "SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER";
+
+/** Idempotent statements that create/repair the migration role. `CREATE USER IF
+ *  NOT EXISTS` + `ALTER USER` make the password authoritative whether or not the
+ *  user already exists; the single GRANT is the DDL set on `scholars`.* only —
+ *  no privilege on `scholars_audit` (migrations touch the application schema,
+ *  never the append-only audit log). */
+export function migrateSeedStatements(password: string): string[] {
+  const u = `'${MIGRATE_USER}'@'%'`;
+  return [
+    `CREATE USER IF NOT EXISTS ${u} IDENTIFIED BY '${password}'`,
+    `ALTER USER ${u} IDENTIFIED BY '${password}'`,
+    `GRANT ${MIGRATE_SCHOLARS_PRIVILEGES} ON \`scholars\`.* TO ${u}`,
+  ];
+}
+
+/** Drop the migration role (custom-resource Delete). */
+export function migrateDropStatements(): string[] {
+  return [`DROP USER IF EXISTS '${MIGRATE_USER}'@'%'`];
+}
+
 /** The DSN the bootstrap ECS task consumes as BOOTSTRAP_DSN. Alphanumeric
  *  password ⇒ no URL-encoding needed. No database segment: the task connects at
  *  server level to CREATE the audit database. */
 export function buildDsn(host: string, port: number, password: string): string {
   return `mysql://${BOOTSTRAP_USER}:${password}@${host}:${port}/`;
+}
+
+/** The application schema the migration role connects to (`prisma migrate
+ *  deploy` reads DATABASE_URL, which must name the database). */
+export const MIGRATE_DB = "scholars";
+
+/** The DSN the migrate task will consume as MIGRATE_DSN once Phase 2 points it
+ *  here. Unlike the bootstrap DSN this DOES carry the `${MIGRATE_DB}` segment,
+ *  because Prisma's DATABASE_URL must name the database it migrates. */
+export function buildMigrateDsn(host: string, port: number, password: string): string {
+  return `mysql://${MIGRATE_USER}:${password}@${host}:${port}/${MIGRATE_DB}`;
 }
 
 /** Extract the password from an existing bootstrap DSN, or undefined if the
@@ -80,7 +123,10 @@ export function passwordFromDsn(dsn: string): string | undefined {
  *   - present but NOT a DSN-with-password → throw, never silently clobber an
  *     unexpected value (fails the deploy loud).
  */
-export function decidePassword(existing: string | undefined): {
+export function decidePassword(
+  existing: string | undefined,
+  label = "bootstrap",
+): {
   password: string;
   reused: boolean;
 } {
@@ -90,7 +136,7 @@ export function decidePassword(existing: string | undefined): {
   const pw = passwordFromDsn(existing);
   if (pw === undefined) {
     throw new Error(
-      "bootstrap secret holds a value that is not a mysql:// DSN with a password; refusing to overwrite it",
+      `${label} secret holds a value that is not a mysql:// DSN with a password; refusing to overwrite it`,
     );
   }
   return { password: pw, reused: true };

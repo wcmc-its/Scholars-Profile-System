@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDsn,
+  buildMigrateDsn,
   decidePassword,
   dropStatements,
   generatePassword,
+  migrateDropStatements,
+  migrateSeedStatements,
   passwordFromDsn,
   seedStatements,
 } from "../statements.js";
@@ -58,6 +61,50 @@ describe("seedStatements", () => {
 describe("dropStatements", () => {
   it("drops the bootstrap user idempotently", () => {
     expect(dropStatements()).toEqual(["DROP USER IF EXISTS 'sps_bootstrap'@'%'"]);
+  });
+});
+
+describe("migrateSeedStatements (ADR-009 Phase 1)", () => {
+  const stmts = migrateSeedStatements("PW123");
+
+  it("creates + repairs sps_migrate and grants the proven scholars.* DDL set", () => {
+    expect(stmts).toEqual([
+      "CREATE USER IF NOT EXISTS 'sps_migrate'@'%' IDENTIFIED BY 'PW123'",
+      "ALTER USER 'sps_migrate'@'%' IDENTIFIED BY 'PW123'",
+      "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER ON `scholars`.* TO 'sps_migrate'@'%'",
+    ]);
+  });
+
+  it("grants ONLY on the application `scholars` schema — nothing on scholars_audit", () => {
+    for (const s of stmts) {
+      expect(s).not.toMatch(/scholars_audit/);
+    }
+    const grant = stmts.find((s) => s.startsWith("GRANT"));
+    expect(grant).toMatch(/ON `scholars`\.\* TO/);
+  });
+
+  it("matches the privilege set the verify pins for sps_migrate (ADR-009 req 6)", () => {
+    // The seeder GRANT and scripts/verify-db-grants.ts ROLES.sps_migrate.golden
+    // must stay equal; both are the inherited app_rw scholars.* set, verbatim.
+    const grant = stmts.find((s) => s.startsWith("GRANT")) as string;
+    const privs = grant.slice("GRANT ".length, grant.indexOf(" ON "));
+    expect(privs).toBe(
+      "SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER",
+    );
+  });
+});
+
+describe("migrateDropStatements", () => {
+  it("drops the migrate user idempotently", () => {
+    expect(migrateDropStatements()).toEqual(["DROP USER IF EXISTS 'sps_migrate'@'%'"]);
+  });
+});
+
+describe("buildMigrateDsn", () => {
+  it("carries the `scholars` database segment (prisma DATABASE_URL needs it)", () => {
+    const dsn = buildMigrateDsn("db.internal", 3306, "PW123");
+    expect(dsn).toBe("mysql://sps_migrate:PW123@db.internal:3306/scholars");
+    expect(passwordFromDsn(dsn)).toBe("PW123");
   });
 });
 

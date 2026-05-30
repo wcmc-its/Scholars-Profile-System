@@ -21,7 +21,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { createConnection } from "mariadb";
 
-import { runSeed, type RequestType } from "./seed.js";
+import { runMigrateSeed, runSeed, type RequestType } from "./seed.js";
 
 interface OnEventRequest {
   RequestType: RequestType;
@@ -63,6 +63,7 @@ async function getSecretString(
 export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
   const masterArn = requireEnv("MASTER_SECRET_ARN");
   const bootstrapArn = requireEnv("BOOTSTRAP_SECRET_ARN");
+  const migrateArn = requireEnv("MIGRATE_SECRET_ARN");
   const dbHost = requireEnv("DB_HOST");
   const dbPort = Number(process.env.DB_PORT ?? "3306");
 
@@ -98,9 +99,27 @@ export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
       log: (eventName, extra) =>
         console.log(JSON.stringify({ event: eventName, ...extra })),
     });
+    // ADR-009 Phase 1: mint the deploy-time migration role on the SAME master
+    // connection. Additive — does not touch app_rw or the running system.
+    const migrate = await runMigrateSeed({
+      requestType: event.RequestType,
+      query: async (sql) => {
+        await conn.query(sql);
+      },
+      getMigrateSecret: () => getSecretString(sm, migrateArn),
+      putMigrateSecret: async (dsn) => {
+        await sm.send(
+          new PutSecretValueCommand({ SecretId: migrateArn, SecretString: dsn }),
+        );
+      },
+      dbHost,
+      dbPort,
+      log: (eventName, extra) =>
+        console.log(JSON.stringify({ event: eventName, ...extra })),
+    });
     return {
       PhysicalResourceId: result.physicalResourceId,
-      Data: { reused: result.reused },
+      Data: { reused: result.reused, migrateReused: migrate.reused },
     };
   } finally {
     await conn.end();

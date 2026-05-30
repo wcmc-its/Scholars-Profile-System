@@ -138,6 +138,8 @@ export class AppStack extends Stack {
   /** Family-only handle to the one-shot Prisma migration task definition. */
   public readonly migrationTaskDefinition: ecs.FargateTaskDefinition;
   public readonly dbBootstrapTaskDefinition: ecs.FargateTaskDefinition;
+  /** Family-only handle to the one-shot grant-equality verify task (ADR-009). */
+  public readonly verifyGrantsTaskDefinition: ecs.FargateTaskDefinition;
   /** Public, internet-facing ALB. */
   public readonly publicAlb: elbv2.ApplicationLoadBalancer;
   /** Internal ALB — reachable only from inside the VPC. */
@@ -190,6 +192,18 @@ export class AppStack extends Stack {
       this,
       "BootstrapDsnSecret",
       `scholars/${env}/db/bootstrap`,
+    );
+    // Deploy-time-only migration DSN (ADR-009). The sps_migrate user holds the
+    // DDL on `scholars.*` that `prisma migrate deploy` needs; reducing app_rw to
+    // DML-only (Phase 3) leaves this as the only DDL-bearing credential, and it
+    // is injected ONLY into the one-shot migrate task -- never the 24/7 app. The
+    // "/migrate" tail (7 chars, no leading dash) sidesteps the Secrets Manager
+    // 6-char-tail partial-ARN gotcha. SecretsStack defines the stub; the
+    // DataStack seeder mints the user + populates this secret (Phase 1).
+    const migrateSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "MigrateSecret",
+      `scholars/${env}/db/migrate`,
     );
     const opensearchAppSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -261,10 +275,21 @@ export class AppStack extends Stack {
       `scholars/${env}/newrelic-license-key`,
     );
 
-    // The exhaustive list of eleven consumer ARNs. The task-execution role's
-    // `secretsmanager:GetSecretValue` resource list is this exact array
-    // (assertion in app-stack.test.ts). No `*` resource; no other secrets.
-    const consumerSecretArns: string[] = [
+    // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
+    //
+    // - appConsumerSecretArns: what the 24/7 app TASK consumes (app container +
+    //   ADOT sidecar). This is the app task-execution role's
+    //   `secretsmanager:GetSecretValue` resource list -- exactly these, no `*`,
+    //   and crucially NOT the migrate DSN (req 4: the DDL-capable migrate
+    //   credential must never be readable by the internet-adjacent app role).
+    //   `bootstrap` is also gone -- it moved to the deploy role with the
+    //   db-bootstrap task, so the app role sheds a grant it never used.
+    // - deployConsumerSecretArns: what the deploy-time tasks (migrate,
+    //   verify-grants, db-bootstrap) consume, on a separate short-lived
+    //   execution role. The migrate DSN lives ONLY here.
+    //
+    // Both lists are asserted in app-stack.test.ts.
+    const appConsumerSecretArns: string[] = [
       appRwSecret.secretArn,
       appRoSecret.secretArn,
       opensearchAppSecret.secretArn,
@@ -274,12 +299,19 @@ export class AppStack extends Stack {
       samlIdpCertSecret.secretArn,
       samlSpCertSecret.secretArn,
       sessionCookieSecret.secretArn,
-      // db-bootstrap task (#493): both DSNs it consumes -- its own least-priv
-      // login, and the app-rw DSN it reads only to resolve the grantee username.
-      bootstrapDsnSecret.secretArn,
       // New Relic ingest key (B24): consumed by the ADOT collector sidecar,
       // not the app container. Execution role still needs GetSecretValue on it.
       newRelicLicenseKeySecret.secretArn,
+    ];
+    // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
+    // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
+    // bootstrap + app-rw. The union is these four -- and the migrate DSN appears
+    // on no other execution role (req 4, asserted).
+    const deployConsumerSecretArns: string[] = [
+      appRoSecret.secretArn,
+      appRwSecret.secretArn,
+      bootstrapDsnSecret.secretArn,
+      migrateSecret.secretArn,
     ];
 
     // ------------------------------------------------------------------
@@ -375,6 +407,13 @@ export class AppStack extends Stack {
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    // grant-equality verify task log group (ADR-009 Phase 0) — distinct stream
+    // so the per-role SHOW GRANTS diff output is separable from db-bootstrap.
+    const verifyGrantsLogGroup = new logs.LogGroup(this, "VerifyGrantsLogGroup", {
+      logGroupName: `/aws/ecs/sps-verify-grants-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
     // ADOT collector sidecar log group (B24). Same retention as the app log
     // group; env-prefixed per Footgun #4. Created here -- not in
     // ObservabilityStack -- because the sidecar lives inside the AppStack
@@ -388,11 +427,16 @@ export class AppStack extends Stack {
     // ------------------------------------------------------------------
     // IAM role split (B06).
     //
-    // - **Task-execution role** is the role ECS itself assumes to pull the
-    //   image, inject secrets into the container, and write log streams.
-    //   Permissions are tightly scoped: ECR auth + Batch* on the SPS repo
-    //   only; secrets:GetSecretValue on the eleven consumer ARNs only; logs
-    //   on the two log groups only. No `*` resource anywhere.
+    // - **Task-execution role** (`taskExecutionRole`) is the role ECS assumes
+    //   for the 24/7 APP task to pull the image, inject secrets, and write log
+    //   streams. Tightly scoped: ECR auth + Batch* on the app repo only;
+    //   secrets:GetSecretValue on the ten app consumer ARNs only (ADR-009: no
+    //   migrate, no bootstrap); logs on the app + ADOT-sidecar groups only.
+    // - **Deploy execution role** (`deployTaskExecutionRole`, ADR-009) is the
+    //   parallel role for the short-lived deploy-time tasks (migrate,
+    //   verify-grants, db-bootstrap). It -- and only it -- can read the migrate
+    //   DSN, keeping the DDL-capable credential off the internet-adjacent app
+    //   role (req 4). No `*` resource on either beyond ecr:GetAuthorizationToken.
     // - **Task role** is the role the *application code* runs as. The
     //   running Next.js + Prisma code does not call any AWS API today;
     //   the task role therefore has zero attached permissions. Secrets
@@ -428,16 +472,20 @@ export class AppStack extends Stack {
         resources: [this.ecrRepository.repositoryArn],
       }),
     );
-    // Secrets — exactly the eleven consumer ARNs. Asserted in tests.
+    // Secrets -- exactly the ten app consumer ARNs (ADR-009 split: no migrate,
+    // no bootstrap). Asserted in tests.
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["secretsmanager:GetSecretValue"],
-        resources: consumerSecretArns,
+        resources: appConsumerSecretArns,
       }),
     );
-    // Logs -- limited to the four log groups + their streams (app, migrate,
-    // db-bootstrap, otel-collector sidecar).
+    // Logs -- the app task's own groups only (app container + ADOT sidecar).
+    // ADR-009: the migrate / db-bootstrap / verify-grants groups moved to the
+    // deploy execution role with their tasks. (awsLogs() also auto-grants the
+    // driving execution role write on each group; this explicit block is the
+    // documented, asserted scope.)
     taskExecutionRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -445,12 +493,74 @@ export class AppStack extends Stack {
         resources: [
           appLogGroup.logGroupArn,
           `${appLogGroup.logGroupArn}:*`,
+          otelLogGroup.logGroupArn,
+          `${otelLogGroup.logGroupArn}:*`,
+        ],
+      }),
+    );
+
+    // ------------------------------------------------------------------
+    // Deploy-time execution role (ADR-009 exec-role split).
+    //
+    // The migrate / verify-grants / db-bootstrap tasks run for seconds during a
+    // deploy, not 24/7. They get their OWN execution role so the migrate DSN --
+    // which carries `scholars.*` DDL -- is injectable into them and ONLY them.
+    // The app role (above) deliberately lacks it (req 4): a runtime compromise
+    // of the internet-adjacent app cannot even read the DDL-capable credential.
+    //
+    // Same shape as the app role: ECR auth + Batch* on BOTH repos (migrate runs
+    // the app image; db-bootstrap + verify-grants run the ETL image),
+    // GetSecretValue on the four deploy ARNs only, logs on the three deploy
+    // groups only. fromEcrRepository()/awsLogs() also auto-grant these; the
+    // explicit blocks are the documented, asserted least-privilege contract.
+    // ------------------------------------------------------------------
+    const deployTaskExecutionRole = new iam.Role(this, "DeployExecutionRole", {
+      roleName: `sps-deploy-exec-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS ECS deploy-time task-execution role (${env}). Migrate/verify/db-bootstrap only; the sole reader of the migrate DSN.`,
+    });
+    deployTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    deployTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: [
+          this.ecrRepository.repositoryArn,
+          this.etlEcrRepository.repositoryArn,
+        ],
+      }),
+    );
+    // Secrets -- exactly the four deploy ARNs (incl. the migrate DSN, which is
+    // on no other role). Asserted in tests.
+    deployTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: deployConsumerSecretArns,
+      }),
+    );
+    // Logs -- the three deploy-task groups + their streams.
+    deployTaskExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [
           migrationLogGroup.logGroupArn,
           `${migrationLogGroup.logGroupArn}:*`,
           dbBootstrapLogGroup.logGroupArn,
           `${dbBootstrapLogGroup.logGroupArn}:*`,
-          otelLogGroup.logGroupArn,
-          `${otelLogGroup.logGroupArn}:*`,
+          verifyGrantsLogGroup.logGroupArn,
+          `${verifyGrantsLogGroup.logGroupArn}:*`,
         ],
       }),
     );
@@ -844,7 +954,7 @@ export class AppStack extends Stack {
         family: `sps-migrate-${env}`,
         cpu: envConfig.migrationTaskCpu,
         memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
-        executionRole: taskExecutionRole,
+        executionRole: deployTaskExecutionRole,
         taskRole,
       },
     );
@@ -858,7 +968,10 @@ export class AppStack extends Stack {
         streamPrefix: "migrate",
       }),
       secrets: {
-        DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
+        // ADR-009 Phase 2 cutover: the migrate task runs as sps_migrate (the
+        // DDL-bearing deploy-time role), NOT app_rw. req 1 (asserted): this
+        // MUST be the migrate DSN, never app-rw.
+        DATABASE_URL: ecs.Secret.fromSecretsManager(migrateSecret),
       },
     });
 
@@ -887,7 +1000,7 @@ export class AppStack extends Stack {
         family: `sps-db-bootstrap-${env}`,
         cpu: envConfig.migrationTaskCpu,
         memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
-        executionRole: taskExecutionRole,
+        executionRole: deployTaskExecutionRole,
         taskRole,
       },
     );
@@ -909,6 +1022,63 @@ export class AppStack extends Stack {
       secrets: {
         BOOTSTRAP_DSN: ecs.Secret.fromSecretsManager(bootstrapDsnSecret),
         APP_RW_DSN: ecs.Secret.fromSecretsManager(appRwSecret),
+      },
+    });
+
+    // ------------------------------------------------------------------
+    // grant-equality verify task definition (ADR-009 Phase 0).
+    //
+    // Asserts every managed DB role's live grants EXACTLY equal a pinned golden
+    // list (a delta in EITHER direction -- excess OR missing -- fails). This is
+    // the load-bearing gate that kills the manual-grant drift class behind the
+    // 2026-05-30 staging `ALL PRIVILEGES ON scholars.*` incident; a capability
+    // probe can't see *retained* excess, only an equality diff can.
+    //
+    // Runs scripts/verify-db-grants.ts on the ETL image (the only one carrying
+    // tsx + the source tree + the mariadb client), AFTER db-bootstrap (so app-rw
+    // already holds the audit INSERT its golden list expects) and BEFORE the
+    // service rolls. It connects AS each role and reads SHOW GRANTS FOR
+    // CURRENT_USER() (the #607 grantee-side technique -- no mysql.user read), so
+    // it needs each role's own DSN. Read-only (no GRANT/REVOKE), idempotent, and
+    // fails-closed: any delta exits non-zero and halts the deploy.
+    //
+    // VERIFY_ROLES covers all four managed roles. ADR-009 Phase 2 wires
+    // sps_migrate + its MIGRATE_DSN here, now that the migrate task runs as that
+    // role -- so the verify enforces sps_migrate's golden list live too. Every
+    // named role MUST have its DSN injected or the task fails closed -- never a
+    // silent skip. Network config is supplied at run-task time by the deploy
+    // workflow, exactly as for the migrate / db-bootstrap tasks.
+    // ------------------------------------------------------------------
+    this.verifyGrantsTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "VerifyGrantsTaskDefinition",
+      {
+        family: `sps-verify-grants-${env}`,
+        cpu: envConfig.migrationTaskCpu,
+        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+        executionRole: deployTaskExecutionRole,
+        taskRole,
+      },
+    );
+    this.verifyGrantsTaskDefinition.addContainer("verify-grants", {
+      image: etlContainerImage,
+      containerName: "verify-grants",
+      essential: true,
+      entryPoint: ["npx", "tsx", "scripts/verify-db-grants.ts"],
+      environment: {
+        VERIFY_ROLES: "app-ro,app-rw,sps_migrate,sps_bootstrap",
+      },
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: verifyGrantsLogGroup,
+        streamPrefix: "verify-grants",
+      }),
+      secrets: {
+        APP_RO_DSN: ecs.Secret.fromSecretsManager(appRoSecret),
+        APP_RW_DSN: ecs.Secret.fromSecretsManager(appRwSecret),
+        BOOTSTRAP_DSN: ecs.Secret.fromSecretsManager(bootstrapDsnSecret),
+        // ADR-009 Phase 2: verify now also covers sps_migrate, so it connects
+        // AS that role (SHOW GRANTS FOR CURRENT_USER()) -- it needs the DSN.
+        MIGRATE_DSN: ecs.Secret.fromSecretsManager(migrateSecret),
       },
     });
 
@@ -1321,6 +1491,12 @@ export class AppStack extends Stack {
             resource: "task-definition",
             resourceName: `${this.dbBootstrapTaskDefinition.family}:*`,
           }),
+          // The grant-equality verify task, run after db-bootstrap (ADR-009).
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.verifyGrantsTaskDefinition.family}:*`,
+          }),
         ],
       }),
     );
@@ -1348,7 +1524,13 @@ export class AppStack extends Stack {
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
         actions: ["iam:PassRole"],
-        resources: [taskExecutionRole.roleArn, taskRole.roleArn],
+        resources: [
+          taskExecutionRole.roleArn,
+          // ADR-009: RunTask for migrate / verify-grants / db-bootstrap passes
+          // the deploy execution role, so the deploy principal must be able to.
+          deployTaskExecutionRole.roleArn,
+          taskRole.roleArn,
+        ],
         conditions: {
           StringEquals: {
             "iam:PassedToService": "ecs-tasks.amazonaws.com",
@@ -1475,6 +1657,11 @@ export class AppStack extends Stack {
       value: this.dbBootstrapTaskDefinition.family,
       description:
         "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+    });
+    new CfnOutput(this, "EcsVerifyGrantsTaskFamily", {
+      value: this.verifyGrantsTaskDefinition.family,
+      description:
+        "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,

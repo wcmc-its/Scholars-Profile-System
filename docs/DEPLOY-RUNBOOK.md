@@ -1,6 +1,6 @@
 # Deploy runbook
 
-This is the operator reference for shipping a build of the Scholars Profile System to staging or production. It pairs with `.github/workflows/deploy.yml`, which automates the same five-step pipeline. Read this end-to-end once; thereafter, use it as the lookup for emergencies and the prod pre-deploy checklist.
+This is the operator reference for shipping a build of the Scholars Profile System to staging or production. It pairs with `.github/workflows/deploy.yml`, which automates the same deploy pipeline. Read this end-to-end once; thereafter, use it as the lookup for emergencies and the prod pre-deploy checklist.
 
 Closes the documentation half of [#108](https://github.com/wcmc-its/Scholars-Profile-System/issues/108) (B09 deploy-workflow) and [#111](https://github.com/wcmc-its/Scholars-Profile-System/issues/111) (B12 deploy strategy + rollback). Companion to [`docs/PRODUCTION_ADDENDUM.md` § AppStack](./PRODUCTION_ADDENDUM.md#appstack), [`docs/PRODUCTION_ADDENDUM.md` § Schema migration policy](./PRODUCTION_ADDENDUM.md#schema-migration-policy), [`docs/STAGING.md`](./STAGING.md), and [`ADR-004` Deploy strategy](./ADR-004-deploy-strategy.md).
 
@@ -27,7 +27,7 @@ To promote a tested build to **production**:
 2. Click `Run workflow`. Pick **branch `master`** (the OIDC sub-claim enforces this) and **env `prod`**.
 3. Click the green `Run workflow` button. The job lands in `Awaiting approval` state.
 4. The `prod` GitHub Environment's required reviewer (you) gets the approval prompt; click `Approve and deploy`.
-5. The same five-step pipeline runs against `Sps-App-prod`, the prod ECR repo, and the prod ECS service.
+5. The same deploy pipeline runs against `Sps-App-prod`, the prod ECR repo, and the prod ECS service.
 
 The CLI equivalent of step 2 is `gh workflow run deploy.yml --ref master -f env=prod`. Approval still gates the run.
 
@@ -50,25 +50,33 @@ Revisit the decision when **any** of:
 
 None of these are true today. If two become true, open a workstream to implement CodeDeploy blue/green; the AppStack outputs are already shaped to feed it.
 
-## The five-step pipeline contract
+## The deploy pipeline contract
 
-Lifted from `docs/PRODUCTION_ADDENDUM.md` § "Where migrations run" and codified in `.github/workflows/deploy.yml`:
+Lifted from `docs/PRODUCTION_ADDENDUM.md` § "Where migrations run" and codified in `.github/workflows/deploy.yml`. Steps 3 and 4 self-skip (with a warning) until their task families are deployed; once present they are fail-closed gates that run **before** migrate and the service roll:
 
 ```
 1. build image
-2. push to ECR
-3. run migration task
+2. push to ECR (app image + ETL batch image)
+3. db-bootstrap task (#493)
+     provisions scholars_audit + the app-rw INSERT grant, as the least-priv
+     sps_bootstrap user; idempotent
+     exit 0 -> continue; non-zero -> fail the deploy, do not roll the service
+4. verify-grants task (ADR-009)
+     asserts every managed DB role's live grants == its pinned golden list;
+     read-only; fails closed on ANY drift (excess or missing)
+     exit 0 -> continue; non-zero -> fail the deploy, do not roll the service
+5. run migration task
      image:   same image as the new app version
      command: prisma migrate deploy
      secret:  scholars/{env}/db/app-rw (writer DSN, injected via task-execution role)
      exit 0 -> continue; non-zero -> fail the deploy, do not roll the service
-4. update ECS service -> rolling deploy of the new image
-5. wait for stability + smoke test
+6. update ECS service -> rolling deploy of the new image
+7. wait for stability + smoke test
 ```
 
-This order is load-bearing. The migration runs **before** the service updates because the schema must be ready when the new app version starts; the previous app version is still serving traffic during the migration (additive-only rule makes this safe). If the migration fails, step 4 never fires and the previous app version continues serving against the unchanged schema.
+This order is load-bearing. db-bootstrap runs first so the audit schema + grant exist; verify-grants then confirms the whole DB role model is intact before any credential is used to migrate; the migration runs **before** the service updates because the schema must be ready when the new app version starts; the previous app version is still serving traffic throughout (additive-only rule makes this safe). If any gate (3, 4, 5) fails, step 6 never fires and the previous app version continues serving against the unchanged schema.
 
-Any out-of-band deploy (e.g. an operator running `aws ecs update-service` manually because the workflow is broken) MUST follow the same order. In particular, the migration task MUST exit 0 before the service is rolled. Skipping the migration step risks shipping a new app version against an old schema. Skipping the ordering risks shipping a new schema before the app that needs it.
+Any out-of-band deploy (e.g. an operator running `aws ecs update-service` manually because the workflow is broken) MUST follow the same order: db-bootstrap and verify-grants MUST exit 0, then the migration task MUST exit 0, before the service is rolled. Skipping the migration step risks shipping a new app version against an old schema; skipping verify-grants risks rolling on a drifted/over-privileged DB role model; skipping the ordering risks shipping a new schema before the app that needs it.
 
 ## Bootstrap two-step (first deploy of an env)
 
@@ -260,3 +268,4 @@ ECR push on the SPS repo only; `ecs:RunTask` on the migration task family ARN; `
 5. **`wait services-stable` times out.** Either new tasks aren't passing health checks (check `/aws/ecs/sps-app-${env}` logs) or the circuit-breaker fired. `describe-services` event log will say which.
 6. **Smoke test fails with HTTP 000.** Public ALB DNS not resolving, or curl can't reach :80. Usually: AppStack's public-ALB SG ingress is missing `0.0.0.0/0:80`; verify with `aws ec2 describe-security-groups --filters Name=group-name,Values=*public*`.
 7. **Smoke test fails with HTTP 503.** New tasks haven't registered with the target group yet; the workflow may have raced ahead. Re-run; not a real defect.
+8. **`verify-grants` task exits 1** (step "Run verify-grants task"; service NOT rolled). A managed DB role's live grants no longer equal its golden list (ADR-009). Read `/aws/ecs/sps-verify-grants-${env}` — the failure names the role and the EXCESS / MISSING grant tokens. EXCESS (e.g. `scholars.* ALL PRIVILEGES`) = a role was widened out-of-band; `REVOKE` the extra and re-run. MISSING = a grant was dropped, or a deliberate change to the role model wasn't reflected in the golden list (`scripts/verify-db-grants.ts` `ROLES`) — reconcile, then re-run. This gate is **not** retryable by re-running alone; the underlying grant drift must be fixed first.

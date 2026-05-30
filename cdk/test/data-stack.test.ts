@@ -338,7 +338,7 @@ describe("DataStack", () => {
     });
 
     describe("db-bootstrap seeder (#493 PR 2)", () => {
-      it("creates the seeder Lambda in-VPC with both secret ARNs + DB host in env", () => {
+      it("creates the seeder Lambda in-VPC with all three secret ARNs + DB host in env", () => {
         const fns = template.findResources("AWS::Lambda::Function");
         const seeder = Object.values(fns).find(
           (r) => r.Properties?.FunctionName === "sps-db-bootstrap-seed-prod",
@@ -351,6 +351,8 @@ describe("DataStack", () => {
           | undefined)?.Variables ?? {};
         expect(env.MASTER_SECRET_ARN).toBeDefined();
         expect(env.BOOTSTRAP_SECRET_ARN).toBeDefined();
+        // ADR-009 Phase 1: the seeder also mints sps_migrate + writes its DSN.
+        expect(env.MIGRATE_SECRET_ARN).toBeDefined();
         expect(env.DB_HOST).toBeDefined();
       });
 
