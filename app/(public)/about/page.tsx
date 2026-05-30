@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DocsToc, type NavGroup } from "@/components/docs/docs-toc";
+import { DocsMobileNav, DocsToc, type NavGroup } from "@/components/docs/docs-toc";
 
 /**
  * /docs (v0) — single comprehensive documentation page, stakeholder-first +
@@ -91,7 +91,11 @@ const MAIN_CLASS = [
   // `overflow-x-auto` table wrappers are intentionally not.
   "[&_h1]:max-w-[820px] [&_h2]:max-w-[820px] [&_h3]:max-w-[820px] [&_p]:max-w-[820px] [&_ul]:max-w-[820px] [&_ol]:max-w-[820px] [&_dl]:max-w-[820px]",
   "[&_p]:mt-3 [&_ul]:mt-3 [&_ul]:ml-5 [&_ul]:list-disc [&_li]:mt-1 [&_ol]:mt-3 [&_ol]:ml-5 [&_ol]:list-decimal",
-  "[&_h2]:mt-14 [&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight",
+  // Anchor offset: below lg a sticky "On this page" bar (DocsMobileNav) sits
+  // under the 60px header, so headings need extra scroll-margin to clear it;
+  // at lg the bar is gone and the original 80px (matching the sidebar's
+  // lg:top-20) applies.
+  "[&_h2]:mt-14 [&_h2]:scroll-mt-28 lg:[&_h2]:scroll-mt-20 [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-tight",
   "[&_h3]:mt-7 [&_h3]:text-lg [&_h3]:font-semibold",
   "[&_table]:w-full [&_table]:border-collapse [&_table]:text-[15px]",
   "[&_th]:border-b-2 [&_th]:border-[#d3d8de] [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top [&_th]:text-xs [&_th]:font-bold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground",
@@ -103,13 +107,14 @@ const MAIN_CLASS = [
 export default function DocsPage() {
   return (
     <div className="mx-auto max-w-[1280px] px-6 lg:grid lg:grid-cols-[248px_minmax(0,1fr)] lg:gap-12">
+      <DocsMobileNav nav={NAV} />
       <DocsToc nav={NAV} />
 
       <main className={MAIN_CLASS}>
         <p className="text-xs font-bold uppercase tracking-widest text-[#7d1c1c]">About</p>
         <h1
           id="start"
-          className="mt-1 scroll-mt-20 font-serif text-4xl font-semibold leading-tight tracking-tight"
+          className="mt-1 scroll-mt-28 font-serif text-4xl font-semibold leading-tight tracking-tight lg:scroll-mt-20"
         >
           Scholars at Weill Cornell Medicine
         </h1>
@@ -525,7 +530,7 @@ export default function DocsPage() {
           rather than a hand-kept duplicate.
         </p>
 
-        <h3 id="disclosures" className="scroll-mt-20">
+        <h3 id="disclosures" className="scroll-mt-28 lg:scroll-mt-20">
           Disclosures
         </h3>
         <p>
@@ -863,25 +868,25 @@ export default function DocsPage() {
                 <td>Representative publications per subtopic, in a small rotating set</td>
                 <td>Ranked by Impact within the subtopic; refreshed weekly</td>
               </tr>
-              <tr id="selected-highlights" className="scroll-mt-20">
+              <tr id="selected-highlights" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Selected highlights</td>
                 <td>A scholar&apos;s profile</td>
                 <td>That scholar&apos;s most notable papers</td>
                 <td>Impact and recency, restricted to first- or senior-author papers; lighter recency weight</td>
               </tr>
-              <tr id="recent-contributions" className="scroll-mt-20">
+              <tr id="recent-contributions" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Recent contributions</td>
                 <td>Home page</td>
                 <td>Recent notable work across WCM</td>
                 <td>Impact and heavy recency; eligible roles only; one per research area</td>
               </tr>
-              <tr id="recent-highlights" className="scroll-mt-20">
+              <tr id="recent-highlights" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Recent highlights</td>
                 <td>Topic page</td>
                 <td>Recent notable work in a topic</td>
                 <td>Impact and heavy recency; all attributed authors</td>
               </tr>
-              <tr id="top-scholars" className="scroll-mt-20">
+              <tr id="top-scholars" className="scroll-mt-28 lg:scroll-mt-20">
                 <td>Top scholars</td>
                 <td>Topic page</td>
                 <td>Full-time faculty most active in a research area</td>
@@ -949,7 +954,7 @@ export default function DocsPage() {
             { term: "Spotlight / Selected research", def: "The home-page showcase of representative publications per subtopic, selected by ReciterAI Impact within the subtopic and refreshed weekly. Not scholar-curated." },
             { term: "Suppression", def: "Hiding a misattributed publication from a profile. A reversible, recorded near-term measure; the source-level fix is rejecting the paper in Publication Manager." },
           ].map(({ term, def }) => (
-            <div key={term} id={`g-${term.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`} className="scroll-mt-20">
+            <div key={term} id={`g-${term.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`} className="scroll-mt-28 lg:scroll-mt-20">
               <dt className="font-semibold">{term}</dt>
               <dd className="mt-0.5 text-muted-foreground">{def}</dd>
             </div>
