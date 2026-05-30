@@ -256,7 +256,8 @@ export default function DocsPage() {
             ReCiter Publication Manager
           </a>{" "}
           to correct the attribution at the source so it does not come back; a <em>missing</em>{" "}
-          publication is added there too. Your name, department, title, funding, disclosures, and
+          publication is added there too &mdash; by you or the library curation team, whoever gets
+          to it first. Your name, department, title, funding, disclosures, and
           appointments are corrected at their source. Use Request a change in your self-edit
           interface, and it routes to the right office. Topics, Impact, and synopsis are computed by
           ReciterAI and cannot be hand-edited. The full map is in{" "}
@@ -578,7 +579,8 @@ export default function DocsPage() {
                   Add or confirm it at{" "}
                   <a href={PM} className={LINK}>
                     reciter.weill.cornell.edu
-                  </a>
+                  </a>{" "}
+                  &mdash; you or the library curation team, whoever gets there first
                 </td>
               </tr>
               <tr>
@@ -752,7 +754,7 @@ export default function DocsPage() {
         <p>
           <strong>Freshness.</strong> The taxonomy, the set of topics, recomputes on a
           longer (roughly annual) cycle, but your publications are classified into the current
-          taxonomy as they are ingested on the weekly pipeline, so an individual paper does not wait
+          taxonomy as they are ingested on the nightly pipeline, so an individual paper does not wait
           a year to receive topics. A topic can shift when the taxonomy is rebuilt; that is expected.
           A publication with no abstract is classified from title, MeSH, and RePORTER terms, and a
           cross-cutting paper can sit under more than one parent topic. A genuinely wrong topic is a
@@ -783,9 +785,10 @@ export default function DocsPage() {
           Editorials hard-excluded.
         </p>
         <p>
-          <strong>How often it updates.</strong> Impact scores and synopses refresh on a weekly
-          batch, distinct from the nightly refresh of source mirrors like ED and PubMed. A score can
-          lag a brand-new citation by up to a week.
+          <strong>How often it updates.</strong> Impact scores and synopses refresh nightly, on the
+          same cadence as the source mirrors like ED and PubMed. A newly matched publication is
+          usually scored within a day or two, and an updated citation count reaches the score within
+          about a day.
         </p>
         <p>
           <strong>Why a publication can show no Impact (a dash).</strong> Not a quality judgment.
@@ -836,10 +839,15 @@ export default function DocsPage() {
           When your query maps to a concept, the publications tab shows a resolver chip naming it,
           and you can escape into a literal-text search from that chip to match your words exactly.
         </p>
+        <p>
+          If a publication of yours isn&apos;t turning up, the search index rebuilds nightly, so a
+          paper added today usually appears the next day; searching its exact title is the quickest
+          way to confirm it is indexed.
+        </p>
         <Callout variant="note" heading="Search is separate from your profile">
           <p>
             Whether a publication appears in search is governed by the search index, which rebuilds
-            on its own schedule. Whether it appears on your profile is governed by attribution and
+            nightly. Whether it appears on your profile is governed by attribution and
             your hide/restore choices. Hiding a paper from your profile does not remove it from
             search, and the reverse holds too.
           </p>
@@ -944,7 +952,7 @@ export default function DocsPage() {
             { term: "Author Position", def: "Your place in a publication’s author list (first / middle / senior). This, not Impact, conveys your role on a paper." },
             { term: "ReCiter", def: "WCM’s author-disambiguation engine. Decides which publications are yours, from PubMed. Runs nightly." },
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
-            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s topics, Impact score, and one-line synopsis. Impact and synopsis refresh weekly; the topic taxonomy recomputes roughly annually." },
+            { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s topics, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; the topic taxonomy recomputes roughly annually." },
             { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },

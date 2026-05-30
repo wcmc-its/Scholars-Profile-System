@@ -549,7 +549,12 @@ export class EtlStack extends Stack {
     // TTL after a cadence run). mesh-coverage runs nightly only: it
     // recomputes the publication.mesh_terms numerator off ReCiter, which
     // is a nightly source, so a weekly pass would recompute against an
-    // unchanged snapshot. Per-cadence step ids keep `Task${id}` unique
+    // unchanged snapshot. dynamodb runs nightly too: ReciterAI recomputes the
+    // per-publication Impact / topic / synopsis outputs daily, so a weekly pull
+    // surfaced them up to a week late -- nightly keeps Scholars within a day of
+    // the upstream scores. (spotlight stays weekly: it is a rotating showcase,
+    // and it reads the already-persisted Impact, now refreshed nightly.)
+    // Per-cadence step ids keep `Task${id}` unique
     // (otherwise the `Task${id}` construct id collides across machines).
     // (vivo-redirect is a manual cutover-prep tool, never a cadence step.)
     // ------------------------------------------------------------------
@@ -559,12 +564,15 @@ export class EtlStack extends Stack {
       { id: "Asms", npmScript: "etl:asms", external: true },
       { id: "Infoed", npmScript: "etl:infoed", external: true },
       { id: "Coi", npmScript: "etl:coi", external: true },
+      // After the source ETLs (so a freshly matched publication is enriched the
+      // same night) and before search:index (so the rebuilt index carries the
+      // day's scores).
+      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
       { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
     ];
     const weeklySteps: ReadonlyArray<StepSpec> = [
-      { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
       { id: "Completeness", npmScript: "etl:completeness", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
