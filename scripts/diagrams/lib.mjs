@@ -42,6 +42,7 @@ export const COL = {
 export const STACKC = {
   NetworkStack: "#4263eb", DataStack: "#f08c00", SecretsStack: "#7048e8", AppStack: "#0ca678",
   EtlStack: "#2f9e44", EdgeStack: "#7d1c1c", Observability: "#1098ad", DrVault: "#868e96",
+  Analytics: "#ae3ec9",
 };
 
 /** Right-aligned status chip tones (e.g. ETL refresh cadence on a source node). */

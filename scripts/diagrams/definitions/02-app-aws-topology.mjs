@@ -20,13 +20,20 @@ const nodes = {
   audit: { x: 852, y: 430, w: 236, h: 64, kind: "data", title: "scholars_audit DB", sub: ["append-only B03 audit"], badge: "DataStack" },
   etlt:  { x: 560, y: 520, w: 310, h: 60, kind: "app", title: "ECS Fargate · sps-etl", sub: ["npm run etl:<source>"], badge: "EtlStack" },
   xray:  { x: 404, y: 636, w: 200, h: 60, kind: "aws", title: "X-Ray + New Relic", sub: ["OTLP traces (sidecar)"] },
-  obs:   { x: 760, y: 636, w: 220, h: 60, kind: "aws", title: "Observability", sub: ["alarms->SNS->Lambda->Teams"], badge: "Observability" },
+  obs:   { x: 760, y: 636, w: 220, h: 60, kind: "aws", title: "Observability", sub: ["alarms->SNS->Teams", "sps-reliability dashboard"], badge: "Observability" },
   eb:    { x: 1180, y: 198, w: 180, h: 52, kind: "aws", title: "EventBridge", sub: ["cron schedules"], badge: "EtlStack" },
   sfn:   { x: 1180, y: 282, w: 180, h: 60, kind: "aws", title: "Step Functions", sub: ["nightly/weekly/annual"], badge: "EtlStack" },
   dr:    { x: 1180, y: 430, w: 180, h: 62, kind: "ext", title: "DR backup vault", sub: ["us-west-2 · cross-region"], badge: "DrVault" },
+  // Usage-analytics plane (Sps-Analytics, ADR-008 9th stack) — off-request, nightly.
+  cflog:  { x: 300, y: 748, w: 250, h: 62, kind: "data", title: "CloudFront access logs", sub: ["S3 · cf/<env>/ · 90-day TTL"], badge: "EdgeStack" },
+  rollup: { x: 620, y: 748, w: 264, h: 62, kind: "app", title: "Usage rollup Lambda", sub: ["sps-cf-usage-rollup", "EventBridge -> Athena INSERT"], chip: { tone: "nightly", text: "nightly" }, badge: "Analytics" },
+  usage:  { x: 954, y: 748, w: 286, h: 62, kind: "data", title: "daily_usage (durable S3)", sub: ["Glue + Athena · aggregates only"], badge: "Analytics" },
 };
 
-const groups = [{ x: 300, y: 140, w: 840, h: 468, kind: "net", title: "AWS · VPC (us-east-1)", fo: 0.06 }];
+const groups = [
+  { x: 300, y: 140, w: 840, h: 468, kind: "net", title: "AWS · VPC (us-east-1)", fo: 0.06 },
+  { x: 280, y: 724, w: 978, h: 108, kind: "aws", title: "Usage analytics · CloudFront logs (off-request)", fo: 0.05 },
+];
 const [gvpc] = groups;
 
 const edges = [
@@ -48,9 +55,14 @@ const edges = [
   { p0: A(nodes.audit, "r", 0.4), p1: A(nodes.dr, "l", 0.4), color: "gray", dash: true, label: "backup copy" },
   { p0: A(gvpc, "b", 0.243), p1: A(nodes.xray, "t", 0.5), color: "gray", dash: true, label: "traces" },
   { p0: A(gvpc, "b", 0.679), p1: A(nodes.obs, "t", 0.5), color: "gray", dash: true, label: "telemetry" },
+  // Usage-analytics plane: CloudFront delivers access logs to S3; a nightly Lambda
+  // runs Athena to roll them into the durable, aggregates-only daily_usage table.
+  { p0: A(nodes.cf, "b", 0.08), p1: A(nodes.cflog, "t", 0.5), color: "gray", dash: true, label: "access logs", points: [{ x: 282, y: 120 }, { x: 282, y: 735 }] },
+  { p0: A(nodes.cflog, "r", 0.5), p1: A(nodes.rollup, "l", 0.5), color: "violet", label: "scan" },
+  { p0: A(nodes.rollup, "r", 0.5), p1: A(nodes.usage, "l", 0.5), color: "violet", label: "INSERT" },
 ];
 
-export const spec = { id: "app-aws-topology", vb: [1400, 740], groups, nodes, edges };
+export const spec = { id: "app-aws-topology", vb: [1400, 860], groups, nodes, edges };
 
 export const meta = {
   nav: "② App &amp; AWS topology",
@@ -60,7 +72,8 @@ export const meta = {
   blurb:
     "The runtime: <b>CloudFront + WAF → ALB → ECS Fargate → Aurora + OpenSearch</b>, the staff " +
     "write-path (SAML + LDAP authz, append-only audit), and the off-request-path ETL plane. Box " +
-    "<b>fill</b> encodes resource type; the <b>top accent stripe</b> names the owning CDK stack.",
+    "<b>fill</b> encodes resource type; the <b>top accent stripe</b> names the owning CDK stack. A " +
+    "separate nightly plane rolls CloudFront access logs into a durable, aggregates-only usage table.",
   legend: [
     { fill: "#f1f3f5", stroke: "#adb5bd", label: "External" },
     { fill: "#fbeaea", stroke: "#7d1c1c", label: "Edge / CDN" },
@@ -74,7 +87,8 @@ export const meta = {
     ["NetworkStack", "VPC, subnets, SGs, endpoints"], ["DataStack", "Aurora, OpenSearch"],
     ["SecretsStack", "Secrets Manager, rotation"], ["AppStack", "ECR, ECS, ALBs, migration"],
     ["EtlStack", "Step Functions, schedules"], ["EdgeStack", "CloudFront, WAF"],
-    ["Observability", "alarms, SNS, on-call"], ["DrVault", "us-west-2 backup vault"],
+    ["Observability", "alarms, SNS, on-call, dashboard"], ["DrVault", "us-west-2 backup vault"],
+    ["Analytics", "Glue, Athena, usage rollup"],
   ],
-  source: "cdk/lib/*-stack.ts · docs/architecture-overview.md · OTel→X-Ray/New Relic (B24) · autoscaling (#596)",
+  source: "cdk/lib/*-stack.ts · docs/architecture-overview.md · OTel→X-Ray/New Relic (B24) · autoscaling (#596) · Sps-Analytics + reliability dashboard (#619)",
 };
