@@ -249,6 +249,28 @@ describe("AnalyticsStack", () => {
         }
       });
 
+      it("grants s3:GetBucketLocation UNCONDITIONED (Athena bucket verify)", () => {
+        // Regression guard: GetBucketLocation has no s3:prefix request context,
+        // so gating it with an s3:prefix condition silently voids it and Athena
+        // fails StartQueryExecution with "Unable to verify/create output
+        // bucket". It must be its own unconditioned statement.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const stmts = Object.values(policies).flatMap(
+          (p) =>
+            (
+              p.Properties as {
+                PolicyDocument?: { Statement?: Array<Record<string, unknown>> };
+              }
+            ).PolicyDocument?.Statement ?? [],
+        );
+        const gbl = stmts.find((s) => {
+          const a = Array.isArray(s.Action) ? s.Action : [s.Action];
+          return a.includes("s3:GetBucketLocation");
+        });
+        expect(gbl).toBeDefined();
+        expect(gbl?.Condition).toBeUndefined();
+      });
+
       // ---- EventBridge -----------------------------------------------
       it("creates the nightly rollup rule, enabled per env config", () => {
         template.resourceCountIs("AWS::Events::Rule", 1);

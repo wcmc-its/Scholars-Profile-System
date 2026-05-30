@@ -416,10 +416,31 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
               ],
             },
             {
-              "Action": [
-                "s3:GetBucketLocation",
-                "s3:ListBucket",
+              "Action": "s3:GetBucketLocation",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
               ],
+            },
+            {
+              "Action": "s3:ListBucket",
               "Condition": {
                 "StringLike": {
                   "s3:prefix": [
@@ -442,10 +463,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
               },
             },
             {
-              "Action": [
-                "s3:GetBucketLocation",
-                "s3:ListBucket",
-              ],
+              "Action": "s3:ListBucket",
               "Condition": {
                 "StringLike": {
                   "s3:prefix": [
@@ -1302,10 +1320,31 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
               ],
             },
             {
-              "Action": [
-                "s3:GetBucketLocation",
-                "s3:ListBucket",
+              "Action": "s3:GetBucketLocation",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
               ],
+            },
+            {
+              "Action": "s3:ListBucket",
               "Condition": {
                 "StringLike": {
                   "s3:prefix": [
@@ -1328,10 +1367,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
               },
             },
             {
-              "Action": [
-                "s3:GetBucketLocation",
-                "s3:ListBucket",
-              ],
+              "Action": "s3:ListBucket",
               "Condition": {
                 "StringLike": {
                   "s3:prefix": [

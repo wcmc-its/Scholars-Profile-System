@@ -497,13 +497,27 @@ export class AnalyticsStack extends Stack {
       }),
     );
 
-    // S3: list the raw bucket (scoped to cf/<env>/*) and the analytics bucket
-    // (scoped to the rollup + athena-results prefixes), read raw cf/<env>/
-    // logs, and read+write the rollup + athena-results prefixes.
+    // S3 bucket-level: GetBucketLocation MUST be a separate, UNCONDITIONED
+    // statement. It is a bucket-level call that carries no `s3:prefix` request
+    // context, so gating it with the `s3:prefix` condition below silently voids
+    // the grant -- Athena calls GetBucketLocation on both the source and result
+    // buckets at StartQueryExecution, and the denial surfaces at runtime as
+    // "Unable to verify/create output bucket" (deploy-only bug; cdk synth +
+    // assertions cannot catch the IAM-condition semantics). Region lookup only,
+    // low sensitivity.
     rollupFn.addToRolePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: ["s3:GetBucketLocation", "s3:ListBucket"],
+        actions: ["s3:GetBucketLocation"],
+        resources: [rawBucketArn, analyticsBucketArn],
+      }),
+    );
+    // S3 list: scope each bucket's object listing to the exact prefixes the
+    // rollup touches (raw cf/<env>/*, and the rollup + athena-results prefixes).
+    rollupFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["s3:ListBucket"],
         resources: [rawBucketArn],
         conditions: { StringLike: { "s3:prefix": [`cf/${env}/*`] } },
       }),
@@ -511,7 +525,7 @@ export class AnalyticsStack extends Stack {
     rollupFn.addToRolePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
-        actions: ["s3:GetBucketLocation", "s3:ListBucket"],
+        actions: ["s3:ListBucket"],
         resources: [analyticsBucketArn],
         conditions: {
           StringLike: {
