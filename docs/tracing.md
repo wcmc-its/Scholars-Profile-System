@@ -138,8 +138,8 @@ into X-Ray retention. **Ask before flipping in production.**
 
 1. Identify the affected request in CloudWatch (path + approx timestamp).
 2. Open the [X-Ray service map](https://console.aws.amazon.com/xray/) in
-   the same AWS account; filter to `service.name = sps-app-prod` (or
-   `sps-app-staging`) plus the relevant time window.
+   the same AWS account; filter to `service.name = Scholars-prod` (or
+   `Scholars-staging`) plus the relevant time window.
 3. The trace list shows kept traces only. Errors + traces > 1500 ms are
    always kept; the rest is the 5% baseline sample. If the request you
    want isn't there and wasn't an error / wasn't slow, you may have to

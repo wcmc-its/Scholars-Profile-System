@@ -1172,7 +1172,7 @@ describe("AppStack", () => {
             e.Value,
           ]),
         );
-        expect(envByName.get("OTEL_SERVICE_NAME")).toBe("sps-app-prod");
+        expect(envByName.get("OTEL_SERVICE_NAME")).toBe("Scholars-prod");
         expect(envByName.get("OTEL_EXPORTER_OTLP_ENDPOINT")).toBe(
           "http://localhost:4318",
         );

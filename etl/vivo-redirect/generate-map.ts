@@ -18,17 +18,30 @@
  *
  * Run on demand at cutover prep time (NOT integrated into daily ETL):
  *   npm run etl:vivo-redirect
- *   # outputs to: etl/vivo-redirect/output/vivo-redirect.map
+ *   # outputs:
+ *   #   etl/vivo-redirect/output/vivo-redirect.map      (cwid -> profile, D-01..D-05)
+ *   #   etl/vivo-redirect/output/vivo-pub-redirect.map  (pubid<PMID> -> author, D-06..D-09)
+ *   #   etl/vivo-redirect/output/vivo-org-redirect.map  (org-u<N> -> dept/center, D-10..D-13)
  *
- * Decisions:
+ * Decisions (see docs/vivo-cutover-redirect-runbook.md):
  * - D-01: redirect scope is /display/cwid-{cwid} only (people profiles)
  * - D-02: active scholars 301 → /scholars/{slug}
  * - D-03: deleted/unknown CWIDs fall through to nginx 404 (no entry in map)
  * - D-05: cwid_aliases included so old CWIDs that map to a new live
  *         CWID also redirect to the live scholar's current slug
+ * - D-06: second map — VIVO pubid<PMID> 301 → the owning WCM author's profile
+ *         (VIVO pubid IS the PMID; Scholars has no per-publication page)
+ * - D-07: author pick is deterministic, one per PMID. Among CONFIRMED, ACTIVE
+ *         WCM authors (the query WHERE filters to exactly these), prefer the
+ *         first author, else the senior (last) author, else the earliest
+ *         remaining rank (lowest position). "Active" is a hard gate — the query
+ *         never returns inactive/deleted authors, so the priority only ever
+ *         ranks live profiles.
+ * - D-08: PMIDs with no confirmed+active WCM author produce no entry and fall
+ *         through to nginx 404 (same as D-03).
  */
 
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { prisma } from "../../lib/db";
 
@@ -38,9 +51,56 @@ const DEFAULT_OUTPUT_PATH = path.join(
   "output",
   "vivo-redirect.map",
 );
+const DEFAULT_PUB_OUTPUT_PATH = path.join(
+  __dirname,
+  "output",
+  "vivo-pub-redirect.map",
+);
+const DEFAULT_ORG_OUTPUT_PATH = path.join(
+  __dirname,
+  "output",
+  "vivo-org-redirect.map",
+);
+// Hand-built (NOT DB-derived) org crosswalk — see data/vivo-org-redirects.json.
+const DEFAULT_ORG_CROSSWALK_PATH = path.join(
+  __dirname,
+  "..",
+  "..",
+  "data",
+  "vivo-org-redirects.json",
+);
 
 export type MapScholar = { cwid: string; slug: string };
 export type MapAlias = { oldCwid: string; currentCwid: string };
+
+/**
+ * One confirmed, ACTIVE WCM author of a single publication. The DB query
+ * filters to confirmed authorships whose scholar is active + non-deleted, so
+ * every row here is already a live profile (D-07's "active" hard gate). `cwid`
+ * is carried only for a deterministic final tiebreak.
+ */
+export type PubAuthorRow = {
+  cwid: string;
+  slug: string;
+  isFirst: boolean;
+  isLast: boolean;
+  position: number; // 1-based author position
+};
+
+export type PubMapEntry = { pmid: string; slug: string };
+
+/**
+ * One row of the hand-built VIVO org-unit crosswalk
+ * (data/vivo-org-redirects.json). `scholarsTarget` is a site-relative path
+ * (e.g. "/departments/medicine") or null when the org has no Scholars
+ * equivalent / hasn't been resolved yet — null → no map entry → 404 (D-13).
+ */
+export type OrgCrosswalkEntry = {
+  vivoOrgId: string;
+  scholarsTarget: string | null;
+  vivoName?: string | null;
+  views30d?: number;
+};
 
 /**
  * Pure builder used by the unit test. Given the projected scholar list
@@ -88,6 +148,94 @@ export function buildVivoMapLines(
   return lines;
 }
 
+/**
+ * D-07 author pick. Given every confirmed+active WCM author of ONE publication,
+ * return the slug of the single author the pubid should redirect to, or null if
+ * the list is empty (→ D-08 fall-through). Priority: first author, else senior
+ * (last) author, else earliest remaining rank (lowest position). Position is
+ * unique per paper, so the final cwid tiebreak is only a determinism backstop.
+ */
+export function pickPubAuthorSlug(rows: PubAuthorRow[]): string | null {
+  if (rows.length === 0) return null;
+  const first = rows.find((r) => r.isFirst);
+  if (first) return first.slug;
+  const last = rows.find((r) => r.isLast);
+  if (last) return last.slug;
+  const earliest = [...rows].sort(
+    (a, b) => a.position - b.position || a.cwid.localeCompare(b.cwid),
+  )[0];
+  return earliest.slug;
+}
+
+/**
+ * Collapse all authors of all publications down to one redirect entry per PMID
+ * via {@link pickPubAuthorSlug}. PMIDs with no resolvable author are dropped
+ * (D-08). Pure — unit-tested.
+ */
+export function buildPubMapEntries(
+  rowsByPmid: Map<string, PubAuthorRow[]>,
+): PubMapEntry[] {
+  const entries: PubMapEntry[] = [];
+  for (const [pmid, rows] of rowsByPmid) {
+    const slug = pickPubAuthorSlug(rows);
+    if (slug) entries.push({ pmid, slug });
+  }
+  return entries;
+}
+
+/**
+ * Pure builder for the pubid→author nginx RewriteMap (D-06). Mirrors
+ * {@link buildVivoMapLines}: comment header + `<pmid>\t<url>;` data lines.
+ */
+export function buildVivoPubMapLines(
+  entries: PubMapEntry[],
+  baseUrl: string = DEFAULT_BASE_URL,
+): string[] {
+  const lines: string[] = [];
+  lines.push(
+    "# VIVO pubid → Scholars redirect map — generated by etl/vivo-redirect/generate-map.ts (D-06)",
+  );
+  lines.push(
+    "# Format: <pmid> <target-url>;  key = VIVO pubid = PMID; value = owning WCM author's profile.",
+  );
+  lines.push(
+    "# Author pick D-07 (active first → senior → earliest rank). Unmatched PMIDs fall through to 404 (D-08).",
+  );
+  lines.push("");
+  for (const e of entries) {
+    lines.push(`${e.pmid}\t${baseUrl}/scholars/${e.slug};`);
+  }
+  return lines;
+}
+
+/**
+ * Pure builder for the org-unit nginx RewriteMap (D-10). Emits a line only for
+ * entries with a resolved `scholarsTarget`; null targets are skipped so the org
+ * URL falls through to 404 (D-13). Until the crosswalk is filled, this yields a
+ * header-only (empty) map.
+ */
+export function buildVivoOrgMapLines(
+  entries: OrgCrosswalkEntry[],
+  baseUrl: string = DEFAULT_BASE_URL,
+): string[] {
+  const lines: string[] = [];
+  lines.push(
+    "# VIVO org-unit → Scholars redirect map — generated by etl/vivo-redirect/generate-map.ts (D-10)",
+  );
+  lines.push(
+    "# Format: <u-id> <target-url>;  key = VIVO org-u<N> id; value = Scholars department/center.",
+  );
+  lines.push(
+    "# Hand-built crosswalk: data/vivo-org-redirects.json. Null/unresolved targets are skipped → 404 (D-13).",
+  );
+  lines.push("");
+  for (const e of entries) {
+    if (!e.scholarsTarget) continue; // unresolved / no equivalent → fall through (D-13)
+    lines.push(`${e.vivoOrgId}\t${baseUrl}${e.scholarsTarget};`);
+  }
+  return lines;
+}
+
 export async function main(): Promise<void> {
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ?? DEFAULT_BASE_URL;
 
@@ -114,6 +262,80 @@ export async function main(): Promise<void> {
   const total = scholars.length + aliases.length;
   console.log(
     `[vivo-redirect] wrote ${total} entries (${scholars.length} active scholars + ${aliases.length} aliases) to ${outputPath}`,
+  );
+
+  // D-06/D-07: pubid<PMID> → owning WCM author's profile. The WHERE enforces
+  // D-07's hard "active" gate (confirmed authorship, WCM author, live profile),
+  // so the in-memory pick only ever ranks live profiles.
+  const pubAuthors = await prisma.publicationAuthor.findMany({
+    where: {
+      isConfirmed: true,
+      cwid: { not: null },
+      scholar: { is: { deletedAt: null, status: "active" } },
+    },
+    select: {
+      pmid: true,
+      cwid: true,
+      position: true,
+      isFirst: true,
+      isLast: true,
+      scholar: { select: { slug: true } },
+    },
+  });
+
+  const rowsByPmid = new Map<string, PubAuthorRow[]>();
+  for (const r of pubAuthors) {
+    if (!r.scholar || r.cwid == null) continue; // belt-and-suspenders vs the WHERE
+    const row: PubAuthorRow = {
+      cwid: r.cwid,
+      slug: r.scholar.slug,
+      isFirst: r.isFirst,
+      isLast: r.isLast,
+      position: r.position,
+    };
+    const arr = rowsByPmid.get(r.pmid);
+    if (arr) arr.push(row);
+    else rowsByPmid.set(r.pmid, [row]);
+  }
+
+  const pubEntries = buildPubMapEntries(rowsByPmid);
+  const pubText = buildVivoPubMapLines(pubEntries, baseUrl).join("\n") + "\n";
+  const pubOutputPath =
+    process.env.SCHOLARS_VIVO_PUB_REDIRECT_OUTPUT ?? DEFAULT_PUB_OUTPUT_PATH;
+  await mkdir(path.dirname(pubOutputPath), { recursive: true });
+  await writeFile(pubOutputPath, pubText, "utf8");
+  console.log(
+    `[vivo-redirect] wrote ${pubEntries.length} pubid entries ` +
+      `(from ${rowsByPmid.size} PMIDs with a live WCM author) to ${pubOutputPath}`,
+  );
+
+  // D-10..D-13: org-unit map from the hand-built crosswalk (NOT DB-derived;
+  // VIVO org-u<N> ids have no key in the Scholars DB). Missing/empty crosswalk
+  // is fine — every org URL then falls through to 404 until it's filled.
+  const orgCrosswalkPath =
+    process.env.SCHOLARS_VIVO_ORG_CROSSWALK ?? DEFAULT_ORG_CROSSWALK_PATH;
+  let orgEntries: OrgCrosswalkEntry[] = [];
+  try {
+    const parsed = JSON.parse(await readFile(orgCrosswalkPath, "utf8")) as {
+      entries?: OrgCrosswalkEntry[];
+    };
+    orgEntries = parsed.entries ?? [];
+  } catch (err) {
+    console.warn(
+      `[vivo-redirect] org crosswalk not read (${orgCrosswalkPath}) — writing empty org map. ${
+        (err as Error).message
+      }`,
+    );
+  }
+  const orgText = buildVivoOrgMapLines(orgEntries, baseUrl).join("\n") + "\n";
+  const orgOutputPath =
+    process.env.SCHOLARS_VIVO_ORG_REDIRECT_OUTPUT ?? DEFAULT_ORG_OUTPUT_PATH;
+  await mkdir(path.dirname(orgOutputPath), { recursive: true });
+  await writeFile(orgOutputPath, orgText, "utf8");
+  const orgResolved = orgEntries.filter((e) => e.scholarsTarget).length;
+  console.log(
+    `[vivo-redirect] wrote ${orgResolved} org entries ` +
+      `(of ${orgEntries.length} trafficked; the rest unresolved → 404) to ${orgOutputPath}`,
   );
 
   await prisma.$disconnect();

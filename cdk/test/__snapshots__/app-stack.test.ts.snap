@@ -259,7 +259,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "OTEL_SERVICE_NAME",
-                "Value": "sps-app-prod",
+                "Value": "Scholars-prod",
               },
               {
                 "Name": "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -2697,7 +2697,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "OTEL_SERVICE_NAME",
-                "Value": "sps-app-staging",
+                "Value": "Scholars-staging",
               },
               {
                 "Name": "OTEL_EXPORTER_OTLP_ENDPOINT",
