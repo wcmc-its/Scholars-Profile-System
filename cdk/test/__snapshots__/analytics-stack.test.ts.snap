@@ -276,7 +276,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
             "ATHENA_DATABASE": {
               "Ref": "UsageDatabase",
             },
-            "ATHENA_WORKGROUP": "sps-usage-prod",
+            "ATHENA_WORKGROUP": "sps-usage-rollup-prod",
             "RAW_TABLE": "cf_access_logs",
             "RESULT_OUTPUT": {
               "Fn::Join": [
@@ -364,7 +364,7 @@ exports[`AnalyticsStack prod matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":athena:us-east-1:123456789012:workgroup/sps-usage-prod",
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-rollup-prod",
                   ],
                 ],
               },
@@ -783,6 +783,36 @@ LIMIT 50",
       },
       "Type": "AWS::Athena::NamedQuery",
     },
+    "RollupWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage rollup workgroup (prod). Nightly rollup Lambda only -- uncapped, scans the unpartitioned raw log table.",
+        "Name": "sps-usage-rollup-prod",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
+    },
     "UsageDatabase": {
       "Properties": {
         "CatalogId": {
@@ -1133,7 +1163,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
             "ATHENA_DATABASE": {
               "Ref": "UsageDatabase",
             },
-            "ATHENA_WORKGROUP": "sps-usage-staging",
+            "ATHENA_WORKGROUP": "sps-usage-rollup-staging",
             "RAW_TABLE": "cf_access_logs",
             "RESULT_OUTPUT": {
               "Fn::Join": [
@@ -1221,7 +1251,7 @@ exports[`AnalyticsStack staging matches the snapshot 1`] = `
                     {
                       "Ref": "AWS::Partition",
                     },
-                    ":athena:us-east-1:123456789012:workgroup/sps-usage-staging",
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-rollup-staging",
                   ],
                 ],
               },
@@ -1639,6 +1669,36 @@ LIMIT 50",
         "WorkGroup": "sps-usage-staging",
       },
       "Type": "AWS::Athena::NamedQuery",
+    },
+    "RollupWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage rollup workgroup (staging). Nightly rollup Lambda only -- uncapped, scans the unpartitioned raw log table.",
+        "Name": "sps-usage-rollup-staging",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
     },
     "UsageDatabase": {
       "Properties": {

@@ -153,8 +153,10 @@ describe("AnalyticsStack", () => {
       });
 
       // ---- Athena ----------------------------------------------------
-      it("creates the env-suffixed workgroup enforcing config + SSE-S3 + bytes cap", () => {
-        template.resourceCountIs("AWS::Athena::WorkGroup", 1);
+      it("creates two workgroups: operator (1 GiB cap) + rollup (uncapped)", () => {
+        template.resourceCountIs("AWS::Athena::WorkGroup", 2);
+        // Operator workgroup: enforced config, SSE-S3, 1 GiB scan cap (guards
+        // an interactive no-predicate scan of the unpartitioned raw table).
         template.hasResourceProperties("AWS::Athena::WorkGroup", {
           Name: `sps-usage-${env}`,
           WorkGroupConfiguration: {
@@ -166,6 +168,32 @@ describe("AnalyticsStack", () => {
             },
           },
         });
+        // Rollup workgroup: enforced config + SSE-S3 but NO scan cap -- the
+        // nightly rollup must scan the full corpus, and a cap would silently
+        // fail the job as traffic grows (finding #2).
+        const wgs = template.findResources("AWS::Athena::WorkGroup");
+        const rollup = Object.values(wgs).find(
+          (w) =>
+            (w.Properties as { Name?: string })?.Name ===
+            `sps-usage-rollup-${env}`,
+        );
+        expect(rollup).toBeDefined();
+        const cfg = (
+          rollup!.Properties as {
+            WorkGroupConfiguration?: {
+              EnforceWorkGroupConfiguration?: boolean;
+              BytesScannedCutoffPerQuery?: number;
+              ResultConfiguration?: {
+                EncryptionConfiguration?: { EncryptionOption?: string };
+              };
+            };
+          }
+        ).WorkGroupConfiguration;
+        expect(cfg?.EnforceWorkGroupConfiguration).toBe(true);
+        expect(
+          cfg?.ResultConfiguration?.EncryptionConfiguration?.EncryptionOption,
+        ).toBe("SSE_S3");
+        expect(cfg?.BytesScannedCutoffPerQuery).toBeUndefined();
       });
 
       it("creates the six saved marketing named queries", () => {
@@ -197,6 +225,21 @@ describe("AnalyticsStack", () => {
           MemorySize: 256,
           Timeout: 600,
         });
+      });
+
+      it("rollup Lambda targets the uncapped rollup workgroup (env var)", () => {
+        const fns = template.findResources("AWS::Lambda::Function");
+        const target = Object.values(fns)
+          .map(
+            (f) =>
+              (
+                f.Properties as {
+                  Environment?: { Variables?: Record<string, unknown> };
+                }
+              )?.Environment?.Variables,
+          )
+          .find((v) => v?.ATHENA_WORKGROUP !== undefined);
+        expect(target?.ATHENA_WORKGROUP).toBe(`sps-usage-rollup-${env}`);
       });
 
       it("Lambda owns one explicit log group (3-month retention)", () => {

@@ -672,6 +672,7 @@ describe("SpsObservabilityStack", () => {
       expect(serialized).toContain("HTTPCode_Target_5XX_Count"); // ALB 5xx
       expect(serialized).toContain("AWS/CloudFront"); // CF namespace
       expect(serialized).toContain("TotalErrorRate"); // CF error rate
+      expect(serialized).toContain("OriginLatency"); // CF origin latency (additional metric)
       expect(serialized).toContain("CPUUtilization"); // ECS + Aurora CPU
       expect(serialized).toContain("DatabaseConnections"); // Aurora connections
       expect(serialized).toContain("SelectLatency"); // Aurora select latency
@@ -920,6 +921,7 @@ describe("SpsObservabilityStack", () => {
       expect(serialized).toContain("HTTPCode_Target_5XX_Count"); // ALB 5xx
       expect(serialized).toContain("AWS/CloudFront"); // CF namespace
       expect(serialized).toContain("TotalErrorRate"); // CF error rate
+      expect(serialized).toContain("OriginLatency"); // CF origin latency (additional metric)
       expect(serialized).toContain("CPUUtilization"); // ECS + Aurora CPU
       expect(serialized).toContain("DatabaseConnections"); // Aurora connections
       expect(serialized).toContain("SelectLatency"); // Aurora select latency

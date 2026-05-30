@@ -243,14 +243,18 @@ export class AnalyticsStack extends Stack {
     rawTable.addDependency(usageDatabase);
 
     // ------------------------------------------------------------------
-    // Athena workgroup. Usage queries are billed/governed separately and can
-    // never write results outside our athena-results prefix. enforce=true
-    // makes the result location + SSE-S3 mandatory regardless of caller input;
-    // the bytes-scanned cutoff caps a runaway scan (the raw CF table is
-    // unpartitioned, so a no-predicate SELECT * could scan the whole prefix --
-    // 1 GiB is generous for the WCM-only tiny pre-launch volume, re-tunable).
-    // recursiveDeleteOption lets the stack tear down the workgroup even with
-    // saved queries still attached.
+    // Operator (interactive) Athena workgroup. Hosts the saved marketing
+    // queries below and is where a human runs ad-hoc analytics. enforce=true
+    // makes the result location + SSE-S3 mandatory regardless of caller input.
+    // The bytes-scanned cutoff caps a runaway INTERACTIVE scan: the raw CF
+    // table is unpartitioned (CloudFront writes the date into the log FILENAME,
+    // not a path segment, so neither Hive partitions nor projection can prune
+    // it), so a no-predicate SELECT * over cf_access_logs could scan the whole
+    // prefix -- 1 GiB stops that. The nightly rollup Lambda legitimately must
+    // scan the full corpus, so it runs in its OWN uncapped workgroup
+    // (rollupWorkGroup, below) -- the cap here would otherwise silently fail the
+    // nightly job once traffic grows. recursiveDeleteOption lets the stack tear
+    // down the workgroup even with saved queries still attached.
     // ------------------------------------------------------------------
     const workGroup = new athena.CfnWorkGroup(this, "UsageWorkGroup", {
       name: `sps-usage-${env}`,
@@ -261,6 +265,34 @@ export class AnalyticsStack extends Stack {
         enforceWorkGroupConfiguration: true,
         publishCloudWatchMetricsEnabled: true,
         bytesScannedCutoffPerQuery: 1_073_741_824, // 1 GiB cost guard
+        resultConfiguration: {
+          outputLocation:
+            this.analyticsBucket.s3UrlForObject(athenaResultsPrefix),
+          encryptionConfiguration: { encryptionOption: "SSE_S3" },
+        },
+      },
+    });
+
+    // ------------------------------------------------------------------
+    // Rollup workgroup -- used ONLY by the nightly rollup Lambda. It has NO
+    // bytes-scanned cap on purpose: the rollup INSERT scans the unpartitioned
+    // cf_access_logs corpus (~6x per run across the UNION arms), which grows
+    // past 1 GiB as traffic ramps post-launch. Capping it would silently fail
+    // the nightly job and stop the durable daily_usage history accumulating --
+    // the very thing this stack exists to preserve. Runaway protection instead
+    // comes from the Lambda's 8-minute Athena poll budget (it stops the query)
+    // and the account-wide Cost Anomaly Detection monitor (ObservabilityStack,
+    // prod). Same enforced result location + SSE-S3 as the operator workgroup.
+    // ------------------------------------------------------------------
+    const rollupWorkGroup = new athena.CfnWorkGroup(this, "RollupWorkGroup", {
+      name: `sps-usage-rollup-${env}`,
+      description: `SPS CloudFront usage rollup workgroup (${env}). Nightly rollup Lambda only -- uncapped, scans the unpartitioned raw log table.`,
+      recursiveDeleteOption: true,
+      state: "ENABLED",
+      workGroupConfiguration: {
+        enforceWorkGroupConfiguration: true,
+        publishCloudWatchMetricsEnabled: true,
+        // No bytesScannedCutoffPerQuery -- see comment above.
         resultConfiguration: {
           outputLocation:
             this.analyticsBucket.s3UrlForObject(athenaResultsPrefix),
@@ -394,7 +426,9 @@ export class AnalyticsStack extends Stack {
       logGroup: rollupLogGroup,
       environment: {
         ATHENA_DATABASE: usageDatabase.ref,
-        ATHENA_WORKGROUP: workGroup.name,
+        // The rollup runs in the uncapped rollup workgroup, NOT the 1 GiB-capped
+        // operator workgroup -- it must scan the full unpartitioned corpus.
+        ATHENA_WORKGROUP: rollupWorkGroup.name,
         RAW_TABLE: "cf_access_logs",
         ROLLUP_TABLE: "daily_usage",
         ANALYTICS_BUCKET: this.analyticsBucket.bucketName,
@@ -421,7 +455,9 @@ export class AnalyticsStack extends Stack {
     // ------------------------------------------------------------------
     const rawBucketArn = edgeStack.logsBucket.bucketArn;
     const analyticsBucketArn = this.analyticsBucket.bucketArn;
-    const workGroupArn = `arn:${Aws.PARTITION}:athena:${this.region}:${this.account}:workgroup/${workGroup.name}`;
+    // The Lambda only ever runs queries in the rollup workgroup -- scope the
+    // Athena grant to it (not the operator workgroup).
+    const workGroupArn = `arn:${Aws.PARTITION}:athena:${this.region}:${this.account}:workgroup/${rollupWorkGroup.name}`;
     const catalogArn = `arn:${Aws.PARTITION}:glue:${this.region}:${this.account}:catalog`;
     const dbArn = `arn:${Aws.PARTITION}:glue:${this.region}:${this.account}:database/${usageDatabase.ref}`;
     const tableArn = `arn:${Aws.PARTITION}:glue:${this.region}:${this.account}:table/${usageDatabase.ref}/*`;

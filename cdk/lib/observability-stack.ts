@@ -654,11 +654,12 @@ export class SpsObservabilityStack extends Stack {
     // dimension and do not pin the metric region -- so a graph built from
     // them shows no data. Every CloudFront series below is therefore a raw
     // `cloudwatch.Metric` with the full dimension set + `region: "us-east-1"`
-    // via the `cfMetric` helper. OriginLatency / cache-hit rate are paid
-    // additional metrics that need `publishAdditionalMetrics: true` on the
-    // distribution (EdgeStack does not enable it), so the CF row graphs only
-    // the always-available standard metrics. Flip that EdgeStack flag and add
-    // a metricOriginLatency panel to extend it.
+    // via the `cfMetric` helper. OriginLatency is a paid CloudFront additional
+    // metric; EdgeStack enables it (`publishAdditionalMetrics: true`, which
+    // synthesizes a MonitoringSubscription) so the origin-latency panel below
+    // has data. The rest of the CF row graphs the always-available standard
+    // metrics. Cache-hit rate is another additional metric available behind the
+    // same EdgeStack flag if a panel is ever wanted.
     // ------------------------------------------------------------------
 
     /**
@@ -748,7 +749,7 @@ export class SpsObservabilityStack extends Stack {
     // ---- CloudFront row ---------------------------------------------
     const cfErrorWidget = new cloudwatch.GraphWidget({
       title: "CloudFront error rate (%) + requests",
-      width: 12,
+      width: 8,
       height: 6,
       left: [
         cfMetric("TotalErrorRate", "Average", "Total error rate"),
@@ -762,10 +763,25 @@ export class SpsObservabilityStack extends Stack {
 
     const cfVolumeWidget = new cloudwatch.GraphWidget({
       title: "CloudFront bytes downloaded (5m sum)",
-      width: 12,
+      width: 8,
       height: 6,
       left: [cfMetric("BytesDownloaded", "Sum", "Bytes downloaded")],
       leftYAxis: { min: 0, label: "bytes" },
+    });
+
+    // OriginLatency is a CloudFront additional metric (EdgeStack enables it via
+    // publishAdditionalMetrics); the average + p99 origin round-trip is the
+    // edge-to-ALB time and the first thing to check when ALB latency looks fine
+    // but users report slow edges. ms (additional metrics are reported in ms).
+    const cfLatencyWidget = new cloudwatch.GraphWidget({
+      title: "CloudFront origin latency (ms)",
+      width: 8,
+      height: 6,
+      left: [
+        cfMetric("OriginLatency", "Average", "Origin latency avg"),
+        cfMetric("OriginLatency", "p99", "Origin latency p99"),
+      ],
+      leftYAxis: { min: 0, label: "ms" },
     });
 
     // ---- ECS row ----------------------------------------------------
@@ -873,7 +889,7 @@ export class SpsObservabilityStack extends Stack {
         height: 1,
       }),
     );
-    dashboard.addWidgets(cfErrorWidget, cfVolumeWidget);
+    dashboard.addWidgets(cfLatencyWidget, cfErrorWidget, cfVolumeWidget);
     dashboard.addWidgets(
       new cloudwatch.TextWidget({ markdown: "## ECS service", width: 24, height: 1 }),
     );

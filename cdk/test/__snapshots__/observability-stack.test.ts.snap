@@ -824,7 +824,19 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
               },
-              "",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":12,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront error rate (%) + requests","region":"",
+              "",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/CloudFront","OriginLatency","DistributionId","",
+              {
+                "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputRefDistribution830FAC524DF81588",
+              },
+              "","Region","Global",{"label":"Origin latency avg","region":"us-east-1"}],["AWS/CloudFront","OriginLatency","DistributionId","",
+              {
+                "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputRefDistribution830FAC524DF81588",
+              },
+              "","Region","Global",{"label":"Origin latency p99","region":"us-east-1","stat":"p99"}]],"yAxis":{"left":{"min":0,"label":"ms"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":10,"properties":{"view":"timeSeries","title":"CloudFront error rate (%) + requests","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -844,7 +856,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Edge-prod:ExportsOutputRefDistribution830FAC524DF81588",
               },
-              "","Region","Global",{"label":"Requests","region":"us-east-1","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"},"right":{"min":0,"label":"requests"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":10,"properties":{"view":"timeSeries","title":"CloudFront bytes downloaded (5m sum)","region":"",
+              "","Region","Global",{"label":"Requests","region":"us-east-1","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"},"right":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":10,"properties":{"view":"timeSeries","title":"CloudFront bytes downloaded (5m sum)","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1648,7 +1660,19 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttPublicAlb84330974LoadBalancerFullNameF7857A61",
               },
-              "",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":12,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront error rate (%) + requests","region":"",
+              "",{"label":"ELB 5xx","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"label":"requests"},"right":{"min":0,"label":"errors"}}}},{"type":"text","width":24,"height":1,"x":0,"y":9,"properties":{"markdown":"## CloudFront edge"}},{"type":"metric","width":8,"height":6,"x":0,"y":10,"properties":{"view":"timeSeries","title":"CloudFront origin latency (ms)","region":"",
+              {
+                "Ref": "AWS::Region",
+              },
+              "","metrics":[["AWS/CloudFront","OriginLatency","DistributionId","",
+              {
+                "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputRefDistribution830FAC524DF81588",
+              },
+              "","Region","Global",{"label":"Origin latency avg","region":"us-east-1"}],["AWS/CloudFront","OriginLatency","DistributionId","",
+              {
+                "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputRefDistribution830FAC524DF81588",
+              },
+              "","Region","Global",{"label":"Origin latency p99","region":"us-east-1","stat":"p99"}]],"yAxis":{"left":{"min":0,"label":"ms"}}}},{"type":"metric","width":8,"height":6,"x":8,"y":10,"properties":{"view":"timeSeries","title":"CloudFront error rate (%) + requests","region":"",
               {
                 "Ref": "AWS::Region",
               },
@@ -1668,7 +1692,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
               {
                 "Fn::ImportValue": "Sps-Edge-staging:ExportsOutputRefDistribution830FAC524DF81588",
               },
-              "","Region","Global",{"label":"Requests","region":"us-east-1","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"},"right":{"min":0,"label":"requests"}}}},{"type":"metric","width":12,"height":6,"x":12,"y":10,"properties":{"view":"timeSeries","title":"CloudFront bytes downloaded (5m sum)","region":"",
+              "","Region","Global",{"label":"Requests","region":"us-east-1","stat":"Sum","yAxis":"right"}]],"yAxis":{"left":{"min":0,"max":100,"label":"percent"},"right":{"min":0,"label":"requests"}}}},{"type":"metric","width":8,"height":6,"x":16,"y":10,"properties":{"view":"timeSeries","title":"CloudFront bytes downloaded (5m sum)","region":"",
               {
                 "Ref": "AWS::Region",
               },
