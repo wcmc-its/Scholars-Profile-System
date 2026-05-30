@@ -1,0 +1,1809 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`AnalyticsStack prod matches the snapshot 1`] = `
+{
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AnalyticsBucket39EAAEEA": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AnalyticsBucketPolicyB099319A": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "AnalyticsBucket39EAAEEA",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "CfAccessLogsTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Raw CloudFront standard access logs (prod), TSV+gzip, 2 header lines. Exposes client IPs -- operator-restricted.",
+          "Name": "cf_access_logs",
+          "Parameters": {
+            "classification": "csv",
+            "skip.header.line.count": "2",
+          },
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "date",
+                "Type": "date",
+              },
+              {
+                "Name": "time",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_location",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_bytes",
+                "Type": "bigint",
+              },
+              {
+                "Name": "c_ip",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_method",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_host",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_uri_stem",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_status",
+                "Type": "int",
+              },
+              {
+                "Name": "cs_referrer",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_user_agent",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_uri_query",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_cookie",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_request_id",
+                "Type": "string",
+              },
+              {
+                "Name": "x_host_header",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_protocol",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_bytes",
+                "Type": "bigint",
+              },
+              {
+                "Name": "time_taken",
+                "Type": "float",
+              },
+              {
+                "Name": "x_forwarded_for",
+                "Type": "string",
+              },
+              {
+                "Name": "ssl_protocol",
+                "Type": "string",
+              },
+              {
+                "Name": "ssl_cipher",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_response_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_protocol_version",
+                "Type": "string",
+              },
+              {
+                "Name": "fle_status",
+                "Type": "string",
+              },
+              {
+                "Name": "fle_encrypted_fields",
+                "Type": "int",
+              },
+              {
+                "Name": "c_port",
+                "Type": "int",
+              },
+              {
+                "Name": "time_to_first_byte",
+                "Type": "float",
+              },
+              {
+                "Name": "x_edge_detailed_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_content_type",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_content_len",
+                "Type": "bigint",
+              },
+              {
+                "Name": "sc_range_start",
+                "Type": "bigint",
+              },
+              {
+                "Name": "sc_range_end",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": "s3://sps-edge-prod-logsbucket9c4d8843-8swcfno13icn/cf/prod/",
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
+    "CfUsageRollupFunction208D3872": {
+      "DependsOn": [
+        "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14",
+        "CfUsageRollupFunctionServiceRole9FABA5DA",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "c74e657e3ad542d4a0638c9aa308e05508f1849900438100852a875f536b3934.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "ANALYTICS_BUCKET": {
+              "Ref": "AnalyticsBucket39EAAEEA",
+            },
+            "ATHENA_DATABASE": {
+              "Ref": "UsageDatabase",
+            },
+            "ATHENA_WORKGROUP": "sps-usage-rollup-prod",
+            "RAW_TABLE": "cf_access_logs",
+            "RESULT_OUTPUT": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+            "ROLLUP_PREFIX": "rollup/daily-usage",
+            "ROLLUP_TABLE": "daily_usage",
+          },
+        },
+        "FunctionName": "sps-cf-usage-rollup-prod",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "CfUsageRollupLogGroup3CC40CC8",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "CfUsageRollupFunctionServiceRole9FABA5DA",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 600,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CfUsageRollupFunctionServiceRole9FABA5DA": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "athena:StartQueryExecution",
+                "athena:GetQueryExecution",
+                "athena:StopQueryExecution",
+                "athena:GetQueryResults",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-rollup-prod",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "glue:GetDatabase",
+                "glue:GetTable",
+                "glue:GetTables",
+                "glue:GetPartition",
+                "glue:GetPartitions",
+                "glue:BatchCreatePartition",
+                "glue:CreatePartition",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:catalog",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:database/",
+                      {
+                        "Ref": "UsageDatabase",
+                      },
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/",
+                      {
+                        "Ref": "UsageDatabase",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:GetBucketLocation",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "cf/prod/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "rollup/daily-usage/*",
+                    "athena-results/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AnalyticsBucket39EAAEEA",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-prod-logsbucket9c4d8843-8swcfno13icn/cf/prod/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-usage/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/athena-results/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14",
+        "Roles": [
+          {
+            "Ref": "CfUsageRollupFunctionServiceRole9FABA5DA",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "CfUsageRollupLogGroup3CC40CC8": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-cf-usage-rollup-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CfUsageRollupScheduleRuleAllowEventRuleSpsAnalyticsprodCfUsageRollupFunctionBF058C97F949AC15": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "CfUsageRollupFunction208D3872",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "CfUsageRollupScheduleRuleDB416A93",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "CfUsageRollupScheduleRuleDB416A93": {
+      "Properties": {
+        "Description": "SPS CloudFront usage daily rollup (prod). Runs 08:00 UTC.",
+        "Name": "sps-cf-usage-rollup-prod",
+        "ScheduleExpression": "cron(0 8 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "CfUsageRollupFunction208D3872",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "DailyUsageTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Pre-aggregated daily CloudFront usage (prod), TSV, partition-projected on dt. Aggregates only -- no client IPs.",
+          "Name": "daily_usage",
+          "Parameters": {
+            "classification": "csv",
+            "projection.dt.format": "yyyy-MM-dd",
+            "projection.dt.range": "2026-05-22,NOW",
+            "projection.dt.type": "date",
+            "projection.enabled": "true",
+            "storage.location.template": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-usage/dt=\${dt}/",
+                ],
+              ],
+            },
+          },
+          "PartitionKeys": [
+            {
+              "Name": "dt",
+              "Type": "string",
+            },
+          ],
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "metric",
+                "Type": "string",
+              },
+              {
+                "Name": "dimension",
+                "Type": "string",
+              },
+              {
+                "Name": "cnt",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-usage",
+                ],
+              ],
+            },
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
+    "QueryDailyPageviews": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Daily profile pageviews over the rollup.",
+        "Name": "sps-usage-daily-pageviews-prod",
+        "QueryString": "SELECT dt, SUM(cnt) AS pageviews
+FROM daily_usage
+WHERE metric = 'pageviews'
+GROUP BY dt
+ORDER BY dt DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryDevice": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Hits by device class (bot/tablet/mobile/desktop).",
+        "Name": "sps-usage-device-prod",
+        "QueryString": "SELECT dimension AS device, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'device'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryGeo": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Hits by coarse continent (x-edge-location based).",
+        "Name": "sps-usage-geo-prod",
+        "QueryString": "SELECT dimension AS region, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'geo'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryReferrers": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Referrers split internal/direct vs external host (dimension).",
+        "Name": "sps-usage-referrers-prod",
+        "QueryString": "SELECT dimension AS referrer, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'referrer'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QuerySearchTerms": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Name": "sps-usage-search-terms-prod",
+        "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
+FROM daily_usage
+WHERE metric = 'search_term'
+GROUP BY dimension
+ORDER BY searches DESC
+LIMIT 100",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryTopProfiles": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 50 profiles by pageview (dimension = cwid).",
+        "Name": "sps-usage-top-profiles-prod",
+        "QueryString": "SELECT dimension AS cwid, SUM(cnt) AS views
+FROM daily_usage
+WHERE metric = 'profile'
+GROUP BY dimension
+ORDER BY views DESC
+LIMIT 50",
+        "WorkGroup": "sps-usage-prod",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "RollupWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage rollup workgroup (prod). Nightly rollup Lambda only -- uncapped, scans the unpartitioned raw log table.",
+        "Name": "sps-usage-rollup-prod",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
+    },
+    "UsageDatabase": {
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseInput": {
+          "Description": "SPS CloudFront usage analytics (prod). Backs Athena queries over CloudFront access logs.",
+          "Name": "sps_usage_prod",
+        },
+      },
+      "Type": "AWS::Glue::Database",
+    },
+    "UsageWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage analytics workgroup (prod). Operator-restricted -- exposes client IPs via cf_access_logs.",
+        "Name": "sps-usage-prod",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "BytesScannedCutoffPerQuery": 1073741824,
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`AnalyticsStack staging matches the snapshot 1`] = `
+{
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AnalyticsBucket39EAAEEA": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "AnalyticsBucketPolicyB099319A": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "AnalyticsBucket39EAAEEA",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "CfAccessLogsTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Raw CloudFront standard access logs (staging), TSV+gzip, 2 header lines. Exposes client IPs -- operator-restricted.",
+          "Name": "cf_access_logs",
+          "Parameters": {
+            "classification": "csv",
+            "skip.header.line.count": "2",
+          },
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "date",
+                "Type": "date",
+              },
+              {
+                "Name": "time",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_location",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_bytes",
+                "Type": "bigint",
+              },
+              {
+                "Name": "c_ip",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_method",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_host",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_uri_stem",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_status",
+                "Type": "int",
+              },
+              {
+                "Name": "cs_referrer",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_user_agent",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_uri_query",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_cookie",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_request_id",
+                "Type": "string",
+              },
+              {
+                "Name": "x_host_header",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_protocol",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_bytes",
+                "Type": "bigint",
+              },
+              {
+                "Name": "time_taken",
+                "Type": "float",
+              },
+              {
+                "Name": "x_forwarded_for",
+                "Type": "string",
+              },
+              {
+                "Name": "ssl_protocol",
+                "Type": "string",
+              },
+              {
+                "Name": "ssl_cipher",
+                "Type": "string",
+              },
+              {
+                "Name": "x_edge_response_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "cs_protocol_version",
+                "Type": "string",
+              },
+              {
+                "Name": "fle_status",
+                "Type": "string",
+              },
+              {
+                "Name": "fle_encrypted_fields",
+                "Type": "int",
+              },
+              {
+                "Name": "c_port",
+                "Type": "int",
+              },
+              {
+                "Name": "time_to_first_byte",
+                "Type": "float",
+              },
+              {
+                "Name": "x_edge_detailed_result_type",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_content_type",
+                "Type": "string",
+              },
+              {
+                "Name": "sc_content_len",
+                "Type": "bigint",
+              },
+              {
+                "Name": "sc_range_start",
+                "Type": "bigint",
+              },
+              {
+                "Name": "sc_range_end",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": "s3://sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz/cf/staging/",
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
+    "CfUsageRollupFunction208D3872": {
+      "DependsOn": [
+        "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14",
+        "CfUsageRollupFunctionServiceRole9FABA5DA",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "c74e657e3ad542d4a0638c9aa308e05508f1849900438100852a875f536b3934.zip",
+        },
+        "Environment": {
+          "Variables": {
+            "ANALYTICS_BUCKET": {
+              "Ref": "AnalyticsBucket39EAAEEA",
+            },
+            "ATHENA_DATABASE": {
+              "Ref": "UsageDatabase",
+            },
+            "ATHENA_WORKGROUP": "sps-usage-rollup-staging",
+            "RAW_TABLE": "cf_access_logs",
+            "RESULT_OUTPUT": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+            "ROLLUP_PREFIX": "rollup/daily-usage",
+            "ROLLUP_TABLE": "daily_usage",
+          },
+        },
+        "FunctionName": "sps-cf-usage-rollup-staging",
+        "Handler": "index.handler",
+        "LoggingConfig": {
+          "LogGroup": {
+            "Ref": "CfUsageRollupLogGroup3CC40CC8",
+          },
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "CfUsageRollupFunctionServiceRole9FABA5DA",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 600,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CfUsageRollupFunctionServiceRole9FABA5DA": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "athena:StartQueryExecution",
+                "athena:GetQueryExecution",
+                "athena:StopQueryExecution",
+                "athena:GetQueryResults",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":athena:us-east-1:123456789012:workgroup/sps-usage-rollup-staging",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "glue:GetDatabase",
+                "glue:GetTable",
+                "glue:GetTables",
+                "glue:GetPartition",
+                "glue:GetPartitions",
+                "glue:BatchCreatePartition",
+                "glue:CreatePartition",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:catalog",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:database/",
+                      {
+                        "Ref": "UsageDatabase",
+                      },
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":glue:us-east-1:123456789012:table/",
+                      {
+                        "Ref": "UsageDatabase",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:GetBucketLocation",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::GetAtt": [
+                    "AnalyticsBucket39EAAEEA",
+                    "Arn",
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "cf/staging/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": "s3:ListBucket",
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    "rollup/daily-usage/*",
+                    "athena-results/*",
+                  ],
+                },
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AnalyticsBucket39EAAEEA",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":s3:::sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz/cf/staging/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/rollup/daily-usage/*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AnalyticsBucket39EAAEEA",
+                          "Arn",
+                        ],
+                      },
+                      "/athena-results/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "CfUsageRollupFunctionServiceRoleDefaultPolicyCA4E2F14",
+        "Roles": [
+          {
+            "Ref": "CfUsageRollupFunctionServiceRole9FABA5DA",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "CfUsageRollupLogGroup3CC40CC8": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/sps-cf-usage-rollup-staging",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "CfUsageRollupScheduleRuleAllowEventRuleSpsAnalyticsstagingCfUsageRollupFunction88F765AC26A8B89C": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "CfUsageRollupFunction208D3872",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "CfUsageRollupScheduleRuleDB416A93",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "CfUsageRollupScheduleRuleDB416A93": {
+      "Properties": {
+        "Description": "SPS CloudFront usage daily rollup (staging). Runs 08:00 UTC.",
+        "Name": "sps-cf-usage-rollup-staging",
+        "ScheduleExpression": "cron(0 8 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "CfUsageRollupFunction208D3872",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+            "Input": "{}",
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+            },
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "DailyUsageTable": {
+      "DependsOn": [
+        "UsageDatabase",
+      ],
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseName": {
+          "Ref": "UsageDatabase",
+        },
+        "TableInput": {
+          "Description": "Pre-aggregated daily CloudFront usage (staging), TSV, partition-projected on dt. Aggregates only -- no client IPs.",
+          "Name": "daily_usage",
+          "Parameters": {
+            "classification": "csv",
+            "projection.dt.format": "yyyy-MM-dd",
+            "projection.dt.range": "2026-05-22,NOW",
+            "projection.dt.type": "date",
+            "projection.enabled": "true",
+            "storage.location.template": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-usage/dt=\${dt}/",
+                ],
+              ],
+            },
+          },
+          "PartitionKeys": [
+            {
+              "Name": "dt",
+              "Type": "string",
+            },
+          ],
+          "StorageDescriptor": {
+            "Columns": [
+              {
+                "Name": "metric",
+                "Type": "string",
+              },
+              {
+                "Name": "dimension",
+                "Type": "string",
+              },
+              {
+                "Name": "cnt",
+                "Type": "bigint",
+              },
+            ],
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "Location": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/rollup/daily-usage",
+                ],
+              ],
+            },
+            "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+            "SerdeInfo": {
+              "Parameters": {
+                "field.delim": "	",
+              },
+              "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+            },
+          },
+          "TableType": "EXTERNAL_TABLE",
+        },
+      },
+      "Type": "AWS::Glue::Table",
+    },
+    "QueryDailyPageviews": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Daily profile pageviews over the rollup.",
+        "Name": "sps-usage-daily-pageviews-staging",
+        "QueryString": "SELECT dt, SUM(cnt) AS pageviews
+FROM daily_usage
+WHERE metric = 'pageviews'
+GROUP BY dt
+ORDER BY dt DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryDevice": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Hits by device class (bot/tablet/mobile/desktop).",
+        "Name": "sps-usage-device-staging",
+        "QueryString": "SELECT dimension AS device, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'device'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryGeo": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Hits by coarse continent (x-edge-location based).",
+        "Name": "sps-usage-geo-staging",
+        "QueryString": "SELECT dimension AS region, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'geo'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryReferrers": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Referrers split internal/direct vs external host (dimension).",
+        "Name": "sps-usage-referrers-staging",
+        "QueryString": "SELECT dimension AS referrer, SUM(cnt) AS hits
+FROM daily_usage
+WHERE metric = 'referrer'
+GROUP BY dimension
+ORDER BY hits DESC",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QuerySearchTerms": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 100 search terms (dimension = decoded q=).",
+        "Name": "sps-usage-search-terms-staging",
+        "QueryString": "SELECT dimension AS term, SUM(cnt) AS searches
+FROM daily_usage
+WHERE metric = 'search_term'
+GROUP BY dimension
+ORDER BY searches DESC
+LIMIT 100",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "QueryTopProfiles": {
+      "DependsOn": [
+        "UsageDatabase",
+        "UsageWorkGroup",
+      ],
+      "Properties": {
+        "Database": {
+          "Ref": "UsageDatabase",
+        },
+        "Description": "Top 50 profiles by pageview (dimension = cwid).",
+        "Name": "sps-usage-top-profiles-staging",
+        "QueryString": "SELECT dimension AS cwid, SUM(cnt) AS views
+FROM daily_usage
+WHERE metric = 'profile'
+GROUP BY dimension
+ORDER BY views DESC
+LIMIT 50",
+        "WorkGroup": "sps-usage-staging",
+      },
+      "Type": "AWS::Athena::NamedQuery",
+    },
+    "RollupWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage rollup workgroup (staging). Nightly rollup Lambda only -- uncapped, scans the unpartitioned raw log table.",
+        "Name": "sps-usage-rollup-staging",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
+    },
+    "UsageDatabase": {
+      "Properties": {
+        "CatalogId": {
+          "Ref": "AWS::AccountId",
+        },
+        "DatabaseInput": {
+          "Description": "SPS CloudFront usage analytics (staging). Backs Athena queries over CloudFront access logs.",
+          "Name": "sps_usage_staging",
+        },
+      },
+      "Type": "AWS::Glue::Database",
+    },
+    "UsageWorkGroup": {
+      "Properties": {
+        "Description": "SPS CloudFront usage analytics workgroup (staging). Operator-restricted -- exposes client IPs via cf_access_logs.",
+        "Name": "sps-usage-staging",
+        "RecursiveDeleteOption": true,
+        "State": "ENABLED",
+        "WorkGroupConfiguration": {
+          "BytesScannedCutoffPerQuery": 1073741824,
+          "EnforceWorkGroupConfiguration": true,
+          "PublishCloudWatchMetricsEnabled": true,
+          "ResultConfiguration": {
+            "EncryptionConfiguration": {
+              "EncryptionOption": "SSE_S3",
+            },
+            "OutputLocation": {
+              "Fn::Join": [
+                "",
+                [
+                  "s3://",
+                  {
+                    "Ref": "AnalyticsBucket39EAAEEA",
+                  },
+                  "/athena-results",
+                ],
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::Athena::WorkGroup",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;

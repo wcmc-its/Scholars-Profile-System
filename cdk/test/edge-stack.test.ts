@@ -69,6 +69,12 @@ describe("EdgeStack", () => {
       it("creates exactly one S3 bucket (the access-logs target)", () => {
         template.resourceCountIs("AWS::S3::Bucket", 1);
       });
+
+      it("enables CloudFront additional metrics (one monitoring subscription)", () => {
+        // publishAdditionalMetrics: true -- backs the dashboard OriginLatency
+        // panel (ObservabilityStack). Synthesizes a MonitoringSubscription.
+        template.resourceCountIs("AWS::CloudFront::MonitoringSubscription", 1);
+      });
     });
 
     describe("Distribution behaviors (acceptance #2..#8)", () => {

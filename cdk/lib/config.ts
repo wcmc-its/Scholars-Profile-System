@@ -171,6 +171,41 @@ export interface SpsEnvConfig {
   readonly etlTaskCpu: number;
   /** Fargate memory (MiB) for the ETL task family. */
   readonly etlTaskMemoryMiB: number;
+
+  // --- AnalyticsStack (the 9th stack) ---
+
+  /**
+   * Whether the EventBridge rule that fires the nightly CloudFront-usage
+   * rollup Lambda is enabled at deploy time. `true` in BOTH envs: the rollup
+   * is idempotent (it delete-then-inserts each dt partition) and cheap (it
+   * scans only the WCM-only pre-launch CF log volume), so leaving it on from
+   * the first deploy means the durable `daily_usage` history starts
+   * accumulating immediately -- and the rollups must survive the raw CF
+   * logs' 90-day expiry, so the earlier they start the more history we keep.
+   * Distinct from {@link etlSchedulesEnabled} (which ships prod disabled
+   * behind a runbook gate) because this rollup reads existing logs only and
+   * never starts an ETL run. Flip to `false` to ship the rollup paused
+   * without a code change.
+   */
+  readonly usageRollupScheduleEnabled: boolean;
+  /**
+   * CloudFront distribution id, referenced by NAME (literal) for the
+   * reliability dashboard's CloudFront row -- deliberately NOT via the EdgeStack
+   * L2 handle. Importing it would force an Edge redeploy, and EdgeStack is
+   * frozen behind the NetScaler/WAF (#502) decision; a redeploy without the live
+   * `-c edgeCustomDomain/edgeCertArn/edgeAllowedCidrs` context would strip the
+   * prod alias/cert/WAF off the live distribution. The id is stable (the
+   * distribution is RETAIN). Switch back to edgeStack.distribution.distributionId
+   * once Edge unfreezes if the synth-time handle is preferred.
+   */
+  readonly cloudFrontDistributionId: string;
+  /**
+   * CloudFront standard-access-log S3 bucket name (EdgeStack-owned; raw logs at
+   * `cf/<env>/`). Referenced by NAME (s3.Bucket.fromBucketName) by AnalyticsStack
+   * for the same Edge-decoupling reason as {@link cloudFrontDistributionId}.
+   * CFN-generated name, stable (the bucket is RETAIN).
+   */
+  readonly cloudFrontLogsBucketName: string;
 }
 
 const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
@@ -217,6 +252,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
     etlTaskCpu: 2048,
     etlTaskMemoryMiB: 8192,
+    // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
+    usageRollupScheduleEnabled: true,
+    // Live EdgeStack-owned resources, referenced by name to decouple the
+    // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
+    cloudFrontDistributionId: "E17NRWINXLP3B3",
+    cloudFrontLogsBucketName: "sps-edge-staging-logsbucket9c4d8843-kyqasc6ziviz",
   },
   prod: {
     envName: "prod",
@@ -265,6 +306,12 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // m6g.large.search domain already handles the bulk write rate.
     etlTaskCpu: 2048,
     etlTaskMemoryMiB: 8192,
+    // The 9th stack -- idempotent + cheap, so on from launch (see flag JSDoc).
+    usageRollupScheduleEnabled: true,
+    // Live EdgeStack-owned resources, referenced by name to decouple the
+    // dashboard + analytics deploys from the frozen Edge stack (see JSDoc).
+    cloudFrontDistributionId: "E28NKDFXC7K2ZL",
+    cloudFrontLogsBucketName: "sps-edge-prod-logsbucket9c4d8843-8swcfno13icn",
   },
 };
 

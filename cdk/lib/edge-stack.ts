@@ -346,6 +346,15 @@ export class EdgeStack extends Stack {
       enableLogging: true,
       logBucket: this.logsBucket,
       logFilePrefix: `cf/${env}/`,
+      // Publish CloudFront additional metrics so the reliability dashboard
+      // (ObservabilityStack) can graph OriginLatency. This synthesizes an
+      // AWS::CloudFront::MonitoringSubscription; the additional metrics are a
+      // paid CloudFront feature (~$0.30 per distribution per metric per month).
+      // Without it OriginLatency / cache-hit-rate are never emitted and the
+      // dashboard panel would render empty. The standard metrics the rest of
+      // the CF dashboard row uses (error rate, requests, bytes) are free and
+      // unaffected by this flag.
+      publishAdditionalMetrics: true,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
     });

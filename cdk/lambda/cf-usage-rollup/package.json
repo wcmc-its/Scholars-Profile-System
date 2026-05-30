@@ -1,0 +1,21 @@
+{
+  "name": "sps-cf-usage-rollup",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nightly Athena rollup of CloudFront access logs into the daily_usage partition-projected table (usage analytics).",
+  "main": "index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-athena": "^3.700.0",
+    "@aws-sdk/client-s3": "^3.700.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.150",
+    "@types/node": "^24.10.1",
+    "typescript": "~5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

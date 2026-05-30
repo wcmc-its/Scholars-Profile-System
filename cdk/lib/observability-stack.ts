@@ -621,6 +621,289 @@ export class SpsObservabilityStack extends Stack {
     }
 
     // ------------------------------------------------------------------
+    // Reliability dashboard (Build A).
+    //
+    // One at-a-glance CloudWatch dashboard per env (`sps-reliability-${env}`,
+    // both envs) over the four user-facing reliability surfaces -- public
+    // ALB, CloudFront edge, the ECS service, the Aurora cluster. Read-only:
+    // it graphs the same L2 metric handles the alarms above evaluate, so the
+    // board and the page topic never disagree about "healthy". See
+    // docs/SLOs.md for the targets each panel tracks.
+    //
+    // Why a CloudWatch dashboard at all when New Relic is the primary APM:
+    // New Relic's free-tier metric retention is 8 days, but CloudWatch keeps
+    // 1-second/1-minute metrics rolled up to 15 months. This board is the
+    // long-horizon, vendor-neutral source of truth for the SLO review loop
+    // and post-incident timelines that reach back past New Relic's window --
+    // and it survives a New Relic outage or contract lapse. New Relic stays
+    // the day-to-day APM; this is the durable reliability mirror.
+    //
+    // CloudFront caveat (read before editing the CF row): CloudFront only
+    // publishes metrics in us-east-1 under a mandatory `Region` dimension
+    // valued "Global". The aws-cdk-lib 2.254 `distribution.metric*` helpers
+    // set ONLY `dimensionsMap: { DistributionId }` -- they omit the Region
+    // dimension and do not pin the metric region -- so a graph built from
+    // them shows no data. Every CloudFront series below is therefore a raw
+    // `cloudwatch.Metric` with the full dimension set + `region: "us-east-1"`
+    // via the `cfMetric` helper. The DistributionId comes from config
+    // (`envConfig.cloudFrontDistributionId`), NOT the EdgeStack L2 handle: this
+    // stack deploys standalone while EdgeStack is frozen behind the #502
+    // NetScaler/WAF decision (importing the handle would force an Edge redeploy
+    // that, without the live domain/cert/cidr context, would strip prod's alias
+    // + cert + WAF). OriginLatency is a paid CloudFront additional metric that
+    // needs `publishAdditionalMetrics: true` on the distribution; that flag is
+    // set in edge-stack.ts but only takes effect on the NEXT Edge deploy, so
+    // the OriginLatency panel below stays empty until Edge is redeployed. The
+    // rest of the CF row graphs the always-available standard metrics.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a CloudFront metric the way CloudFront actually publishes it:
+     * namespace AWS/CloudFront, dimensions { DistributionId, Region: "Global" },
+     * pinned to us-east-1. The 2.254 L2 `distribution.metric*` helpers omit
+     * the Region dimension, which yields an empty graph -- hence this raw
+     * fallback. DistributionId comes from config (decoupled from the frozen
+     * EdgeStack -- see the caveat comment above).
+     */
+    const cfMetric = (
+      metricName: string,
+      statistic: string,
+      label: string,
+    ): cloudwatch.Metric =>
+      new cloudwatch.Metric({
+        namespace: "AWS/CloudFront",
+        metricName,
+        dimensionsMap: {
+          DistributionId: envConfig.cloudFrontDistributionId,
+          Region: "Global",
+        },
+        statistic,
+        period: Duration.minutes(5),
+        region: "us-east-1",
+        label,
+      });
+
+    const dashboard = new cloudwatch.Dashboard(this, "ReliabilityDashboard", {
+      dashboardName: `sps-reliability-${env}`,
+    });
+
+    // ---- ALB row ----------------------------------------------------
+    const albLatencyWidget = new cloudwatch.GraphWidget({
+      title: "ALB latency p50/p90/p99 (s)",
+      width: 12,
+      height: 6,
+      left: [
+        appStack.publicAlb.metrics.targetResponseTime({
+          statistic: "p50",
+          period: Duration.minutes(5),
+          label: "p50",
+        }),
+        appStack.publicAlb.metrics.targetResponseTime({
+          statistic: "p90",
+          period: Duration.minutes(5),
+          label: "p90",
+        }),
+        appStack.publicAlb.metrics.targetResponseTime({
+          statistic: "p99",
+          period: Duration.minutes(5),
+          label: "p99",
+        }),
+      ],
+      leftYAxis: { min: 0, label: "seconds" },
+    });
+
+    const albTrafficWidget = new cloudwatch.GraphWidget({
+      title: "ALB requests + 5xx/4xx (5m sum)",
+      width: 12,
+      height: 6,
+      left: [
+        appStack.publicAlb.metricRequestCount({
+          statistic: "Sum",
+          period: Duration.minutes(5),
+          label: "Requests",
+        }),
+      ],
+      leftYAxis: { min: 0, label: "requests" },
+      right: [
+        appStack.publicAlb.metrics.httpCodeTarget(
+          elbv2.HttpCodeTarget.TARGET_5XX_COUNT,
+          { statistic: "Sum", period: Duration.minutes(5), label: "Target 5xx" },
+        ),
+        appStack.publicAlb.metrics.httpCodeTarget(
+          elbv2.HttpCodeTarget.TARGET_4XX_COUNT,
+          { statistic: "Sum", period: Duration.minutes(5), label: "Target 4xx" },
+        ),
+        appStack.publicAlb.metrics.httpCodeElb(elbv2.HttpCodeElb.ELB_5XX_COUNT, {
+          statistic: "Sum",
+          period: Duration.minutes(5),
+          label: "ELB 5xx",
+        }),
+      ],
+      rightYAxis: { min: 0, label: "errors" },
+    });
+
+    // ---- CloudFront row ---------------------------------------------
+    const cfErrorWidget = new cloudwatch.GraphWidget({
+      title: "CloudFront error rate (%) + requests",
+      width: 8,
+      height: 6,
+      left: [
+        cfMetric("TotalErrorRate", "Average", "Total error rate"),
+        cfMetric("4xxErrorRate", "Average", "4xx rate"),
+        cfMetric("5xxErrorRate", "Average", "5xx rate"),
+      ],
+      leftYAxis: { min: 0, max: 100, label: "percent" },
+      right: [cfMetric("Requests", "Sum", "Requests")],
+      rightYAxis: { min: 0, label: "requests" },
+    });
+
+    const cfVolumeWidget = new cloudwatch.GraphWidget({
+      title: "CloudFront bytes downloaded (5m sum)",
+      width: 8,
+      height: 6,
+      left: [cfMetric("BytesDownloaded", "Sum", "Bytes downloaded")],
+      leftYAxis: { min: 0, label: "bytes" },
+    });
+
+    // OriginLatency is a CloudFront additional metric (EdgeStack enables it via
+    // publishAdditionalMetrics); the average + p99 origin round-trip is the
+    // edge-to-ALB time and the first thing to check when ALB latency looks fine
+    // but users report slow edges. ms (additional metrics are reported in ms).
+    const cfLatencyWidget = new cloudwatch.GraphWidget({
+      title: "CloudFront origin latency (ms)",
+      width: 8,
+      height: 6,
+      left: [
+        cfMetric("OriginLatency", "Average", "Origin latency avg"),
+        cfMetric("OriginLatency", "p99", "Origin latency p99"),
+      ],
+      leftYAxis: { min: 0, label: "ms" },
+    });
+
+    // ---- ECS row ----------------------------------------------------
+    const ecsUtilWidget = new cloudwatch.GraphWidget({
+      title: "ECS CPU / Memory (%)",
+      width: 12,
+      height: 6,
+      left: [
+        appStack.ecsService.metricCpuUtilization({
+          statistic: "Average",
+          period: Duration.minutes(5),
+          label: "CPU %",
+        }),
+        appStack.ecsService.metricMemoryUtilization({
+          statistic: "Average",
+          period: Duration.minutes(5),
+          label: "Memory %",
+        }),
+      ],
+      leftYAxis: { min: 0, max: 100, label: "percent" },
+    });
+
+    const ecsTasksWidget = new cloudwatch.GraphWidget({
+      title: "ECS running vs desired tasks",
+      width: 12,
+      height: 6,
+      left: [
+        appStack.ecsService.metric("RunningTaskCount", {
+          statistic: "Minimum",
+          period: Duration.minutes(1),
+          label: "Running (min)",
+        }),
+        appStack.ecsService.metric("DesiredTaskCount", {
+          statistic: "Maximum",
+          period: Duration.minutes(1),
+          label: "Desired (max)",
+        }),
+      ],
+      leftYAxis: { min: 0, label: "tasks" },
+    });
+
+    // ---- Aurora row (three-up, width 8 each = 24-col grid) ----------
+    const auroraCpuWidget = new cloudwatch.GraphWidget({
+      title: "Aurora CPU (%)",
+      width: 8,
+      height: 6,
+      left: [
+        dataStack.auroraCluster.metricCPUUtilization({
+          statistic: "Average",
+          period: Duration.minutes(5),
+          label: "CPU %",
+        }),
+      ],
+      leftYAxis: { min: 0, max: 100, label: "percent" },
+    });
+
+    const auroraConnWidget = new cloudwatch.GraphWidget({
+      title: "Aurora connections",
+      width: 8,
+      height: 6,
+      left: [
+        dataStack.auroraCluster.metricDatabaseConnections({
+          statistic: "Maximum",
+          period: Duration.minutes(5),
+          label: "Connections (max)",
+        }),
+      ],
+      leftYAxis: { min: 0, label: "connections" },
+    });
+
+    // SelectLatency has no dedicated L2 helper in 2.254 -- use the generic
+    // `.metric(name, props)` accessor (same pattern as the OpenSearch alarms).
+    const auroraSelectLatencyWidget = new cloudwatch.GraphWidget({
+      title: "Aurora SelectLatency (ms)",
+      width: 8,
+      height: 6,
+      left: [
+        dataStack.auroraCluster.metric("SelectLatency", {
+          statistic: "Average",
+          period: Duration.minutes(5),
+          label: "Select latency",
+        }),
+      ],
+      leftYAxis: { min: 0, label: "ms" },
+    });
+
+    // ---- Compose: a TextWidget header (full-width 24) forces a row break
+    // before each section; addWidgets lays out left-to-right wrapping at the
+    // 24-column grid edge. -------------------------------------------------
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown: `# SPS reliability -- ${env}\nALB / CloudFront / ECS / Aurora. Read-only mirror of the page-topic alarms. See docs/SLOs.md.`,
+        width: 24,
+        height: 2,
+      }),
+    );
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({ markdown: "## Public ALB", width: 24, height: 1 }),
+    );
+    dashboard.addWidgets(albLatencyWidget, albTrafficWidget);
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown: "## CloudFront edge",
+        width: 24,
+        height: 1,
+      }),
+    );
+    dashboard.addWidgets(cfLatencyWidget, cfErrorWidget, cfVolumeWidget);
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({ markdown: "## ECS service", width: 24, height: 1 }),
+    );
+    dashboard.addWidgets(ecsUtilWidget, ecsTasksWidget);
+    dashboard.addWidgets(
+      new cloudwatch.TextWidget({
+        markdown: "## Aurora cluster",
+        width: 24,
+        height: 1,
+      }),
+    );
+    dashboard.addWidgets(
+      auroraCpuWidget,
+      auroraConnWidget,
+      auroraSelectLatencyWidget,
+    );
+
+    // ------------------------------------------------------------------
     // Outputs
     // ------------------------------------------------------------------
     new CfnOutput(this, "AlarmTopicArn", {

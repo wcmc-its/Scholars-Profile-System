@@ -8,7 +8,8 @@
   },
   "workspaces": [
     "lambda/oncall-relay",
-    "lambda/db-bootstrap-seed"
+    "lambda/db-bootstrap-seed",
+    "lambda/cf-usage-rollup"
   ],
   "scripts": {
     "synth": "cdk synth",

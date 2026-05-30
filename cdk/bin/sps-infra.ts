@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { App, type Environment, Tags } from "aws-cdk-lib";
+import { AnalyticsStack } from "../lib/analytics-stack";
 import { AppStack } from "../lib/app-stack";
 import { resolveEnvConfig } from "../lib/config";
 import { DataStack } from "../lib/data-stack";
@@ -95,12 +96,15 @@ new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   description: `SPS ETL orchestration — Step Functions state machines + alarms, ${envConfig.envName} (ADR-008 B08+B20).`,
 });
 
-// ObservabilityStack — SLO alarms, SNS topic, and (prod only) the account
-// cost guardrails (B22). Receives the AppStack + DataStack instances as
-// props so the alarm definitions reference the L2 ALB / target group /
-// Aurora / OpenSearch constructs directly — string-interpolating against
-// env-known resource names would lose the synth-time guarantee that the
-// names line up.
+// ObservabilityStack — SLO alarms, SNS topic, the reliability dashboard, and
+// (prod only) the account cost guardrails (B22). Receives the AppStack +
+// DataStack instances as props so the alarm + dashboard definitions reference
+// the L2 ALB / target group / Aurora / OpenSearch constructs directly —
+// string-interpolating against env-known resource names would lose the
+// synth-time guarantee that the names line up. The dashboard's CloudFront
+// widgets read the distribution id from config (envConfig.cloudFrontDistributionId),
+// NOT an EdgeStack handle, so this stack deploys standalone while EdgeStack is
+// frozen behind the NetScaler/WAF (#502) decision.
 new SpsObservabilityStack(
   app,
   `Sps-Observability-${envConfig.envName}`,
@@ -109,7 +113,7 @@ new SpsObservabilityStack(
     envConfig,
     appStack,
     dataStack,
-    description: `SPS observability — alarms, SNS, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
+    description: `SPS observability — alarms, SNS, dashboard, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
   },
 );
 
@@ -124,6 +128,19 @@ new EdgeStack(app, `Sps-Edge-${envConfig.envName}`, {
   envConfig,
   publicAlb: appStack.publicAlb,
   description: `SPS edge — CloudFront distribution fronting the public ALB, ${envConfig.envName} (ADR-008 B07+B14).`,
+});
+
+// AnalyticsStack — CloudFront usage analytics (ADR-008's 9th stack). Reads the
+// raw CloudFront access-log bucket BY NAME (envConfig.cloudFrontLogsBucketName)
+// and rolls the logs into a durable, pre-aggregated `daily_usage` table (Glue +
+// Athena + a nightly rollup Lambda) for marketing metrics. Aggregates only — no
+// raw client IPs land in the durable table (PII posture, see stack JSDoc).
+// Referenced by name (not an EdgeStack handle) so it deploys standalone while
+// EdgeStack is frozen (#502).
+new AnalyticsStack(app, `Sps-Analytics-${envConfig.envName}`, {
+  env,
+  envConfig,
+  description: `SPS usage analytics — Glue + Athena over CloudFront logs + nightly rollup, ${envConfig.envName} (ADR-008 9th stack).`,
 });
 
 // Tag every resource for cost allocation and ownership clarity.

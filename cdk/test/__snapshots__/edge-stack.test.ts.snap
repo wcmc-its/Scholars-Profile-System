@@ -235,6 +235,19 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFront::Distribution",
     },
+    "DistributionMonitoringSubscription2503EB92": {
+      "Properties": {
+        "DistributionId": {
+          "Ref": "Distribution830FAC52",
+        },
+        "MonitoringSubscription": {
+          "RealtimeMetricsSubscriptionConfig": {
+            "RealtimeMetricsSubscriptionStatus": "Enabled",
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::MonitoringSubscription",
+    },
     "LogsBucket9C4D8843": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -601,6 +614,19 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::Distribution",
+    },
+    "DistributionMonitoringSubscription2503EB92": {
+      "Properties": {
+        "DistributionId": {
+          "Ref": "Distribution830FAC52",
+        },
+        "MonitoringSubscription": {
+          "RealtimeMetricsSubscriptionConfig": {
+            "RealtimeMetricsSubscriptionStatus": "Enabled",
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::MonitoringSubscription",
     },
     "LogsBucket9C4D8843": {
       "DeletionPolicy": "Retain",
