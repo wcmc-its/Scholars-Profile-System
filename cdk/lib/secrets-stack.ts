@@ -106,6 +106,19 @@ export class SecretsStack extends Stack {
         description:
           "SPS db-bootstrap DSN — least-privilege sps_bootstrap user that provisions scholars_audit + the app-rw INSERT grant (#493). Populated by the DataStack seeder custom resource.",
       },
+      // Deploy-time migration DSN for the sps_migrate user (ADR-009). Holds the
+      // proven scholars.* DDL set inherited from app_rw; the credential
+      // `prisma migrate deploy` runs under once Phase 2 cuts the migrate task
+      // over (today the migrate task still uses app-rw). Same lifecycle as the
+      // bootstrap stub: created here empty, POPULATED by the DataStack seeder
+      // (minted with master, confined in-stack). Name avoids a 6-char hyphen
+      // tail (Secrets Manager partial-ARN gotcha).
+      {
+        constructId: "DbMigrate",
+        name: `scholars/${env}/db/migrate`,
+        description:
+          "SPS migrate DSN — sps_migrate user holding scholars.* DDL only, the deploy-time prisma-migrate credential (ADR-009). Populated by the DataStack seeder custom resource.",
+      },
       {
         constructId: "OpensearchMaster",
         name: `scholars/${env}/opensearch/master`,

@@ -138,6 +138,8 @@ export class AppStack extends Stack {
   /** Family-only handle to the one-shot Prisma migration task definition. */
   public readonly migrationTaskDefinition: ecs.FargateTaskDefinition;
   public readonly dbBootstrapTaskDefinition: ecs.FargateTaskDefinition;
+  /** Family-only handle to the one-shot grant-equality verify task (ADR-009). */
+  public readonly verifyGrantsTaskDefinition: ecs.FargateTaskDefinition;
   /** Public, internet-facing ALB. */
   public readonly publicAlb: elbv2.ApplicationLoadBalancer;
   /** Internal ALB — reachable only from inside the VPC. */
@@ -372,6 +374,13 @@ export class AppStack extends Stack {
     // audit-provisioning output is visibly separate in CloudWatch.
     const dbBootstrapLogGroup = new logs.LogGroup(this, "DbBootstrapLogGroup", {
       logGroupName: `/aws/ecs/sps-db-bootstrap-${env}`,
+      retention: logRetention,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    // grant-equality verify task log group (ADR-009 Phase 0) — distinct stream
+    // so the per-role SHOW GRANTS diff output is separable from db-bootstrap.
+    const verifyGrantsLogGroup = new logs.LogGroup(this, "VerifyGrantsLogGroup", {
+      logGroupName: `/aws/ecs/sps-verify-grants-${env}`,
       retention: logRetention,
       removalPolicy: RemovalPolicy.RETAIN,
     });
@@ -913,6 +922,59 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // grant-equality verify task definition (ADR-009 Phase 0).
+    //
+    // Asserts every managed DB role's live grants EXACTLY equal a pinned golden
+    // list (a delta in EITHER direction -- excess OR missing -- fails). This is
+    // the load-bearing gate that kills the manual-grant drift class behind the
+    // 2026-05-30 staging `ALL PRIVILEGES ON scholars.*` incident; a capability
+    // probe can't see *retained* excess, only an equality diff can.
+    //
+    // Runs scripts/verify-db-grants.ts on the ETL image (the only one carrying
+    // tsx + the source tree + the mariadb client), AFTER db-bootstrap (so app-rw
+    // already holds the audit INSERT its golden list expects) and BEFORE the
+    // service rolls. It connects AS each role and reads SHOW GRANTS FOR
+    // CURRENT_USER() (the #607 grantee-side technique -- no mysql.user read), so
+    // it needs each role's own DSN. Read-only (no GRANT/REVOKE), idempotent, and
+    // fails-closed: any delta exits non-zero and halts the deploy.
+    //
+    // VERIFY_ROLES pins the Phase 0 role set (the three roles provisioned today);
+    // Phase 1 appends `,sps_migrate` here and injects a MIGRATE_DSN secret. Every
+    // named role MUST have its DSN or the task fails closed -- never a silent skip.
+    // Network config is supplied at run-task time by the deploy workflow, exactly
+    // as for the migrate / db-bootstrap tasks.
+    // ------------------------------------------------------------------
+    this.verifyGrantsTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "VerifyGrantsTaskDefinition",
+      {
+        family: `sps-verify-grants-${env}`,
+        cpu: envConfig.migrationTaskCpu,
+        memoryLimitMiB: envConfig.migrationTaskMemoryMiB,
+        executionRole: taskExecutionRole,
+        taskRole,
+      },
+    );
+    this.verifyGrantsTaskDefinition.addContainer("verify-grants", {
+      image: etlContainerImage,
+      containerName: "verify-grants",
+      essential: true,
+      entryPoint: ["npx", "tsx", "scripts/verify-db-grants.ts"],
+      environment: {
+        VERIFY_ROLES: "app-ro,app-rw,sps_bootstrap",
+      },
+      logging: ecs.LogDriver.awsLogs({
+        logGroup: verifyGrantsLogGroup,
+        streamPrefix: "verify-grants",
+      }),
+      secrets: {
+        APP_RO_DSN: ecs.Secret.fromSecretsManager(appRoSecret),
+        APP_RW_DSN: ecs.Secret.fromSecretsManager(appRwSecret),
+        BOOTSTRAP_DSN: ecs.Secret.fromSecretsManager(bootstrapDsnSecret),
+      },
+    });
+
+    // ------------------------------------------------------------------
     // ALBs (B05).
     //
     // Two-ALB topology over one-ALB-two-listeners: cleaner SG semantics
@@ -1321,6 +1383,12 @@ export class AppStack extends Stack {
             resource: "task-definition",
             resourceName: `${this.dbBootstrapTaskDefinition.family}:*`,
           }),
+          // The grant-equality verify task, run after db-bootstrap (ADR-009).
+          Stack.of(this).formatArn({
+            service: "ecs",
+            resource: "task-definition",
+            resourceName: `${this.verifyGrantsTaskDefinition.family}:*`,
+          }),
         ],
       }),
     );
@@ -1475,6 +1543,11 @@ export class AppStack extends Stack {
       value: this.dbBootstrapTaskDefinition.family,
       description:
         "SPS one-shot scholars_audit bootstrap task family — run before migrate (#493)",
+    });
+    new CfnOutput(this, "EcsVerifyGrantsTaskFamily", {
+      value: this.verifyGrantsTaskDefinition.family,
+      description:
+        "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
     });
     new CfnOutput(this, "PublicAlbDns", {
       value: this.publicAlb.loadBalancerDnsName,

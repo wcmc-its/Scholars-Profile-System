@@ -257,6 +257,12 @@ export class DataStack extends Stack {
       "BootstrapSecret",
       `scholars/${envConfig.envName}/db/bootstrap`,
     );
+    // The migrate-role stub the seeder also populates (ADR-009 Phase 1).
+    const migrateSecret = secretsmanager.Secret.fromSecretNameV2(
+      this,
+      "MigrateSecret",
+      `scholars/${envConfig.envName}/db/migrate`,
+    );
 
     const seederLogGroup = new logs.LogGroup(this, "DbBootstrapSeederLogGroup", {
       logGroupName: `/aws/lambda/sps-db-bootstrap-seed-${envConfig.envName}`,
@@ -291,6 +297,7 @@ export class DataStack extends Stack {
         environment: {
           MASTER_SECRET_ARN: this.auroraMasterSecret.secretArn,
           BOOTSTRAP_SECRET_ARN: bootstrapSecret.secretArn,
+          MIGRATE_SECRET_ARN: migrateSecret.secretArn,
           DB_HOST: this.auroraCluster.clusterEndpoint.hostname,
           DB_PORT: Token.asString(this.auroraCluster.clusterEndpoint.port),
         },
@@ -320,6 +327,10 @@ export class DataStack extends Stack {
     this.auroraMasterSecret.grantRead(seederFunction);
     bootstrapSecret.grantRead(seederFunction);
     bootstrapSecret.grantWrite(seederFunction);
+    // Same read+write on the migrate stub so the seeder can reuse an existing
+    // password and persist a fresh DSN (ADR-009 Phase 1).
+    migrateSecret.grantRead(seederFunction);
+    migrateSecret.grantWrite(seederFunction);
 
     const seederProvider = new cr.Provider(this, "DbBootstrapSeederProvider", {
       onEventHandler: seederFunction,
@@ -335,7 +346,8 @@ export class DataStack extends Stack {
       properties: {
         // Bump to force a re-assert of the user + grants on a future change to
         // the seeded grant set (the handler is idempotent, so re-runs are safe).
-        Revision: "1",
+        // "2": ADR-009 Phase 1 added the sps_migrate role to the seeder.
+        Revision: "2",
       },
     });
 

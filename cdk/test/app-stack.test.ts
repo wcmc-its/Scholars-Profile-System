@@ -71,8 +71,8 @@ describe("AppStack", () => {
         // App image repo + the dedicated ETL batch-image repo (#454).
         template.resourceCountIs("AWS::ECR::Repository", 2);
         template.resourceCountIs("AWS::ECS::Cluster", 1);
-        // app + migrate + db-bootstrap (#493).
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 3);
+        // app + migrate + db-bootstrap (#493) + verify-grants (ADR-009).
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 4);
         template.resourceCountIs("AWS::ECS::Service", 1);
       });
 
@@ -205,8 +205,8 @@ describe("AppStack", () => {
           .toMatch(/\.s3"\s*\]/);
       });
 
-      it("creates exactly four CloudWatch log groups (app + migrate + db-bootstrap + otel-collector sidecar)", () => {
-        template.resourceCountIs("AWS::Logs::LogGroup", 4);
+      it("creates exactly five CloudWatch log groups (app + migrate + db-bootstrap + verify-grants + otel-collector sidecar)", () => {
+        template.resourceCountIs("AWS::Logs::LogGroup", 5);
         const groups = template.findResources("AWS::Logs::LogGroup");
         const names = Object.values(groups)
           .map((r) => r.Properties?.LogGroupName as string | undefined)
@@ -216,6 +216,7 @@ describe("AppStack", () => {
           "/aws/ecs/sps-db-bootstrap-prod",
           "/aws/ecs/sps-migrate-prod",
           "/aws/ecs/sps-otel-prod",
+          "/aws/ecs/sps-verify-grants-prod",
         ]);
       });
     });
@@ -587,6 +588,42 @@ describe("AppStack", () => {
         );
         expect(envByName.get("GRANTEE_HOST")).toBe("%");
       });
+
+      it("the verify-grants task runs the tsx verify on the ETL image with the three Phase 0 role DSNs (ADR-009)", () => {
+        // Synth-time guard (deploy-only-validation pattern): the grant-equality
+        // verify runs scripts/verify-db-grants.ts on the ETL image (the only one
+        // with tsx + source + the mariadb client), connects AS each role, and so
+        // must inject each role's own DSN. VERIFY_ROLES pins the Phase 0 set; the
+        // injected DSNs must cover exactly those roles (no silent skip).
+        const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+        const verify = Object.values(taskDefs).find(
+          (r) => r.Properties?.Family === "sps-verify-grants-prod",
+        );
+        expect(verify).toBeDefined();
+        const container = (verify?.Properties?.ContainerDefinitions as
+          | Array<Record<string, unknown>>
+          | undefined)?.[0];
+        expect(container?.Name).toBe("verify-grants");
+        expect(container?.EntryPoint).toEqual(["npx", "tsx", "scripts/verify-db-grants.ts"]);
+        // ETL image, not the app image (same Join-over-ETL-repo-URI shape as
+        // db-bootstrap).
+        expect(JSON.stringify(container?.Image)).toMatch(/EtlEcrRepository/);
+        // A DSN per role named in VERIFY_ROLES -- app-ro, app-rw, sps_bootstrap.
+        const secretNames = (
+          container?.Secrets as Array<{ Name?: string }> | undefined
+        )
+          ?.map((s) => s.Name)
+          .sort();
+        expect(secretNames).toEqual(["APP_RO_DSN", "APP_RW_DSN", "BOOTSTRAP_DSN"]);
+        const envByName = new Map(
+          (
+            (container?.Environment as
+              | Array<{ Name?: string; Value?: string }>
+              | undefined) ?? []
+          ).map((e) => [e.Name, e.Value]),
+        );
+        expect(envByName.get("VERIFY_ROLES")).toBe("app-ro,app-rw,sps_bootstrap");
+      });
     });
 
     describe("IAM role split (B06)", () => {
@@ -757,9 +794,10 @@ describe("AppStack", () => {
         expect(serialized).toContain("EtlEcrRepository");
       });
 
-      it("the OIDC deploy role can RunTask on both the migrate and db-bootstrap families (#493)", () => {
-        // The workflow runs db-bootstrap before migrate; the deploy role must be
-        // scoped to both task-definition families and to no broader `*`.
+      it("the OIDC deploy role can RunTask on the migrate, db-bootstrap and verify-grants families (#493 / ADR-009)", () => {
+        // The workflow runs db-bootstrap -> verify-grants -> migrate; the deploy
+        // role must be scoped to all three task-definition families and no
+        // broader `*`.
         const statements = findDeployStatements();
         const runTask = statements.find((stmt) => {
           const action = stmt.Action as string | string[];
@@ -772,6 +810,7 @@ describe("AppStack", () => {
         expect(serialized).not.toMatch(/^"\*"$/);
         expect(serialized).toContain("sps-migrate-prod:*");
         expect(serialized).toContain("sps-db-bootstrap-prod:*");
+        expect(serialized).toContain("sps-verify-grants-prod:*");
       });
     });
 
@@ -1647,6 +1686,22 @@ describe("AppStack", () => {
         (container?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("GRANTEE_HOST")).toBe("10.20.%");
+    });
+
+    it("provisions the verify-grants task on staging with the three Phase 0 role DSNs (ADR-009)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const verify = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-verify-grants-staging",
+      );
+      expect(verify).toBeDefined();
+      const container = (
+        verify?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Secrets?: Array<{ Name?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "verify-grants");
+      expect(container).toBeDefined();
+      const secretNames = container?.Secrets?.map((s) => s.Name).sort();
+      expect(secretNames).toEqual(["APP_RO_DSN", "APP_RW_DSN", "BOOTSTRAP_DSN"]);
     });
 
     it("uses 30-day log retention for staging (vs 90 days in prod)", () => {

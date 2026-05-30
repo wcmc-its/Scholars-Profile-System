@@ -671,7 +671,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "29cda965fdc939c261a73a11e1ffef28bc608579d55bd1931377090e3d6b0e58.zip",
+          "S3Key": "ae3c2c7419db4df90ff4d2c598de4e52211d1bc208434c69c0af3cacf1946573.zip",
         },
         "Environment": {
           "Variables": {
@@ -701,6 +701,18 @@ exports[`DataStack prod matches the snapshot 1`] = `
             },
             "MASTER_SECRET_ARN": {
               "Ref": "AuroraClusterSecretAttachmentDB8032DA",
+            },
+            "MIGRATE_SECRET_ARN": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition",
+                  },
+                  ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate",
+                ],
+              ],
             },
           },
         },
@@ -830,6 +842,45 @@ exports[`DataStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:UpdateSecretVersionStage",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/migrate-??????",
                   ],
                 ],
               },
@@ -978,7 +1029,7 @@ exports[`DataStack prod matches the snapshot 1`] = `
     "DbBootstrapSeederResource": {
       "DeletionPolicy": "Delete",
       "Properties": {
-        "Revision": "1",
+        "Revision": "2",
         "ServiceToken": {
           "Fn::GetAtt": [
             "DbBootstrapSeederProviderframeworkonEvent38589041",

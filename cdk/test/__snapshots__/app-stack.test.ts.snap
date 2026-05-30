@@ -90,6 +90,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
         ],
       },
     },
+    "EcsVerifyGrantsTaskFamily": {
+      "Description": "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
+      "Value": "sps-verify-grants-prod",
+    },
     "EtlEcrRepoUri": {
       "Description": "SPS ETL batch-image ECR repository URI (#454)",
       "Value": {
@@ -984,6 +988,18 @@ service:
                         "Ref": "AWS::Partition",
                       },
                       ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-prod:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-verify-grants-prod:*",
                     ],
                   ],
                 },
@@ -2286,6 +2302,19 @@ service:
                 ],
               },
             },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "VerifyGrantsLogGroupD90AC2C4",
+                  "Arn",
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -2368,6 +2397,162 @@ service:
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "VerifyGrantsLogGroupD90AC2C4": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-verify-grants-prod",
+        "RetentionInDays": 90,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "VerifyGrantsTaskDefinition82FF6836": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/verify-db-grants.ts",
+            ],
+            "Environment": [
+              {
+                "Name": "VERIFY_ROLES",
+                "Value": "app-ro,app-rw,sps_bootstrap",
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "VerifyGrantsLogGroupD90AC2C4",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "verify-grants",
+              },
+            },
+            "Name": "verify-grants",
+            "Secrets": [
+              {
+                "Name": "APP_RO_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "APP_RW_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/app-rw",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "BOOTSTRAP_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/db/bootstrap",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "TaskExecutionRole250D2532",
+            "Arn",
+          ],
+        },
+        "Family": "sps-verify-grants-prod",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole30FC0FBB",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
     },
     "VpcEndpointSecurityGroup02EA44AC": {
       "Properties": {
@@ -2527,6 +2712,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
           "Name",
         ],
       },
+    },
+    "EcsVerifyGrantsTaskFamily": {
+      "Description": "SPS one-shot grant-equality verify task family — run after db-bootstrap, before the service rolls (ADR-009)",
+      "Value": "sps-verify-grants-staging",
     },
     "EtlEcrRepoUri": {
       "Description": "SPS ETL batch-image ECR repository URI (#454)",
@@ -3489,6 +3678,18 @@ service:
                         "Ref": "AWS::Partition",
                       },
                       ":ecs:us-east-1:123456789012:task-definition/sps-db-bootstrap-staging:*",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":ecs:us-east-1:123456789012:task-definition/sps-verify-grants-staging:*",
                     ],
                   ],
                 },
@@ -4810,6 +5011,19 @@ service:
                 ],
               },
             },
+            {
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "VerifyGrantsLogGroupD90AC2C4",
+                  "Arn",
+                ],
+              },
+            },
           ],
           "Version": "2012-10-17",
         },
@@ -4892,6 +5106,162 @@ service:
         ],
       },
       "Type": "AWS::IAM::Policy",
+    },
+    "VerifyGrantsLogGroupD90AC2C4": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LogGroupName": "/aws/ecs/sps-verify-grants-staging",
+        "RetentionInDays": 30,
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "VerifyGrantsTaskDefinition82FF6836": {
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "EntryPoint": [
+              "npx",
+              "tsx",
+              "scripts/verify-db-grants.ts",
+            ],
+            "Environment": [
+              {
+                "Name": "VERIFY_ROLES",
+                "Value": "app-ro,app-rw,sps_bootstrap",
+              },
+            ],
+            "Essential": true,
+            "Image": {
+              "Fn::Join": [
+                "",
+                [
+                  {
+                    "Fn::Select": [
+                      4,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".dkr.ecr.",
+                  {
+                    "Fn::Select": [
+                      3,
+                      {
+                        "Fn::Split": [
+                          ":",
+                          {
+                            "Fn::GetAtt": [
+                              "EtlEcrRepository058F5EEC",
+                              "Arn",
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  ".",
+                  {
+                    "Ref": "AWS::URLSuffix",
+                  },
+                  "/",
+                  {
+                    "Ref": "EtlEcrRepository058F5EEC",
+                  },
+                  ":latest",
+                ],
+              ],
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "VerifyGrantsLogGroupD90AC2C4",
+                },
+                "awslogs-region": "us-east-1",
+                "awslogs-stream-prefix": "verify-grants",
+              },
+            },
+            "Name": "verify-grants",
+            "Secrets": [
+              {
+                "Name": "APP_RO_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-ro",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "APP_RW_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/app-rw",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "BOOTSTRAP_DSN",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/db/bootstrap",
+                    ],
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+        "Cpu": "512",
+        "ExecutionRoleArn": {
+          "Fn::GetAtt": [
+            "TaskExecutionRole250D2532",
+            "Arn",
+          ],
+        },
+        "Family": "sps-verify-grants-staging",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE",
+        ],
+        "TaskRoleArn": {
+          "Fn::GetAtt": [
+            "TaskRole30FC0FBB",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::ECS::TaskDefinition",
     },
     "VpcEndpointSecurityGroup02EA44AC": {
       "Properties": {
