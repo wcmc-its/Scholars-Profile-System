@@ -772,6 +772,12 @@ service:
               "tsx",
               "scripts/db-bootstrap.ts",
             ],
+            "Environment": [
+              {
+                "Name": "GRANTEE_HOST",
+                "Value": "%",
+              },
+            ],
             "Essential": true,
             "Image": {
               "Fn::Join": [
@@ -3268,6 +3274,12 @@ service:
               "npx",
               "tsx",
               "scripts/db-bootstrap.ts",
+            ],
+            "Environment": [
+              {
+                "Name": "GRANTEE_HOST",
+                "Value": "10.20.%",
+              },
             ],
             "Essential": true,
             "Image": {
