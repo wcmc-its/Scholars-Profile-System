@@ -83,12 +83,20 @@ export const ROLES: Record<RoleName, { dsnEnv: string; golden: string[] }> = {
     ],
   },
   // #493 bootstrap role -- scoped to `scholars_audit` only, nothing on
-  // `scholars`. Mirrors `db-bootstrap-seed/statements.ts` seedStatements().
+  // `scholars`. One token, not two: `WITH GRANT OPTION` is a per-(user x
+  // db-scope) privilege in MySQL/Aurora, NOT per-privilege. The seeder's two
+  // statements (`db-bootstrap-seed/statements.ts` seedStatements(): `GRANT
+  // CREATE,ALTER ...` then `GRANT INSERT ... WITH GRANT OPTION`) therefore
+  // collapse into a single `SHOW GRANTS` line that carries the option across all
+  // three privileges -- the realized form this golden must match (ADR-009: the
+  // first live run confirms the pinned list). The role's actual privileges are
+  // unchanged; only the encoding is corrected. Do NOT re-split into two lines:
+  // no db-scope state can give INSERT the grant option while withholding it from
+  // CREATE/ALTER, so a two-line golden is permanently unsatisfiable.
   sps_bootstrap: {
     dsnEnv: "BOOTSTRAP_DSN",
     golden: [
-      "GRANT CREATE, ALTER ON `scholars_audit`.* TO `sps_bootstrap`@`%`",
-      "GRANT INSERT ON `scholars_audit`.* TO `sps_bootstrap`@`%` WITH GRANT OPTION",
+      "GRANT CREATE, ALTER, INSERT ON `scholars_audit`.* TO `sps_bootstrap`@`%` WITH GRANT OPTION",
     ],
   },
 };
