@@ -356,6 +356,14 @@ export class EdgeStack extends Stack {
       // unaffected by this flag.
       publishAdditionalMetrics: true,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+      // Serve A records only (no AAAA). The #461 WAF allowlist is IPv4-only, so
+      // dual-stack admits no authorized client, yet any viewer on a broken-IPv6
+      // path (an address configured but black-holed -- common on enterprise
+      // nets) has its browser prefer IPv6 (RFC 6724), stall on the dead path,
+      // and never fall back -- the homepage and /api/search "spin" indefinitely.
+      // Confirmed 2026-05-31 from a WCM client: IPv4 edge 200 in <0.4s, every
+      // AAAA hung. Re-enable only once WCM IPv6 egress is verified end-to-end.
+      enableIpv6: false,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
     });
 

@@ -199,7 +199,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
           },
           "Enabled": true,
           "HttpVersion": "http2and3",
-          "IPV6Enabled": true,
+          "IPV6Enabled": false,
           "Logging": {
             "Bucket": {
               "Fn::GetAtt": [
@@ -579,7 +579,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
           },
           "Enabled": true,
           "HttpVersion": "http2and3",
-          "IPV6Enabled": true,
+          "IPV6Enabled": false,
           "Logging": {
             "Bucket": {
               "Fn::GetAtt": [
