@@ -83,16 +83,16 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus eight additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus nine additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(8);
+        expect(cacheBehaviors).toHaveLength(9);
       });
 
-      it("evaluates additional behaviors in the spec-defined order (#1..#8)", () => {
+      it("evaluates additional behaviors in the spec-defined order (#1..#9)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
@@ -108,6 +108,11 @@ describe("EdgeStack", () => {
           // `/api/search*` -- query-string-dependent dynamic GET; must not hit
           // the cacheable default (which strips `?q=` and caches). See edge-stack.ts.
           "/api/search*",
+          // `/search*` -- the search PAGE has the same query-string-strip failure
+          // mode as the API (#624); without this behavior CloudFront drops `?q`
+          // and the page renders the query-less "browse all" default for every
+          // search. See edge-stack.ts.
+          "/search*",
         ]);
       });
 
