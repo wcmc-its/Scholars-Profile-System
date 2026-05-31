@@ -88,9 +88,22 @@ export async function validateSamlResponse(
     };
   }
   if (!profile) return { ok: false, reason: "no_profile" };
-  const cwid = extractCwid(profile, env.cwidAttribute);
+  // Primary: the WCM-direct `CWID` attribute (or NameID when unconfigured).
+  // Fallback: the eppn local-part for federated (NYP / WCM-Q) logins, which
+  // arrive without a `CWID` attribute — gated by the trusted-scope allowlist.
+  const cwid =
+    extractCwid(profile, env.cwidAttribute) ??
+    extractCwidFromEppn(profile, env.eppnAttribute, env.eppnTrustedScopes);
   if (!cwid) return { ok: false, reason: "no_cwid" };
   return { ok: true, cwid };
+}
+
+/** First non-empty, trimmed string from a SAML value (tolerates a single-element array). */
+function firstStringValue(raw: unknown): string | null {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
 /**
@@ -103,10 +116,36 @@ export function extractCwid(
   cwidAttribute: string | undefined,
 ): string | null {
   const raw: unknown = cwidAttribute ? profile[cwidAttribute] : profile.nameID;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  return typeof value === "string" && value.trim().length > 0
-    ? value.trim()
-    : null;
+  return firstStringValue(raw);
+}
+
+/**
+ * CWID fallback for federated logins: take the local-part of an eppn
+ * (`<cwid>@<scope>`) ONLY when its scope is in `trustedScopes`. The WCM SAML
+ * proxy passes NYP / WCM-Q assertions through without a `CWID` attribute but
+ * with eppn (e.g. `paa2013@nyp.org`); the local-part is the bare WCM CWID for
+ * upstreams that provision it that way. The scope allowlist is the security
+ * boundary — it prevents an untrusted IdP's `username@evil.example` from being
+ * accepted as CWID `username` and editing a same-named scholar's record. The
+ * value itself is trusted only because it rode in on a signature-verified
+ * assertion from our IdP proxy. Returns null when the attribute is absent,
+ * malformed (not exactly one `@`, empty local-part), or out-of-scope.
+ */
+export function extractCwidFromEppn(
+  profile: Profile,
+  eppnAttribute: string,
+  trustedScopes: string[],
+): string | null {
+  if (!eppnAttribute || trustedScopes.length === 0) return null;
+  const eppn = firstStringValue(profile[eppnAttribute]);
+  if (!eppn) return null;
+  const at = eppn.lastIndexOf("@");
+  // Need a non-empty local-part and a scope, and exactly one `@`.
+  if (at <= 0 || at === eppn.length - 1) return null;
+  const local = eppn.slice(0, at);
+  if (local.includes("@")) return null;
+  const scope = eppn.slice(at + 1).toLowerCase();
+  return trustedScopes.includes(scope) ? local : null;
 }
 
 /** SP metadata XML — hand the `/api/auth/saml/metadata` URL to WCM identity. */

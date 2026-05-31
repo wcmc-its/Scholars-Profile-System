@@ -110,6 +110,21 @@ export interface SamlEnv {
    * not a code change.
    */
   cwidAttribute: string | undefined;
+  /**
+   * SAML attribute carrying the eduPersonPrincipalName (`<cwid>@<scope>`), used
+   * as the CWID fallback for federated logins. The WCM-direct route releases a
+   * `CWID`-named attribute; the NYP / WCM-Q routes (behind the SAML proxy) do
+   * not — they release eppn + `uid` instead. Default is the standard eppn OID.
+   */
+  eppnAttribute: string;
+  /**
+   * Lower-cased scopes whose eppn local-part may be taken as the CWID, e.g.
+   * `nyp.org`. The security boundary for the eppn fallback: a scope identifies
+   * the asserting upstream, and the local-part is trusted as the WCM CWID only
+   * for upstreams that provision `uid`/eppn == CWID. Empty (default) disables
+   * the fallback — an arbitrary domain is never stripped.
+   */
+  eppnTrustedScopes: string[];
   /** Require the response envelope (not only the assertion) to be signed. */
   wantAuthnResponseSigned: boolean;
   /** Accepted clock skew between SP and IdP, in milliseconds. */
@@ -141,6 +156,22 @@ export function parseIdpCert(raw: string): string | string[] {
 }
 
 /**
+ * Parse `SAML_EPPN_TRUSTED_SCOPES` — a comma-separated scope allowlist — into a
+ * lower-cased, de-duplicated array. Unset or empty yields `[]` (fallback off).
+ */
+export function parseScopes(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0),
+    ),
+  ];
+}
+
+/**
  * SAML SP/IdP config, consumed by `lib/auth/saml.ts`. Throws if a required
  * `SAML_*` variable is missing — so the SAML routes fail loud on a
  * misconfigured deployment rather than half-authenticating.
@@ -155,6 +186,9 @@ export function getSamlEnv(): SamlEnv {
     spPrivateKey: optionalEnv("SAML_SP_PRIVATE_KEY"),
     spCert: optionalEnv("SAML_SP_CERT"),
     cwidAttribute: optionalEnv("SAML_CWID_ATTRIBUTE"),
+    eppnAttribute:
+      optionalEnv("SAML_EPPN_ATTRIBUTE") ?? "urn:oid:1.3.6.1.4.1.5923.1.1.1.6",
+    eppnTrustedScopes: parseScopes(optionalEnv("SAML_EPPN_TRUSTED_SCOPES")),
     wantAuthnResponseSigned: envBool("SAML_WANT_AUTHN_RESPONSE_SIGNED", false),
     clockSkewMs: envInt("SAML_CLOCK_SKEW_MS", 5000),
     nameIdFormat: optionalEnv("SAML_NAMEID_FORMAT"),

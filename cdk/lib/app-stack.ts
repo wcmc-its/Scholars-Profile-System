@@ -57,6 +57,24 @@ const WCM_IDP_SSO_URL =
  * fallback (which would otherwise yield the wrong identifier).
  */
 const WCM_SAML_CWID_ATTRIBUTE = "CWID";
+/**
+ * Trusted eppn scopes for the federated-login CWID fallback. The WCM-direct
+ * route releases the `CWID` attribute above; NYP / WCM-Q logins arrive through
+ * the SAML proxy WITHOUT it but WITH eppn (`<cwid>@<scope>`) — captured from a
+ * live `paa2013@nyp.org` assertion 2026-05-31. `extractCwidFromEppn` takes the
+ * eppn local-part as the CWID ONLY for these scopes, so an arbitrary domain is
+ * never stripped. Both are WCM-controlled domains, so allowlisting them adds no
+ * attack surface — only the proxy (federating these trusted upstreams) can
+ * assert an eppn scoped to them.
+ *   - `nyp.org`              — CONFIRMED from a live NYP assertion 2026-05-31.
+ *   - `qatar-med.cornell.edu` — ANTICIPATED from WCM-Q's faculty email domain
+ *     (facultyaffairs@qatar-med.cornell.edu); the proxy passes upstream eppn
+ *     scopes through unchanged (NYP arrived as `@nyp.org`), and for NYP the
+ *     email domain matched the eppn scope exactly. VERIFY against a live WCM-Q
+ *     login and correct here if the real scope differs (until then a WCM-Q
+ *     login simply no-ops this entry and fails closed — no security impact).
+ */
+const WCM_SAML_EPPN_TRUSTED_SCOPES = "nyp.org,qatar-med.cornell.edu";
 
 /**
  * The verified SES sender for the #160 Phase 2 "Request a change" server mailer.
@@ -811,6 +829,10 @@ export class AppStack extends Stack {
         SAML_SP_ENTITY_ID: envConfig.samlSpEntityId,
         SAML_SP_ACS_URL: envConfig.samlSpAcsUrl,
         SAML_CWID_ATTRIBUTE: WCM_SAML_CWID_ATTRIBUTE,
+        // Federated-login CWID fallback (NYP / WCM-Q via the SAML proxy). The
+        // proxy drops the `CWID` attribute on those routes but keeps eppn; this
+        // lets those users self-edit. Scope allowlist is the security guard.
+        SAML_EPPN_TRUSTED_SCOPES: WCM_SAML_EPPN_TRUSTED_SCOPES,
         // #160 Phase 2 -- "Request a change" server mailer. Ships OFF: while
         // off the endpoint 503s and the dialog falls back to the Phase-1 client
         // mailto:. Flip to "on" only after the SES sender identity is verified

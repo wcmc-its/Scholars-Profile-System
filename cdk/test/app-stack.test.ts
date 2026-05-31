@@ -535,6 +535,13 @@ describe("AppStack", () => {
         );
         // CWID arrives in a `CWID` attribute, not the NameID.
         expect(envByName.get("SAML_CWID_ATTRIBUTE")).toBe("CWID");
+        // Federated (NYP / WCM-Q) logins arrive without `CWID`; the eppn
+        // local-part is taken as CWID only for these trusted scopes. nyp.org
+        // confirmed from a live assertion; qatar-med.cornell.edu anticipated
+        // from WCM-Q's email domain (verify on first WCM-Q login).
+        expect(envByName.get("SAML_EPPN_TRUSTED_SCOPES")).toBe(
+          "nyp.org,qatar-med.cornell.edu",
+        );
       });
 
       it("the migration task runs prisma migrate deploy under the migrate DSN, never app-rw (ADR-009 Phase 2 / req 1)", () => {
