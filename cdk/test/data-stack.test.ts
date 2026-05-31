@@ -354,6 +354,9 @@ describe("DataStack", () => {
         // ADR-009 Phase 1: the seeder also mints sps_migrate + writes its DSN.
         expect(env.MIGRATE_SECRET_ARN).toBeDefined();
         expect(env.DB_HOST).toBeDefined();
+        // ADR-009 Phase 3: the seeder revokes app_rw's scholars.* DDL, scoped to
+        // the per-env grantee host (prod = `%`).
+        expect(env.APP_RW_GRANTEE_HOST).toBe("%");
       });
 
       it("runs the seeder on the shared ETL SG (Aurora-admitted) — no dedicated seeder SG", () => {

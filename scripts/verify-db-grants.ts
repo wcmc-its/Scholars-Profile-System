@@ -62,14 +62,16 @@ export const ROLES: Record<RoleName, { dsnEnv: string; golden: string[] }> = {
     dsnEnv: "APP_RO_DSN",
     golden: ["GRANT SELECT ON `scholars`.* TO `app_ro`@`%`"],
   },
-  // runtime writer. TODAY (pre-ADR-009 Phase 3) it still holds the full DDL set
-  // because it doubles as the migrate credential; Phase 3 tightens this golden
-  // list down to `SELECT,INSERT,UPDATE,DELETE` once `sps_migrate` owns the DDL.
-  // That tightening is a CONSCIOUS edit to this list (ADR-009 Decision 1 / req 6).
+  // runtime writer -- DML-only on `scholars`.* (ADR-009 Phase 3 tightened this:
+  // the DDL now lives only in the deploy-time `sps_migrate` role, and the seeder
+  // REVOKEs it from app_rw -- `db-bootstrap-seed/statements.ts`
+  // appRwTightenStatements). This list and that REVOKE are a CONSCIOUS paired
+  // edit (Decision 1 / req 6): the privileges dropped here must equal those the
+  // seeder revokes. Plus the #102 audit INSERT (on `scholars_audit`).
   "app-rw": {
     dsnEnv: "APP_RW_DSN",
     golden: [
-      "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER ON `scholars`.* TO `app_rw`@`%`",
+      "GRANT SELECT, INSERT, UPDATE, DELETE ON `scholars`.* TO `app_rw`@`%`",
       "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `app_rw`@`%`",
     ],
   },
