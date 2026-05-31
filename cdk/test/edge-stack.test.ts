@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { EdgeStack } from "../lib/edge-stack";
@@ -49,12 +51,121 @@ function buildEdgeStack(
 // `cdk synth`.
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
+// ---------------------------------------------------------------------------
+// #490 / #624 synth-time guard.
+//
+// A Next.js route that reads the query string at the SSR origin -- a server
+// `page.tsx` awaiting `searchParams`, or a `route.ts` reading it -- MUST have a
+// CloudFront behavior that forwards the query string to the origin. Without one
+// it falls to the default Managed-CachingOptimized behavior (cache policy
+// QueryString=none), so CloudFront strips `?q` before the origin AND caches one
+// query-less response for every request. #490 broke `/api/search`; #624 broke
+// the `/search` page the same way. Client components using `useSearchParams()`
+// read the URL in the browser after hydration and are unaffected -- excluded.
+//
+// The Next app tree is two levels up from cdk/test/.
+const APP_DIR = path.resolve(__dirname, "../../app");
+
+// Documented backlog (#634): routes already reading the query string with no
+// forwarding behavior when this guard landed. The guard RATCHETS -- a NEW
+// uncovered route fails the test. Shrink this set as each is fixed. NOTE: the
+// cacheable pages here (profile, dept/center/topic listings) need a
+// query-in-cache-key policy, NOT CachingDisabled (which would kill their edge
+// caching) -- see #634.
+const KNOWN_UNCOVERED_QUERY_ROUTES: ReadonlySet<string> = new Set([
+  "/about/feedback",
+  "/api/directory/people",
+  "/api/nih-portfolio",
+  "/api/scholars/*/popover-context",
+  "/api/topics/*/publications",
+  "/centers/*",
+  "/departments/*",
+  "/departments/*/divisions/*",
+  "/scholars/*",
+  "/scholars/*/co-pubs/*/export",
+  "/scholars/*/co-pubs/export",
+  "/topics/*/scholars",
+]);
+
+/** Map an app route file to its URL path: drop the route-group `(...)` segments
+ *  and the `page`/`route` filename; collapse `[dynamic]` segments to `*`. */
+function routePatternFor(file: string): string {
+  const rel = path
+    .relative(APP_DIR, file)
+    .replace(/\\/g, "/")
+    .replace(/\/(page|route)\.(t|j)sx?$/, "");
+  const segs = rel.split("/").filter((s) => s && !/^\(.*\)$/.test(s));
+  return "/" + segs.map((s) => (/^\[.*\]$/.test(s) ? "*" : s)).join("/");
+}
+
+/** Server `page.tsx` / `route.ts` files that read `searchParams` (excluding
+ *  `'use client'` components, whose `useSearchParams()` is browser-side). */
+function findServerQueryDependentRoutes(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!/^(page|route)\.(t|j)sx?$/.test(ent.name)) continue;
+      const src = fs.readFileSync(p, "utf8");
+      if (/^\s*['"]use client['"]/m.test(src)) continue;
+      if (!/\bsearchParams\b/.test(src)) continue;
+      out.push(routePatternFor(p));
+    }
+  };
+  walk(dir);
+  return [...new Set(out)];
+}
+
+/** A CloudFront PathPattern (exact, or trailing-`*` prefix glob) covers a route. */
+function behaviorCovers(pattern: string, route: string): boolean {
+  return pattern.endsWith("*")
+    ? route.startsWith(pattern.slice(0, -1))
+    : route === pattern;
+}
+
 describe("EdgeStack", () => {
   describe("prod", () => {
     const { template } = buildEdgeStack("prod");
 
     it("matches the snapshot", () => {
       expect(template.toJSON()).toMatchSnapshot();
+    });
+
+    it("every server route reading the query string has a query-forwarding behavior (#490 / #624 guard)", () => {
+      // Sanity: we're scanning the real app tree, not silently passing on an
+      // empty walk.
+      expect(fs.existsSync(APP_DIR)).toBe(true);
+      const dist = (
+        Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>
+      ).DistributionConfig as Record<string, unknown>;
+      const behaviorPatterns = (
+        dist.CacheBehaviors as Array<Record<string, unknown>>
+      ).map((b) => b.PathPattern as string);
+
+      const routes = findServerQueryDependentRoutes(APP_DIR);
+      expect(routes.length).toBeGreaterThan(0);
+
+      // A route reading the query string that is neither forwarded by a behavior
+      // nor a documented #634 baseline entry is a new #490/#624-class break.
+      const newlyUncovered = routes.filter(
+        (r) =>
+          !KNOWN_UNCOVERED_QUERY_ROUTES.has(r) &&
+          !behaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(newlyUncovered).toEqual([]);
+
+      // Ratchet hygiene: once a baseline route gets a forwarding behavior, drop
+      // it from KNOWN_UNCOVERED. Fails loudly so the backlog can't go stale.
+      const staleBaseline = [...KNOWN_UNCOVERED_QUERY_ROUTES].filter((r) =>
+        behaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(staleBaseline).toEqual([]);
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
