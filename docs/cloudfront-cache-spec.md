@@ -22,23 +22,28 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 | 4 | `/api/revalidate*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST | Mutating endpoint reachable only from the internal-only ALB listener (B05 #104). Behavior exists for defense-in-depth so a misconfigured origin cannot accidentally be cached at the edge. |
 | 5 | `/api/health/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Operational endpoint; staleness here would mask outages. Origin already sets `force-dynamic`. |
 | 6 | `/api/analytics` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, POST | Telemetry POST. CloudFront does not cache POST regardless, but explicit behavior keeps the cache key from being computed against forwarded cookies. |
-| 7 | `/api/export/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | On-demand CSV/Excel export. Origin sets `Cache-Control: no-store`. Behavior is belt-and-suspenders. |
-| 8 | `/api/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Query-string dynamic GET (`force-dynamic`). The cacheable default strips `?q` and caches a match_all for everyone (#490). Covers `/api/search` and `/api/search/suggest`. |
-| 9 | `/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | The search PAGE, same strip as the API (#624). `#632` made the origin render sub-0.5s, so no caching benefit is lost. |
-| 10 | `/api/directory/people` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. SSO-gated typeahead; reads `q`/`cwids` **and** the session cookie → needs AllViewer. |
-| 11 | `/api/nih-portfolio` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. RePORTER click-through proxy; reads `cwid`/`profile_id`, 302s. |
-| 12 | `/api/scholars/*/popover-context` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Person-popover context; reads `surface`/`context*`. |
-| 13 | `/api/topics/*/publications` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Topic publication feed; reads `sort`/`filter`/`subtopic`/`tier`/`page`. |
-| 14 | `/about/feedback` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `force-dynamic` page; reads `?from=` for contextual mode **and** the session cookie to prefill. |
-| 15 | `/scholars/*/co-pubs/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `no-store` download; reads `?format=`. **Must precede #18** (`/scholars/*` would otherwise swallow it). |
-| 16 | `/scholars/*/co-pubs/*/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Per-mentee variant of #15. |
-| 17 | `/topics/*/scholars` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ISR page; reads `q`/`role`/`page`. Stays cacheable, keyed per query. |
-| 18 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Profile page (highest traffic); reads `mentees-sort`. |
-| 19 | `/departments/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Dept + `…/divisions/*` listings; read `page`/`tab`/`sort`. |
-| 20 | `/centers/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Center listings; read `page`/`tab`/`sort`. |
-| 21 | `*` (default) | `CachingOptimized` | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All remaining cacheable routes — read-only pages and API, sitemap, OG images. **Note:** this policy strips the query string from the cache key (see §Cache key); routes that depend on it get a dedicated behavior above. |
+| 7 | `/api/export/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | `/api/export/publications/<granularity>` is a **POST** handler (large filter body), `Cache-Control: no-store`. ALLOW_ALL, not GET-only — the GET-only form 403'd the POST at the edge so the export never worked through CloudFront. |
+| 8 | `/api/csp-report` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | The CSP `report-uri`/`report-to` collector (`lib/security-headers.ts`). Browsers POST violation reports here; the GET-only default 403'd them all → reports silently dropped at the edge. |
+| 9 | `/api/nih-resolve` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | POST batch resolver fired from profile/funding pages (`lib/use-nih-resolve.ts`). Default GET-only behavior 403'd every resolve → NIH award links silently failed on live profiles. |
+| 10 | `/api/feedback/submit` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | POST from the feedback form (`components/feedback/feedback-form.tsx`). Same default GET-only 403; breaks submission once `FEEDBACK_BADGE_ENABLED` is on. |
+| 11 | `/api/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Query-string dynamic GET (`force-dynamic`). The cacheable default strips `?q` and caches a match_all for everyone (#490). Covers `/api/search` and `/api/search/suggest`. |
+| 12 | `/search*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | The search PAGE, same strip as the API (#624). `#632` made the origin render sub-0.5s, so no caching benefit is lost. |
+| 13 | `/api/directory/people` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. SSO-gated typeahead; reads `q`/`cwids` **and** the session cookie → needs AllViewer. |
+| 14 | `/api/nih-portfolio` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. RePORTER click-through proxy; reads `cwid`/`profile_id`, 302s. |
+| 15 | `/api/scholars/*/popover-context` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Person-popover context; reads `surface`/`context*`. |
+| 16 | `/api/topics/*/publications` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Topic publication feed; reads `sort`/`filter`/`subtopic`/`tier`/`page`. |
+| 17 | `/about/feedback` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `force-dynamic` page; reads `?from=` for contextual mode **and** the session cookie to prefill. |
+| 18 | `/scholars/*/co-pubs/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. `no-store` download; reads `?format=`. **Must precede #20** (`/scholars/*` would otherwise swallow it). |
+| 19 | `/scholars/*/co-pubs/*/export` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | #634 Group A. Per-mentee variant of #18. |
+| 20 | `/scholars/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Profile page (highest traffic); reads `mentees-sort`. |
+| 21 | `/departments/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Dept + `…/divisions/*` listings; read `page`/`tab`/`sort`. |
+| 22 | `/centers/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Center listings; read `page`/`tab`/`sort`. |
+| 23 | `/topics/*/scholars` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ISR page; reads `q`/`role`/`page`. Stays cacheable, keyed per query. |
+| 24 | `*` (default) | `CachingOptimized` | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All remaining cacheable routes — read-only pages and API, sitemap, OG images. **Note:** this policy strips the query string from the cache key (see §Cache key); routes that depend on it get a dedicated behavior above. |
 
-> **Ordering note (#634):** CloudFront uses the **first** matching behavior in list order (not most-specific). The two `/scholars/*/co-pubs/*export` behaviors (#15/#16) must therefore be evaluated **before** `/scholars/*` (#18), since `*` spans slashes and `/scholars/*` matches `/scholars/<slug>/co-pubs/export`. The CDK emits all uncacheable behaviors before the Group B query-keyed ones, which preserves this.
+> **Ordering note (#634):** CloudFront uses the **first** matching behavior in list order (not most-specific). The two `/scholars/*/co-pubs/*export` behaviors (#18/#19) must therefore be evaluated **before** `/scholars/*` (#20), since `*` spans slashes and `/scholars/*` matches `/scholars/<slug>/co-pubs/export`. The CDK emits all uncacheable behaviors before the Group B query-keyed ones, which preserves this.
+
+> **Mutating-method note:** rows #7–#10 (plus the existing ALLOW_ALL writer/auth/revalidate/analytics behaviors) carry POST because the default behavior allows only GET/HEAD/OPTIONS — an uncovered mutating route is **403'd at the edge** before the origin sees it. A synth-time guard (`edge-stack.test.ts`) now ratchets this: any `route.ts` exporting POST/PUT/PATCH/DELETE without an ALLOW_ALL behavior fails the test.
 
 `AllViewer` is AWS-managed origin request policy `Managed-AllViewer` (`216adef6-5c7f-47e4-b989-5492eafa07d3`). `CachingDisabled` and `CachingOptimized` are `Managed-CachingDisabled` (`4135ea2d-6df8-44a3-9df3-4b5a84be39ad`) and `Managed-CachingOptimized` (`658327ea-f89d-4fab-a63d-7e88639e58f6`) respectively. `sps-query-keyed-${env}` is the **custom** cache policy defined in `EdgeStack` (see §Cache key — query-keyed cacheable pages).
 
@@ -80,7 +85,7 @@ Default TTL is 24 h to match the `revalidate = 86400` declaration on `/scholars/
 
 Acceptance criteria for B07 #106:
 
-1. **Distribution has at least two behaviors** — the table above defines the default plus 20 additional behaviors; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
+1. **Distribution has at least two behaviors** — the table above defines the default plus 23 additional behaviors; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
 2. **Cache key inspector test** — same URL with two different `Cookie:` values produces the same cache key for any path covered by the default behavior. Run from the CloudFront console: Distribution → Behaviors → Default → Cache Policy → "Test cache policy."
 3. **Writer route forwards cookies** — `curl -v https://<staging-domain>/api/edit/ping --cookie "session=test"` and confirm the origin access log records `session=test` in the request headers.
 4. **End-to-end edit smoke test** — once B01 #100 (SSO) and B02 #101 (authz predicate) land, perform a full self-edit through CloudFront and confirm the write reaches Aurora and the audit log captures it. Blocked on those issues.

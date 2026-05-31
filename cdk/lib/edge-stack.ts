@@ -234,7 +234,26 @@ export class EdgeStack extends Stack {
       ["/api/revalidate*", cloudfront.AllowedMethods.ALLOW_ALL],
       ["/api/health/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       ["/api/analytics", cloudfront.AllowedMethods.ALLOW_ALL],
-      ["/api/export/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/api/export/*` -- the publications export (`/api/export/publications/
+      // <granularity>`) is a POST handler (large filter body), `force-dynamic`,
+      // `Cache-Control: no-store`. ALLOW_ALL, not GET-only: the GET-only form
+      // 403'd the POST at the edge so the export never worked through
+      // CloudFront. CachingDisabled still prevents any caching.
+      ["/api/export/*", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/csp-report` -- the CSP `report-uri` / `report-to` collector
+      // (lib/security-headers.ts). Browsers POST violation reports here; the
+      // cacheable default allows only GET/HEAD/OPTIONS, so every report was
+      // 403'd at the edge and silently dropped. ALLOW_ALL.
+      ["/api/csp-report", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/nih-resolve` -- POST batch resolver fired from profile / funding
+      // pages (lib/use-nih-resolve.ts) after first paint. Falls to the default
+      // GET-only behavior -> every resolve 403'd at the edge -> NIH award
+      // links silently fail to resolve on live profiles. ALLOW_ALL.
+      ["/api/nih-resolve", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/feedback/submit` -- POST from the feedback form
+      // (components/feedback/feedback-form.tsx). Same default GET-only 403;
+      // breaks feedback submission once FEEDBACK_BADGE_ENABLED is on. ALLOW_ALL.
+      ["/api/feedback/submit", cloudfront.AllowedMethods.ALLOW_ALL],
       // `/api/search*` (covers `/api/search` AND `/api/search/suggest`): the
       // search API is a query-string-dependent dynamic GET (`export const
       // dynamic = "force-dynamic"`). Without an explicit behavior it falls to

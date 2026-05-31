@@ -132,6 +132,33 @@ function findServerQueryDependentRoutes(dir: string): string[] {
   return [...new Set(out)];
 }
 
+/** Server `route.ts` files exporting a MUTATING handler (POST/PUT/PATCH/
+ *  DELETE). These need a CloudFront behavior that allows the method: the
+ *  default cacheable behavior allows only GET/HEAD/OPTIONS, so an uncovered
+ *  mutating route is 403'd at the edge before the origin ever sees it. Sibling
+ *  of the query-string guard above (route handlers cannot be `'use client'`,
+ *  so no exclusion is needed). */
+function findServerMutatingRoutes(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!/^route\.(t|j)sx?$/.test(ent.name)) continue;
+      const src = fs.readFileSync(p, "utf8");
+      if (!/export\s+(async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b/.test(src)) {
+        continue;
+      }
+      out.push(routePatternFor(p));
+    }
+  };
+  walk(dir);
+  return [...new Set(out)];
+}
+
 /** A CloudFront PathPattern (exact, or trailing-`*` prefix glob) covers a route. */
 function behaviorCovers(pattern: string, route: string): boolean {
   return pattern.endsWith("*")
@@ -180,6 +207,35 @@ describe("EdgeStack", () => {
       expect(staleBaseline).toEqual([]);
     });
 
+    it("every server route with a mutating handler has a behavior that allows the method (POST 403 guard)", () => {
+      // Sibling of the query-string guard: a route.ts exporting POST/PUT/PATCH/
+      // DELETE that is not covered by an ALLOW_ALL behavior falls to the
+      // default cacheable behavior (GET/HEAD/OPTIONS only) and is 403'd at the
+      // edge before reaching the origin. This bit /api/csp-report,
+      // /api/nih-resolve, /api/feedback/submit, and the POST /api/export/*
+      // route (caught fixing #634).
+      expect(fs.existsSync(APP_DIR)).toBe(true);
+      const dist = (
+        Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>
+      ).DistributionConfig as Record<string, unknown>;
+      const behaviors = dist.CacheBehaviors as Array<Record<string, unknown>>;
+      // Only behaviors whose AllowedMethods include POST forward a mutation.
+      // The default behavior is GET/HEAD/OPTIONS and is intentionally excluded.
+      const postBehaviorPatterns = behaviors
+        .filter((b) => (b.AllowedMethods as string[]).includes("POST"))
+        .map((b) => b.PathPattern as string);
+
+      const mutatingRoutes = findServerMutatingRoutes(APP_DIR);
+      expect(mutatingRoutes.length).toBeGreaterThan(0);
+
+      const uncovered = mutatingRoutes.filter(
+        (r) => !postBehaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(uncovered).toEqual([]);
+    });
+
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
       it("creates exactly one CloudFront distribution and one response-headers policy", () => {
         template.resourceCountIs("AWS::CloudFront::Distribution", 1);
@@ -206,13 +262,13 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus twenty additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-three additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(20);
+        expect(cacheBehaviors).toHaveLength(23);
       });
 
       it("evaluates additional behaviors in the spec-defined order (uncacheable first, then #634 query-keyed)", () => {
@@ -229,6 +285,11 @@ describe("EdgeStack", () => {
           "/api/health/*",
           "/api/analytics",
           "/api/export/*",
+          // Mutating POST routes that fell to the default GET-only behavior
+          // (-> 403 at the edge); now ALLOW_ALL.
+          "/api/csp-report",
+          "/api/nih-resolve",
+          "/api/feedback/submit",
           // `/api/search*` -- query-string-dependent dynamic GET; must not hit
           // the cacheable default (which strips `?q=` and caches). See edge-stack.ts.
           "/api/search*",
@@ -391,7 +452,12 @@ describe("EdgeStack", () => {
         expect(byPath.get("/api/revalidate*")).toEqual(allMethods);
         expect(byPath.get("/api/health/*")).toEqual(ghOptions);
         expect(byPath.get("/api/analytics")).toEqual(allMethods);
-        expect(byPath.get("/api/export/*")).toEqual(ghOptions);
+        // `/api/export/*` is a POST handler (publications export); ALLOW_ALL.
+        expect(byPath.get("/api/export/*")).toEqual(allMethods);
+        // Mutating POST routes that previously 403'd at the GET-only default.
+        expect(byPath.get("/api/csp-report")).toEqual(allMethods);
+        expect(byPath.get("/api/nih-resolve")).toEqual(allMethods);
+        expect(byPath.get("/api/feedback/submit")).toEqual(allMethods);
         expect(byPath.get("/api/search*")).toEqual(ghOptions);
         expect(byPath.get("/search*")).toEqual(ghOptions);
         // #634 -- every Group A dynamic route and Group B cacheable page is
