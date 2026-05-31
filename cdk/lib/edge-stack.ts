@@ -237,6 +237,17 @@ export class EdgeStack extends Stack {
       // query. CachingDisabled + AllViewer forwards the full query string and
       // never caches, matching the other dynamic GET routes above.
       ["/api/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/search*` -- the user-facing search PAGE (SSR, `force-dynamic`). Same
+      // failure mode as `/api/search*` but it was never given an explicit
+      // behavior, so the page falls to the cacheable default whose
+      // Managed-CachingOptimized policy excludes the query string from the cache
+      // key: CloudFront strips `?q` before the origin (the page renders the
+      // query-less "browse all" default -- all ~8,937 people, with an empty
+      // search box) AND caches that one response for every query (#624).
+      // CachingDisabled + AllViewer forwards the full query string and never
+      // caches; #632 already made the origin render sub-0.5s so there is no
+      // caching benefit to preserve.
+      ["/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
     ];
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};

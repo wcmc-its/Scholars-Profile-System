@@ -181,6 +181,22 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
               "ViewerProtocolPolicy": "redirect-to-https",
             },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/search*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
           ],
           "Comment": "SPS edge -- prod",
           "DefaultCacheBehavior": {
@@ -555,6 +571,22 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/search*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/search*",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
