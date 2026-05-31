@@ -11,7 +11,7 @@ decisions), this doc is correct and the divergences are called out in
 [§ Corrections to older docs](#corrections-to-older-docs).
 
 > Sources of truth this doc consolidates: [`ADR-008`](./ADR-008-infrastructure-as-code.md)
-> (six-stack CDK), [`cdk/lib/config.ts`](../cdk/lib/config.ts) (sizing), [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md)
+> (nine-stack CDK), [`cdk/lib/config.ts`](../cdk/lib/config.ts) (sizing), [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md)
 > (auth, ETL, secrets), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) (edge).
 
 ---
@@ -26,7 +26,7 @@ by **Amazon OpenSearch Service**. All displayed data is *derived* — a nightly/
 **Step Functions ETL** pulls from WCM source systems (Enterprise Directory, InfoEd, COI,
 ReciterDB, ReciterAI) into Aurora and rebuilds the OpenSearch index. Writes happen only
 through staff-authenticated `/edit` endpoints (SAML SSO). The whole thing is defined as
-code in **AWS CDK** across six stacks, deployed to **two separate AWS accounts** (staging
+code in **AWS CDK** across nine stacks, deployed to **two separate AWS accounts** (staging
 and prod) via **GitHub Actions + OIDC**.
 
 ## Request path (what a visitor hits)
@@ -147,7 +147,7 @@ flowchart LR
 - The search index is rebuilt into a fresh versioned index and made live by an **atomic
   alias swap** so the live index never blanks.
 
-## The six CDK stacks
+## The nine CDK stacks
 
 All infrastructure is AWS CDK (TypeScript) in [`cdk/`](../cdk/), split by blast radius and
 change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
@@ -160,7 +160,8 @@ change cadence ([`ADR-008`](./ADR-008-infrastructure-as-code.md)):
 | `AppStack` | ECR, ECS cluster/service/tasks, public + internal ALB, migration task, IAM role split | every deploy | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md) |
 | `EtlStack` | Step Functions, EventBridge schedules, ETL SG, `etl-failures` SNS | per ETL change | [`PRODUCTION_ADDENDUM.md § EtlStack`](./PRODUCTION_ADDENDUM.md) |
 | `EdgeStack` | CloudFront, WAF, security-headers policy, legacy-VIVO redirects | occasional | [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) |
-| `ObservabilityStack` | CloudWatch alarms, SNS page/notify topics, cost guardrails, on-call relay Lambda | occasional | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
+| `ObservabilityStack` | CloudWatch alarms, SNS page/notify topics, cost guardrails, on-call relay Lambda, reliability dashboard | occasional | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
+| `AnalyticsStack` | Glue + Athena over CloudFront access logs, nightly usage-rollup Lambda, durable (no-expiry) analytics bucket | occasional | — |
 
 (A standalone `dr-backup-vault-stack` provisions the us-west-2 DR vault that DataStack
 copies into.) `DataStack` and `NetworkStack` carry `RemovalPolicy.RETAIN` + deletion

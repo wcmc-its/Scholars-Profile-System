@@ -21,6 +21,8 @@ Local prototype under active development. See the planning artifacts in `~/Dropb
 
 For the production deployment shape, caching strategy, and the runbook for "pages are slow," see [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
+For a visual map of the system — context, app/AWS topology, network, and edge — see the architecture gallery ([`docs/architecture/index.html`](docs/architecture/index.html)) and the prose [`docs/architecture-overview.md`](docs/architecture-overview.md).
+
 ## Prerequisites
 
 - Node.js 22+
