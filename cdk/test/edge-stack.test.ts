@@ -66,26 +66,38 @@ const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 // The Next app tree is two levels up from cdk/test/.
 const APP_DIR = path.resolve(__dirname, "../../app");
 
-// Documented backlog (#634): routes already reading the query string with no
+// Documented backlog (#634): routes that read the query string with no
 // forwarding behavior when this guard landed. The guard RATCHETS -- a NEW
-// uncovered route fails the test. Shrink this set as each is fixed. NOTE: the
-// cacheable pages here (profile, dept/center/topic listings) need a
-// query-in-cache-key policy, NOT CachingDisabled (which would kill their edge
-// caching) -- see #634.
-const KNOWN_UNCOVERED_QUERY_ROUTES: ReadonlySet<string> = new Set([
-  "/about/feedback",
-  "/api/directory/people",
-  "/api/nih-portfolio",
-  "/api/scholars/*/popover-context",
-  "/api/topics/*/publications",
-  "/centers/*",
-  "/departments/*",
-  "/departments/*/divisions/*",
+// uncovered route fails the test. ALL 12 baseline routes were fixed in #634
+// (Group A -> CachingDisabled + AllViewer; the cacheable Group B pages ->
+// custom query-keyed cache policy), so this baseline is now EMPTY. Any route
+// that reads `searchParams` without a forwarding behavior now fails the test
+// outright. Do not re-add entries here to "unblock" a break -- give the route
+// a real behavior in edge-stack.ts instead.
+const KNOWN_UNCOVERED_QUERY_ROUTES: ReadonlySet<string> = new Set([]);
+
+// #634 Group B -- the CACHEABLE pages whose behaviors use the custom
+// query-keyed cache policy (per-query cache key, cookies stripped) instead of
+// CachingDisabled + AllViewer. Everything else among the additional behaviors
+// is uncacheable.
+const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
   "/scholars/*",
-  "/scholars/*/co-pubs/*/export",
-  "/scholars/*/co-pubs/export",
+  "/departments/*",
+  "/centers/*",
   "/topics/*/scholars",
 ]);
+
+// The exact query-string allow-list on the custom cache policy: the union of
+// params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
+// division -> page/tab/sort; topics/*/scholars -> q/role/page).
+const QUERY_KEYED_ALLOWLIST = [
+  "mentees-sort",
+  "page",
+  "tab",
+  "sort",
+  "q",
+  "role",
+] as const;
 
 /** Map an app route file to its URL path: drop the route-group `(...)` segments
  *  and the `page`/`route` filename; collapse `[dynamic]` segments to `*`. */
@@ -194,21 +206,22 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus nine additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(9);
+        expect(cacheBehaviors).toHaveLength(20);
       });
 
-      it("evaluates additional behaviors in the spec-defined order (#1..#9)", () => {
+      it("evaluates additional behaviors in the spec-defined order (uncacheable first, then #634 query-keyed)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         const paths = cacheBehaviors.map((b) => b.PathPattern as string);
         expect(paths).toEqual([
+          // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
           "/edit*",
           "/api/auth/*",
@@ -224,6 +237,23 @@ describe("EdgeStack", () => {
           // and the page renders the query-less "browse all" default for every
           // search. See edge-stack.ts.
           "/search*",
+          // #634 Group A -- dynamic query-string routes that must never cache.
+          "/api/directory/people",
+          "/api/nih-portfolio",
+          "/api/scholars/*/popover-context",
+          "/api/topics/*/publications",
+          "/about/feedback",
+          // The two co-pub export routes MUST precede `/scholars/*` below:
+          // CloudFront is first-match-wins in list order and `/scholars/*`
+          // (a `*` glob spanning slashes) would otherwise swallow them and
+          // cache the download.
+          "/scholars/*/co-pubs/export",
+          "/scholars/*/co-pubs/*/export",
+          // -- #634 Group B -- query-keyed CACHEABLE pages (custom policy) --
+          "/scholars/*",
+          "/departments/*",
+          "/centers/*",
+          "/topics/*/scholars",
         ]);
       });
 
@@ -237,27 +267,45 @@ describe("EdgeStack", () => {
         );
       });
 
-      it("all additional behaviors use Managed-CachingDisabled (acceptance #3)", () => {
+      it("uncacheable behaviors use Managed-CachingDisabled; #634 Group B uses the custom query-keyed policy (acceptance #3)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
+        // The custom cache policy is a stack-local resource; CDK references it
+        // by logical id (a `Ref`), not the managed-policy UUID. Resolve it.
+        const customPolicyLogicalId = Object.keys(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        )[0];
         for (const behavior of cacheBehaviors) {
-          // Managed-CachingDisabled id.
-          expect(behavior.CachePolicyId).toBe(
-            "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-          );
+          const path = behavior.PathPattern as string;
+          if (QUERY_KEYED_PATTERNS.has(path)) {
+            // #634 Group B -- custom `sps-query-keyed-*` policy (a Ref).
+            expect(behavior.CachePolicyId).toEqual({ Ref: customPolicyLogicalId });
+          } else {
+            // Managed-CachingDisabled id.
+            expect(behavior.CachePolicyId).toBe(
+              "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            );
+          }
         }
       });
 
-      it("all uncacheable behaviors use Managed-AllViewer origin request policy (acceptance #4)", () => {
+      it("uncacheable behaviors use Managed-AllViewer; #634 Group B has NO origin request policy (cookies stripped) (acceptance #4)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         for (const behavior of cacheBehaviors) {
-          // Managed-AllViewer id.
-          expect(behavior.OriginRequestPolicyId).toBe(
-            "216adef6-5c7f-47e4-b989-5492eafa07d3",
-          );
+          const path = behavior.PathPattern as string;
+          if (QUERY_KEYED_PATTERNS.has(path)) {
+            // Group B must NOT forward cookies -- forwarding them would
+            // fragment the cache per session on the highest-traffic pages.
+            expect(behavior.OriginRequestPolicyId).toBeUndefined();
+          } else {
+            // Managed-AllViewer id.
+            expect(behavior.OriginRequestPolicyId).toBe(
+              "216adef6-5c7f-47e4-b989-5492eafa07d3",
+            );
+          }
         }
       });
 
@@ -345,6 +393,76 @@ describe("EdgeStack", () => {
         expect(byPath.get("/api/analytics")).toEqual(allMethods);
         expect(byPath.get("/api/export/*")).toEqual(ghOptions);
         expect(byPath.get("/api/search*")).toEqual(ghOptions);
+        expect(byPath.get("/search*")).toEqual(ghOptions);
+        // #634 -- every Group A dynamic route and Group B cacheable page is
+        // a read-only GET/HEAD/OPTIONS surface (form POSTs go to separate
+        // already-covered /api/* routes).
+        for (const p of [
+          "/api/directory/people",
+          "/api/nih-portfolio",
+          "/api/scholars/*/popover-context",
+          "/api/topics/*/publications",
+          "/about/feedback",
+          "/scholars/*/co-pubs/export",
+          "/scholars/*/co-pubs/*/export",
+          "/scholars/*",
+          "/departments/*",
+          "/centers/*",
+          "/topics/*/scholars",
+        ]) {
+          expect(byPath.get(p)).toEqual(ghOptions);
+        }
+      });
+    });
+
+    describe("#634 query-keyed cache policy (Group B)", () => {
+      const policyConfig = (): Record<string, unknown> => {
+        const policies = template.findResources(
+          "AWS::CloudFront::CachePolicy",
+        );
+        const entries = Object.values(policies);
+        expect(entries).toHaveLength(1);
+        return (entries[0].Properties as Record<string, unknown>)
+          .CachePolicyConfig as Record<string, unknown>;
+      };
+
+      it("synthesizes exactly one custom cache policy, env-named", () => {
+        const cfg = policyConfig();
+        expect(cfg.Name).toBe("sps-query-keyed-prod");
+      });
+
+      it("includes ONLY the allow-listed query params in the cache key (not ALL)", () => {
+        const cfg = policyConfig();
+        const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
+          string,
+          unknown
+        >;
+        const qs = params.QueryStringsConfig as Record<string, unknown>;
+        expect(qs.QueryStringBehavior).toBe("whitelist");
+        const items = (qs.QueryStrings as string[]).slice().sort();
+        expect(items).toEqual([...QUERY_KEYED_ALLOWLIST].sort());
+      });
+
+      it("does NOT key on cookies or non-encoding headers (preserves cacheability)", () => {
+        const cfg = policyConfig();
+        const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
+          string,
+          unknown
+        >;
+        const cookies = params.CookiesConfig as Record<string, unknown>;
+        const headers = params.HeadersConfig as Record<string, unknown>;
+        expect(cookies.CookieBehavior).toBe("none");
+        expect(headers.HeaderBehavior).toBe("none");
+        // Accept-Encoding negotiation stays on so gzip/br are served.
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
+        const cfg = policyConfig();
+        expect(cfg.MinTTL).toBe(1);
+        expect(cfg.DefaultTTL).toBe(86400);
+        expect(cfg.MaxTTL).toBe(31536000);
       });
     });
 
