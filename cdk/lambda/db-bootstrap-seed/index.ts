@@ -21,7 +21,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { createConnection } from "mariadb";
 
-import { runMigrateSeed, runSeed, type RequestType } from "./seed.js";
+import { runAppRwTighten, runMigrateSeed, runSeed, type RequestType } from "./seed.js";
 
 interface OnEventRequest {
   RequestType: RequestType;
@@ -64,6 +64,7 @@ export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
   const masterArn = requireEnv("MASTER_SECRET_ARN");
   const bootstrapArn = requireEnv("BOOTSTRAP_SECRET_ARN");
   const migrateArn = requireEnv("MIGRATE_SECRET_ARN");
+  const appRwGranteeHost = requireEnv("APP_RW_GRANTEE_HOST");
   const dbHost = requireEnv("DB_HOST");
   const dbPort = Number(process.env.DB_PORT ?? "3306");
 
@@ -114,6 +115,18 @@ export async function onEvent(event: OnEventRequest): Promise<OnEventResponse> {
       },
       dbHost,
       dbPort,
+      log: (eventName, extra) =>
+        console.log(JSON.stringify({ event: eventName, ...extra })),
+    });
+    // ADR-009 Phase 3: tighten app_rw to DML-only on the SAME master connection,
+    // AFTER sps_migrate is minted (so the migrate task — already cut over in
+    // Phase 2 — owns the DDL app_rw is losing). Idempotent + zero-gap.
+    await runAppRwTighten({
+      requestType: event.RequestType,
+      query: async (sql) => {
+        await conn.query(sql);
+      },
+      appRwGranteeHost,
       log: (eventName, extra) =>
         console.log(JSON.stringify({ event: eventName, ...extra })),
     });

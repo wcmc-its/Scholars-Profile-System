@@ -300,6 +300,10 @@ export class DataStack extends Stack {
           MIGRATE_SECRET_ARN: migrateSecret.secretArn,
           DB_HOST: this.auroraCluster.clusterEndpoint.hostname,
           DB_PORT: Token.asString(this.auroraCluster.clusterEndpoint.port),
+          // ADR-009 Phase 3: the host scope of the app_rw grant the seeder
+          // tightens to DML-only (`%` prod / `10.20.%` staging). app_rw is
+          // host-scoped, unlike the seeder's own `@'%'` roles.
+          APP_RW_GRANTEE_HOST: envConfig.appRwGranteeHost,
         },
         bundling: {
           // Emit an ESM bundle. The handler sources are ESM-native (`import`
@@ -347,7 +351,8 @@ export class DataStack extends Stack {
         // Bump to force a re-assert of the user + grants on a future change to
         // the seeded grant set (the handler is idempotent, so re-runs are safe).
         // "2": ADR-009 Phase 1 added the sps_migrate role to the seeder.
-        Revision: "2",
+        // "3": ADR-009 Phase 3 revokes app_rw's `scholars`.* DDL (DML-only).
+        Revision: "3",
       },
     });
 

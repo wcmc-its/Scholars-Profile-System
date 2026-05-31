@@ -5,8 +5,10 @@
  * and mariadb connection; this decides what runs.
  */
 import {
+  APP_RW_USER,
   BOOTSTRAP_USER,
   MIGRATE_USER,
+  appRwTightenStatements,
   buildDsn,
   buildMigrateDsn,
   decidePassword,
@@ -120,4 +122,43 @@ export async function runMigrateSeed(deps: MigrateSeedDeps): Promise<{ reused: b
   // Never logs the password or DSN — only the outcome class.
   log("db_migrate_seed_ok", { user: MIGRATE_USER, reused });
   return { reused };
+}
+
+export interface AppRwTightenDeps {
+  requestType: RequestType;
+  /** Run one SQL statement as the master user. */
+  query(sql: string): Promise<void>;
+  /** Per-env host scope of the `app_rw` grant (`%` prod / `10.20.%` staging). */
+  appRwGranteeHost: string;
+  /** Structured logger. */
+  log?: (event: string, extra?: Record<string, unknown>) => void;
+}
+
+/**
+ * Tighten `app_rw` to DML-only on `scholars`.* (ADR-009 Phase 3): revoke the DDL
+ * privileges, leaving `SELECT,INSERT,UPDATE,DELETE` (+ the audit `INSERT`, which
+ * is on `scholars_audit` and not named here). Idempotent (`REVOKE IF EXISTS`) so
+ * the custom-resource re-run every deploy is a no-op once the DDL is gone, and
+ * zero-gap (only DDL is named, so the running app's DML is never interrupted).
+ *
+ * **Sequencing (ADR-009):** safe ONLY because Phase 2 is deploy-confirmed — the
+ * migrate task now runs under `sps_migrate`, which owns the DDL `app_rw` is
+ * losing. Running this before that cutover would leave `prisma migrate deploy`
+ * (still on `app_rw`) without DDL.
+ *
+ * **Delete is a NO-OP:** a stack teardown must not re-widen `app_rw` back to DDL.
+ * `app_rw` is provisioned out-of-band, not owned by this seeder; the tightening
+ * is intended to be permanent. Throws on a real SQL error (fails-closed).
+ */
+export async function runAppRwTighten(deps: AppRwTightenDeps): Promise<void> {
+  const log = deps.log ?? (() => {});
+
+  if (deps.requestType === "Delete") {
+    log("db_app_rw_tighten_skipped_on_delete", { user: APP_RW_USER });
+    return;
+  }
+
+  for (const sql of appRwTightenStatements(deps.appRwGranteeHost)) await deps.query(sql);
+
+  log("db_app_rw_tighten_ok", { user: APP_RW_USER, granteeHost: deps.appRwGranteeHost });
 }

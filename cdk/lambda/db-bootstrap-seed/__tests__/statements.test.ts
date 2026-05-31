@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appRwTightenStatements,
   buildDsn,
   buildMigrateDsn,
   decidePassword,
@@ -97,6 +98,34 @@ describe("migrateSeedStatements (ADR-009 Phase 1)", () => {
 describe("migrateDropStatements", () => {
   it("drops the migrate user idempotently", () => {
     expect(migrateDropStatements()).toEqual(["DROP USER IF EXISTS 'sps_migrate'@'%'"]);
+  });
+});
+
+describe("appRwTightenStatements (ADR-009 Phase 3)", () => {
+  it("revokes exactly the scholars.* DDL from app_rw, host-scoped, via IF EXISTS", () => {
+    expect(appRwTightenStatements("10.20.%")).toEqual([
+      "REVOKE IF EXISTS CREATE, DROP, ALTER, INDEX, REFERENCES, EXECUTE, TRIGGER ON `scholars`.* FROM 'app_rw'@'10.20.%'",
+    ]);
+  });
+
+  it("interpolates the per-env grantee host (prod `%`)", () => {
+    expect(appRwTightenStatements("%")[0]).toContain("FROM 'app_rw'@'%'");
+  });
+
+  it("never revokes the DML app_rw must keep (SELECT/INSERT/UPDATE/DELETE)", () => {
+    const revoke = appRwTightenStatements("%")[0];
+    const privs = revoke.slice("REVOKE IF EXISTS ".length, revoke.indexOf(" ON "));
+    expect(privs).not.toMatch(/\b(SELECT|INSERT|UPDATE|DELETE)\b/);
+  });
+
+  it("uses REVOKE IF EXISTS so a re-run (DDL already gone) is a no-op, not an error", () => {
+    expect(appRwTightenStatements("%")[0]).toMatch(/^REVOKE IF EXISTS /);
+  });
+
+  it("touches only `scholars`.* — never the audit schema", () => {
+    const revoke = appRwTightenStatements("%")[0];
+    expect(revoke).not.toMatch(/scholars_audit/);
+    expect(revoke).toMatch(/ON `scholars`\.\* FROM/);
   });
 });
 

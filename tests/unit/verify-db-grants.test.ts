@@ -79,7 +79,7 @@ describe("diffGrants / assertGrantsEqual", () => {
     const live = [
       "GRANT USAGE ON *.* TO `app_rw`@`10.20.%`",
       // privileges reordered vs the golden list, different host pattern
-      "GRANT INSERT, SELECT, DELETE, UPDATE, ALTER, CREATE, DROP, INDEX, REFERENCES, TRIGGER, EXECUTE ON `scholars`.* TO `app_rw`@`10.20.%`",
+      "GRANT INSERT, SELECT, DELETE, UPDATE ON `scholars`.* TO `app_rw`@`10.20.%`",
       "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `app_rw`@`10.20.%`",
     ];
     expect(diffGrants(appRwGolden, live)).toEqual({ excess: [], missing: [] });
@@ -94,17 +94,29 @@ describe("diffGrants / assertGrantsEqual", () => {
     ];
     const { excess, missing } = diffGrants(appRwGolden, drifted);
     expect(excess).toContain("scholars.* ALL PRIVILEGES");
-    expect(missing).toContain(
-      "scholars.* ALTER,CREATE,DELETE,DROP,EXECUTE,INDEX,INSERT,REFERENCES,SELECT,TRIGGER,UPDATE",
-    );
+    expect(missing).toContain("scholars.* DELETE,INSERT,SELECT,UPDATE");
     expect(() => assertGrantsEqual("app-rw", appRwGolden, drifted)).toThrow(
       /grant drift for role 'app-rw'.*EXCESS.*MISSING/s,
     );
   });
 
+  it("ADR-009 Phase 3: a lingering `scholars`.* DDL grant on app_rw is caught as excess", () => {
+    // Post-Phase-3 app_rw is DML-only. If any DDL lingers (a re-widened or
+    // not-yet-tightened env), the wide token != the tight golden token: the wide
+    // grant is excess and the golden is missing — the verify fails the deploy.
+    const live = [
+      "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE ON `scholars`.* TO `app_rw`@`%`",
+      "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `app_rw`@`%`",
+    ];
+    const { excess, missing } = diffGrants(appRwGolden, live);
+    expect(excess).toEqual(["scholars.* CREATE,DELETE,INSERT,SELECT,UPDATE"]);
+    expect(missing).toEqual(["scholars.* DELETE,INSERT,SELECT,UPDATE"]);
+    expect(() => assertGrantsEqual("app-rw", appRwGolden, live)).toThrow(/EXCESS.*MISSING/s);
+  });
+
   it("catches a missing grant (the audit INSERT dropped)", () => {
     const live = [
-      "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER ON `scholars`.* TO `app_rw`@`%`",
+      "GRANT SELECT, INSERT, UPDATE, DELETE ON `scholars`.* TO `app_rw`@`%`",
     ];
     const { excess, missing } = diffGrants(appRwGolden, live);
     expect(excess).toEqual([]);
@@ -114,7 +126,7 @@ describe("diffGrants / assertGrantsEqual", () => {
 
   it("catches an excess privilege (an extra DELETE on the audit table)", () => {
     const live = [
-      "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, EXECUTE, TRIGGER ON `scholars`.* TO `app_rw`@`%`",
+      "GRANT SELECT, INSERT, UPDATE, DELETE ON `scholars`.* TO `app_rw`@`%`",
       "GRANT INSERT, DELETE ON `scholars_audit`.`manual_edit_audit` TO `app_rw`@`%`",
     ];
     const { excess, missing } = diffGrants(appRwGolden, live);
@@ -158,10 +170,32 @@ describe("golden lists are internally consistent", () => {
     }
   });
 
-  it("app-rw and sps_migrate share the identical `scholars.*` DDL token (inherited verbatim)", () => {
-    const scholarsToken = (role: RoleName) =>
-      [...toGrantSet(ROLES[role].golden)].find((t) => t.startsWith("scholars.* "));
-    expect(scholarsToken("sps_migrate")).toBe(scholarsToken("app-rw"));
+  it("ADR-009 Phase 3: app_rw's `scholars.*` set is the DML subset of sps_migrate's DDL set", () => {
+    // Pre-Phase-3 they were identical (sps_migrate inherited app_rw's set
+    // verbatim). Phase 3 split them: app_rw is DML-only; the DDL moved to (and
+    // stays only on) sps_migrate. The privileges app_rw shed must equal exactly
+    // what the seeder revokes (db-bootstrap-seed appRwTightenStatements, req 6).
+    const scholarsPrivs = (role: RoleName) => {
+      const token = [...toGrantSet(ROLES[role].golden)].find((t) =>
+        t.startsWith("scholars.* "),
+      );
+      return new Set((token ?? "").slice("scholars.* ".length).split(","));
+    };
+    const appRw = scholarsPrivs("app-rw");
+    const migrate = scholarsPrivs("sps_migrate");
+    expect([...appRw].sort()).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
+    expect([...appRw].every((p) => migrate.has(p))).toBe(true);
+    expect(migrate.size).toBeGreaterThan(appRw.size);
+    const shed = [...migrate].filter((p) => !appRw.has(p)).sort();
+    expect(shed).toEqual([
+      "ALTER",
+      "CREATE",
+      "DROP",
+      "EXECUTE",
+      "INDEX",
+      "REFERENCES",
+      "TRIGGER",
+    ]);
   });
 });
 

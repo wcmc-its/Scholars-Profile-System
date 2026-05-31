@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  runAppRwTighten,
   runMigrateSeed,
   runSeed,
+  type AppRwTightenDeps,
   type MigrateSeedDeps,
   type SeedDeps,
 } from "../seed.js";
@@ -174,5 +176,62 @@ describe("runMigrateSeed (ADR-009 Phase 1)", () => {
     expect(serialized).not.toContain(password);
     expect(serialized).not.toContain("mysql://");
     expect(d.logs[0]).toMatchObject({ event: "db_migrate_seed_ok", extra: { reused: false } });
+  });
+});
+
+function tightenDeps(overrides: Partial<AppRwTightenDeps> = {}): AppRwTightenDeps & {
+  queries: string[];
+  logs: Array<{ event: string; extra?: Record<string, unknown> }>;
+} {
+  const queries: string[] = [];
+  const logs: Array<{ event: string; extra?: Record<string, unknown> }> = [];
+  return {
+    requestType: "Create",
+    query: vi.fn(async (sql: string) => {
+      queries.push(sql);
+    }),
+    appRwGranteeHost: "10.20.%",
+    log: (event, extra) => logs.push({ event, extra }),
+    queries,
+    logs,
+    ...overrides,
+  };
+}
+
+describe("runAppRwTighten (ADR-009 Phase 3)", () => {
+  it("Create: revokes app_rw's scholars.* DDL, host-scoped, and logs the outcome", async () => {
+    const d = tightenDeps();
+    await runAppRwTighten(d);
+    expect(d.queries).toEqual([
+      "REVOKE IF EXISTS CREATE, DROP, ALTER, INDEX, REFERENCES, EXECUTE, TRIGGER ON `scholars`.* FROM 'app_rw'@'10.20.%'",
+    ]);
+    expect(d.logs[0]).toMatchObject({
+      event: "db_app_rw_tighten_ok",
+      extra: { granteeHost: "10.20.%" },
+    });
+  });
+
+  it("Update: re-asserts the same idempotent REVOKE (prod host `%`)", async () => {
+    const d = tightenDeps({ requestType: "Update", appRwGranteeHost: "%" });
+    await runAppRwTighten(d);
+    expect(d.queries).toEqual([
+      "REVOKE IF EXISTS CREATE, DROP, ALTER, INDEX, REFERENCES, EXECUTE, TRIGGER ON `scholars`.* FROM 'app_rw'@'%'",
+    ]);
+  });
+
+  it("Delete: NO-OP — never re-widens app_rw back to DDL", async () => {
+    const d = tightenDeps({ requestType: "Delete" });
+    await runAppRwTighten(d);
+    expect(d.queries).toEqual([]);
+    expect(d.logs[0]).toMatchObject({ event: "db_app_rw_tighten_skipped_on_delete" });
+  });
+
+  it("fails-closed: a SQL error propagates", async () => {
+    const d = tightenDeps({
+      query: vi.fn(async () => {
+        throw new Error("Access denied for REVOKE");
+      }),
+    });
+    await expect(runAppRwTighten(d)).rejects.toThrow(/Access denied/);
   });
 });

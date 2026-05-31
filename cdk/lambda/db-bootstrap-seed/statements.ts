@@ -84,6 +84,34 @@ export function migrateDropStatements(): string[] {
   return [`DROP USER IF EXISTS '${MIGRATE_USER}'@'%'`];
 }
 
+/** The 24/7 runtime writer. Unlike the seeder's own `@'%'` roles, `app_rw` is
+ *  host-scoped per env (`%` prod / `10.20.%` staging = `envConfig.appRwGranteeHost`)
+ *  and is provisioned OUT-OF-BAND (manual DBA step) — this seeder never CREATEs it. */
+export const APP_RW_USER = "app_rw";
+
+/** The `scholars`.* DDL privileges ADR-009 Phase 3 strips from `app_rw`: the
+ *  complement of the DML it keeps (`SELECT,INSERT,UPDATE,DELETE`). DDL authority
+ *  now lives only in the deploy-time `sps_migrate` role. This list and the
+ *  `app-rw` golden in `scripts/verify-db-grants.ts` are a conscious paired edit
+ *  (ADR-009 req 6): what is revoked here must be exactly what the golden drops. */
+const APP_RW_REVOKED_SCHOLARS_DDL =
+  "CREATE, DROP, ALTER, INDEX, REFERENCES, EXECUTE, TRIGGER";
+
+/** Idempotent statement that tightens `app_rw` to DML-only on `scholars`.*
+ *  (ADR-009 Phase 3). `REVOKE IF EXISTS` (MySQL 8.0.16+ / Aurora MySQL 3) turns
+ *  a re-run into a warning rather than an error once the DDL is already gone, so
+ *  the custom-resource re-assert every deploy is a safe no-op. **Zero-gap:** only
+ *  the DDL privileges are named, so the DML the running app depends on is never
+ *  dropped — there is no window where `app_rw` cannot write. The audit `INSERT`
+ *  on `scholars_audit.manual_edit_audit` is a different object and untouched.
+ *  `app_rw` must already exist (provisioned out-of-band); if absent the REVOKE
+ *  fails loud (fail-closed) rather than silently auto-creating it. */
+export function appRwTightenStatements(granteeHost: string): string[] {
+  return [
+    `REVOKE IF EXISTS ${APP_RW_REVOKED_SCHOLARS_DDL} ON \`scholars\`.* FROM '${APP_RW_USER}'@'${granteeHost}'`,
+  ];
+}
+
 /** The DSN the bootstrap ECS task consumes as BOOTSTRAP_DSN. Alphanumeric
  *  password ⇒ no URL-encoding needed. No database segment: the task connects at
  *  server level to CREATE the audit database. */
