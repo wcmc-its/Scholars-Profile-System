@@ -513,7 +513,16 @@ export class EtlStack extends Stack {
       const choice = new sfn.Choice(this, `${smId}StartFromChoice`);
       for (let i = 0; i < steps.length; i++) {
         choice.when(
-          sfn.Condition.stringEquals("$.startFrom", steps[i].id),
+          // Guard the value test with isPresent. A scheduled invocation
+          // passes `{}` (no startFrom key), and Step Functions raises
+          // `States.Runtime: Invalid path '$.startFrom'` when a Choice tests
+          // a path that is absent from the input. isPresent makes the And
+          // short-circuit to false for the missing-key case, so it falls
+          // through to .otherwise(step[0]) instead of failing the execution.
+          sfn.Condition.and(
+            sfn.Condition.isPresent("$.startFrom"),
+            sfn.Condition.stringEquals("$.startFrom", steps[i].id),
+          ),
           stepTasks[i],
         );
       }
@@ -649,7 +658,9 @@ export class EtlStack extends Stack {
       });
       rule.addTarget(
         new eventsTargets.SfnStateMachine(stateMachine, {
-          // Default empty input -> Choice falls through to step[0].
+          // Empty input -> the isPresent-guarded Choice (buildStateMachine)
+          // falls through to step[0]. The guard is load-bearing: without it
+          // Step Functions raises `Invalid path '$.startFrom'` on this `{}`.
           input: events.RuleTargetInput.fromObject({}),
         }),
       );
