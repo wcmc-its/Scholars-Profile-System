@@ -168,6 +168,26 @@ describe("EtlStack", () => {
         },
       );
 
+      // Regression: the EventBridge schedules invoke with `{}` (no startFrom).
+      // Without an isPresent guard the top-level Choice raises
+      // `States.Runtime: Invalid path '$.startFrom'` and every scheduled
+      // execution fails before the first step. Assert the value test is
+      // guarded so an absent key falls through to step[0] instead of erroring.
+      it.each(Object.keys(EXPECTED_CRONS))(
+        "%s Choice guards $.startFrom with isPresent (empty {} schedule input falls through, never errors)",
+        (cadence) => {
+          const text = getStateMachineDefinitionText(
+            template,
+            `scholars-${cadence}-prod`,
+          );
+          // The guarded branch synthesises as an And pairing IsPresent with
+          // StringEquals on the same $.startFrom path.
+          expect(text).toMatch(/"IsPresent":\s*true/);
+          expect(text).toMatch(/"And":/);
+          expect(text).toMatch(/"Variable":\s*"\$\.startFrom"/);
+        },
+      );
+
       it.each(Object.keys(EXPECTED_CRONS))(
         "%s state machine has per-step retry (MaxAttempts=2, BackoffRate=2)",
         (cadence) => {
