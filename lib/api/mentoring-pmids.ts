@@ -38,6 +38,14 @@ import { prisma } from "@/lib/db";
 import { withReciterConnection } from "@/lib/sources/reciterdb";
 
 const TTL_MS = 10 * 60 * 1000;
+// A failed / timed-out refresh (ReciterDB unreachable) caches the EMPTY result
+// for this short window instead of not caching at all -- so a persistent outage
+// costs at most one slow refresh per NEGATIVE_TTL_MS, not one per /search render.
+const NEGATIVE_TTL_MS = 30 * 1000;
+// #610-style cap (mirrors people-classifier-sets.ts): a refresh past this is
+// wedged (an unreachable ReciterDB burning the mariadb ~10s acquireTimeout),
+// not slow. On timeout we degrade to empty buckets, same as an errored refresh.
+const REFRESH_TIMEOUT_MS = 2000;
 const PAIR_BATCH = 500;
 
 export type MentoringProgramKey = "md" | "mdphd" | "phd" | "postdoc" | "ecr";
@@ -46,7 +54,14 @@ export type MentoringPmidBuckets = {
   byProgram: Record<MentoringProgramKey, string[]>;
 };
 
-let cache: { buckets: MentoringPmidBuckets; ts: number } | null = null;
+/** The empty/degraded shape served when ReciterDB is unreachable. Exported so
+ *  the search count-only path can use it without taking a ReciterDB dependency. */
+export const EMPTY_MENTORING_BUCKETS: MentoringPmidBuckets = {
+  all: [],
+  byProgram: { md: [], mdphd: [], phd: [], postdoc: [], ecr: [] },
+};
+
+let cache: { buckets: MentoringPmidBuckets; ts: number; ok: boolean } | null = null;
 let inflight: Promise<MentoringPmidBuckets> | null = null;
 
 function bucketProgramType(programType: string | null): MentoringProgramKey | null {
@@ -177,24 +192,53 @@ async function refresh(): Promise<MentoringPmidBuckets> {
   };
 }
 
+/**
+ * Issue #610-style guard (mirrors people-classifier-sets.ts `refreshWithTimeout`):
+ * race `refresh()` against {@link REFRESH_TIMEOUT_MS}. The underlying ReciterDB /
+ * Prisma calls can't be cancelled, so a wedged one keeps running in the
+ * background after the timeout; we stop awaiting it and let the caller degrade
+ * to empty buckets. The timer is always cleared and `unref`'d so it cannot by
+ * itself keep the process alive.
+ */
+async function refreshWithTimeout(): Promise<MentoringPmidBuckets> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(new Error(`mentoring-pmids refresh exceeded ${REFRESH_TIMEOUT_MS}ms`)),
+      REFRESH_TIMEOUT_MS,
+    );
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([refresh(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getMentoringPmidBuckets(): Promise<MentoringPmidBuckets> {
   const now = Date.now();
-  if (cache && now - cache.ts < TTL_MS) return cache.buckets;
+  // A successful load is cached for TTL_MS; a degraded (empty) result only for
+  // NEGATIVE_TTL_MS, so we retry ReciterDB soon after it recovers.
+  if (cache && now - cache.ts < (cache.ok ? TTL_MS : NEGATIVE_TTL_MS)) {
+    return cache.buckets;
+  }
   if (inflight) return inflight;
   inflight = (async () => {
     try {
-      const buckets = await refresh();
-      cache = { buckets, ts: now };
+      const buckets = await refreshWithTimeout();
+      cache = { buckets, ts: now, ok: true };
       return buckets;
     } catch (err) {
-      // ReciterDB unavailable -> degrade to empty buckets rather than throwing
-      // up into the render (the mentoring surfaces simply show nothing). Do NOT
-      // cache the failure, so the next call retries once ReciterDB is reachable.
+      // ReciterDB unavailable / refresh wedged -> degrade to empty buckets
+      // rather than throwing up into the render (the mentoring surfaces simply
+      // show nothing). Negative-cache the empty result for NEGATIVE_TTL_MS so a
+      // persistent outage costs at most one slow refresh per window, not one per
+      // /search render (the ~10s acquireTimeout stall this fixes).
       console.warn("[mentoring-pmids] refresh failed; serving empty buckets", err);
-      return {
-        all: [],
-        byProgram: { md: [], mdphd: [], phd: [], postdoc: [], ecr: [] },
-      };
+      cache = { buckets: EMPTY_MENTORING_BUCKETS, ts: now, ok: false };
+      return EMPTY_MENTORING_BUCKETS;
     } finally {
       inflight = null;
     }

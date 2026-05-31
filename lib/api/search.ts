@@ -21,7 +21,11 @@
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
 import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
-import { getMentoringPmidBuckets, type MentoringProgramKey } from "@/lib/api/mentoring-pmids";
+import {
+  getMentoringPmidBuckets,
+  EMPTY_MENTORING_BUCKETS,
+  type MentoringProgramKey,
+} from "@/lib/api/mentoring-pmids";
 import {
   capFill,
   chooseKindOrder,
@@ -1449,11 +1453,22 @@ export async function searchPublications(opts: {
   // a match_none clause so a stale-cache state returns zero rows rather
   // than all rows.
   //
-  // Always load the buckets (not just when filtering) so we can compute
-  // per-bucket contextual counts for the sidebar. The buckets are cached
-  // 10 min in mentoring-pmids.ts so this is cheap.
+  // Load the buckets on the full faceted render (not just when filtering) so we
+  // can compute per-bucket contextual counts for the sidebar (the mentoring
+  // facet agg below). They're cached 10 min and the refresh is now time-capped,
+  // so an unreachable ReciterDB degrades to empty buckets fast instead of
+  // stalling the render.
+  //
+  // The count-only badge path (inactive tabs) returns at the `countOnly`
+  // short-circuit below and never reads the buckets, so skip the load there
+  // entirely. Otherwise every /search render pays the ReciterDB round-trip once
+  // per inactive-tab badge -- and when ReciterDB is unreachable that burns the
+  // mariadb pool's ~10s acquireTimeout on each, the root cause of the /search
+  // SSR stall.
   const mentoringPrograms = filters.mentoringPrograms ?? [];
-  const mentoringBuckets = await getMentoringPmidBuckets();
+  const mentoringBuckets = opts.countOnly
+    ? EMPTY_MENTORING_BUCKETS
+    : await getMentoringPmidBuckets();
   const mentoringPmids = mentoringPrograms.length > 0
     ? Array.from(new Set(mentoringPrograms.flatMap((p) => mentoringBuckets.byProgram[p] ?? [])))
     : [];
