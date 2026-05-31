@@ -220,7 +220,13 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     auroraReaderCount: 0,
     auroraBackupRetentionDays: 14,
     opensearchDataNodes: 1,
-    opensearchDataNodeInstanceType: "t3.small.search",
+    // #626 — bumped from t3.small.search: the burstable t3.small (2 GB, ~1 GB
+    // heap) could not complete a full `search:index` bulk rebuild. With the
+    // write queue empty it still 429'd every chunk — AWS throttling the
+    // credit-exhausted burstable instance, not OpenSearch backpressure. t3.medium
+    // (4 GB, ~2 GB heap, more burst credits) gives the rebuild headroom, paired
+    // with the paced bulk writer (#627). Still single-node — staging is low-traffic.
+    opensearchDataNodeInstanceType: "t3.medium.search",
     awsBackupRetentionDays: 14,
     appDesiredCount: 1,
     // #596 — staging is low-traffic (internal QA + VPN circulation); a small
