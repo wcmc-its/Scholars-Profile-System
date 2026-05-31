@@ -137,14 +137,14 @@ describe("diffGrants / assertGrantsEqual", () => {
   });
 
   it("treats WITH GRANT OPTION as load-bearing for sps_bootstrap", () => {
-    // Same INSERT, but the live grant lost WITH GRANT OPTION -> not equal.
+    // The golden carries WITH GRANT OPTION on its single db-scope line; a live
+    // grant that lost the option must register as drift in both directions.
     const live = [
-      "GRANT CREATE, ALTER ON `scholars_audit`.* TO `sps_bootstrap`@`%`",
-      "GRANT INSERT ON `scholars_audit`.* TO `sps_bootstrap`@`%`",
+      "GRANT CREATE, ALTER, INSERT ON `scholars_audit`.* TO `sps_bootstrap`@`%`",
     ];
     const { excess, missing } = diffGrants(ROLES.sps_bootstrap.golden, live);
-    expect(excess).toEqual(["scholars_audit.* INSERT"]);
-    expect(missing).toEqual(["scholars_audit.* INSERT WITH GRANT OPTION"]);
+    expect(excess).toEqual(["scholars_audit.* ALTER,CREATE,INSERT"]);
+    expect(missing).toEqual(["scholars_audit.* ALTER,CREATE,INSERT WITH GRANT OPTION"]);
   });
 });
 
