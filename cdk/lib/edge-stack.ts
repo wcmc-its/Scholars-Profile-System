@@ -194,20 +194,52 @@ export class EdgeStack extends Stack {
     // ------------------------------------------------------------------
     // Cache + origin request policies (plan D5).
     //
-    // Default behavior uses `Managed-CachingOptimized` (includes
-    // Accept-Encoding in the cache key, does not include Cookie). The
-    // spec's `Accept` / `Accept-Language` allowlist is documented but
-    // unused by any route -- no Vary on content negotiation, no i18n --
-    // so the managed policy is correct. Switching to a custom policy is
-    // a follow-on if a route is added that varies on those headers.
+    // Default behavior uses a custom policy (`defaultRscCache`) that
+    // mirrors `Managed-CachingOptimized` (URL-keyed, Accept-Encoding in
+    // the cache key, no Cookie) but additionally keys on the Next.js App
+    // Router RSC headers -- see the policy below for why. The spec's
+    // `Accept` / `Accept-Language` allowlist is documented but unused by
+    // any route (no Vary on content negotiation, no i18n) so it is left
+    // out of the key.
     //
     // Uncacheable behaviors use `Managed-CachingDisabled` plus
     // `Managed-AllViewer` so writer / SSO / mutating routes get the
     // full request (cookies, query strings, headers) at the origin.
     // ------------------------------------------------------------------
-    const cachingOptimized = cloudfront.CachePolicy.CACHING_OPTIMIZED;
     const cachingDisabled = cloudfront.CachePolicy.CACHING_DISABLED;
     const allViewer = cloudfront.OriginRequestPolicy.ALL_VIEWER;
+
+    // Next.js App Router serves two representations at the SAME URL: the
+    // full HTML document (a hard navigation / refresh) and the React
+    // Flight payload (a soft navigation -- a `<Link>` click), told apart
+    // only by the `RSC` request header (`Next-Router-Prefetch` additionally
+    // marks a prefetch). A URL-only cache key (Managed-CachingOptimized)
+    // caches whichever it sees first and serves it to both: a soft
+    // navigation then receives a `text/html` body the client router cannot
+    // apply, so the click silently does nothing (e.g. the "About these
+    // disclosures" cross-page link). Keying on these two headers -- and
+    // CloudFront forwards cache-key headers to the origin, so the app
+    // returns the matching representation -- splits the cache into at most
+    // three variants per URL: document, navigation flight, prefetch flight.
+    // We deliberately do NOT key on `Next-Router-State-Tree` / `Next-Url`:
+    // they vary per navigation context and would all but eliminate edge
+    // cacheability of the static pages.
+    const rscCacheKeyHeaders = ["RSC", "Next-Router-Prefetch"];
+    const defaultRscCache = new cloudfront.CachePolicy(this, "DefaultRscCache", {
+      cachePolicyName: `sps-default-rsc-${env}`,
+      comment: `SPS default cache (${env}) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.`,
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
+        ...rscCacheKeyHeaders,
+      ),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      // Mirror Managed-CachingOptimized TTLs (1s / 1d / 1y).
+      minTtl: Duration.seconds(1),
+      defaultTtl: Duration.days(1),
+      maxTtl: Duration.days(365),
+    });
 
     // Each entry: [pathPattern, allowedMethods]. Order matters because
     // CloudFront evaluates path patterns top-down -- specific must
@@ -362,11 +394,16 @@ export class EdgeStack extends Stack {
         "role",
       ),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
-      headerBehavior: cloudfront.CacheHeaderBehavior.none(),
+      // Key on the RSC headers too (same rationale as `defaultRscCache`) so
+      // App Router soft navigation TO a Group B page (e.g. /scholars/*)
+      // returns the Flight payload, not a cached HTML document.
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
+        ...rscCacheKeyHeaders,
+      ),
       enableAcceptEncodingGzip: true,
       enableAcceptEncodingBrotli: true,
       // Mirror Managed-CachingOptimized so caching behaviour is identical to
-      // the default except the query string now keys the cache.
+      // the default except the query string + RSC headers now key the cache.
       minTtl: Duration.seconds(1),
       defaultTtl: Duration.days(1),
       maxTtl: Duration.days(365),
@@ -480,8 +517,9 @@ export class EdgeStack extends Stack {
     //   stack-owned bucket.
     // - The default behavior has NO origin request policy, by design:
     //   without it CloudFront forwards only the cache-key headers
-    //   (Accept-Encoding) and never the Cookie header. Adding ALL_VIEWER
-    //   here would leak cookies onto the cacheable path.
+    //   (Accept-Encoding plus the RSC headers keyed by `defaultRscCache`)
+    //   and never the Cookie header. Adding ALL_VIEWER here would leak
+    //   cookies onto the cacheable path.
     // ------------------------------------------------------------------
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       comment: `SPS edge -- ${env}`,
@@ -491,7 +529,7 @@ export class EdgeStack extends Stack {
       webAclId: webAclArn,
       defaultBehavior: {
         origin,
-        cachePolicy: cachingOptimized,
+        cachePolicy: defaultRscCache,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         responseHeadersPolicy: securityHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

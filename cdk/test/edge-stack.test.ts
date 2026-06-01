@@ -319,14 +319,25 @@ describe("EdgeStack", () => {
         ]);
       });
 
-      it("default behavior uses Managed-CachingOptimized (acceptance #3)", () => {
+      it("default behavior uses the custom RSC-aware cache policy (acceptance #3)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
-        // Managed-CachingOptimized id.
-        expect(defaultBehavior.CachePolicyId).toBe(
-          "658327ea-f89d-4fab-a63d-7e88639e58f6",
-        );
+        // No longer Managed-CachingOptimized: a stack-local policy that mirrors
+        // it but keys on the RSC headers so App Router soft navigation works.
+        // CDK references it by logical id (a `Ref`); resolve `sps-default-rsc-*`.
+        const policies = template.findResources("AWS::CloudFront::CachePolicy");
+        const defaultPolicyLogicalId = Object.entries(policies).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-default-rsc-prod",
+        )?.[0];
+        expect(defaultPolicyLogicalId).toBeDefined();
+        expect(defaultBehavior.CachePolicyId).toEqual({
+          Ref: defaultPolicyLogicalId,
+        });
       });
 
       it("uncacheable behaviors use Managed-CachingDisabled; #634 Group B uses the custom query-keyed policy (acceptance #3)", () => {
@@ -334,10 +345,18 @@ describe("EdgeStack", () => {
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         // The custom cache policy is a stack-local resource; CDK references it
-        // by logical id (a `Ref`), not the managed-policy UUID. Resolve it.
-        const customPolicyLogicalId = Object.keys(
+        // by logical id (a `Ref`), not the managed-policy UUID. Two custom
+        // policies now exist (default RSC-aware + query-keyed); resolve the
+        // query-keyed one by name.
+        const customPolicyLogicalId = Object.entries(
           template.findResources("AWS::CloudFront::CachePolicy"),
-        )[0];
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-query-keyed-prod",
+        )?.[0];
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
           if (QUERY_KEYED_PATTERNS.has(path)) {
@@ -487,10 +506,16 @@ describe("EdgeStack", () => {
         const policies = template.findResources(
           "AWS::CloudFront::CachePolicy",
         );
-        const entries = Object.values(policies);
-        expect(entries).toHaveLength(1);
-        return (entries[0].Properties as Record<string, unknown>)
-          .CachePolicyConfig as Record<string, unknown>;
+        // Two custom policies now: the default RSC-aware policy and this
+        // query-keyed one. Select the query-keyed policy by name.
+        const cfgs = Object.values(policies).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const queryKeyed = cfgs.find((c) => c.Name === "sps-query-keyed-prod");
+        expect(queryKeyed).toBeDefined();
+        return queryKeyed as Record<string, unknown>;
       };
 
       it("synthesizes exactly one custom cache policy, env-named", () => {
@@ -510,7 +535,7 @@ describe("EdgeStack", () => {
         expect(items).toEqual([...QUERY_KEYED_ALLOWLIST].sort());
       });
 
-      it("does NOT key on cookies or non-encoding headers (preserves cacheability)", () => {
+      it("does NOT key on cookies; keys on the RSC headers (soft-nav) only", () => {
         const cfg = policyConfig();
         const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
           string,
@@ -519,7 +544,12 @@ describe("EdgeStack", () => {
         const cookies = params.CookiesConfig as Record<string, unknown>;
         const headers = params.HeadersConfig as Record<string, unknown>;
         expect(cookies.CookieBehavior).toBe("none");
-        expect(headers.HeaderBehavior).toBe("none");
+        // RSC header keying so App Router soft navigation TO a Group B page
+        // returns the Flight payload, not a cached HTML document.
+        expect(headers.HeaderBehavior).toBe("whitelist");
+        expect((headers.Headers as string[]).slice().sort()).toEqual(
+          ["Next-Router-Prefetch", "RSC"].sort(),
+        );
         // Accept-Encoding negotiation stays on so gzip/br are served.
         expect(params.EnableAcceptEncodingGzip).toBe(true);
         expect(params.EnableAcceptEncodingBrotli).toBe(true);
@@ -527,6 +557,55 @@ describe("EdgeStack", () => {
 
       it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
         const cfg = policyConfig();
+        expect(cfg.MinTTL).toBe(1);
+        expect(cfg.DefaultTTL).toBe(86400);
+        expect(cfg.MaxTTL).toBe(31536000);
+      });
+    });
+
+    describe("default RSC-aware cache policy (App Router soft navigation)", () => {
+      const defaultCacheConfig = (): Record<string, unknown> => {
+        const policies = template.findResources(
+          "AWS::CloudFront::CachePolicy",
+        );
+        const cfgs = Object.values(policies).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const def = cfgs.find((c) => c.Name === "sps-default-rsc-prod");
+        expect(def).toBeDefined();
+        return def as Record<string, unknown>;
+      };
+
+      it("synthesizes the env-named default policy alongside the query-keyed one", () => {
+        template.resourceCountIs("AWS::CloudFront::CachePolicy", 2);
+        expect(defaultCacheConfig().Name).toBe("sps-default-rsc-prod");
+      });
+
+      it("keys on the RSC headers so soft navigation returns the Flight payload", () => {
+        const params = defaultCacheConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        const headers = params.HeadersConfig as Record<string, unknown>;
+        expect(headers.HeaderBehavior).toBe("whitelist");
+        expect((headers.Headers as string[]).slice().sort()).toEqual(
+          ["Next-Router-Prefetch", "RSC"].sort(),
+        );
+      });
+
+      it("does not key on cookies or the query string (mirrors Managed-CachingOptimized)", () => {
+        const params = defaultCacheConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        const cookies = params.CookiesConfig as Record<string, unknown>;
+        const qs = params.QueryStringsConfig as Record<string, unknown>;
+        expect(cookies.CookieBehavior).toBe("none");
+        expect(qs.QueryStringBehavior).toBe("none");
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
+        const cfg = defaultCacheConfig();
         expect(cfg.MinTTL).toBe(1);
         expect(cfg.DefaultTTL).toBe(86400);
         expect(cfg.MaxTTL).toBe(31536000);
