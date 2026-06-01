@@ -46,6 +46,7 @@ in **§10**.
 | What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) |
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
+| Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 
@@ -151,6 +152,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`people-relevance-baseline.md`](./people-relevance-baseline.md) | The frozen baseline behind People-tab relevance (eval-owner signed off). |
 | [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
+| [`retracted-publications.md`](./retracted-publications.md) | Why retracted papers don't display — the two-record problem (notice vs original), ReCiter's re-fetch lag, and the nightly PubMed-retraction stamp (#604) that closes the gap via the existing `NEVER_DISPLAY_TYPES` filter. |
 | [`vivo-incident-analysis.md`](./vivo-incident-analysis.md) | VIVO incident history — what the predecessor system's support load looked like. |
 
 ## 9. Build-time specs & drafts (not operational)
@@ -222,7 +224,9 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-05-29 — §10 app-tier autoscaling resolved: `AppStack` now ships a
+*Last updated: 2026-06-01 — added [`retracted-publications.md`](./retracted-publications.md)
+(§0 triage + §8): why retracted papers don't display and why the nightly PubMed-retraction
+step (#604, PR #625) is required to close the ReCiter re-fetch gap. 2026-05-29 — §10 app-tier autoscaling resolved: `AppStack` now ships a
 target-tracking policy (#596) and the docs are reconciled; the row is narrowed to
 threshold-tuning pending #554. Earlier 2026-05-29 — §10 added the app-tier autoscaling doc/infra mismatch (#596);
 added §9 launch-window outreach drafts (Waves 1–4 + skeleton, #506 D5) and the ServiceNow KB

@@ -25,6 +25,8 @@
  * converged corpus updates zero rows.
  *
  * Usage: `npm run etl:pubmed-retractions`
+ *
+ * Rationale & operator notes: docs/retracted-publications.md
  */
 import { db } from "../../lib/db";
 import { fetchRetractedPmids } from "./fetcher";
