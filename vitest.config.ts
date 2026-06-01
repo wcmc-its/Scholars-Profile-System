@@ -11,6 +11,10 @@ export default defineConfig({
     },
     environment: "jsdom",
     globals: true,
+    // Raised from the 5000ms default so a waitFor that consumes its widened
+    // 5000ms asyncUtilTimeout (tests/setup.ts) on a CPU-starved fork doesn't
+    // trip the per-test timeout first (#652).
+    testTimeout: 15000,
     setupFiles: ["./tests/setup.ts"],
     include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx"],
     exclude: ["tests/e2e/**", "node_modules/**", ".next/**"],
