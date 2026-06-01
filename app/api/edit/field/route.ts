@@ -66,7 +66,7 @@ function isUnitEntityType(value: string): value is UnitEntityType {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape (entityType discriminator) ---
   const { entityType, entityId, fieldName, value, op } = body;
@@ -90,6 +90,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (entityType === "scholar") {
     return handleScholarFieldEdit({
       session,
+      realCwid,
+      impersonatedCwid,
       requestId,
       entityId,
       fieldName,
@@ -100,6 +102,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (isUnitEntityType(entityType)) {
     return handleUnitFieldEdit({
       session,
+      realCwid,
+      impersonatedCwid,
       requestId,
       entityType,
       entityId,
@@ -117,13 +121,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 async function handleScholarFieldEdit(params: {
   session: { cwid: string; isSuperuser: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
   entityId: string;
   fieldName: string;
   value: unknown;
   op: "set" | "clear";
 }): Promise<NextResponse> {
-  const { session, requestId, entityId, fieldName, value, op } = params;
+  const { session, realCwid, impersonatedCwid, requestId, entityId, fieldName, value, op } =
+    params;
   // SPEC § Interfaces — scholar contract is unchanged. `op` is not part of
   // self-edit-spec's /api/edit/field; reject "clear" here to keep the existing
   // semantics (clearing rides /api/edit/clear-field).
@@ -187,7 +194,8 @@ async function handleScholarFieldEdit(params: {
         await reconcileScholarSlug(tx, entityId, storedValue);
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: entityId,
         action: "field_override",
@@ -217,6 +225,8 @@ async function handleScholarFieldEdit(params: {
 
 async function handleUnitFieldEdit(params: {
   session: { cwid: string; isSuperuser: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
   entityType: UnitEntityType;
   entityId: string;
@@ -224,7 +234,17 @@ async function handleUnitFieldEdit(params: {
   value: unknown;
   op: "set" | "clear";
 }): Promise<NextResponse> {
-  const { session, requestId, entityType, entityId, fieldName, value, op } = params;
+  const {
+    session,
+    realCwid,
+    impersonatedCwid,
+    requestId,
+    entityType,
+    entityId,
+    fieldName,
+    value,
+    op,
+  } = params;
   if (!isEditableUnitField(fieldName)) {
     return editError(400, "invalid_field", "fieldName");
   }
@@ -341,7 +361,8 @@ async function handleUnitFieldEdit(params: {
         after = null;
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: targetAuditType,
         targetEntityId: entityId,
         action,

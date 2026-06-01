@@ -1,8 +1,23 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockGetEditSession } = vi.hoisted(() => ({ mockGetEditSession: vi.fn() }));
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+// `readEditRequest` resolves identity through the #637 effective-identity seam:
+// `getEffectiveEditSession()` for the (effective) EditSession + live superuser
+// verdict, and the raw `getSession()` for the REAL cwid / overlay. Mock both —
+// `impersonationActive` decides whether `impersonatedCwid` is set (false here:
+// these fixtures carry no overlay).
+const { mockGetEffectiveEditSession, mockGetSession, mockImpersonationActive } = vi.hoisted(
+  () => ({
+    mockGetEffectiveEditSession: vi.fn(),
+    mockGetSession: vi.fn(),
+    mockImpersonationActive: vi.fn(),
+  }),
+);
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEffectiveEditSession,
+  impersonationActive: mockImpersonationActive,
+}));
+vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
 
 import { editError, editOk, readEditRequest } from "@/lib/edit/request";
 
@@ -20,7 +35,11 @@ function makeRequest(opts: { headers?: Record<string, string>; body?: string }):
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetEditSession.mockResolvedValue({ cwid: "usr01", isSuperuser: false });
+  // Default: an ordinary signed-in, non-impersonating session. Effective and
+  // real identities coincide; no overlay → `impersonationActive` is false.
+  mockGetEffectiveEditSession.mockResolvedValue({ cwid: "usr01", isSuperuser: false });
+  mockGetSession.mockResolvedValue({ cwid: "usr01", iat: 0, exp: 0 });
+  mockImpersonationActive.mockReturnValue(false);
 });
 
 describe("editOk / editError", () => {
@@ -57,7 +76,8 @@ describe("readEditRequest", () => {
   });
 
   it("returns 401 with an empty body when there is no session", async () => {
-    mockGetEditSession.mockResolvedValue(null);
+    mockGetEffectiveEditSession.mockResolvedValue(null);
+    mockGetSession.mockResolvedValue(null);
     const r = await readEditRequest(makeRequest({}));
     expect(r.ok).toBe(false);
     if (!r.ok) {

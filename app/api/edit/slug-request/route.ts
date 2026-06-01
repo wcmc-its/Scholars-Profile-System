@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape ---
   const { requestedSlug, reason } = body;
@@ -113,7 +113,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         select: { id: true },
       });
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: cwid,
         action: "slug_request",

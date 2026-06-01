@@ -44,7 +44,11 @@ export type AuditAction =
   /** a CenterMembership / DivisionMembership row was added or removed (#540 Phase 1) */
   | "roster_change"
   /** a UnitAdmin row was inserted or hard-deleted (#540 Phase 1) */
-  | "grant_change";
+  | "grant_change"
+  /** a superuser began a "View as" impersonation session (#637 R5 — enter) */
+  | "impersonation_start"
+  /** a superuser ended (or expired out of) a "View as" session (#637 R5 — exit) */
+  | "impersonation_end";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -76,6 +80,16 @@ export interface AuditRow {
   ts: Date;
   /** request-correlation id; ties the row to its `edit_authz_denied` / `self_suppression` lines */
   requestId: string | null;
+  /**
+   * The target CWID this write happened *on behalf of*, when the actor was in a
+   * "View as" impersonation session (#637 §3/R3); `null` for an ordinary,
+   * non-impersonated write. `actorCwid` is **always** the real human — never the
+   * target — so `actorCwid` + `impersonatedCwid` together make an impersonated
+   * edit non-repudiable and unforgeable as the target (#637 T2). REQUIRED so
+   * tsc forces every call site to decide a value (no silent attribution gaps);
+   * inside `row_hash` recipe v2 so the attribution is tamper-evident.
+   */
+  impersonatedCwid: string | null;
 }
 
 /**
@@ -105,6 +119,16 @@ function canonicalize(value: unknown): unknown {
  * not depend on key order. `ts` enters the hash as its ISO-8601 string with
  * milliseconds. To verify a stored row, rebuild the array from its columns (the
  * `ts` column reconstructed as ISO-8601) and recompute with `canonicalize`.
+ *
+ * RECIPE VERSIONS (#637 §10).
+ *   v1 — 9 elements, ending at `requestId`; rows written **before** the
+ *        `impersonated_cwid` migration (`scripts/sql/impersonation-audit-migration.sql`).
+ *   v2 — 10 elements; appends `impersonatedCwid` as the **last** positional
+ *        element, after `requestId`; rows written **on or after** the migration.
+ * A verifier recomputes with the recipe in effect **at write time**, delimited
+ * by the migration timestamp (`ts <` migration ⇒ v1, else v2): a v2 recompute
+ * of a v1 row, or vice versa, will not match. This function emits v2; the v1
+ * variant is `[…, requestId]` with the final element dropped.
  */
 export function computeRowHash(row: AuditRow): string {
   const canonical = JSON.stringify(
@@ -118,6 +142,8 @@ export function computeRowHash(row: AuditRow): string {
       row.afterValues,
       row.ts.toISOString(),
       row.requestId,
+      // recipe v2 (#637): the impersonation target, or null for a normal write.
+      row.impersonatedCwid,
     ]),
   );
   return createHash("sha256").update(canonical, "utf8").digest("hex");
@@ -147,14 +173,22 @@ export async function appendAuditRow(
   // `row_hash` was computed over (`computeRowHash` hashes `ts.toISOString()`).
   const tsUtc = row.ts.toISOString().replace("T", " ").replace("Z", "");
 
+  // Bound-value order matches the `computeRowHash` v2 positional array (#637 §10):
+  // actor_cwid, target_entity_type, target_entity_id, action, fields_changed,
+  // before_values, after_values, row_hash, ts, request_id, impersonated_cwid —
+  // `impersonated_cwid` appended LAST, mirroring the v2 hash recipe (it is the
+  // physical column placed AFTER actor_cwid by the migration, but the INSERT
+  // column list is explicit, so the bound order need not match the table layout).
   const inserted = await tx.$executeRaw`
     INSERT INTO scholars_audit.manual_edit_audit
       (actor_cwid, target_entity_type, target_entity_id, action,
-       fields_changed, before_values, after_values, row_hash, ts, request_id)
+       fields_changed, before_values, after_values, row_hash, ts, request_id,
+       impersonated_cwid)
     VALUES (
       ${row.actorCwid}, ${row.targetEntityType}, ${row.targetEntityId}, ${row.action},
       ${jsonOrNull(row.fieldsChanged)}, ${jsonOrNull(row.beforeValues)},
-      ${jsonOrNull(row.afterValues)}, ${rowHash}, ${tsUtc}, ${row.requestId}
+      ${jsonOrNull(row.afterValues)}, ${rowHash}, ${tsUtc}, ${row.requestId},
+      ${row.impersonatedCwid}
     )`;
 
   // A single-row INSERT affects exactly one row or throws; anything else is a

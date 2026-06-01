@@ -28,7 +28,7 @@ const PATH = "/api/edit/clear-field";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape ---
   const { entityType, entityId, fieldName } = body;
@@ -107,7 +107,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: entityId,
         action: "field_override_clear",

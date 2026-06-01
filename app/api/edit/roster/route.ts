@@ -81,7 +81,7 @@ function snapshot(row: {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   const { unitType, unitCode, cwid, action } = body;
   if (unitType !== "center" && unitType !== "division") {
@@ -216,9 +216,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   if (unitType === "division") {
-    return handleDivision({ unitCode, cwid, action, unitSlug, parentDeptSlug, session, requestId });
+    return handleDivision({
+      unitCode,
+      cwid,
+      action,
+      unitSlug,
+      parentDeptSlug,
+      realCwid,
+      impersonatedCwid,
+      requestId,
+    });
   }
-  return handleCenter({ unitCode, cwid, action, ext, unitSlug, session, requestId });
+  return handleCenter({
+    unitCode,
+    cwid,
+    action,
+    ext,
+    unitSlug,
+    realCwid,
+    impersonatedCwid,
+    requestId,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -231,10 +249,20 @@ async function handleDivision(p: {
   action: string;
   unitSlug: string;
   parentDeptSlug: string | undefined;
-  session: { cwid: string };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
 }): Promise<NextResponse> {
-  const { unitCode, cwid, action, unitSlug, parentDeptSlug, session, requestId } = p;
+  const {
+    unitCode,
+    cwid,
+    action,
+    unitSlug,
+    parentDeptSlug,
+    realCwid,
+    impersonatedCwid,
+    requestId,
+  } = p;
   const existing = await db.read.divisionMembership.findUnique({
     where: { divisionCode_cwid: { divisionCode: unitCode, cwid } },
     select: { cwid: true },
@@ -256,7 +284,8 @@ async function handleDivision(p: {
         });
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "division",
         targetEntityId: unitCode,
         action: "roster_change",
@@ -286,10 +315,11 @@ async function handleCenter(p: {
   action: string;
   ext: ExtendedFields;
   unitSlug: string;
-  session: { cwid: string };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
 }): Promise<NextResponse> {
-  const { unitCode, cwid, action, ext, unitSlug, session, requestId } = p;
+  const { unitCode, cwid, action, ext, unitSlug, realCwid, impersonatedCwid, requestId } = p;
 
   const existing = await db.read.centerMembership.findUnique({
     where: { centerCode_cwid: { centerCode: unitCode, cwid } },
@@ -352,7 +382,8 @@ async function handleCenter(p: {
       }
 
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "center",
         targetEntityId: unitCode,
         action: "roster_change",
