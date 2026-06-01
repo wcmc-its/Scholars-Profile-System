@@ -27,7 +27,7 @@ export async function POST(
 
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, requestId } = req.ctx;
 
   const { id } = await params;
   const slugRequest = await db.read.slugRequest.findUnique({
@@ -57,7 +57,8 @@ export async function POST(
         data: { status: "withdrawn" },
       });
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: slugRequest.cwid,
         action: "slug_request_withdrawn",

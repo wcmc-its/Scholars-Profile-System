@@ -51,7 +51,21 @@ const {
   mockTxSlugHistoryUpsert: vi.fn(),
 }));
 
+// AC-3 drives the live verdict at `getEffectiveEditSession` — the single
+// per-request entry point `readEditRequest` consumes for the effective
+// EditSession (#637 moved the field route off `getEditSession` onto this seam).
+// The flip + call-count invariant ride on this one mock, so `getSession` must
+// NOT consume it: it returns a FIXED real session for the (unchanging) actor,
+// so the real cwid for attribution is stable while only the superuser verdict
+// flips between POSTs. Non-impersonating, so `impersonationActive` is false.
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
+}));
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => ({ cwid: ACTOR_CWID, iat: 0, exp: 0 })),
+}));
 vi.mock("@/lib/db", () => ({
   db: {
     read: {

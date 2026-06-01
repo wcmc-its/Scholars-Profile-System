@@ -45,7 +45,7 @@ const MAX_DETAIL = 4000;
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape ---
   const { attribute, issueId, itemId, detail, targetCwid, noReceipt } = body;
@@ -143,7 +143,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await db.write.$transaction(async (tx) => {
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: target,
         action: "request_change",

@@ -31,7 +31,20 @@ const {
   mockSlugReqFindMany: vi.fn(),
 }));
 
+// The GET path calls `getEditSession` directly; the POST path resolves identity
+// through `readEditRequest` → the #637 effective-identity seam. Drive BOTH from
+// the same `mockGetEditSession` knob (non-impersonating: real == effective).
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
+}));
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => {
+    const s = await mockGetEditSession();
+    return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+  }),
+}));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
 vi.mock("@/lib/edit/rate-limit", () => ({ recordRequestChangeAttempt: mockRecordAttempt }));
 vi.mock("@/lib/edit/slug-request", async (orig) => ({

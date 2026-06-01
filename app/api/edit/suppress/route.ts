@@ -36,7 +36,7 @@ const SELF_HIDE_REASON = "Hidden by the author via /edit";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape ---
   const { entityType, entityId, contributorCwid, reason } = body;
@@ -210,7 +210,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: entityType,
         targetEntityId: entityId,
         action: "suppression_create",

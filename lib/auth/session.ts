@@ -27,6 +27,15 @@ export interface SessionData {
   iat: number;
   /** Expiry, epoch seconds (`iat + ttl`; ttl is hard-capped at 8h by config). */
   exp: number;
+  /**
+   * "View as" overlay (#637, impersonation-spec.md §2). Present only while a
+   * superuser is viewing/acting as another user. `cwid` above stays the real
+   * SAML subject and is NEVER mutated — the overlay rides inside the same AEAD
+   * seal (unforgeable without the key), so the effective identity is decided
+   * by `lib/auth/effective-identity.ts`, never by re-minting the cookie. The
+   * `startedAt` epoch-seconds stamp feeds the read-time TTL (R6).
+   */
+  impersonating?: { targetCwid: string; startedAt: number };
 }
 
 /** A cookie ready for `NextResponse.cookies.set(name, value, options)`. */
@@ -43,7 +52,8 @@ export interface SerializedSessionCookie {
   };
 }
 
-function nowSeconds(): number {
+/** Current time in epoch seconds — the unit the cookie's `iat`/`exp` use. */
+export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
@@ -73,6 +83,60 @@ export async function createSessionCookie(
       maxAge: cfg.ttlSeconds,
     },
   };
+}
+
+/**
+ * Re-seal an existing session with a fresh payload, preserving its `iat`/`exp`
+ * (#637). The shared path behind `withImpersonation` / `withoutImpersonation`:
+ * toggling the overlay must NOT extend the session — the original 8h `exp` is
+ * the authoritative cap (R6). The seal `ttl` and the cookie `maxAge` are both
+ * derived from the time remaining to the preserved `exp`, never reset to a full
+ * `cfg.ttlSeconds`. `maxAge` is floored at 1s so the browser keeps the cookie
+ * even within the final second before expiry (the `exp` check still gates it).
+ */
+async function reseal(data: SessionData): Promise<SerializedSessionCookie> {
+  const cfg = getSessionConfig();
+  const remaining = Math.max(data.exp - nowSeconds(), 1);
+  const value = await sealData(data, { password: cfg.secret, ttl: remaining });
+  return {
+    name: cfg.cookieName,
+    value,
+    options: {
+      httpOnly: true,
+      secure: cfg.cookieSecure,
+      sameSite: "lax",
+      path: "/",
+      domain: cfg.cookieDomain,
+      maxAge: remaining,
+    },
+  };
+}
+
+/**
+ * Re-seal `session` with the "view as" overlay set to `targetCwid` (#637). The
+ * real `cwid`, `iat`, and `exp` are preserved exactly; `startedAt` is stamped
+ * now, so the read-time TTL in `effective-identity.ts` measures from this call.
+ * Starting a second target simply replaces the overlay (spec test E7).
+ */
+export async function withImpersonation(
+  session: SessionData,
+  targetCwid: string,
+): Promise<SerializedSessionCookie> {
+  return reseal({
+    ...session,
+    impersonating: { targetCwid, startedAt: nowSeconds() },
+  });
+}
+
+/**
+ * Re-seal `session` with the overlay dropped — "Return to my view" (#637).
+ * Preserves `iat`/`exp`; idempotent when no overlay is present (spec test E8).
+ */
+export async function withoutImpersonation(
+  session: SessionData,
+): Promise<SerializedSessionCookie> {
+  const { impersonating: _dropped, ...rest } = session;
+  return reseal(rest);
 }
 
 /** A cookie that clears the session — empty value, immediate expiry. */

@@ -12,6 +12,8 @@ const BASE_ROW: AuditRow = {
   afterValues: { overview: "new bio" },
   ts: new Date("2026-05-17T14:03:01.234Z"),
   requestId: "req-001",
+  // A plain, non-impersonated B03 row (#637 §10 recipe v2 — null = no overlay).
+  impersonatedCwid: null,
 };
 
 // ---------------------------------------------------------------------------

@@ -51,7 +51,19 @@ describe("SPEC edge 20 — slug override for a CWID with no Scholar row", () => 
     mockTxSlugHistoryUpsert: vi.fn(),
   }));
 
+  // `readEditRequest` resolves identity through the #637 effective-identity seam.
+  // Drive it from the same `mockGetEditSession` knob (non-impersonating).
   vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+  vi.mock("@/lib/auth/effective-identity", () => ({
+    getEffectiveEditSession: mockGetEditSession,
+    impersonationActive: vi.fn().mockReturnValue(false),
+  }));
+  vi.mock("@/lib/auth/session-server", () => ({
+    getSession: vi.fn(async () => {
+      const s = await mockGetEditSession();
+      return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+    }),
+  }));
   vi.mock("@/lib/db", () => ({
     db: {
       read: {

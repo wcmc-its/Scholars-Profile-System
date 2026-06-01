@@ -29,6 +29,21 @@ const {
 }));
 
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+// `readEditRequest` resolves identity through the #637 effective-identity seam.
+// `mockGetEditSession` stays the single per-test knob: the effective EditSession
+// is whatever it returns, the REAL session mirrors its cwid (non-impersonating,
+// so real == effective and `impersonationActive` is false → `impersonatedCwid`
+// stays null and `actor_cwid` is this cwid).
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
+}));
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => {
+    const s = await mockGetEditSession();
+    return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+  }),
+}));
 vi.mock("@/lib/edit/mailer", () => ({
   isMailerConfigured: mockIsMailerConfigured,
   sendMail: mockSendMail,

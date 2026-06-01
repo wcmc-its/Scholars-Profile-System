@@ -53,7 +53,7 @@ const PATH = "/api/edit/grant";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   const { entityType, entityId, cwid, role, action } = body;
 
@@ -165,7 +165,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: entityType,
         targetEntityId: entityId,
         action: "grant_change",

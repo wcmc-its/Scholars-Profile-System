@@ -21,7 +21,7 @@ const PATH = "/api/edit/revoke";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   const { suppressionId } = body;
   if (typeof suppressionId !== "string" || suppressionId.length === 0) {
@@ -91,7 +91,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: suppression.entityType,
         targetEntityId: suppression.entityId,
         action: "suppression_revoke",

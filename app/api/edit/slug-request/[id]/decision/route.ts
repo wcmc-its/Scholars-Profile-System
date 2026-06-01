@@ -44,7 +44,7 @@ export async function POST(
 
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- authorization (403): superuser only ---
   if (!session.isSuperuser) {
@@ -111,7 +111,8 @@ export async function POST(
           data: { status: "approved", decidedBy: session.cwid, decidedAt: new Date() },
         });
         await appendAuditRow(tx, {
-          actorCwid: session.cwid,
+          actorCwid: realCwid,
+          impersonatedCwid,
           targetEntityType: "scholar",
           targetEntityId: cwid,
           action: "slug_request_approved",
@@ -147,7 +148,8 @@ export async function POST(
         },
       });
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "scholar",
         targetEntityId: cwid,
         action: "slug_request_rejected",

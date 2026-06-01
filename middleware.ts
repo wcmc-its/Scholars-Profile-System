@@ -37,8 +37,18 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  * a second 301 to the current canonical slug, keeping slug currency /
  * aliasing in `lib/url-resolver.ts` (a single source of truth).
  *
+ * #637 "View as" impersonation: `/api/impersonation*` joins the coarse gate
+ * exactly like `/api/edit*` — an unauthenticated request gets a bare 401; the
+ * route handler runs the authoritative R1 (`canImpersonate`, an LDAPS check
+ * that cannot run in Edge) and the 404-when-flag-off. Middleware adds only a
+ * cheap Edge-safe `IMPERSONATION_ENABLED` short-circuit: when the flag is unset
+ * the feature is dark, so the route 404s before any handler work — `process.env`
+ * is readable in the Edge runtime, but `isSuperuser` (`lib/auth/superuser.ts`,
+ * Node-only `ldapts`) is NOT, and is deliberately never imported here.
+ *
  * Edge-safe: imports only `lib/auth/session.ts` (iron-session + config), never
- * `saml.ts` (Node-only) or `session-server.ts` (`next/headers`).
+ * `saml.ts` (Node-only), `superuser.ts` (Node-only), or `session-server.ts`
+ * (`next/headers`).
  */
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   // ------------------------------------------------------------------
@@ -66,6 +76,19 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
+  // #637 — flag-off short-circuit. When `IMPERSONATION_ENABLED` is unset the
+  // whole feature is dark: the route handlers 404, the switcher hides, any
+  // overlay is ignored. Mirror the 404 at the edge so a flag-off deployment
+  // never reaches the handler (cheap; `process.env` is Edge-readable). Runs
+  // before the session gate so the response is a 404, not a 401, regardless of
+  // auth state — exactly what the handler returns (spec §5/§7).
+  if (
+    request.nextUrl.pathname.startsWith("/api/impersonation") &&
+    process.env.IMPERSONATION_ENABLED !== "true"
+  ) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   let authenticated = false;
   try {
     authenticated = (await getSessionFromRequest(request)) !== null;
@@ -77,9 +100,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (authenticated) return NextResponse.next();
 
   // Unauthenticated below this point.
-  if (request.nextUrl.pathname.startsWith("/api/edit")) {
+  if (
+    request.nextUrl.pathname.startsWith("/api/edit") ||
+    request.nextUrl.pathname.startsWith("/api/impersonation")
+  ) {
     // API route: 401, empty body — no redirect, no leakage
-    // (#100 AC; self-edit-spec.md edge case 16).
+    // (#100 AC; self-edit-spec.md edge case 16; #637 §7 — "no session" ⇒ 401).
     return new NextResponse(null, { status: 401 });
   }
 
@@ -115,6 +141,9 @@ export const config = {
     "/edit/:path*",
     "/api/edit",
     "/api/edit/:path*",
+    // #637 "View as" impersonation — start/stop + candidates search.
+    "/api/impersonation",
+    "/api/impersonation/:path*",
     // B14 legacy VIVO paths (issue #113).
     "/display/:path*",
     "/individual/:path*",
