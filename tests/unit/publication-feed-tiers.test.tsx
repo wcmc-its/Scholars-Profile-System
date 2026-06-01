@@ -184,7 +184,7 @@ function mockFetchByTier({
       json: async () => payload,
     } as unknown as Response;
   });
-  globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  vi.stubGlobal("fetch", fetchSpy);
   return fetchSpy;
 }
 
@@ -217,11 +217,14 @@ function getShowSelect(): HTMLSelectElement | null {
 
 beforeEach(() => {
   // Reset fetch each test
-  globalThis.fetch = vi.fn();
+  vi.stubGlobal("fetch", vi.fn());
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  // Restore the fetch stub so it can't leak into a later file if file
+  // isolation is ever relaxed (#660).
+  vi.unstubAllGlobals();
 });
 
 describe("PublicationFeed — two-tier display via Show scope select (#326)", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeAll, afterAll } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { ScrollFade } from "@/components/ui/scroll-fade";
 
@@ -18,6 +18,12 @@ beforeAll(() => {
       disconnect() {}
     },
   );
+});
+
+afterAll(() => {
+  // Restore the ResizeObserver stub so it can't leak into a later file if
+  // file isolation is ever relaxed (#660).
+  vi.unstubAllGlobals();
 });
 
 /** Mock the layout metrics jsdom does not compute, then notify the component. */
