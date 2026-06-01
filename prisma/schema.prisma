@@ -697,6 +697,33 @@ model MeshCuratedTopicAnchor {
   @@map("mesh_curated_topic_anchor")
 }
 
+/// Issue #642 — curated query→descriptor alias. Maps a free-text surface
+/// form that NLM itself lacks (e.g. "Cardiothoracic Surgery") onto an
+/// existing MeSH descriptor so `resolveMeshDescriptor` (§1.5) resolves it
+/// as `confidence: "entry-term"`. Merged into the resolver's `byForm` map
+/// AFTER descriptor names + entry terms, so a real NLM surface form always
+/// wins; aliases only fill gaps. `alias` is the human-readable form;
+/// the resolver normalizes it (lowercase + strip non-alphanumeric) at load
+/// time, matching the query-time key.
+///
+/// No Prisma FK to `MeshDescriptor.descriptorUi` — same rationale as
+/// `MeshCuratedTopicAnchor`: the MeSH ETL full-replaces the descriptor table
+/// inside a transaction, so a cascading FK would wipe aliases on every
+/// refresh (the ETL-wipe hazard #642 calls out). A stale `descriptor_ui`
+/// becomes inert — the resolver skips aliases whose UI is absent.
+///
+/// Seeded from the committed CSV at `etl/mesh-aliases/curated.csv`, loaded
+/// by `npm run etl:mesh-aliases` (truncate + insert).
+model MeshCuratedAlias {
+  alias        String   @id @db.VarChar(255)
+  descriptorUi String   @map("descriptor_ui") @db.VarChar(10)
+  sourceNote   String?  @map("source_note") @db.Text
+  refreshedAt  DateTime @default(now()) @map("refreshed_at")
+
+  @@index([descriptorUi])
+  @@map("mesh_curated_alias")
+}
+
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
 /// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).
@@ -995,7 +1022,7 @@ model SlugHistory {
 /// CloudWatch alarm trigger in production: max(completed_at) per source < now - 26h.
 model EtlRun {
   id                      String    @id @default(uuid()) @db.VarChar(64)
-  source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | PubMedRetractions | ReCiterAI-projection | OpenSearch-index | MeSH | MeshAnchor
+  source                  String    @db.VarChar(64) // ED | ASMS | InfoEd | ReCiter | COI | PubMedRetractions | ReCiterAI-projection | OpenSearch-index | MeSH | MeshAnchor | MeshAlias
   startedAt               DateTime  @default(now()) @map("started_at")
   completedAt             DateTime? @map("completed_at")
   status                  String    @db.VarChar(16) // 'running' | 'success' | 'failed'

@@ -47,6 +47,9 @@ seed-output/
 # Exception: §1.4 curated MeSH-anchor seed is intentionally checked in
 # so curation-team edits flow through PR review.
 !etl/mesh-anchors/curated.csv
+# Exception: #642 curated MeSH-alias seed — checked in for the same reason
+# (curation-team edits flow through PR review).
+!etl/mesh-aliases/curated.csv
 # Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
 # in so the baseline isn't a secondary analysis. Public URLs only (no PII).
 !docs/data/vivo-pageview-baseline/*.csv

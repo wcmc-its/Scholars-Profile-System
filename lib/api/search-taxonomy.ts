@@ -479,7 +479,7 @@ async function getMeshMap(): Promise<MeshMap> {
   }
   if (meshMapInFlight) return meshMapInFlight;
   meshMapInFlight = (async () => {
-    const [rows, manifestSha256, anchors] = await Promise.all([
+    const [rows, manifestSha256, anchors, aliases] = await Promise.all([
       prisma.meshDescriptor.findMany({
         select: {
           descriptorUi: true,
@@ -501,6 +501,13 @@ async function getMeshMap(): Promise<MeshMap> {
       // for anchor edits is acceptable while §1.6 has no consumer.
       prisma.meshCuratedTopicAnchor.findMany({
         select: { descriptorUi: true, parentTopicId: true },
+      }),
+      // #642 — curated query→descriptor aliases for surface forms NLM itself
+      // lacks (e.g. "Cardiothoracic Surgery" → D013903). Merged into `byForm`
+      // below, after descriptor names + entry terms. Invalidation piggybacks
+      // on the same MeSH-manifest sha refresh tick as the anchor rows.
+      prisma.meshCuratedAlias.findMany({
+        select: { alias: true, descriptorUi: true },
       }),
     ]);
     const anchorsByUi = new Map<string, string[]>();
@@ -557,6 +564,33 @@ async function getMeshMap(): Promise<MeshMap> {
           event: "mesh_map_load_warning",
           reason: "non_string_entry_terms",
           droppedEntries,
+        }),
+      );
+    }
+
+    // ── #642 curated-alias merge ──────────────────────────────────────────
+    // Merge aliases AFTER descriptors so a real NLM surface form always wins
+    // — an alias only fills a gap, it never overrides a name/entry-term. An
+    // alias whose descriptor was dropped by a MeSH full-replace is skipped
+    // (inert), mirroring the anchor table's stale-UI behavior. A resolved
+    // alias surfaces as confidence "entry-term" (its key != the descriptor
+    // name), exactly as issue #642 specifies — no change to the resolve path.
+    let aliasStaleUi = 0;
+    for (const a of aliases) {
+      const key = normalizeForMatch(a.alias);
+      if (!key || byForm.has(key)) continue;
+      if (!byUi.has(a.descriptorUi)) {
+        aliasStaleUi += 1;
+        continue;
+      }
+      byForm.set(key, [a.descriptorUi]);
+    }
+    if (aliasStaleUi > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "mesh_map_load_warning",
+          reason: "alias_stale_ui",
+          aliasStaleUi,
         }),
       );
     }

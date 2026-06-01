@@ -1,0 +1,7 @@
+alias,descriptor_ui,source_note
+Cardiothoracic Surgery,D013903,"Thoracic Surgery (entry terms incl. Cardiac/Heart Surgery). PubMed ATM splits to generic operative procedures; #642 audit."
+Neurological Surgery,D009493,"Neurosurgery (specialty descriptor). PubMed ATM falls back to Neurosurgical Procedures; #642 audit."
+Orthopaedic Surgery,D009985,"Orthopedics. NB: American spelling 'Orthopedic Surgery' already resolves natively to Orthopedic Procedures (D019637); curation may prefer aligning both. #642 audit."
+Otolaryngology Head and Neck Surgery,D010036,"Otolaryngology. Full WCM dept phrasing matches a journal title in ATM (FREE_TEXT); #642 audit."
+Plastic and Reconstructive Surgery,D013518,"Surgery, Plastic. PubMed ATM FREE_TEXT; #642 audit."
+Oral and Maxillofacial Surgery,D013515,"Surgery, Oral (closest descriptor; no exact maxillofacial descriptor). #642 audit."
