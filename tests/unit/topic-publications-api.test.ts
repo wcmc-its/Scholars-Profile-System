@@ -142,13 +142,18 @@ function makePtRow(overrides: {
 
 /**
  * Helper for the $transaction tuple shape. The service calls
- * `prisma.$transaction([findMany, count×7])` — 8 elements: rows, total,
+ * `prisma.$transaction([findMany, groupBy×7])` — 8 elements: rows, total,
  * totalAllTypes, totalResearchOnly, tierStrongly, tierAlso,
  * parentTierStrongly, parentTierAlso. The last two were added in the
  * #326 subtopic-consistency refinement (parent-scope tier totals
  * surfaced to the client). Defaults treat parent counts as identical
  * to in-scope counts — the no-subtopic-filter case — so existing tests
  * remain valid without explicit overrides.
+ *
+ * #651 — the seven count slots are now `groupBy(["pmid"])` results (one row
+ * per distinct pmid); the service derives each total via `.length`. This
+ * helper emits arrays of the requested length so callers keep passing plain
+ * numbers while exercising the distinct-count path.
  */
 function txn({
   rows = [],
@@ -169,15 +174,17 @@ function txn({
   parentTierStrongly?: number;
   parentTierAlso?: number;
 } = {}): unknown[] {
+  const distinct = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ pmid: `p${i}` }));
   return [
     rows,
-    total,
-    totalAllTypes ?? total,
-    totalResearchOnly ?? total,
-    tierStrongly,
-    tierAlso,
-    parentTierStrongly ?? tierStrongly,
-    parentTierAlso ?? tierAlso,
+    distinct(total),
+    distinct(totalAllTypes ?? total),
+    distinct(totalResearchOnly ?? total),
+    distinct(tierStrongly),
+    distinct(tierAlso),
+    distinct(parentTierStrongly ?? tierStrongly),
+    distinct(parentTierAlso ?? tierAlso),
   ];
 }
 
@@ -219,7 +226,7 @@ describe("getTopicPublications", () => {
   describe("sort=newest orders by year DESC then dateAddedToEntrez DESC", () => {
     it("calls $transaction with correct orderBy", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(mockTransaction).toHaveBeenCalled();
       // Verify result shape
@@ -232,7 +239,7 @@ describe("getTopicPublications", () => {
     it("returns paginated result with total, page, pageSize", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "1", year: 2024 }), makePtRow({ pmid: "2", year: 2023 })];
-      mockTransaction.mockResolvedValue([rows, 2]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 2 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest", page: 0 }, NOW);
       expect(result).not.toBeNull();
       expect(result!.total).toBe(2);
@@ -249,7 +256,7 @@ describe("getTopicPublications", () => {
         makePtRow({ pmid: "1", year: 2024 }),
         makePtRow({ pmid: "2", year: 2023 }),
       ];
-      mockTransaction.mockResolvedValue([rows, 2]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 2 }));
       mockSuppressionFindMany.mockResolvedValue([
         { entityId: "2", contributorCwid: null },
       ]);
@@ -265,7 +272,7 @@ describe("getTopicPublications", () => {
   describe("sort=most_cited orders by citationCount DESC NULLs LAST", () => {
     it("calls $transaction (SQL-direct path, not scorePublication)", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "most_cited" }, NOW);
       expect(mockTransaction).toHaveBeenCalled();
       // scorePublication must NOT be called for SQL-direct paths
@@ -279,7 +286,7 @@ describe("getTopicPublications", () => {
     // at the canonical `publication.impactScore` column.
     it("uses $transaction (SQL-direct path), not scorePublication", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
       expect(mockTransaction).toHaveBeenCalled();
       expect(mockScorePublication).not.toHaveBeenCalled();
@@ -287,7 +294,7 @@ describe("getTopicPublications", () => {
 
     it("passes orderBy `publication.impactScore desc` + `year desc` to findMany", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
       // The inner findMany inside $transaction still captures its own args
       // via the publicationTopic.findMany mock.
@@ -303,7 +310,7 @@ describe("getTopicPublications", () => {
   describe("filter=research_articles_only excludes Letter, Editorial Article, Erratum", () => {
     it("passes notIn clause for hard-excluded types on newest path", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "newest", filter: "research_articles_only" }, NOW);
       expect(mockTransaction).toHaveBeenCalled();
       const findManyArgs = mockTransaction.mock.calls[0][0][0];
@@ -314,7 +321,7 @@ describe("getTopicPublications", () => {
 
     it("default filter is research_articles_only", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       // No filter param — should behave same as research_articles_only
       const r1 = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       const r2 = await getTopicPublications(TOPIC_SLUG, { sort: "newest", filter: "research_articles_only" }, NOW);
@@ -329,7 +336,7 @@ describe("getTopicPublications", () => {
         makePtRow({ pmid: "30", publicationType: "Letter" }),
         makePtRow({ pmid: "31", publicationType: "Academic Article" }),
       ];
-      mockTransaction.mockResolvedValue([rows, 2, 2, 2]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 2 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "by_impact", filter: "all" }, NOW);
       expect(result).not.toBeNull();
       // After #316 PR-A's SQL-direct by_impact migration: the publicationType
@@ -343,7 +350,7 @@ describe("getTopicPublications", () => {
   describe("subtopic param filters by primarySubtopicId", () => {
     it("passes primarySubtopicId filter on newest path", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "newest", subtopic: "breast_screening" }, NOW);
       expect(mockTransaction).toHaveBeenCalled();
       // The where clause should include primarySubtopicId = "breast_screening"
@@ -353,7 +360,7 @@ describe("getTopicPublications", () => {
 
     it("passes primarySubtopicId filter on by_impact path", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0, 0, 0]);
+      mockTransaction.mockResolvedValue(txn());
       await getTopicPublications(TOPIC_SLUG, { sort: "by_impact", subtopic: "lung_cancer" }, NOW);
       // by_impact is SQL-direct after #316 PR-A — assert the where clause
       // through the captured findMany args (executed inside $transaction).
@@ -366,14 +373,14 @@ describe("getTopicPublications", () => {
   describe("pagination", () => {
     it("page is 0-indexed at service layer; default page=0", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.page).toBe(0);
     });
 
     it("pageSize is 20", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
-      mockTransaction.mockResolvedValue([[], 0]);
+      mockTransaction.mockResolvedValue(txn());
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.pageSize).toBe(20);
     });
@@ -403,7 +410,7 @@ describe("getTopicPublications", () => {
         makePtRow({ pmid: "100", impactScore: 47 }),
         makePtRow({ pmid: "101", impactScore: 12 }),
       ];
-      mockTransaction.mockResolvedValue([rows, 2, 2, 2]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 2 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.hits.map((h) => h.impactScore)).toEqual([47, 12]);
     });
@@ -411,7 +418,7 @@ describe("getTopicPublications", () => {
     it("flag on: null impactScore on the row stays null on the hit", async () => {
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "200", impactScore: null })];
-      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.hits[0]!.impactScore).toBeNull();
     });
@@ -423,7 +430,7 @@ describe("getTopicPublications", () => {
       // taken changes (mockTransaction, not the legacy findMany direct call).
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "300", impactScore: 73 })];
-      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "by_impact" }, NOW);
       expect(result!.hits[0]!.impactScore).toBe(73);
     });
@@ -432,7 +439,7 @@ describe("getTopicPublications", () => {
       process.env.SEARCH_PUB_TAB_IMPACT = "off";
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "400", impactScore: 89 })];
-      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.hits[0]!.impactScore).toBeNull();
     });
@@ -441,7 +448,7 @@ describe("getTopicPublications", () => {
       delete process.env.SEARCH_PUB_TAB_IMPACT;
       mockTopicFindUnique.mockResolvedValue(TOPIC_ROW);
       const rows = [makePtRow({ pmid: "500", impactScore: 55 })];
-      mockTransaction.mockResolvedValue([rows, 1, 1, 1]);
+      mockTransaction.mockResolvedValue(txn({ rows, total: 1 }));
       const result = await getTopicPublications(TOPIC_SLUG, { sort: "newest" }, NOW);
       expect(result!.hits[0]!.impactScore).toBeNull();
     });
@@ -575,11 +582,11 @@ describe("getTopicPublications", () => {
         { sort: "newest", subtopic: "gi_pancreatic" },
         NOW,
       );
-      // The 7th and 8th count() calls are the parent-scope tier counts.
-      // Their `where` must NOT contain `primarySubtopicId` so the parent
-      // counts span the whole topic regardless of subtopic selection.
-      const parentStronglyArgs = mockPublicationTopicCount.mock.calls.at(-2)?.[0];
-      const parentAlsoArgs = mockPublicationTopicCount.mock.calls.at(-1)?.[0];
+      // #651 — the 7th and 8th groupBy(["pmid"]) calls are the parent-scope
+      // tier counts. Their `where` must NOT contain `primarySubtopicId` so the
+      // parent counts span the whole topic regardless of subtopic selection.
+      const parentStronglyArgs = mockPublicationTopicGroupBy.mock.calls.at(-2)?.[0];
+      const parentAlsoArgs = mockPublicationTopicGroupBy.mock.calls.at(-1)?.[0];
       expect(parentStronglyArgs.where.primarySubtopicId).toBeUndefined();
       expect(parentStronglyArgs.where.score).toEqual({ gte: 0.5 });
       expect(parentAlsoArgs.where.primarySubtopicId).toBeUndefined();
@@ -601,8 +608,8 @@ describe("getTopicPublications", () => {
         },
         NOW,
       );
-      const parentStronglyArgs = mockPublicationTopicCount.mock.calls.at(-2)?.[0];
-      const parentAlsoArgs = mockPublicationTopicCount.mock.calls.at(-1)?.[0];
+      const parentStronglyArgs = mockPublicationTopicGroupBy.mock.calls.at(-2)?.[0];
+      const parentAlsoArgs = mockPublicationTopicGroupBy.mock.calls.at(-1)?.[0];
       // Pub-type filter SHOULD propagate into parent-scope counts so the
       // select-visibility decision matches what the user could see under
       // the active filter.
@@ -694,10 +701,18 @@ describe("getSubtopicsForTopic", () => {
       { id: "lung_cancer", label: "Lung Cancer", description: "Lung cancer research" },
       { id: "rare_tumors", label: "Rare Tumors", description: null },
     ]);
+    // #651 — groupBy is now keyed (primarySubtopicId, pmid): one row per
+    // distinct pmid per subtopic, and pubCount is the per-subtopic row tally.
     mockPublicationTopicGroupBy.mockResolvedValue([
-      { primarySubtopicId: "lung_cancer", _count: { pmid: 15 } },
-      { primarySubtopicId: "breast_screening", _count: { pmid: 10 } },
-      // rare_tumors has 0 count
+      ...Array.from({ length: 15 }, (_, i) => ({
+        primarySubtopicId: "lung_cancer",
+        pmid: `l${i}`,
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        primarySubtopicId: "breast_screening",
+        pmid: `b${i}`,
+      })),
+      // rare_tumors has 0 rows → pubCount 0
     ]);
     const result = await getSubtopicsForTopic(TOPIC_SLUG);
     expect(result).not.toBeNull();
@@ -716,10 +731,13 @@ describe("getSubtopicsForTopic", () => {
       { id: "common_one", label: "Common One", description: null },
       { id: "rare_one", label: "Rare One", description: null },
     ]);
-    mockPublicationTopicGroupBy.mockResolvedValue([
-      { primarySubtopicId: "common_one", _count: { pmid: 20 } },
-      // rare_one not in groupBy results → pubCount 0
-    ]);
+    // rare_one absent from the grouped rows → pubCount 0
+    mockPublicationTopicGroupBy.mockResolvedValue(
+      Array.from({ length: 20 }, (_, i) => ({
+        primarySubtopicId: "common_one",
+        pmid: `c${i}`,
+      })),
+    );
     const result = await getSubtopicsForTopic(TOPIC_SLUG);
     expect(result).not.toBeNull();
     const rareEntry = result!.find((s) => s.id === "rare_one");
@@ -733,9 +751,12 @@ describe("getSubtopicsForTopic", () => {
     mockSubtopicFindMany.mockResolvedValue([
       { id: "test_sub", label: "Test Sub", description: "A test subtopic" },
     ]);
-    mockPublicationTopicGroupBy.mockResolvedValue([
-      { primarySubtopicId: "test_sub", _count: { pmid: 5 } },
-    ]);
+    mockPublicationTopicGroupBy.mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => ({
+        primarySubtopicId: "test_sub",
+        pmid: `t${i}`,
+      })),
+    );
     const result = await getSubtopicsForTopic(TOPIC_SLUG);
     expect(result).not.toBeNull();
     expect(result![0]).toMatchObject({
