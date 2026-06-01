@@ -4,12 +4,14 @@
  *   npm run seo:standings                                   # latest snapshot
  *   npm run seo:standings -- --snapshot data/seo/snapshots/rank-<ts>.json
  *   npm run seo:standings -- --home WCM --csv data/seo/standings-matrix.csv
+ *   npm run seo:standings -- --llm-snapshot data/seo/snapshots/llm-rank-<ts>.json
  *
  * Prints a markdown report (institution + platform leaderboards, head-to-head,
  * gap list, matched cohort) to stdout; `--csv` also writes the full institution
  * × query matrix. Intended for a RIVAL basket snapshot (targets carry
  * `institution`/`surfaceType`); on a plain cutover snapshot it still runs but is
- * trivial (groups fall back to target keys).
+ * trivial (groups fall back to target keys). `--llm-snapshot` appends the
+ * #594 §6 "LLM-answer" share-of-voice column from a citation-RAG snapshot.
  *
  * Read-only: consumes a snapshot file, no DB and no API calls.
  */
@@ -30,6 +32,8 @@ import {
   toMatchedMarkdown,
   toMatrixCsv,
 } from "@/lib/seo/standings";
+import type { LlmRankSnapshot } from "@/lib/seo/llm-rank";
+import { computeLlmShareOfVoice, toLlmShareMarkdown } from "@/lib/seo/llm-standings";
 
 const SNAPSHOT_DIR = path.resolve(process.cwd(), "data", "seo", "snapshots");
 
@@ -41,12 +45,16 @@ function getFlag(argv: string[], flag: string): string | undefined {
 async function latestSnapshot(): Promise<string> {
   let entries: string[] = [];
   try {
-    entries = (await fs.readdir(SNAPSHOT_DIR)).filter((f) => f.startsWith("rank-") && f.endsWith(".json")).sort();
+    entries = (await fs.readdir(SNAPSHOT_DIR))
+      .filter((f) => f.startsWith("rank-") && f.endsWith(".json"))
+      .sort();
   } catch {
     entries = [];
   }
   if (entries.length === 0) {
-    throw new Error(`No snapshots in ${SNAPSHOT_DIR}. Run seo:track on the rival basket first, or pass --snapshot.`);
+    throw new Error(
+      `No snapshots in ${SNAPSHOT_DIR}. Run seo:track on the rival basket first, or pass --snapshot.`,
+    );
   }
   return path.join(SNAPSHOT_DIR, entries[entries.length - 1]);
 }
@@ -71,7 +79,12 @@ async function main(): Promise<void> {
   );
   out.push("");
 
-  out.push(toStandingsMarkdown(computeStandings(snapshot, institutions, "expert"), "Institution standings — expert sweep"));
+  out.push(
+    toStandingsMarkdown(
+      computeStandings(snapshot, institutions, "expert"),
+      "Institution standings — expert sweep",
+    ),
+  );
   out.push("");
 
   const flagship = computeStandings(snapshot, institutions, "flagship");
@@ -80,7 +93,12 @@ async function main(): Promise<void> {
     out.push("");
   }
 
-  out.push(toStandingsMarkdown(computeStandings(snapshot, platforms, "expert"), "Platform rollup — expert sweep"));
+  out.push(
+    toStandingsMarkdown(
+      computeStandings(snapshot, platforms, "expert"),
+      "Platform rollup — expert sweep",
+    ),
+  );
   out.push("");
 
   out.push(toHeadToHeadMarkdown(headToHead(snapshot, institutions, home, "expert"), home));
@@ -92,7 +110,9 @@ async function main(): Promise<void> {
   if (gaps.length) {
     out.push(`| Query | ${home} | Best rival |`, "|---|---|---|");
     for (const g of gaps) {
-      out.push(`| ${g.query} | ${g.home.position ?? "—"} | ${g.bestRival ? `${g.bestRival.label} @ ${g.bestRival.position}` : "—"} |`);
+      out.push(
+        `| ${g.query} | ${g.home.position ?? "—"} | ${g.bestRival ? `${g.bestRival.label} @ ${g.bestRival.position}` : "—"} |`,
+      );
     }
   } else {
     out.push("_None — every query where a rival ranks top-10, WCM does too._");
@@ -102,6 +122,22 @@ async function main(): Promise<void> {
   const cohorts = matchedCohorts(snapshot, institutions);
   if (cohorts.length) {
     out.push(toMatchedMarkdown(cohorts));
+    out.push("");
+  }
+
+  // #594 §6 — append the LLM-answer share-of-voice column from a citation-RAG
+  // snapshot. Groups by institution off the LLM snapshot's own targets, so a
+  // WCM-only or full-rival LLM snapshot both work.
+  const llmPath = getFlag(argv, "--llm-snapshot");
+  if (llmPath) {
+    const llm = JSON.parse(await fs.readFile(llmPath, "utf8")) as LlmRankSnapshot;
+    const llmGroups = groupByInstitution(llm.targets, "research-profiles");
+    out.push(
+      toLlmShareMarkdown(
+        computeLlmShareOfVoice(llm, llmGroups),
+        `LLM-answer share of voice — ${llmPath}`,
+      ),
+    );
     out.push("");
   }
 
