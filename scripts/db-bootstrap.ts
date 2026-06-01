@@ -173,7 +173,23 @@ export async function bootstrap(
   const statements = extractStatements(opts.sqlText);
   log(`Applying ${statements.length} audit-schema DDL statement(s)`);
   for (const stmt of statements) {
-    await conn.query(stmt);
+    try {
+      await conn.query(stmt);
+    } catch (err: unknown) {
+      // Idempotent `ADD COLUMN`. Aurora (MySQL 8.0) has no
+      // `ADD COLUMN IF NOT EXISTS` (that is MariaDB-only), so a column-add that
+      // already ran on a prior deploy errors 1060 (ER_DUP_FIELDNAME) when the
+      // bootstrap re-runs. The column being present IS the desired end state, so
+      // treat that one case as a no-op — the same idempotency the `IF NOT EXISTS`
+      // CREATEs and the `MODIFY COLUMN` ENUM widenings already have. Every other
+      // DDL error (and a 1060 from anything but an ADD COLUMN) still fails closed.
+      const errno = (err as { errno?: number }).errno;
+      if (errno === 1060 && /\bADD\s+COLUMN\b/i.test(stmt)) {
+        log("column already present — idempotent ADD COLUMN no-op");
+        continue;
+      }
+      throw err;
+    }
   }
 
   const grantSql = buildGrantSql(opts.grantee, host);

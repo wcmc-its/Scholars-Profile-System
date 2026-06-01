@@ -175,11 +175,14 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
 -- already-installed deploys. `CREATE TABLE IF NOT EXISTS` above carries it for
--- fresh installs; `ADD COLUMN IF NOT EXISTS` is a no-op once present (mirrors
--- the idempotent ENUM MODIFYs above). A table-level INSERT grant covers a new
--- column automatically -- no grant change (confirm INSERT-only post-apply).
+-- fresh installs. Aurora (MySQL 8.0) has NO `ADD COLUMN IF NOT EXISTS` (that is
+-- MariaDB-only), so this is a plain `ADD COLUMN`; idempotency is provided by the
+-- bootstrap runner (`scripts/db-bootstrap.ts`), which treats the re-run
+-- duplicate-column error (1060 / ER_DUP_FIELDNAME) on an ADD COLUMN as a no-op.
+-- A table-level INSERT grant covers a new column automatically -- no grant
+-- change (confirm INSERT-only post-apply).
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
-  ADD COLUMN IF NOT EXISTS `impersonated_cwid` VARCHAR(32) NULL AFTER `actor_cwid`;
+  ADD COLUMN `impersonated_cwid` VARCHAR(32) NULL AFTER `actor_cwid`;
 
 -- =============================================================================
 -- GRANT -- append-only for the application role.
