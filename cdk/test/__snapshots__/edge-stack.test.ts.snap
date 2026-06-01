@@ -33,6 +33,35 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
     },
   },
   "Resources": {
+    "DefaultRscCacheCFC4DDE6": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS default cache (prod) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
+          "DefaultTTL": 86400,
+          "MaxTTL": 31536000,
+          "MinTTL": 1,
+          "Name": "sps-default-rsc-prod",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "whitelist",
+              "Headers": [
+                "RSC",
+                "Next-Router-Prefetch",
+              ],
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "none",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
     "Distribution830FAC52": {
       "Properties": {
         "DistributionConfig": {
@@ -469,7 +498,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "HEAD",
               "OPTIONS",
             ],
-            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "CachePolicyId": {
+              "Ref": "DefaultRscCacheCFC4DDE6",
+            },
             "Compress": true,
             "ResponseHeadersPolicyId": {
               "Ref": "SecurityHeadersE66B69D3",
@@ -628,7 +659,11 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             "EnableAcceptEncodingBrotli": true,
             "EnableAcceptEncodingGzip": true,
             "HeadersConfig": {
-              "HeaderBehavior": "none",
+              "HeaderBehavior": "whitelist",
+              "Headers": [
+                "RSC",
+                "Next-Router-Prefetch",
+              ],
             },
             "QueryStringsConfig": {
               "QueryStringBehavior": "whitelist",
@@ -726,6 +761,35 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
     },
   },
   "Resources": {
+    "DefaultRscCacheCFC4DDE6": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS default cache (staging) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
+          "DefaultTTL": 86400,
+          "MaxTTL": 31536000,
+          "MinTTL": 1,
+          "Name": "sps-default-rsc-staging",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "whitelist",
+              "Headers": [
+                "RSC",
+                "Next-Router-Prefetch",
+              ],
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "none",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
+    },
     "Distribution830FAC52": {
       "Properties": {
         "DistributionConfig": {
@@ -1162,7 +1226,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "HEAD",
               "OPTIONS",
             ],
-            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "CachePolicyId": {
+              "Ref": "DefaultRscCacheCFC4DDE6",
+            },
             "Compress": true,
             "ResponseHeadersPolicyId": {
               "Ref": "SecurityHeadersE66B69D3",
@@ -1321,7 +1387,11 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             "EnableAcceptEncodingBrotli": true,
             "EnableAcceptEncodingGzip": true,
             "HeadersConfig": {
-              "HeaderBehavior": "none",
+              "HeaderBehavior": "whitelist",
+              "Headers": [
+                "RSC",
+                "Next-Router-Prefetch",
+              ],
             },
             "QueryStringsConfig": {
               "QueryStringBehavior": "whitelist",
