@@ -8,6 +8,15 @@
  * enough — the editor only needs the call to not throw; scroll geometry has no
  * effect in jsdom.
  */
+import { configure } from "@testing-library/react";
+
+// Under `pool: "forks"` with maxForks:4, up to four test files run on contended
+// CPU at once. RTL's default 1000ms asyncUtilTimeout can elapse before a render
+// settles on a starved fork — the ~1/3 "passes in isolation, fails under load"
+// flake in #652. Widen the waitFor/findBy budget; vitest.config.ts raises
+// testTimeout to match so the per-test timeout doesn't trip first.
+configure({ asyncUtilTimeout: 5000 });
+
 // Radix Select calls `scrollIntoView` on the focused option when its content
 // portal mounts; jsdom does not implement it. A no-op is enough for tests.
 if (typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.scrollIntoView !== "function") {
