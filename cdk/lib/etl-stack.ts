@@ -613,6 +613,13 @@ export class EtlStack extends Stack {
       { id: "ReporterWeekly", npmScript: "etl:reporter", external: true },
       { id: "NsfWeekly", npmScript: "etl:nsf", external: false },
       { id: "JenzabarWeekly", npmScript: "etl:jenzabar", external: true },
+      // #658 -- the remaining grant/PI enrichers, completing the set. Both read
+      // PUBLIC sources (Gates BMGF CSV; NIH RePORTER API) over NAT egress with no
+      // credential -> external: false, no SecretsStack wiring. Gates (an NSF twin:
+      // 90-day TTL + source-precedence guard) precedes search:index so its abstracts
+      // are indexed; nih-profile feeds profile/grant deep-links, not the index.
+      { id: "GatesWeekly", npmScript: "etl:gates", external: false },
+      { id: "NihProfileWeekly", npmScript: "etl:nih-profile", external: false },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
     ];

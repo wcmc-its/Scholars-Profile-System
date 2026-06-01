@@ -321,6 +321,39 @@ describe("EtlStack", () => {
           expect(text).not.toMatch(/"etl:jenzabar"/);
         });
       });
+
+      // #658 -- gates + nih-profile complete the grant/PI enrichment set on the
+      // weekly machine. Both read public sources (no credential), external: false.
+      describe("#658 -- weekly machine runs gates + nih-profile", () => {
+        it("weekly runs etl:gates and etl:nih-profile", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          expect(text).toMatch(/"etl:gates"/);
+          expect(text).toMatch(/"etl:nih-profile"/);
+        });
+
+        it("Gates abstracts precede the weekly search:index", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          const idxSearch = text.indexOf("search:index");
+          expect(idxSearch).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:gates")).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:gates")).toBeLessThan(idxSearch);
+        });
+
+        it("gates + nih-profile do not leak onto the nightly machine", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-nightly-prod",
+          );
+          expect(text).not.toMatch(/"etl:gates"/);
+          expect(text).not.toMatch(/"etl:nih-profile"/);
+        });
+      });
     });
 
     describe("EventBridge schedules (D7)", () => {
