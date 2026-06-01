@@ -6,13 +6,12 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { MentoringSection } from "@/components/scholar/mentoring-section";
-import { getMenteesForMentor, type MenteeSort } from "@/lib/api/mentoring";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollFade } from "@/components/ui/scroll-fade";
-import { getSession } from "@/lib/auth/session-server";
+import { EditMyProfileButton } from "@/components/scholar/edit-my-profile-button";
 import { Suspense } from "react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -20,7 +19,6 @@ import { ProfilePubsCluster } from "@/components/profile/profile-pubs-cluster";
 import { PublicationRow } from "@/components/profile/publication-row";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import {
-  getActiveScholarSlugs,
   getScholarFullProfileBySlug,
   isSparseProfile,
   type ProfilePayload,
@@ -32,24 +30,18 @@ import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { redirect } from "next/navigation";
 
-// ISR: regenerate every 24 hours by default; on-demand revalidation fires from
-// `/api/edit` (Phase 7) and from ETL writes (Phase 4) per decision #8.
-export const revalidate = 86400;
-export const dynamicParams = true;
-
-export async function generateStaticParams() {
-  // Pre-render all active scholars at build when the DB is reachable. In
-  // build environments without a DB (CI on a fresh checkout), gracefully
-  // skip prerendering — `dynamicParams: true` means pages still render at
-  // request time. This keeps `next build` green in CI.
-  try {
-    const slugs = await getActiveScholarSlugs();
-    return slugs.map((slug) => ({ slug }));
-  } catch (err) {
-    console.warn("[generateStaticParams] Skipping prerender (no DB):", err);
-    return [];
-  }
-}
+// #640 — Render dynamically, like the sibling detail pages (/topics,
+// /centers, /departments are all dynamic). The route was previously ISR
+// (revalidate + generateStaticParams), but that was untenable: (1) the app's
+// shared <SiteHeader> and global not-found legitimately read cookies()/
+// headers(), which is incompatible with static/ISR generation and 500'd every
+// on-demand profile render (DYNAMIC_SERVER_USAGE / "static → dynamic at
+// runtime"); and (2) the deploy CI builds without DB access, so
+// generateStaticParams returned [] and NO profile was ever actually
+// prerendered — the ISR benefit did not exist in production. Rendering
+// dynamically is correct and matches reality; CloudFront still caches the
+// public response by path at the edge.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -94,25 +86,17 @@ export async function generateMetadata({
 
 export default async function ScholarProfilePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
-  // Issue #201 (Slice B2) — Mentoring sort selector at N≥12 serializes
-  // its non-default choice as `?mentees-sort=class-year`. Anything other
-  // than the two recognized values (including the default-equal
-  // `copubs` form per spec §5.3) collapses to the default; the URL
-  // self-cleans on the next user-triggered toggle via `router.replace`
-  // in the selector. Reading `searchParams` makes this page dynamic per
-  // request, so ISR (revalidate=86400) continues to cache the canonical
-  // URL while param-bearing URLs render fresh. Optional in the type so
-  // unit tests that call the page directly need not provide a stub.
-  const sp = (await searchParams) ?? {};
-  const requestedSort = sp["mentees-sort"];
-  const menteeSort: MenteeSort =
-    requestedSort === "class-year" ? "class-year" : "copubs";
+  // Issue #201 / #640 — the mentee sort is handled entirely client-side in
+  // MentoringSection (local state). Reading `?mentees-sort` server-side made
+  // this ISR route dynamic (cookies()/searchParams → DYNAMIC_SERVER_USAGE →
+  // 500 in production builds, #640), and CloudFront strips the query string
+  // before it reaches the origin anyway, so the server-side sort never took
+  // effect in production. The data layer ships the default `copubs` ordering;
+  // the client re-sorts on demand.
 
   // First-pass redirect resolution for slug_history matches. Direct hits skip
   // the redirect cost; only renamed/old slugs incur a 301.
@@ -129,12 +113,11 @@ export default async function ScholarProfilePage({
   // Google-indexable orphan; superusers manage these scholars via /edit instead.
   if (!isPubliclyDisplayed(profile.roleCategory)) notFound();
 
-  // #356 Phase 5 — surface the "Edit my profile" affordance to the signed-in
-  // profile owner only. UI-SPEC § Signing in: the button is rendered by the
-  // server (no client hydration), so it materialises on the post-sign-in
-  // navigation back, not on a client-side session check.
-  const session = await getSession().catch(() => null);
-  const isOwnProfile = session?.cwid === profile.cwid;
+  // #356 / #640 — the owner-only "Edit my profile" affordance is rendered by a
+  // client island (<EditMyProfileButton>) that probes /api/auth/session. Doing
+  // the owner check server-side here both 500'd this statically-generated route
+  // (cookies() → DYNAMIC_SERVER_USAGE) and was wrong on CloudFront-cached pages
+  // (the edge strips the cookie). Keeping it client-side preserves ISR.
 
   // ANALYTICS-01 (D-01): structured page-view log on each ISR render / cache miss.
   console.log(
@@ -168,7 +151,7 @@ export default async function ScholarProfilePage({
   // word — the component does no global re-sort, only within-bucket
   // re-sort at the grouped tier when `menteeSort === "copubs"` (URL
   // can't request class-year at that tier because no selector renders).
-  const mentees = await getMenteesForMentor(profile.cwid, { sort: menteeSort });
+  const mentees = await getMenteesForMentor(profile.cwid, { sort: "copubs" });
 
   const pubGroups = groupPublicationsByYear(profile.publications);
   const pubMinYear = pubGroups
@@ -215,15 +198,7 @@ export default async function ScholarProfilePage({
                     : profile.primaryDepartment}
                 </div>
               ) : null}
-              {isOwnProfile ? (
-                <div className="mt-4 flex justify-center">
-                  <Button asChild variant="outline" size="sm">
-                    <Link href="/edit" data-testid="edit-my-profile">
-                      Edit my profile
-                    </Link>
-                  </Button>
-                </div>
-              ) : null}
+              <EditMyProfileButton profileSlug={profile.slug} />
             </div>
 
             {profile.email || profile.hasClinicalProfile ? (
@@ -503,7 +478,6 @@ export default async function ScholarProfilePage({
                   mentees={mentees}
                   mentorCwid={profile.cwid}
                   mentorSlug={slug}
-                  currentSort={menteeSort}
                 />
               </Section>
             );
