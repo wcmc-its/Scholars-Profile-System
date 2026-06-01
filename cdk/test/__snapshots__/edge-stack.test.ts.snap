@@ -154,11 +154,75 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 "GET",
                 "HEAD",
                 "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/export/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/csp-report",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/nih-resolve",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/feedback/submit",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -191,6 +255,186 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/search*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/directory/people",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/nih-portfolio",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/scholars/*/popover-context",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/topics/*/publications",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/about/feedback",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/scholars/*/co-pubs/export",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/scholars/*/co-pubs/*/export",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/scholars/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/departments/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/centers/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/topics/*/scholars",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -348,6 +592,39 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "QueryKeyedCacheF5F61D4E": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS query-keyed cache (prod) -- per-query cache key, cookies stripped (#634).",
+          "DefaultTTL": 86400,
+          "MaxTTL": 31536000,
+          "MinTTL": 1,
+          "Name": "sps-query-keyed-prod",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "whitelist",
+              "QueryStrings": [
+                "mentees-sort",
+                "page",
+                "tab",
+                "sort",
+                "q",
+                "role",
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
     },
     "SecurityHeadersE66B69D3": {
       "Properties": {
@@ -550,11 +827,75 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 "GET",
                 "HEAD",
                 "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
               ],
               "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/api/export/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/csp-report",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/nih-resolve",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/feedback/submit",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -587,6 +928,186 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "Compress": true,
               "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
               "PathPattern": "/search*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/directory/people",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/nih-portfolio",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/scholars/*/popover-context",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/api/topics/*/publications",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/about/feedback",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/scholars/*/co-pubs/export",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",
+              "PathPattern": "/scholars/*/co-pubs/*/export",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/scholars/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/departments/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/centers/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": {
+                "Ref": "QueryKeyedCacheF5F61D4E",
+              },
+              "Compress": true,
+              "PathPattern": "/topics/*/scholars",
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
@@ -744,6 +1265,39 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::S3::BucketPolicy",
+    },
+    "QueryKeyedCacheF5F61D4E": {
+      "Properties": {
+        "CachePolicyConfig": {
+          "Comment": "SPS query-keyed cache (staging) -- per-query cache key, cookies stripped (#634).",
+          "DefaultTTL": 86400,
+          "MaxTTL": 31536000,
+          "MinTTL": 1,
+          "Name": "sps-query-keyed-staging",
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "CookiesConfig": {
+              "CookieBehavior": "none",
+            },
+            "EnableAcceptEncodingBrotli": true,
+            "EnableAcceptEncodingGzip": true,
+            "HeadersConfig": {
+              "HeaderBehavior": "none",
+            },
+            "QueryStringsConfig": {
+              "QueryStringBehavior": "whitelist",
+              "QueryStrings": [
+                "mentees-sort",
+                "page",
+                "tab",
+                "sort",
+                "q",
+                "role",
+              ],
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::CachePolicy",
     },
     "SecurityHeadersE66B69D3": {
       "Properties": {
