@@ -14,8 +14,8 @@ import { PeopleResultCard } from "@/components/search/people-result-card";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
-import { TaxonomyCallout } from "@/components/search/taxonomy-callout";
-import { ConceptChip } from "@/components/search/concept-chip";
+import { ResearchAreaCard } from "@/components/search/research-area-card";
+import { MeshBoostControl } from "@/components/search/mesh-boost-control";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
 import { SearchInterpretationPopover } from "@/components/search/search-interpretation-popover";
 import { buildSearchInterpretation } from "@/lib/api/search-interpretation";
@@ -50,7 +50,11 @@ import {
 import { FundingResultsList } from "@/components/search/funding-results-list";
 import { InvestigatorFacet } from "@/components/search/investigator-facet";
 import { getAZBuckets } from "@/lib/api/browse";
-import { matchQueryToTaxonomy, type MeshResolution } from "@/lib/api/search-taxonomy";
+import {
+  matchQueryToTaxonomy,
+  type MeshResolution,
+  type TaxonomyMatchResult,
+} from "@/lib/api/search-taxonomy";
 import { timed } from "@/lib/api/search-timing";
 import { prisma } from "@/lib/db";
 import { formatRoleCategory } from "@/lib/role-display";
@@ -332,55 +336,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         peopleCount={peopleResult.total}
         pubCount={pubsResult.total}
         fundingCount={fundingResult.total}
+        taxonomyMatch={taxonomyMatch}
       />
-      <div className="mx-auto max-w-[1280px] px-6">
-        <TaxonomyCallout result={taxonomyMatch} />
-        {/* Issue #259 §1.11 — resolved-concept chip. Pub-tab only (the
-            MeSH descriptor doesn't yet drive scholar / funding results
-            in Phase 1, so the line "Showing pubs for MeSH concept" would
-            mislead on the other tabs). Hidden after the user clicks
-            "Search broadly instead" (mesh=off) — the param itself is the
-            persistent state, so the chip stays gone on subsequent
-            renders until the user clears the param or runs a new query. */}
-        {type === "publications" && effectiveMeshResolution ? (
-          chipMode === "strict" ? (
-            <ConceptChip
-              mode="strict"
-              resolution={effectiveMeshResolution}
-              matchedQuery={q}
-              broadenHref={buildMeshHref(sp, "off")}
-            />
-          ) : chipMode === "expanded_default" ? (
-            <ConceptChip
-              mode="expanded_default"
-              resolution={effectiveMeshResolution}
-              matchedQuery={q}
-              narrowHref={buildMeshHref(sp, "strict")}
-              broadenHref={buildMeshHref(sp, "off")}
-            />
-          ) : (
-            <ConceptChip
-              mode="expanded_narrow"
-              resolution={effectiveMeshResolution}
-              matchedQuery={q}
-              expandHref={buildMeshHref(sp, "clear")}
-            />
-          )
-        ) : null}
-        {/* Issue #265 Phase 1 — Search interpretation popover. Pub-tab only:
-            Phase 2 introduces author/journal detection, at which point the
-            trigger earns its place on scholars / funding tabs. The strict
-            `?searchMode=mesh-only` filter CTA is carved to #396 pending the
-            MEDLINE-indexed-vs-has-MeSH semantic decision. */}
-        {type === "publications" && q.length > 0 ? (
-          <div className="my-2 flex justify-end">
-            <SearchInterpretationPopover
-              interpretation={buildSearchInterpretation(effectiveMeshResolution)}
-              q={q}
-            />
-          </div>
-        ) : null}
-      </div>
+      {/* Issue #638 — the research-area suggestion now renders as a compact
+          card inside the SearchMeta header (top-right), and the MeSH boost
+          (§259) + search-interpretation (§265) affordances move into the
+          publications toolbar (see PublicationsResults). The old full-width
+          banner band that sat between the title and the tabs is removed. */}
       <ModeTabs
         q={q}
         activeType={type}
@@ -455,6 +417,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
+                narrowHref={buildMeshHref(sp, "strict")}
+                expandHref={buildMeshHref(sp, "clear")}
               />
             ) : type === "funding" ? (
               <FundingResults
@@ -541,31 +505,44 @@ function SearchMeta({
   peopleCount,
   pubCount,
   fundingCount,
+  taxonomyMatch,
 }: {
   q: string;
   peopleCount: number;
   pubCount: number;
   fundingCount: number;
+  taxonomyMatch: TaxonomyMatchResult;
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
-      <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
-        {q ? (
-          <>
-            Results for{" "}
-            <span className="font-bold text-[#2c4f6e]">
-              {"“"}
-              {q}
-              {"”"}
-            </span>
-          </>
-        ) : (
-          "Browse"
-        )}
-      </h1>
-      <div className="text-[13px] text-muted-foreground">
-        {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
-        {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
+      {/* #638 — title block flexes to fill; the research-area card is fixed-
+          width and pinned right. `min-w-0` lets a long query wrap left of the
+          card with no overlap. On narrow viewports the card stacks below. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+        <div className="min-w-0 sm:flex-1">
+          <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
+            {q ? (
+              <>
+                {/* #638 (b) — query echoed in primary text (not an accent
+                    "link" color); set apart from a lighter-weight "Results
+                    for" by weight + quotes. Accent reserved for real links. */}
+                <span className="font-normal">Results for </span>
+                <span className="font-bold text-foreground">
+                  {"“"}
+                  {q}
+                  {"”"}
+                </span>
+              </>
+            ) : (
+              "Browse"
+            )}
+          </h1>
+          <div className="text-[13px] text-muted-foreground">
+            {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
+            {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
+          </div>
+        </div>
+        <ResearchAreaCard result={taxonomyMatch} />
       </div>
     </div>
   );
@@ -908,6 +885,8 @@ async function PublicationsResults({
   meshResolution,
   chipMode,
   broadenHref,
+  narrowHref,
+  expandHref,
 }: {
   q: string;
   page: number;
@@ -931,7 +910,12 @@ async function PublicationsResults({
    */
   meshResolution: MeshResolution | null;
   chipMode: "strict" | "expanded_default" | "expanded_narrow";
+  /** #259 §6.2 mesh-mode transition URLs, precomputed by the page (the raw
+   *  `sp` isn't in scope here). off = "Don't use MeSH", strict = "Narrow to
+   *  this concept only", clear = "Expand to related". */
   broadenHref: string;
+  narrowHref: string;
+  expandHref: string;
 }) {
   const result = await resultPromise;
   // Issue #274 — concept-aware empty state (moved here from the page so the
@@ -1112,6 +1096,47 @@ async function PublicationsResults({
       toggleHref: toggleHref("wcmAuthor", a.cwid),
     }));
 
+  // Issue #638 — MeSH boost control (was the above-tabs ConceptChip banner)
+  // plus the §265 search-interpretation affordance, relocated into the
+  // publications results column. The interpretation popover lives inside the
+  // control's panel when a concept resolved; otherwise it stands alone (the
+  // free-text "no concept matched" explainer), preserving prior behavior.
+  const interpretation = buildSearchInterpretation(meshResolution);
+  const interpretationPopover =
+    q.length > 0 ? (
+      <SearchInterpretationPopover interpretation={interpretation} q={q} />
+    ) : null;
+  const meshControl = meshResolution ? (
+    chipMode === "strict" ? (
+      <MeshBoostControl
+        mode="strict"
+        resolution={meshResolution}
+        matchedQuery={q}
+        broadenHref={broadenHref}
+        interpretationSlot={interpretationPopover}
+      />
+    ) : chipMode === "expanded_default" ? (
+      <MeshBoostControl
+        mode="expanded_default"
+        resolution={meshResolution}
+        matchedQuery={q}
+        narrowHref={narrowHref}
+        broadenHref={broadenHref}
+        interpretationSlot={interpretationPopover}
+      />
+    ) : (
+      <MeshBoostControl
+        mode="expanded_narrow"
+        resolution={meshResolution}
+        matchedQuery={q}
+        expandHref={expandHref}
+        interpretationSlot={interpretationPopover}
+      />
+    )
+  ) : interpretationPopover ? (
+    <div className="mb-3 flex justify-end">{interpretationPopover}</div>
+  ) : null;
+
   return (
     <>
       <FacetSidebarPubs
@@ -1138,6 +1163,7 @@ async function PublicationsResults({
         clearAllHref={clearAllHref}
       />
       <section>
+        {meshControl}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
           tab="publications"
