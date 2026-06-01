@@ -29,9 +29,38 @@ export interface SerpOrganicResult {
 /** The slice of a SerpAPI `engine=google` response we care about. */
 export interface SerpResponse {
   organic_results?: SerpOrganicResult[];
+  /**
+   * The AI Overview block Google sometimes renders above the organic results.
+   * Already present in the response `seo:track` fetches, so parsing it costs
+   * ZERO extra SerpAPI searches (see `findAiOverviewCitation`).
+   */
+  ai_overview?: AiOverview;
   /** SerpAPI surfaces request/quota errors in a top-level `error` string. */
   error?: string;
   search_metadata?: { id?: string; status?: string; created_at?: string };
+}
+
+/** One reference cited by a Google AI Overview block. */
+export interface AiOverviewReference {
+  /** SerpAPI's own 1-based reference index within the block. */
+  index?: number;
+  title?: string;
+  link?: string;
+  snippet?: string;
+  source?: string;
+}
+
+/** The slice of SerpAPI's `ai_overview` object we consume. */
+export interface AiOverview {
+  text_blocks?: Array<{ type?: string; snippet?: string; reference_indexes?: number[] }>;
+  references?: AiOverviewReference[];
+  /**
+   * Sometimes SerpAPI returns only a `page_token` instead of the full block;
+   * the references then require a SEPARATE (billed) `google_ai_overview` fetch.
+   * We do NOT pay for that by default — see the `page_token_only` status.
+   */
+  page_token?: string;
+  error?: string;
 }
 
 /** Where a target domain landed for a single query. */
@@ -224,4 +253,59 @@ export async function fetchSerpResult(
     throw new Error(`SerpAPI error for query ${JSON.stringify(query)}: ${body.error}`);
   }
   return body;
+}
+
+// ── AI Overview (Google's citation-RAG SERP block) ──────────────────────────
+
+/**
+ * - "parsed": the AI Overview block was present WITH references we could scan.
+ * - "page_token_only": the block exists but its references are behind a
+ *   `page_token` we deliberately did not pay a second search to expand.
+ * - "absent": no AI Overview rendered for this query.
+ */
+export type AiOverviewStatus = "absent" | "page_token_only" | "parsed";
+
+/** Where a target landed among an AI Overview's cited references. */
+export interface AiOverviewPlacement {
+  status: AiOverviewStatus;
+  /** 1-based position within the (ordered) references list, or null. */
+  citationIndex: number | null;
+  url: string | null;
+  title: string | null;
+}
+
+/**
+ * Find a target host's citation within a Google AI Overview block. Pure and
+ * network-free, reusing the same host/path matchers as `findDomainRank` so an
+ * AI-Overview reference and an organic result count a target identically.
+ *
+ * Honest about partial data: an absent block and a present-but-unexpanded block
+ * (`page_token` only, references withheld) are reported via `status`, never
+ * conflated with "target not cited". We pay for no second fetch — capturing the
+ * AI Overview alongside the organic SERP `seo:track` already retrieved is free.
+ */
+export function findAiOverviewCitation(
+  aiOverview: AiOverview | undefined,
+  targets: string | string[],
+  pathPrefix?: string,
+): AiOverviewPlacement {
+  const miss = (status: AiOverviewStatus): AiOverviewPlacement => ({
+    status,
+    citationIndex: null,
+    url: null,
+    title: null,
+  });
+  if (!aiOverview) return miss("absent");
+  const refs = aiOverview.references;
+  if (!refs || refs.length === 0) {
+    return miss(aiOverview.page_token ? "page_token_only" : "absent");
+  }
+  const hosts = Array.isArray(targets) ? targets : [targets];
+  for (let i = 0; i < refs.length; i++) {
+    const r = refs[i];
+    if (!hosts.some((h) => hostMatches(r.link, h))) continue;
+    if (!pathMatches(r.link, pathPrefix)) continue;
+    return { status: "parsed", citationIndex: i + 1, url: r.link ?? null, title: r.title ?? null };
+  }
+  return { status: "parsed", citationIndex: null, url: null, title: null };
 }

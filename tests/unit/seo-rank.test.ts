@@ -6,10 +6,12 @@ import {
   hostMatches,
   pathMatches,
   findDomainRank,
+  findAiOverviewCitation,
   buildRequestParams,
   serpApiKeyFromEnv,
   throttleWaitMs,
   type SerpOrganicResult,
+  type AiOverview,
 } from "@/lib/seo/serpapi";
 import {
   diffSnapshots,
@@ -508,5 +510,56 @@ describe("openalex parsers", () => {
     expect(pickBestAuthor(authors, { institution: "UCSF" })?.id).toBe("A2"); // institution wins over works
     expect(pickBestAuthor(authors)?.id).toBe("A1"); // no institution → most prolific
     expect(pickBestAuthor([])).toBeNull();
+  });
+});
+
+describe("findAiOverviewCitation (#594 §2)", () => {
+  const scholars = "scholars.weill.cornell.edu";
+
+  it("finds a target in the references at its 1-based ordered index", () => {
+    const ao: AiOverview = {
+      references: [
+        { index: 1, title: "Mayo", link: "https://www.mayoclinic.org/x" },
+        { index: 2, title: "WCM", link: "https://scholars.weill.cornell.edu/jane-doe" },
+        { index: 3, title: "NIH", link: "https://www.nih.gov/y" },
+      ],
+    };
+    const p = findAiOverviewCitation(ao, scholars);
+    expect(p.status).toBe("parsed");
+    expect(p.citationIndex).toBe(2);
+    expect(p.url).toBe("https://scholars.weill.cornell.edu/jane-doe");
+    expect(p.title).toBe("WCM");
+  });
+
+  it("reports parsed-but-not-cited when the block exists without the target", () => {
+    const ao: AiOverview = { references: [{ index: 1, link: "https://www.mayoclinic.org/x" }] };
+    const p = findAiOverviewCitation(ao, scholars);
+    expect(p.status).toBe("parsed");
+    expect(p.citationIndex).toBeNull();
+  });
+
+  it("distinguishes an absent block from a page_token-only block (no paid 2nd fetch)", () => {
+    expect(findAiOverviewCitation(undefined, scholars).status).toBe("absent");
+    expect(findAiOverviewCitation({}, scholars).status).toBe("absent");
+    const tokenOnly: AiOverview = { page_token: "abc123" };
+    const p = findAiOverviewCitation(tokenOnly, scholars);
+    expect(p.status).toBe("page_token_only");
+    expect(p.citationIndex).toBeNull();
+  });
+
+  it("honors host aliases and pathPrefix, reusing the organic matchers", () => {
+    const ao: AiOverview = {
+      references: [
+        { index: 1, link: "https://www.med.upenn.edu/some-news" },
+        { index: 2, link: "https://www.med.upenn.edu/apps/faculty/jane" },
+        { index: 3, link: "https://vivo.med.cornell.edu/display/jane" },
+      ],
+    };
+    // pathPrefix scopes Penn to its faculty path (index 2, not 1)
+    expect(findAiOverviewCitation(ao, "www.med.upenn.edu", "/apps/faculty/").citationIndex).toBe(2);
+    // alias host still matches
+    expect(
+      findAiOverviewCitation(ao, ["vivo.weill.cornell.edu", "vivo.med.cornell.edu"]).citationIndex,
+    ).toBe(3);
   });
 });

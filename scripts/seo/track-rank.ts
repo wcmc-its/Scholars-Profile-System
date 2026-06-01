@@ -22,6 +22,7 @@ import path from "node:path";
 
 import {
   fetchSerpResult,
+  findAiOverviewCitation,
   findDomainRank,
   serpApiKeyFromEnv,
   throttleWaitMs,
@@ -127,6 +128,7 @@ async function main(): Promise<void> {
     console.log(`  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}${t.pathPrefix ? " " + t.pathPrefix : ""}]`).join("  |  ")}`);
     console.log(`  selected: ${queries.length} queries (${typeSummary})`);
     console.log(`  cost:     ~${queries.length} SerpAPI searches (1 per query; all targets share each search)`);
+    console.log(`  bonus:    Google AI Overview citations captured from the same responses (no extra searches)`);
     console.log(
       `  throttle: ${args.maxPerHour > 0 ? `<= ${args.maxPerHour}/hour` : "disabled"}` +
         (args.maxPerHour > 0 && queries.length <= args.maxPerHour ? " (under cap — no pause this run)" : ""),
@@ -165,6 +167,12 @@ async function main(): Promise<void> {
     }
     callTimes.push(Date.now());
     const res = await fetchWithRetry(q.query, apiKey, searchOpts);
+    // AI Overview placement comes from the SAME response (#594 §2) — no extra
+    // SerpAPI search. `status` is block-level; per-target citation index below.
+    const aiOverviewPerTarget = basket.targets.map((t) => ({
+      targetKey: t.key,
+      ...findAiOverviewCitation(res.ai_overview, t.hosts, t.pathPrefix),
+    }));
     rows.push({
       id: q.id,
       query: q.query,
@@ -181,6 +189,14 @@ async function main(): Promise<void> {
         targetKey: t.key,
         ...findDomainRank(res.organic_results, t.hosts, t.pathPrefix),
       })),
+      aiOverview: {
+        status: aiOverviewPerTarget[0]?.status ?? "absent",
+        placements: aiOverviewPerTarget.map((p) => ({
+          targetKey: p.targetKey,
+          citationIndex: p.citationIndex,
+          url: p.url,
+        })),
+      },
     });
     done++;
     if (done % 10 === 0 || done === queries.length) {
