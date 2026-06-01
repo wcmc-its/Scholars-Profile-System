@@ -262,13 +262,13 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus twenty-three additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-four additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(23);
+        expect(cacheBehaviors).toHaveLength(24);
       });
 
       it("evaluates additional behaviors in the spec-defined order (uncacheable first, then #634 query-keyed)", () => {
@@ -279,6 +279,7 @@ describe("EdgeStack", () => {
         expect(paths).toEqual([
           // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
+          "/api/impersonation*",
           "/edit*",
           "/api/auth/*",
           "/api/revalidate*",

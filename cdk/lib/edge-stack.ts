@@ -223,6 +223,13 @@ export class EdgeStack extends Stack {
     // forwards the full request.
     const uncacheableBehaviors: ReadonlyArray<[string, cloudfront.AllowedMethods]> = [
       ["/api/edit*", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/impersonation*` (#637 "View as"): the start/stop POST + DELETE and
+      // the `?q=&kind=` candidates GET all need cookies + the query string
+      // forwarded and the non-GET methods allowed. Same shape as `/api/edit*`,
+      // placed right after it so the #490/#624 query-strip and the POST-403
+      // edge guards both stay satisfied. No public route begins with
+      // "impersonation", so the broad glob is safe.
+      ["/api/impersonation*", cloudfront.AllowedMethods.ALLOW_ALL],
       // `/edit*`, NOT `/edit/*`: the bare `/edit` self-editor route must also
       // forward cookies. `/edit/*` does not match `/edit` (no trailing slash),
       // so a bare `/edit` request falls to the cacheable default behavior, which
