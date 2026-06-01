@@ -12,6 +12,7 @@ const {
   mockMeshFindMany,
   mockEtlRunFindFirst,
   mockMeshAnchorFindMany,
+  mockMeshAliasFindMany,
 } = vi.hoisted(() => ({
   mockTopicFindMany: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockMeshFindMany: vi.fn(),
   mockEtlRunFindFirst: vi.fn(),
   mockMeshAnchorFindMany: vi.fn(),
+  mockMeshAliasFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -29,6 +31,7 @@ vi.mock("@/lib/db", () => ({
     meshDescriptor: { findMany: mockMeshFindMany },
     etlRun: { findFirst: mockEtlRunFindFirst },
     meshCuratedTopicAnchor: { findMany: mockMeshAnchorFindMany },
+    meshCuratedAlias: { findMany: mockMeshAliasFindMany },
   },
 }));
 
@@ -47,6 +50,7 @@ beforeEach(() => {
   mockMeshFindMany.mockReset().mockResolvedValue([]);
   mockEtlRunFindFirst.mockReset().mockResolvedValue({ manifestSha256: "sha-1" });
   mockMeshAnchorFindMany.mockReset().mockResolvedValue([]);
+  mockMeshAliasFindMany.mockReset().mockResolvedValue([]);
   _resetMeshMapForTests();
 });
 
@@ -1174,5 +1178,58 @@ describe("resolveMeshDescriptor × descendantUis (§5.4.2)", () => {
     expect(r2?.descendantUis).toEqual(expected);
     // findMany still only called once — cache load was not re-triggered.
     expect(mockMeshFindMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resolveMeshDescriptor — curated aliases (#642)", () => {
+  const D_THORACIC = {
+    descriptorUi: "D013903",
+    name: "Thoracic Surgery",
+    entryTerms: ["Cardiac Surgery", "Heart Surgery"],
+    scopeNote: null as string | null,
+    dateRevised: null as Date | null,
+    localPubCoverage: null as number | null,
+    treeNumbers: ["G02.403.810"],
+  };
+
+  it("resolves a curated alias to its descriptor as confidence: entry-term", async () => {
+    mockMeshFindMany.mockResolvedValue([D_THORACIC]);
+    mockMeshAliasFindMany.mockResolvedValue([
+      { alias: "Cardiothoracic Surgery", descriptorUi: "D013903" },
+    ]);
+    const r = await resolveMeshDescriptor("Cardiothoracic Surgery");
+    expect(r?.descriptorUi).toBe("D013903");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
+  it("a real NLM name wins over a conflicting alias (alias fills gaps only)", async () => {
+    // Alias tries to point "Thoracic Surgery" at a different UI; the real
+    // descriptor name must win because aliases merge after descriptors.
+    mockMeshFindMany.mockResolvedValue([D_THORACIC]);
+    mockMeshAliasFindMany.mockResolvedValue([
+      { alias: "Thoracic Surgery", descriptorUi: "D999999" },
+    ]);
+    const r = await resolveMeshDescriptor("Thoracic Surgery");
+    expect(r?.descriptorUi).toBe("D013903");
+    expect(r?.confidence).toBe("exact");
+  });
+
+  it("skips an alias whose descriptor_ui is stale (absent from the descriptor table)", async () => {
+    mockMeshFindMany.mockResolvedValue([D_THORACIC]);
+    mockMeshAliasFindMany.mockResolvedValue([
+      { alias: "Cardiothoracic Surgery", descriptorUi: "D000000" },
+    ]);
+    const r = await resolveMeshDescriptor("Cardiothoracic Surgery");
+    expect(r).toBeNull();
+  });
+
+  it("matches an alias across punctuation/case variants (same normalization)", async () => {
+    mockMeshFindMany.mockResolvedValue([D_THORACIC]);
+    mockMeshAliasFindMany.mockResolvedValue([
+      { alias: "Cardiothoracic Surgery", descriptorUi: "D013903" },
+    ]);
+    const r = await resolveMeshDescriptor("cardiothoracic-surgery");
+    expect(r?.descriptorUi).toBe("D013903");
+    expect(r?.confidence).toBe("entry-term");
   });
 });
