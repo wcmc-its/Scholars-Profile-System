@@ -412,14 +412,22 @@ export async function getSubtopicsForTopic(topicSlug: string): Promise<SubtopicW
     },
   });
 
+  // #651 — group by (subtopic, pmid) and tally distinct pmids per subtopic.
+  // `_count: { pmid: true }` counts publication_topic ROWS, which the
+  // (pmid, cwid, parent_topic_id) key inflates once per WCM co-author — so the
+  // rail count over-reported vs. the deduped feed (which uses distinct:
+  // ["pmid"]). No pmid maps to >1 primary_subtopic within a topic, so the
+  // per-subtopic tally is exact and the topic-header sum (page.tsx) stays free
+  // of double counting.
   const countRows = await prisma.publicationTopic.groupBy({
-    by: ["primarySubtopicId"],
+    by: ["primarySubtopicId", "pmid"],
     where: { parentTopicId: topicSlug, primarySubtopicId: { not: null } },
-    _count: { pmid: true },
   });
   const countMap = new Map<string, number>();
   for (const r of countRows) {
-    if (r.primarySubtopicId) countMap.set(r.primarySubtopicId, r._count.pmid);
+    if (r.primarySubtopicId) {
+      countMap.set(r.primarySubtopicId, (countMap.get(r.primarySubtopicId) ?? 0) + 1);
+    }
   }
 
   // HIERARCHY-05 (Path A): `display_name` is authoritative — render verbatim.
@@ -738,15 +746,25 @@ export async function getTopicPublications(
     // current page's topic so the redundant inline label never renders.
     topTopic: { select: { id: true, label: true } },
   } as const;
+  // #651 — every total here must count DISTINCT pmids, not publication_topic
+  // rows. The table is keyed (pmid, cwid, parent_topic_id), so a co-authored
+  // paper has one row per WCM author; a plain `count()` over-reports (e.g. an
+  // 11-row / 5-pmid subtopic rendered "11 results" while the page query —
+  // which dedupes via `distinct: ["pmid"]` — showed 5). `groupBy(["pmid"])`
+  // + `.length` is the distinct-count idiom already used in this file
+  // (getDistinctScholarCountForTopic). `orderBy` is required by the groupBy
+  // type inside $transaction; the pmid sort is irrelevant to `.length`.
+  const distinctPmids = (where: Record<string, unknown>) =>
+    prisma.publicationTopic.groupBy({ by: ["pmid"], where, orderBy: { pmid: "asc" } });
   const [
     rows,
-    total,
-    totalAllTypes,
-    totalResearchOnly,
-    tierStronglyCount,
-    tierAlsoCount,
-    parentTierStronglyCount,
-    parentTierAlsoCount,
+    totalGroups,
+    totalAllTypesGroups,
+    totalResearchOnlyGroups,
+    tierStronglyGroups,
+    tierAlsoGroups,
+    parentTierStronglyGroups,
+    parentTierAlsoGroups,
   ] = await prisma.$transaction([
     prisma.publicationTopic.findMany({
       where: baseWhere,
@@ -757,14 +775,21 @@ export async function getTopicPublications(
       distinct: ["pmid"],
       include: { publication: { select: pubSelectFields } },
     }),
-    prisma.publicationTopic.count({ where: baseWhere }),
-    prisma.publicationTopic.count({ where: baseWhereAllTypes }),
-    prisma.publicationTopic.count({ where: baseWhereResearchOnly }),
-    prisma.publicationTopic.count({ where: tierStronglyWhere }),
-    prisma.publicationTopic.count({ where: tierAlsoWhere }),
-    prisma.publicationTopic.count({ where: parentTierStronglyWhere }),
-    prisma.publicationTopic.count({ where: parentTierAlsoWhere }),
+    distinctPmids(baseWhere),
+    distinctPmids(baseWhereAllTypes),
+    distinctPmids(baseWhereResearchOnly),
+    distinctPmids(tierStronglyWhere),
+    distinctPmids(tierAlsoWhere),
+    distinctPmids(parentTierStronglyWhere),
+    distinctPmids(parentTierAlsoWhere),
   ]);
+  const total = totalGroups.length;
+  const totalAllTypes = totalAllTypesGroups.length;
+  const totalResearchOnly = totalResearchOnlyGroups.length;
+  const tierStronglyCount = tierStronglyGroups.length;
+  const tierAlsoCount = tierAlsoGroups.length;
+  const parentTierStronglyCount = parentTierStronglyGroups.length;
+  const parentTierAlsoCount = parentTierAlsoGroups.length;
   // #356 — drop publications taken down or derived-dark from the feed. The
   // publication_topic-keyed `total` / tier counts are left as-is: a per-author
   // hide never changes them, and a whole-pub takedown is a rare superuser

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 
 // Mock the SAML library boundary: the route logic is exercised without a real
 // IdP or SAML config. node-saml's own crypto validation is its responsibility
@@ -15,7 +15,11 @@ import { POST as callbackPOST } from "@/app/api/auth/saml/callback/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
 
 // Real session minting is used in the success-path test.
-process.env.SESSION_COOKIE_SECRET = "test-session-secret-0123456789-0123456789";
+vi.stubEnv("SESSION_COOKIE_SECRET", "test-session-secret-0123456789-0123456789");
+
+// Restore the env so it can't leak into a later file if isolation is ever
+// relaxed (#660).
+afterAll(() => vi.unstubAllEnvs());
 
 const mockedLoginUrl = vi.mocked(getLoginRedirectUrl);
 const mockedValidate = vi.mocked(validateSamlResponse);

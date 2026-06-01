@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { FeedbackBadge } from "@/components/site/feedback-badge";
 import { FeedbackBadgeProvider } from "@/components/site/feedback-badge-context";
+import { ImpersonationBanner } from "@/components/site/impersonation-banner";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -34,6 +35,12 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <body className="bg-background text-foreground antialiased">
         <FeedbackBadgeProvider>
+          {/* #637 — "View as" banner above all chrome. Client-probed (T6) and
+              self-gating: renders nothing unless a live overlay is present, so
+              it is inert on every non-impersonated page and when the flag is
+              off. Placed before {children} (which contains the sticky header)
+              so it sits at the very top and pushes content down. */}
+          <ImpersonationBanner />
           {children}
           {showFeedbackBadge ? <FeedbackBadge /> : null}
         </FeedbackBadgeProvider>

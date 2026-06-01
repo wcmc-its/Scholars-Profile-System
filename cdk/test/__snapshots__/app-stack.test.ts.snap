@@ -312,6 +312,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "CWID",
               },
               {
+                "Name": "SAML_EPPN_TRUSTED_SCOPES",
+                "Value": "nyp.org,qatar-med.cornell.edu",
+              },
+              {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_SEND",
                 "Value": "off",
               },
@@ -330,6 +334,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
                 "Value": "https://scholars.weill.cornell.edu",
+              },
+              {
+                "Name": "IMPERSONATION_ENABLED",
+                "Value": "true",
               },
             ],
             "Essential": true,
@@ -3160,6 +3168,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "CWID",
               },
               {
+                "Name": "SAML_EPPN_TRUSTED_SCOPES",
+                "Value": "nyp.org,qatar-med.cornell.edu",
+              },
+              {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_SEND",
                 "Value": "off",
               },
@@ -3178,6 +3190,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
                 "Value": "https://scholars-staging.weill.cornell.edu",
+              },
+              {
+                "Name": "IMPERSONATION_ENABLED",
+                "Value": "true",
               },
             ],
             "Essential": true,

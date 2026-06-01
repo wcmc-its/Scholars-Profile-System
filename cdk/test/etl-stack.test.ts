@@ -79,6 +79,12 @@ const EXPECTED_SECRET_ENV_VARS = [
   "SCHOLARS_RECITERDB_DATABASE",
   "SCHOLARS_RECITERDB_USERNAME",
   "SCHOLARS_RECITERDB_PASSWORD",
+  // jenzabar (PhD-mentor MSSQL -- #608)
+  "SCHOLARS_JENZABAR_SERVER",
+  "SCHOLARS_JENZABAR_PORT",
+  "SCHOLARS_JENZABAR_DATABASE",
+  "SCHOLARS_JENZABAR_USERNAME",
+  "SCHOLARS_JENZABAR_PASSWORD",
 ] as const;
 
 // IAM-based sources read these as plaintext config from the environment
@@ -165,6 +171,26 @@ describe("EtlStack", () => {
             `scholars-${cadence}-prod`,
           );
           expect(text).toMatch(/startFrom/);
+        },
+      );
+
+      // Regression: the EventBridge schedules invoke with `{}` (no startFrom).
+      // Without an isPresent guard the top-level Choice raises
+      // `States.Runtime: Invalid path '$.startFrom'` and every scheduled
+      // execution fails before the first step. Assert the value test is
+      // guarded so an absent key falls through to step[0] instead of erroring.
+      it.each(Object.keys(EXPECTED_CRONS))(
+        "%s Choice guards $.startFrom with isPresent (empty {} schedule input falls through, never errors)",
+        (cadence) => {
+          const text = getStateMachineDefinitionText(
+            template,
+            `scholars-${cadence}-prod`,
+          );
+          // The guarded branch synthesises as an And pairing IsPresent with
+          // StringEquals on the same $.startFrom path.
+          expect(text).toMatch(/"IsPresent":\s*true/);
+          expect(text).toMatch(/"And":/);
+          expect(text).toMatch(/"Variable":\s*"\$\.startFrom"/);
         },
       );
 
@@ -256,6 +282,77 @@ describe("EtlStack", () => {
             expect(lastRevalidate).toBeGreaterThan(lastSearchIndex);
           },
         );
+      });
+
+      // #608 -- the grant-enrichment sources (RePORTER / NSF / Jenzabar) are
+      // wired onto the WEEKLY machine (not nightly), ahead of its closing
+      // search:index/revalidate tail.
+      describe("#608 -- weekly machine runs the grant-enrichment sources", () => {
+        it("weekly runs etl:reporter, etl:nsf, and etl:jenzabar", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          expect(text).toMatch(/"etl:reporter"/);
+          expect(text).toMatch(/"etl:nsf"/);
+          expect(text).toMatch(/"etl:jenzabar"/);
+        });
+
+        it("RePORTER + NSF precede the weekly search:index (funding index carries the refreshed abstracts/keywords)", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          const idxSearch = text.indexOf("search:index");
+          expect(idxSearch).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:reporter")).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:reporter")).toBeLessThan(idxSearch);
+          expect(text.indexOf("etl:nsf")).toBeLessThan(idxSearch);
+          expect(text.indexOf("etl:jenzabar")).toBeLessThan(idxSearch);
+        });
+
+        it("the grant sources do not leak onto the nightly machine", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-nightly-prod",
+          );
+          expect(text).not.toMatch(/"etl:reporter"/);
+          expect(text).not.toMatch(/"etl:nsf"/);
+          expect(text).not.toMatch(/"etl:jenzabar"/);
+        });
+      });
+
+      // #658 -- gates + nih-profile complete the grant/PI enrichment set on the
+      // weekly machine. Both read public sources (no credential), external: false.
+      describe("#658 -- weekly machine runs gates + nih-profile", () => {
+        it("weekly runs etl:gates and etl:nih-profile", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          expect(text).toMatch(/"etl:gates"/);
+          expect(text).toMatch(/"etl:nih-profile"/);
+        });
+
+        it("Gates abstracts precede the weekly search:index", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-weekly-prod",
+          );
+          const idxSearch = text.indexOf("search:index");
+          expect(idxSearch).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:gates")).toBeGreaterThan(-1);
+          expect(text.indexOf("etl:gates")).toBeLessThan(idxSearch);
+        });
+
+        it("gates + nih-profile do not leak onto the nightly machine", () => {
+          const text = getStateMachineDefinitionText(
+            template,
+            "scholars-nightly-prod",
+          );
+          expect(text).not.toMatch(/"etl:gates"/);
+          expect(text).not.toMatch(/"etl:nih-profile"/);
+        });
       });
     });
 
@@ -525,7 +622,7 @@ describe("EtlStack", () => {
     });
 
     describe("IAM least-privilege guards", () => {
-      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 8 consumer ARNs (no *)", () => {
+      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 9 consumer ARNs (no *)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -550,10 +647,10 @@ describe("EtlStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        // 5 credentialed sources + db/etl + opensearch/etl + revalidate-token
-        // = 8. The dynamodb/spotlight/hierarchy sources are IAM-based (task
+        // 6 credentialed sources + db/etl + opensearch/etl + revalidate-token
+        // = 9. The dynamodb/spotlight/hierarchy sources are IAM-based (task
         // role) and read no injected secret, so they are absent (#442).
-        expect(resourceList).toHaveLength(8);
+        expect(resourceList).toHaveLength(9);
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
         }

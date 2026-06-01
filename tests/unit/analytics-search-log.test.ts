@@ -42,6 +42,9 @@ vi.mock("@/lib/api/search", () => ({
     total: 17,
     page: 0,
     pageSize: 20,
+    // Issue #645 — recency tilt telemetry surfaced by the route log line.
+    recencyMode: "gentle",
+    recencyOriginYear: 2026,
   })),
 }));
 
@@ -181,6 +184,9 @@ describe("ANALYTICS-02 (server) — search_query structured log (publications br
     expect(parsed.filters).toBeDefined();
     expect(parsed.filters.yearMin).toBe(2020);
     expect(parsed.filters.yearMax).toBeUndefined();
+    // Issue #645 — recency tilt telemetry rides on the publications log line.
+    expect(parsed.recencyMode).toBe("gentle");
+    expect(parsed.recencyOriginYear).toBe(2026);
     expect(parsed.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 

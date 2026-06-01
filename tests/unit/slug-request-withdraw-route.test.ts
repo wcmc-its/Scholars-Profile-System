@@ -20,7 +20,20 @@ const {
   mockSlugReqFindUnique: vi.fn(),
 }));
 
+// `readEditRequest` resolves identity through the #637 effective-identity seam.
+// Drive it from the same `mockGetEditSession` knob (non-impersonating: real ==
+// effective, so `actor_cwid` is this cwid and `impersonatedCwid` stays null).
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationActive: vi.fn().mockReturnValue(false),
+}));
+vi.mock("@/lib/auth/session-server", () => ({
+  getSession: vi.fn(async () => {
+    const s = await mockGetEditSession();
+    return s ? { cwid: s.cwid, iat: 0, exp: 0 } : null;
+  }),
+}));
 vi.mock("@/lib/edit/audit", () => ({ appendAuditRow: mockAppendAuditRow }));
 vi.mock("@/lib/edit/slug-request", async (orig) => ({
   ...(await orig<typeof import("@/lib/edit/slug-request")>()),

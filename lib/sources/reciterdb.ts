@@ -32,6 +32,14 @@ export function getReciterPool(): Pool {
     port,
     connectionLimit: 4,
     bigIntAsNumber: true,
+    // Fail fast when ReciterDB is unreachable (it is WCM-side; the SPS VPC->WCM
+    // path can be down) instead of inheriting the mariadb driver defaults
+    // (connectTimeout 1000ms, acquireTimeout 10000ms) that otherwise stall every
+    // caller ~10s. The web mentoring path is additionally time-capped in
+    // mentoring-pmids.ts; these bounds also protect the other web callers
+    // (publication-detail, mentoring, popover-context) and the ETL.
+    connectTimeout: 2000,
+    acquireTimeout: 3000,
   });
   pool = created;
   return created;

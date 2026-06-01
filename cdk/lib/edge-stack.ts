@@ -26,14 +26,22 @@ export interface EdgeStackProps extends StackProps {
 /**
  * EdgeStack — CloudFront distribution fronting the SPS public ALB (B07 + B14).
  *
- * Implements the eight behaviors in `docs/cloudfront-cache-spec.md`:
- * one cacheable default behavior (`Managed-CachingOptimized`) plus seven
- * uncacheable behaviors (`Managed-CachingDisabled` + `Managed-AllViewer`)
- * for writer routes, SSO endpoints, mutating internal endpoints, the health
- * probe, telemetry, and on-demand exports. The cache key on the default
- * behavior excludes cookies and all headers beyond `Accept-Encoding` — the
- * single most important knob in the spec, since forwarding cookies on
- * cacheable routes would fragment the cache per session.
+ * Implements the behaviors in `docs/cloudfront-cache-spec.md`. Three classes:
+ *   1. One cacheable default behavior (`Managed-CachingOptimized`) for the
+ *      bulk of read-only pages and APIs.
+ *   2. Uncacheable behaviors (`Managed-CachingDisabled` + `Managed-AllViewer`)
+ *      for writer routes, SSO endpoints, mutating internal endpoints, the
+ *      health probe, telemetry, on-demand exports, and every query-string
+ *      DYNAMIC route (search + the #634 Group A API/feedback/export routes).
+ *   3. Query-keyed CACHEABLE behaviors (#634 Group B) for the high-traffic
+ *      ISR pages (profile, dept/center/division, topic-scholars) that read
+ *      `searchParams`: a custom cache policy that keeps them edge-cacheable
+ *      but puts the query string in the cache key and forwards it to the
+ *      origin -- without forwarding cookies.
+ * The cache key on the default and the query-keyed behaviors both exclude
+ * cookies and all headers beyond `Accept-Encoding` — the single most
+ * important knob in the spec, since forwarding cookies on cacheable routes
+ * would fragment the cache per session.
  *
  * Origin protection (plan D3): CloudFront-only access is enforced by a
  * shared-secret custom origin header `X-Origin-Verify`. CloudFront injects
@@ -186,20 +194,52 @@ export class EdgeStack extends Stack {
     // ------------------------------------------------------------------
     // Cache + origin request policies (plan D5).
     //
-    // Default behavior uses `Managed-CachingOptimized` (includes
-    // Accept-Encoding in the cache key, does not include Cookie). The
-    // spec's `Accept` / `Accept-Language` allowlist is documented but
-    // unused by any route -- no Vary on content negotiation, no i18n --
-    // so the managed policy is correct. Switching to a custom policy is
-    // a follow-on if a route is added that varies on those headers.
+    // Default behavior uses a custom policy (`defaultRscCache`) that
+    // mirrors `Managed-CachingOptimized` (URL-keyed, Accept-Encoding in
+    // the cache key, no Cookie) but additionally keys on the Next.js App
+    // Router RSC headers -- see the policy below for why. The spec's
+    // `Accept` / `Accept-Language` allowlist is documented but unused by
+    // any route (no Vary on content negotiation, no i18n) so it is left
+    // out of the key.
     //
     // Uncacheable behaviors use `Managed-CachingDisabled` plus
     // `Managed-AllViewer` so writer / SSO / mutating routes get the
     // full request (cookies, query strings, headers) at the origin.
     // ------------------------------------------------------------------
-    const cachingOptimized = cloudfront.CachePolicy.CACHING_OPTIMIZED;
     const cachingDisabled = cloudfront.CachePolicy.CACHING_DISABLED;
     const allViewer = cloudfront.OriginRequestPolicy.ALL_VIEWER;
+
+    // Next.js App Router serves two representations at the SAME URL: the
+    // full HTML document (a hard navigation / refresh) and the React
+    // Flight payload (a soft navigation -- a `<Link>` click), told apart
+    // only by the `RSC` request header (`Next-Router-Prefetch` additionally
+    // marks a prefetch). A URL-only cache key (Managed-CachingOptimized)
+    // caches whichever it sees first and serves it to both: a soft
+    // navigation then receives a `text/html` body the client router cannot
+    // apply, so the click silently does nothing (e.g. the "About these
+    // disclosures" cross-page link). Keying on these two headers -- and
+    // CloudFront forwards cache-key headers to the origin, so the app
+    // returns the matching representation -- splits the cache into at most
+    // three variants per URL: document, navigation flight, prefetch flight.
+    // We deliberately do NOT key on `Next-Router-State-Tree` / `Next-Url`:
+    // they vary per navigation context and would all but eliminate edge
+    // cacheability of the static pages.
+    const rscCacheKeyHeaders = ["RSC", "Next-Router-Prefetch"];
+    const defaultRscCache = new cloudfront.CachePolicy(this, "DefaultRscCache", {
+      cachePolicyName: `sps-default-rsc-${env}`,
+      comment: `SPS default cache (${env}) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.`,
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
+        ...rscCacheKeyHeaders,
+      ),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      // Mirror Managed-CachingOptimized TTLs (1s / 1d / 1y).
+      minTtl: Duration.seconds(1),
+      defaultTtl: Duration.days(1),
+      maxTtl: Duration.days(365),
+    });
 
     // Each entry: [pathPattern, allowedMethods]. Order matters because
     // CloudFront evaluates path patterns top-down -- specific must
@@ -215,6 +255,13 @@ export class EdgeStack extends Stack {
     // forwards the full request.
     const uncacheableBehaviors: ReadonlyArray<[string, cloudfront.AllowedMethods]> = [
       ["/api/edit*", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/impersonation*` (#637 "View as"): the start/stop POST + DELETE and
+      // the `?q=&kind=` candidates GET all need cookies + the query string
+      // forwarded and the non-GET methods allowed. Same shape as `/api/edit*`,
+      // placed right after it so the #490/#624 query-strip and the POST-403
+      // edge guards both stay satisfied. No public route begins with
+      // "impersonation", so the broad glob is safe.
+      ["/api/impersonation*", cloudfront.AllowedMethods.ALLOW_ALL],
       // `/edit*`, NOT `/edit/*`: the bare `/edit` self-editor route must also
       // forward cookies. `/edit/*` does not match `/edit` (no trailing slash),
       // so a bare `/edit` request falls to the cacheable default behavior, which
@@ -226,7 +273,26 @@ export class EdgeStack extends Stack {
       ["/api/revalidate*", cloudfront.AllowedMethods.ALLOW_ALL],
       ["/api/health/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       ["/api/analytics", cloudfront.AllowedMethods.ALLOW_ALL],
-      ["/api/export/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/api/export/*` -- the publications export (`/api/export/publications/
+      // <granularity>`) is a POST handler (large filter body), `force-dynamic`,
+      // `Cache-Control: no-store`. ALLOW_ALL, not GET-only: the GET-only form
+      // 403'd the POST at the edge so the export never worked through
+      // CloudFront. CachingDisabled still prevents any caching.
+      ["/api/export/*", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/csp-report` -- the CSP `report-uri` / `report-to` collector
+      // (lib/security-headers.ts). Browsers POST violation reports here; the
+      // cacheable default allows only GET/HEAD/OPTIONS, so every report was
+      // 403'd at the edge and silently dropped. ALLOW_ALL.
+      ["/api/csp-report", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/nih-resolve` -- POST batch resolver fired from profile / funding
+      // pages (lib/use-nih-resolve.ts) after first paint. Falls to the default
+      // GET-only behavior -> every resolve 403'd at the edge -> NIH award
+      // links silently fail to resolve on live profiles. ALLOW_ALL.
+      ["/api/nih-resolve", cloudfront.AllowedMethods.ALLOW_ALL],
+      // `/api/feedback/submit` -- POST from the feedback form
+      // (components/feedback/feedback-form.tsx). Same default GET-only 403;
+      // breaks feedback submission once FEEDBACK_BADGE_ENABLED is on. ALLOW_ALL.
+      ["/api/feedback/submit", cloudfront.AllowedMethods.ALLOW_ALL],
       // `/api/search*` (covers `/api/search` AND `/api/search/suggest`): the
       // search API is a query-string-dependent dynamic GET (`export const
       // dynamic = "force-dynamic"`). Without an explicit behavior it falls to
@@ -237,15 +303,142 @@ export class EdgeStack extends Stack {
       // query. CachingDisabled + AllViewer forwards the full query string and
       // never caches, matching the other dynamic GET routes above.
       ["/api/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/search*` -- the user-facing search PAGE (SSR, `force-dynamic`). Same
+      // failure mode as `/api/search*` but it was never given an explicit
+      // behavior, so the page falls to the cacheable default whose
+      // Managed-CachingOptimized policy excludes the query string from the cache
+      // key: CloudFront strips `?q` before the origin (the page renders the
+      // query-less "browse all" default -- all ~8,937 people, with an empty
+      // search box) AND caches that one response for every query (#624).
+      // CachingDisabled + AllViewer forwards the full query string and never
+      // caches; #632 already made the origin render sub-0.5s so there is no
+      // caching benefit to preserve.
+      ["/search*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+
+      // ----------------------------------------------------------------
+      // #634 Group A -- query-string-dependent DYNAMIC routes that must
+      // NEVER cache (same treatment as `/api/search*` / `/search*`).
+      // Each reads `searchParams` at a `force-dynamic` origin; without an
+      // explicit behavior they fall to the cacheable default whose
+      // Managed-CachingOptimized policy strips the query string (#490/#624
+      // root cause) AND caches one query-less response for everyone.
+      // CachingDisabled + AllViewer forwards the full request (cookies +
+      // query string + headers) and never caches. All are GET-only; their
+      // form POSTs (where any) go to separate `/api/*` routes already
+      // covered above.
+      // ----------------------------------------------------------------
+      // SSO-gated directory typeahead -- reads `q` / `cwids` AND the session
+      // cookie, so it needs AllViewer (cookies) not just the query string.
+      ["/api/directory/people", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // RePORTER click-through proxy -- reads `cwid` / `profile_id`, 302s.
+      ["/api/nih-portfolio", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Person-popover context -- reads `surface` + `context*` params.
+      ["/api/scholars/*/popover-context", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
+      ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Feedback form page -- `force-dynamic`, reads `?from=` for contextual
+      // mode AND the session cookie to prefill; both are stripped by the
+      // cacheable default today. AllViewer restores both.
+      ["/about/feedback", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Co-pub exports -- `force-dynamic`, `Cache-Control: no-store`, read
+      // `?format=csv|docx`. Mirror the `/api/export/*` belt-and-suspenders
+      // CachingDisabled behavior. These two MUST precede the cacheable
+      // `/scholars/*` behavior below: CloudFront is first-match-wins in list
+      // order, and `/scholars/*` (a `*` glob spanning slashes) would otherwise
+      // swallow `/scholars/<slug>/co-pubs/export` and cache the download.
+      ["/scholars/*/co-pubs/export", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      ["/scholars/*/co-pubs/*/export", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+    ];
+
+    // ------------------------------------------------------------------
+    // #634 Group B -- query-keyed cache policy for CACHEABLE pages.
+    //
+    // The profile, department, center, division, and topic-scholars pages
+    // are ISR (`revalidate`) and the highest-traffic content on the site;
+    // making them CachingDisabled (Group A) would kill their edge caching.
+    // But they read `searchParams` (selector/tab/page/sort/role), so the
+    // cacheable default's Managed-CachingOptimized policy (QueryString=none)
+    // strips those params and serves one query-less response for every URL
+    // -- the #490/#624 strip, just degrading a sub-feature instead of the
+    // whole page.
+    //
+    // The fix is a custom cache policy that keeps the page cacheable but
+    // puts the query string in the cache key (so `?page=2` and `?page=3`
+    // cache separately) and forwards it to the origin. Cache-key params are
+    // always forwarded to the origin, so NO origin request policy is needed
+    // -- and crucially MUST NOT be added: AllViewer would forward cookies,
+    // fragmenting the cache per session and leaking one user's cached HTML
+    // to another (the single most important knob in cloudfront-cache-spec.md).
+    // Cookies stay stripped, exactly as on the default behavior.
+    //
+    // ALLOW-LIST, not ALL: only the params these pages actually read enter
+    // the cache key (the union across all Group B routes). Tracking params
+    // (utm_*, fbclid, gclid) are dropped, so inbound campaign links don't
+    // fragment the profile-page cache. The trade-off: a NEW param added to
+    // one of these pages must also be added here, or it is silently stripped
+    // (a narrow re-run of the #490 class the synth guard does not catch --
+    // it only checks that *some* behavior forwards the query string).
+    // ------------------------------------------------------------------
+    const queryKeyedCache = new cloudfront.CachePolicy(this, "QueryKeyedCache", {
+      cachePolicyName: `sps-query-keyed-${env}`,
+      comment: `SPS query-keyed cache (${env}) -- per-query cache key, cookies stripped (#634).`,
+      // Union of params read by the Group B pages: /scholars/* (mentees-sort),
+      // /departments/* + /centers/* + divisions (page/tab/sort),
+      // /topics/*/scholars (q/role/page).
+      queryStringBehavior: cloudfront.CacheQueryStringBehavior.allowList(
+        "mentees-sort",
+        "page",
+        "tab",
+        "sort",
+        "q",
+        "role",
+      ),
+      cookieBehavior: cloudfront.CacheCookieBehavior.none(),
+      // Key on the RSC headers too (same rationale as `defaultRscCache`) so
+      // App Router soft navigation TO a Group B page (e.g. /scholars/*)
+      // returns the Flight payload, not a cached HTML document.
+      headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
+        ...rscCacheKeyHeaders,
+      ),
+      enableAcceptEncodingGzip: true,
+      enableAcceptEncodingBrotli: true,
+      // Mirror Managed-CachingOptimized so caching behaviour is identical to
+      // the default except the query string + RSC headers now key the cache.
+      minTtl: Duration.seconds(1),
+      defaultTtl: Duration.days(1),
+      maxTtl: Duration.days(365),
+    });
+
+    // Group B path patterns (all GET-only cacheable pages). `/departments/*`
+    // (trailing-`*` prefix glob) also covers `/departments/*/divisions/*`.
+    const queryCacheablePatterns: ReadonlyArray<string> = [
+      "/scholars/*",
+      "/departments/*",
+      "/centers/*",
+      "/topics/*/scholars",
     ];
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
+    // Uncacheable (existing + #634 Group A) FIRST so the scholars-export
+    // behaviors precede the cacheable `/scholars/*` glob (first-match-wins).
     for (const [pathPattern, allowedMethods] of uncacheableBehaviors) {
       additionalBehaviors[pathPattern] = {
         origin,
         cachePolicy: cachingDisabled,
         originRequestPolicy: allViewer,
         allowedMethods,
+        responseHeadersPolicy: securityHeaders,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        compress: true,
+      };
+    }
+    // Query-keyed cacheable pages (#634 Group B): custom cache policy, NO
+    // origin request policy (cookies stay stripped).
+    for (const pathPattern of queryCacheablePatterns) {
+      additionalBehaviors[pathPattern] = {
+        origin,
+        cachePolicy: queryKeyedCache,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         responseHeadersPolicy: securityHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         compress: true,
@@ -324,8 +517,9 @@ export class EdgeStack extends Stack {
     //   stack-owned bucket.
     // - The default behavior has NO origin request policy, by design:
     //   without it CloudFront forwards only the cache-key headers
-    //   (Accept-Encoding) and never the Cookie header. Adding ALL_VIEWER
-    //   here would leak cookies onto the cacheable path.
+    //   (Accept-Encoding plus the RSC headers keyed by `defaultRscCache`)
+    //   and never the Cookie header. Adding ALL_VIEWER here would leak
+    //   cookies onto the cacheable path.
     // ------------------------------------------------------------------
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       comment: `SPS edge -- ${env}`,
@@ -335,7 +529,7 @@ export class EdgeStack extends Stack {
       webAclId: webAclArn,
       defaultBehavior: {
         origin,
-        cachePolicy: cachingOptimized,
+        cachePolicy: defaultRscCache,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
         responseHeadersPolicy: securityHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -356,6 +550,14 @@ export class EdgeStack extends Stack {
       // unaffected by this flag.
       publishAdditionalMetrics: true,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+      // Serve A records only (no AAAA). The #461 WAF allowlist is IPv4-only, so
+      // dual-stack admits no authorized client, yet any viewer on a broken-IPv6
+      // path (an address configured but black-holed -- common on enterprise
+      // nets) has its browser prefer IPv6 (RFC 6724), stall on the dead path,
+      // and never fall back -- the homepage and /api/search "spin" indefinitely.
+      // Confirmed 2026-05-31 from a WCM client: IPv4 edge 200 in <0.4s, every
+      // AAAA hung. Re-enable only once WCM IPv6 egress is verified end-to-end.
+      enableIpv6: false,
       minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
     });
 

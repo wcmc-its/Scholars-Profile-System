@@ -55,6 +55,7 @@ import {
   buildPublicationDoc,
   computePubCountBuckets,
 } from "@/lib/search-index-docs";
+import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
 import { rebuildAliasedIndex } from "./alias-swap";
 
 // Rebuilds happen via the alias-swap pattern (B18, #117) -- see
@@ -79,8 +80,8 @@ async function bulkIndex(
   client: ReturnType<typeof searchClient>,
   body: Record<string, unknown>[],
   label: string,
+  maxAttempts = resolveBulkConfig().maxAttempts,
 ): Promise<void> {
-  const MAX_ATTEMPTS = 6;
   for (let attempt = 0; ; attempt++) {
     const backoff = () =>
       new Promise((r) => setTimeout(r, Math.min(30_000, 500 * 2 ** attempt)));
@@ -91,9 +92,13 @@ async function bulkIndex(
       const status =
         (err as { meta?: { statusCode?: number } })?.meta?.statusCode ??
         (err as { statusCode?: number })?.statusCode;
-      if (status === 429 && attempt < MAX_ATTEMPTS) {
+      // #626 — retry the throttle (429) AND the gateway/unavailable family
+      // (502/503/504) a small overwhelmed node returns through its ELB, instead
+      // of aborting the whole rebuild on the first hiccup. Chunks are idempotent
+      // (explicit `_id`s), so re-sending after a backoff is safe.
+      if (isRetryableBulkStatus(status) && attempt < maxAttempts) {
         console.log(
-          `  ...429 on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+          `  ...retryable ${status} on ${label} bulk; backing off (attempt ${attempt + 1}/${maxAttempts})`,
         );
         await backoff();
         continue;
@@ -105,23 +110,24 @@ async function bulkIndex(
         index?: { status?: number; error?: unknown };
       }>;
       const hardError = items.find(
-        (it) => it.index?.error && it.index?.status !== 429,
+        (it) => it.index?.error && !isRetryableBulkStatus(it.index?.status),
       );
       if (hardError) {
         throw new Error(
           `${label} bulk indexing had errors: ${JSON.stringify(hardError, null, 2)}`,
         );
       }
-      // Only 429s remain — retry the whole (idempotent) chunk.
-      if (attempt < MAX_ATTEMPTS) {
+      // Only retryable (429) per-item statuses remain — retry the whole
+      // (idempotent) chunk.
+      if (attempt < maxAttempts) {
         console.log(
-          `  ...429 (per-item) on ${label} bulk; backing off (attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+          `  ...retryable (per-item) on ${label} bulk; backing off (attempt ${attempt + 1}/${maxAttempts})`,
         );
         await backoff();
         continue;
       }
       throw new Error(
-        `${label} bulk indexing throttled (429) after ${MAX_ATTEMPTS} retries`,
+        `${label} bulk indexing throttled after ${maxAttempts} retries`,
       );
     }
     return;
@@ -139,20 +145,24 @@ async function bulkIndexDocs(
   items: Array<{ id: string; doc: Record<string, unknown> }>,
   label: string,
 ): Promise<void> {
-  const MAX_BYTES = 8 * 1024 * 1024; // headroom under the 10 MB hard limit
-  const MAX_DOCS = 500;
+  // #626 — tunable, gentler-by-default chunking + inter-chunk pacing so a small
+  // node can keep up; every knob is env-overridable for a well-sized prod domain.
+  const { maxBytes, maxDocs, pauseMs, maxAttempts } = resolveBulkConfig();
   let body: Record<string, unknown>[] = [];
   let bytes = 0;
   const flush = async () => {
     if (body.length === 0) return;
-    await bulkIndex(client, body, label);
+    await bulkIndex(client, body, label, maxAttempts);
     body = [];
     bytes = 0;
+    // Breathe between chunks so the node can flush its write queue before the
+    // next burst — the back-to-back original toppled a t3.small (#626).
+    if (pauseMs > 0) await new Promise((r) => setTimeout(r, pauseMs));
   };
   for (const { id, doc } of items) {
     // ~120 bytes covers the action line ({"index":{"_index":...,"_id":...}}).
     const docBytes = JSON.stringify(doc).length + 120;
-    if (body.length > 0 && (bytes + docBytes > MAX_BYTES || body.length / 2 >= MAX_DOCS)) {
+    if (body.length > 0 && (bytes + docBytes > maxBytes || body.length / 2 >= maxDocs)) {
       await flush();
     }
     body.push({ index: { _index: concreteIndex, _id: id } });

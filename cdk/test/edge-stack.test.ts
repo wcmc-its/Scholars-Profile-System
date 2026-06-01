@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { EdgeStack } from "../lib/edge-stack";
@@ -49,12 +51,189 @@ function buildEdgeStack(
 // `cdk synth`.
 const EC2_DESCRIPTION_ALLOWED = /^[a-zA-Z0-9. _\-:/()#,@[\]+=&;{}!$*]+$/;
 
+// ---------------------------------------------------------------------------
+// #490 / #624 synth-time guard.
+//
+// A Next.js route that reads the query string at the SSR origin -- a server
+// `page.tsx` awaiting `searchParams`, or a `route.ts` reading it -- MUST have a
+// CloudFront behavior that forwards the query string to the origin. Without one
+// it falls to the default Managed-CachingOptimized behavior (cache policy
+// QueryString=none), so CloudFront strips `?q` before the origin AND caches one
+// query-less response for every request. #490 broke `/api/search`; #624 broke
+// the `/search` page the same way. Client components using `useSearchParams()`
+// read the URL in the browser after hydration and are unaffected -- excluded.
+//
+// The Next app tree is two levels up from cdk/test/.
+const APP_DIR = path.resolve(__dirname, "../../app");
+
+// Documented backlog (#634): routes that read the query string with no
+// forwarding behavior when this guard landed. The guard RATCHETS -- a NEW
+// uncovered route fails the test. ALL 12 baseline routes were fixed in #634
+// (Group A -> CachingDisabled + AllViewer; the cacheable Group B pages ->
+// custom query-keyed cache policy), so this baseline is now EMPTY. Any route
+// that reads `searchParams` without a forwarding behavior now fails the test
+// outright. Do not re-add entries here to "unblock" a break -- give the route
+// a real behavior in edge-stack.ts instead.
+const KNOWN_UNCOVERED_QUERY_ROUTES: ReadonlySet<string> = new Set([]);
+
+// #634 Group B -- the CACHEABLE pages whose behaviors use the custom
+// query-keyed cache policy (per-query cache key, cookies stripped) instead of
+// CachingDisabled + AllViewer. Everything else among the additional behaviors
+// is uncacheable.
+const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
+  "/scholars/*",
+  "/departments/*",
+  "/centers/*",
+  "/topics/*/scholars",
+]);
+
+// The exact query-string allow-list on the custom cache policy: the union of
+// params the Group B pages read (/scholars/* -> mentees-sort; dept/center/
+// division -> page/tab/sort; topics/*/scholars -> q/role/page).
+const QUERY_KEYED_ALLOWLIST = [
+  "mentees-sort",
+  "page",
+  "tab",
+  "sort",
+  "q",
+  "role",
+] as const;
+
+/** Map an app route file to its URL path: drop the route-group `(...)` segments
+ *  and the `page`/`route` filename; collapse `[dynamic]` segments to `*`. */
+function routePatternFor(file: string): string {
+  const rel = path
+    .relative(APP_DIR, file)
+    .replace(/\\/g, "/")
+    .replace(/\/(page|route)\.(t|j)sx?$/, "");
+  const segs = rel.split("/").filter((s) => s && !/^\(.*\)$/.test(s));
+  return "/" + segs.map((s) => (/^\[.*\]$/.test(s) ? "*" : s)).join("/");
+}
+
+/** Server `page.tsx` / `route.ts` files that read `searchParams` (excluding
+ *  `'use client'` components, whose `useSearchParams()` is browser-side). */
+function findServerQueryDependentRoutes(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!/^(page|route)\.(t|j)sx?$/.test(ent.name)) continue;
+      const src = fs.readFileSync(p, "utf8");
+      if (/^\s*['"]use client['"]/m.test(src)) continue;
+      if (!/\bsearchParams\b/.test(src)) continue;
+      out.push(routePatternFor(p));
+    }
+  };
+  walk(dir);
+  return [...new Set(out)];
+}
+
+/** Server `route.ts` files exporting a MUTATING handler (POST/PUT/PATCH/
+ *  DELETE). These need a CloudFront behavior that allows the method: the
+ *  default cacheable behavior allows only GET/HEAD/OPTIONS, so an uncovered
+ *  mutating route is 403'd at the edge before the origin ever sees it. Sibling
+ *  of the query-string guard above (route handlers cannot be `'use client'`,
+ *  so no exclusion is needed). */
+function findServerMutatingRoutes(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      if (!/^route\.(t|j)sx?$/.test(ent.name)) continue;
+      const src = fs.readFileSync(p, "utf8");
+      if (!/export\s+(async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b/.test(src)) {
+        continue;
+      }
+      out.push(routePatternFor(p));
+    }
+  };
+  walk(dir);
+  return [...new Set(out)];
+}
+
+/** A CloudFront PathPattern (exact, or trailing-`*` prefix glob) covers a route. */
+function behaviorCovers(pattern: string, route: string): boolean {
+  return pattern.endsWith("*")
+    ? route.startsWith(pattern.slice(0, -1))
+    : route === pattern;
+}
+
 describe("EdgeStack", () => {
   describe("prod", () => {
     const { template } = buildEdgeStack("prod");
 
     it("matches the snapshot", () => {
       expect(template.toJSON()).toMatchSnapshot();
+    });
+
+    it("every server route reading the query string has a query-forwarding behavior (#490 / #624 guard)", () => {
+      // Sanity: we're scanning the real app tree, not silently passing on an
+      // empty walk.
+      expect(fs.existsSync(APP_DIR)).toBe(true);
+      const dist = (
+        Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>
+      ).DistributionConfig as Record<string, unknown>;
+      const behaviorPatterns = (
+        dist.CacheBehaviors as Array<Record<string, unknown>>
+      ).map((b) => b.PathPattern as string);
+
+      const routes = findServerQueryDependentRoutes(APP_DIR);
+      expect(routes.length).toBeGreaterThan(0);
+
+      // A route reading the query string that is neither forwarded by a behavior
+      // nor a documented #634 baseline entry is a new #490/#624-class break.
+      const newlyUncovered = routes.filter(
+        (r) =>
+          !KNOWN_UNCOVERED_QUERY_ROUTES.has(r) &&
+          !behaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(newlyUncovered).toEqual([]);
+
+      // Ratchet hygiene: once a baseline route gets a forwarding behavior, drop
+      // it from KNOWN_UNCOVERED. Fails loudly so the backlog can't go stale.
+      const staleBaseline = [...KNOWN_UNCOVERED_QUERY_ROUTES].filter((r) =>
+        behaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(staleBaseline).toEqual([]);
+    });
+
+    it("every server route with a mutating handler has a behavior that allows the method (POST 403 guard)", () => {
+      // Sibling of the query-string guard: a route.ts exporting POST/PUT/PATCH/
+      // DELETE that is not covered by an ALLOW_ALL behavior falls to the
+      // default cacheable behavior (GET/HEAD/OPTIONS only) and is 403'd at the
+      // edge before reaching the origin. This bit /api/csp-report,
+      // /api/nih-resolve, /api/feedback/submit, and the POST /api/export/*
+      // route (caught fixing #634).
+      expect(fs.existsSync(APP_DIR)).toBe(true);
+      const dist = (
+        Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>
+      ).DistributionConfig as Record<string, unknown>;
+      const behaviors = dist.CacheBehaviors as Array<Record<string, unknown>>;
+      // Only behaviors whose AllowedMethods include POST forward a mutation.
+      // The default behavior is GET/HEAD/OPTIONS and is intentionally excluded.
+      const postBehaviorPatterns = behaviors
+        .filter((b) => (b.AllowedMethods as string[]).includes("POST"))
+        .map((b) => b.PathPattern as string);
+
+      const mutatingRoutes = findServerMutatingRoutes(APP_DIR);
+      expect(mutatingRoutes.length).toBeGreaterThan(0);
+
+      const uncovered = mutatingRoutes.filter(
+        (r) => !postBehaviorPatterns.some((p) => behaviorCovers(p, r)),
+      );
+      expect(uncovered).toEqual([]);
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
@@ -83,65 +262,131 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus eight additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-four additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(8);
+        expect(cacheBehaviors).toHaveLength(24);
       });
 
-      it("evaluates additional behaviors in the spec-defined order (#1..#8)", () => {
+      it("evaluates additional behaviors in the spec-defined order (uncacheable first, then #634 query-keyed)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         const paths = cacheBehaviors.map((b) => b.PathPattern as string);
         expect(paths).toEqual([
+          // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
+          "/api/impersonation*",
           "/edit*",
           "/api/auth/*",
           "/api/revalidate*",
           "/api/health/*",
           "/api/analytics",
           "/api/export/*",
+          // Mutating POST routes that fell to the default GET-only behavior
+          // (-> 403 at the edge); now ALLOW_ALL.
+          "/api/csp-report",
+          "/api/nih-resolve",
+          "/api/feedback/submit",
           // `/api/search*` -- query-string-dependent dynamic GET; must not hit
           // the cacheable default (which strips `?q=` and caches). See edge-stack.ts.
           "/api/search*",
+          // `/search*` -- the search PAGE has the same query-string-strip failure
+          // mode as the API (#624); without this behavior CloudFront drops `?q`
+          // and the page renders the query-less "browse all" default for every
+          // search. See edge-stack.ts.
+          "/search*",
+          // #634 Group A -- dynamic query-string routes that must never cache.
+          "/api/directory/people",
+          "/api/nih-portfolio",
+          "/api/scholars/*/popover-context",
+          "/api/topics/*/publications",
+          "/about/feedback",
+          // The two co-pub export routes MUST precede `/scholars/*` below:
+          // CloudFront is first-match-wins in list order and `/scholars/*`
+          // (a `*` glob spanning slashes) would otherwise swallow them and
+          // cache the download.
+          "/scholars/*/co-pubs/export",
+          "/scholars/*/co-pubs/*/export",
+          // -- #634 Group B -- query-keyed CACHEABLE pages (custom policy) --
+          "/scholars/*",
+          "/departments/*",
+          "/centers/*",
+          "/topics/*/scholars",
         ]);
       });
 
-      it("default behavior uses Managed-CachingOptimized (acceptance #3)", () => {
+      it("default behavior uses the custom RSC-aware cache policy (acceptance #3)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
-        // Managed-CachingOptimized id.
-        expect(defaultBehavior.CachePolicyId).toBe(
-          "658327ea-f89d-4fab-a63d-7e88639e58f6",
-        );
+        // No longer Managed-CachingOptimized: a stack-local policy that mirrors
+        // it but keys on the RSC headers so App Router soft navigation works.
+        // CDK references it by logical id (a `Ref`); resolve `sps-default-rsc-*`.
+        const policies = template.findResources("AWS::CloudFront::CachePolicy");
+        const defaultPolicyLogicalId = Object.entries(policies).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-default-rsc-prod",
+        )?.[0];
+        expect(defaultPolicyLogicalId).toBeDefined();
+        expect(defaultBehavior.CachePolicyId).toEqual({
+          Ref: defaultPolicyLogicalId,
+        });
       });
 
-      it("all additional behaviors use Managed-CachingDisabled (acceptance #3)", () => {
+      it("uncacheable behaviors use Managed-CachingDisabled; #634 Group B uses the custom query-keyed policy (acceptance #3)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
+        // The custom cache policy is a stack-local resource; CDK references it
+        // by logical id (a `Ref`), not the managed-policy UUID. Two custom
+        // policies now exist (default RSC-aware + query-keyed); resolve the
+        // query-keyed one by name.
+        const customPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::CachePolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .CachePolicyConfig as Record<string, unknown>
+            ).Name === "sps-query-keyed-prod",
+        )?.[0];
         for (const behavior of cacheBehaviors) {
-          // Managed-CachingDisabled id.
-          expect(behavior.CachePolicyId).toBe(
-            "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-          );
+          const path = behavior.PathPattern as string;
+          if (QUERY_KEYED_PATTERNS.has(path)) {
+            // #634 Group B -- custom `sps-query-keyed-*` policy (a Ref).
+            expect(behavior.CachePolicyId).toEqual({ Ref: customPolicyLogicalId });
+          } else {
+            // Managed-CachingDisabled id.
+            expect(behavior.CachePolicyId).toBe(
+              "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+            );
+          }
         }
       });
 
-      it("all uncacheable behaviors use Managed-AllViewer origin request policy (acceptance #4)", () => {
+      it("uncacheable behaviors use Managed-AllViewer; #634 Group B has NO origin request policy (cookies stripped) (acceptance #4)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         for (const behavior of cacheBehaviors) {
-          // Managed-AllViewer id.
-          expect(behavior.OriginRequestPolicyId).toBe(
-            "216adef6-5c7f-47e4-b989-5492eafa07d3",
-          );
+          const path = behavior.PathPattern as string;
+          if (QUERY_KEYED_PATTERNS.has(path)) {
+            // Group B must NOT forward cookies -- forwarding them would
+            // fragment the cache per session on the highest-traffic pages.
+            expect(behavior.OriginRequestPolicyId).toBeUndefined();
+          } else {
+            // Managed-AllViewer id.
+            expect(behavior.OriginRequestPolicyId).toBe(
+              "216adef6-5c7f-47e4-b989-5492eafa07d3",
+            );
+          }
         }
       });
 
@@ -227,8 +472,143 @@ describe("EdgeStack", () => {
         expect(byPath.get("/api/revalidate*")).toEqual(allMethods);
         expect(byPath.get("/api/health/*")).toEqual(ghOptions);
         expect(byPath.get("/api/analytics")).toEqual(allMethods);
-        expect(byPath.get("/api/export/*")).toEqual(ghOptions);
+        // `/api/export/*` is a POST handler (publications export); ALLOW_ALL.
+        expect(byPath.get("/api/export/*")).toEqual(allMethods);
+        // Mutating POST routes that previously 403'd at the GET-only default.
+        expect(byPath.get("/api/csp-report")).toEqual(allMethods);
+        expect(byPath.get("/api/nih-resolve")).toEqual(allMethods);
+        expect(byPath.get("/api/feedback/submit")).toEqual(allMethods);
         expect(byPath.get("/api/search*")).toEqual(ghOptions);
+        expect(byPath.get("/search*")).toEqual(ghOptions);
+        // #634 -- every Group A dynamic route and Group B cacheable page is
+        // a read-only GET/HEAD/OPTIONS surface (form POSTs go to separate
+        // already-covered /api/* routes).
+        for (const p of [
+          "/api/directory/people",
+          "/api/nih-portfolio",
+          "/api/scholars/*/popover-context",
+          "/api/topics/*/publications",
+          "/about/feedback",
+          "/scholars/*/co-pubs/export",
+          "/scholars/*/co-pubs/*/export",
+          "/scholars/*",
+          "/departments/*",
+          "/centers/*",
+          "/topics/*/scholars",
+        ]) {
+          expect(byPath.get(p)).toEqual(ghOptions);
+        }
+      });
+    });
+
+    describe("#634 query-keyed cache policy (Group B)", () => {
+      const policyConfig = (): Record<string, unknown> => {
+        const policies = template.findResources(
+          "AWS::CloudFront::CachePolicy",
+        );
+        // Two custom policies now: the default RSC-aware policy and this
+        // query-keyed one. Select the query-keyed policy by name.
+        const cfgs = Object.values(policies).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const queryKeyed = cfgs.find((c) => c.Name === "sps-query-keyed-prod");
+        expect(queryKeyed).toBeDefined();
+        return queryKeyed as Record<string, unknown>;
+      };
+
+      it("synthesizes exactly one custom cache policy, env-named", () => {
+        const cfg = policyConfig();
+        expect(cfg.Name).toBe("sps-query-keyed-prod");
+      });
+
+      it("includes ONLY the allow-listed query params in the cache key (not ALL)", () => {
+        const cfg = policyConfig();
+        const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
+          string,
+          unknown
+        >;
+        const qs = params.QueryStringsConfig as Record<string, unknown>;
+        expect(qs.QueryStringBehavior).toBe("whitelist");
+        const items = (qs.QueryStrings as string[]).slice().sort();
+        expect(items).toEqual([...QUERY_KEYED_ALLOWLIST].sort());
+      });
+
+      it("does NOT key on cookies; keys on the RSC headers (soft-nav) only", () => {
+        const cfg = policyConfig();
+        const params = cfg.ParametersInCacheKeyAndForwardedToOrigin as Record<
+          string,
+          unknown
+        >;
+        const cookies = params.CookiesConfig as Record<string, unknown>;
+        const headers = params.HeadersConfig as Record<string, unknown>;
+        expect(cookies.CookieBehavior).toBe("none");
+        // RSC header keying so App Router soft navigation TO a Group B page
+        // returns the Flight payload, not a cached HTML document.
+        expect(headers.HeaderBehavior).toBe("whitelist");
+        expect((headers.Headers as string[]).slice().sort()).toEqual(
+          ["Next-Router-Prefetch", "RSC"].sort(),
+        );
+        // Accept-Encoding negotiation stays on so gzip/br are served.
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
+        const cfg = policyConfig();
+        expect(cfg.MinTTL).toBe(1);
+        expect(cfg.DefaultTTL).toBe(86400);
+        expect(cfg.MaxTTL).toBe(31536000);
+      });
+    });
+
+    describe("default RSC-aware cache policy (App Router soft navigation)", () => {
+      const defaultCacheConfig = (): Record<string, unknown> => {
+        const policies = template.findResources(
+          "AWS::CloudFront::CachePolicy",
+        );
+        const cfgs = Object.values(policies).map(
+          (e) =>
+            (e.Properties as Record<string, unknown>)
+              .CachePolicyConfig as Record<string, unknown>,
+        );
+        const def = cfgs.find((c) => c.Name === "sps-default-rsc-prod");
+        expect(def).toBeDefined();
+        return def as Record<string, unknown>;
+      };
+
+      it("synthesizes the env-named default policy alongside the query-keyed one", () => {
+        template.resourceCountIs("AWS::CloudFront::CachePolicy", 2);
+        expect(defaultCacheConfig().Name).toBe("sps-default-rsc-prod");
+      });
+
+      it("keys on the RSC headers so soft navigation returns the Flight payload", () => {
+        const params = defaultCacheConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        const headers = params.HeadersConfig as Record<string, unknown>;
+        expect(headers.HeaderBehavior).toBe("whitelist");
+        expect((headers.Headers as string[]).slice().sort()).toEqual(
+          ["Next-Router-Prefetch", "RSC"].sort(),
+        );
+      });
+
+      it("does not key on cookies or the query string (mirrors Managed-CachingOptimized)", () => {
+        const params = defaultCacheConfig()
+          .ParametersInCacheKeyAndForwardedToOrigin as Record<string, unknown>;
+        const cookies = params.CookiesConfig as Record<string, unknown>;
+        const qs = params.QueryStringsConfig as Record<string, unknown>;
+        expect(cookies.CookieBehavior).toBe("none");
+        expect(qs.QueryStringBehavior).toBe("none");
+        expect(params.EnableAcceptEncodingGzip).toBe(true);
+        expect(params.EnableAcceptEncodingBrotli).toBe(true);
+      });
+
+      it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
+        const cfg = defaultCacheConfig();
+        expect(cfg.MinTTL).toBe(1);
+        expect(cfg.DefaultTTL).toBe(86400);
+        expect(cfg.MaxTTL).toBe(31536000);
       });
     });
 

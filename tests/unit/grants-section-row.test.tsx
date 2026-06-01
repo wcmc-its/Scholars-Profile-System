@@ -6,7 +6,7 @@
  * Wave C: SponsorAbbr eyebrow with raw fall-through, "via [direct]"
  * subaward annotation, Type pill, and MechanismAbbr in award numbers.
  */
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { GrantsSection } from "@/components/profile/grants-section";
 import type { ProfilePayload } from "@/lib/api/profile";
@@ -23,6 +23,12 @@ beforeEach(() => {
       json: async () => ({ results: [] }),
     }),
   );
+});
+
+afterEach(() => {
+  // Restore the fetch stub each test so it can't leak into a later file if
+  // file isolation is ever relaxed (#660).
+  vi.unstubAllGlobals();
 });
 
 const baseGrant: Grant = {

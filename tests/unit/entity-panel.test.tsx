@@ -119,10 +119,17 @@ describe("EntityPanel — optimistic hide/show", () => {
 
     fireEvent.click(screen.getByTestId("appointment-row-a1-hide"));
 
-    await waitFor(() => expect(screen.getByText(/We couldn't hide this appointment/)).toBeTruthy());
-    // Reverted — the Hide control is back, no Show.
-    expect(screen.getByTestId("appointment-row-a1-hide")).toBeTruthy();
-    expect(screen.queryByTestId("appointment-row-a1-show")).toBeNull();
+    // The inline error AND the completed optimistic revert must both be observed
+    // in the same poll. React 19's useOptimistic revert flushes on the
+    // transition's async tail, which can land a tick after the setError re-render
+    // that shows the error — asserting the revert synchronously raced that flush
+    // (#652).
+    await waitFor(() => {
+      expect(screen.getByText(/We couldn't hide this appointment/)).toBeTruthy();
+      // Reverted — the Hide control is back, no Show.
+      expect(screen.getByTestId("appointment-row-a1-hide")).toBeTruthy();
+      expect(screen.queryByTestId("appointment-row-a1-show")).toBeNull();
+    });
   });
 });
 

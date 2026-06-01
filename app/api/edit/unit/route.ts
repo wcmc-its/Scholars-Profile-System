@@ -76,11 +76,11 @@ const CENTER_STRUCTURAL_FIELDS: ReadonlySet<CenterUpdateField> = new Set([
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, body, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   const { op } = body;
-  if (op === "create") return handleCreate(session, body, requestId);
-  if (op === "update") return handleUpdate(session, body, requestId);
+  if (op === "create") return handleCreate(session, realCwid, impersonatedCwid, body, requestId);
+  if (op === "update") return handleUpdate(session, realCwid, impersonatedCwid, body, requestId);
   return editError(400, "invalid_op", "op");
 }
 
@@ -90,6 +90,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 async function handleCreate(
   session: { cwid: string; isSuperuser: boolean },
+  realCwid: string,
+  impersonatedCwid: string | null,
   body: Record<string, unknown>,
   requestId: string | null,
 ): Promise<NextResponse> {
@@ -124,6 +126,8 @@ async function handleCreate(
   if (unitType === "center") {
     return createInformalCenter({
       session,
+      realCwid,
+      impersonatedCwid,
       requestId,
       name: nameResult.value,
       slug: slugResult.value,
@@ -133,6 +137,8 @@ async function handleCreate(
   }
   return createCodedDivision({
     session,
+    realCwid,
+    impersonatedCwid,
     requestId,
     name: nameResult.value,
     slug: slugResult.value,
@@ -144,13 +150,16 @@ async function handleCreate(
 
 async function createInformalCenter(params: {
   session: { cwid: string; isSuperuser: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
   name: string;
   slug: string;
   deptCode: string;
   centerType: unknown;
 }): Promise<NextResponse> {
-  const { session, requestId, name, slug, deptCode, centerType } = params;
+  const { session, realCwid, impersonatedCwid, requestId, name, slug, deptCode, centerType } =
+    params;
 
   // centerType is optional; default "center". Reject anything other than the
   // allowlist so an institute (Superuser-only structural field) can't be
@@ -232,7 +241,8 @@ async function createInformalCenter(params: {
       });
       createdId = created.code;
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "center",
         targetEntityId: created.code,
         action: "unit_create",
@@ -261,6 +271,8 @@ async function createInformalCenter(params: {
 
 async function createCodedDivision(params: {
   session: { cwid: string; isSuperuser: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
   requestId: string | null;
   name: string;
   slug: string;
@@ -268,7 +280,17 @@ async function createCodedDivision(params: {
   parentDeptSlug: string;
   code: unknown;
 }): Promise<NextResponse> {
-  const { session, requestId, name, slug, deptCode, parentDeptSlug, code } = params;
+  const {
+    session,
+    realCwid,
+    impersonatedCwid,
+    requestId,
+    name,
+    slug,
+    deptCode,
+    parentDeptSlug,
+    code,
+  } = params;
 
   // Superuser-only (SPEC line 214 — structural). The check runs before the
   // code-format validation so a non-superuser cannot probe for collisions.
@@ -319,7 +341,8 @@ async function createCodedDivision(params: {
       });
       createdCode = created.code;
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "division",
         targetEntityId: created.code,
         action: "unit_create",
@@ -355,6 +378,8 @@ async function createCodedDivision(params: {
 
 async function handleUpdate(
   session: { cwid: string; isSuperuser: boolean },
+  realCwid: string,
+  impersonatedCwid: string | null,
   body: Record<string, unknown>,
   requestId: string | null,
 ): Promise<NextResponse> {
@@ -481,7 +506,8 @@ async function handleUpdate(
                 ? before?.leaderInterim
                 : before?.centerType;
       await appendAuditRow(tx, {
-        actorCwid: session.cwid,
+        actorCwid: realCwid,
+        impersonatedCwid,
         targetEntityType: "center",
         targetEntityId: entityId,
         // `field_override` action — semantic stretch for centers (no

@@ -132,7 +132,14 @@ afterEach(() => {
   document.body.style.overflow = "";
 });
 
-describe("PublicationModal — trigger + close", () => {
+// Every test below opens the modal and gates on a real-timer `waitFor` for the
+// dialog, which only mounts after a real fetch + effect + setState + createPortal.
+// Under `pool:"forks"` (maxForks:4) those waitFors can lose a CPU-contention race
+// and flake ~1/3 of full-suite runs (#652). The asyncUtilTimeout bump in
+// tests/setup.ts is the primary fix; `{ retry: 2 }` here is a scoped safety net so
+// a residual contention spike can't block the required build gate. Deliberately
+// not applied suite-wide — it must not mask genuine regressions elsewhere.
+describe("PublicationModal — trigger + close", { retry: 2 }, () => {
   it("opens when the trigger fires and shows the title", async () => {
     mockFetch(makePayload());
     renderModalHarness();
@@ -177,7 +184,7 @@ describe("PublicationModal — trigger + close", () => {
   });
 });
 
-describe("PublicationModal — content sections", () => {
+describe("PublicationModal — content sections", { retry: 2 }, () => {
   it("renders journal/year/volume in the citation context line", async () => {
     mockFetch(makePayload());
     renderModalHarness();
@@ -415,7 +422,7 @@ describe("PublicationModal — content sections", () => {
   });
 });
 
-describe("PublicationModal — Cited by section", () => {
+describe("PublicationModal — Cited by section", { retry: 2 }, () => {
   it("renders the fallback message when reciterdb returned null", async () => {
     mockFetch(
       makePayload({ citingPubs: null, citingPubsTotal: null }),
@@ -697,7 +704,7 @@ describe("PublicationModal — Cited by section", () => {
   });
 });
 
-describe("PublicationModal — error path", () => {
+describe("PublicationModal — error path", { retry: 2 }, () => {
   it("shows the error fallback when /api/publications/[pmid] errors", async () => {
     globalThis.fetch = vi.fn(async () => {
       return {

@@ -91,6 +91,20 @@ function multiMatchClause(body: Record<string, unknown>): Record<string, unknown
   return must[0];
 }
 
+// Issue #645 — every case in this file asserts the admission `bool` shape via
+// `body.query.bool`. The recency tilt (default `gentle`) wraps `body.query` in
+// a `function_score`, so pin the tilt off file-wide; its own shape is covered
+// in `search-pub-recency.test.ts`. File-level hooks run before each suite's own
+// beforeEach, and `resolvePubRecencyMode` reads the env at call time.
+const originalRecency = process.env.SEARCH_PUB_RELEVANCE_RECENCY;
+beforeEach(() => {
+  process.env.SEARCH_PUB_RELEVANCE_RECENCY = "off";
+});
+afterEach(() => {
+  if (originalRecency === undefined) delete process.env.SEARCH_PUB_RELEVANCE_RECENCY;
+  else process.env.SEARCH_PUB_RELEVANCE_RECENCY = originalRecency;
+});
+
 describe("pub-tab query shape — SEARCH_PUB_TAB_MSM", () => {
   const originalEnv = process.env.SEARCH_PUB_TAB_MSM;
 

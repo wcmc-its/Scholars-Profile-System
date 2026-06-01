@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
@@ -48,6 +47,11 @@ export function MentoringSection({
   // Not persisted (URL or storage) — purely local UI state.
   const [showAll, setShowAll] = React.useState(false);
 
+  // #640 — mentee sort is client-only local state now (was server/URL-driven,
+  // which 500'd the ISR route and was stripped at the CloudFront edge anyway).
+  // `currentSort` seeds the initial value.
+  const [sort, setSort] = React.useState<MenteeSort>(currentSort);
+
   // Escape closes whichever chip is open. We attach a single window-level
   // handler on the section rather than per chip so the listener count
   // stays at one regardless of mentee count.
@@ -71,7 +75,10 @@ export function MentoringSection({
   // class-year → copubs flatten case) may have lost its grouping context
   // entirely. Cleanly closing is better than leaking the expanded state
   // into a re-rendered grid.
-  const onSortChange = () => setExpandedCwid(null);
+  const handleSortPick = (next: MenteeSort) => {
+    setExpandedCwid(null);
+    setSort(next);
+  };
   const toggleShowAll = () => {
     setExpandedCwid(null);
     setShowAll((v) => !v);
@@ -104,18 +111,14 @@ export function MentoringSection({
   // chip's bucket would be implicit in `programName` on its subtitle
   // (already there), but the section-level grouping disappears so the
   // user sees a pure collaboration ranking.
-  if (isControlledTier && currentSort === "copubs") {
+  if (isControlledTier && sort === "copubs") {
     const visible = showAll
       ? mentees
       : mentees.slice(0, MENTORING_TRUNCATE_LIMIT);
     const hidden = mentees.length - visible.length;
     return (
       <div>
-        <MentoringSortSelector
-          currentSort={currentSort}
-          mentorSlug={mentorSlug}
-          onChange={onSortChange}
-        />
+        <MentoringSortSelector currentSort={sort} onChange={handleSortPick} />
         {/* Controlled tier (N ≥ 12) is single-column. Avoids the column-pair
             gap when a chip is expanded (#246) and reduces ping-pong scanning
             at dense profiles. */}
@@ -148,14 +151,14 @@ export function MentoringSection({
   // class-year there); re-sort within buckets so within-group order is
   // class-year-desc per SPEC §4.2 / §6.2 regardless of what the data
   // layer returned.
-  const orderedForGrouping =
-    currentSort === "copubs"
-      ? [...mentees].sort((a, b) => {
-          const byYear = menteeTerminalYear(b) - menteeTerminalYear(a);
-          if (byYear !== 0) return byYear;
-          return a.fullName.localeCompare(b.fullName);
-        })
-      : mentees;
+  // #640 — the grouped tier always orders within-bucket by terminal year
+  // (desc), independent of the data layer's order (which now always ships
+  // `copubs`). Mirrors the prior behavior where the URL sort drove this.
+  const orderedForGrouping = [...mentees].sort((a, b) => {
+    const byYear = menteeTerminalYear(b) - menteeTerminalYear(a);
+    if (byYear !== 0) return byYear;
+    return a.fullName.localeCompare(b.fullName);
+  });
   const allGroups = partitionMenteesByBucket(orderedForGrouping);
 
   // Truncation applies only at the controlled tier and only when
@@ -169,11 +172,7 @@ export function MentoringSection({
   return (
     <div>
       {isControlledTier && (
-        <MentoringSortSelector
-          currentSort={currentSort}
-          mentorSlug={mentorSlug}
-          onChange={onSortChange}
-        />
+        <MentoringSortSelector currentSort={sort} onChange={handleSortPick} />
       )}
       <div className="space-y-6">
         {truncated.visible.map((g) => (
@@ -247,18 +246,17 @@ function ShowAllToggle({
 /** Issue #201 (Slice B2) — sort selector. Custom popover-styled button to
  *  match Publications' `PositionMultiSelect` trigger so the two filters
  *  feel like the same family. Single-select; "Co-publications" is the
- *  default and stripped from the URL on selection, "Class year"
- *  serializes as `?mentees-sort=class-year`. */
+ *  default. #640 — selection is client-only local state (was a
+ *  `?mentees-sort=` URL round-trip; removed because reading the param
+ *  server-side 500'd the ISR route and the edge strips the query string
+ *  anyway). */
 function MentoringSortSelector({
   currentSort,
-  mentorSlug,
   onChange,
 }: {
   currentSort: MenteeSort;
-  mentorSlug: string;
-  onChange: () => void;
+  onChange: (next: MenteeSort) => void;
 }) {
-  const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const wrapperRef = React.useRef<HTMLDivElement | null>(null);
   const triggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -286,20 +284,9 @@ function MentoringSortSelector({
     setOpen(false);
     triggerRef.current?.focus();
     if (next === currentSort) return;
-    onChange();
-    // `router.replace` keeps the operation out of the browser's history
-    // stack — sort selection isn't a navigation the user should be able
-    // to "back" into. `scroll: false` preserves the user's scroll
-    // position; default behavior is to scroll to top, which is jarring
-    // when the Mentoring section sits well below the fold on a profile.
-    // Co-pubs is the default; strip the param so the canonical URL is
-    // restored.
-    const base = `/scholars/${mentorSlug}`;
-    if (next === "copubs") {
-      router.replace(base, { scroll: false });
-    } else {
-      router.replace(`${base}?mentees-sort=class-year`, { scroll: false });
-    }
+    // #640 — sort is local client state; no URL navigation. (The previous
+    // `?mentees-sort=` round-trip 500'd the ISR route and was edge-stripped.)
+    onChange(next);
   };
 
   const summary = currentSort === "copubs" ? "Co-publications" : "Class year";
