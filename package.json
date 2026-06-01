@@ -45,6 +45,7 @@
     "etl:jenzabar": "tsx etl/jenzabar/index.ts",
     "etl:reporter:probe": "tsx etl/reporter/mesh-probe.ts",
     "etl:reporter": "tsx etl/reporter/index.ts",
+    "etl:pubmed-retractions": "tsx etl/pubmed-retractions/index.ts",
     "etl:nsf:probe": "tsx etl/nsf/probe.ts",
     "etl:nsf": "tsx etl/nsf/index.ts",
     "etl:gates:probe": "tsx etl/gates/probe.ts",

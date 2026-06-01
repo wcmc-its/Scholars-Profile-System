@@ -593,6 +593,14 @@ export class EtlStack extends Stack {
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
       { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
+      // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
+      // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert
+      // overwrites publication_type from ReciterDB) and before SearchIndex (so
+      // the rebuilt index reflects the stamp). Re-applying nightly is how an
+      // un-retraction self-heals: Reciter restores the real type, then this step
+      // simply no longer re-stamps the PMID. external:false -- it reads public
+      // PubMed E-utilities (NAT egress), no per-source WCM secret.
+      { id: "PubMedRetractions", npmScript: "etl:pubmed-retractions", external: false },
       { id: "SearchIndexNightly", npmScript: "search:index", external: false },
       { id: "RevalidateNightly", npmScript: "etl:revalidate", external: false },
     ];
