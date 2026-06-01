@@ -858,6 +858,18 @@ export class AppStack extends Stack {
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
         FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
+        // #637 "View as" impersonation -- the global feature gate. The code
+        // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
+        // middleware.ts, the /api/impersonation* routes, the /api/auth/session
+        // probe), so the value is the literal string "true", not "on". When
+        // unset/anything-else the whole feature is dark: /api/impersonation*
+        // 404s, the switcher hides, any overlay is ignored. Requires the
+        // `/api/impersonation*` EdgeStack behavior to be deployed FIRST (else
+        // cookies/query are stripped + POST 403'd at the edge) -- both envs'
+        // Sps-Edge stacks carry it before this flips on. Initiators still gate
+        // on the live superuser-role LDAP check (R1); enabling the flag does
+        // not by itself grant anyone impersonation.
+        IMPERSONATION_ENABLED: "true",
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
