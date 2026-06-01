@@ -22,7 +22,7 @@
  * a bind failure, or a search error all resolve to "not a superuser". A
  * directory problem can never *grant* the admin tier.
  */
-import { getSuperuserConfig } from "@/lib/auth/config";
+import { getSuperuserAllowlist, getSuperuserConfig } from "@/lib/auth/config";
 import { getSession } from "@/lib/auth/session-server";
 import { DEFAULT_SEARCH_BASE, openLdap } from "@/lib/sources/ldap";
 
@@ -71,6 +71,13 @@ function logCheckFailed(cwid: string, reason: string): void {
  */
 export async function isSuperuser(cwid: string): Promise<boolean> {
   if (!cwid) return false;
+  // Interim allowlist (#443) — confers superuser WITHOUT LDAP, checked before
+  // any directory work. The SPS VPC has no route to the WCM directory yet, so
+  // the live group search below times out and fails closed; this keeps the
+  // admin tier (incl. #637 "View as") usable for a named operator set in the
+  // meantime. Matched case-insensitively. Empty/unset => no-op (the default in
+  // every env once routing lands and SCHOLARS_SUPERUSER_GROUP_CN takes over).
+  if (getSuperuserAllowlist().includes(cwid.toLowerCase())) return true;
   const { groupCn } = getSuperuserConfig();
   // Group cn not configured yet — the admin tier is dormant, not broken.
   if (!groupCn) return false;
