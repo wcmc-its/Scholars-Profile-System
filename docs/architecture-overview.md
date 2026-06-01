@@ -134,11 +134,12 @@ flowchart LR
   classDef net fill:#eef2ff,stroke:#3b5bdb,color:#222;
 ```
 
-- **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`): nightly (`ed → reciter → asms →
-  infoed → coi → search-index → revalidate`-style chain), weekly (`reciter → dynamodb →
-  spotlight → search-index → revalidate`), annual (`hierarchy` + manual approval gate).
-  Step Functions enforces ordering (`reciter` cascades into `dynamodb`) and short-circuits
-  on failure.
+- **Cadences** (`PRODUCTION_ADDENDUM.md § EtlStack`; authoritative step lists in
+  `cdk/lib/etl-stack.ts`): nightly (`ed → reciter → asms → infoed → coi → dynamodb →
+  mesh-coverage → search-index → revalidate`), weekly (`completeness → spotlight →
+  reporter → nsf → jenzabar → search-index → revalidate`), annual (`hierarchy` + manual
+  approval gate). Step Functions enforces ordering (`reciter` cascades into `dynamodb`
+  within the nightly run) and short-circuits on failure.
 - Each source maps to a connector in [`lib/sources/`](../lib/sources/); the full list of
   upstreams and what fails if each is down is in
   [`dependency-outage-matrix.md`](./dependency-outage-matrix.md).

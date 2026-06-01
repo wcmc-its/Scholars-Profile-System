@@ -72,20 +72,20 @@ Step Functions alarms.
 | **InfoEd** (MS SQL) | [`lib/sources/mssql-infoed.ts`](../lib/sources/mssql-infoed.ts) | nightly | `Grant` (funding) | Funding section stops updating; existing grants still render. |
 | **COI Portal** (MySQL) | [`lib/sources/mysql-coi.ts`](../lib/sources/mysql-coi.ts) | nightly | `CoiActivity` (disclosures) | Disclosures stop updating. |
 | **ASMS** (MS SQL) | [`lib/sources/mssql-asms.ts`](../lib/sources/mssql-asms.ts) | nightly | `Education` | Education/training entries stop updating. |
-| **Jenzabar** (MS SQL) | [`lib/sources/mssql-jenzabar.ts`](../lib/sources/mssql-jenzabar.ts) | (per spec) | `PhdMentorRelationship`, GS faculty | Graduate-school mentoring chips stop updating. See [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md). |
-| **ReciterDB** (MariaDB) | [`lib/sources/reciterdb.ts`](../lib/sources/reciterdb.ts) | weekly | `Publication`, `PublicationAuthor`, MeSH terms, abstracts, citation counts | Publications stop updating. **This is the heavy job (~5 min) and it cascades** — it `deleteMany`s `Publication` and the `dynamodb` step must follow it (see consistency window below). |
-| **ReciterAI** (DynamoDB + S3) | [`etl/dynamodb`](../etl/dynamodb/), [`etl/spotlight`](../etl/spotlight/), [`etl/hierarchy`](../etl/hierarchy/) | weekly / annual | `Topic`, `PublicationTopic`, `PublicationScore`, `Spotlight`, `Subtopic`, impact scores, synopses | Topics, the home-page "Selected research" spotlight, and relevance signals stop updating. See [`spotlight-runbook.md`](./spotlight-runbook.md). |
-| **NIH RePORTER** (`api.reporter.nih.gov`) | [`etl/reporter`](../etl/reporter/), [`etl/nih-profile`](../etl/nih-profile/), [`lib/nih-reporter.ts`](../lib/nih-reporter.ts) | nightly/weekly | Grant abstracts, keywords, RePORTER PI profile links, `appl_id` deep-links | Grant enrichment stops updating; grants still render with InfoEd data. |
-| **NSF Awards API** (`api.nsf.gov`) | [`etl/nsf`](../etl/nsf/) | (per spec) | Grant abstracts for NSF awards | NSF abstract enrichment stops. |
+| **Jenzabar** (MS SQL) | [`lib/sources/mssql-jenzabar.ts`](../lib/sources/mssql-jenzabar.ts) | weekly | `PhdMentorRelationship`, GS faculty | Graduate-school mentoring chips stop updating. See [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md). |
+| **ReciterDB** (MariaDB) | [`lib/sources/reciterdb.ts`](../lib/sources/reciterdb.ts) | nightly | `Publication`, `PublicationAuthor`, MeSH terms, abstracts, citation counts | Publications stop updating. **This is the heavy job (~5 min) and it cascades** — it `deleteMany`s `Publication` and the `dynamodb` step must follow it (see consistency window below). |
+| **ReciterAI** (DynamoDB + S3) | [`etl/dynamodb`](../etl/dynamodb/), [`etl/spotlight`](../etl/spotlight/), [`etl/hierarchy`](../etl/hierarchy/) | nightly (`dynamodb`) / weekly (`spotlight`) / annual (`hierarchy`) | `Topic`, `PublicationTopic`, `PublicationScore`, `Spotlight`, `Subtopic`, impact scores, synopses | Topics, the home-page "Selected research" spotlight, and relevance signals stop updating. See [`spotlight-runbook.md`](./spotlight-runbook.md). |
+| **NIH RePORTER** (`api.reporter.nih.gov`) | [`etl/reporter`](../etl/reporter/), [`etl/nih-profile`](../etl/nih-profile/), [`lib/nih-reporter.ts`](../lib/nih-reporter.ts) | weekly (`reporter`, #608); `nih-profile` not yet scheduled | Grant abstracts, keywords, RePORTER PI profile links, `appl_id` deep-links | Grant enrichment stops updating; grants still render with InfoEd data. |
+| **NSF Awards API** (`api.nsf.gov`) | [`etl/nsf`](../etl/nsf/) | weekly | Grant abstracts for NSF awards | NSF abstract enrichment stops. |
 | **NLM MeSH** (`nlmpubs.nlm.nih.gov`) | [`etl/mesh-descriptors`](../etl/mesh-descriptors/) | annual (NLM publishes in Nov) | `MeshDescriptor` catalog (taxonomy-aware search) | MeSH catalog stays at the last release; no user-visible effect mid-year. See [`mesh-resolver-cache`](./taxonomy-aware-search.md). |
 
 ### The one internal consistency window worth knowing
 
-`reciter` (weekly) deletes and rewrites `Publication`, cascading `PublicationTopic`. Until
-the following `dynamodb` step finishes, topic edges are missing for just-rewritten
-publications. The UI masks this with a **"topics updating" placeholder** driven by
-`EtlState.lastTopicRebuildAt` (auto-expires 30 min). This is expected behavior during the
-weekly run, not an incident. (`PRODUCTION_ADDENDUM.md § The reciter → dynamodb consistency window`.)
+`reciter` (nightly) deletes and rewrites `Publication`, cascading `PublicationTopic`. Until
+the following `dynamodb` step finishes (both run in the nightly chain), topic edges are
+missing for just-rewritten publications. The UI masks this with a **"topics updating"
+placeholder** driven by `EtlState.lastTopicRebuildAt` (auto-expires 30 min). This is
+expected behavior during the nightly run, not an incident. (`PRODUCTION_ADDENDUM.md § The reciter → dynamodb consistency window`.)
 
 ## AWS platform dependencies (supporting, not data)
 
