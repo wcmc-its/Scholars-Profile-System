@@ -58,8 +58,18 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- which the write path computes BEFORE the row exists and the id is assigned.
   `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 
-  -- WHO -- the signed-in actor's CWID (the B01 SSO session subject).
+  -- WHO -- the signed-in actor's CWID (the B01 SSO session subject). ALWAYS the
+  -- real human, even under impersonation (#637 R3 -- never the impersonated CWID).
   `actor_cwid`         VARCHAR(32)  NOT NULL,
+
+  -- ON BEHALF OF WHOM -- the target CWID a write happened on behalf of while the
+  -- actor was impersonating ("View as", #637 section 3 / R3), else NULL. The
+  -- non-repudiable actor stays `actor_cwid`; this records the impersonated
+  -- subject so an edit reads "actor, acting as target." NULL for every ordinary
+  -- (non-impersonated) write, including all rows that predate #637. Part of the
+  -- `row_hash` recipe v2 (the last positional element). VARCHAR(32) mirrors
+  -- `actor_cwid`; positioned beside it so the two attribution columns sit together.
+  `impersonated_cwid`  VARCHAR(32)  NULL,
 
   -- WHAT -- the target. #354 generalizes #102's single `scholar_cwid` to a
   -- (type, id) pair so a row can audit a publication or (publication, author)
@@ -82,8 +92,11 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- unit-curation actions: `unit_create` (a manually-owned center or a
   -- manually-created division, including informal no-code subunits);
   -- `roster_change` (add/remove a CenterMembership / DivisionMembership row);
-  -- `grant_change` (a UnitAdmin INSERT or hard-DELETE).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change') NOT NULL,
+  -- `grant_change` (a UnitAdmin INSERT or hard-DELETE). #637 adds two "View as"
+  -- session events: `impersonation_start` / `impersonation_end` (R5 -- audit
+  -- enter AND exit; `target_entity_type='scholar'`, `target_entity_id` the
+  -- impersonated CWID).
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -141,11 +154,15 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                        (org-unit curation; also extends target_entity_type
 --                         with department / division / center -- the second
 --                         MODIFY COLUMN below)
+--   #637:              + impersonation_start · impersonation_end
+--                        (View-as impersonation; also adds the
+--                         `impersonated_cwid` attribution column -- the
+--                         ADD COLUMN below)
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end')
     NOT NULL;
 
 -- target_entity_type history:
@@ -155,6 +172,14 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
     ENUM('scholar','publication','grant','education','appointment','department','division','center')
     NOT NULL;
+
+-- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
+-- already-installed deploys. `CREATE TABLE IF NOT EXISTS` above carries it for
+-- fresh installs; `ADD COLUMN IF NOT EXISTS` is a no-op once present (mirrors
+-- the idempotent ENUM MODIFYs above). A table-level INSERT grant covers a new
+-- column automatically -- no grant change (confirm INSERT-only post-apply).
+ALTER TABLE `scholars_audit`.`manual_edit_audit`
+  ADD COLUMN IF NOT EXISTS `impersonated_cwid` VARCHAR(32) NULL AFTER `actor_cwid`;
 
 -- =============================================================================
 -- GRANT -- append-only for the application role.

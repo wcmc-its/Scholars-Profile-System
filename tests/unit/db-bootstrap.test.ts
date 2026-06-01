@@ -58,16 +58,19 @@ describe("granteeFromAppRwDsn", () => {
 describe("extractStatements", () => {
   it("yields exactly the audit DDL and never the commented GRANT template", () => {
     const stmts = extractStatements(AUDIT_SQL);
-    // CREATE DATABASE, CREATE TABLE, two ALTER TABLEs — and nothing else.
-    // The second ALTER is the #540 Phase 1 widening of `target_entity_type`
-    // to cover department / division / center; the first stays the `action`
-    // enum widening (now also carrying #540 Phase 1's three unit-curation
-    // actions).
-    expect(stmts).toHaveLength(4);
+    // CREATE DATABASE, CREATE TABLE, three ALTER TABLEs — and nothing else.
+    // ALTER #1 is the `action` enum widening (now also carrying #540 Phase 1's
+    // three unit-curation actions and #637's two impersonation actions); #2 is
+    // the #540 Phase 1 widening of `target_entity_type` to cover department /
+    // division / center; #3 is #637's `impersonated_cwid` ADD COLUMN.
+    expect(stmts).toHaveLength(5);
     expect(stmts[0]).toMatch(/^CREATE DATABASE IF NOT EXISTS `scholars_audit`/);
     expect(stmts[1]).toMatch(/^CREATE TABLE IF NOT EXISTS `scholars_audit`\.`manual_edit_audit`/);
     expect(stmts[2]).toMatch(/^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+MODIFY COLUMN `action`/);
     expect(stmts[3]).toMatch(/^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+MODIFY COLUMN `target_entity_type`/);
+    expect(stmts[4]).toMatch(
+      /^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+ADD COLUMN IF NOT EXISTS `impersonated_cwid`/,
+    );
     // The GRANT template at the foot is fully commented — no executable GRANT
     // statement must survive (the `'grant'` entity-type ENUM value is fine).
     expect(stmts.some((s) => /\bGRANT\s+\w+\s+ON\b/i.test(s))).toBe(false);
