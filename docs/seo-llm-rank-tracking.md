@@ -16,6 +16,18 @@ provider clients + non-determinism controls an LLM surface demands.
 > is a cheap pre-cutover baseline (§ Pre-cutover baseline) — capture it while
 > VIVO is still live, then archive.
 
+> **Hard prerequisite — scholars must be public + bot-accessible.** An LLM can
+> only cite a page its fetcher can retrieve. While `scholars.weill.cornell.edu`
+> is behind the WCM-only WAF (#502), Perplexity/OpenAI/Gemini cannot fetch it, so
+> the `new` (scholars) target is **0 by construction** in every snapshot — not a
+> bug, the firewall. Until launch, the only meaningful target is the **public
+> legacy `vivo`** host. When the WAF opens, its allowlist must admit AI fetchers
+> (GPTBot, PerplexityBot, Google-Extended, ClaudeBot, …) and search crawlers, or
+> citation rate stays pinned at zero regardless of the #171 supply-side work.
+> Same prerequisite as the GSC/SerpAPI "after"; flag on #502. So this baseline is
+> the pre-public **floor**: how invisible WCM is in AI answers today, with only
+> the legacy vivo profiles publicly fetchable.
+
 ---
 
 ## Why "rank" means three different things here
