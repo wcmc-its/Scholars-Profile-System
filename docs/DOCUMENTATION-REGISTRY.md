@@ -116,6 +116,7 @@ in **§10**.
 | Doc | Answers |
 |---|---|
 | [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) | The full upstream inventory (ED, InfoEd, COI, ASMS, Jenzabar, ReciterDB, ReciterAI, NIH/NSF/NLM) — connector, cadence, and outage impact for each. |
+| [`cdk/lib/etl-stack.ts`](../cdk/lib/etl-stack.ts) | **Source of truth for the ETL cadence** — the `nightlySteps` / `weeklySteps` / `annualSteps` arrays + EventBridge crons. The cadence prose in `dependency-outage-matrix.md`, `PRODUCTION_ADDENDUM.md § State machines`, and `architecture-overview.md` must be reconciled against this file whenever the schedule changes. |
 | [`data-dictionary.md`](./data-dictionary.md) | The public data model: every table grouped by domain, with its source of record and what its fields mean. |
 | [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) | The runtime/ETL relationship — the backbone of how data lands and is read. |
 | [`ADR-002`](./ADR-002-division-chiefs.md) | How `Division.chiefCwid` is populated. |
