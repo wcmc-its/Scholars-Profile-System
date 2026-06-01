@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterAll } from "vitest";
 import { sealData } from "iron-session";
 import {
   createSessionCookie,
@@ -9,7 +9,11 @@ import {
 // getSessionConfig() reads this lazily at call time, so setting it here is
 // enough — no need to set it before the imports above.
 const SECRET = "test-session-secret-0123456789-0123456789";
-process.env.SESSION_COOKIE_SECRET = SECRET;
+vi.stubEnv("SESSION_COOKIE_SECRET", SECRET);
+
+// Restore the env so it can't leak into a later file if isolation is ever
+// relaxed (#660).
+afterAll(() => vi.unstubAllEnvs());
 
 describe("createSessionCookie / readSessionValue", () => {
   it("round-trips a session for a CWID", async () => {
