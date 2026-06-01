@@ -212,6 +212,13 @@ export async function GET(request: NextRequest) {
         // §6.2 — chip-engaged narrow-mode opt-in. True when `?mesh=strict`
         // present (and `?mesh=off` absent).
         meshStrict,
+        // Issue #645 — recency tilt on the Relevance sort. `recencyMode` is the
+        // resolved SEARCH_PUB_RELEVANCE_RECENCY value; `recencyOriginYear` is
+        // the gauss origin actually used (null when the tilt wasn't applied —
+        // mode off, or an explicit non-relevance sort). Lets the retro plot
+        // rank-position-vs-year and confirm the tilt fired with the right origin.
+        recencyMode: result.recencyMode,
+        recencyOriginYear: result.recencyOriginYear,
         // SPEC §7.5 — split-scope latency. `taxonomyMatchMs` is the resolver
         // alone; `searchLatencyMs` is the rebalance scope (body construction
         // + OpenSearch + hydration). The §3.1 (c) guardrail targets the
