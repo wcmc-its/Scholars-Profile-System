@@ -2,10 +2,8 @@ import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { ScrollRevealedSearch } from "@/components/site/scroll-revealed-search";
 import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
-import { getSession } from "@/lib/auth/session-server";
-import { db } from "@/lib/db";
 
-export async function SiteHeader({
+export function SiteHeader({
   showSearch = true,
   revealOnScrollPast,
 }: {
@@ -18,19 +16,13 @@ export async function SiteHeader({
    */
   revealOnScrollPast?: string;
 }) {
-  // #356 Phase 5 — session-aware auth slot (Sign in / AccountMenu).
-  // Lookup is opportunistic; a failure here MUST NOT 500 the page since the
-  // header renders on every public surface.
-  const session = await getSession().catch(() => null);
-  let scholar: { slug: string; preferredName: string } | null = null;
-  if (session) {
-    scholar = await db.read.scholar
-      .findUnique({
-        where: { cwid: session.cwid },
-        select: { slug: true, preferredName: true },
-      })
-      .catch(() => null);
-  }
+  // #356 Phase 5 / #640 — the auth slot (Sign in / AccountMenu) is resolved
+  // entirely client-side by <HeaderAuthSlot>, which probes /api/auth/session.
+  // The header must NOT read the session (cookies) on the server: every public
+  // surface is CloudFront-cached with the Cookie header stripped (so a server
+  // read is wrong anyway), and a server cookies() read forces statically-
+  // generated pages (e.g. /scholars/[slug]) to change "static → dynamic at
+  // runtime" and 500s them (#640).
 
   return (
     <header
@@ -75,7 +67,7 @@ export async function SiteHeader({
           <Link href="/about" className="text-sm font-medium text-white/85 transition-colors hover:text-white">
             About
           </Link>
-          <HeaderAuthSlot isAuthenticated={session !== null} scholar={scholar} />
+          <HeaderAuthSlot isAuthenticated={false} scholar={null} />
         </nav>
       </div>
     </header>
