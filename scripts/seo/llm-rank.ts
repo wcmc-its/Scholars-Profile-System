@@ -142,17 +142,25 @@ function fsSafeTimestamp(): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (i < attempts - 1) await sleep(1000 * (i + 1)); // linear backoff
+      // Transient gateway hiccups ("Gateway request failed", 429, 5xx) clear on
+      // a retry; back off linearly (2s, 4s, 6s). The SDK also retries internally.
+      if (i < attempts - 1) await sleep(2000 * (i + 1));
     }
   }
   throw lastErr;
+}
+
+/** First line of an error message, for compact per-sample failure logs. */
+function shortErr(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.split("\n")[0].slice(0, 200);
 }
 
 function usd(n: number): string {
@@ -205,10 +213,39 @@ async function main(): Promise<void> {
 
   gatewayKeyFromEnv(); // fail fast (and secret-free) if the key is missing
 
+  const capturedAt = new Date().toISOString();
+  const out = args.out ?? path.join(SNAPSHOT_DIR, `llm-rank-${fsSafeTimestamp()}.json`);
+  const runs: LlmRunMeta[] = providers.map((spec: ProviderSpec) => ({
+    provider: spec.key,
+    model: spec.model,
+    modelDate: spec.modelDate,
+    temperature: args.temperature,
+    samples: args.samples,
+    queryBasketSha: sha,
+    surface: "citation-rag",
+  }));
+
   const rows: LlmRankSnapshot["rows"] = [];
   const callTimes = new Map<string, number[]>(); // per-provider sliding-window state
   let done = 0;
+  let failedSamples = 0;
+  const failedUnits: string[] = [];
   const totalUnits = queries.length * providers.length;
+
+  // Checkpoint after every unit so a transient provider failure (or a crash)
+  // never discards a long run's accumulated work — the snapshot on disk always
+  // reflects what has completed so far.
+  const writeSnapshot = async (): Promise<void> => {
+    const snapshot: LlmRankSnapshot = {
+      capturedAt,
+      basketSource: args.queries,
+      targets,
+      runs,
+      rows,
+    };
+    await fs.mkdir(path.dirname(out), { recursive: true });
+    await fs.writeFile(out, JSON.stringify(snapshot, null, 2) + "\n", "utf8");
+  };
 
   for (const q of queries) {
     const prompt = buildPrompt(q.query);
@@ -227,48 +264,51 @@ async function main(): Promise<void> {
           times.push(Date.now());
           callTimes.set(spec.key, times);
         }
-        const answer = await withRetry(() => callProvider(spec, prompt, args.temperature));
-        const placements: SamplePlacement[] = targets.map((t) => ({
-          targetKey: t.key,
-          ...findCitationPlacement(answer.citedUrls, t.hosts, t.pathPrefix),
-        }));
-        samples.push({
-          sampleIndex: i,
-          citedUrls: answer.citedUrls,
-          placements,
-          usage: answer.usage,
-          generationId: answer.generationId,
-        });
+        // One flaky sample must not abort a 200-call run: log it, count it, and
+        // keep going. The unit still aggregates over whatever samples succeeded.
+        try {
+          const answer = await withRetry(() => callProvider(spec, prompt, args.temperature));
+          const placements: SamplePlacement[] = targets.map((t) => ({
+            targetKey: t.key,
+            ...findCitationPlacement(answer.citedUrls, t.hosts, t.pathPrefix),
+          }));
+          samples.push({
+            sampleIndex: i,
+            citedUrls: answer.citedUrls,
+            placements,
+            usage: answer.usage,
+            generationId: answer.generationId,
+          });
+        } catch (err) {
+          failedSamples++;
+          console.warn(
+            `[seo:llm-rank] sample failed (${spec.key} / ${q.id} #${i}): ${shortErr(err)}`,
+          );
+        }
         await sleep(args.delayMs);
       }
-      rows.push(aggregateSamples(q.id, q.query, q.label, spec.key, targets, samples));
       done++;
-      console.log(`[seo:llm-rank] ${done}/${totalUnits} (query × provider) units`);
+      if (samples.length > 0) {
+        rows.push(aggregateSamples(q.id, q.query, q.label, spec.key, targets, samples));
+      } else {
+        failedUnits.push(`${spec.key}/${q.id}`);
+      }
+      await writeSnapshot(); // checkpoint
+      console.log(
+        `[seo:llm-rank] ${done}/${totalUnits} units (rows=${rows.length}, failedSamples=${failedSamples})`,
+      );
     }
   }
 
-  const runs: LlmRunMeta[] = providers.map((spec: ProviderSpec) => ({
-    provider: spec.key,
-    model: spec.model,
-    modelDate: spec.modelDate,
-    temperature: args.temperature,
-    samples: args.samples,
-    queryBasketSha: sha,
-    surface: "citation-rag",
-  }));
-
-  const snapshot: LlmRankSnapshot = {
-    capturedAt: new Date().toISOString(),
-    basketSource: args.queries,
-    targets,
-    runs,
-    rows,
-  };
-
-  const out = args.out ?? path.join(SNAPSHOT_DIR, `llm-rank-${fsSafeTimestamp()}.json`);
-  await fs.mkdir(path.dirname(out), { recursive: true });
-  await fs.writeFile(out, JSON.stringify(snapshot, null, 2) + "\n", "utf8");
+  await writeSnapshot();
   console.log(`[seo:llm-rank] wrote snapshot of ${rows.length} rows to ${out}`);
+  if (failedSamples > 0 || failedUnits.length > 0) {
+    console.warn(
+      `[seo:llm-rank] WARNING: ${failedSamples} sample(s) failed after retries; ` +
+        `${failedUnits.length} unit(s) produced no data` +
+        (failedUnits.length ? `: ${failedUnits.join(", ")}` : ""),
+    );
+  }
 }
 
 main().catch((err) => {
