@@ -69,8 +69,11 @@ describe("extractStatements", () => {
     expect(stmts[2]).toMatch(/^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+MODIFY COLUMN `action`/);
     expect(stmts[3]).toMatch(/^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+MODIFY COLUMN `target_entity_type`/);
     expect(stmts[4]).toMatch(
-      /^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+ADD COLUMN IF NOT EXISTS `impersonated_cwid`/,
+      /^ALTER TABLE `scholars_audit`\.`manual_edit_audit`\s+ADD COLUMN `impersonated_cwid`/,
     );
+    // No `IF NOT EXISTS` — Aurora (MySQL 8.0) rejects it on ADD COLUMN; the
+    // runner handles re-run idempotency via the 1060 catch (test below).
+    expect(stmts[4]).not.toMatch(/ADD COLUMN IF NOT EXISTS/i);
     // The GRANT template at the foot is fully commented — no executable GRANT
     // statement must survive (the `'grant'` entity-type ENUM value is fine).
     expect(stmts.some((s) => /\bGRANT\s+\w+\s+ON\b/i.test(s))).toBe(false);
@@ -193,6 +196,49 @@ describe("bootstrap", () => {
     await expect(
       bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
     ).rejects.toThrow(/CREATE command denied/);
+  });
+
+  it("idempotent ADD COLUMN: a 1060 duplicate-column error is a no-op (re-run safe)", async () => {
+    // Aurora (MySQL 8.0) has no `ADD COLUMN IF NOT EXISTS`, so a second deploy
+    // re-runs the plain ADD COLUMN and errors 1060. The runner must swallow that
+    // one case and still complete the grant + verify (#637).
+    const verifyConn = fakeConn([
+      "GRANT INSERT ON `scholars_audit`.`manual_edit_audit` TO `sps_app`@`%`",
+    ]);
+    const conn: SqlConn = {
+      query: vi.fn(async (sql: string) => {
+        if (/ADD COLUMN/i.test(sql)) {
+          const e = new Error("Duplicate column name 'impersonated_cwid'") as Error & {
+            errno: number;
+          };
+          e.errno = 1060;
+          throw e;
+        }
+        return undefined;
+      }),
+      end: vi.fn(async () => {}),
+    };
+    await expect(
+      bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails-closed: a 1060 on a non-ADD-COLUMN statement still propagates", async () => {
+    const verifyConn = fakeConn();
+    const conn: SqlConn = {
+      query: vi.fn(async (sql: string) => {
+        if (/CREATE TABLE/i.test(sql)) {
+          const e = new Error("dup") as Error & { errno: number };
+          e.errno = 1060;
+          throw e;
+        }
+        return undefined;
+      }),
+      end: vi.fn(async () => {}),
+    };
+    await expect(
+      bootstrap(conn, { sqlText: AUDIT_SQL, grantee: "sps_app", verifyConn }),
+    ).rejects.toThrow(/dup/);
   });
 
   it("fails-closed: a non-INSERT-only verification result throws", async () => {
