@@ -22,6 +22,7 @@ import path from "node:path";
 
 import {
   fetchSerpResult,
+  findAiOverviewCitation,
   findDomainRank,
   serpApiKeyFromEnv,
   throttleWaitMs,
@@ -121,15 +122,26 @@ async function main(): Promise<void> {
       acc[q.type] = (acc[q.type] ?? 0) + 1;
       return acc;
     }, {});
-    const typeSummary = Object.entries(byType).map(([t, n]) => `${n} ${t}`).join(", ");
+    const typeSummary = Object.entries(byType)
+      .map(([t, n]) => `${n} ${t}`)
+      .join(", ");
     console.log(`[seo:track] DRY RUN — no API calls, no SERPAPI_KEY required.`);
     console.log(`  basket:   ${args.basket} (generated ${basket.generatedAt})`);
-    console.log(`  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}${t.pathPrefix ? " " + t.pathPrefix : ""}]`).join("  |  ")}`);
+    console.log(
+      `  targets:  ${basket.targets.map((t) => `${t.label} [${t.hosts.join(", ")}${t.pathPrefix ? " " + t.pathPrefix : ""}]`).join("  |  ")}`,
+    );
     console.log(`  selected: ${queries.length} queries (${typeSummary})`);
-    console.log(`  cost:     ~${queries.length} SerpAPI searches (1 per query; all targets share each search)`);
+    console.log(
+      `  cost:     ~${queries.length} SerpAPI searches (1 per query; all targets share each search)`,
+    );
+    console.log(
+      `  bonus:    Google AI Overview citations captured from the same responses (no extra searches)`,
+    );
     console.log(
       `  throttle: ${args.maxPerHour > 0 ? `<= ${args.maxPerHour}/hour` : "disabled"}` +
-        (args.maxPerHour > 0 && queries.length <= args.maxPerHour ? " (under cap — no pause this run)" : ""),
+        (args.maxPerHour > 0 && queries.length <= args.maxPerHour
+          ? " (under cap — no pause this run)"
+          : ""),
     );
     console.log(`  sample:`);
     for (const q of queries.slice(0, 8)) {
@@ -149,9 +161,27 @@ async function main(): Promise<void> {
     noCache: args.noCache,
   };
 
+  const capturedAt = new Date().toISOString();
+  const out = args.out ?? path.join(SNAPSHOT_DIR, `rank-${fsSafeTimestamp()}.json`);
   const rows: SnapshotRow[] = [];
   const callTimes: number[] = []; // sliding-window throttle state
   let done = 0;
+  const failed: string[] = [];
+
+  // Checkpoint after every query so one bad SERP (or a crash) never discards a
+  // long basket run — the snapshot on disk always reflects completed queries.
+  const writeSnapshot = async (): Promise<void> => {
+    const snapshot: RankSnapshot = {
+      capturedAt,
+      basketSource: args.basket,
+      targets: basket.targets,
+      searchDefaults: basket.searchDefaults,
+      rows,
+    };
+    await fs.mkdir(path.dirname(out), { recursive: true });
+    await fs.writeFile(out, JSON.stringify(snapshot, null, 2) + "\n", "utf8");
+  };
+
   for (const q of queries) {
     // Self-throttle so we never exceed the plan's per-hour cap. A single
     // snapshot is under the Starter cap, so this is a no-op in practice; it
@@ -164,43 +194,62 @@ async function main(): Promise<void> {
       await sleep(wait);
     }
     callTimes.push(Date.now());
-    const res = await fetchWithRetry(q.query, apiKey, searchOpts);
-    rows.push({
-      id: q.id,
-      query: q.query,
-      type: q.type,
-      topicId: q.topicId,
-      label: q.label,
-      // Carried through so single-snapshot standings can segment (flagship,
-      // matched cohort) and surface eminence covariates without the basket.
-      flagship: q.flagship,
-      matchGroup: q.matchGroup,
-      hIndex: q.hIndex,
-      academicAge: q.academicAge,
-      placements: basket.targets.map((t) => ({
+    // One failed query (transient SerpAPI error after retries) must not abort a
+    // whole basket run: log it, count it, and continue. A genuinely empty SERP
+    // is NOT an error — fetchSerpResult returns it, yielding null placements.
+    try {
+      const res = await fetchWithRetry(q.query, apiKey, searchOpts);
+      // AI Overview placement comes from the SAME response (#594 §2) — no extra
+      // SerpAPI search. `status` is block-level; per-target citation index below.
+      const aiOverviewPerTarget = basket.targets.map((t) => ({
         targetKey: t.key,
-        ...findDomainRank(res.organic_results, t.hosts, t.pathPrefix),
-      })),
-    });
+        ...findAiOverviewCitation(res.ai_overview, t.hosts, t.pathPrefix),
+      }));
+      rows.push({
+        id: q.id,
+        query: q.query,
+        type: q.type,
+        topicId: q.topicId,
+        label: q.label,
+        // Carried through so single-snapshot standings can segment (flagship,
+        // matched cohort) and surface eminence covariates without the basket.
+        flagship: q.flagship,
+        matchGroup: q.matchGroup,
+        hIndex: q.hIndex,
+        academicAge: q.academicAge,
+        placements: basket.targets.map((t) => ({
+          targetKey: t.key,
+          ...findDomainRank(res.organic_results, t.hosts, t.pathPrefix),
+        })),
+        aiOverview: {
+          status: aiOverviewPerTarget[0]?.status ?? "absent",
+          placements: aiOverviewPerTarget.map((p) => ({
+            targetKey: p.targetKey,
+            citationIndex: p.citationIndex,
+            url: p.url,
+          })),
+        },
+      });
+    } catch (err) {
+      failed.push(q.id);
+      const msg = err instanceof Error ? err.message.split("\n")[0] : String(err);
+      console.warn(`[seo:track] query failed (${q.id}): ${msg}`);
+    }
     done++;
+    await writeSnapshot(); // checkpoint
     if (done % 10 === 0 || done === queries.length) {
-      console.log(`[seo:track] ${done}/${queries.length} queries`);
+      console.log(`[seo:track] ${done}/${queries.length} queries (rows=${rows.length})`);
     }
     if (done < queries.length) await sleep(args.delayMs);
   }
 
-  const snapshot: RankSnapshot = {
-    capturedAt: new Date().toISOString(),
-    basketSource: args.basket,
-    targets: basket.targets,
-    searchDefaults: basket.searchDefaults,
-    rows,
-  };
-
-  const out = args.out ?? path.join(SNAPSHOT_DIR, `rank-${fsSafeTimestamp()}.json`);
-  await fs.mkdir(path.dirname(out), { recursive: true });
-  await fs.writeFile(out, JSON.stringify(snapshot, null, 2) + "\n", "utf8");
+  await writeSnapshot();
   console.log(`[seo:track] wrote snapshot of ${rows.length} queries to ${out}`);
+  if (failed.length) {
+    console.warn(
+      `[seo:track] WARNING: ${failed.length} query(ies) failed after retries: ${failed.join(", ")}`,
+    );
+  }
 }
 
 main().catch((err) => {

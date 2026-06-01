@@ -9,6 +9,27 @@ without an asterisk.
 > **while VIVO is still live**. Once it's gone you cannot re-measure it. Capture
 > the baseline during the pre-launch window.
 
+> **Hard prerequisite for any "after" — public + bot-accessible.** This whole
+> instrument (and the GSC, rival, and LLM-citation companions) can only measure
+> an "after" once `scholars.weill.cornell.edu` is reachable by **crawlers**, not
+> just humans. While it sits behind the WCM-only WAF (#502), Googlebot cannot
+> index it (so GSC accrues no data and SerpAPI finds no scholars URLs) and LLM
+> fetchers cannot cite it — the new-site numbers are **zero by construction**,
+> not by failure. When the WAF opens at launch, the allowlist **must** admit
+> search + AI crawlers — Googlebot/Bingbot **and** GPTBot, PerplexityBot,
+> Google-Extended, ClaudeBot, etc. A "public" launch that still bot-blocks at the
+> WAF leaves SEO _and_ AI-citation permanently at zero and nullifies the #171
+> supply-side work (JSON-LD, `sameAs`, sitemap). Flag on #502 before cutover.
+
+> **GSC capture note (observed 2026-06-01).** Exporting the `weill.cornell.edu`
+> domain property filtered to `vivo.weill.cornell.edu` over a >6-month range
+> returns a **gap** — clean daily data ~2025-05-04 → 2025-11-02, then nothing
+> until the last ~3 days, across _every_ tab (Chart, Queries, Pages), with
+> full-volume traffic on both sides. It is a GSC export/processing quirk, **not**
+> a vivo traffic or indexing loss. Treat **2025-05-04 → 2025-11-02** (≈6 contiguous
+> months: 209K clicks, 3.79M impr, avg pos 11.7, faculty-name queries at pos ~1)
+> as the documented vivo "before"; re-export later to see if GSC backfills.
+
 ---
 
 ## What it measures, and the honest caveats
@@ -17,7 +38,7 @@ without an asterisk.
 a fixed set of queries, for one or more target domains, over time.
 
 - **Topical queries are the story.** They come from the ReciterAI `topic`
-  taxonomy (e.g. *cancer genomics*, *health services research*). Movement here
+  taxonomy (e.g. _cancer genomics_, _health services research_). Movement here
   reflects whether WCM scholars surface for the research areas ReciterAI says
   they actually work in — a competitive, non-branded signal.
 - **Branded queries (`<name> weill cornell`) are a control.** They rank #1
@@ -26,17 +47,18 @@ a fixed set of queries, for one or more target domains, over time.
 
 **This is one of two complementary instruments — use both:**
 
-| Instrument | What it gives you | Cost | Caveat |
-|---|---|---|---|
-| **This tracker (SerpAPI)** | Exact position for *your* chosen query basket, on demand, for any domain | Paid per search | A point-in-time sample; positions are geolocated/de-personalized but still noisy |
-| **Google Search Console** | Google's own avg position + impressions + clicks + CTR for *all* queries that surface your pages, plus indexed-page coverage and Core Web Vitals | Free | Only covers domains you've verified; can't backfill a domain you never verified |
+| Instrument                 | What it gives you                                                                                                                                | Cost            | Caveat                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- | -------------------------------------------------------------------------------- |
+| **This tracker (SerpAPI)** | Exact position for _your_ chosen query basket, on demand, for any domain                                                                         | Paid per search | A point-in-time sample; positions are geolocated/de-personalized but still noisy |
+| **Google Search Console**  | Google's own avg position + impressions + clicks + CTR for _all_ queries that surface your pages, plus indexed-page coverage and Core Web Vitals | Free            | Only covers domains you've verified; can't backfill a domain you never verified  |
 
 Verify **both** the legacy VIVO property and `scholars.weill.cornell.edu` in GSC
 now — GSC backfills ~16 months the moment you verify, and it's the first-party
 number. This tracker is the surgical complement for a specific topical basket.
 
 ### Confounds to control for
-- **Reindex dip.** Position usually *drops* for 2–6 weeks post-migration, then
+
+- **Reindex dip.** Position usually _drops_ for 2–6 weeks post-migration, then
   recovers — provided the VIVO 301s preserve link equity (see the redirect
   machinery: `etl/vivo-redirect/`, `scripts/etl/generate-vivo-redirect-set.ts`,
   B14 middleware). Measure "after" at ~30 and ~90 days, not launch week.
@@ -46,6 +68,7 @@ number. This tracker is the surgical complement for a specific topical basket.
   re-runs are comparable. Compare equivalent seasonal windows.
 
 ### Why SerpAPI, not direct scraping
+
 Scraping Google's SERP violates its ToS and gets rate-limited/CAPTCHA'd, and the
 results are personalized. SerpAPI returns de-personalized, geolocated,
 structured results. The key is read from `SERPAPI_KEY` (in `~/.zshrc` per
@@ -97,15 +120,15 @@ before/after program (~3 snapshots ≈ 500 searches).
 
 ## Files
 
-| Path | Role | Committed? |
-|---|---|---|
-| `lib/seo/serpapi.ts` | SerpAPI client + pure SERP-parsing helpers | yes |
-| `lib/seo/rank-basket.ts` | Basket/snapshot types + diff/summary/CSV/markdown | yes |
-| `scripts/seo/build-basket.ts` | Generate the basket from the DB (`seo:basket`) | yes |
-| `scripts/seo/track-rank.ts` | Run SerpAPI, write a snapshot (`seo:track`) | yes |
-| `scripts/seo/diff-rank.ts` | Before/after report (`seo:diff`) | yes |
-| `data/seo/rank-basket.json` | The query basket (the fixed instrument) | **yes** (gitignore allowlist) |
-| `data/seo/snapshots/rank-*.json` | SerpAPI output | no (gitignored — re-derivable, can be large) |
+| Path                             | Role                                              | Committed?                                   |
+| -------------------------------- | ------------------------------------------------- | -------------------------------------------- |
+| `lib/seo/serpapi.ts`             | SerpAPI client + pure SERP-parsing helpers        | yes                                          |
+| `lib/seo/rank-basket.ts`         | Basket/snapshot types + diff/summary/CSV/markdown | yes                                          |
+| `scripts/seo/build-basket.ts`    | Generate the basket from the DB (`seo:basket`)    | yes                                          |
+| `scripts/seo/track-rank.ts`      | Run SerpAPI, write a snapshot (`seo:track`)       | yes                                          |
+| `scripts/seo/diff-rank.ts`       | Before/after report (`seo:diff`)                  | yes                                          |
+| `data/seo/rank-basket.json`      | The query basket (the fixed instrument)           | **yes** (gitignore allowlist)                |
+| `data/seo/snapshots/rank-*.json` | SerpAPI output                                    | no (gitignored — re-derivable, can be large) |
 
 ## Cost model
 
@@ -139,7 +162,7 @@ they cost **zero** extra searches.
 ## What it measures, honestly
 
 - **Share of voice, not absolute rank.** Broad expert queries (`breast cancer
-  researcher`) are nationally competitive (NCI centers, NIH, Google Scholar,
+researcher`) are nationally competitive (NCI centers, NIH, Google Scholar,
   news). No school owns #1. Report relative standings across the named schools.
 - **Profiles platform vs platform.** Scope is each school's research-profiles
   host only. `weillcornell.org` (WCM's clinical find-a-doctor site) is tracked
@@ -206,4 +229,3 @@ academic-age band so the head-to-head isolates platform SEO. The starter file
 ships with real WCM anchors and `REPLACE_ME` placeholders — **comms must
 validate the names** before the matched panel means anything; the enrich script
 skips placeholders and never invents a name.
-

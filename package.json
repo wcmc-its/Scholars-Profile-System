@@ -70,9 +70,12 @@
     "seo:track": "tsx scripts/seo/track-rank.ts",
     "seo:diff": "tsx scripts/seo/diff-rank.ts",
     "seo:standings": "tsx scripts/seo/standings-rank.ts",
-    "seo:enrich-matched": "tsx scripts/seo/enrich-matched.ts"
+    "seo:enrich-matched": "tsx scripts/seo/enrich-matched.ts",
+    "seo:llm-rank": "tsx scripts/seo/llm-rank.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.80",
+    "@ai-sdk/openai": "^3.0.67",
     "@aws-sdk/client-cloudfront": "^3.1049.0",
     "@aws-sdk/client-dynamodb": "^3.1039.0",
     "@aws-sdk/client-s3": "^3.1044.0",
@@ -102,6 +105,7 @@
     "@tiptap/extension-text": "^3.23.5",
     "@tiptap/react": "^3.23.5",
     "@vercel/otel": "^2.1.2",
+    "ai": "^6.0.193",
     "ajv": "^8.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -118,7 +122,8 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "sax": "^1.6.0",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
