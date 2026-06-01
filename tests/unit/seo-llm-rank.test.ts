@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   citedUrlsFromSources,
   findCitationPlacement,
+  isGroundingRedirect,
   wilsonInterval,
   basketSha,
   aggregateSamples,
@@ -81,6 +82,17 @@ describe("findCitationPlacement", () => {
         ["vivo.weill.cornell.edu", "vivo.med.cornell.edu"],
       ).citationIndex,
     ).toBe(1);
+  });
+});
+
+describe("isGroundingRedirect", () => {
+  it("flags Gemini Vertex AI Search grounding redirects, not real source URLs", () => {
+    expect(
+      isGroundingRedirect("https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123"),
+    ).toBe(true);
+    expect(isGroundingRedirect("https://scholars.weill.cornell.edu/jane")).toBe(false);
+    expect(isGroundingRedirect("https://www.dana-farber.org/x?utm_source=openai")).toBe(false);
+    expect(isGroundingRedirect("not a url")).toBe(false);
   });
 });
 

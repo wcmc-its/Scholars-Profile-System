@@ -18,7 +18,7 @@ import { generateText, stepCountIs, type ToolSet } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 
-import { citedUrlsFromSources, type CitedUrl } from "./llm-rank";
+import { citedUrlsFromSources, isGroundingRedirect, type CitedUrl } from "./llm-rank";
 
 /** One citation-RAG surface: a pinned model + how it is told to search. */
 export interface ProviderSpec {
@@ -97,6 +97,36 @@ export interface LlmAnswer {
   generationId: string | null;
 }
 
+/** Follow a URL's redirects and return its final URL, or the original on failure. */
+async function resolveFinalUrl(url: string, timeoutMs = 8000): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.url && res.url !== url) return res.url;
+  } catch {
+    // Resilient: a failed resolution keeps the original URL — it simply won't
+    // host-match, which is the honest outcome (better than crashing the run).
+  }
+  return url;
+}
+
+/**
+ * Resolve search-grounding redirect wrappers (Gemini's Vertex AI Search links)
+ * to their real final URLs so the pure host/path matcher sees the actual source.
+ * Spends no API credits; bounded to the cited URLs and resolved concurrently.
+ * Non-redirect URLs (Perplexity/OpenAI return real ones) pass through untouched.
+ */
+export async function resolveCitedUrls(citedUrls: CitedUrl[]): Promise<CitedUrl[]> {
+  return Promise.all(
+    citedUrls.map(async (c) =>
+      isGroundingRedirect(c.url) ? { url: await resolveFinalUrl(c.url), title: c.title } : c,
+    ),
+  );
+}
+
 /**
  * Execute one answer for `prompt` against `spec`. Network call. Tool-using
  * surfaces get a bounded `stopWhen` so the model completes the search→answer
@@ -124,7 +154,7 @@ export async function callProvider(
 
   return {
     prose: result.text,
-    citedUrls: citedUrlsFromSources(result.sources),
+    citedUrls: await resolveCitedUrls(citedUrlsFromSources(result.sources)),
     usage: result.usage
       ? {
           inputTokens: result.usage.inputTokens,

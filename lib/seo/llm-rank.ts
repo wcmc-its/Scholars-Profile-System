@@ -70,6 +70,25 @@ export function citedUrlsFromSources(
   return out;
 }
 
+/** Hosts that wrap the real source behind an opaque redirect. */
+const REDIRECT_HOSTS = new Set(["vertexaisearch.cloud.google.com"]);
+
+/**
+ * True if a cited URL is a search-grounding REDIRECT wrapper (Gemini grounding
+ * returns `vertexaisearch.cloud.google.com/grounding-api-redirect/…` links whose
+ * real destination — e.g. a WCM scholars page — is only revealed by following
+ * the 302). Such URLs MUST be resolved to their final form before host-matching,
+ * else a real citation is invisible. Pure: the resolution itself is a network
+ * call living in `llm-client.ts` (`resolveCitedUrls`).
+ */
+export function isGroundingRedirect(url: string): boolean {
+  try {
+    return REDIRECT_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Best (lowest-index) citation placement of `targets` within an ordered
  * `citedUrls` list. Mirrors `findDomainRank`: `targets` may be one host or an

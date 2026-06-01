@@ -78,6 +78,13 @@ export AI_GATEWAY_API_KEY=…        # in ~/.zshrc per project convention; never
 - **Verify the pinned model strings** in `CITATION_PROVIDERS` against the live
   gateway model list before each run — model ids roll forward. They are the
   single edit-point.
+- **Gemini grounding returns redirect URLs.** Its cited sources are opaque
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/…` links, not the real
+  domain (the source title only carries the registrable domain, e.g.
+  `weill.cornell.edu`, which can't pinpoint the scholars subdomain). The runner
+  resolves these to their final URL (`resolveCitedUrls`, network-only, no API
+  cost) before host-matching, so a WCM citation is actually detectable. A
+  redirect that fails to resolve is kept as-is and simply won't match.
 
 ---
 
