@@ -270,13 +270,21 @@ Under expanded mode, facet aggs reference the same top-level `should` clauses + 
 
 | Sort | Behavior |
 |---|---|
-| Relevance (default) | OpenSearch `_score` from the BM25 + boost layer described above |
+| Relevance (default) | OpenSearch `_score` from the BM25 + boost layer above, **multiplied by a recency tilt** (gauss decay on `year`) — see below |
 | Year (newest first) | `year` desc |
 | Citation count | `citationCount` desc |
 | Impact (flag-gated) | `impactScore` desc, tiebreak on `pmid` for paging determinism |
 | Recency (flag-gated) | `year` desc, tiebreak on `dateAddedToEntrez` desc |
 
 Impact + Recency are behind `SEARCH_PUB_TAB_IMPACT=on`. When the flag is off, the dropdown hides those options (URL `?sort=impact` falls through to relevance — no 500).
+
+**Relevance is recency-tilted (issue [#645](https://github.com/wcmc-its/Scholars-Profile-System/issues/645)).** Pure BM25 let a foundational old paper top a broad query (a c.1999 paper at the top of `q=cancer`). On the relevance path only, the query is wrapped in a `function_score` Gaussian decay on `year` (`SEARCH_PUB_RELEVANCE_RECENCY`, default `gentle`):
+
+- `gentle` (default) — `bm25 × (1 + 2·gauss(year))`, ceiling **3×**: oldest papers keep 100% of their BM25 (floored at 1×, never penalized below it), the freshest get up to 3×. Calibrated to a ≈3:1 current-vs-2001 ratio (`origin`=current year, `offset`=2, `scale`=8, `decay`=0.5). The gauss term is gated by an `exists: year` filter so a missing/null `year` stays neutral (1×) instead of reading as max freshness.
+- `strong` — `bm25 × gauss(year)`: damps old papers toward (never to) zero. Escalation lever.
+- `off` — no wrapper; pure BM25 (rollback; body byte-identical to pre-#645).
+
+The tilt is **not** a new sort option, and it differs from the **Recency** sort: Recency is hard chronological (`year desc`); recency-tilted Relevance keeps keyword match dominant and only re-orders near-peers. It applies to every relevance-sorted shape (the §1.2 keyword path and the concept_expanded / strict MeSH paths) but **only re-scores admitted docs** — it does not change admission, so it can't surface a recent paper that isn't MeSH-tagged yet (see "MeSH lag for recent papers"). Full design: `docs/search-recency-relevance-spec.md`.
 
 ---
 
@@ -307,8 +315,9 @@ The `mesh` precedence rule (`off` wins) is enforced both server-side in the rout
 | `SEARCH_PUB_TAB_CONCEPT_MODE` | `expanded` | Set to `strict` to revert to PR-3-merge admission (today's `concept_filtered` body). Set to `off` for pre-§1.6 fallback (resolution logged but not applied). |
 | `SEARCH_PUB_TAB_MSM` | `on` | Set to `off` to remove the `minimum_should_match` floor on unresolved-query multi_match. Pre-§1.2 behavior. |
 | `SEARCH_PUB_TAB_IMPACT` | `off` | Set to `on` to surface Impact + Recency sort options + display `impactScore` / `conceptImpactScore` in hit rows. |
+| `SEARCH_PUB_RELEVANCE_RECENCY` | `gentle` | Recency tilt on the Relevance sort (issue #645). `off` reverts to pure BM25 (body byte-identical to pre-#645); `strong` switches the bounded `1 + 2·gauss` multiplier for a pure-multiplicative `gauss` decay. |
 
-All three are env-flips, no redeploy required.
+All four are env-flips, no redeploy required.
 
 ---
 
@@ -331,6 +340,8 @@ Every pub-tab request emits a structured `search_query` log line with:
   "meshAnchorCount": 0,                     // length of curatedTopicAnchors (null when no resolution)
   "meshOff": false,                         // ?mesh=off
   "meshStrict": false,                      // ?mesh=strict
+  "recencyMode": "gentle",                  // #645 — off | gentle | strong (resolved)
+  "recencyOriginYear": 2026,                // gauss origin used; null when tilt not applied
   "taxonomyMatchMs": 12,                    // resolver scope only
   "searchLatencyMs": 87,                    // body construction + OpenSearch + Prisma hydration
   "ts": "2026-05-15T12:34:56.789Z"

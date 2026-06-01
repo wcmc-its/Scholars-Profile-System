@@ -64,6 +64,8 @@ Sort options: relevance (default `_score`), Last name A–Z (uses dedicated `las
 
 `best_fields` scoring (multi_match default) ensures the strongest single-field match dominates — a passing abstract mention can't outrank a direct title hit. Sort options: relevance, year (newest first), citation count.
 
+On the **relevance** sort the BM25 `_score` is multiplied by a recency tilt — a `function_score` Gaussian decay on `year` so recent work isn't buried under foundational old papers (issue #645, `SEARCH_PUB_RELEVANCE_RECENCY`, default `gentle`, ceiling 3×). Keyword match stays primary (old papers floored at 1×); explicit `year`/`citations`/`impact`/`recency` sorts are unwrapped. Mechanism + calibration: `docs/search-recency-relevance-spec.md`; pub-tab explainer: `docs/search-publications.md`.
+
 ### Grants (`searchFunding` / `scholars-funding`)
 
 `multi_match` with these boosts:

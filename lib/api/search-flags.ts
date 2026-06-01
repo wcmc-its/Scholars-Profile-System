@@ -118,3 +118,35 @@ export function resolveFundingConceptEnabled(): boolean {
 export function resolveDeptLeadershipBoost(): boolean {
   return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST !== "off";
 }
+
+export type PubRecencyMode = "off" | "gentle" | "strong";
+
+/**
+ * Issue #645 — recency tilt on the pub-tab Relevance sort. By default
+ * Relevance is pure BM25 (no recency signal), so a foundational old paper can
+ * out-score recent work on a broad query (e.g. a c.1999 paper at the top of
+ * `q=cancer`). This wraps the relevance-path query in a multiplicative
+ * `function_score` Gaussian decay on the indexed `year` field so keyword match
+ * stays primary while recent papers get a bounded lift.
+ *
+ *   `off`    — no wrapper; `body.query` byte-identical to the pre-#645 shape
+ *              (emergency rollback; also the §7.2 byte-identical target).
+ *   `gentle` — **Default.** Bounded-additive `1 + W·gauss(year)`, ceiling 3×:
+ *              oldest papers floored at 1× BM25 (never penalized below it),
+ *              freshest lifted up to 3×. Calibrated to a ≈3:1 current-vs-2001
+ *              ratio (offset 2, scale 8, decay 0.5, W=2). See
+ *              `docs/search-recency-relevance-spec.md` §5.
+ *   `strong` — pure multiplicative `gauss(year)`; damps old papers toward
+ *              (never to) zero. Escalation lever, not the default.
+ *
+ * Deliberately a separate flag from `SEARCH_PUB_TAB_*` (concept mode, MSM,
+ * impact) so it carries an independent rollback trigger. Applies only on the
+ * relevance sort path; explicit `year`/`citations`/`impact`/`recency` sorts
+ * override `_score` and are left unwrapped. An unrecognized value falls
+ * through to the `gentle` default.
+ */
+export function resolvePubRecencyMode(): PubRecencyMode {
+  const v = process.env.SEARCH_PUB_RELEVANCE_RECENCY;
+  if (v === "off" || v === "gentle" || v === "strong") return v;
+  return "gentle";
+}

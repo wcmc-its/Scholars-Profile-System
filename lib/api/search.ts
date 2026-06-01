@@ -56,7 +56,11 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
-import { resolveConceptMode } from "@/lib/api/search-flags";
+import {
+  resolveConceptMode,
+  resolvePubRecencyMode,
+  type PubRecencyMode,
+} from "@/lib/api/search-flags";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
 // to keep both names unambiguous within this module.
@@ -330,6 +334,15 @@ export type PublicationsSearchResult = {
    */
   meshDescendantSetSize: number | null;
   meshAnchorCount: number | null;
+  /**
+   * Issue #645 — recency tilt applied to this request (telemetry). The resolved
+   * `SEARCH_PUB_RELEVANCE_RECENCY` mode; `recencyOriginYear` is the gauss origin
+   * actually used, or `null` when the tilt was NOT applied (mode `off`, or an
+   * explicit non-relevance sort). Surfaced so the route log can attribute a
+   * ranking shift to the tilt and confirm the origin year (clock-seam guard).
+   */
+  recencyMode: PubRecencyMode;
+  recencyOriginYear: number | null;
   facets: {
     publicationTypes: SearchFacetBucket[];
     journals: SearchFacetBucket[];
@@ -1226,6 +1239,13 @@ export async function searchPublications(opts: {
    * the same query predicate, so the badge is identical to a full search.
    */
   countOnly?: boolean;
+  /**
+   * Issue #645 — injectable "current year" for the recency-decay origin (§7 of
+   * the spec). Defaults to `new Date().getUTCFullYear()`. Tests pass a fixed
+   * value so the emitted `gauss.year.origin` (and the §5.4 calibration) is
+   * deterministic without leaning on fake timers.
+   */
+  nowYear?: number;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -1266,6 +1286,12 @@ export async function searchPublications(opts: {
   // §1.8 ETL build.
   const useImpact =
     (process.env.SEARCH_PUB_TAB_IMPACT ?? "off") === "on";
+
+  // Issue #645 — recency tilt on the Relevance sort. Resolved here (route
+  // handler + SSR page share the resolver) so the server-rendered list and any
+  // follow-up /api/search call rank identically. Only applied on the relevance
+  // path (empty sortClause) below.
+  const recencyMode = resolvePubRecencyMode();
 
   let queryShape: PublicationsQueryShape;
   const must: Record<string, unknown>[] = [];
@@ -1603,6 +1629,10 @@ export async function searchPublications(opts: {
       queryShape,
       meshDescendantSetSize: resolution?.descendantUis.length ?? null,
       meshAnchorCount: resolution?.curatedTopicAnchors.length ?? null,
+      // §645 — count path scores nothing (size:0, unwrapped `query`), so the
+      // tilt is reported as resolved-but-not-applied.
+      recencyMode,
+      recencyOriginYear: null,
       facets: {
         publicationTypes: [],
         journals: [],
@@ -1614,6 +1644,59 @@ export async function searchPublications(opts: {
     };
   }
 
+  // Issue #645 — recency tilt. Wrap the relevance-path query in a
+  // `function_score` Gaussian decay on `year` so keyword match stays primary
+  // while recent papers get a bounded lift (§5 of the spec). Mirrors the
+  // People-tab dept-leadership wrapper (`searchPeople`, same file): wrapping the
+  // whole `query` object is shape-agnostic, so a stale paper admitted via a
+  // MeSH descendant (concept_expanded) is damped too.
+  //
+  // Applied ONLY when:
+  //   - the mode is not `off`, AND
+  //   - this is the relevance path (no explicit sort). An explicit
+  //     year/citations/impact/recency sort overrides `_score` anyway, so we
+  //     skip the wrapper to keep those bodies byte-identical and avoid paying
+  //     for scoring we'd discard.
+  // The count path above is intentionally left on the unwrapped `query`.
+  const applyRecency = recencyMode !== "off" && sortClause.length === 0;
+  const recencyOriginYear = applyRecency
+    ? opts.nowYear ?? new Date().getUTCFullYear()
+    : null;
+  // The gauss term is gated by an `exists: year` filter so a missing/null
+  // `year` (rare; `publication.year` is nullable) contributes nothing rather
+  // than OpenSearch's neutral 1.0 — under `gentle`'s additive `sum` that 1.0
+  // would otherwise read as max freshness (1 + W·1 = 3×) and float unknown-date
+  // papers to the top. With the filter, a missing-year doc falls back to the
+  // constant floor (1×) under `gentle` and to the no-function neutral (1×)
+  // under `strong`.
+  const recencyGauss = {
+    filter: { exists: { field: "year" } },
+    gauss: {
+      year: { origin: recencyOriginYear, offset: 2, scale: 8, decay: 0.5 },
+    },
+  };
+  const scoredQuery = !applyRecency
+    ? query
+    : recencyMode === "gentle"
+      ? {
+          // final = bm25 × (1 + W·gauss),  W = 2  → multiplier ∈ [1, 3]
+          function_score: {
+            query,
+            functions: [{ weight: 1 }, { ...recencyGauss, weight: 2 }],
+            score_mode: "sum",
+            boost_mode: "multiply",
+          },
+        }
+      : {
+          // `strong`: final = bm25 × gauss (no floor; damps old papers toward 0)
+          function_score: {
+            query,
+            functions: [recencyGauss],
+            score_mode: "multiply",
+            boost_mode: "multiply",
+          },
+        };
+
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
@@ -1623,7 +1706,10 @@ export async function searchPublications(opts: {
     // counts a few thousand extra docs on broad queries, but it's needed
     // for an accurate count line.
     track_total_hits: true,
-    query,
+    // §645 — `scoredQuery` is the recency-wrapped query on the relevance path,
+    // otherwise the plain `query`. Aggregations below keep using the unscored
+    // `aggBoolFor` (counts don't need scoring), so facet counts are unaffected.
+    query: scoredQuery,
     // post_filter applies all user-axis filters to hits AFTER the
     // aggregations run, so each per-facet agg can compute correct
     // excluding-self counts (see searchPeople for the rationale).
@@ -1874,6 +1960,8 @@ export async function searchPublications(opts: {
     queryShape,
     meshDescendantSetSize: resolution?.descendantUis.length ?? null,
     meshAnchorCount: resolution?.curatedTopicAnchors.length ?? null,
+    recencyMode,
+    recencyOriginYear,
     facets: {
       publicationTypes: (r.aggregations?.publicationTypes?.keys.buckets ?? []).map((b) => ({
         value: b.key,

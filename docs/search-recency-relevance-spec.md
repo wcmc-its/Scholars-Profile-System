@@ -1,6 +1,6 @@
 # SPEC — Recency-weighted Relevance (publications tab)
 
-Status: **DRAFT** — §14 decisions resolved 2026-06-01 (ship `gentle` on by default; iterate). Ready for PLAN.
+Status: **IMPLEMENTED** 2026-06-01 (#645) — shipped on by default (`gentle`); test matrix §10 green. §14 decisions resolved (ship `gentle`, iterate via the §11 levers).
 Owner: search.
 Companions: `docs/search-publications.md` (explainer), `docs/search.md` (architecture), `docs/taxonomy-aware-search.md` (the MeSH-aware SPEC this rides on top of).
 Issue: [#645](https://github.com/wcmc-its/Scholars-Profile-System/issues/645).
@@ -82,7 +82,8 @@ Recency is a **bounded lift**: oldest papers keep 100% of their BM25 (floor 1×)
     "query": { /* the existing bool, unchanged */ },
     "functions": [
       { "weight": 1 },                                    // constant floor → factor never < 1×
-      { "gauss": { "year": { "origin": 2026, "offset": 2, "scale": 8, "decay": 0.5 } },
+      { "filter": { "exists": { "field": "year" } },      // missing-year → falls to the floor (E1)
+        "gauss": { "year": { "origin": 2026, "offset": 2, "scale": 8, "decay": 0.5 } },
         "weight": 2 }                                      // W = 2.0  → ceiling (1+W) = 3×
     ],
     "score_mode": "sum",        // 1 + W·g(year)  ∈ [1, 3]
@@ -90,7 +91,7 @@ Recency is a **bounded lift**: oldest papers keep 100% of their BM25 (floor 1×)
 }}
 ```
 
-`origin: 2026` is illustrative — it is the **current year at query time**, sourced through an injectable clock (§7), not a literal.
+`origin: 2026` is illustrative — it is the **current year at query time**, sourced through an injectable clock (§7), not a literal. The gauss function carries an `exists: year` filter so a missing/null `year` contributes nothing to the `sum` (→ floor 1×) rather than OpenSearch's neutral 1.0, which under `sum` would read as max freshness (1 + 2·1 = 3×) and float unknown-date papers to the top — see §8 E1.
 
 ### 5.2 Why Gaussian (not exp / linear)
 
@@ -132,7 +133,19 @@ This ratio is between *ages*, so it holds as "now" advances: a current paper vs 
 
 ### 5.5 Escalation lever (not the default)
 
-Keep one more flag value, `strong` = pure multiplicative decay (`final = bm25 × g`, no constant floor), available as a no-redeploy lever if iteration shows `gentle` still can't move a very-high-BM25 evergreen hit. It damps old papers toward (never to) zero — more aggressive, riskier for foundational work. Off unless explicitly set.
+Keep one more flag value, `strong` = pure multiplicative decay (`final = bm25 × g`, no constant floor), available as a no-redeploy lever if iteration shows `gentle` still can't move a very-high-BM25 evergreen hit. It damps old papers toward (never to) zero — more aggressive, riskier for foundational work. Off unless explicitly set. Emitted as a single filtered gauss so missing-year stays neutral the same way it does under `gentle`:
+
+```jsonc
+{ "function_score": {
+    "query": { /* the existing bool, unchanged */ },
+    "functions": [
+      { "filter": { "exists": { "field": "year" } },
+        "gauss": { "year": { "origin": 2026, "offset": 2, "scale": 8, "decay": 0.5 } } }
+    ],
+    "score_mode": "multiply",   // single function; multiply == sum here
+    "boost_mode": "multiply"    // final = bm25 × g(year);  missing year → no function → 1×
+}}
+```
 
 ---
 
@@ -175,7 +188,7 @@ export function resolvePubRecencyMode(): PubRecencyMode {
    ```ts
    const originYear = nowYear ?? new Date().getUTCFullYear();
    ```
-   Tests set `vi.setSystemTime(new Date("2026-06-01T00:00:00Z"))` (or pass `nowYear`) so the emitted `origin: 2026` is deterministic and §5.4 is reproducible in assertions. **Do not** inline a bare `new Date().getFullYear()` at the construction site without the injection seam — it makes the body untestable and drifts the snapshot every Jan 1.
+   Tests pass `nowYear` (the implemented seam; simpler than fake timers) so the emitted `origin: 2026` is deterministic and §5.4 is reproducible in assertions. **Do not** inline a bare `new Date().getFullYear()` at the construction site without the injection seam — it makes the body untestable and drifts the snapshot every Jan 1. Implemented as an optional `nowYear?: number` param on `searchPublications`, defaulting to `new Date().getUTCFullYear()`.
 
 ---
 
@@ -183,7 +196,7 @@ export function resolvePubRecencyMode(): PubRecencyMode {
 
 | # | Case | Behavior | Why |
 |---|---|---|---|
-| E1 | `year` is `null` (rare; `year Int?`) | Decay returns **1.0** (neutral) for a missing field → 1× multiplier (BM25 unchanged). | Don't penalize unknown-date papers. Verify OpenSearch's missing-field semantics in §10; if the runtime treats missing as 0, add `"missing": <origin>` so unknown reads as "fresh-neutral", not "infinitely old". |
+| E1 | `year` is `null` (rare; `year Int?`) | The gauss carries a `filter: { exists: { field: "year" } }`, so for a missing-year doc the gauss function is **not applied**: under `gentle`'s `sum` only the constant `{weight:1}` contributes → **1×**; under `strong` no function applies → function_score neutral → **1×**. | We **don't** rely on OpenSearch's missing-field default. Under `gentle`'s `sum`, a neutral 1.0 from the decay would read as max freshness (`1 + 2·1 = 3×`) and float unknown-date papers to the top — the explicit `exists` filter forces the floor instead. Locked by test T7. |
 | E2 | `year` > origin (ahead-of-print / epub `year`, e.g. 2027 today) | Within the offset plateau (\|2026−2027\|=1 ≤ 2) → factor 1.0 → full 3×. Never penalized. | Gauss is symmetric; offset≥2 absorbs the look-ahead. |
 | E3 | sort = `year` / `citations` / `impact` / `recency` (explicit sort) | **No wrapper.** `sortClause` non-empty → `_score` overridden anyway; we also skip the `function_score` so those bodies stay byte-identical and we don't pay scoring cost. | The tilt is a property of *Relevance*, not of explicit sorts. |
 | E4 | `queryShape = concept_expanded` (admission in top-level `should`+msm:1, `must` empty) | Wrapper goes around the **whole `query`** → works unchanged; a stale paper admitted via a MeSH descendant is damped too (G4). | Wrapping `query` is shape-agnostic, like the People wrapper at `:1051`. |
@@ -202,22 +215,22 @@ export function resolvePubRecencyMode(): PubRecencyMode {
 
 ## 10. Test matrix
 
-New file `tests/unit/search-pub-recency.test.ts` (mirrors the capture-the-body harness in `search-pub-query-shape.test.ts`). All assert on the body emitted by `searchPublications` with `vi.setSystemTime` pinned to 2026-06-01.
+New file `tests/unit/search-pub-recency.test.ts` (mirrors the capture-the-body harness in `search-pub-query-shape.test.ts`). All assert on the body emitted by `searchPublications` with `nowYear: 2026` passed for a deterministic origin. **Shipped — all 9 cases green.**
 
 | # | Flag | sort | Assert |
 |---|---|---|---|
-| T0 | — | — | **Migration:** existing `search-pub-query-shape.test.ts` cases set `…=off` in setup → their `body.query.bool.*` assertions are unchanged. |
-| T1 | `off` | relevance | `body.query` has **no** `function_score`; structurally identical to pre-feature (rollback assertion). |
-| T2 | `gentle` (default) | relevance | `body.query.function_score.functions = [{weight:1}, {gauss:{year:{origin:2026,offset:2,scale:8,decay:0.5}}, weight:2}]`; `score_mode:"sum"`, `boost_mode:"multiply"`; inner `query.bool` equals the un-wrapped body. |
-| T3 | `strong` | relevance | `body.query.function_score.gauss.year` present; `boost_mode:"multiply"`; no constant-weight floor function. |
-| T4 | `gentle` | `year` | **No** `function_score` (E3); `sort:[{year:"desc"}]`. |
-| T5 | `gentle` | relevance, `countOnly` | count body uses the unwrapped `query` (E6). |
-| T6 | `gentle` | relevance, `queryShape=concept_expanded` | `function_score.query.bool` carries the `should`+`msm:1` admission unchanged (E4). |
-| T7 | `gentle` | relevance, missing-year semantics | a doc lacking `year` resolves to the neutral 1× multiplier (E1). |
-| T8 | `SEARCH_PUB_RELEVANCE_RECENCY=banana` | — | `resolvePubRecencyMode()` returns `"gentle"` (default). |
-| T9 | calibration | — | unit-assert `M(2024)/M(2001) ≈ 3` given the §5.3 constants (guards against a constant edit silently breaking the anchor). |
+| T0 | — | — | **Migration:** `search-pub-query-shape.test.ts` sets `…=off` via file-level hooks → its `body.query.bool.*` assertions are unchanged. |
+| T1 | `off` | relevance | `body.query` has **no** `function_score`; `recencyMode="off"`, `recencyOriginYear=null` (rollback assertion). |
+| T2 | `gentle` (default) | relevance | `function_score.functions = [{weight:1}, {filter:{exists:{field:"year"}}, gauss:{year:{origin:2026,offset:2,scale:8,decay:0.5}}, weight:2}]`; `score_mode:"sum"`, `boost_mode:"multiply"`; inner `query.bool` is the un-wrapped admission; `recencyOriginYear=2026`. |
+| T3 | `strong` | relevance | `function_score.functions = [{filter:{exists:{field:"year"}}, gauss:{year:{…}}}]` (single, no `{weight:1}` floor); `boost_mode:"multiply"`. |
+| T4 | `gentle` | `year` | **No** `function_score` (E3); `sort:[{year:"desc"}]`; `recencyOriginYear=null`. |
+| T5 | `gentle` | relevance, `countOnly` | count body has `size:0` and the unwrapped `query.bool` (E6). |
+| T6 | `gentle` | relevance, `queryShape=concept_expanded` | `function_score.query.bool` carries the 4-clause `should`+`msm:1` admission, no `must` (E4). |
+| T7 | `gentle` | relevance, missing-year | the gauss function carries `filter:{exists:{field:"year"}}` (E1). |
+| T8 | parsing | — | `resolvePubRecencyMode()` maps off/gentle/strong verbatim; unset and garbage → `"gentle"`. |
+| T9 | calibration | — | recompute `M` from the **emitted** gauss params: `M(2024)≈3`, `M(2024)/M(2001)≈3`, `M(1999)∈[1,1.1)` (guards against a constant edit silently breaking the anchor). |
 
-Plus a `resolvePubRecencyMode()` parsing test (off/gentle/strong/unset/garbage) alongside `search-flags.test.ts`.
+Telemetry wiring (`recencyMode` / `recencyOriginYear` on the `search_query` log line) is asserted in `tests/unit/analytics-search-log.test.ts`.
 
 ---
 
@@ -272,11 +285,11 @@ Lets the post-ship retro plot rank-position-vs-year and confirm the tilt is acti
 
 ---
 
-## 13. Doc touchpoints (update during implementation)
+## 13. Doc touchpoints (done)
 
-- `docs/search-publications.md` → **Sort options** table: change "Relevance (default)" from "pure BM25" to "BM25 × a recency tilt (gauss decay on `year`, ceiling 3×) — `SEARCH_PUB_RELEVANCE_RECENCY`, default `gentle`"; add the flag to **Rollback knobs**; add the two telemetry fields; restate the §7.2 byte-identical caveat (E5).
-- `docs/search.md` → relevance-computation section: note the recency multiplier on the pub-tab relevance path.
-- `lib/api/search-flags.ts` → the new resolver, comment block matching the house style of the surrounding resolvers.
+- ✅ `docs/search-publications.md` → **Sort options** table now notes the recency-tilted Relevance; flag added to **Rollback knobs**; `recencyMode`/`recencyOriginYear` added to the telemetry block.
+- ✅ `docs/search.md` → relevance-computation section notes the recency multiplier on the pub-tab relevance path.
+- ✅ `lib/api/search-flags.ts` → `resolvePubRecencyMode()` resolver, house-style comment block.
 
 ---
 
