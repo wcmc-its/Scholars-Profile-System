@@ -142,9 +142,9 @@ export class EtlStack extends Stack {
     //
     //  - **Shared** -- db/etl writer DSN + opensearch/etl user + the
     //    revalidate bearer the closing revalidate step posts.
-    //  - **Per-source credentials** -- the five external sources whose
+    //  - **Per-source credentials** -- the six external sources whose
     //    config loaders read granular `SCHOLARS_*` connection vars
-    //    (ed/asms/infoed/coi/reciter). Each secret's JSON keys are exactly
+    //    (ed/asms/infoed/coi/reciter/jenzabar). Each secret's JSON keys are exactly
     //    those granular var names (pinned during staging/prod bring-up); we
     //    fan each key out into its own env var below so the script reads
     //    `process.env.SCHOLARS_*` with no SDK fetch coupling (#442).
@@ -153,7 +153,7 @@ export class EtlStack extends Stack {
     // table and S3 buckets through the task role (IAM), not an injected
     // credential -- so they are deliberately absent from the consumer ARN
     // list, and their non-secret config (table name, bucket names, prefix)
-    // lives in the task `environment:` block. Eight consumer ARNs total.
+    // lives in the task `environment:` block. Nine consumer ARNs total.
     // ------------------------------------------------------------------
     const dbEtlSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -234,6 +234,21 @@ export class EtlStack extends Stack {
           "SCHOLARS_RECITERDB_DATABASE",
           "SCHOLARS_RECITERDB_USERNAME",
           "SCHOLARS_RECITERDB_PASSWORD",
+        ],
+      },
+      {
+        // #608 -- the weekly etl:jenzabar step reads PhD primary-mentor rows
+        // from the Jenzabar SQL Server via lib/sources/mssql-jenzabar.ts. The
+        // etl/hierarchy secret's legacy "Jenzabar" wording is stale (hierarchy
+        // now reads ReciterAI S3 via IAM), so Jenzabar gets its own stub.
+        constructId: "EtlSecretJenzabar",
+        secretName: `scholars/${env}/etl/jenzabar`,
+        keys: [
+          "SCHOLARS_JENZABAR_SERVER",
+          "SCHOLARS_JENZABAR_PORT",
+          "SCHOLARS_JENZABAR_DATABASE",
+          "SCHOLARS_JENZABAR_USERNAME",
+          "SCHOLARS_JENZABAR_PASSWORD",
         ],
       },
     ];
@@ -584,6 +599,20 @@ export class EtlStack extends Stack {
     const weeklySteps: ReadonlyArray<StepSpec> = [
       { id: "Completeness", npmScript: "etl:completeness", external: false },
       { id: "Spotlight", npmScript: "etl:spotlight", external: true },
+      // Grant-enrichment sources (#608). They key off the `grant` table that
+      // etl:infoed refreshes nightly; none needs 24h freshness, so they batch
+      // here weekly instead of weighting the nightly critical path. RePORTER +
+      // NSF precede search:index so the funding index carries the refreshed
+      // abstracts/keywords; Jenzabar (mentoring chips, ISR-only -- not indexed)
+      // need only precede the closing revalidate. All three are full-scan, not
+      // new-rows-only: RePORTER's grant<->publication bridge and renewal-year
+      // applId/abstract updates accrue to EXISTING grants, so a delta scan
+      // would miss them. RePORTER reads ReciterDB (etl/reciter secret), Jenzabar
+      // reads its own MSSQL credential (etl/jenzabar), and NSF hits the public
+      // NSF Awards API (no credential -- NAT egress only, so external: false).
+      { id: "ReporterWeekly", npmScript: "etl:reporter", external: true },
+      { id: "NsfWeekly", npmScript: "etl:nsf", external: false },
+      { id: "JenzabarWeekly", npmScript: "etl:jenzabar", external: true },
       { id: "SearchIndexWeekly", npmScript: "search:index", external: false },
       { id: "RevalidateWeekly", npmScript: "etl:revalidate", external: false },
     ];
