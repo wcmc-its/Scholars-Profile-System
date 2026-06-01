@@ -215,8 +215,8 @@ export class SecretsStack extends Stack {
       // in the nightly/weekly/annual Step Functions state machines that
       // calls an external system gets its own secret so credentials can
       // rotate independently. Values are populated out-of-band per the
-      // ADR-008 hard rule. The eight sources here mirror D6 in
-      // `feat-infra-phase3-etlstack.md`.
+      // ADR-008 hard rule. The nine sources here mirror D6 in
+      // `feat-infra-phase3-etlstack.md` (jenzabar added in #608).
       {
         constructId: "EtlEd",
         name: `scholars/${env}/etl/ed`,
@@ -244,6 +244,12 @@ export class SecretsStack extends Stack {
         name: `scholars/${env}/etl/reciter`,
         description:
           "SPS ETL credentials — ReciterDB MySQL connection (SCHOLARS_RECITERDB_* host/port/database/username/password).",
+      },
+      {
+        constructId: "EtlJenzabar",
+        name: `scholars/${env}/etl/jenzabar`,
+        description:
+          "SPS ETL credentials — Jenzabar SQL Server connection for the #608 weekly PhD-mentor import (SCHOLARS_JENZABAR_* server/port/database/username/password).",
       },
       {
         constructId: "EtlDynamodb",
