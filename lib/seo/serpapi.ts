@@ -77,7 +77,10 @@ const DEFAULT_ENDPOINT = "https://serpapi.com/search";
 
 /** Normalize a hostname for comparison: lowercase, strip a leading `www.`. */
 export function normalizeHost(host: string): string {
-  return host.trim().toLowerCase().replace(/^www\./, "");
+  return host
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
 }
 
 /**
@@ -205,11 +208,7 @@ export function buildRequestParams(
  * already full, returns the ms until the oldest in-window call ages out — i.e.
  * we burst up to the cap, then wait, rather than artificially spacing every call.
  */
-export function throttleWaitMs(
-  callTimestamps: number[],
-  maxPerHour: number,
-  now: number,
-): number {
+export function throttleWaitMs(callTimestamps: number[], maxPerHour: number, now: number): number {
   if (maxPerHour <= 0) return 0;
   const windowStart = now - 3_600_000;
   const inWindow = callTimestamps.filter((t) => t > windowStart).sort((a, b) => a - b);
@@ -220,9 +219,7 @@ export function throttleWaitMs(
 }
 
 /** Read the SerpAPI key from the environment, or throw a clear error. */
-export function serpApiKeyFromEnv(
-  env: Record<string, string | undefined> = process.env,
-): string {
+export function serpApiKeyFromEnv(env: Record<string, string | undefined> = process.env): string {
   const key = env.SERPAPI_KEY?.trim();
   if (!key) {
     throw new Error(
@@ -233,9 +230,22 @@ export function serpApiKeyFromEnv(
 }
 
 /**
+ * SerpAPI reports an empty SERP via the top-level `error` string (e.g. "Google
+ * hasn't returned any results for this query."), not an HTTP error. That is
+ * VALID data — the query simply has no results, so every target's position is
+ * null — not a failure. Distinguishing it from real errors (bad key, quota
+ * exhausted, malformed request) keeps one zero-result branded query from
+ * aborting a whole basket run.
+ */
+export function isNoResultsError(message: string | undefined | null): boolean {
+  return !!message && /returned any results|no results found/i.test(message);
+}
+
+/**
  * Execute one SerpAPI search. Network call. Throws on transport failure,
- * non-2xx status, or a SerpAPI-level `error` field. The key is never logged
- * (only the redacted endpoint is, by the caller, if at all).
+ * non-2xx status, or a real SerpAPI-level `error` — but a "no results" error is
+ * returned as an empty SERP, not thrown. The key is never logged (only the
+ * redacted endpoint is, by the caller, if at all).
  */
 export async function fetchSerpResult(
   query: string,
@@ -246,10 +256,12 @@ export async function fetchSerpResult(
   const params = buildRequestParams(query, apiKey, opts);
   const res = await fetch(`${endpoint}?${params.toString()}`);
   if (!res.ok) {
-    throw new Error(`SerpAPI HTTP ${res.status} ${res.statusText} for query ${JSON.stringify(query)}`);
+    throw new Error(
+      `SerpAPI HTTP ${res.status} ${res.statusText} for query ${JSON.stringify(query)}`,
+    );
   }
   const body = (await res.json()) as SerpResponse;
-  if (body.error) {
+  if (body.error && !isNoResultsError(body.error)) {
     throw new Error(`SerpAPI error for query ${JSON.stringify(query)}: ${body.error}`);
   }
   return body;

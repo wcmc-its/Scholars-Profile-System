@@ -7,6 +7,7 @@ import {
   pathMatches,
   findDomainRank,
   findAiOverviewCitation,
+  isNoResultsError,
   buildRequestParams,
   serpApiKeyFromEnv,
   throttleWaitMs,
@@ -510,6 +511,19 @@ describe("openalex parsers", () => {
     expect(pickBestAuthor(authors, { institution: "UCSF" })?.id).toBe("A2"); // institution wins over works
     expect(pickBestAuthor(authors)?.id).toBe("A1"); // no institution → most prolific
     expect(pickBestAuthor([])).toBeNull();
+  });
+});
+
+describe("isNoResultsError", () => {
+  it("treats an empty-SERP message as benign (not a real error)", () => {
+    expect(isNoResultsError("Google hasn't returned any results for this query.")).toBe(true);
+    expect(isNoResultsError("No results found for the given query")).toBe(true);
+  });
+  it("treats real errors as errors", () => {
+    expect(isNoResultsError("Your account has run out of searches.")).toBe(false);
+    expect(isNoResultsError("Invalid API key")).toBe(false);
+    expect(isNoResultsError(undefined)).toBe(false);
+    expect(isNoResultsError(null)).toBe(false);
   });
 });
 
