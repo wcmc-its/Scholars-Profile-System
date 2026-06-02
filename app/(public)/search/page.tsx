@@ -57,6 +57,7 @@ import {
 } from "@/lib/api/search-taxonomy";
 import { timed } from "@/lib/api/search-timing";
 import { prisma } from "@/lib/db";
+import { logSearchDegraded } from "@/lib/analytics/errors";
 import { formatRoleCategory } from "@/lib/role-display";
 import { displayPublicationType } from "@/lib/publication-types";
 import { expandSponsor, getSponsor, funderVerbose } from "@/lib/sponsor-lookup";
@@ -287,7 +288,14 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // Perf — badge count only; the funding tab's full result streams below.
       countOnly: true,
     }),
-  ]);
+  ]).catch((err) => {
+    // #668 §3 — an OpenSearch outage on the shell's badge-count fetch is logged
+    // as a structured, server-side `search_degraded` event before it bubbles to
+    // app/(public)/search/error.tsx (the branded degraded panel). Rethrow so the
+    // boundary renders. Query length only — never the query text.
+    logSearchDegraded({ qLen: q.length });
+    throw err;
+  });
   const searchesMs = Math.round(performance.now() - searchesStart);
 
   // Issue #274 — the concept-aware empty state (and its broad-count fallback
