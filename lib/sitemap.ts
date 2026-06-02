@@ -17,6 +17,7 @@
  * and gives one source of truth (`buildSitemapEntries`) for the shard count.
  */
 import { prisma } from "@/lib/db";
+import { canonicalProfilePath } from "@/lib/profile-url";
 
 /**
  * Maximum URLs per child sitemap. Half the 50,000-URL protocol cap, which also
@@ -97,7 +98,7 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
   ];
 
   const scholarEntries: SitemapEntry[] = scholars.map((s) => ({
-    url: `${base}/scholars/${s.slug}`,
+    url: `${base}${canonicalProfilePath(s.slug)}`,
     lastModified: s.updatedAt ?? now,
     changeFrequency: "weekly",
     priority: 0.8,

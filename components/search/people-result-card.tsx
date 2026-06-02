@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
+import { profilePath } from "@/lib/profile-url";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -125,7 +126,7 @@ export function PeopleResultCard({
 
   return (
     <Link
-      href={`/scholars/${hit.slug}`}
+      href={profilePath(hit.slug)}
       onClick={handleClick}
       className="grid grid-cols-[56px_1fr_auto] gap-4 border-b border-[#e3e2dd] py-5 no-underline hover:bg-[#fafaf8] hover:no-underline"
     >

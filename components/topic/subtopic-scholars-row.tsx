@@ -22,6 +22,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { profilePath } from "@/lib/profile-url";
 import type { SubtopicScholarRowData } from "@/lib/api/topics";
 
 const INLINE_CAP = 10;
@@ -130,7 +131,7 @@ function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
   return (
     <span className="group relative inline-block">
       <a
-        href={`/scholars/${scholar.slug}`}
+        href={profilePath(scholar.slug)}
         aria-describedby={id}
         // Spec: weight 500 at rest; hover/focus shows a faint gray underline,
         // no color shift. `:focus-visible` gets a 2px slate ring with offset
@@ -156,7 +157,7 @@ function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
         style={{ transitionDelay: "var(--popover-delay, 180ms)" }}
       >
         <a
-          href={`/scholars/${scholar.slug}`}
+          href={profilePath(scholar.slug)}
           tabIndex={-1}
           className="block rounded-md border border-border bg-popover p-3.5 shadow-lg ring-1 ring-black/5"
         >

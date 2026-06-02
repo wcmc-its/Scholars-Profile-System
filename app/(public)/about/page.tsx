@@ -48,6 +48,7 @@ const NAV: NavGroup[] = [
       { id: "impact", label: "The Impact score" },
       { id: "search", label: "Search" },
       { id: "showcase", label: "Spotlight & Selected research" },
+      { id: "profile-url", label: "Your profile URL" },
       { id: "requests", label: "Requesting changes" },
     ],
   },
@@ -57,7 +58,6 @@ const NAV: NavGroup[] = [
 const LINK = "text-[#7d1c1c] underline underline-offset-4 hover:no-underline";
 const PM = "https://reciter.weill.cornell.edu";
 const WEB_DIR = "https://directory.weill.cornell.edu";
-const SCHOLARS_EMAIL = "mailto:scholars@weill.cornell.edu";
 
 function Callout({
   variant = "note",
@@ -200,6 +200,11 @@ export default function DocsPage() {
               q: "How do I add or remove a member of my center?",
               a: "A center Owner or Curator edits the roster in-app; center membership is the one thing Scholars itself owns.",
             },
+            {
+              href: "#profile-url",
+              q: "Can I change my profile’s web address?",
+              a: "A custom address can be arranged through the Scholars team; your existing address keeps working and redirects to the new one.",
+            },
           ].map((item) => (
             <Link
               key={item.href}
@@ -254,7 +259,12 @@ export default function DocsPage() {
           <code>/edit/scholar/[your CWID]</code>: your overview text; which publications appear
           (hide one that isn&apos;t yours, or restore one you hid, reversible and recorded);
           and a data correction for anything else (Request a change, routed to the office that owns
-          the field). A personalized profile URL is planned but not yet self-serve.
+          the field). Your profile also has a stable web address you don&apos;t normally need to
+          touch; a custom one can be arranged through the Scholars team (see{" "}
+          <Link href="#profile-url" className={LINK}>
+            Your profile URL
+          </Link>
+          ).
         </p>
         <p>
           <strong>What you cannot change directly</strong>: source-of-record fields. For a{" "}
@@ -328,10 +338,10 @@ export default function DocsPage() {
           Affairs, by way of ASMS and Enterprise Directory) and isn&apos;t directly editable; it
           changes only when the appointment does. The two personal controls (overview, publication
           visibility) belong to the scholar.
-          For recurring reports by topic, date, or funding, email the Scholars team at{" "}
-          <a href={SCHOLARS_EMAIL} className={LINK}>
-            scholars@weill.cornell.edu
-          </a>
+          For recurring reports by topic, date, or funding, ask the Scholars team through{" "}
+          <Link href="#requests" className={LINK}>
+            Request a change
+          </Link>
           .
         </p>
         <p>
@@ -362,10 +372,11 @@ export default function DocsPage() {
           A center Owner or Curator manages the roster at <code>/edit/center/[code]</code>: add,
           remove, or update a member, with membership type, program, and start/end dates. Every
           change is one transaction and is audit-logged. If you do not have a role yet, a Superuser
-          grants you one (an Owner can also grant Curators on their own center), or email{" "}
-          <a href={SCHOLARS_EMAIL} className={LINK}>
-            scholars@weill.cornell.edu
-          </a>
+          grants you one (an Owner can also grant Curators on their own center), or request access
+          through{" "}
+          <Link href="#requests" className={LINK}>
+            Request a change
+          </Link>
           .
         </p>
         <p>
@@ -651,10 +662,11 @@ export default function DocsPage() {
                 <td>Center membership</td>
                 <td>Scholars</td>
                 <td>
-                  A center Owner/Curator edits it at <code>/edit/center/[code]</code>, or email{" "}
-                  <a href={SCHOLARS_EMAIL} className={LINK}>
-                    scholars@weill.cornell.edu
-                  </a>
+                  A center Owner/Curator edits it at <code>/edit/center/[code]</code>, or request it
+                  through{" "}
+                  <Link href="#requests" className={LINK}>
+                    Request a change
+                  </Link>
                 </td>
               </tr>
             </tbody>
@@ -928,6 +940,47 @@ export default function DocsPage() {
           co-author relationship refers to them.
         </p>
 
+        <h2 id="profile-url">Your profile URL</h2>
+        <p>
+          Every profile has a short, stable web address:{" "}
+          <code>scholars.weill.cornell.edu/&lt;your-name&gt;</code> &mdash; for example{" "}
+          <code>/jane-smith</code>. The longer form{" "}
+          <code>/scholars/&lt;your-name&gt;</code> works too and leads to the same profile, so any
+          link to you keeps working.
+        </p>
+        <p>
+          The address is <strong>derived automatically from your preferred name</strong> in the Web
+          Directory: lowercased, accents removed, spaces turned into hyphens. So{" "}
+          <em>María José García-López</em> becomes <code>maria-jose-garcia-lopez</code> and{" "}
+          <em>Mary-Anne O&rsquo;Brien</em> becomes{" "}
+          <code>mary-anne-obrien</code>. You don&apos;t set it, and you don&apos;t normally need to
+          think about it.
+        </p>
+        <p>
+          <strong>Your address is stable.</strong> If your preferred name later changes, or an
+          administrator sets a custom address for you, the old address keeps working &mdash; it
+          permanently redirects to the new one, so existing links, citations, and bookmarks
+          don&apos;t break.
+        </p>
+        <p>
+          <strong>Want a different address?</strong> Ask through{" "}
+          <Link href="#requests" className={LINK}>
+            Request a change
+          </Link>
+          ; a Scholars administrator reviews the request and sets your new address in the app.
+          Custom addresses are still based on your name &mdash; your first and last name, optionally
+          with a middle initial or a fuller form to tell you apart from a namesake. They aren&apos;t
+          free-choice handles: you can&apos;t claim a word like a research area or a department.
+        </p>
+        <Callout variant="note" heading="A number in your address isn’t a ranking">
+          <p>
+            If your address ends in a number (<code>jane-smith-2</code>), it only means someone
+            already had the name-based address when yours was created. The first profile keeps the
+            plain <code>jane-smith</code>; each later namesake gets the next number, in the order
+            profiles were created. It says nothing about you.
+          </p>
+        </Callout>
+
         <h2 id="requests">Requesting a correction, bug, or enhancement</h2>
         <p>
           Three different requests go to different places. A <em>correction</em> means something is
@@ -936,18 +989,14 @@ export default function DocsPage() {
             How to correct something
           </Link>
           , starting in your self-edit interface, which routes the request to the owning office for
-          you. A <em>bug</em> means something is broken; report it to the Scholars team at{" "}
-          <a href={SCHOLARS_EMAIL} className={LINK}>
-            scholars@weill.cornell.edu
-          </a>
+          you. A <em>bug</em> means something is broken; report it through{" "}
+          <Link href="#correct" className={LINK}>
+            Request a change
+          </Link>
           , and a systematic model error, such as wrong scores or topics across many items, routes to
           a ReciterAI review. An <em>enhancement</em> is a feature request: include your stakeholder
-          role, the surface or behavior, what you want, and the underlying need. A guided request
-          form, routed through WCM&apos;s service tooling, is rolling out; until then, email{" "}
-          <a href={SCHOLARS_EMAIL} className={LINK}>
-            scholars@weill.cornell.edu
-          </a>
-          .
+          role, the surface or behavior, what you want, and the underlying need, and submit it the
+          same way. Every request is logged as a support ticket and routed for you.
         </p>
 
         <hr className="mt-12 border-border" />
@@ -961,6 +1010,7 @@ export default function DocsPage() {
             { term: "ReCiter Publication Manager", def: "The curation interface at reciter.weill.cornell.edu where a publication’s attribution is corrected. A misattributed paper is rejected here; a missing one is added here." },
             { term: "ReciterAI", def: "WCM’s pipeline that derives a publication’s topics, Impact score, and one-line synopsis. Impact and synopsis refresh nightly; the topic taxonomy recomputes roughly annually." },
             { term: "Self-edit interface", def: "Where a scholar edits their overview, hides or restores publications, and submits data corrections (Request a change), which route to the owning office." },
+            { term: "Profile URL (slug)", def: "A profile’s web address — the short scholars.weill.cornell.edu/<slug> and the longer /scholars/<slug> both work and lead to the same page. The slug is derived automatically from the scholar’s preferred name (e.g. jane-smith); a later namesake gets a number (jane-smith-2) and the earlier profile keeps the plain form — it is not a ranking. The address is stable: if it changes, the old one permanently redirects, so existing links keep working. A custom address — still based on the scholar’s name — can be set by a Scholars administrator." },
             { term: "iCite", def: "The NIH tool Scholars uses as its only citation source. Scholars does not use Scopus." },
             { term: "InfoEd", def: "WCM’s grants system of record, for all sponsors. NIH RePORTER supplies federal abstract text and the portfolio link." },
             { term: "MeSH", def: "Medical Subject Headings, the NLM’s controlled vocabulary for indexing biomedical literature. Scholars search is MeSH-aware." },

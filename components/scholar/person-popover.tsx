@@ -33,6 +33,7 @@ import {
   type AuthorshipRole,
 } from "@/components/scholar/person-card-role-pill";
 import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill";
+import { profilePath } from "@/lib/profile-url";
 
 export type PersonPopoverSurface =
   | "facet"
@@ -356,7 +357,7 @@ function PersonPopoverBody({
   // Actions row. View profile only when the scholar has an active slug; for
   // unlinked WCM authors (alumni) we drop "View profile" but keep any
   // context-aware primary action.
-  const profileHref = header.slug ? `/scholars/${header.slug}` : null;
+  const profileHref = header.slug ? profilePath(header.slug) : null;
   const primary = !isSelf
     ? derivePrimaryAction({
         surface,
@@ -712,8 +713,10 @@ function derivePrimaryAction({
     if (cp && cp.count > 0 && contextScholarName && profileHref) {
       // Co-pubs jump action — defaults to the co-pubs page if the popover
       // target has a profile slug. Falls back to View profile when missing.
+      // #671 — co-pubs sub-pages stay under `/scholars/{slug}` (not the root
+      // profile form), so build this from the slug, not `profileHref`.
       return {
-        href: `${profileHref}/co-pubs?with=${data.header.cwid}`,
+        href: `/scholars/${data.header.slug}/co-pubs?with=${data.header.cwid}`,
         label: `See ${cp.count} co-pub${cp.count === 1 ? "" : "s"} →`,
         eventKey: "copubs",
       };

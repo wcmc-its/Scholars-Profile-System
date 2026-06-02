@@ -20,16 +20,18 @@ Most correction requests route themselves to the owning office through the in-ap
 
 For source-data items that reach you by mistake (a title, appointment, degree, funding, or publication-metadata fix), **reassign** to the matrix's assignment group rather than fixing in Scholars — the copy would be overwritten.
 
-## 2. Slug-request queue review
+## 2. Profile-URL (slug) management
 
-Queue: **`/edit/slug-requests`** (AdminSubnav → URL requests).
+A scholar's profile is served at `/scholars/<slug>`. Slugs are **auto-derived** from the preferred name (lowercased, accents stripped, spaces → hyphens). When two scholars derive the same slug, the later arrival gets a numeric suffix (`jane-smith-2`) **in CWID-creation order, and the incumbent keeps the bare form** — so a `-2` is a collision marker, not a ranking. That's a common scholar question you can field directly.
 
-- Each row shows requester, current slug → requested slug, and the requester's optional note.
+**Set a slug directly — your everyday tool.** From a scholar's `/edit` → **Profile URL** card you can set a custom slug (superuser-only). On save it takes effect **immediately**: the new address resolves and the old one **301-redirects** to it automatically (both the short `/<slug>` and the longer `/scholars/<slug>` forms keep working). The override also *pins* the slug, so a later preferred-name change in the directory won't overwrite it. Slugs already in use, or reserved words (site sections like `about`, `search`, `topics`), are rejected. **Custom slugs must stay name-based** — a variant of the scholar's own first/last name (add a middle initial, or use a fuller form to clear a namesake's `-2`), never a free-choice handle like a research area or department (no `cancer`). The format validator does **not** enforce name-basis, so you are the gate.
+
+**Slug-request queue.** A scholar-facing self-serve flow — the scholar proposes a slug, you approve/decline it at **`/edit/slug-requests`** (AdminSubnav → URL requests) — exists but is **gated behind `SELF_EDIT_SLUG_REQUEST` and off at launch.** Until it's enabled, custom-URL requests reach you as **ServiceNow tickets** and you actualize them with the direct override above — the slug is set in the app, not in ServiceNow. When the queue is on:
+
+- Each row shows requester, current → requested slug, and the requester's optional note.
 - **Approve** or **Decline…**. A decline **requires a note** — the requester sees it.
-- **Collisions are hard-rejected by design** (Option A): if the requested slug is already in use or is a reserved word, the row is flagged and Approve is disabled. There is no swap/transfer in v1 — decline it and tell the requester to choose another. This also guards against identity bleed (one person's URL silently pointing at another).
+- **Collisions and reserved words are hard-rejected by design** (Option A): the row is flagged and Approve is disabled. There is no swap/transfer in v1 — decline it and tell the requester to choose another. This guards against identity bleed (one person's URL silently pointing at another).
 - After you decide, the row leaves the queue and the requester is notified.
-
-You can also **set a slug directly** (superuser override) from a scholar's `/edit` → Profile URL card — bypassing the request flow when you're acting on a vetted #160 vanity request. The old URL 301-redirects to the new one automatically; `/scholars/<old>` keeps working.
 
 ## 3. Unit-admin grants and revocations (#540)
 

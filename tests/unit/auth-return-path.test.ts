@@ -28,22 +28,34 @@ describe("isSafeReturnPath", () => {
     expect(isSafeReturnPath("/search?q=mRNA")).toBe(true);
   });
 
-  it("rejects paths outside the curated allowlist", () => {
+  it("rejects reserved route words and API paths", () => {
+    // Reserved single-segment words (RESERVED_SLUGS) are never profile slugs.
     expect(isSafeReturnPath("/admin")).toBe(false);
+    expect(isSafeReturnPath("/login")).toBe(false);
+    expect(isSafeReturnPath("/logout")).toBe(false);
+    expect(isSafeReturnPath("/auth")).toBe(false);
+    expect(isSafeReturnPath("/support")).toBe(false); // reserved; no page (pre-existing 404)
     expect(isSafeReturnPath("/api/edit/suppress")).toBe(false); // API never a return target
     expect(isSafeReturnPath("/api/auth/logout")).toBe(false);
-    expect(isSafeReturnPath("/support")).toBe(false); // no /support page exists; pre-existing 404
   });
 
-  it("rejects prefix-spoofs on every allow-listed entry (the /edit vs /editfoo precedent)", () => {
-    expect(isSafeReturnPath("/editfoo")).toBe(false);
-    expect(isSafeReturnPath("/scholarsfoo")).toBe(false);
-    expect(isSafeReturnPath("/centersfoo")).toBe(false);
-    expect(isSafeReturnPath("/departmentsfoo")).toBe(false);
-    expect(isSafeReturnPath("/topicsfoo")).toBe(false);
-    expect(isSafeReturnPath("/aboutfoo")).toBe(false);
-    expect(isSafeReturnPath("/browsefoo")).toBe(false);
-    expect(isSafeReturnPath("/searchfoo")).toBe(false);
+  it("accepts a non-reserved single segment as a root-profile candidate (#671)", () => {
+    // Under root-canonical, `/{slug}` is the people namespace, so a single
+    // non-reserved lowercase slug-shaped segment is a legitimate return target:
+    // it renders a profile or 404s — GET-only, same-origin, carrying no
+    // privilege a fresh navigation wouldn't. The pre-#671 "prefix-spoof"
+    // strings (`/scholarsfoo`, `/editfoo`, …) are simply profile candidates now.
+    expect(isSafeReturnPath("/jane-smith")).toBe(true);
+    expect(isSafeReturnPath("/jane-smith?tab=publications")).toBe(true);
+    expect(isSafeReturnPath("/jane-smith#bio")).toBe(true);
+    expect(isSafeReturnPath("/scholarsfoo")).toBe(true);
+    expect(isSafeReturnPath("/editfoo")).toBe(true);
+  });
+
+  it("does not widen acceptance to multi-segment paths outside the allowlist", () => {
+    // Single-segment profile acceptance must NOT leak into nested paths.
+    expect(isSafeReturnPath("/nope/deeper")).toBe(false);
+    expect(isSafeReturnPath("/jane-smith/edit")).toBe(false);
   });
 
   it("rejects absolute and protocol-relative URLs (open-redirect vectors)", () => {

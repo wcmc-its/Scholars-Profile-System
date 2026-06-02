@@ -1,17 +1,25 @@
 import { headers } from "next/headers";
-import Link from "next/link";
-import { logVivoFourOhFour } from "@/lib/analytics/vivo-pattern";
+import { SiteHeader } from "@/components/site/header";
+import { SiteFooter } from "@/components/site/footer";
+import { NotFoundContent } from "@/components/site/not-found-content";
+import { logVivoFourOhFour, VIVO_PATTERN } from "@/lib/analytics/vivo-pattern";
+import { logNotFound } from "@/lib/analytics/errors";
 
 /**
- * Global 404 (Next.js App Router file convention).
- * Logs ANALYTICS-04 vivo_404 telemetry when the failing path matches
- * the VIVO legacy profile URL pattern. Renders a minimal 404 UI.
+ * Root 404 (#668 §2) — the catch site for everything OUTSIDE the `(public)`
+ * route group: dead legacy VIVO profile URLs (`/display/cwid-…`), unmatched
+ * paths, and root-alias misses (`app/[slug]/page.tsx → notFound()`). The root
+ * layout (`app/layout.tsx`) does not include the site chrome, so this file
+ * renders `SiteHeader`/`SiteFooter` directly (both are standalone and
+ * cookie-safe). In-group 404s use `(public)/not-found.tsx`, which inherits the
+ * chrome from `(public)/layout`.
  *
- * Header source for incoming pathname: tries x-invoke-path,
- * x-nextjs-matched-path, x-matched-path, x-pathname in order. If none
- * are present (very old Next.js or unusual deploy), falls back to the
- * referer header path. This belt-and-suspenders approach handles the
- * unstable-header risk noted in RESEARCH.md Pitfall 2.
+ * Telemetry: keeps the unchanged `vivo_404` signal (ANALYTICS-04 redirect-map
+ * pruning) and adds the generalized `not_found` event alongside it.
+ *
+ * Header source for the incoming pathname: tries x-invoke-path,
+ * x-nextjs-matched-path, x-matched-path, x-pathname in order, then falls back
+ * to the referer path. Belt-and-suspenders against the unstable-header risk.
  */
 export default async function NotFound() {
   const h = await headers();
@@ -23,20 +31,18 @@ export default async function NotFound() {
     extractPathFromReferer(h.get("referer")) ??
     "";
 
+  const isVivo = VIVO_PATTERN.test(pathname);
   logVivoFourOhFour(pathname);
+  logNotFound({ path: pathname, pattern: isVivo ? "vivo" : "other" });
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-16 text-center">
-      <h1 className="page-title text-3xl font-semibold">Page not found</h1>
-      <p className="mt-4 text-zinc-600 dark:text-zinc-400">
-        We couldn&apos;t find the page you were looking for.
-      </p>
-      <p className="mt-6">
-        <Link href="/" className="underline">Return home</Link>
-        {" · "}
-        <Link href="/search" className="underline">Search scholars</Link>
-      </p>
-    </main>
+    <div className="flex min-h-screen flex-col">
+      <SiteHeader />
+      <div className="flex-1">
+        <NotFoundContent isVivo={isVivo} />
+      </div>
+      <SiteFooter />
+    </div>
   );
 }
 

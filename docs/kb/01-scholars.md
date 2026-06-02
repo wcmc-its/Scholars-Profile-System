@@ -29,7 +29,7 @@ Sign in at **`scholars.weill.cornell.edu/edit`** with your WCM credentials. Your
 | Edit your **overview** | `/edit` → Overview | The short narrative at the top of your profile. |
 | **Hide / show** individual publications | `/edit` → Publications | Display-only and **reversible**. It removes the paper from *your profile only* — it changes nothing in PubMed or ReCiter. |
 | **Hide your entire profile** | `/edit` → Visibility | One click; reversible any time. Use this if you'd rather not appear publicly at all. |
-| **Request a custom URL** | `/edit` → Profile URL | A Scholars administrator reviews every request. Your existing `/scholars/<url>` keeps working. |
+| **Get a custom profile URL** | Ask the Scholars team | A superuser can set a custom web address for you; your existing `/scholars/<url>` keeps working (it redirects). An in-app self-serve request flow is rolling out — see [Your profile URL](#your-profile-url) below. |
 | **Request a change** to anything else | "Request a change" on any field | Routes to the office that owns the field (see below). |
 
 ## What you can't change here — and where it *does* get changed
@@ -47,6 +47,17 @@ These come from WCM systems of record. Fixing them in Scholars wouldn't hold; co
 | Whether a publication is yours | PubMed + ReCiter | **Not by hiding** — see the FAQ. Correct attribution in Publication Manager. |
 
 > **Don't reject a paper just because you'd rather not show it.** If a paper *is* yours but you don't want it on your profile, **hide** it (above). Only mark a paper "not mine" / reject it in Publication Manager when it genuinely isn't yours — rejecting your own work feeds a false signal back into the attribution algorithm.
+
+---
+
+## Your profile URL
+
+Your public profile has a short, stable web address — `scholars.weill.cornell.edu/<your-url>` (e.g. `scholars.weill.cornell.edu/jane-smith`). The longer `/scholars/<your-url>` form works too and leads to the same page, so existing links keep working.
+
+- **It's generated for you** from your preferred name in the Web Directory — lowercased, accents removed, spaces turned into hyphens (e.g. *Mary-Anne O'Brien* → `mary-anne-obrien`). You don't set it.
+- **A number on the end** (`jane-smith-2`) just means someone already had the name-based address when your profile was created. The first profile keeps the plain form; later namesakes are numbered in creation order. It isn't a ranking.
+- **It's stable.** If your preferred name changes — or an administrator gives you a custom address — the old address keeps working and redirects to the new one, so existing links and citations don't break.
+- **Want a different address?** Use **Request a change**; it's logged as a support ticket and a Scholars administrator sets your new address in the app. Custom addresses are still based on your name — first and last name, optionally a middle initial or a fuller form to distinguish you from a namesake — not a free-choice handle, so you can't claim a word like a research area or department.
 
 ---
 

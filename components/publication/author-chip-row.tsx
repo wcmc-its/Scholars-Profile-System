@@ -19,6 +19,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import { isPubliclyDisplayed, type RoleCategory } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 
 export type AuthorChip = {
   name: string;
@@ -134,7 +135,7 @@ export function AuthorChipRow({
         // (its profile would 404). Fail-open: missing role → linkable.
         const linkable = isPubliclyDisplayed(a.roleCategory);
         const inlineChip = a.slug && linkable ? (
-          <a href={`/scholars/${a.slug}`} className={chipClass}>
+          <a href={profilePath(a.slug)} className={chipClass}>
             {inner}
           </a>
         ) : (

@@ -18,6 +18,7 @@ import {
   CollapsibleContent,
 } from "@/components/ui/collapsible";
 import type { AZBucket } from "@/lib/api/browse";
+import { profilePath } from "@/lib/profile-url";
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
@@ -86,7 +87,7 @@ export function AZDirectory({ buckets }: { buckets: AZBucket[] }) {
                 {openBucket.scholars.map((s) => (
                   <li key={s.slug}>
                     <a
-                      href={`/scholars/${s.slug}`}
+                      href={profilePath(s.slug)}
                       className="text-base hover:underline hover:text-[var(--color-accent-slate)]"
                     >
                       {s.name}

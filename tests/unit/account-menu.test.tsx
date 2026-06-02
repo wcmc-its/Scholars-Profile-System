@@ -21,7 +21,8 @@ describe("AccountMenu — with a scholar row", () => {
     expect(edit.textContent).toBe("Edit my profile");
 
     const view = screen.getByTestId("account-menu-view");
-    expect(view.getAttribute("href")).toBe("/scholars/jane-smith");
+    // #671 — profile links use the root `/{slug}` form (profilePath).
+    expect(view.getAttribute("href")).toBe("/jane-smith");
     expect(view.textContent).toBe("View my profile");
 
     const signout = screen.getByTestId("account-menu-signout");

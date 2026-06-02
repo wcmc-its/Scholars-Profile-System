@@ -22,6 +22,7 @@ import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { sanitizePubTitle } from "@/lib/utils";
 import { formatPublishedName } from "@/lib/postnominal";
+import { profilePath } from "@/lib/profile-url";
 
 export const revalidate = 86400;
 export const dynamicParams = true;
@@ -100,7 +101,7 @@ export default async function MentorCoPubsRollupPage({
           Scholars
         </Link>
         <span className="mx-1.5">/</span>
-        <Link href={`/scholars/${mentor.slug}`} className="hover:underline">
+        <Link href={profilePath(mentor.slug)} className="hover:underline">
           {mentorName}
         </Link>
         <span className="mx-1.5">/</span>
@@ -178,7 +179,7 @@ function EmptyState({
       <p>No co-authored publications with mentees yet.</p>
       <p className="mt-2">
         <Link
-          href={`/scholars/${mentor.slug}`}
+          href={profilePath(mentor.slug)}
           className="text-foreground underline-offset-2 hover:underline"
         >
           ← Back to {publishedName(mentor)}

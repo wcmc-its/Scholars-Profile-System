@@ -20,6 +20,7 @@ import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug
 import { VisibilityCard } from "@/components/edit/visibility-card";
 import type { RailItem } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
+import { profilePath } from "@/lib/profile-url";
 
 type AttrKey =
   | "name-title"
@@ -106,7 +107,7 @@ export function EditPage({
       railItems={railItems}
       activeAttr={active.key}
       basePath={basePath}
-      previewHref={`/scholars/${ctx.scholar.slug}`}
+      previewHref={profilePath(ctx.scholar.slug)}
     >
       {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest)}
     </EditShell>

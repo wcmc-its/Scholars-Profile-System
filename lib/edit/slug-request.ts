@@ -9,15 +9,20 @@
  */
 import type { PrismaClient, SlugRequestStatus } from "@/lib/generated/prisma/client";
 import { checkSlugCollision, RESERVED_SLUGS } from "@/lib/edit/validators";
+import { canonicalProfilePath } from "@/lib/profile-url";
 
 /** Canonical public base URL — mirrors `lib/seo/jsonld.ts`. */
 export function publicSiteUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL ?? "https://scholars.weill.cornell.edu";
 }
 
-/** The canonical public profile URL for a slug (`/scholars/<slug>`). */
+/**
+ * The canonical public profile URL for a slug — `/scholars/<slug>` or the root
+ * `/<slug>` form per PROFILE_CANONICAL (#671). Server-side helper (email
+ * bodies / approval flow), so the flag read is authoritative.
+ */
 export function publicProfileUrl(slug: string): string {
-  return `${publicSiteUrl()}/scholars/${slug}`;
+  return `${publicSiteUrl()}${canonicalProfilePath(slug)}`;
 }
 
 /**

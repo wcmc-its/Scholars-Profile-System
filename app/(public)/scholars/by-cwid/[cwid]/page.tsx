@@ -1,12 +1,14 @@
 import { notFound, permanentRedirect } from "next/navigation";
 import { resolveByCwidOrAlias } from "@/lib/url-resolver";
+import { canonicalProfilePath } from "@/lib/profile-url";
 
 /**
  * CWID-keyed entry point for a scholar profile.
  *
  * Resolves the cwid to the scholar's current canonical slug via
  * `resolveByCwidOrAlias` (direct cwid -> cwid_aliases -> not-found) and
- * emits a permanent 301 to `/scholars/{slug}`. Unknown cwids return 404.
+ * emits a permanent 301 to the canonical profile URL (`/scholars/{slug}` or
+ * the root `/{slug}` form per PROFILE_CANONICAL, #671). Unknown cwids 404.
  *
  * Consumed by the B14 legacy-URL redirect layer in `middleware.ts`:
  * `/display/cwid-{cwid}`, `/individual/cwid-{cwid}`, and
@@ -26,7 +28,7 @@ export default async function Page({
   const { cwid } = await params;
   const resolved = await resolveByCwidOrAlias(cwid);
   if (resolved.type === "redirect") {
-    permanentRedirect(`/scholars/${resolved.targetSlug}`);
+    permanentRedirect(canonicalProfilePath(resolved.targetSlug));
   }
   // resolveByCwidOrAlias only ever returns `redirect` or `not-found` --
   // there's no `found` case because cwids are never canonical URL keys.

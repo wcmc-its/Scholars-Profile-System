@@ -164,6 +164,7 @@ Listed here for completeness so §1–§8 stay focused.
 - Self-edit: `self-edit-spec.md`, `self-edit-ui-spec.md`, `self-edit-launch-spec.md`,
   `self-edit-request-change-modal.md`, `self-edit-request-change-server-mailer-plan.md`,
   `feedback-badge-spec.md`
+- Error handling: `error-handling-spec.md` (#668 — 404 recovery UX, error boundaries, degraded-search, error-response edge caching). Promote to §0 triage once shipped.
 - Overview coverage: `overview-coverage-scope.md` (scope + strategy) and `overview-coverage/`
   (audit + export SQL, target-list CSV, `gradschool-harvest-scope.md`); the AI-assisted
   draft generator in `overview-statement-generator-spec.md`

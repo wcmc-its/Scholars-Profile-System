@@ -39,6 +39,7 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
 import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
+import { canonicalProfilePath } from "@/lib/profile-url";
 
 /** Bust the Next.js ISR cache for each allow-listed path. */
 function revalidatePaths(paths: readonly string[]): void {
@@ -93,7 +94,9 @@ async function invalidateCloudFront(paths: readonly string[]): Promise<void> {
  * reflection.
  */
 export function reflectOverviewEdit(slug: string): void {
-  revalidatePaths([`/scholars/${slug}`]);
+  // #671 — revalidate the current canonical profile form per PROFILE_CANONICAL
+  // (`/scholars/{slug}` by default, root `/{slug}` after the flip).
+  revalidatePaths([canonicalProfilePath(slug)]);
 }
 
 /**
@@ -144,7 +147,8 @@ export function reflectUnitChange(params: {
 export async function reflectVisibilityChange(
   profileSlugs: readonly string[],
 ): Promise<void> {
-  const paths = ["/browse", ...profileSlugs.map((slug) => `/scholars/${slug}`)];
+  // #671 — the current canonical profile form per slug (PROFILE_CANONICAL).
+  const paths = ["/browse", ...profileSlugs.map((slug) => canonicalProfilePath(slug))];
   revalidatePaths(paths);
   await invalidateCloudFront(paths);
 }

@@ -13,7 +13,7 @@
  * either way, so the story lives in non-branded topical movement.
  */
 
-import type { DomainPlacement } from "./serpapi";
+import type { AiOverviewStatus, DomainPlacement } from "./serpapi";
 
 // "topical" = bare-topic / brand-control queries (the cutover instrument);
 // "expert" = funder-style "{topic} researcher/expert" (the rival sweep);
@@ -101,6 +101,16 @@ export interface SnapshotRow {
   hIndex?: number;
   academicAge?: number;
   placements: SnapshotPlacement[];
+  /**
+   * Google AI Overview citation placement, captured from the SAME SerpAPI
+   * response as the organic results (zero extra search; #594 §2). Additive —
+   * `diffSnapshots`/standings read named fields and ignore this. `status` is
+   * block-level (absent | page_token_only | parsed); `placements` is per target.
+   */
+  aiOverview?: {
+    status: AiOverviewStatus;
+    placements: { targetKey: string; citationIndex: number | null; url: string | null }[];
+  };
 }
 
 export interface RankSnapshot {
