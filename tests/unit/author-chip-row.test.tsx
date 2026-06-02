@@ -107,8 +107,9 @@ describe("AuthorChipRow — hidden identity class (#536)", () => {
     ];
     render(<AuthorChipRow authors={authors} />);
     // Faculty chip links to the profile; the doctoral student does not.
-    expect(document.querySelector('a[href="/scholars/pi-faculty"]')).not.toBeNull();
-    expect(document.querySelector('a[href="/scholars/grad-student"]')).toBeNull();
+    // #671 — profile links use the root `/{slug}` form (profilePath).
+    expect(document.querySelector('a[href="/pi-faculty"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/grad-student"]')).toBeNull();
     // The hidden author's name is still visible (rendered as text).
     expect(screen.getByText("Grad Student")).toBeTruthy();
   });
@@ -119,6 +120,6 @@ describe("AuthorChipRow — hidden identity class (#536)", () => {
         authors={[baseChip({ name: "Unknown Role", cwid: "u001", slug: "unknown-role" })]}
       />,
     );
-    expect(document.querySelector('a[href="/scholars/unknown-role"]')).not.toBeNull();
+    expect(document.querySelector('a[href="/unknown-role"]')).not.toBeNull();
   });
 });

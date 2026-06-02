@@ -13,6 +13,8 @@
  * (tracked in #171).
  */
 
+import { canonicalProfilePath } from "@/lib/profile-url";
+
 /** ROR identifier for Weill Cornell Medicine. Source: ror.org/02r109517. */
 const WCM_ROR = "https://ror.org/02r109517";
 
@@ -81,7 +83,7 @@ export function buildPersonJsonLd(
     "@context": "https://schema.org",
     "@type": "Person",
     name: profile.preferredName,
-    url: `${baseUrl}/scholars/${profile.slug}`,
+    url: `${baseUrl}${canonicalProfilePath(profile.slug)}`,
     image: profile.identityImageEndpoint,
     affiliation: {
       "@type": "Organization",

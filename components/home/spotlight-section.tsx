@@ -34,6 +34,7 @@ import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
 const AUTO_ADVANCE_MS = 10_000;
@@ -298,7 +299,7 @@ function AuthorChip({ author }: { author: SpotlightAuthor }) {
   }
   return (
     <a
-      href={`/scholars/${author.profileSlug}`}
+      href={profilePath(author.profileSlug)}
       className="inline-flex items-center gap-1.5 hover:text-zinc-900 hover:underline"
     >
       {inner}

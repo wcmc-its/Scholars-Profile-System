@@ -20,6 +20,7 @@
  */
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
+import { profilePath } from "@/lib/profile-url";
 import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import {
   getMentoringPmidBuckets,
@@ -2234,7 +2235,7 @@ export async function suggestEntities(
       kind: "person",
       title: p.text,
       subtitle: subParts.join(" · ") || undefined,
-      href: `/scholars/${p.slug}`,
+      href: profilePath(p.slug),
       cwid: p.cwid,
       roleCategory: p.personType ?? undefined,
     };

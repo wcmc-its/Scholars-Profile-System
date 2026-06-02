@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { METHODOLOGY_BASE, METHODOLOGY_ANCHORS } from "@/lib/methodology-anchors";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 import type { SubtopicCard as SubtopicCardData } from "@/lib/api/home";
 
 export function SubtopicCard({ item }: { item: SubtopicCardData }) {
@@ -43,7 +44,7 @@ export function SubtopicCard({ item }: { item: SubtopicCardData }) {
                   {p.firstWcmAuthor ? (
                     isPubliclyDisplayed(p.firstWcmAuthor.roleCategory) ? (
                       <a
-                        href={`/scholars/${p.firstWcmAuthor.slug}`}
+                        href={profilePath(p.firstWcmAuthor.slug)}
                         className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-sm hover:bg-zinc-200"
                       >
                         {p.firstWcmAuthor.preferredName}

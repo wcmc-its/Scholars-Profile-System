@@ -10,6 +10,7 @@
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { sanitizePubmedHtml } from "@/lib/utils";
+import { profilePath } from "@/lib/profile-url";
 import type { RecentContribution } from "@/lib/api/home";
 
 export function RecentContributionCard({ item }: { item: RecentContribution }) {
@@ -26,7 +27,7 @@ export function RecentContributionCard({ item }: { item: RecentContribution }) {
           />
           <div className="min-w-0 flex-1">
             <a
-              href={`/scholars/${item.slug}`}
+              href={profilePath(item.slug)}
               className="text-base font-semibold hover:underline"
             >
               {item.preferredName}

@@ -63,7 +63,8 @@ describe("FundingResultRow — basics", () => {
   it("renders the lead PI as a chip linking to the profile", () => {
     render(<FundingResultRow hit={baseHit} />);
     const link = screen.getByRole("link", { name: /Alice Author, MD/ });
-    expect(link.getAttribute("href")).toBe("/scholars/alice-author");
+    // #671 — profile links use the root `/{slug}` form (profilePath).
+    expect(link.getAttribute("href")).toBe("/alice-author");
   });
 });
 

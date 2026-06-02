@@ -4,6 +4,7 @@ import type { DepartmentFacultyHit } from "@/lib/api/departments";
 import { htmlToPlainText } from "@/lib/utils";
 import { formatRoleCategory } from "@/lib/role-display";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 
 /**
  * Per neurology_dept_body_per_spec.html: 11px uppercase role tag with 0.06em
@@ -43,7 +44,7 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
           {isPubliclyDisplayed(hit.roleCategory) ? (
             <PersonPopover cwid={hit.cwid} surface="facet">
               <a
-                href={`/scholars/${hit.slug}`}
+                href={profilePath(hit.slug)}
                 className="hover:underline"
                 style={{ textDecoration: "none", color: "var(--color-text-primary)" }}
               >

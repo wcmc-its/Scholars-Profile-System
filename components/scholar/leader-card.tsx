@@ -7,6 +7,7 @@
  * underline-on-hover name link to the scholar profile.
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { profilePath } from "@/lib/profile-url";
 
 export type LeaderRole = "Chair" | "Chief" | "Director";
 
@@ -38,7 +39,7 @@ export function LeaderCard({
           {role}
         </div>
         <a
-          href={`/scholars/${leader.slug}`}
+          href={profilePath(leader.slug)}
           className="text-[16px] font-medium leading-[1.2] hover:underline"
           style={{ textDecoration: "none" }}
         >
