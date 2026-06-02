@@ -11,6 +11,7 @@ import { parseFunderEyebrow } from "@/lib/grant-meta";
 import { sanitizePubTitle } from "@/lib/utils";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { profilePath } from "@/lib/profile-url";
 
 export function GrantCard({ grant }: { grant: DeptGrantCard }) {
   const eyebrow = parseFunderEyebrow(grant.funder, grant.awardNumber);
@@ -49,7 +50,7 @@ export function GrantCard({ grant }: { grant: DeptGrantCard }) {
               text={grant.isMultiPi ? "Multi-PI" : "Principal investigator"}
             >
               <a
-                href={p.slug ? `/scholars/${p.slug}` : undefined}
+                href={p.slug ? profilePath(p.slug) : undefined}
                 className="chip chip-first flex items-center gap-1.5 rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground"
                 style={{ textDecoration: "none" }}
               >

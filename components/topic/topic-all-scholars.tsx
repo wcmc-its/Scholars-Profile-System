@@ -28,6 +28,7 @@ import {
   type TopicScholarsResult,
 } from "@/lib/api/topics";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 
 const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyof TopicScholarsResult["roleCounts"] }> = [
   { id: "all", label: "All", countKey: "all" },
@@ -108,7 +109,7 @@ function ScholarRow({ scholar }: { scholar: TopicScholarRow }) {
   return (
     <li className="break-inside-avoid py-2">
       {linkable ? (
-        <a href={`/scholars/${scholar.slug}`} className={`${rowClass} hover:bg-muted/50`}>
+        <a href={profilePath(scholar.slug)} className={`${rowClass} hover:bg-muted/50`}>
           {inner}
         </a>
       ) : (

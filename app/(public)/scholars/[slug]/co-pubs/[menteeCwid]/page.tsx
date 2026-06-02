@@ -24,6 +24,7 @@ import {
 import { AuthorChipRow, type AuthorChip } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { sanitizePubTitle } from "@/lib/utils";
+import { profilePath } from "@/lib/profile-url";
 
 export const revalidate = 86400;
 export const dynamicParams = true;
@@ -101,7 +102,7 @@ export default async function CoPubsPage({
           Scholars
         </Link>
         <span className="mx-1.5">/</span>
-        <Link href={`/scholars/${mentor.slug}`} className="hover:underline">
+        <Link href={profilePath(mentor.slug)} className="hover:underline">
           {pair.mentorName}
         </Link>
         <span className="mx-1.5">/</span>
@@ -139,7 +140,7 @@ export default async function CoPubsPage({
           <p>No co-authored publications found.</p>
           <p className="mt-2">
             <Link
-              href={`/scholars/${mentor.slug}`}
+              href={profilePath(mentor.slug)}
               className="text-foreground underline-offset-2 hover:underline"
             >
               ← Back to {pair.mentorName}

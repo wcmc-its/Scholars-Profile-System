@@ -10,6 +10,7 @@ import { PersonPopover } from "@/components/scholar/person-popover";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
+import { profilePath } from "@/lib/profile-url";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
 /**
@@ -149,7 +150,7 @@ export function FundingResultRow({
                 }}
               >
                 <Link
-                  href={`/scholars/${p.slug}`}
+                  href={profilePath(p.slug)}
                   onClick={() => trackClick(p.cwid)}
                   className="inline-flex items-center gap-1.5 text-[13px] text-[#2c4f6e] hover:underline"
                 >

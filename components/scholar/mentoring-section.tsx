@@ -7,6 +7,7 @@ import { PersonPopover } from "@/components/scholar/person-popover";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { profilePath } from "@/lib/profile-url";
 import type { MenteeChip, CoPublication, MenteeSort } from "@/lib/api/mentoring";
 import {
   MENTORING_GROUPED_THRESHOLD,
@@ -443,7 +444,7 @@ function MenteeChipCard({
             contextScholarCwid={mentorCwid}
           >
             <a
-              href={`/scholars/${mentee.scholar!.slug}`}
+              href={profilePath(mentee.scholar!.slug)}
               data-mentee-body
               className="flex min-w-0 flex-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >

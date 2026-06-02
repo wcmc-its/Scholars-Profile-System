@@ -1,9 +1,9 @@
 /**
  * Unit tests for ANALYTICS-01: profile page-view structured log.
  *
- * RED phase — all assertions target console.log output that does not yet exist
- * in app/(public)/scholars/[slug]/page.tsx. Tests MUST FAIL until Task 2 inserts
- * the structured log call.
+ * The log lives in the shared <ProfileView> render body
+ * (components/profile/profile-view.tsx, #671) — exercised directly here since
+ * the route files only create the element, not invoke it.
  *
  * Log shape: { event: "profile_view", cwid, slug, ts: ISO8601 }
  */
@@ -102,12 +102,10 @@ describe("ANALYTICS-01 — profile_view structured log", () => {
 
   it("emits a profile_view log line when a profile page renders", async () => {
     // Import the page module dynamically so mocks are in place.
-    const { default: ScholarProfilePage } = await import(
-      "@/app/(public)/scholars/[slug]/page"
-    );
+    const { ProfileView } = await import("@/components/profile/profile-view");
 
     // Render the server component (it returns JSX — we just need the side-effects).
-    await ScholarProfilePage({ params: Promise.resolve({ slug: "jane-doe" }) });
+    await ProfileView({ slug: "jane-doe" });
 
     // At least one console.log call should have been made.
     expect(consoleSpy).toHaveBeenCalled();
@@ -137,11 +135,9 @@ describe("ANALYTICS-01 — profile_view structured log", () => {
   });
 
   it("includes the exact CWID from the fetched profile", async () => {
-    const { default: ScholarProfilePage } = await import(
-      "@/app/(public)/scholars/[slug]/page"
-    );
+    const { ProfileView } = await import("@/components/profile/profile-view");
 
-    await ScholarProfilePage({ params: Promise.resolve({ slug: "jane-doe" }) });
+    await ProfileView({ slug: "jane-doe" });
 
     const call = consoleSpy.mock.calls.find((c) => {
       try {
@@ -156,11 +152,9 @@ describe("ANALYTICS-01 — profile_view structured log", () => {
   });
 
   it("log line is valid JSON (parseable by log drain)", async () => {
-    const { default: ScholarProfilePage } = await import(
-      "@/app/(public)/scholars/[slug]/page"
-    );
+    const { ProfileView } = await import("@/components/profile/profile-view");
 
-    await ScholarProfilePage({ params: Promise.resolve({ slug: "jane-doe" }) });
+    await ProfileView({ slug: "jane-doe" });
 
     const call = consoleSpy.mock.calls.find((c) => {
       try {

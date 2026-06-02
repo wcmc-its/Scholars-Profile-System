@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator";
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 import { ImpersonationSwitcher } from "@/components/site/impersonation-switcher";
+import { profilePath } from "@/lib/profile-url";
 
 /**
  * Signed-in account menu rendered in the site header (UI-SPEC § Signing in
@@ -93,7 +94,7 @@ export function AccountMenu({ scholar }: AccountMenuProps) {
                   Edit my profile
                 </Link>
                 <Link
-                  href={`/scholars/${scholar.slug}`}
+                  href={profilePath(scholar.slug)}
                   className={ROW_CLASS}
                   data-testid="account-menu-view"
                 >

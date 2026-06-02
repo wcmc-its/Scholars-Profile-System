@@ -14,6 +14,7 @@
  */
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { profilePath } from "@/lib/profile-url";
 import type { TopScholarChipData } from "@/lib/api/topics";
 
 export function TopScholarChip({
@@ -27,7 +28,7 @@ export function TopScholarChip({
 }) {
   const anchor = (
     <a
-      href={`/scholars/${scholar.slug}`}
+      href={profilePath(scholar.slug)}
       className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3 py-1 transition-colors hover:border-[var(--color-accent-slate)]"
     >
       <HeadshotAvatar

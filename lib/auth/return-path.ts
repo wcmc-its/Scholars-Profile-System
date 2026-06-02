@@ -35,8 +35,20 @@
  * back to the default and the user lands somewhere unexpected after
  * sign-in.
  *
- * Pure functions, no imports — safe in both the Edge and Node runtimes.
+ * #671 — also accepts a root people-profile path (`/{slug}`): a single
+ * reserved-free lowercase slug-shaped segment. `/` cannot be an allow-list
+ * *prefix* (it prefixes every path), so root profiles need their own matcher.
+ * All such targets are GET-only public profile renders (or a 404), carrying no
+ * privilege a fresh navigation wouldn't — the same de-minimis surface as the
+ * other public allow-listed routes. Sensitive single-segment words (`admin`,
+ * `login`, `logout`, `auth`, `api`, `edit`, …) are in `RESERVED_SLUGS` and so
+ * are excluded by construction.
+ *
+ * Imports only the pure `RESERVED_SLUGS` / `looksLikeSlug` from `@/lib/slug`
+ * (no runtime deps) — still safe in both the Edge and Node runtimes.
  */
+
+import { looksLikeSlug, RESERVED_SLUGS } from "@/lib/slug";
 
 const MAX_RETURN_PATH_LENGTH = 512;
 
@@ -60,6 +72,22 @@ const ALLOWED_PATH_PREFIXES = [
   "/search",
 ] as const;
 
+/**
+ * #671 — true for a root people-profile path: exactly one path segment that is
+ * a reserved-free, lowercase slug-shaped token (e.g. `/jane-doe`). Mirrors the
+ * gate the root `(public)/[slug]` route applies, so the post-login return set
+ * is exactly "renders-or-404s as a profile". Multi-segment paths and reserved
+ * route words fall through to the prefix allow-list. The caller
+ * (`isSafeReturnPath`) has already rejected `..`, `//`, `/\`, control chars,
+ * and over-length input before this runs.
+ */
+function isRootProfilePath(path: string): boolean {
+  const seg = path.replace(/[?#].*$/, "").slice(1); // drop leading "/" + query/hash
+  if (seg === "" || seg.includes("/")) return false;
+  if (RESERVED_SLUGS.has(seg)) return false;
+  return looksLikeSlug(seg);
+}
+
 function matchesAllowedPath(path: string): boolean {
   if (path === "/") return true;
   for (const prefix of ALLOWED_PATH_PREFIXES) {
@@ -72,7 +100,7 @@ function matchesAllowedPath(path: string): boolean {
       return true;
     }
   }
-  return false;
+  return isRootProfilePath(path);
 }
 
 /**

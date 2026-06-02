@@ -31,6 +31,11 @@ const PATTERNS: ReadonlyArray<{ match: RegExp; route: string }> = [
   { match: /^\/search$/, route: "/search" },
   { match: /^\/browse$/, route: "/browse" },
   { match: /^\/$/, route: "/" },
+  // #671 — root people profiles live at `/{slug}`. Bucket them with the legacy
+  // `/scholars/[slug]` so the analytical surface key is stable across the
+  // canonical flip. Last in the list: every explicit single-segment route
+  // above already claimed its path, so only profile-shaped slugs reach here.
+  { match: /^\/[a-z0-9]+(?:-[a-z0-9]+)*$/, route: "/scholars/[slug]" },
 ];
 
 export function urlToPageRoute(url: string | null | undefined): string | null {
