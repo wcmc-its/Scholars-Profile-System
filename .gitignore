@@ -79,6 +79,12 @@ data/seo/*
 !data/seo/rival-basket.json
 !data/seo/flagship-queries.json
 !data/seo/matched-researchers.json
+# Exception: #692 curated deprioritized-terms list — the hand-reviewed query
+# vocabulary that drives generic-term demotion (strip-before-resolve, BM25
+# down-weight, highlight exclusion). Committed and reviewed by PR.
+!data/search/
+data/search/*
+!data/search/deprioritized-terms.json
 # #594 §3: the specific-subtopic LLM basket (derived from the DB subtopic taxonomy),
 # the corrected "WCM presence" instrument alongside the broad flagship queries.
 !data/seo/specific-queries.json
