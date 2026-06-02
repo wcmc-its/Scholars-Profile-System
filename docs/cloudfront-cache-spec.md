@@ -81,6 +81,20 @@ Cookie: session=user-B
 
 Default TTL is 24 h to match the `revalidate = 86400` declaration on `/scholars/[slug]` and `/sitemap.xml`. Origin `Cache-Control: max-age=…` (e.g. on `/og/*`) overrides the default. Min TTL of 0 lets `Cache-Control: no-store` from the origin take effect; max TTL of 1 y is a ceiling, not a target.
 
+## Error-response caching (#668 §4)
+
+A distribution-level `CustomErrorResponses` block (CDK `errorResponses` on the `Distribution`) governs how long CloudFront caches origin error responses. It is **not** per-behavior — it applies across the distribution.
+
+| Status | `ErrorCachingMinTTL` | Custom page? | Why |
+|---|---|---|---|
+| **404** | **60 s** | No (pass-through) | Absorb dead-URL crawler floods (the legacy-VIVO cutover) at the edge instead of hitting the `force-dynamic` origin every time. 60 s is safe — profiles are 24 h-cached, so the edge is never the freshness bottleneck for a URL that later becomes valid. |
+| **500 / 502 / 503 / 504** | **0** | No | **Never cache.** A transient Aurora / OpenSearch blip must not get pinned at the edge — otherwise a 10-second hiccup becomes a multi-minute outage for every cache-cold path. |
+
+Two invariants, both enforced by the synth guard in `cdk/test/edge-stack.test.ts`:
+
+1. **No soft-404.** The 404 entry sets neither `responseHttpStatus` nor `responsePagePath`, so CloudFront passes the origin's branded 404 body **and** its 404 status through unchanged. A cached 404 stays a real 404 — never rewritten to 200. (The branded body is rendered by `app/not-found.tsx` / `app/(public)/not-found.tsx`, not by CloudFront.)
+2. **Never-cache-5xx (ratcheted).** Every 5xx `CustomErrorResponse` must carry `ErrorCachingMinTTL: 0`; the test fails if any 5xx is ever given a non-zero TTL.
+
 ## Verification
 
 Acceptance criteria for B07 #106:
