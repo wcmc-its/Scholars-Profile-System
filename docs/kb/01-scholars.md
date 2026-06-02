@@ -57,7 +57,7 @@ Your public profile has a short, stable web address — `scholars.weill.cornell.
 - **It's generated for you** from your preferred name in the Web Directory — lowercased, accents removed, spaces turned into hyphens (e.g. *Mary-Anne O'Brien* → `mary-anne-obrien`). You don't set it.
 - **A number on the end** (`jane-smith-2`) just means someone already had the name-based address when your profile was created. The first profile keeps the plain form; later namesakes are numbered in creation order. It isn't a ranking.
 - **It's stable.** If your preferred name changes — or an administrator gives you a custom address — the old address keeps working and redirects to the new one, so existing links and citations don't break.
-- **Want a custom address?** Ask the Scholars team (use **Request a change**, or email scholars@weill.cornell.edu) and a superuser can set it for you. A self-serve flow — you propose an address, an administrator approves it — is rolling out. A few addresses are reserved because they match site sections (like `/about` or `/search`) and can't be used.
+- **Want a different address?** Use **Request a change**; it's logged as a support ticket and a Scholars administrator sets your new address in the app. Custom addresses are still based on your name — first and last name, optionally a middle initial or a fuller form to distinguish you from a namesake — not a free-choice handle, so you can't claim a word like a research area or department.
 
 ---
 
