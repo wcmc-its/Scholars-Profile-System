@@ -23,6 +23,8 @@ import {
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolveGenericTermMode,
+  resolvePublicationHighlight,
+  resolvePublicationMatchProvenance,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -204,6 +206,10 @@ export async function GET(request: NextRequest) {
       // strict-mode admission under flag = `expanded`. `?mesh=off`
       // precedence is already enforced upstream by nulling the resolution.
       meshStrict,
+      // SEARCH_PUB_HIGHLIGHT — mark matched terms in the title.
+      highlightMatches: resolvePublicationHighlight(),
+      // SEARCH_PUB_MATCH_PROVENANCE — #688-parity "Why this match" MeSH note.
+      matchProvenance: resolvePublicationMatchProvenance(),
     });
     const searchLatencyMs = Date.now() - searchStart;
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).

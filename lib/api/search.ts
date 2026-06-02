@@ -207,6 +207,14 @@ export type PeopleHit = {
 export type PublicationHit = {
   pmid: string;
   title: string;
+  /**
+   * The matched title with the query terms wrapped in `<mark>`, present only
+   * when `SEARCH_PUB_HIGHLIGHT` is on and the title matched. The row renders this
+   * (with the marks restyled) instead of the plain `title`; falls back to
+   * `title` otherwise. The indexed title is plain text, so the fragment carries
+   * no other markup.
+   */
+  titleHighlight: string | null;
   journal: string | null;
   year: number | null;
   publicationType: string | null;
@@ -261,6 +269,15 @@ export type PublicationHit = {
    * string. Rendered inline via `<AbstractDisclosure>` on the row.
    */
   abstract: string | null;
+  /**
+   * Issue #707 — the publications twin of `PeopleHit.matchProvenance` (#688).
+   * Present only when `SEARCH_PUB_MATCH_PROVENANCE` is on, the topic query
+   * resolved to a MeSH descriptor, AND this publication is tagged with the
+   * descriptor (`concept`) or a narrower descendant (`narrower`) — the concept
+   * match the title highlighter can't explain. Omitted otherwise. Rendered as
+   * the same "Why this match" note the Scholars tab uses.
+   */
+  matchProvenance?: MatchProvenance;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -1519,6 +1536,21 @@ export async function searchPublications(opts: {
   /** Issue #692 — query with deprioritized filler tokens removed (computed in
    *  the route). Only consumed when `genericDemote` is true. */
   contentQuery?: string;
+  /**
+   * `SEARCH_PUB_HIGHLIGHT` resolved at request time by the route. When true, the
+   * body requests a `title` highlight (on the content query when demoting) and
+   * each hit carries `titleHighlight`. Pure presentation metadata — it only adds
+   * a `highlight` clause; the query predicate, scoring, and result set are
+   * unchanged. Headless callers default to `false`.
+   */
+  highlightMatches?: boolean;
+  /**
+   * Issue #707 — `SEARCH_PUB_MATCH_PROVENANCE` resolved at request time. When
+   * true and `meshResolution` is non-null, each hit tagged with the resolved
+   * descriptor or a narrower descendant carries `matchProvenance`. Pure additive
+   * metadata; no effect on the query, scoring, or result set. Default `false`.
+   */
+  matchProvenance?: boolean;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -1533,6 +1565,20 @@ export async function searchPublications(opts: {
     !!opts.contentQuery &&
     opts.contentQuery !== trimmed;
   const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
+
+  // SEARCH_PUB_HIGHLIGHT — request a title highlight so the row can show which
+  // terms matched. Default-off ⇒ the body below is byte-identical to today.
+  const highlightMatches = opts.highlightMatches === true;
+  // #707 — the *significant* query for highlighting: the full query with the
+  // 251-term academic-common set (`deprioritized-terms.json`) stripped, so a
+  // near-stopword like "research" never lights up scattered across a title set
+  // (where its document frequency makes the color carry no information). The
+  // route always passes this as `contentQuery`; fall back to the full query when
+  // a headless caller omits it, or when every token is generic (strip-to-empty).
+  // Decoupled from `demoteGeneric` on purpose — gating highlights by term
+  // significance is the right default regardless of the ranking-demote flag.
+  const highlightSignificantQuery =
+    opts.contentQuery && opts.contentQuery.length > 0 ? opts.contentQuery : trimmed;
 
   // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
   // after prod verification of the >50% p95 cut for resolved-concept
@@ -2033,6 +2079,39 @@ export async function searchPublications(opts: {
       ? { post_filter: { bool: { filter: userAxisFilters } } }
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
+    // SEARCH_PUB_HIGHLIGHT — mark the matched terms in the title so the row shows
+    // why it matched. The `highlight_query` (always present, not the raw query)
+    // does two things the naive per-token highlighter can't:
+    //   1. Significance gating — `match` runs only the SIGNIFICANT query, so a
+    //      near-stopword generic ("research") scattered through a title is never
+    //      marked; it carries no information at academic-title document
+    //      frequencies. (The match clauses are analyzed by the field analyzer,
+    //      so the highlighter marks exactly the stemmed forms the ranker matched
+    //      — no more, no less.)
+    //   2. Phrase preference — `match_phrase` on the FULL query marks the
+    //      contiguous typed phrase when it exists ("Microbiome Research"), so the
+    //      highlight mirrors the phrase-boosted rank; scattered, only the
+    //      discriminating token lights up.
+    // The indexed title is plain text and short, so no analyzer-offset cap is
+    // needed (unlike the People `publicationTitles` blob). Omitted when the flag
+    // is off ⇒ body unchanged.
+    ...(highlightMatches
+      ? {
+          highlight: {
+            fields: { title: { number_of_fragments: 0 } },
+            highlight_query: {
+              bool: {
+                should: [
+                  { match_phrase: { title: trimmed } },
+                  { match: { title: highlightSignificantQuery } },
+                ],
+              },
+            },
+            pre_tags: ["<mark>"],
+            post_tags: ["</mark>"],
+          },
+        }
+      : {}),
     aggs: {
       publicationTypes: {
         filter: aggBoolFor(filtersExcept("publicationType")),
@@ -2126,7 +2205,14 @@ export async function searchPublications(opts: {
       // pubs with no abstract, so this is always-present in practice but
       // optional-typed for defensive null handling on older index docs.
       abstract?: string;
+      // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
+      // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
+      // the match-provenance path; already in `_source` (no include-list trims it).
+      meshDescriptorUi?: string[];
     };
+    // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),
+    // present only when the flag is on and the title matched.
+    highlight?: { title?: string[] };
   };
   type Bucket = { key: string; doc_count: number };
   const r = resp.body as unknown as {
@@ -2207,6 +2293,20 @@ export async function searchPublications(opts: {
       ? new Set(resolution.curatedTopicAnchors)
       : new Set<string>();
 
+  // Issue #707 — MeSH match provenance, the publications twin of #688. Only when
+  // the flag is on and the query resolved to a descriptor with at least one
+  // descendant (so there's a tree to subsume). Labels for the whole descendant
+  // set are resolved once, then intersected per hit by `computeMatchProvenance`
+  // against the publication's own `meshDescriptorUi`.
+  const pubProvenanceOn =
+    opts.matchProvenance === true &&
+    resolution != null &&
+    resolution.descendantUis.length > 1 &&
+    resolution.name.length > 0;
+  const pubProvenanceLabels = pubProvenanceOn
+    ? await descriptorLabelsForUis(resolution!.descendantUis)
+    : new Map<string, string>();
+
   return {
     hits: r.hits.hits.map((h) => {
       const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
@@ -2239,6 +2339,7 @@ export async function searchPublications(opts: {
       return {
         pmid: h._source.pmid,
         title: h._source.title,
+        titleHighlight: h.highlight?.title?.[0] ?? null,
         journal: h._source.journal,
         year: h._source.year,
         publicationType: h._source.publicationType,
@@ -2268,6 +2369,14 @@ export async function searchPublications(opts: {
           typeof h._source.abstract === "string" && h._source.abstract.length > 0
             ? h._source.abstract
             : null,
+        matchProvenance: pubProvenanceOn
+          ? computeMatchProvenance({
+              publicationMeshUi: h._source.meshDescriptorUi,
+              descendantUis: resolution!.descendantUis,
+              parentTerm: resolution!.name,
+              labels: pubProvenanceLabels,
+            })
+          : undefined,
       };
     }),
     total: r.hits.total.value,

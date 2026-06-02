@@ -218,3 +218,38 @@ export function resolvePubRecencyMode(): PubRecencyMode {
   if (v === "off" || v === "gentle" || v === "strong") return v;
   return "gentle";
 }
+
+/**
+ * Publications-tab term highlighting. Unlike the People tab, `searchPublications`
+ * never requested a highlight, so a matched title rendered with no emphasis on
+ * the query terms — a search-result page that doesn't show *why* a row matched.
+ * When on, `searchPublications` highlights the `title` field (on the content
+ * query when #692 demotion is active, so stripped generics aren't marked) and
+ * emits `titleHighlight` for the row to render. Pure presentation metadata: no
+ * effect on the query predicate, scoring, or result set.
+ *
+ * Default off until verified; a separate lever from the `SEARCH_PUB_TAB_*`
+ * ranking flags and from the People-tab `SEARCH_PEOPLE_MATCH_EXPLAIN`, each with
+ * an independent rollback trigger.
+ */
+export function resolvePublicationHighlight(): boolean {
+  return process.env.SEARCH_PUB_HIGHLIGHT === "on";
+}
+
+/**
+ * Publications-tab MeSH match provenance — the publications twin of the People
+ * tab's `SEARCH_PEOPLE_MATCH_PROVENANCE` (#688). When a topic query resolves to
+ * a descriptor, the concept-mode admission/boost (`terms { meshDescriptorUi:
+ * descendantUis }`, #259) ranks up publications tagged with the descriptor or a
+ * narrower descendant — a match the title highlighter can't explain when the
+ * typed term isn't in the title. With this on, each such hit carries
+ * `matchProvenance` (reusing the generalized `computeMatchProvenance`) so the row
+ * can render the same "Why this match" note as the Scholars tab. Pure additive
+ * metadata — no effect on ranking or the result set.
+ *
+ * Default off until eval; a separate lever from the People-tab provenance flag
+ * and from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
+ */
+export function resolvePublicationMatchProvenance(): boolean {
+  return process.env.SEARCH_PUB_MATCH_PROVENANCE === "on";
+}
