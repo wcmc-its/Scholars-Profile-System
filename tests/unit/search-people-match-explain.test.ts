@@ -107,8 +107,11 @@ const highlightFieldsOf = (body: Record<string, unknown>) =>
   Object.keys((body as { highlight: { fields: Record<string, unknown> } }).highlight.fields);
 
 const highlightQueryOf = (body: Record<string, unknown>) =>
-  (body as { highlight: { highlight_query?: { multi_match: { fields: string[] } } } }).highlight
-    .highlight_query;
+  (
+    body as {
+      highlight: { highlight_query?: { multi_match: { query: string; fields: string[] } } };
+    }
+  ).highlight.highlight_query;
 
 beforeEach(() => {
   capturedBodies.length = 0;
