@@ -164,6 +164,9 @@ Listed here for completeness so §1–§8 stay focused.
 - Self-edit: `self-edit-spec.md`, `self-edit-ui-spec.md`, `self-edit-launch-spec.md`,
   `self-edit-request-change-modal.md`, `self-edit-request-change-server-mailer-plan.md`,
   `feedback-badge-spec.md`
+- Overview coverage: `overview-coverage-scope.md` (scope + strategy) and `overview-coverage/`
+  (audit + export SQL, target-list CSV, `gradschool-harvest-scope.md`); the AI-assisted
+  draft generator in `overview-statement-generator-spec.md`
 - Slug personalization: `slug-personalization-spec.md`, `slug-personalization-ui-spec.md`
 - Unit curation: `unit-curation-spec.md`, `unit-curation-edit-ui-spec.md`,
   `center-management-spec.md`
