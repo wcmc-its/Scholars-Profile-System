@@ -901,7 +901,7 @@ describe("AppStack", () => {
           []) as Array<Record<string, unknown>>;
       };
 
-      it("the OIDC deploy role can DescribeStacks on the AppStack only (#460)", () => {
+      it("the OIDC deploy role can DescribeStacks on the AppStack + EdgeStack only (#460 / #700)", () => {
         const statements = findDeployStatements();
         const cfn = statements.find((stmt) => {
           const action = stmt.Action as string | string[];
@@ -911,9 +911,12 @@ describe("AppStack", () => {
         });
         expect(cfn).toBeDefined();
         const serialized = JSON.stringify(cfn?.Resource);
-        // Scoped to this stack's ARN, not `*`.
+        // Scoped to the two stacks the workflow reads outputs from, not `*`:
+        // Sps-App-<env> (ECR/cluster/service/task families) and Sps-Edge-<env>
+        // (StaticAssetsBucketName for the #700 static-asset sync).
         expect(serialized).not.toMatch(/^"\*"$/);
         expect(serialized).toContain("stack/Sps-App-prod/*");
+        expect(serialized).toContain("stack/Sps-Edge-prod/*");
       });
 
       it("the OIDC deploy role can push to both the app and ETL ECR repos (#460/#454)", () => {

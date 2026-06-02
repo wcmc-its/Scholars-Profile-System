@@ -24,6 +24,12 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         "Ref": "LogsBucket9C4D8843",
       },
     },
+    "StaticAssetsBucketName": {
+      "Description": "SPS static-asset bucket (/_next/static/*) for additive deploy sync",
+      "Value": {
+        "Ref": "StaticAssetsBucketC3095769",
+      },
+    },
   },
   "Parameters": {
     "BootstrapVersion": {
@@ -78,7 +84,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
-              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "TargetOriginId": "SpsEdgeprodDistributionOriginGroup145A7C8F1",
               "ViewerProtocolPolicy": "redirect-to-https",
             },
             {
@@ -557,6 +563,34 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             },
             "Prefix": "cf/prod/",
           },
+          "OriginGroups": {
+            "Items": [
+              {
+                "FailoverCriteria": {
+                  "StatusCodes": {
+                    "Items": [
+                      403,
+                      404,
+                    ],
+                    "Quantity": 2,
+                  },
+                },
+                "Id": "SpsEdgeprodDistributionOriginGroup145A7C8F1",
+                "Members": {
+                  "Items": [
+                    {
+                      "OriginId": "SpsEdgeprodDistributionOrigin22E1F11C1",
+                    },
+                    {
+                      "OriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+                    },
+                  ],
+                  "Quantity": 2,
+                },
+              },
+            ],
+            "Quantity": 1,
+          },
           "Origins": [
             {
               "CustomOriginConfig": {
@@ -577,6 +611,24 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
                 },
               ],
             },
+            {
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "RegionalDomainName",
+                ],
+              },
+              "Id": "SpsEdgeprodDistributionOrigin22E1F11C1",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "DistributionOrigin2S3OriginAccessControlDC470594",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
           ],
           "PriceClass": "PriceClass_100",
         },
@@ -595,6 +647,17 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::MonitoringSubscription",
+    },
+    "DistributionOrigin2S3OriginAccessControlDC470594": {
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "SpsEdgeprodDistributionOrigin2S3OriginAccessControl50342575",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4",
+        },
+      },
+      "Type": "AWS::CloudFront::OriginAccessControl",
     },
     "HtmlHeadersD748949D": {
       "Properties": {
@@ -759,6 +822,170 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::CloudFront::ResponseHeadersPolicy",
     },
+    "StaticAssetsBucketC3095769": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 14,
+              "Id": "sps-static-assets-expire-prod",
+              "Prefix": "_next/static/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "StaticAssetsBucketPolicy3DFC5B6F": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "StaticAssetsBucketC3095769",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StaticAssetsBucketC3095769",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StaticAssetsBucketC3095769",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttDeployRole885297C3ArnF4D2225A",
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/_next/static/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ListBucket",
+                "s3:GetBucketLocation",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::ImportValue": "Sps-App-prod:ExportsOutputFnGetAttDeployRole885297C3ArnF4D2225A",
+                },
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetObject",
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":cloudfront::",
+                        {
+                          "Ref": "AWS::AccountId",
+                        },
+                        ":distribution/",
+                        {
+                          "Ref": "Distribution830FAC52",
+                        },
+                      ],
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
   },
   "Rules": {
     "CheckBootstrapVersion": {
@@ -812,6 +1039,12 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Description": "SPS CloudFront access logs bucket",
       "Value": {
         "Ref": "LogsBucket9C4D8843",
+      },
+    },
+    "StaticAssetsBucketName": {
+      "Description": "SPS static-asset bucket (/_next/static/*) for additive deploy sync",
+      "Value": {
+        "Ref": "StaticAssetsBucketC3095769",
       },
     },
   },
@@ -868,7 +1101,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
               "ResponseHeadersPolicyId": {
                 "Ref": "SecurityHeadersE66B69D3",
               },
-              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "TargetOriginId": "SpsEdgestagingDistributionOriginGroup1AF3D484D",
               "ViewerProtocolPolicy": "redirect-to-https",
             },
             {
@@ -1347,6 +1580,34 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             },
             "Prefix": "cf/staging/",
           },
+          "OriginGroups": {
+            "Items": [
+              {
+                "FailoverCriteria": {
+                  "StatusCodes": {
+                    "Items": [
+                      403,
+                      404,
+                    ],
+                    "Quantity": 2,
+                  },
+                },
+                "Id": "SpsEdgestagingDistributionOriginGroup1AF3D484D",
+                "Members": {
+                  "Items": [
+                    {
+                      "OriginId": "SpsEdgestagingDistributionOrigin2DF9FA65F",
+                    },
+                    {
+                      "OriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+                    },
+                  ],
+                  "Quantity": 2,
+                },
+              },
+            ],
+            "Quantity": 1,
+          },
           "Origins": [
             {
               "CustomOriginConfig": {
@@ -1367,6 +1628,24 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
                 },
               ],
             },
+            {
+              "DomainName": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "RegionalDomainName",
+                ],
+              },
+              "Id": "SpsEdgestagingDistributionOrigin2DF9FA65F",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "DistributionOrigin2S3OriginAccessControlDC470594",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
           ],
           "PriceClass": "PriceClass_100",
         },
@@ -1385,6 +1664,17 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::MonitoringSubscription",
+    },
+    "DistributionOrigin2S3OriginAccessControlDC470594": {
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "SpsEdgestagingDistributionOrigin2S3OriginAccessControlC52F88B4",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4",
+        },
+      },
+      "Type": "AWS::CloudFront::OriginAccessControl",
     },
     "HtmlHeadersD748949D": {
       "Properties": {
@@ -1548,6 +1838,170 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+    },
+    "StaticAssetsBucketC3095769": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 14,
+              "Id": "sps-static-assets-expire-staging",
+              "Prefix": "_next/static/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "StaticAssetsBucketPolicy3DFC5B6F": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "StaticAssetsBucketC3095769",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StaticAssetsBucketC3095769",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StaticAssetsBucketC3095769",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttDeployRole885297C3ArnF4D2225A",
+                },
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/_next/static/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "s3:ListBucket",
+                "s3:GetBucketLocation",
+              ],
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::ImportValue": "Sps-App-staging:ExportsOutputFnGetAttDeployRole885297C3ArnF4D2225A",
+                },
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StaticAssetsBucketC3095769",
+                  "Arn",
+                ],
+              },
+            },
+            {
+              "Action": "s3:GetObject",
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":cloudfront::",
+                        {
+                          "Ref": "AWS::AccountId",
+                        },
+                        ":distribution/",
+                        {
+                          "Ref": "Distribution830FAC52",
+                        },
+                      ],
+                    ],
+                  },
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "StaticAssetsBucketC3095769",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
     },
   },
   "Rules": {

@@ -10,6 +10,7 @@ import * as acm from "aws-cdk-lib/aws-certificatemanager";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import { type Construct } from "constructs";
@@ -19,8 +20,17 @@ import { type SpsEnvConfig } from "./config";
 export interface EdgeStackProps extends StackProps {
   /** Resolved per-environment configuration. */
   readonly envConfig: SpsEnvConfig;
-  /** The public ALB from AppStack — the only origin this distribution fronts. */
+  /** The public ALB from AppStack — the primary (fallback) origin. */
   readonly publicAlb: elbv2.IApplicationLoadBalancer;
+  /**
+   * ARN of the AppStack GitHub Actions deploy role (`sps-deploy-<env>`). The
+   * static-asset bucket grants this principal `s3:PutObject` (prefix-scoped) so
+   * the deploy workflow can sync `.next/static` to S3. Passed as a string (not
+   * the role handle) to keep the App -> Edge dependency one-directional; the
+   * grant is a resource-based bucket-policy statement, so no identity policy is
+   * mutated cross-stack.
+   */
+  readonly deployRoleArn: string;
 }
 
 /**
@@ -232,6 +242,77 @@ export class EdgeStack extends Stack {
       customHeaders: {
         "X-Origin-Verify": originVerifyToken,
       },
+    });
+
+    // ------------------------------------------------------------------
+    // Static-asset S3 origin (Layer 2 of the /about chunk-404 fix).
+    //
+    // The default behavior's 60s HTML clamp bounds *stale HTML*, but the Next
+    // standalone server still bakes `.next/static` into the container image, so
+    // a deploy that rolls the ECS task set deletes the old build's
+    // content-hashed chunks -- a browser holding HTML from just before the
+    // deploy can still 404 a chunk. Serving `/_next/static/*` from an S3 bucket
+    // that the deploy writes ADDITIVELY (no `--delete`, see deploy.yml) makes
+    // old hashes survive every deploy, so they never 404.
+    //
+    // Private bucket + OAC (CloudFront signs requests; no public access, no
+    // ACLs). Name is CFN-generated (no `bucketName`) so it inherits the
+    // stack-name prefix and satisfies Footgun #3 without colliding across the
+    // staging+prod single-account deployment. 14-day lifecycle on the asset
+    // prefix sweeps hashes long after any HTML referencing them has aged out of
+    // the 60s edge cache and every browser tab has been refreshed.
+    // ------------------------------------------------------------------
+    const staticBucket = new s3.Bucket(this, "StaticAssetsBucket", {
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: `sps-static-assets-expire-${env}`,
+          enabled: true,
+          prefix: "_next/static/",
+          expiration: Duration.days(14),
+        },
+      ],
+    });
+
+    // Resource-based grant: the deploy role (AppStack) writes hashed assets
+    // under `_next/static/` only -- PutObject prefix-scoped, plus ListBucket so
+    // `aws s3 sync` (no `--delete`) can skip already-uploaded objects. NO
+    // DeleteObject: the sync is additive by design. Granting via the bucket
+    // policy (not the role's identity policy) keeps the App -> Edge dependency
+    // one-directional.
+    const deployPrincipal = new iam.ArnPrincipal(props.deployRoleArn);
+    staticBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [deployPrincipal],
+        actions: ["s3:PutObject"],
+        resources: [staticBucket.arnForObjects("_next/static/*")],
+      }),
+    );
+    staticBucket.addToResourcePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        principals: [deployPrincipal],
+        actions: ["s3:ListBucket", "s3:GetBucketLocation"],
+        resources: [staticBucket.bucketArn],
+      }),
+    );
+
+    // `/_next/static/*` origin: S3 (OAC) primary, ALB fallback. The origin
+    // group fails over to the Next server's baked-in `.next/static` on a 403
+    // (OAC GetObject on a missing key -> AccessDenied) or 404, so the asset is
+    // ALWAYS resolvable even if S3 is momentarily incomplete -- e.g. the window
+    // between deploying this EdgeStack (flipping the behavior to S3) and the
+    // first app deploy that populates the bucket. That failover is what makes
+    // the two-mechanism rollout (manual Edge deploy + CI app deploy) safe.
+    const staticS3Origin = origins.S3BucketOrigin.withOriginAccessControl(staticBucket);
+    const staticOriginGroup = new origins.OriginGroup({
+      primaryOrigin: staticS3Origin,
+      fallbackOrigin: origin,
+      fallbackStatusCodes: [403, 404],
     });
 
     // ------------------------------------------------------------------
@@ -501,11 +582,12 @@ export class EdgeStack extends Stack {
     // 60s `maxTtl`, so without this dedicated behavior every chunk would inherit
     // that 60s ceiling and stampede the origin. `CachingOptimized` keys on URL +
     // Accept-Encoding (no cookies, no RSC headers -- assets have no soft-nav
-    // variant) and respects the origin's immutable TTL. Same ALB origin as
-    // everything else today; L2 (#follow-up) moves these to an S3 origin so old
-    // hashes survive a deploy and never 404 in the first place.
+    // variant) and respects the origin's immutable TTL. Served from the
+    // S3-primary / ALB-fallback origin group (`staticOriginGroup`) so old
+    // content-hashed chunks survive a deploy and never 404 (#700); the ALB
+    // fallback preserves today's behavior whenever S3 lacks the object.
     additionalBehaviors["/_next/static/*"] = {
-      origin,
+      origin: staticOriginGroup,
       cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
       allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
       responseHeadersPolicy: securityHeaders,
@@ -694,6 +776,14 @@ export class EdgeStack extends Stack {
     new CfnOutput(this, "LogsBucketName", {
       value: this.logsBucket.bucketName,
       description: "SPS CloudFront access logs bucket",
+    });
+    // Consumed by the deploy workflow's "Sync static assets to S3" step
+    // (#700). The step self-skips if this output is absent (Edge not yet
+    // redeployed with Layer 2), matching the resilient discovery pattern used
+    // for the ETL repo / db-bootstrap task family.
+    new CfnOutput(this, "StaticAssetsBucketName", {
+      value: staticBucket.bucketName,
+      description: "SPS static-asset bucket (/_next/static/*) for additive deploy sync",
     });
   }
 }
