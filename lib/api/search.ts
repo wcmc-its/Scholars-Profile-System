@@ -207,6 +207,14 @@ export type PeopleHit = {
 export type PublicationHit = {
   pmid: string;
   title: string;
+  /**
+   * The matched title with the query terms wrapped in `<mark>`, present only
+   * when `SEARCH_PUB_HIGHLIGHT` is on and the title matched. The row renders this
+   * (with the marks restyled) instead of the plain `title`; falls back to
+   * `title` otherwise. The indexed title is plain text, so the fragment carries
+   * no other markup.
+   */
+  titleHighlight: string | null;
   journal: string | null;
   year: number | null;
   publicationType: string | null;
@@ -1507,6 +1515,14 @@ export async function searchPublications(opts: {
   /** Issue #692 — query with deprioritized filler tokens removed (computed in
    *  the route). Only consumed when `genericDemote` is true. */
   contentQuery?: string;
+  /**
+   * `SEARCH_PUB_HIGHLIGHT` resolved at request time by the route. When true, the
+   * body requests a `title` highlight (on the content query when demoting) and
+   * each hit carries `titleHighlight`. Pure presentation metadata — it only adds
+   * a `highlight` clause; the query predicate, scoring, and result set are
+   * unchanged. Headless callers default to `false`.
+   */
+  highlightMatches?: boolean;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -1521,6 +1537,10 @@ export async function searchPublications(opts: {
     !!opts.contentQuery &&
     opts.contentQuery !== trimmed;
   const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
+
+  // SEARCH_PUB_HIGHLIGHT — request a title highlight so the row can show which
+  // terms matched. Default-off ⇒ the body below is byte-identical to today.
+  const highlightMatches = opts.highlightMatches === true;
 
   // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
   // after prod verification of the >50% p95 cut for resolved-concept
@@ -2021,6 +2041,32 @@ export async function searchPublications(opts: {
       ? { post_filter: { bool: { filter: userAxisFilters } } }
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
+    // SEARCH_PUB_HIGHLIGHT — mark the matched terms in the title so the row shows
+    // why it matched. When #692 demotion is active, highlight on the content
+    // query so a stripped generic ("Research") is never <mark>-ed. The indexed
+    // title is plain text and short, so no analyzer-offset cap is needed (unlike
+    // the People `publicationTitles` blob). Omitted when off ⇒ body unchanged.
+    ...(highlightMatches
+      ? {
+          highlight: {
+            fields: { title: { number_of_fragments: 0 } },
+            ...(demoteGeneric
+              ? {
+                  highlight_query: {
+                    multi_match: {
+                      query: contentQuery,
+                      fields: ["title"],
+                      type: "best_fields",
+                      operator: "or",
+                    },
+                  },
+                }
+              : {}),
+            pre_tags: ["<mark>"],
+            post_tags: ["</mark>"],
+          },
+        }
+      : {}),
     aggs: {
       publicationTypes: {
         filter: aggBoolFor(filtersExcept("publicationType")),
@@ -2115,6 +2161,9 @@ export async function searchPublications(opts: {
       // optional-typed for defensive null handling on older index docs.
       abstract?: string;
     };
+    // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),
+    // present only when the flag is on and the title matched.
+    highlight?: { title?: string[] };
   };
   type Bucket = { key: string; doc_count: number };
   const r = resp.body as unknown as {
@@ -2227,6 +2276,7 @@ export async function searchPublications(opts: {
       return {
         pmid: h._source.pmid,
         title: h._source.title,
+        titleHighlight: h.highlight?.title?.[0] ?? null,
         journal: h._source.journal,
         year: h._source.year,
         publicationType: h._source.publicationType,

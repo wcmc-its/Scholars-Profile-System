@@ -27,6 +27,7 @@ import {
   resolveGenericTermMode,
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
+  resolvePublicationHighlight,
 } from "@/lib/api/search-flags";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -466,6 +467,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   // Issue #692 — generic-term demotion on the streamed pub tab.
                   genericDemote,
                   contentQuery,
+                  // SEARCH_PUB_HIGHLIGHT — mark matched terms in the title on the
+                  // SSR render so direct navigation shows highlights too.
+                  highlightMatches: resolvePublicationHighlight(),
                 })}
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}

@@ -6,6 +6,25 @@ import { usePublicationModal } from "@/components/publication/publication-modal"
 import type { PublicationHit } from "@/lib/api/search";
 import { sanitizePubTitle } from "@/lib/utils";
 
+// SEARCH_PUB_HIGHLIGHT — render the matched title. The OpenSearch fragment wraps
+// matches in <mark>; the indexed title may also carry scientific <sub>/<sup>/<i>
+// markup. Keep that whitelist plus <mark>, drop everything else, then restyle
+// the marks as a brand-red accent (the title is already bold, so weight alone
+// can't distinguish a match) — never the post-it-yellow <mark> default (#20).
+const TITLE_TAG_WHITELIST = /^(?:i|em|b|strong|sup|sub|mark)$/;
+
+export function highlightedTitleHtml(fragment: string): string {
+  return fragment
+    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash: string, raw: string) => {
+      const name = raw.toLowerCase();
+      if (!TITLE_TAG_WHITELIST.test(name)) return "";
+      if (name === "mark") {
+        return slash ? "</mark>" : '<mark class="bg-transparent text-[#b31b1b]">';
+      }
+      return slash ? `</${name}>` : `<${name}>`;
+    });
+}
+
 /**
  * Single row on the /search?type=publications result list.
  *
@@ -15,7 +34,9 @@ import { sanitizePubTitle } from "@/lib/utils";
  * shape is unchanged from the inline `<li>` it replaces.
  */
 export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
-  const titleHtml = sanitizePubTitle(hit.title);
+  const titleHtml = hit.titleHighlight
+    ? highlightedTitleHtml(hit.titleHighlight)
+    : sanitizePubTitle(hit.title);
   const { open } = usePublicationModal();
   return (
     <li className="border-b border-[#e3e2dd] py-5">

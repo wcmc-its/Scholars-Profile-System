@@ -218,3 +218,20 @@ export function resolvePubRecencyMode(): PubRecencyMode {
   if (v === "off" || v === "gentle" || v === "strong") return v;
   return "gentle";
 }
+
+/**
+ * Publications-tab term highlighting. Unlike the People tab, `searchPublications`
+ * never requested a highlight, so a matched title rendered with no emphasis on
+ * the query terms — a search-result page that doesn't show *why* a row matched.
+ * When on, `searchPublications` highlights the `title` field (on the content
+ * query when #692 demotion is active, so stripped generics aren't marked) and
+ * emits `titleHighlight` for the row to render. Pure presentation metadata: no
+ * effect on the query predicate, scoring, or result set.
+ *
+ * Default off until verified; a separate lever from the `SEARCH_PUB_TAB_*`
+ * ranking flags and from the People-tab `SEARCH_PEOPLE_MATCH_EXPLAIN`, each with
+ * an independent rollback trigger.
+ */
+export function resolvePublicationHighlight(): boolean {
+  return process.env.SEARCH_PUB_HIGHLIGHT === "on";
+}
