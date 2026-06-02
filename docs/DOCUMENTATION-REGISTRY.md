@@ -164,6 +164,7 @@ Listed here for completeness so §1–§8 stay focused.
 - Self-edit: `self-edit-spec.md`, `self-edit-ui-spec.md`, `self-edit-launch-spec.md`,
   `self-edit-request-change-modal.md`, `self-edit-request-change-server-mailer-plan.md`,
   `feedback-badge-spec.md`
+- Error handling: `error-handling-spec.md` (#668 — 404 recovery UX, error boundaries, degraded-search, error-response edge caching). Promote to §0 triage once shipped.
 - Slug personalization: `slug-personalization-spec.md`, `slug-personalization-ui-spec.md`
 - Unit curation: `unit-curation-spec.md`, `unit-curation-edit-ui-spec.md`,
   `center-management-spec.md`
