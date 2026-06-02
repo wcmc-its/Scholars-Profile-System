@@ -30,6 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# scratch — session-local notes, PR/issue bodies, throwaway artifacts.
+# Was previously un-ignored, so a `git add -A` could sweep it into a commit.
+tmp/
+
 # environment files — NEVER commit
 .env
 .env.local
