@@ -94,7 +94,7 @@ function HighlightedSnippet({ html }: { html: string }) {
 // explain this (the typed term isn't necessarily in their text), so we spell it
 // out. Quiet left-rule aside; "Why this match" uses the role-tag micro-label so
 // the eye lands on the bolded term, not the boilerplate.
-function MatchProvenanceNote({
+export function MatchProvenanceNote({
   provenance,
 }: {
   provenance: NonNullable<PeopleHit["matchProvenance"]>;
@@ -122,17 +122,36 @@ function MatchProvenanceNote({
 function NarrowerTerms({ parentTerm, terms }: { parentTerm: string; terms: string[] }) {
   const MAX = 3;
   const shown = terms.slice(0, MAX);
-  const extra = terms.length - shown.length;
+  const hidden = terms.slice(MAX);
+  const extra = hidden.length;
   const plural = shown.length > 1 || extra > 0;
+  // #702 follow-up — MeSH descriptor names are in inverted form and routinely
+  // carry internal commas ("Carcinoma, Ductal, Breast"), so a bare comma/"and"
+  // join is unreadable ("Carcinoma, Ductal, Breast and Carcinoma, Lobular …").
+  // Quote each term so its boundaries are unambiguous; use "and" only before the
+  // final element (the last term, or the "N more" count), commas otherwise. The
+  // "and N more" count carries the hidden term names in its tooltip.
   return (
     <>
-      {shown.map((term, i) => (
-        <span key={i}>
-          {i === 0 ? "" : i === shown.length - 1 ? " and " : ", "}
-          <strong className="font-semibold text-[#1a1a1a]">{term}</strong>
+      {shown.map((term, i) => {
+        const isFinal = i === shown.length - 1 && extra === 0;
+        const sep = i === 0 ? "" : isFinal ? " and " : ", ";
+        return (
+          <span key={i}>
+            {sep}
+            <strong className="font-semibold text-[#1a1a1a]">&ldquo;{term}&rdquo;</strong>
+          </span>
+        );
+      })}
+      {extra > 0 ? (
+        <span
+          title={hidden.join("; ")}
+          className="cursor-help underline decoration-dotted underline-offset-2"
+        >
+          {" "}
+          and {extra} more
         </span>
-      ))}
-      {extra > 0 ? <span> +{extra} more</span> : null}
+      ) : null}
       {` — ${plural ? "narrower terms" : "a narrower term"} of `}
       <span>&ldquo;{parentTerm}&rdquo;</span>.
     </>
