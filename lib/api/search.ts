@@ -1257,6 +1257,18 @@ export async function searchPeople(opts: {
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs,
     highlight: {
+      // Issue #702 — `publicationTitles` is a concatenated blob of every title
+      // on the scholar; for a prolific author it exceeds the index's
+      // `highlight.max_analyzed_offset` (1,000,000 by default), and OpenSearch
+      // throws `illegal_argument_exception` for the WHOLE search rather than
+      // skipping that field. Capping the analyzed offset truncates analysis
+      // instead of failing — the matched term is almost always in the first
+      // window, and a miss falls back to the chip (still non-blank). NB the
+      // query-level parameter is `max_analyzer_offset` (OpenSearch), distinct
+      // from the `index.highlight.max_analyzed_offset` index setting it bounds.
+      // Only set when match-explain adds the blob fields, so the flag-off body
+      // is unchanged.
+      ...(matchExplain ? { max_analyzer_offset: 900000 } : {}),
       fields: {
         preferredName: {},
         areasOfInterest: {},

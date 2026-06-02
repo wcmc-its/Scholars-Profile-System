@@ -134,9 +134,14 @@ describe("#702 highlight body", () => {
       "areasOfInterest",
       "overview",
     ]);
+    // No analyzer-offset cap on the flag-off body.
+    expect(
+      (capturedBodies[0] as { highlight: { max_analyzer_offset?: number } }).highlight
+        .max_analyzer_offset,
+    ).toBeUndefined();
   });
 
-  it("on: also requests the pub-evidence and detection-only fields", async () => {
+  it("on: also requests the pub-evidence and detection-only fields, capped at the analyzer offset", async () => {
     await searchPeople({
       q: "microbiome",
       relevanceMode: "v3",
@@ -154,6 +159,14 @@ describe("#702 highlight body", () => {
       "primaryTitle",
       "primaryDepartment",
     ]);
+    // #702 — cap analysis of the concatenated publicationTitles blob so a
+    // prolific author can't trip OpenSearch's max-offset guard and 500 the
+    // whole search. NB the query param is `max_analyzer_offset` (not the
+    // `max_analyzed_offset` index setting it bounds).
+    expect(
+      (capturedBodies[0] as { highlight: { max_analyzer_offset?: number } }).highlight
+        .max_analyzer_offset,
+    ).toBe(900000);
   });
 
   it("on + demote: the #692 highlight_query widens to the same field set", async () => {
