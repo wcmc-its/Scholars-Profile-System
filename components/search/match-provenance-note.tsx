@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import type { MatchProvenance } from "@/lib/api/match-provenance";
 
 /**
@@ -10,9 +13,13 @@ import type { MatchProvenance } from "@/lib/api/match-provenance";
  *
  * Terms are quoted because MeSH descriptor names are inverted and routinely
  * carry internal commas ("Carcinoma, Ductal, Breast") — an unquoted comma/"and"
- * join is unreadable. (Mirrors the people-result-card note; once #705 lands the
- * Scholars-tab copy will import this shared component too.)
+ * join is unreadable. When more than `MAX` narrower terms match, the surplus is
+ * collapsed behind an "and N more" control that expands the full list in place
+ * on click/Enter (progressive disclosure; everything is still reachable on the
+ * linked topic page).
  */
+const MAX = 3;
+
 export function MatchProvenanceNote({ provenance }: { provenance: MatchProvenance }) {
   return (
     <div className="mt-2 border-l-2 border-[#e3cfcf] pl-2.5 text-[13px] leading-snug text-[#4a4a4a]">
@@ -35,11 +42,19 @@ export function MatchProvenanceNote({ provenance }: { provenance: MatchProvenanc
 }
 
 function NarrowerTerms({ parentTerm, terms }: { parentTerm: string; terms: string[] }) {
-  const MAX = 3;
-  const shown = terms.slice(0, MAX);
-  const hidden = terms.slice(MAX);
-  const extra = hidden.length;
-  const plural = shown.length > 1 || extra > 0;
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? terms : terms.slice(0, MAX);
+  const extra = terms.length - shown.length;
+  const plural = terms.length > 1;
+
+  // The card row is itself a link (Scholars tab); stop the click/keypress from
+  // navigating so the control only toggles disclosure.
+  const expand = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setExpanded(true);
+  };
+
   return (
     <>
       {shown.map((term, i) => {
@@ -53,13 +68,21 @@ function NarrowerTerms({ parentTerm, terms }: { parentTerm: string; terms: strin
         );
       })}
       {extra > 0 ? (
-        <span
-          title={hidden.join("; ")}
-          className="cursor-help underline decoration-dotted underline-offset-2"
-        >
+        <>
           {" "}
-          and {extra} more
-        </span>
+          and{" "}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={expand}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") expand(e);
+            }}
+            className="cursor-pointer rounded-sm underline decoration-dotted underline-offset-2 hover:text-[#1a1a1a] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#8f1320]"
+          >
+            {extra} more
+          </span>
+        </>
       ) : null}
       {` — ${plural ? "narrower terms" : "a narrower term"} of `}
       <span>&ldquo;{parentTerm}&rdquo;</span>.

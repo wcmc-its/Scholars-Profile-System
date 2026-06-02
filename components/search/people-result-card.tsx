@@ -4,6 +4,7 @@ import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
+import { MatchProvenanceNote } from "@/components/search/match-provenance-note";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -83,58 +84,6 @@ function HighlightedSnippet({ html }: { html: string }) {
           <span key={i}>{part}</span>
         ),
       )}
-    </>
-  );
-}
-
-// Issue #688 / #702 — "why this match" note for a MeSH attribution hit: the
-// scholar surfaced because a publication is tagged with the searched concept
-// itself (`concept`) or a *narrower* term than the one searched (`narrower`,
-// e.g. "Microbiome" → Mycobiome). The query-keyed <mark> highlighter can't
-// explain this (the typed term isn't necessarily in their text), so we spell it
-// out. Quiet left-rule aside; "Why this match" uses the role-tag micro-label so
-// the eye lands on the bolded term, not the boilerplate.
-function MatchProvenanceNote({
-  provenance,
-}: {
-  provenance: NonNullable<PeopleHit["matchProvenance"]>;
-}) {
-  return (
-    <div className="mt-2 border-l-2 border-[#e3cfcf] pl-2.5 text-[13px] leading-snug text-[#4a4a4a]">
-      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
-        Why this match
-      </span>
-      {provenance.kind === "narrower" ? (
-        <NarrowerTerms parentTerm={provenance.parentTerm} terms={provenance.descendantTerms} />
-      ) : (
-        <>
-          publications tagged{" "}
-          <strong className="font-semibold text-[#1a1a1a]">
-            &ldquo;{provenance.parentTerm}&rdquo;
-          </strong>
-          .
-        </>
-      )}
-    </div>
-  );
-}
-
-function NarrowerTerms({ parentTerm, terms }: { parentTerm: string; terms: string[] }) {
-  const MAX = 3;
-  const shown = terms.slice(0, MAX);
-  const extra = terms.length - shown.length;
-  const plural = shown.length > 1 || extra > 0;
-  return (
-    <>
-      {shown.map((term, i) => (
-        <span key={i}>
-          {i === 0 ? "" : i === shown.length - 1 ? " and " : ", "}
-          <strong className="font-semibold text-[#1a1a1a]">{term}</strong>
-        </span>
-      ))}
-      {extra > 0 ? <span> +{extra} more</span> : null}
-      {` — ${plural ? "narrower terms" : "a narrower term"} of `}
-      <span>&ldquo;{parentTerm}&rdquo;</span>.
     </>
   );
 }

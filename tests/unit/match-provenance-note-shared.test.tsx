@@ -1,10 +1,12 @@
 /**
  * #707 — the shared "Why this match" note (Scholars + Publications). Quotes each
  * MeSH term because descriptor names are inverted with internal commas
- * ("Carcinoma, Ductal, Breast"); the concept variant reads "tagged …".
+ * ("Carcinoma, Ductal, Breast"); the concept variant reads "tagged …"; the
+ * surplus past 3 collapses behind an "and N more" control that expands in place.
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MatchProvenanceNote } from "@/components/search/match-provenance-note";
 
 const text = (node: React.ReactElement) =>
@@ -37,17 +39,33 @@ describe("shared MatchProvenanceNote (#707)", () => {
     expect(out).toContain('tagged "Breast Neoplasms"');
   });
 
-  it("truncates at 3 with 'and N more' and a tooltip of the hidden terms", () => {
-    const node = (
+  it("collapses past 3 to an 'and N more' control; hidden terms aren't in the initial render", () => {
+    const out = text(
       <MatchProvenanceNote
         provenance={{
           kind: "narrower",
           parentTerm: "Breast Neoplasms",
           descendantTerms: ["A", "B", "C", "Hidden One", "Hidden Two"],
         }}
-      />
+      />,
     );
-    expect(text(node)).toContain("and 2 more");
-    expect(renderToStaticMarkup(node)).toContain('title="Hidden One; Hidden Two"');
+    expect(out).toContain("and 2 more");
+    expect(out).not.toContain("Hidden One");
+  });
+
+  it("click-to-expand reveals the hidden terms in place", () => {
+    render(
+      <MatchProvenanceNote
+        provenance={{
+          kind: "narrower",
+          parentTerm: "Breast Neoplasms",
+          descendantTerms: ["A", "B", "C", "Hidden One", "Hidden Two"],
+        }}
+      />,
+    );
+    expect(screen.queryByText(/Hidden One/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /2 more/ }));
+    expect(screen.getByText(/Hidden One/)).toBeTruthy();
+    expect(screen.getByText(/Hidden Two/)).toBeTruthy();
   });
 });
