@@ -160,7 +160,10 @@ not in these tables. See [`ADR-005`](./ADR-005-manual-override-layer.md) and
   name change can't clobber a curated URL. Scholar self-serve requests (the **`slug_request`**
   queue, reviewed at `/edit/slug-requests`) are gated behind `SELF_EDIT_SLUG_REQUEST` (off at
   launch); the superuser direct override is always available. Reserved single-segment words
-  (`RESERVED_SLUGS`) can't be taken. Full design:
+  (`RESERVED_SLUGS`) can't be taken. Custom slugs are **policy-constrained to be name-based** (a
+  variant of the scholar's own name), enforced by **review only** — `validateRequestedSlug` checks
+  format/length/reserved/numeric/profanity/collision but **not** name-derivation; custom-slug
+  requests arrive as ServiceNow tickets and are actualized via the superuser override. Full design:
   [`ADR-005`](./ADR-005-manual-override-layer.md), [`slug-personalization-spec.md`](./slug-personalization-spec.md).
 - This dictionary covers the **public/runtime model** (Aurora). The B03 audit schema is
   documented separately; upstream source schemas (ReciterDB, InfoEd, etc.) are owned by
