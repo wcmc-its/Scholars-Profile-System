@@ -1435,6 +1435,12 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
+      it("keeps prod on the legacy /scholars canonical profile URL (PROFILE_CANONICAL=scholars, #671 cutover deferred)", () => {
+        // The prod cutover to root /{slug} is deferred until after the staging
+        // soak; flipping it is a one-line change to the app-stack ternary.
+        expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("scholars");
+      });
+
       it("the task role has zero AWS managed policies attached", () => {
         // The grant lands as an inline AWS::IAM::Policy resource attached
         // to the role; the role itself must not import a managed policy.
@@ -1742,6 +1748,25 @@ describe("AppStack", () => {
       template.hasResourceProperties("AWS::ECS::Service", {
         DesiredCount: 1,
       });
+    });
+
+    it("flips staging to the root /{slug} canonical profile URL (PROFILE_CANONICAL=root, #671 soak-first)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {

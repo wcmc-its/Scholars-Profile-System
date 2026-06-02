@@ -339,6 +339,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
+              {
+                "Name": "PROFILE_CANONICAL",
+                "Value": "scholars",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -3194,6 +3198,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
+              },
+              {
+                "Name": "PROFILE_CANONICAL",
+                "Value": "root",
               },
             ],
             "Essential": true,
