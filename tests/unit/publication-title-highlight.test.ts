@@ -33,4 +33,21 @@ describe("highlightedTitleHtml", () => {
     const out = highlightedTitleHtml('<mark data-x="1">x</mark>');
     expect(out).toBe('<mark class="bg-transparent text-[#b31b1b]">x</mark>');
   });
+
+  it("first-occurrence only: a repeated marked term doesn't strobe", () => {
+    const out = highlightedTitleHtml(
+      "Maternal gut <mark>microbiome</mark> regulates neonatal gut <mark>microbiome</mark>.",
+    );
+    expect(out).toBe(
+      'Maternal gut <mark class="bg-transparent text-[#b31b1b]">microbiome</mark> regulates neonatal gut microbiome.',
+    );
+  });
+
+  it("keeps distinct adjacent marks (the contiguous-phrase case)", () => {
+    const out = highlightedTitleHtml("<mark>Microbiome</mark> <mark>Research</mark> in X");
+    expect(out).toBe(
+      '<mark class="bg-transparent text-[#b31b1b]">Microbiome</mark> ' +
+        '<mark class="bg-transparent text-[#b31b1b]">Research</mark> in X',
+    );
+  });
 });

@@ -1541,6 +1541,16 @@ export async function searchPublications(opts: {
   // SEARCH_PUB_HIGHLIGHT — request a title highlight so the row can show which
   // terms matched. Default-off ⇒ the body below is byte-identical to today.
   const highlightMatches = opts.highlightMatches === true;
+  // #707 — the *significant* query for highlighting: the full query with the
+  // 251-term academic-common set (`deprioritized-terms.json`) stripped, so a
+  // near-stopword like "research" never lights up scattered across a title set
+  // (where its document frequency makes the color carry no information). The
+  // route always passes this as `contentQuery`; fall back to the full query when
+  // a headless caller omits it, or when every token is generic (strip-to-empty).
+  // Decoupled from `demoteGeneric` on purpose — gating highlights by term
+  // significance is the right default regardless of the ranking-demote flag.
+  const highlightSignificantQuery =
+    opts.contentQuery && opts.contentQuery.length > 0 ? opts.contentQuery : trimmed;
 
   // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
   // after prod verification of the >50% p95 cut for resolved-concept
@@ -2042,26 +2052,33 @@ export async function searchPublications(opts: {
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     // SEARCH_PUB_HIGHLIGHT — mark the matched terms in the title so the row shows
-    // why it matched. When #692 demotion is active, highlight on the content
-    // query so a stripped generic ("Research") is never <mark>-ed. The indexed
-    // title is plain text and short, so no analyzer-offset cap is needed (unlike
-    // the People `publicationTitles` blob). Omitted when off ⇒ body unchanged.
+    // why it matched. The `highlight_query` (always present, not the raw query)
+    // does two things the naive per-token highlighter can't:
+    //   1. Significance gating — `match` runs only the SIGNIFICANT query, so a
+    //      near-stopword generic ("research") scattered through a title is never
+    //      marked; it carries no information at academic-title document
+    //      frequencies. (The match clauses are analyzed by the field analyzer,
+    //      so the highlighter marks exactly the stemmed forms the ranker matched
+    //      — no more, no less.)
+    //   2. Phrase preference — `match_phrase` on the FULL query marks the
+    //      contiguous typed phrase when it exists ("Microbiome Research"), so the
+    //      highlight mirrors the phrase-boosted rank; scattered, only the
+    //      discriminating token lights up.
+    // The indexed title is plain text and short, so no analyzer-offset cap is
+    // needed (unlike the People `publicationTitles` blob). Omitted when the flag
+    // is off ⇒ body unchanged.
     ...(highlightMatches
       ? {
           highlight: {
             fields: { title: { number_of_fragments: 0 } },
-            ...(demoteGeneric
-              ? {
-                  highlight_query: {
-                    multi_match: {
-                      query: contentQuery,
-                      fields: ["title"],
-                      type: "best_fields",
-                      operator: "or",
-                    },
-                  },
-                }
-              : {}),
+            highlight_query: {
+              bool: {
+                should: [
+                  { match_phrase: { title: trimmed } },
+                  { match: { title: highlightSignificantQuery } },
+                ],
+              },
+            },
             pre_tags: ["<mark>"],
             post_tags: ["</mark>"],
           },

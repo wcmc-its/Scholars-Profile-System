@@ -118,27 +118,53 @@ describe("searchPublications highlight body", () => {
     expect(res.hits[0].titleHighlight).toBeNull();
   });
 
-  it("on: requests a title highlight and emits the marked fragment", async () => {
+  type BoolHq = {
+    bool: {
+      should: [{ match_phrase: { title: string } }, { match: { title: string } }];
+    };
+  };
+
+  it("on: highlight_query gates the full query OR phrase; emits the marked fragment", async () => {
     hitHolder.highlight = { title: ["The Traveling <mark>Microbiome</mark>."] };
-    const res = await searchPublications({ q: "microbiome", highlightMatches: true });
+    // contentQuery is the route-stripped significant query (here unchanged).
+    const res = await searchPublications({
+      q: "microbiome",
+      contentQuery: "microbiome",
+      highlightMatches: true,
+    });
     const hl = highlightOf(capturedBodies[0]);
     expect(hl?.fields).toHaveProperty("title");
-    expect(hl?.highlight_query).toBeUndefined();
+    const hq = hl?.highlight_query as BoolHq;
+    expect(hq.bool.should[0].match_phrase.title).toBe("microbiome");
+    expect(hq.bool.should[1].match.title).toBe("microbiome");
     expect(res.hits[0].titleHighlight).toBe("The Traveling <mark>Microbiome</mark>.");
   });
 
-  it("on + demote: highlight_query runs the content query over title", async () => {
+  it("significance gating: phrase keeps the full query; token-match drops the generic", async () => {
+    // The route passes contentQuery = stripDeprioritized("microbiome research") = "microbiome".
     await searchPublications({
       q: "microbiome research",
       contentQuery: "microbiome",
-      genericDemote: true,
       highlightMatches: true,
     });
-    const hq = highlightOf(capturedBodies[0])?.highlight_query as {
-      multi_match: { query: string; fields: string[] };
-    };
-    expect(hq.multi_match.query).toBe("microbiome");
-    expect(hq.multi_match.fields).toEqual(["title"]);
+    const hq = highlightOf(capturedBodies[0])?.highlight_query as BoolHq;
+    // Phrase clause keeps the FULL typed query (so a contiguous "Microbiome
+    // Research" still highlights as the phrase)...
+    expect(hq.bool.should[0].match_phrase.title).toBe("microbiome research");
+    // ...but the token clause is the SIGNIFICANT query only — scattered
+    // "research" never lights up.
+    expect(hq.bool.should[1].match.title).toBe("microbiome");
+  });
+
+  it("gating is decoupled from the demote flag (highlight_query present even with demote off)", async () => {
+    await searchPublications({
+      q: "microbiome research",
+      contentQuery: "microbiome",
+      genericDemote: false,
+      highlightMatches: true,
+    });
+    const hq = highlightOf(capturedBodies[0])?.highlight_query as BoolHq;
+    expect(hq.bool.should[1].match.title).toBe("microbiome");
   });
 
   it("on but no title match: titleHighlight stays null", async () => {

@@ -14,15 +14,28 @@ import { sanitizePubTitle } from "@/lib/utils";
 const TITLE_TAG_WHITELIST = /^(?:i|em|b|strong|sup|sub|mark)$/;
 
 export function highlightedTitleHtml(fragment: string): string {
-  return fragment
-    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (_, slash: string, raw: string) => {
+  // 1. Keep the scientific-notation whitelist + <mark>; drop everything else.
+  //    Normalize marks to a bare tag here; the brand-accent class is applied in
+  //    step 2 so we can also de-duplicate.
+  const cleaned = fragment.replace(
+    /<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi,
+    (_, slash: string, raw: string) => {
       const name = raw.toLowerCase();
       if (!TITLE_TAG_WHITELIST.test(name)) return "";
-      if (name === "mark") {
-        return slash ? "</mark>" : '<mark class="bg-transparent text-[#b31b1b]">';
-      }
       return slash ? `</${name}>` : `<${name}>`;
-    });
+    },
+  );
+  // 2. First-occurrence-only: a title that repeats a matched term shouldn't
+  //    strobe. Keep the first <mark> per normalized term, unwrap later repeats,
+  //    and recolor survivors as a brand-red accent with the post-it background
+  //    reset (#20) — never recolored glyphs on every literal hit.
+  const seen = new Set<string>();
+  return cleaned.replace(/<mark>([\s\S]*?)<\/mark>/gi, (_, inner: string) => {
+    const key = inner.replace(/<[^>]*>/g, "").toLowerCase().trim();
+    if (seen.has(key)) return inner;
+    seen.add(key);
+    return `<mark class="bg-transparent text-[#b31b1b]">${inner}</mark>`;
+  });
 }
 
 /**
