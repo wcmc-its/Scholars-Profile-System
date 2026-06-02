@@ -501,6 +501,46 @@ describe("EdgeStack", () => {
       });
     });
 
+    describe("#668 error-response caching (§4)", () => {
+      const customErrorResponses = (): Array<Record<string, unknown>> => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        return (dc.CustomErrorResponses as Array<Record<string, unknown>>) ?? [];
+      };
+
+      it("caches 404 for 60s and passes the origin 404 through unchanged (no soft-404)", () => {
+        const r404 = customErrorResponses().find((e) => e.ErrorCode === 404);
+        expect(r404).toBeDefined();
+        expect(r404?.ErrorCachingMinTTL).toBe(60);
+        // No ResponseCode / ResponsePagePath: CloudFront preserves the origin's
+        // 404 status + body. A cached 404 must STAY a 404, never become a 200.
+        expect(r404?.ResponseCode).toBeUndefined();
+        expect(r404?.ResponsePagePath).toBeUndefined();
+      });
+
+      it("never caches a 5xx -- every 5xx declares ErrorCachingMinTTL 0 (ratchet)", () => {
+        const byCode = new Map(
+          customErrorResponses().map((e) => [e.ErrorCode as number, e]),
+        );
+        for (const code of [500, 502, 503, 504]) {
+          const r = byCode.get(code);
+          expect(r).toBeDefined();
+          expect(r?.ErrorCachingMinTTL).toBe(0);
+        }
+        // Ratchet: NO 5xx custom error response may carry a non-zero TTL. Guards
+        // a future edit from accidentally pinning a transient origin 5xx at the
+        // edge (a 10s blip would otherwise become a multi-minute outage).
+        const cachedFiveXx = customErrorResponses().filter(
+          (e) =>
+            (e.ErrorCode as number) >= 500 &&
+            (e.ErrorCachingMinTTL as number) !== 0,
+        );
+        expect(cachedFiveXx).toEqual([]);
+      });
+    });
+
     describe("#634 query-keyed cache policy (Group B)", () => {
       const policyConfig = (): Record<string, unknown> => {
         const policies = template.findResources(

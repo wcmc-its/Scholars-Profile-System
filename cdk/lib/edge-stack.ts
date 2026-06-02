@@ -536,6 +536,27 @@ export class EdgeStack extends Stack {
         compress: true,
       },
       additionalBehaviors,
+      // ------------------------------------------------------------------
+      // #668 §4 -- error-response caching.
+      //   404: cache 60s so dead-URL crawler floods (the legacy-VIVO cutover)
+      //   are absorbed at the edge rather than hitting the force-dynamic
+      //   origin every time. No responseHttpStatus / responsePagePath, so the
+      //   origin's branded 404 body AND its 404 status pass through unchanged
+      //   -- a cached 404 stays a real 404 (never a soft-404). 60s is safe:
+      //   profiles are 24h-cached, so the edge is never the freshness
+      //   bottleneck for a URL that later becomes valid.
+      //   5xx: ttl 0 (ErrorCachingMinTTL 0) -- NEVER cache, so a transient
+      //   Aurora/OpenSearch blip can't get pinned at the edge and turn a
+      //   10-second hiccup into a multi-minute outage for cached paths.
+      // The 5xx-never-cache invariant is ratcheted by edge-stack.test.ts.
+      // ------------------------------------------------------------------
+      errorResponses: [
+        { httpStatus: 404, ttl: Duration.seconds(60) },
+        { httpStatus: 500, ttl: Duration.seconds(0) },
+        { httpStatus: 502, ttl: Duration.seconds(0) },
+        { httpStatus: 503, ttl: Duration.seconds(0) },
+        { httpStatus: 504, ttl: Duration.seconds(0) },
+      ],
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       enableLogging: true,
       logBucket: this.logsBucket,
