@@ -79,6 +79,9 @@ data/seo/*
 !data/seo/rival-basket.json
 !data/seo/flagship-queries.json
 !data/seo/matched-researchers.json
+# #594 §3: the specific-subtopic LLM basket (derived from the DB subtopic taxonomy),
+# the corrected "WCM presence" instrument alongside the broad flagship queries.
+!data/seo/specific-queries.json
 # Exception: Next.js dynamic route segment that happens to look like a CSV
 # filename — the literal `citations.csv` directory is the route path that
 # serves /api/publications/[pmid]/citations.csv. Brackets are escaped so
