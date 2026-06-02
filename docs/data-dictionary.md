@@ -144,6 +144,24 @@ not in these tables. See [`ADR-005`](./ADR-005-manual-override-layer.md) and
   cross-table FK (D-06).
 - **`@db.Text` JSON fields** (`meshTerms`, `keywords`, `subtopicIds`, `papers`, …) are
   JSON-typed MariaDB columns; treat as opaque arrays/objects per the inline schema docs.
+- **Profile URLs (slugs)** — a scholar's slug is `Scholar.slug`; the *canonical* public URL is
+  governed by `PROFILE_CANONICAL` (#671, [`lib/profile-url.ts`](../lib/profile-url.ts)): default
+  `scholars` → `/scholars/<slug>` canonical with the root `/<slug>` 308-aliasing to it; `root` →
+  `/<slug>` canonical with `/scholars/<slug>` 308-ing to it (mid-migration to the shorter root
+  form). On-page links always use the root form (`profilePath`); `canonicalProfilePath` drives
+  rel=canonical / OG / JSON-LD / sitemap / redirect targets. The slug itself is **auto-derived**
+  from ED `preferredName` (`deriveSlug`, [`lib/slug.ts`](../lib/slug.ts)); a collision takes a
+  numeric suffix (`-2`, `-3`) in CWID-creation order and the incumbent is never renamed. The four
+  tables interlock: a **`field_override(slug)`** row is the *pin* — a superuser override (or an
+  approved `slug_request`) writes it, and on write `reconcileScholarSlug` updates `Scholar.slug`
+  and records the prior value in **`slug_history`** so the old URL keeps permanent-redirecting.
+  Routing reads only `Scholar.slug` + `slug_history`, never the override row (single source of
+  truth). The ED ETL skips re-minting any cwid carrying a `field_override(slug)` (#497 §5.2), so a
+  name change can't clobber a curated URL. Scholar self-serve requests (the **`slug_request`**
+  queue, reviewed at `/edit/slug-requests`) are gated behind `SELF_EDIT_SLUG_REQUEST` (off at
+  launch); the superuser direct override is always available. Reserved single-segment words
+  (`RESERVED_SLUGS`) can't be taken. Full design:
+  [`ADR-005`](./ADR-005-manual-override-layer.md), [`slug-personalization-spec.md`](./slug-personalization-spec.md).
 - This dictionary covers the **public/runtime model** (Aurora). The B03 audit schema is
   documented separately; upstream source schemas (ReciterDB, InfoEd, etc.) are owned by
   those systems.
