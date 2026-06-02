@@ -13,7 +13,7 @@ import { PeopleResultCard } from "@/components/search/people-result-card";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
-import { ResearchAreaCard } from "@/components/search/research-area-card";
+import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { MeshBoostControl } from "@/components/search/mesh-boost-control";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
 import { SearchInterpretationPopover } from "@/components/search/search-interpretation-popover";
@@ -588,35 +588,30 @@ function SearchMeta({
 }) {
   return (
     <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
-      {/* #638 — title block flexes to fill; the research-area card is fixed-
-          width and pinned right. `min-w-0` lets a long query wrap left of the
-          card with no overlap. On narrow viewports the card stacks below. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-        <div className="min-w-0 sm:flex-1">
-          <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
-            {q ? (
-              <>
-                {/* #638 (b) — query echoed in primary text (not an accent
-                    "link" color); set apart from a lighter-weight "Results
-                    for" by weight + quotes. Accent reserved for real links. */}
-                <span className="font-normal">Results for </span>
-                <span className="font-bold text-foreground">
-                  {"“"}
-                  {q}
-                  {"”"}
-                </span>
-              </>
-            ) : (
-              "Browse"
-            )}
-          </h1>
-          <div className="text-[13px] text-muted-foreground">
-            {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
-            {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
-          </div>
-        </div>
-        <ResearchAreaCard result={taxonomyMatch} />
+      <h1 className="page-title mb-1 text-[28px] leading-tight font-bold tracking-[-0.01em]">
+        {q ? (
+          <>
+            {/* #638 (b) — query echoed in primary text (not an accent "link"
+                color); set apart from a lighter-weight "Results for" by weight
+                + quotes. Accent reserved for real links. */}
+            <span className="font-normal">Results for </span>
+            <span className="font-bold text-foreground">
+              {"“"}
+              {q}
+              {"”"}
+            </span>
+          </>
+        ) : (
+          "Browse"
+        )}
+      </h1>
+      <div className="text-[13px] text-muted-foreground">
+        {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
+        {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
       </div>
+      {/* #709 — Research Areas chip row: below the count line, above the tabs.
+          Replaces the top-right "Research area at WCM" card (RA-1/RA-2). */}
+      <ResearchAreasRow result={taxonomyMatch} />
     </div>
   );
 }
@@ -641,7 +636,7 @@ function ModeTabs({
   const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
   const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   return (
-    <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
       <ModeTab
         href={peopleHref}
         label="Scholars"
