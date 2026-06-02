@@ -23,7 +23,12 @@ export default async function PublicNotFound() {
     h.get("x-pathname") ??
     "";
 
-  logNotFound({ path: pathname, pattern: pathname.startsWith("/scholars") ? "profile" : "other" });
+  // Post-#671 an unknown profile is a bare root slug `/{slug}` (single segment);
+  // `/scholars/<slug>` is the legacy form. Both are profile misses. Other
+  // in-group 404s (topics / centers / departments — multi-segment) are "other".
+  const segments = pathname.replace(/^\/+/, "").split("/").filter(Boolean);
+  const pattern = pathname.startsWith("/scholars/") || segments.length === 1 ? "profile" : "other";
+  logNotFound({ path: pathname, pattern });
 
   return <NotFoundContent />;
 }

@@ -1,12 +1,13 @@
 # Error handling & not-found — SPEC
 
-**Status:** Draft
+**Status:** Draft — P1–P3 implemented (this branch); P4–P6 pending.
 **Date:** 2026-06-01
 **Authors:** Scholars Profile System development team
 **Implements:** [#668](https://github.com/wcmc-its/Scholars-Profile-System/issues/668) — error handling: 404 recovery UX + error boundaries + degraded-search + error-response edge caching
 **Operationalizes:** [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) — the "what breaks when X is down" matrix. This SPEC defines what the *user sees* when those failures reach the request path.
 **Extends:** [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md) (§4 edge caching of error responses), [`logging-reference.md`](./logging-reference.md) (§6 error-event vocabulary).
 **Related:** [#595](https://github.com/wcmc-its/Scholars-Profile-System/issues/595) (New Relic RUM + log ingestion), [#506](https://github.com/wcmc-its/Scholars-Profile-System/issues/506) Gate A (launch tech-readiness), [#576](https://github.com/wcmc-its/Scholars-Profile-System/issues/576) (launch data-QA gate), [#474](https://github.com/wcmc-its/Scholars-Profile-System/issues/474) (/edit 404 — a data-population issue, not in scope here).
+**Reconciled with:** [#671/#672](https://github.com/wcmc-its/Scholars-Profile-System/issues/671) — people canonical URL migration, which moved the catch-all profile route into the `(public)` group (`app/(public)/[slug]/page.tsx`) and makes profiles canonical at root `/{slug}` when `PROFILE_CANONICAL === "root"` (else a 301 alias to `/scholars/{slug}`). Routing references below reflect the post-#671 layout.
 
 ---
 
@@ -77,8 +78,8 @@ Each boundary fires exactly one event (§6): segment `error.tsx` → `error_boun
 
 `notFound()` resolves to the nearest `not-found` boundary up the tree. Two sites matter:
 
-1. **`app/(public)/not-found.tsx`** (NEW) — catches `notFound()` thrown from inside the `(public)` group (profiles, topics, centers, departments, co-pubs). Renders inside `(public)/layout.tsx` → **chrome for free**.
-2. **`app/not-found.tsx`** (existing, to be upgraded) — the root catch site for everything else: dead legacy **VIVO** URLs (`/display/cwid-…` — two segments, never matches the `[slug]` catch-all, lands here), random unmatched paths, and root-alias misses (`app/[slug]/page.tsx` → `notFound()`). The root layout does not include the public chrome, so this file must render `SiteHeader`/`SiteFooter` **directly** (both are standalone and cookie-safe).
+1. **`app/(public)/not-found.tsx`** (NEW) — catches `notFound()` thrown from inside the `(public)` group: profiles, topics, centers, departments, co-pubs, **and (post-#671) the root catch-all profile route `app/(public)/[slug]/page.tsx`** — so an unknown root slug `/{slug}` now lands here with chrome + the recovery search box. Renders inside `(public)/layout.tsx` → **chrome for free**.
+2. **`app/not-found.tsx`** (existing, upgraded) — the root catch site for everything *outside* the `(public)` group: dead legacy **VIVO** URLs (`/display/cwid-…` — two segments, never match the single-segment `(public)/[slug]` catch-all, so they land here), random unmatched multi-segment paths, and non-`(public)` top-level paths. The root layout does not include the public chrome, so this file renders `SiteHeader`/`SiteFooter` **directly** (both are standalone and cookie-safe).
 
 Factor the 404 body into one shared component (`components/site/not-found-content.tsx`) so both sites are visually identical and branded.
 
@@ -98,14 +99,16 @@ Factor the 404 body into one shared component (`components/site/not-found-conten
 
 ## §3 — `/search` degraded state
 
-OpenSearch is a **live-path** dependency but scoped to `/search` and `/api/search/*` only (`dependency-outage-matrix.md`). An outage must degrade search and leave the Aurora-served site fully functional.
+OpenSearch is a **live-path** dependency but scoped to `/search` and `/api/search/*` only (`dependency-outage-matrix.md`). An outage must produce a branded, observable failure and leave the Aurora-served site fully functional.
 
-- Wrap the OpenSearch calls in `lib/api/search.ts` (`searchPeople`, `searchPublications`, `searchFunding`, and the taxonomy/suggest paths) so a backend failure is **caught at the data layer** and surfaced as a typed degraded result (e.g. `{ degraded: true }`) rather than thrown.
-- The `/search` page renders a branded **"Search is temporarily unavailable"** panel in the results area — HTTP **200**, full chrome, the query box still present — instead of throwing. The A–Z browse fallback (already Aurora-backed via `getAZBuckets`) can still render where applicable.
-- A segment `app/(public)/search/error.tsx` is the belt-and-suspenders boundary for anything the data-layer catch misses (so search can never reach the unstyled 500).
-- Emit `search_degraded` (§6) when the degraded path is taken, so the OpenSearch outage is visible in logs/alarms independent of the AWS-side `ClusterStatus.red` alarm.
+**As-built (decided — see Resolved decisions #4):** the `/search` outage renders a **branded HTTP 500**, not an in-page 200 degrade. A 500 is the *correct* status for a real backend outage (it stays visible to monitoring), and `/search` is `noindex` so the status carries no SEO cost. The work is therefore two pieces, both additive and low-risk:
 
-> Search responses are already `noindex, follow` (`robots: { index: false, follow: true }`), so a degraded search page carries no SEO risk.
+- **`app/(public)/search/error.tsx`** — the segment error boundary. An OpenSearch failure thrown from the page's search calls (the shell badge-counts and/or the streamed `<Suspense>` results) is caught here and rendered as a branded **"Search is temporarily unavailable"** panel inside the `(public)` chrome, with a retry and browse links. This is what prevents the unstyled Next.js 500.
+- **Server-side `search_degraded` log (§6)** — a `.catch` on the page's badge-count `Promise.all` logs the structured event (query length only) then rethrows to the boundary. This makes the outage visible in logs/alarms independent of the AWS-side `ClusterStatus.red` alarm. (Emitting from the boundary alone is insufficient — it is a Client Component and would only reach the browser console / RUM.)
+
+> Search responses are already `noindex, follow` (`robots: { index: false, follow: true }`), so a 500 here carries no SEO risk.
+>
+> **Deferred refinement (optional):** the original "HTTP 200, query box still present, only the results area degrades" experience requires a contained refactor of the search shell's data fetch (the badge-count `Promise.all` plus the streamed results). It was deferred to avoid restructuring the app's most complex page; the branded 500 is the shipped behavior. Revisit as a separate follow-up if the 200 UX is wanted.
 
 ---
 
@@ -170,7 +173,7 @@ Candidate alarms (defer to #595 / `SLOs.md`): `global_error` rate > 0 (any root 
 | Missing / non-public / sparse-hidden profile, missing topic/center/dept | **404** | No | `notFound()`. Body is the recovery UI (§2) — still a 404, never a soft-404. |
 | Renamed slug (slug_history hit) | **301 / 308** | Follows target | `redirect()` / `permanentRedirect()`, unchanged. |
 | Render throw (DB cold-cache, resolver, etc.) | **500** | No | `error.tsx` / `global-error.tsx`. Never cached (§4). |
-| OpenSearch outage on `/search` | **200** (degraded panel) | No (`noindex`) | Degrading to a usable page beats a 5xx; search is already `noindex, follow`. |
+| OpenSearch outage on `/search` | **500** (branded boundary) | No (`noindex`) | As-built (Resolved decisions #4): `search/error.tsx` renders a branded "temporarily unavailable" page; a 500 stays visible to monitoring and `/search` is `noindex`. Never cached (§4). |
 | Dead legacy VIVO URL | **404** | No | Recovery UI + VIVO copy (§2). Cacheable short-TTL (§4). |
 | API error | per §5 | n/a | `no-store`. |
 
@@ -211,7 +214,7 @@ docs/
 ## §9 — Acceptance / verification
 
 - [ ] A forced Server Component throw renders the branded segment `error.tsx` (chrome intact, "Try again" works), and a forced root-layout throw renders the self-contained `global-error.tsx`. Neither shows raw stack text.
-- [ ] `/search` with OpenSearch unreachable returns **HTTP 200** with a degraded panel and intact chrome — confirmed it does **not** 500. Every Aurora-served page still renders normally.
+- [ ] `/search` with OpenSearch unreachable renders the **branded** `search/error.tsx` panel (chrome intact, "Try again" works) — i.e. not the unstyled Next default — and logs a server-side `search_degraded` event. Every Aurora-served page still renders normally. (Status is 500 by design — Resolved decisions #4.)
 - [ ] A dead profile URL and a `/display/cwid-x` VIVO URL both return **HTTP 404** with full chrome + a working search box; `vivo_404` (and `not_found`) appear in the log.
 - [ ] CloudFront caches a 404 for the configured short TTL **and** returns it as a 404 (not 200); a simulated origin 5xx is **not** cached at the edge. Verified from `curl -I` against the distribution (status + `x-cache` + age).
 - [ ] `edge-stack.test.ts` fails if any 5xx `errorCachingMinTtl` is non-zero.
@@ -247,8 +250,9 @@ No feature flag is required for P1–P3 (they only improve failure paths that to
 
 ## Resolved decisions
 
-These were the open forks; all three are settled (2026-06-01) with the defaults below and reflected inline in §1, §4, and §6.
+These were the open forks; all are settled (2026-06-01) with the defaults below and reflected inline in §1, §3, §4, and §6.
 
 1. **404 cache TTL — fixed at 60 s.** Profiles are already 24 h-cached, so the edge is never the freshness bottleneck for a valid page; 60 s absorbs the VIVO-cutover crawler floods while keeping a newly-valid URL's stale-404 window negligible. Revisit only if cutover crawler volume proves materially higher than expected.
 2. **`vivo_404` stays; `not_found` is added alongside it — not folded in this work.** Folding would couple the redirect-map-pruning query migration into the error-handling PRs for no functional gain. `vivo_404` keeps emitting unchanged (continuity of the pruning signal); `not_found{pattern}` is the new general event. Fold them later, in the PR that next touches the pruning query.
 3. **`global-error.tsx` branding — inline text wordmark, no assets.** "Scholars @ Weill Cornell Medicine" as inline-styled text plus the recovery links; no inline SVG, no external CSS / font / image. The root boundary must survive the failure of the cascade and the root layout themselves, so it depends on nothing but the HTML it ships.
+4. **`/search` outage degrades to a branded HTTP 500, not an in-page 200.** A 500 is the correct status for a real OpenSearch outage (it stays visible to monitoring) and `/search` is `noindex`, so there is no SEO cost; the boundary (`search/error.tsx`) provides the branded UX and a retry, and a server-side `search_degraded` log provides observability. The in-page 200 degrade (keep the form/tabs, degrade only the results area) would require a contained refactor of the app's most complex page and was deferred as an optional follow-up. This supersedes the earlier §7 "200 (degraded panel)" entry.
