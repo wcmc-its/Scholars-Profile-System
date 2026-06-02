@@ -8,15 +8,18 @@ import { sanitizePubTitle } from "@/lib/utils";
 
 // SEARCH_PUB_HIGHLIGHT — render the matched title. The OpenSearch fragment wraps
 // matches in <mark>; the indexed title may also carry scientific <sub>/<sup>/<i>
-// markup. Keep that whitelist plus <mark>, drop everything else, then restyle
-// the marks as a brand-red accent (the title is already bold, so weight alone
-// can't distinguish a match) — never the post-it-yellow <mark> default (#20).
+// markup. Keep that whitelist plus <mark>, drop everything else, then style the
+// surviving marks as a quiet pale-brand tint behind the span — keeping the title
+// glyph color (the title is already bold; a tint reads as "highlight", not the
+// recolored-glyph "link/alert" the nearby blue links would clash with) and never
+// the post-it-yellow <mark> default (#20). `box-decoration-clone` keeps the pill
+// intact if a match wraps across lines.
 const TITLE_TAG_WHITELIST = /^(?:i|em|b|strong|sup|sub|mark)$/;
+const MARK_CLASS = "box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px]";
 
 export function highlightedTitleHtml(fragment: string): string {
   // 1. Keep the scientific-notation whitelist + <mark>; drop everything else.
-  //    Normalize marks to a bare tag here; the brand-accent class is applied in
-  //    step 2 so we can also de-duplicate.
+  //    Normalize marks to a bare tag; the pill class is applied in step 3.
   const cleaned = fragment.replace(
     /<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi,
     (_, slash: string, raw: string) => {
@@ -25,16 +28,19 @@ export function highlightedTitleHtml(fragment: string): string {
       return slash ? `</${name}>` : `<${name}>`;
     },
   );
-  // 2. First-occurrence-only: a title that repeats a matched term shouldn't
+  // 2. Merge adjacent marks separated only by whitespace into one pill, so a
+  //    contiguous phrase ("Microbiome Research") reads as a single highlight
+  //    rather than two abutting tinted boxes.
+  const merged = cleaned.replace(/<\/mark>(\s+)<mark>/gi, "$1");
+  // 3. First-occurrence-only: a title that repeats a matched term shouldn't
   //    strobe. Keep the first <mark> per normalized term, unwrap later repeats,
-  //    and recolor survivors as a brand-red accent with the post-it background
-  //    reset (#20) — never recolored glyphs on every literal hit.
+  //    and apply the pale-tint pill to the survivors.
   const seen = new Set<string>();
-  return cleaned.replace(/<mark>([\s\S]*?)<\/mark>/gi, (_, inner: string) => {
+  return merged.replace(/<mark>([\s\S]*?)<\/mark>/gi, (_, inner: string) => {
     const key = inner.replace(/<[^>]*>/g, "").toLowerCase().trim();
     if (seen.has(key)) return inner;
     seen.add(key);
-    return `<mark class="bg-transparent text-[#b31b1b]">${inner}</mark>`;
+    return `<mark class="${MARK_CLASS}">${inner}</mark>`;
   });
 }
 
