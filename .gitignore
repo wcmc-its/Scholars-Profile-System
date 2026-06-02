@@ -105,6 +105,9 @@ Thumbs.db
 
 # Session screenshots
 *.png
+# ...but keep the Next.js App Router brand icons (WCM favicon set)
+!app/icon.png
+!app/apple-icon.png
 
 # Git worktrees (embedded repos)
 .claude/worktrees/
