@@ -94,6 +94,13 @@ function SignInLink() {
   return (
     <Link
       href={`/api/auth/saml/login?return=${encodeURIComponent(pathname)}`}
+      // Never prefetch: this is an API route that 302-redirects cross-origin to
+      // the SAML IdP. Next's viewport RSC prefetch fires on every public page
+      // (the link is always in the header), and each one fails the CORS
+      // preflight on the cross-origin redirect — "Failed to fetch RSC payload …
+      // Falling back to browser navigation" — flooding the console and burning
+      // a connection slot. The real click navigates fine without a prefetch.
+      prefetch={false}
       className="text-sm font-medium text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
       data-testid="header-sign-in"
     >

@@ -1,5 +1,4 @@
 import * as React from "react";
-import NextLink from "next/link";
 import {
   SearchTransitionProvider,
   TransitionLink as Link,
@@ -351,27 +350,36 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           (§259) + search-interpretation (§265) affordances move into the
           publications toolbar (see PublicationsResults). The old full-width
           banner band that sat between the title and the tabs is removed. */}
-      <ModeTabs
-        q={q}
-        activeType={type}
-        peopleCount={peopleResult.total}
-        pubCount={pubsResult.total}
-        fundingCount={fundingResult.total}
-      />
-      {showAZ && azBuckets ? (
-        <div className="mx-auto max-w-[1280px] px-6 pt-6">
-          <AZDirectory buckets={azBuckets} />
-          <div className="mt-2 text-right">
-            <Link
-              href="/browse"
-              className="text-sm text-[var(--color-accent-slate)] hover:underline"
-            >
-              Or browse departments &amp; centers &#x2192;
-            </Link>
-          </div>
-        </div>
-      ) : null}
+      {/* The transition provider wraps the mode tabs and the AZ block as well
+          as the results grid, so a tab switch — and the MeSH "Narrow to this
+          concept only" / "Don't use MeSH" links inside the results — runs
+          through the SAME shared useTransition as the facet / sort / pagination
+          links. Previously the tabs used a plain <Link> and lived outside the
+          provider: an in-page nav that only changes searchParams gets no
+          loading.tsx fallback and no dim, so a slow round-trip read as "the
+          click did nothing." Inside the provider the region dims + goes
+          aria-busy while the new results stream in. */}
       <SearchTransitionProvider>
+        <ModeTabs
+          q={q}
+          activeType={type}
+          peopleCount={peopleResult.total}
+          pubCount={pubsResult.total}
+          fundingCount={fundingResult.total}
+        />
+        {showAZ && azBuckets ? (
+          <div className="mx-auto max-w-[1280px] px-6 pt-6">
+            <AZDirectory buckets={azBuckets} />
+            <div className="mt-2 text-right">
+              <Link
+                href="/browse"
+                className="text-sm text-[var(--color-accent-slate)] hover:underline"
+              >
+                Or browse departments &amp; centers &#x2192;
+              </Link>
+            </div>
+          </div>
+        ) : null}
         <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
           {/* Perf streaming — the active tab's full faceted search runs inside
               this Suspense boundary so the shell above (header, chip, tabs,
@@ -611,7 +619,7 @@ function ModeTab({
   active: boolean;
 }) {
   return (
-    <NextLink
+    <Link
       href={href}
       className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
         active
@@ -627,7 +635,7 @@ function ModeTab({
       >
         {count.toLocaleString()}
       </span>
-    </NextLink>
+    </Link>
   );
 }
 
