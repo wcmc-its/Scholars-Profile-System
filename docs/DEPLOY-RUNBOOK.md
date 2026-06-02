@@ -57,6 +57,11 @@ Lifted from `docs/PRODUCTION_ADDENDUM.md` § "Where migrations run" and codified
 ```
 1. build image
 2. push to ECR (app image + ETL batch image)
+2b. sync static assets to S3 (#700)
+     docker cp .next/static out of the just-pushed image, then `aws s3 sync`
+     (additive, NO --delete) to the EdgeStack static-asset bucket so old
+     content-hashed chunks survive a deploy and never 404; non-fatal, self-
+     skips until `cdk deploy Sps-Edge-<env>` has created the bucket + output
 3. db-bootstrap task (#493)
      provisions scholars_audit + the app-rw INSERT grant, as the least-priv
      sps_bootstrap user; idempotent
@@ -77,6 +82,52 @@ Lifted from `docs/PRODUCTION_ADDENDUM.md` § "Where migrations run" and codified
 This order is load-bearing. db-bootstrap runs first so the audit schema + grant exist; verify-grants then confirms the whole DB role model is intact before any credential is used to migrate; the migration runs **before** the service updates because the schema must be ready when the new app version starts; the previous app version is still serving traffic throughout (additive-only rule makes this safe). If any gate (3, 4, 5) fails, step 6 never fires and the previous app version continues serving against the unchanged schema.
 
 Any out-of-band deploy (e.g. an operator running `aws ecs update-service` manually because the workflow is broken) MUST follow the same order: db-bootstrap and verify-grants MUST exit 0, then the migration task MUST exit 0, before the service is rolled. Skipping the migration step risks shipping a new app version against an old schema; skipping verify-grants risks rolling on a drifted/over-privileged DB role model; skipping the ordering risks shipping a new schema before the app that needs it.
+
+## EdgeStack (CloudFront) — MANUAL deploy, not in CI
+
+`Sps-Edge-${env}` (the CloudFront distribution) is **deliberately not in `deploy.yml`**. Pushing to `master` deploys only AppStack's app image (staging); the distribution is changed by a human running `cdk deploy` from the repo. The app deploy and the EdgeStack deploy are **two separate mechanisms** — a change touching both (e.g. the #700 static-asset split) is rolled out as: merge → `cdk deploy` the stacks → app deploy populates anything CI-side.
+
+### Footgun: a bare `cdk diff/deploy` STRIPS the WAF + cert + custom domain
+
+The custom domain, ACM cert, and #461 WCM-only WAF are all gated on **optional CDK context**. Omit the flags and they synthesize as *absent* → the diff shows `[-] destroy WebACL/IPSet` and `Removed: Aliases/ViewerCertificate/WebACLId`, and deploying that takes the site offline. **Always** diff `--strict` with all flags first and confirm the diff is non-destructive before deploying:
+
+```
+npx cdk diff --strict --exclusively Sps-Edge-<env> \
+  -c env=<env> \
+  -c edgeCustomDomain=<domain> \
+  -c edgeCertArn=<acm-arn-us-east-1> \
+  -c edgeAllowedCidrs=140.251.0.0/16,157.139.0.0/16
+# verify: NO destroy/Removed of WebACL/IPSet/Aliases/ViewerCertificate, then:
+npx cdk deploy --require-approval never --exclusively Sps-Edge-<env> <same -c flags>
+```
+
+Derive the live `edgeCustomDomain` / `edgeCertArn` / WebACL from `aws cloudfront get-distribution-config --id <dist-id>` to guarantee the diff matches. CloudFront updates take ~5–15 min; background the deploy. `--exclusively` is mandatory (avoids touching sibling stacks).
+
+### Ordering: AppStack BEFORE EdgeStack when a cross-stack ref is added
+
+EdgeStack consumes AppStack exports (the public ALB, and — since #700 — the `sps-deploy-<env>` role ARN for the static-asset bucket policy). When a **new** cross-stack reference is added, the producing stack must be deployed first or EdgeStack rolls back with:
+
+```
+No export named Sps-App-<env>:ExportsOutput...DeployRole...Arn found
+```
+
+So deploy **`Sps-App-<env>` first** (publishes the export + the new `cloudformation:DescribeStacks`-on-Edge grant the CI sync needs), then `Sps-Edge-<env>`. Note `Sps-App-<env>` is otherwise manual too, and **prod lags master** (push-to-master deploys staging only) — so a prod AppStack deploy may carry unrelated accumulated drift; `cdk diff Sps-App-prod` first and confirm the delta is acceptable before deploying.
+
+### Static-asset S3 origin (#700) activation order
+
+1. `cdk deploy Sps-App-<env>` (export + DescribeStacks grant).
+2. `cdk deploy Sps-Edge-<env>` (creates the bucket; `/_next/static/*` becomes an S3-primary / ALB-fallback origin group — assets still serve via the ALB fallback while the bucket is empty).
+3. An app deploy then runs the **2b sync** step, populating S3. Until then the sync self-skips and the fallback serves assets — never a hard failure.
+
+### HTML edge TTL + the one-time `/about` flush
+
+The default behavior caps HTML at a 60 s edge TTL (so a force-static page's `s-maxage=1y` can't pin year-stale HTML referencing rotated-out chunks — the original /about "client-side exception"). The clamp governs only **new** cache fills; any object cached under the *old* policy keeps its long TTL until it expires. So **once, right after deploying the clamp to an env**, invalidate the affected long-cached HTML to force a re-fill under the new policy:
+
+```
+aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/about" "/about/*"
+```
+
+This is the **only** invalidation the design needs — after it, the 60 s clamp + the S3 origin self-heal, and no deploy-time invalidation is ever required again.
 
 ## Bootstrap two-step (first deploy of an env)
 
