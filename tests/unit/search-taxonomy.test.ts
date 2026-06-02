@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const {
   mockTopicFindMany,
   mockSubtopicFindMany,
+  mockSubtopicGroupBy,
   mockPubTopicGroupBy,
   mockMeshFindMany,
   mockEtlRunFindFirst,
@@ -16,6 +17,7 @@ const {
 } = vi.hoisted(() => ({
   mockTopicFindMany: vi.fn(),
   mockSubtopicFindMany: vi.fn(),
+  mockSubtopicGroupBy: vi.fn(),
   mockPubTopicGroupBy: vi.fn(),
   mockMeshFindMany: vi.fn(),
   mockEtlRunFindFirst: vi.fn(),
@@ -23,10 +25,13 @@ const {
   mockMeshAliasFindMany: vi.fn(),
 }));
 
+// #709 — loadEntityCandidates now also groupBy's subtopics for the child count.
+mockSubtopicGroupBy.mockResolvedValue([]);
+
 vi.mock("@/lib/db", () => ({
   prisma: {
     topic: { findMany: mockTopicFindMany },
-    subtopic: { findMany: mockSubtopicFindMany },
+    subtopic: { findMany: mockSubtopicFindMany, groupBy: mockSubtopicGroupBy },
     publicationTopic: { groupBy: mockPubTopicGroupBy },
     meshDescriptor: { findMany: mockMeshFindMany },
     etlRun: { findFirst: mockEtlRunFindFirst },
@@ -46,6 +51,7 @@ import {
 beforeEach(() => {
   mockTopicFindMany.mockReset().mockResolvedValue([]);
   mockSubtopicFindMany.mockReset().mockResolvedValue([]);
+  mockSubtopicGroupBy.mockReset().mockResolvedValue([]);
   mockPubTopicGroupBy.mockReset().mockResolvedValue([]);
   mockMeshFindMany.mockReset().mockResolvedValue([]);
   mockEtlRunFindFirst.mockReset().mockResolvedValue({ manifestSha256: "sha-1" });

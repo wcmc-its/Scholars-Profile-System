@@ -18,7 +18,10 @@ vi.mock("@/lib/db", () => ({
       groupBy: vi.fn().mockResolvedValue([]),
     },
     topic: { findMany: vi.fn().mockResolvedValue([]) },
-    subtopic: { findMany: vi.fn().mockResolvedValue([]) },
+    subtopic: {
+      findMany: vi.fn().mockResolvedValue([]),
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
     meshDescriptor: { findMany: vi.fn().mockResolvedValue([]) },
     etlRun: { findFirst: vi.fn().mockResolvedValue(null) },
   },

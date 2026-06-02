@@ -43,6 +43,9 @@ import { normalizeForMatch } from "@/lib/api/normalize";
 
 const MIN_QUERY_LEN = 3;
 const SECONDARY_CAP = 4;
+/** Issue #709 — max chips the row will ever show (the inline-expand ceiling,
+ *  RA-19). Beyond this, the "+N more" affordance routes to Browse. */
+const ROW_AREA_CAP = 12;
 /** Cap candidates considered before enrichment. Anything beyond this rolls
  *  into the overflow count without being individually counted/ranked. */
 const MATCH_HARD_CAP = 1 + SECONDARY_CAP + 20;
@@ -58,6 +61,16 @@ export type TaxonomyMatch = {
   publicationCount: number;
   /** Length-normalized substring overlap, in [0, 1]. */
   similarity: number;
+  /**
+   * Issue #709 — one-line area description for the chip hover preview (same
+   * text as the topic page). Null when the topic/subtopic has no description.
+   */
+  description: string | null;
+  /**
+   * Issue #709 — number of child subtopics (parentTopic only; 0 for a
+   * subtopic). Drives the popover "publications · subtopics" stat line.
+   */
+  subtopicCount: number;
 };
 
 /**
@@ -101,6 +114,15 @@ export type TaxonomyMatchResult =
       /** Original query, used for the overflow link target. */
       query: string;
       meshResolution: MeshResolution | null;
+      /**
+       * Issue #709 — the matched research areas ranked for the search-header
+       * "Research Areas" chip row, by match relevance (RA-18). Enriched with
+       * description + subtopicCount, capped at ROW_AREA_CAP (the inline-expand
+       * ceiling). `totalMatched` is the true count of matched areas (drives the
+       * "+N more" affordance, N = totalMatched − 4).
+       */
+      areas: TaxonomyMatch[];
+      totalMatched: number;
     };
 
 // `normalizeForMatch` now lives in the dependency-free `@/lib/api/normalize`
@@ -118,21 +140,32 @@ type EntityCandidate = {
   matchKey: string;
   parentTopicId: string | null;
   parentTopicLabel: string | null;
+  /** Issue #709 — area description (Topic/Subtopic.description) for the popover. */
+  description: string | null;
+  /** Issue #709 — child-subtopic count (parentTopic only; 0 for a subtopic). */
+  subtopicCount: number;
 };
 
 async function loadEntityCandidates(): Promise<EntityCandidate[]> {
-  const [topics, subtopics] = await Promise.all([
-    prisma.topic.findMany({ select: { id: true, label: true } }),
+  const [topics, subtopics, subtopicCounts] = await Promise.all([
+    prisma.topic.findMany({ select: { id: true, label: true, description: true } }),
     prisma.subtopic.findMany({
       select: {
         id: true,
         label: true,
         displayName: true,
+        description: true,
         parentTopicId: true,
         parentTopic: { select: { label: true } },
       },
     }),
+    // Issue #709 — child-subtopic count per parent topic, one groupBy instead of
+    // a count query per enriched candidate.
+    prisma.subtopic.groupBy({ by: ["parentTopicId"], _count: { _all: true } }),
   ]);
+  const subtopicCountByParent = new Map(
+    subtopicCounts.map((r) => [r.parentTopicId, r._count._all]),
+  );
 
   const out: EntityCandidate[] = [];
   for (const t of topics) {
@@ -145,6 +178,8 @@ async function loadEntityCandidates(): Promise<EntityCandidate[]> {
       matchKey: key,
       parentTopicId: null,
       parentTopicLabel: null,
+      description: t.description ?? null,
+      subtopicCount: subtopicCountByParent.get(t.id) ?? 0,
     });
   }
   for (const s of subtopics) {
@@ -158,6 +193,8 @@ async function loadEntityCandidates(): Promise<EntityCandidate[]> {
       matchKey,
       parentTopicId: s.parentTopicId,
       parentTopicLabel: s.parentTopic?.label ?? null,
+      description: s.description ?? null,
+      subtopicCount: 0,
     });
   }
   return out;
@@ -277,6 +314,8 @@ export async function matchQueryToTaxonomy(
         scholarCount: counts.scholarCount,
         publicationCount: counts.publicationCount,
         similarity: c.similarity,
+        description: c.description,
+        subtopicCount: c.subtopicCount,
       };
       return match;
     }),
@@ -288,6 +327,21 @@ export async function matchQueryToTaxonomy(
   const overflowCount =
     Math.max(0, rest.length - SECONDARY_CAP) + cappedExtra;
 
+  // Issue #709 — chip row, ordered by match relevance (RA-18): similarity desc,
+  // then scholarCount desc, then name. Distinct from the card's `primary`
+  // (scholarCount-first, #74). Capped at the inline-expand ceiling; totalMatched
+  // is the full substring-match count for the "+N more" affordance.
+  const areas = enriched
+    .slice()
+    .sort(
+      (a, b) =>
+        b.similarity - a.similarity ||
+        b.scholarCount - a.scholarCount ||
+        a.name.localeCompare(b.name),
+    )
+    .slice(0, ROW_AREA_CAP);
+  const totalMatched = matched.length;
+
   return {
     state: "matches",
     primary,
@@ -295,6 +349,8 @@ export async function matchQueryToTaxonomy(
     overflowCount,
     query: trimmed,
     meshResolution,
+    areas,
+    totalMatched,
   };
 }
 
