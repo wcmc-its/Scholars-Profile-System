@@ -235,3 +235,21 @@ export function resolvePubRecencyMode(): PubRecencyMode {
 export function resolvePublicationHighlight(): boolean {
   return process.env.SEARCH_PUB_HIGHLIGHT === "on";
 }
+
+/**
+ * Publications-tab MeSH match provenance — the publications twin of the People
+ * tab's `SEARCH_PEOPLE_MATCH_PROVENANCE` (#688). When a topic query resolves to
+ * a descriptor, the concept-mode admission/boost (`terms { meshDescriptorUi:
+ * descendantUis }`, #259) ranks up publications tagged with the descriptor or a
+ * narrower descendant — a match the title highlighter can't explain when the
+ * typed term isn't in the title. With this on, each such hit carries
+ * `matchProvenance` (reusing the generalized `computeMatchProvenance`) so the row
+ * can render the same "Why this match" note as the Scholars tab. Pure additive
+ * metadata — no effect on ranking or the result set.
+ *
+ * Default off until eval; a separate lever from the People-tab provenance flag
+ * and from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
+ */
+export function resolvePublicationMatchProvenance(): boolean {
+  return process.env.SEARCH_PUB_MATCH_PROVENANCE === "on";
+}

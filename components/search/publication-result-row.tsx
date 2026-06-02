@@ -3,6 +3,7 @@
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
+import { MatchProvenanceNote } from "@/components/search/match-provenance-note";
 import type { PublicationHit } from "@/lib/api/search";
 import { sanitizePubTitle } from "@/lib/utils";
 
@@ -73,6 +74,11 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         {hit.year ?? null}.
       </div>
       <AuthorChipRow authors={hit.wcmAuthors} pmid={hit.pmid} />
+      {/* Issue #707 — #688-parity "Why this match" note when this publication
+          matched via the resolved MeSH concept (its meshDescriptorUi intersects
+          the descriptor's descendant set), which the title highlighter can't
+          explain when the typed term isn't in the title. */}
+      {hit.matchProvenance ? <MatchProvenanceNote provenance={hit.matchProvenance} /> : null}
       {/* Issue #284 — impact and concept-impact land inline in the meta row
           (between citations and PMID). When both are non-null the row shows
           `Impact: 42 · Concept: 38` so the §1.8 reweighting delta is visible.

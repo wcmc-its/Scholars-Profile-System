@@ -13,7 +13,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { hitHolder } = vi.hoisted(() => ({
-  hitHolder: { highlight: undefined as { title?: string[] } | undefined },
+  hitHolder: {
+    highlight: undefined as { title?: string[] } | undefined,
+    meshDescriptorUi: undefined as string[] | undefined,
+  },
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -25,6 +28,15 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/api/topics", () => ({
   fetchWcmAuthorsForPmids: vi.fn().mockResolvedValue(new Map()),
+}));
+
+vi.mock("@/lib/api/search-taxonomy", () => ({
+  descriptorLabelsForUis: vi.fn().mockResolvedValue(
+    new Map([
+      ["D018270", "Carcinoma, Ductal, Breast"],
+      ["D018275", "Carcinoma, Lobular"],
+    ]),
+  ),
 }));
 
 vi.mock("@/lib/api/mentoring-pmids", () => ({
@@ -66,6 +78,7 @@ vi.mock("@/lib/search", () => ({
                   pmcid: null,
                   pubmedUrl: null,
                   abstract: "",
+                  meshDescriptorUi: hitHolder.meshDescriptorUi,
                 },
                 highlight: hitHolder.highlight,
               },
@@ -106,10 +119,23 @@ const highlightOf = (b: Body) =>
 beforeEach(() => {
   capturedBodies.length = 0;
   hitHolder.highlight = undefined;
+  hitHolder.meshDescriptorUi = undefined;
 });
 afterEach(() => {
   delete process.env.SEARCH_PUB_HIGHLIGHT;
 });
+
+// Breast Neoplasms (D001943) → [self, Carcinoma Ductal Breast, Carcinoma Lobular].
+const BREAST_RESOLUTION = {
+  descriptorUi: "D001943",
+  name: "Breast Neoplasms",
+  matchedForm: "breast cancer",
+  confidence: "entry-term" as const,
+  scopeNote: null,
+  entryTerms: ["Breast Cancer"],
+  curatedTopicAnchors: [],
+  descendantUis: ["D001943", "D018270", "D018275"],
+};
 
 describe("searchPublications highlight body", () => {
   it("off: no highlight clause; titleHighlight is null", async () => {
@@ -171,5 +197,53 @@ describe("searchPublications highlight body", () => {
     hitHolder.highlight = undefined;
     const res = await searchPublications({ q: "microbiome", highlightMatches: true });
     expect(res.hits[0].titleHighlight).toBeNull();
+  });
+});
+
+describe("searchPublications MeSH match provenance (#707)", () => {
+  it("emits a narrower note when the pub is tagged with a descendant descriptor", async () => {
+    hitHolder.meshDescriptorUi = ["D018270"]; // Carcinoma, Ductal, Breast
+    const res = await searchPublications({
+      q: "breast cancer",
+      meshResolution: BREAST_RESOLUTION,
+      matchProvenance: true,
+    });
+    expect(res.hits[0].matchProvenance).toEqual({
+      kind: "narrower",
+      parentTerm: "Breast Neoplasms",
+      descendantTerms: ["Carcinoma, Ductal, Breast"],
+    });
+  });
+
+  it("emits a concept note when the pub is tagged with the resolved descriptor itself", async () => {
+    hitHolder.meshDescriptorUi = ["D001943"]; // Breast Neoplasms
+    const res = await searchPublications({
+      q: "breast cancer",
+      meshResolution: BREAST_RESOLUTION,
+      matchProvenance: true,
+    });
+    expect(res.hits[0].matchProvenance).toEqual({ kind: "concept", parentTerm: "Breast Neoplasms" });
+  });
+
+  it("omits the note when the flag is off", async () => {
+    hitHolder.meshDescriptorUi = ["D018270"];
+    const res = await searchPublications({ q: "breast cancer", meshResolution: BREAST_RESOLUTION });
+    expect(res.hits[0].matchProvenance).toBeUndefined();
+  });
+
+  it("omits the note when no descriptor resolved", async () => {
+    hitHolder.meshDescriptorUi = ["D018270"];
+    const res = await searchPublications({ q: "breast cancer", matchProvenance: true });
+    expect(res.hits[0].matchProvenance).toBeUndefined();
+  });
+
+  it("omits the note when the pub carries no intersecting descriptor", async () => {
+    hitHolder.meshDescriptorUi = ["D099999"]; // unrelated
+    const res = await searchPublications({
+      q: "breast cancer",
+      meshResolution: BREAST_RESOLUTION,
+      matchProvenance: true,
+    });
+    expect(res.hits[0].matchProvenance).toBeUndefined();
   });
 });

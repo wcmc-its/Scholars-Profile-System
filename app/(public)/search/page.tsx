@@ -28,6 +28,7 @@ import {
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
   resolvePublicationHighlight,
+  resolvePublicationMatchProvenance,
 } from "@/lib/api/search-flags";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -470,6 +471,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   // SEARCH_PUB_HIGHLIGHT — mark matched terms in the title on the
                   // SSR render so direct navigation shows highlights too.
                   highlightMatches: resolvePublicationHighlight(),
+                  // SEARCH_PUB_MATCH_PROVENANCE — #688-parity MeSH note on SSR.
+                  matchProvenance: resolvePublicationMatchProvenance(),
                 })}
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}

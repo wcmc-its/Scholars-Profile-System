@@ -269,6 +269,15 @@ export type PublicationHit = {
    * string. Rendered inline via `<AbstractDisclosure>` on the row.
    */
   abstract: string | null;
+  /**
+   * Issue #707 — the publications twin of `PeopleHit.matchProvenance` (#688).
+   * Present only when `SEARCH_PUB_MATCH_PROVENANCE` is on, the topic query
+   * resolved to a MeSH descriptor, AND this publication is tagged with the
+   * descriptor (`concept`) or a narrower descendant (`narrower`) — the concept
+   * match the title highlighter can't explain. Omitted otherwise. Rendered as
+   * the same "Why this match" note the Scholars tab uses.
+   */
+  matchProvenance?: MatchProvenance;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -1523,6 +1532,13 @@ export async function searchPublications(opts: {
    * unchanged. Headless callers default to `false`.
    */
   highlightMatches?: boolean;
+  /**
+   * Issue #707 — `SEARCH_PUB_MATCH_PROVENANCE` resolved at request time. When
+   * true and `meshResolution` is non-null, each hit tagged with the resolved
+   * descriptor or a narrower descendant carries `matchProvenance`. Pure additive
+   * metadata; no effect on the query, scoring, or result set. Default `false`.
+   */
+  matchProvenance?: boolean;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
@@ -2177,6 +2193,10 @@ export async function searchPublications(opts: {
       // pubs with no abstract, so this is always-present in practice but
       // optional-typed for defensive null handling on older index docs.
       abstract?: string;
+      // Issue #707 — descriptor UIs this publication is tagged with (#259 uses
+      // them for the concept-mode `terms { meshDescriptorUi }` clause). Read for
+      // the match-provenance path; already in `_source` (no include-list trims it).
+      meshDescriptorUi?: string[];
     };
     // SEARCH_PUB_HIGHLIGHT — `title` highlight fragment (whole field, marked),
     // present only when the flag is on and the title matched.
@@ -2261,6 +2281,20 @@ export async function searchPublications(opts: {
       ? new Set(resolution.curatedTopicAnchors)
       : new Set<string>();
 
+  // Issue #707 — MeSH match provenance, the publications twin of #688. Only when
+  // the flag is on and the query resolved to a descriptor with at least one
+  // descendant (so there's a tree to subsume). Labels for the whole descendant
+  // set are resolved once, then intersected per hit by `computeMatchProvenance`
+  // against the publication's own `meshDescriptorUi`.
+  const pubProvenanceOn =
+    opts.matchProvenance === true &&
+    resolution != null &&
+    resolution.descendantUis.length > 1 &&
+    resolution.name.length > 0;
+  const pubProvenanceLabels = pubProvenanceOn
+    ? await descriptorLabelsForUis(resolution!.descendantUis)
+    : new Map<string, string>();
+
   return {
     hits: r.hits.hits.map((h) => {
       const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
@@ -2323,6 +2357,14 @@ export async function searchPublications(opts: {
           typeof h._source.abstract === "string" && h._source.abstract.length > 0
             ? h._source.abstract
             : null,
+        matchProvenance: pubProvenanceOn
+          ? computeMatchProvenance({
+              publicationMeshUi: h._source.meshDescriptorUi,
+              descendantUis: resolution!.descendantUis,
+              parentTerm: resolution!.name,
+              labels: pubProvenanceLabels,
+            })
+          : undefined,
       };
     }),
     total: r.hits.total.value,
