@@ -198,6 +198,7 @@ Deploy mechanics, the staging-gates-prod rule, and the prod approval gate are in
 | Network / security topology | [`network-security-topology.md`](./network-security-topology.md) |
 | What it costs | [`cost-model.md`](./cost-model.md) |
 | Data model + field provenance | [`data-dictionary.md`](./data-dictionary.md) |
+| Profile URLs (slugs) — derivation, redirects, overrides, canonical-URL flag (#671) | [`data-dictionary.md § Notes`](./data-dictionary.md#notes--gotchas), [`slug-personalization-spec.md`](./slug-personalization-spec.md) |
 | Recovery (RPO/RTO, backups) | [`PRODUCTION.md § Recovery objectives`](./PRODUCTION.md), [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 
 ## Corrections to older docs
