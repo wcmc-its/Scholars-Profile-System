@@ -858,6 +858,14 @@ export class AppStack extends Stack {
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
         FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
+        // #688 / #692 -- search query-interpretation flags. Staged rollout:
+        // ON in staging for UAT (the #692 generic-term de-highlight + the #688
+        // "Why this match" MeSH-provenance note); prod stays default-off until
+        // the SPEC §8 eval signs off. `env === "staging"` keeps the prod task
+        // def explicitly "off". resolveGenericTermMode reads off|resolve|on;
+        // resolvePeopleMatchProvenance reads on|off (lib/api/search-flags.ts).
+        SEARCH_GENERIC_TERM_DEMOTE: env === "staging" ? "on" : "off",
+        SEARCH_PEOPLE_MATCH_PROVENANCE: env === "staging" ? "on" : "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
