@@ -42,9 +42,14 @@ const NCBI_TOOL = "wcm-sps-specialty-audit";
 const NCBI_EMAIL = "paa2013@med.cornell.edu"; // NCBI etiquette contact (SPS operator)
 const DEFAULT_THROTTLE_MS = 400; // < 3 req/s, keyless-safe
 
-/** Mirror of normalizeForMatch in lib/api/search-taxonomy.ts. */
+/** Mirror of normalizeForMatch in lib/api/search-taxonomy.ts (incl. the #690
+ *  standalone-"and" drop, so the audit's "we MISS / we RESOLVE" verdicts match
+ *  the live resolver). */
 function normalizeForMatch(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return s
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 type Verdict = "NATIVE" | "SPLIT" | "FREE_TEXT" | "ERROR";

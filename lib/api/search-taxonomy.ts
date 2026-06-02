@@ -105,9 +105,22 @@ export type TaxonomyMatchResult =
 /**
  * Lowercase + strip non-alphanumeric. Handles "Cardio-oncology" ↔
  * "cardio oncology" ↔ "cardiooncology" without stemming.
+ *
+ * The standalone connector word "and" is dropped first (issue #690 /
+ * #642 Bucket A) so it collapses the same way the ampersand already does —
+ * "&" strips to nothing as a non-alphanumeric char, but the literal word
+ * "and" survived and blocked the match. Dropping it lets a department-style
+ * query like "Pathology and Laboratory Medicine" substring-match the curated
+ * topic "Pathology & Laboratory Medicine". Whole word only (`\band\b`), so
+ * "Andrology", "island", "command", "Anderson" are untouched; an audit over
+ * all 67 topics + 267k MeSH surface forms found this introduces no topic-label
+ * or MeSH-descriptor key collisions.
  */
 export function normalizeForMatch(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return s
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 type EntityCandidate = {

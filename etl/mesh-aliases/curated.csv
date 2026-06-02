@@ -5,3 +5,7 @@ Orthopaedic Surgery,D009985,"Orthopedics. NB: American spelling 'Orthopedic Surg
 Otolaryngology Head and Neck Surgery,D010036,"Otolaryngology. Full WCM dept phrasing matches a journal title in ATM (FREE_TEXT); #642 audit."
 Plastic and Reconstructive Surgery,D013518,"Surgery, Plastic. PubMed ATM FREE_TEXT; #642 audit."
 Oral and Maxillofacial Surgery,D013515,"Surgery, Oral (closest descriptor; no exact maxillofacial descriptor). #642 audit."
+Population Health Sciences,D000075485,"Population Health. #690 Bucket B; WCM dept, 171 scholars. PubMed ATM fallback 'population health'. #642 audit."
+Rehabilitation Medicine,D010810,"Physical and Rehabilitation Medicine (specialty descriptor). #690 Bucket B; WCM dept, 123 scholars. PubMed ATM fallback 'physical and rehabilitation medicine'. #642 audit."
+Newborn Medicine,D009359,"Neonatology. #690 Bucket B; WCM dept, 39 scholars. PubMed ATM fallback 'neonatology'. #642 audit."
+Genetic Medicine,D005826,"Genetics, Medical (medical-genetics specialty descriptor). #690 Bucket B; WCM dept, 34 scholars. #642 audit."

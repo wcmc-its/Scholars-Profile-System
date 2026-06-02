@@ -66,6 +66,28 @@ describe("normalizeForMatch", () => {
     expect(normalizeForMatch("---")).toBe("");
     expect(normalizeForMatch("")).toBe("");
   });
+
+  it("drops the standalone connector word 'and' so it collapses like '&' (#690)", () => {
+    // "&" already strips to nothing (non-alphanumeric); the literal word "and"
+    // now does too, so the two surface forms of one concept normalize alike.
+    expect(normalizeForMatch("Pathology and Laboratory Medicine")).toBe(
+      "pathologylaboratorymedicine",
+    );
+    expect(normalizeForMatch("Pathology & Laboratory Medicine")).toBe(
+      "pathologylaboratorymedicine",
+    );
+    expect(normalizeForMatch("Biochemistry and Biophysics")).toBe(
+      normalizeForMatch("Biochemistry & Biophysics"),
+    );
+  });
+
+  it("only drops 'and' as a whole word, never as a substring (#690)", () => {
+    expect(normalizeForMatch("Andrology")).toBe("andrology");
+    expect(normalizeForMatch("island")).toBe("island");
+    expect(normalizeForMatch("command")).toBe("command");
+    expect(normalizeForMatch("Anderson")).toBe("anderson");
+    expect(normalizeForMatch("Brand")).toBe("brand");
+  });
 });
 
 describe("matchQueryToTaxonomy", () => {
@@ -325,6 +347,24 @@ describe("matchQueryToTaxonomy", () => {
     // Query has different punctuation/case but should normalize identically.
     const r = await matchQueryToTaxonomy("CARDIO ONCOLOGY");
     expect(r.state).toBe("matches");
+  });
+
+  it("#690: a department query with 'and' substring-matches the '&'-spelled topic", async () => {
+    // "Gastroenterology and Hepatology" (a WCM division) now resolves to the
+    // existing "...&..." topic. Before the standalone-"and" drop the surviving
+    // "and" blocked the substring match. Regression guard for #690 Bucket A.
+    mockTopicFindMany.mockResolvedValue([
+      {
+        id: "gastroenterology_hepatology",
+        label: "Gastroenterology, Hepatology & Pancreatic Disease",
+      },
+    ]);
+    mockPubTopicGroupBy.mockResolvedValue([{ cwid: "c1" }]);
+
+    const r = await matchQueryToTaxonomy("Gastroenterology and Hepatology");
+    expect(r.state).toBe("matches");
+    if (r.state !== "matches") return;
+    expect(r.primary.id).toBe("gastroenterology_hepatology");
   });
 });
 
@@ -1230,6 +1270,29 @@ describe("resolveMeshDescriptor — curated aliases (#642)", () => {
     ]);
     const r = await resolveMeshDescriptor("cardiothoracic-surgery");
     expect(r?.descriptorUi).toBe("D013903");
+    expect(r?.confidence).toBe("entry-term");
+  });
+
+  it("#690: an alias whose surface form contains 'and' still resolves (key computed post-drop)", async () => {
+    // Both the alias key (load time) and the query (resolve time) drop the
+    // standalone "and", so they still meet. Guards the existing #667 aliases
+    // ("Plastic and Reconstructive Surgery" etc.) against the #690 change.
+    mockMeshFindMany.mockResolvedValue([
+      {
+        descriptorUi: "D013518",
+        name: "Surgery, Plastic",
+        entryTerms: [],
+        scopeNote: null,
+        dateRevised: null,
+        localPubCoverage: null,
+        treeNumbers: ["E04.555.500"],
+      },
+    ]);
+    mockMeshAliasFindMany.mockResolvedValue([
+      { alias: "Plastic and Reconstructive Surgery", descriptorUi: "D013518" },
+    ]);
+    const r = await resolveMeshDescriptor("Plastic and Reconstructive Surgery");
+    expect(r?.descriptorUi).toBe("D013518");
     expect(r?.confidence).toBe("entry-term");
   });
 });
