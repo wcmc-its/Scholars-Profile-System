@@ -341,7 +341,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "PROFILE_CANONICAL",
-                "Value": "scholars",
+                "Value": "root",
               },
             ],
             "Essential": true,
