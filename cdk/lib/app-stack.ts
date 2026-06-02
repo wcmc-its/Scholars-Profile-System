@@ -872,15 +872,17 @@ export class AppStack extends Stack {
         IMPERSONATION_ENABLED: "true",
         // #671 -- people profile canonical URL. "root" serves /{slug} as the
         // canonical profile URL (and /scholars/{slug} 301s to it); "scholars"
-        // (or unset) keeps the legacy /scholars/{slug} canonical. Rolling out
-        // staging-first: staging flips to "root" now for the soak / runtime
-        // verification, prod stays on the legacy form until the prod cutover
-        // (a one-line change to this ternary). Unlike IMPERSONATION above, this
-        // needs NO EdgeStack behavior: a root single-segment profile falls to
-        // the cacheable default behavior (force-dynamic, path-cached, no
-        // cookie/query dependence) -- the same edge treatment the legacy route
-        // got. The app reads PROFILE_CANONICAL in lib/profile-url.ts.
-        PROFILE_CANONICAL: env === "prod" ? "scholars" : "root",
+        // (or unset) keeps the legacy /scholars/{slug}. Both envs cut over to
+        // "root" (staging flipped first for verification; prod followed). Kept
+        // as an explicit flag -- not yet removed -- so it stays the rollback
+        // lever during the soak (set back to "scholars" + redeploy to revert).
+        // Unlike IMPERSONATION above, this needs NO EdgeStack behavior: a root
+        // single-segment profile falls to the cacheable default behavior
+        // (force-dynamic, path-cached, no cookie/query dependence) -- the same
+        // edge treatment the legacy route got. The app reads PROFILE_CANONICAL
+        // in lib/profile-url.ts. Deployed manually (cdk deploy --exclusively
+        // Sps-App-<env>); the CD pipeline only re-rolls the image.
+        PROFILE_CANONICAL: "root",
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),

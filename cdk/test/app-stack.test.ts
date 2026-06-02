@@ -1435,10 +1435,10 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
-      it("keeps prod on the legacy /scholars canonical profile URL (PROFILE_CANONICAL=scholars, #671 cutover deferred)", () => {
-        // The prod cutover to root /{slug} is deferred until after the staging
-        // soak; flipping it is a one-line change to the app-stack ternary.
-        expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("scholars");
+      it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
+        // Both envs are cut over to root; the flag stays set explicitly as the
+        // soak rollback lever (set back to "scholars" + redeploy to revert).
+        expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
       });
 
       it("the task role has zero AWS managed policies attached", () => {
