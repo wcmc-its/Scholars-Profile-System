@@ -237,11 +237,15 @@ describe("EdgeStack", () => {
     });
 
     describe("Resource counts (the plan's § Acceptance criteria)", () => {
-      it("creates exactly one CloudFront distribution and one response-headers policy", () => {
+      it("creates exactly one CloudFront distribution and two response-headers policies", () => {
         template.resourceCountIs("AWS::CloudFront::Distribution", 1);
+        // Two policies: `sps-security-headers-*` (HSTS, applied to assets +
+        // uncacheable + Group B) and `sps-html-headers-*` (HSTS + a
+        // `max-age=0, must-revalidate` Cache-Control override, applied to the
+        // HTML default behavior so a document never outlives a deploy).
         template.resourceCountIs(
           "AWS::CloudFront::ResponseHeadersPolicy",
-          1,
+          2,
         );
       });
 
@@ -262,21 +266,24 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus twenty-four additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-five additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        expect(cacheBehaviors).toHaveLength(24);
+        // 24 prior behaviors + the new `/_next/static/*` long-cache behavior.
+        expect(cacheBehaviors).toHaveLength(25);
       });
 
-      it("evaluates additional behaviors in the spec-defined order (uncacheable first, then #634 query-keyed)", () => {
+      it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         const paths = cacheBehaviors.map((b) => b.PathPattern as string);
         expect(paths).toEqual([
+          // -- Immutable build assets (long-cache, CachingOptimized) ------
+          "/_next/static/*",
           // -- Uncacheable (CachingDisabled + AllViewer) ------------------
           "/api/edit*",
           "/api/impersonation*",
@@ -359,7 +366,13 @@ describe("EdgeStack", () => {
         )?.[0];
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
-          if (QUERY_KEYED_PATTERNS.has(path)) {
+          if (path === "/_next/static/*") {
+            // Immutable build assets -- Managed-CachingOptimized id (long TTL,
+            // respects the origin's `immutable, max-age=1y`).
+            expect(behavior.CachePolicyId).toBe(
+              "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            );
+          } else if (QUERY_KEYED_PATTERNS.has(path)) {
             // #634 Group B -- custom `sps-query-keyed-*` policy (a Ref).
             expect(behavior.CachePolicyId).toEqual({ Ref: customPolicyLogicalId });
           } else {
@@ -377,9 +390,9 @@ describe("EdgeStack", () => {
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
-          if (QUERY_KEYED_PATTERNS.has(path)) {
-            // Group B must NOT forward cookies -- forwarding them would
-            // fragment the cache per session on the highest-traffic pages.
+          if (path === "/_next/static/*" || QUERY_KEYED_PATTERNS.has(path)) {
+            // `/_next/static/*` (immutable assets) and Group B (highest-traffic
+            // pages) must NOT forward cookies -- it would fragment the cache.
             expect(behavior.OriginRequestPolicyId).toBeUndefined();
           } else {
             // Managed-AllViewer id.
@@ -644,11 +657,110 @@ describe("EdgeStack", () => {
         expect(params.EnableAcceptEncodingBrotli).toBe(true);
       });
 
-      it("mirrors Managed-CachingOptimized TTLs (1s / 1d / 1y)", () => {
+      it("clamps the edge TTL to 60s so HTML cannot outlive a deploy (min 0 / default 60 / max 60)", () => {
+        // The load-bearing change: force-static HTML ships `s-maxage=31536000`,
+        // and `MaxTTL` is the ceiling CloudFront honors, so that bogus year
+        // collapses to 60s -- a rotated-chunk break self-corrects in <=60s
+        // instead of persisting for up to a year. `MinTTL` 0 so a no-store page
+        // is never force-cached. Immutable `/_next/static/*` is unaffected (its
+        // own CachingOptimized behavior).
         const cfg = defaultCacheConfig();
-        expect(cfg.MinTTL).toBe(1);
-        expect(cfg.DefaultTTL).toBe(86400);
-        expect(cfg.MaxTTL).toBe(31536000);
+        expect(cfg.MinTTL).toBe(0);
+        expect(cfg.DefaultTTL).toBe(60);
+        expect(cfg.MaxTTL).toBe(60);
+      });
+    });
+
+    describe("/_next/static/* immutable-asset behavior (HTML/asset cache split)", () => {
+      const staticBehavior = (): Record<string, unknown> => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        const b = (dc.CacheBehaviors as Array<Record<string, unknown>>).find(
+          (x) => x.PathPattern === "/_next/static/*",
+        );
+        expect(b).toBeDefined();
+        return b as Record<string, unknown>;
+      };
+
+      it("uses Managed-CachingOptimized (long TTL, respects origin immutable) with cookies stripped", () => {
+        const b = staticBehavior();
+        expect(b.CachePolicyId).toBe("658327ea-f89d-4fab-a63d-7e88639e58f6");
+        expect(b.OriginRequestPolicyId).toBeUndefined();
+        expect((b.AllowedMethods as string[]).slice().sort()).toEqual([
+          "GET",
+          "HEAD",
+          "OPTIONS",
+        ]);
+        expect(b.ViewerProtocolPolicy).toBe("redirect-to-https");
+      });
+
+      it("does NOT use the HTML no-store headers policy (assets stay browser-cacheable)", () => {
+        // Assets must keep their `immutable` browser caching -- only the HTML
+        // default behavior gets the `max-age=0, must-revalidate` override.
+        const htmlPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::ResponseHeadersPolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .ResponseHeadersPolicyConfig as Record<string, unknown>
+            ).Name === "sps-html-headers-prod",
+        )?.[0];
+        expect(htmlPolicyLogicalId).toBeDefined();
+        expect(staticBehavior().ResponseHeadersPolicyId).not.toEqual({
+          Ref: htmlPolicyLogicalId,
+        });
+      });
+    });
+
+    describe("HTML default behavior never outlives a deploy (Cache-Control override)", () => {
+      it("the default behavior uses the sps-html-headers-* policy", () => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        const dc = dist.DistributionConfig as Record<string, unknown>;
+        const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
+        const htmlPolicyLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::ResponseHeadersPolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .ResponseHeadersPolicyConfig as Record<string, unknown>
+            ).Name === "sps-html-headers-prod",
+        )?.[0];
+        expect(htmlPolicyLogicalId).toBeDefined();
+        expect(defaultBehavior.ResponseHeadersPolicyId).toEqual({
+          Ref: htmlPolicyLogicalId,
+        });
+      });
+
+      it("the HTML headers policy overrides viewer Cache-Control to max-age=0, must-revalidate and keeps HSTS", () => {
+        template.hasResourceProperties(
+          "AWS::CloudFront::ResponseHeadersPolicy",
+          {
+            ResponseHeadersPolicyConfig: Match.objectLike({
+              Name: "sps-html-headers-prod",
+              SecurityHeadersConfig: Match.objectLike({
+                StrictTransportSecurity: Match.objectLike({
+                  IncludeSubdomains: true,
+                  Override: true,
+                }),
+              }),
+              CustomHeadersConfig: Match.objectLike({
+                Items: Match.arrayWith([
+                  Match.objectLike({
+                    Header: "Cache-Control",
+                    Value: "public, max-age=0, must-revalidate",
+                    Override: true,
+                  }),
+                ]),
+              }),
+            }),
+          },
+        );
       });
     });
 
