@@ -24,7 +24,10 @@ import {
   resolveConceptMode,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
+  resolveGenericTermMode,
+  resolvePeopleMatchProvenance,
 } from "@/lib/api/search-flags";
+import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
 import {
@@ -113,8 +116,31 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     // independent; only the synchronous classify() below consumes both.
     getPeopleClassifierSets(),
   ]);
-  const taxonomyMatch = taxonomyTimed.result;
+  // Issue #692 — generic-term demotion on the SSR path (mirrors the
+  // /api/search route) so the server-rendered result set ranks + highlights
+  // identically to a subsequent client fetch. `removed` is empty (incl. the
+  // never-strip-to-empty case) when nothing was stripped, so the resolution
+  // retry and `genericDemote` both stay inert.
+  const genericTermMode = resolveGenericTermMode();
+  const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+  const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
+
+  let taxonomyMatch = taxonomyTimed.result;
   const taxonomyMatchMs = taxonomyTimed.ms;
+  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
+  // match AND no MeSH descriptor) retry against the stripped content query.
+  // Full-first protects descriptors built from filler ("gene therapy").
+  if (
+    genericStripped &&
+    taxonomyMatch.state === "none" &&
+    taxonomyMatch.meshResolution === null
+  ) {
+    const retry = await matchQueryToTaxonomy(contentQuery);
+    if (retry.state === "matches" || retry.meshResolution !== null) {
+      taxonomyMatch = retry;
+    }
+  }
 
   // Issue #259 §1.11 / §6.2 — `?mesh` URL contract. Three states:
   //   absent     → default expanded mode (chip renders narrow + broaden affordances)
@@ -242,6 +268,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // matches the streamed full search's predicate; it's a scoring function
       // and doesn't change the total, but passing it keeps the calls aligned).
       deptLeadershipBoost: resolveDeptLeadershipBoost(),
+      // Issue #692 — keep the badge count aligned with the streamed full search
+      // (the demote content-gate changes the total, so both calls must agree).
+      genericDemote,
+      contentQuery,
       // Perf — badge count only; the people tab's full result streams below.
       countOnly: true,
     }),
@@ -271,6 +301,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // §6.2 — chip-engaged narrow-mode opt-in (`?mesh=strict`). Forces
       // strict-mode admission under flag = `expanded`.
       meshStrict,
+      // Issue #692 — keep the badge count aligned with the streamed full search.
+      genericDemote,
+      contentQuery,
       // Perf — badge count only; the pub tab's full result streams below.
       countOnly: true,
     }),
@@ -429,6 +462,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   },
                   meshResolution: effectiveMeshResolution,
                   meshStrict,
+                  // Issue #692 — generic-term demotion on the streamed pub tab.
+                  genericDemote,
+                  contentQuery,
                 })}
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}
@@ -475,6 +511,16 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   shape: peopleQueryShape,
                   meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
                   deptLeadershipBoost: resolveDeptLeadershipBoost(),
+                  // Issue #692 — generic-term demotion on the streamed people
+                  // tab: gates/highlights on the content query (this is the SSR
+                  // render the screenshot showed un-demoted before the fix).
+                  genericDemote,
+                  contentQuery,
+                  // Issue #688 — MeSH match-provenance on the SSR path too, so
+                  // the "Why this match" note renders on direct navigation, not
+                  // just on a client-side /api/search fetch.
+                  matchProvenance: resolvePeopleMatchProvenance(),
+                  meshDescriptorName: taxonomyMatch.meshResolution?.name,
                 })}
               />
             )}
