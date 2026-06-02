@@ -41,6 +41,7 @@ function buildEdgeStack(
     env: fixture.env,
     envConfig: fixture.envConfig,
     publicAlb: app.publicAlb,
+    deployRoleArn: app.deployRole.roleArn,
   });
   return { template: Template.fromStack(stack), stack };
 }
@@ -249,8 +250,10 @@ describe("EdgeStack", () => {
         );
       });
 
-      it("creates exactly one S3 bucket (the access-logs target)", () => {
-        template.resourceCountIs("AWS::S3::Bucket", 1);
+      it("creates two S3 buckets (access-logs target + static-asset origin)", () => {
+        // LogsBucket (CloudFront standard logs) + StaticAssetsBucket
+        // (/_next/static/* S3 origin, #700).
+        template.resourceCountIs("AWS::S3::Bucket", 2);
       });
 
       it("enables CloudFront additional metrics (one monitoring subscription)", () => {
@@ -410,15 +413,22 @@ describe("EdgeStack", () => {
         expect(defaultBehavior.OriginRequestPolicyId).toBeUndefined();
       });
 
-      it("origin is HTTP-only on port 80 (acceptance #6)", () => {
+      it("ALB origin is HTTP-only on port 80; static-asset S3 origin uses OAC (acceptance #6, #700)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const ods = dc.Origins as Array<Record<string, unknown>>;
-        expect(ods).toHaveLength(1);
-        const origin = ods[0];
-        const config = origin?.CustomOriginConfig as Record<string, unknown>;
+        // Two origins now: the ALB (custom, fallback) + the static-asset S3
+        // bucket (OAC, primary of the /_next/static/* origin group, #700).
+        expect(ods).toHaveLength(2);
+        const albOrigin = ods.find((o) => o.CustomOriginConfig !== undefined);
+        const config = albOrigin?.CustomOriginConfig as Record<string, unknown>;
         expect(config.OriginProtocolPolicy).toBe("http-only");
         expect(config.HTTPPort).toBe(80);
+        // The S3 origin is OAC-backed: it carries an OriginAccessControlId and
+        // (since it's a bucket) no CustomOriginConfig.
+        const s3Origin = ods.find((o) => o.CustomOriginConfig === undefined);
+        expect(s3Origin?.OriginAccessControlId).toBeDefined();
+        expect(s3Origin?.S3OriginConfig).toBeDefined();
       });
 
       it("origin sends an X-Origin-Verify custom header (acceptance #7)", () => {
@@ -761,6 +771,76 @@ describe("EdgeStack", () => {
             }),
           },
         );
+      });
+    });
+
+    describe("static-asset S3 origin + origin-group failover (#700)", () => {
+      const distConfig = (): Record<string, unknown> => {
+        const dist = Object.values(
+          template.findResources("AWS::CloudFront::Distribution"),
+        )[0].Properties as Record<string, unknown>;
+        return dist.DistributionConfig as Record<string, unknown>;
+      };
+
+      it("private static bucket with BlockPublicAccess ALL and a 14-day lifecycle on _next/static/", () => {
+        template.hasResourceProperties("AWS::S3::Bucket", {
+          PublicAccessBlockConfiguration: Match.objectLike({
+            BlockPublicAcls: true,
+            BlockPublicPolicy: true,
+            IgnorePublicAcls: true,
+            RestrictPublicBuckets: true,
+          }),
+          LifecycleConfiguration: Match.objectLike({
+            Rules: Match.arrayWith([
+              Match.objectLike({
+                Prefix: "_next/static/",
+                ExpirationInDays: 14,
+                Status: "Enabled",
+              }),
+            ]),
+          }),
+        });
+      });
+
+      it("creates exactly one Origin Access Control for the S3 origin", () => {
+        template.resourceCountIs("AWS::CloudFront::OriginAccessControl", 1);
+      });
+
+      it("the /_next/static/* behavior targets an origin group that fails over S3 -> ALB on 403/404", () => {
+        const dc = distConfig();
+        const groups = dc.OriginGroups as Record<string, unknown>;
+        const items = groups.Items as Array<Record<string, unknown>>;
+        expect(items).toHaveLength(1);
+        const group = items[0];
+        const failover = group.FailoverCriteria as Record<string, unknown>;
+        const codes = (failover.StatusCodes as Record<string, unknown>)
+          .Items as number[];
+        expect(codes.slice().sort()).toEqual([403, 404]);
+        // The static behavior must route through the origin GROUP, not a bare
+        // origin -- that is what gives the ALB fallback.
+        const groupId = group.Id as string;
+        const staticBehavior = (
+          dc.CacheBehaviors as Array<Record<string, unknown>>
+        ).find((b) => b.PathPattern === "/_next/static/*");
+        expect(staticBehavior?.TargetOriginId).toBe(groupId);
+      });
+
+      it("grants the deploy role prefix-scoped s3:PutObject (additive, NO DeleteObject)", () => {
+        // Find the static bucket's policy by the _next/static/ prefix it
+        // references; assert it grants PutObject and never DeleteObject (the
+        // sync is additive so old hashes survive -- granting delete would
+        // defeat the point and is least-privilege-wrong).
+        const policies = Object.values(
+          template.findResources("AWS::S3::BucketPolicy"),
+        ).map((r) => JSON.stringify((r.Properties as Record<string, unknown>).PolicyDocument));
+        const staticPolicy = policies.find((p) => p.includes("_next/static/*"));
+        expect(staticPolicy).toBeDefined();
+        expect(staticPolicy).toContain("s3:PutObject");
+        expect(staticPolicy).not.toContain("s3:DeleteObject");
+      });
+
+      it("exports the StaticAssetsBucketName output for the deploy sync", () => {
+        template.hasOutput("StaticAssetsBucketName", {});
       });
     });
 

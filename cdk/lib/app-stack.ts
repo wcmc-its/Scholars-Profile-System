@@ -1595,8 +1595,10 @@ export class AppStack extends Stack {
     );
     // The deploy workflow's "Discover AppStack outputs" step calls
     // `aws cloudformation describe-stacks --stack-name Sps-App-<env>` to
-    // read the ECR URIs, cluster, service, and migration-task family. Scope
-    // to this stack only -- the wildcard tail matches the stack-id suffix
+    // read the ECR URIs, cluster, service, and migration-task family. The
+    // "Sync static assets to S3" step (#700) additionally reads
+    // `Sps-Edge-<env>` for the StaticAssetsBucketName output. Scope to those
+    // two stacks only -- the wildcard tail matches the stack-id suffix
     // CloudFormation appends to the ARN.
     this.deployRole.addToPolicy(
       new iam.PolicyStatement({
@@ -1607,6 +1609,11 @@ export class AppStack extends Stack {
             service: "cloudformation",
             resource: "stack",
             resourceName: `${this.stackName}/*`,
+          }),
+          Stack.of(this).formatArn({
+            service: "cloudformation",
+            resource: "stack",
+            resourceName: `Sps-Edge-${env}/*`,
           }),
         ],
       }),

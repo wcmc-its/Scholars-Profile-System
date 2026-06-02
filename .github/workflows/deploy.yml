@@ -149,6 +149,36 @@ jobs:
         run: |
           echo "::warning::EtlEcrRepoUri not found on ${{ steps.target.outputs.stack }}. ETL image not built/pushed. Run 'cdk deploy ${{ steps.target.outputs.stack }}' to create scholars-etl-${{ steps.target.outputs.env }}, then re-run this workflow."
 
+      # Static-asset sync to S3 (#700) — make old content-hashed chunks survive a
+      # deploy. The Next standalone image bakes `.next/static`; when ECS rolls,
+      # the old image's chunks vanish, so HTML cached just before the deploy can
+      # 404 a chunk (the L1 60s clamp bounds stale HTML; this removes the 404
+      # entirely). Extract `.next/static` from the just-pushed image and sync it
+      # ADDITIVELY (NO --delete) to the bucket fronted by the `/_next/static/*`
+      # CloudFront behavior, so every past hash stays resolvable. Runs BEFORE the
+      # service roll so the new tasks' HTML finds its chunks in S3. Self-skips
+      # until `cdk deploy Sps-Edge-<env>` (manual) has created the bucket + its
+      # StaticAssetsBucketName output; until then assets serve from the ALB via
+      # the origin-group fallback, so a skip is non-fatal.
+      - name: Sync static assets to S3
+        run: |
+          set -euo pipefail
+          bucket=$(aws cloudformation describe-stacks \
+            --stack-name "Sps-Edge-${{ steps.target.outputs.env }}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`StaticAssetsBucketName`].OutputValue' \
+            --output text 2>/dev/null || true)
+          if [ -z "$bucket" ] || [ "$bucket" = "None" ]; then
+            echo "::warning::StaticAssetsBucketName not found on Sps-Edge-${{ steps.target.outputs.env }}. Static assets NOT synced (#700). Run 'cdk deploy Sps-Edge-${{ steps.target.outputs.env }}' (manual, with the edge context flags) to provision the bucket, then re-run. Non-fatal: assets still serve from the ALB via the origin-group fallback."
+            exit 0
+          fi
+          cid=$(docker create "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}")
+          docker cp "$cid:/app/.next/static" /tmp/next-static
+          docker rm "$cid" >/dev/null
+          aws s3 sync /tmp/next-static "s3://$bucket/_next/static/" \
+            --no-progress \
+            --cache-control 'public, max-age=31536000, immutable'
+          echo "Synced $(find /tmp/next-static -type f | wc -l) files to s3://$bucket/_next/static/ (additive, no --delete)."
+
       # db-bootstrap (#493) — provision scholars_audit + the app-rw INSERT grant
       # BEFORE migrate, as the least-privilege sps_bootstrap user. Idempotent;
       # fails-closed (non-zero exit halts the deploy, service not rolled), so a
