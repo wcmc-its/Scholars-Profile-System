@@ -328,3 +328,81 @@ describe("people-index topic-shape template — SPEC §6.1.3 (#310)", () => {
     expect(inner.boost_mode).toBe("multiply");
   });
 });
+
+// Issue #692 — generic-term demotion on the topic body.
+describe("generic-term demotion — #692 (people topic shape)", () => {
+  beforeEach(() => {
+    capturedBodies.length = 0;
+    groupByMock.mockResolvedValue([]);
+  });
+  afterEach(() => vi.clearAllMocks());
+
+  const topicMust0 = (body: Record<string, unknown>) =>
+    (topicBranch(body).bool as { must: Record<string, unknown>[] }).must[0];
+  const topicShould0 = (body: Record<string, unknown>) =>
+    (topicBranch(body).bool as { should: Record<string, unknown>[] }).should[0];
+  const highlightOf = (body: Record<string, unknown>) =>
+    (body as { highlight: Record<string, unknown> }).highlight;
+
+  it("off (no genericDemote): plain cross_fields on the full query, no highlight_query", async () => {
+    await searchPeople({
+      q: "microbiome research",
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const must0 = topicMust0(capturedBodies[0]) as { multi_match?: { query: string } };
+    expect(must0.multi_match?.query).toBe("microbiome research");
+    expect(highlightOf(capturedBodies[0]).highlight_query).toBeUndefined();
+  });
+
+  it("on: gates on the content query, discounts the full query ×0.1, highlights content only", async () => {
+    await searchPeople({
+      q: "microbiome research",
+      contentQuery: "microbiome",
+      genericDemote: true,
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const gate = topicMust0(capturedBodies[0]) as {
+      bool: {
+        must: Array<{ multi_match: { query: string; minimum_should_match: string } }>;
+        should: Array<{ multi_match: { query: string; boost: number } }>;
+      };
+    };
+    // Gate = content query with the topic msm; discount = full query at 0.1.
+    expect(gate.bool.must[0].multi_match.query).toBe("microbiome");
+    expect(gate.bool.must[0].multi_match.minimum_should_match).toBe("2<-34%");
+    expect(gate.bool.should[0].multi_match.query).toBe("microbiome research");
+    expect(gate.bool.should[0].multi_match.boost).toBe(0.1);
+    // Abstracts now key on content too.
+    expect(topicShould0(capturedBodies[0])).toEqual({
+      match: { publicationAbstracts: { query: "microbiome", boost: 0.5 } },
+    });
+    // Highlight restricted to the content query over the highlighted fields.
+    const hq = highlightOf(capturedBodies[0]).highlight_query as {
+      multi_match: { query: string; fields: string[] };
+    };
+    expect(hq.multi_match.query).toBe("microbiome");
+    expect(hq.multi_match.fields).toEqual([
+      "preferredName",
+      "areasOfInterest",
+      "overview",
+    ]);
+  });
+
+  it("inert when contentQuery equals the full query (nothing stripped)", async () => {
+    await searchPeople({
+      q: "microbiome",
+      contentQuery: "microbiome",
+      genericDemote: true,
+      relevanceMode: "v3",
+      shape: "topic",
+      meshDescendantUis: DESCENDANTS,
+    });
+    const must0 = topicMust0(capturedBodies[0]) as { multi_match?: { query: string } };
+    expect(must0.multi_match?.query).toBe("microbiome");
+    expect(highlightOf(capturedBodies[0]).highlight_query).toBeUndefined();
+  });
+});

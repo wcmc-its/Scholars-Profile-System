@@ -374,6 +374,55 @@ export type PublicationsSearchResult = {
   };
 };
 
+// Issue #692 — generic-term demotion. The "discount" boost applied to the full
+// query when scoring on the content query: a doc that also contains the removed
+// generic terms ranks marginally above one that doesn't, but generics can never
+// outweigh content. "Discounted, not ignored."
+const GENERIC_DISCOUNT_BOOST = 0.1;
+
+/**
+ * Issue #692 §4.2 — gate(content) + discount(full) scoring clause. The content
+ * query is the recall/scoring driver (with the caller's msm, if any); the full
+ * query rides as a low-boost `should` so generic terms only tie-break. Called
+ * ONLY when demoting; off-mode call sites keep their original inline clause, so
+ * the default-off body is byte-identical to today's.
+ */
+function demoteScoringClause(opts: {
+  contentQuery: string;
+  fullQuery: string;
+  fields: string[];
+  type: "best_fields" | "cross_fields";
+  msm?: string;
+  boost?: number;
+}): Record<string, unknown> {
+  const mm = (query: string, extra: Record<string, unknown>) => ({
+    multi_match: {
+      query,
+      fields: opts.fields,
+      type: opts.type,
+      operator: "or",
+      ...(opts.msm ? { minimum_should_match: opts.msm } : {}),
+      ...extra,
+    },
+  });
+  return {
+    bool: {
+      must: [mm(opts.contentQuery, opts.boost !== undefined ? { boost: opts.boost } : {})],
+      should: [
+        {
+          multi_match: {
+            query: opts.fullQuery,
+            fields: opts.fields,
+            type: opts.type,
+            operator: "or",
+            boost: GENERIC_DISCOUNT_BOOST,
+          },
+        },
+      ],
+    },
+  };
+}
+
 export async function searchPeople(opts: {
   q: string;
   page?: number;
@@ -436,6 +485,17 @@ export async function searchPeople(opts: {
    */
   deptLeadershipBoost?: boolean;
   /**
+   * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
+   * differs from the raw query, the topic + hybrid bodies score on the content
+   * query (full query discounted) and highlighting is restricted to the content
+   * query. Inert for name/department/cwid/empty shapes. Default false.
+   */
+  genericDemote?: boolean;
+  /** Issue #692 — the query with deprioritized filler tokens removed (computed
+   *  once in the route by `stripDeprioritized`). Only consumed when
+   *  `genericDemote` is true; ignored otherwise. */
+  contentQuery?: string;
+  /**
    * Perf — count-only mode for the inactive search tabs. The /search page
    * runs all three corpora on every request, but the two tabs the user
    * isn't viewing need only their total for the "{n} people · {n} pubs ·
@@ -452,6 +512,15 @@ export async function searchPeople(opts: {
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
+
+  // Issue #692 — generic-term demotion. Only active when the route asked for it
+  // AND there is a real content/full split; otherwise `contentQuery === trimmed`
+  // and every demote-gated branch falls back to its original clause.
+  const demoteGeneric =
+    opts.genericDemote === true &&
+    !!opts.contentQuery &&
+    opts.contentQuery !== trimmed;
+  const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -641,18 +710,27 @@ export async function searchPeople(opts: {
         bool: {
           should: [
             ...nameTemplateClauses,
-            {
-              multi_match: {
-                query: trimmed,
-                fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
-                type: "cross_fields",
-                operator: "or",
-              },
-            },
+            // Issue #692 — topic ladder scores on the content query (full query
+            // discounted) when demoting; otherwise the original cross_fields.
+            demoteGeneric
+              ? demoteScoringClause({
+                  contentQuery,
+                  fullQuery: trimmed,
+                  fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                  type: "cross_fields",
+                })
+              : {
+                  multi_match: {
+                    query: trimmed,
+                    fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                    type: "cross_fields",
+                    operator: "or",
+                  },
+                },
             {
               match: {
                 publicationAbstracts: {
-                  query: trimmed,
+                  query: contentQuery,
                   boost: PEOPLE_TOPIC_ABSTRACTS_BOOST,
                 },
               },
@@ -671,21 +749,31 @@ export async function searchPeople(opts: {
         // multiplicative modifiers wrap this body via function_score below.
         bool: {
           must: [
-            {
-              multi_match: {
-                query: trimmed,
-                fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
-                type: "cross_fields",
-                operator: "or",
-                minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
-              },
-            },
+            // Issue #692 — the topic must-clause gates on the content query
+            // (full query discounted) when demoting; otherwise unchanged.
+            demoteGeneric
+              ? demoteScoringClause({
+                  contentQuery,
+                  fullQuery: trimmed,
+                  fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                  type: "cross_fields",
+                  msm: PEOPLE_RESTRUCTURED_MSM,
+                })
+              : {
+                  multi_match: {
+                    query: trimmed,
+                    fields: [...PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS],
+                    type: "cross_fields",
+                    operator: "or",
+                    minimum_should_match: PEOPLE_RESTRUCTURED_MSM,
+                  },
+                },
           ],
           should: [
             {
               match: {
                 publicationAbstracts: {
-                  query: trimmed,
+                  query: contentQuery,
                   boost: PEOPLE_TOPIC_ABSTRACTS_BOOST,
                 },
               },
@@ -1139,6 +1227,22 @@ export async function searchPeople(opts: {
         areasOfInterest: {},
         overview: {},
       },
+      // Issue #692 — when demoting, restrict highlighting to the content query
+      // so stripped generics ("Research") are never <mark>-ed. Without this the
+      // discount clause's full query would still drive highlights. Omitted when
+      // not demoting, so the default-off highlight body is unchanged.
+      ...(demoteGeneric
+        ? {
+            highlight_query: {
+              multi_match: {
+                query: contentQuery,
+                fields: ["preferredName", "areasOfInterest", "overview"],
+                type: "best_fields",
+                operator: "or",
+              },
+            },
+          }
+        : {}),
       pre_tags: ["<mark>"],
       post_tags: ["</mark>"],
     },
@@ -1301,11 +1405,31 @@ export async function searchPublications(opts: {
    * deterministic without leaning on fake timers.
    */
   nowYear?: number;
+  /**
+   * Issue #692 — generic-term demotion (mode `on`). When true and `contentQuery`
+   * differs from the raw query, the BM25-over-surface-query clauses score on the
+   * content query (full query discounted). The descriptor-name / MeSH-terms
+   * clauses are unaffected (they already score on `resolution.name`). Default
+   * false → byte-identical body.
+   */
+  genericDemote?: boolean;
+  /** Issue #692 — query with deprioritized filler tokens removed (computed in
+   *  the route). Only consumed when `genericDemote` is true. */
+  contentQuery?: string;
 }): Promise<PublicationsSearchResult> {
   const { q, page = 0 } = opts;
   const sort = opts.sort ?? "relevance";
   const filters = opts.filters ?? {};
   const trimmed = q.trim();
+
+  // Issue #692 — generic-term demotion, active only with a real content/full
+  // split. Off → `contentQuery === trimmed` and every demote-gated clause keeps
+  // its original inline shape.
+  const demoteGeneric =
+    opts.genericDemote === true &&
+    !!opts.contentQuery &&
+    opts.contentQuery !== trimmed;
+  const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
 
   // Issue #259 §1.2 — pub-tab minimum_should_match floor. Now default-on
   // after prod verification of the >50% p95 cut for resolved-concept
@@ -1376,16 +1500,28 @@ export async function searchPublications(opts: {
     queryShape = "concept_expanded";
     // Clause 1: BM25 over the original surface query. Same fields/boosts
     // as the §1.2 multi_match — preserves token-coverage signal.
-    topLevelShould.push({
-      multi_match: {
-        query: trimmed,
-        fields: [...PUBLICATION_FIELD_BOOSTS],
-        type: "best_fields",
-        operator: "or",
-        minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
-        boost: 1,
-      },
-    });
+    // Issue #692 — score on the content query (full query discounted) when demoting.
+    topLevelShould.push(
+      demoteGeneric
+        ? demoteScoringClause({
+            contentQuery,
+            fullQuery: trimmed,
+            fields: [...PUBLICATION_FIELD_BOOSTS],
+            type: "best_fields",
+            msm: PUBLICATIONS_RESTRUCTURED_MSM,
+            boost: 1,
+          })
+        : {
+            multi_match: {
+              query: trimmed,
+              fields: [...PUBLICATION_FIELD_BOOSTS],
+              type: "best_fields",
+              operator: "or",
+              minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+              boost: 1,
+            },
+          },
+    );
     // Clause 2: parallel BM25 over the descriptor's canonical name. Token
     // count drawn from `resolution.name` only (NOT the entry-term list)
     // so msm is computed against name-tokens, avoiding cross-contamination
@@ -1458,15 +1594,26 @@ export async function searchPublications(opts: {
     must.push({
       bool: { should: evidenceShould, minimum_should_match: 1 },
     });
-    topLevelShould.push({
-      multi_match: {
-        query: trimmed,
-        fields: [...PUBLICATION_FIELD_BOOSTS],
-        type: "best_fields",
-        operator: "or",
-        minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
-      },
-    });
+    // Issue #692 — score on the content query (full query discounted) when demoting.
+    topLevelShould.push(
+      demoteGeneric
+        ? demoteScoringClause({
+            contentQuery,
+            fullQuery: trimmed,
+            fields: [...PUBLICATION_FIELD_BOOSTS],
+            type: "best_fields",
+            msm: PUBLICATIONS_RESTRUCTURED_MSM,
+          })
+        : {
+            multi_match: {
+              query: trimmed,
+              fields: [...PUBLICATION_FIELD_BOOSTS],
+              type: "best_fields",
+              operator: "or",
+              minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+            },
+          },
+    );
   } else {
     // §1.2 path. Catches:
     //   - resolution null (mesh=off, no match, under-3-char)
@@ -1492,19 +1639,30 @@ export async function searchPublications(opts: {
         }),
       );
     }
-    must.push({
-      multi_match: {
-        query: trimmed,
-        fields: [...PUBLICATION_FIELD_BOOSTS],
-        type: "best_fields",
-        ...(usePubMsm
-          ? {
-              operator: "or",
-              minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
-            }
-          : {}),
-      },
-    });
+    // Issue #692 — score on the content query (full query discounted) when demoting.
+    must.push(
+      demoteGeneric
+        ? demoteScoringClause({
+            contentQuery,
+            fullQuery: trimmed,
+            fields: [...PUBLICATION_FIELD_BOOSTS],
+            type: "best_fields",
+            msm: usePubMsm ? PUBLICATIONS_RESTRUCTURED_MSM : undefined,
+          })
+        : {
+            multi_match: {
+              query: trimmed,
+              fields: [...PUBLICATION_FIELD_BOOSTS],
+              type: "best_fields",
+              ...(usePubMsm
+                ? {
+                    operator: "or",
+                    minimum_should_match: PUBLICATIONS_RESTRUCTURED_MSM,
+                  }
+                : {}),
+            },
+          },
+    );
     queryShape = usePubMsm ? "restructured_msm" : "legacy_multi_match";
   }
 

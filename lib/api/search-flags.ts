@@ -135,6 +135,33 @@ export function resolvePeopleMatchProvenance(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE === "on";
 }
 
+export type GenericTermMode = "off" | "resolve" | "on";
+
+/**
+ * Issue #692 — generic/filler-term demotion mode. A trailing generic word
+ * ("Microbiome Research") breaks MeSH resolution and pollutes ranking/highlight.
+ *
+ *   - `off` (default): no change.
+ *   - `resolve`: on a full-query resolution MISS, retry against the query with
+ *     deprioritized terms stripped (recovers resolution + #688 provenance on
+ *     multi-word queries). No ranking/result-set/highlight change. Safe — only
+ *     fires after the full query already failed to resolve.
+ *   - `on`: `resolve` plus BM25 down-weight (content gates, full query
+ *     discounted) and highlight de-marking of the stripped terms.
+ *
+ * Staged like `resolveConceptMode` (off|strict|expanded); unknown value → `off`.
+ */
+export function resolveGenericTermMode(): GenericTermMode {
+  const v = process.env.SEARCH_GENERIC_TERM_DEMOTE;
+  if (v === "resolve" || v === "on") return v;
+  if (v !== undefined && v !== "off") {
+    console.warn(
+      `[search] ignoring unrecognized SEARCH_GENERIC_TERM_DEMOTE="${v}"; using "off"`,
+    );
+  }
+  return "off";
+}
+
 export type PubRecencyMode = "off" | "gentle" | "strong";
 
 /**
