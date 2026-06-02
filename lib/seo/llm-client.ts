@@ -73,15 +73,31 @@ export const CITATION_PROVIDERS: ProviderSpec[] = [
   },
 ];
 
-/** Resolve a comma-separated provider selection against the catalog. */
-export function selectProviders(keys: string[] | null): ProviderSpec[] {
-  if (!keys || keys.length === 0) return CITATION_PROVIDERS;
-  const byKey = new Map(CITATION_PROVIDERS.map((p) => [p.key, p]));
+/**
+ * The PARAMETRIC catalog (#594 §3): vanilla chat models with NO web tools, so
+ * answers reflect the model's training-data prior (no browsing). Routed by bare
+ * `provider/model` strings through the gateway — no provider packages needed
+ * (those are only for provider-executed tools, which parametric deliberately
+ * omits). Model strings are operator-tunable; verify against the live gateway.
+ */
+export const PARAMETRIC_PROVIDERS: ProviderSpec[] = [
+  { key: "openai", model: "openai/gpt-5.1", modelDate: null, costPerCallUsd: 0.01 },
+  { key: "anthropic", model: "anthropic/claude-sonnet-4.5", modelDate: null, costPerCallUsd: 0.012 },
+  { key: "google", model: "google/gemini-2.5-flash", modelDate: null, costPerCallUsd: 0.004 },
+];
+
+/** Resolve a comma-separated provider selection against a catalog (default: citation). */
+export function selectProviders(
+  keys: string[] | null,
+  catalog: ProviderSpec[] = CITATION_PROVIDERS,
+): ProviderSpec[] {
+  if (!keys || keys.length === 0) return catalog;
+  const byKey = new Map(catalog.map((p) => [p.key, p]));
   return keys.map((k) => {
     const spec = byKey.get(k);
     if (!spec) {
       throw new Error(
-        `Unknown provider ${JSON.stringify(k)}. Known: ${CITATION_PROVIDERS.map((p) => p.key).join(", ")}`,
+        `Unknown provider ${JSON.stringify(k)}. Known: ${catalog.map((p) => p.key).join(", ")}`,
       );
     }
     return spec;

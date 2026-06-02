@@ -35,14 +35,44 @@ provider clients + non-determinism controls an LLM surface demands.
 Unlike a Google SERP (a deterministic ordered list of URLs), LLM surfaces differ
 by retrieval mechanism. Conflating them produces a meaningless number.
 
-| Surface                                                            | Returns                                  | "Rank" analog                             | SEO-sensitive?                                    | Built                           |
-| ------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------- | ------------------------------------------------- | ------------------------------- |
-| **Citation RAG** — Perplexity, ChatGPT Search, Gemini grounding    | prose + cited URLs                       | citation present + 1-based citation index | **Yes** — where the #171 structured data pays off | `seo:llm-rank`                  |
-| **Google AI Overview** (a citation-RAG subset)                     | AI block above the SERP, with references | reference present + position              | Yes                                               | folded into `seo:track`         |
-| **Parametric prose** — vanilla ChatGPT/Claude/Gemini (no browsing) | prose naming people/orgs, no URLs        | mention present + prominence              | Lagging — reflects training cutoff                | _follow-up (`seo:llm-mention`)_ |
+| Surface                                                            | Returns                                  | "Rank" analog                             | SEO-sensitive?                                    | Built                   |
+| ------------------------------------------------------------------ | ---------------------------------------- | ----------------------------------------- | ------------------------------------------------- | ----------------------- |
+| **Citation RAG** — Perplexity, ChatGPT Search, Gemini grounding    | prose + cited URLs                       | citation present + 1-based citation index | **Yes** — where the #171 structured data pays off | `seo:llm-rank`          |
+| **Google AI Overview** (a citation-RAG subset)                     | AI block above the SERP, with references | reference present + position              | Yes                                               | folded into `seo:track` |
+| **Parametric prose** — vanilla ChatGPT/Claude/Gemini (no browsing) | prose naming people/orgs, no URLs        | mention present + prominence              | Lagging — reflects training cutoff                | `seo:llm-mention`       |
 
-This document covers the first two (the SEO-sensitive, measurable surfaces). The
-parametric-prose instrument is a separate, diagnostic-only follow-up.
+All three surfaces are built. Citation-RAG + AI Overview are the SEO-sensitive,
+launch-relevant ones; parametric prose (`seo:llm-mention`) is diagnostic only —
+it reflects the model's training prior, lags cutoffs by months, and is **not** a
+launch metric.
+
+## Parametric prose (`seo:llm-mention`, §3) — diagnostic
+
+Asks the _vanilla_ model (no web tools) "who's an expert in X" and parses the
+answer for whether WCM is NAMED — the institution, or a rostered scholar — and
+how prominently. It's the "does the model even know WCM works in this field"
+floor.
+
+```bash
+npm run seo:llm-mention -- --dry-run                # keyless validate + cost
+npm run seo:llm-mention                             # live (vanilla openai/anthropic/google)
+npm run seo:llm-mention -- --judge openai/gpt-5.1   # add the 0–3 LLM-as-judge prominence rubric (2× calls)
+npm run seo:llm-mention -- --roster names.json      # scholar roster (JSON string[]); else top-30 from rank-basket
+```
+
+Records, per (query, provider): Wilson rate+CI that WCM the institution is named
+and that a specific scholar is named, a deterministic prominence ordinal (WCM's
+first-mention rank among peers), and the mean judge score. Same drift controls
+(`{provider, model, modelDate, temperature, samples, queryBasketSha}`),
+per-sample resilience, and checkpointing as `seo:llm-rank`. Cadence: quarterly.
+
+## LLM-answer share of voice (`seo:standings --llm-snapshot`, §6)
+
+`standings-rank.ts` gains `--llm-snapshot <citation-rag-snapshot>`: it appends an
+"LLM-answer share of voice" table — the fraction of LLM answers (query × provider
+× sample) that cite each institution's profile platform, pooled with a Wilson CI
+and a per-provider split. Point `seo:llm-rank --basket data/seo/rival-basket.json`
+at the rival targets first to get the cross-institution comparison.
 
 ---
 
