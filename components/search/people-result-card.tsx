@@ -87,6 +87,39 @@ function HighlightedSnippet({ html }: { html: string }) {
   );
 }
 
+// Issue #688 — "why this match" note for a MeSH subsumption hit: the scholar
+// surfaced because a publication is tagged with a *narrower* term than the one
+// searched (e.g. "Microbiome" → Mycobiome). The query-keyed <mark> highlighter
+// can't explain this (the typed term isn't in their text), so we spell it out.
+// Quiet left-rule aside; "Why this match" uses the role-tag micro-label so the
+// eye lands on the bolded term, not the boilerplate.
+function MatchProvenanceNote({
+  provenance,
+}: {
+  provenance: NonNullable<PeopleHit["matchProvenance"]>;
+}) {
+  const MAX = 3;
+  const shown = provenance.descendantTerms.slice(0, MAX);
+  const extra = provenance.descendantTerms.length - shown.length;
+  const plural = shown.length > 1 || extra > 0;
+  return (
+    <div className="mt-2 border-l-2 border-[#e3cfcf] pl-2.5 text-[13px] leading-snug text-[#4a4a4a]">
+      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
+        Why this match
+      </span>
+      {shown.map((term, i) => (
+        <span key={i}>
+          {i === 0 ? "" : i === shown.length - 1 ? " and " : ", "}
+          <strong className="font-semibold text-[#1a1a1a]">{term}</strong>
+        </span>
+      ))}
+      {extra > 0 ? <span> +{extra} more</span> : null}
+      {` — ${plural ? "narrower terms" : "a narrower term"} of `}
+      <span>&ldquo;{provenance.parentTerm}&rdquo;</span>.
+    </div>
+  );
+}
+
 export function PeopleResultCard({
   hit,
   position,
@@ -153,6 +186,9 @@ export function PeopleResultCard({
           <div className="text-[13px] leading-snug text-[#4a4a4a]">
             <HighlightedSnippet html={snippet} />
           </div>
+        ) : null}
+        {hit.matchProvenance ? (
+          <MatchProvenanceNote provenance={hit.matchProvenance} />
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">

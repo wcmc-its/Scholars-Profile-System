@@ -57,6 +57,11 @@ import {
   searchClient,
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
+import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
+import {
+  computeMatchProvenance,
+  type MatchProvenance,
+} from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
   resolvePubRecencyMode,
@@ -171,6 +176,13 @@ export type PeopleHit = {
   hasActiveGrants: boolean;
   identityImageEndpoint: string;
   highlight?: string[];
+  /**
+   * Issue #688 — present only when `SEARCH_PEOPLE_MATCH_PROVENANCE` is on, the
+   * topic/unclassified search resolved to a MeSH descriptor, AND this scholar
+   * matched via a *narrower* descendant term (the §6.1.3 subsumption boost).
+   * Omitted in every other case.
+   */
+  matchProvenance?: MatchProvenance;
 };
 
 export type PublicationHit = {
@@ -396,6 +408,21 @@ export async function searchPeople(opts: {
    * boost function is simply omitted then.
    */
   meshDescendantUis?: string[];
+  /**
+   * Issue #688 — `SEARCH_PEOPLE_MATCH_PROVENANCE` resolved at request time by
+   * the route. When true (and the topic template ran against a resolved
+   * descriptor), each hit that matched via a narrower descendant term carries
+   * `matchProvenance` so the UI can explain the subsumption match. Pure
+   * additive metadata: no effect on the query, scoring, or result set.
+   */
+  matchProvenance?: boolean;
+  /**
+   * Issue #688 — the resolved descriptor's display name (the term the user
+   * effectively searched), passed alongside `meshDescendantUis` so the
+   * provenance string can read "… narrower term of {name}". Absent when the
+   * query didn't resolve to a descriptor.
+   */
+  meshDescriptorName?: string;
   /**
    * Issue #532 — `SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST` resolved at request
    * time by the route (`resolveDeptLeadershipBoost()`). When true, the
@@ -1132,6 +1159,10 @@ export async function searchPeople(opts: {
       publicationCount: number;
       grantCount: number;
       hasActiveGrants: boolean;
+      // Issue #688 — descriptor UIs the scholar is tagged with (omit-on-empty
+      // in the ETL). Read only for the match-provenance path; the field is
+      // already in `_source` (no `_source` include-list trims it).
+      publicationMeshUi?: string[];
     };
     highlight?: Record<string, string[]>;
   };
@@ -1159,6 +1190,21 @@ export async function searchPeople(opts: {
       ? (r.aggregations?.attributionMatch?.doc_count ?? 0) > 0
       : null;
 
+  // Issue #688 — narrower-term match provenance. Only when the flag is on, the
+  // topic template ran against a resolved descriptor with at least one
+  // descendant, and we have the descriptor's display name to frame the "…
+  // narrower term of {name}" string. Labels for the whole descendant set are
+  // resolved once, then intersected per hit by `computeMatchProvenance`.
+  const provenanceOn =
+    opts.matchProvenance === true &&
+    applyTopicTemplate &&
+    meshDescendantUis.length > 1 &&
+    (opts.meshDescriptorName?.length ?? 0) > 0;
+  const provenanceLabels = provenanceOn
+    ? await descriptorLabelsForUis(meshDescendantUis)
+    : new Map<string, string>();
+  const provenanceParent = opts.meshDescriptorName ?? "";
+
   return {
     hits: r.hits.hits.map((h) => ({
       cwid: h._source.cwid,
@@ -1174,6 +1220,14 @@ export async function searchPeople(opts: {
       hasActiveGrants: h._source.hasActiveGrants,
       identityImageEndpoint: identityImageEndpoint(h._source.cwid),
       highlight: h.highlight ? Object.values(h.highlight).flat() : undefined,
+      matchProvenance: provenanceOn
+        ? computeMatchProvenance({
+            publicationMeshUi: h._source.publicationMeshUi,
+            descendantUis: meshDescendantUis,
+            parentTerm: provenanceParent,
+            labels: provenanceLabels,
+          })
+        : undefined,
     })),
     total: r.hits.total.value,
     page,
