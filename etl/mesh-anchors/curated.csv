@@ -1,3 +1,9 @@
 descriptor_ui,parent_topic_id,source_note
 D057286,biomedical_informatics,"Initial seed — spec example (Electronic Health Records per public NLM). Replace via curation team review."
 D008498,biomedical_informatics,"Initial seed — covers EHR under local mesh_descriptor naming (apparent §1.3 ETL name/UI inconsistency; tracked separately). Replace via curation team review."
+D013903,cardiovascular_disease,"#690/#642 — Cardiothoracic Surgery alias target (Thoracic Surgery). Confirm vs surgery_perioperative_medicine. Inert until §1.6 anchor consumption."
+D009493,neuroscience_neurology,"#690/#642 — Neurological Surgery alias target (Neurosurgery). Inert until §1.6."
+D009985,musculoskeletal_orthopedic_medicine,"#690/#642 — Orthopaedic Surgery alias target (Orthopedics). Inert until §1.6."
+D010036,otolaryngology_head_neck,"#690/#642 — Otolaryngology Head and Neck Surgery alias target. Inert until §1.6."
+D013518,surgery_perioperative_medicine,"#690/#642 — Plastic & Reconstructive Surgery alias target (Surgery, Plastic). Inert until §1.6."
+D013515,oral_craniofacial_health,"#690/#642 — Oral & Maxillofacial Surgery alias target (Surgery, Oral). Inert until §1.6."
