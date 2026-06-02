@@ -13,8 +13,16 @@
  *   - Default open state: collapsed when concept == query (normalized), open
  *     when they differ. Chevron toggles aria-expanded / aria-controls.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+
+// The control's links now render via TransitionLink, which calls useRouter().
+// Without an app-router context that throws in jsdom; stub it. These tests
+// assert the rendered href, not the navigation itself.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+}));
+
 import { MeshBoostControl } from "@/components/search/mesh-boost-control";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 

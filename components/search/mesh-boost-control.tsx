@@ -28,7 +28,12 @@
  * the resting concept name stays a plain span (no nested focusable element).
  */
 import * as React from "react";
-import Link from "next/link";
+// Route the off-switch + "Narrow to this concept only" links through the
+// shared search useTransition (same as facet / sort / pagination links) so a
+// concept-mode change dims the results in place instead of leaving the page
+// frozen with no feedback. Outside a SearchTransitionProvider TransitionLink
+// still navigates via router.push, so the control degrades gracefully.
+import { TransitionLink as Link } from "@/components/search/transition-link";
 import { ChevronDown, Sparkles, X } from "lucide-react";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
