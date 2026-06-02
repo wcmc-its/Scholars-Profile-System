@@ -19,6 +19,7 @@ import {
   resolveFundingConceptEnabled,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
+  resolvePeopleMatchProvenance,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -298,6 +299,11 @@ export async function GET(request: NextRequest) {
     // drives the topic-shape attribution boost; searchPeople ignores it for
     // non-topic shapes.
     meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+    // Issue #688 — env-gated narrower-term match provenance. searchPeople only
+    // attaches it on topic/unclassified hits that matched via a descendant; the
+    // descriptor name frames the "… narrower term of {name}" string.
+    matchProvenance: resolvePeopleMatchProvenance(),
+    meshDescriptorName: taxonomyMatch.meshResolution?.name,
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),

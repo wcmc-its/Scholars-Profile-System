@@ -761,6 +761,37 @@ export async function resolveMeshDescriptor(
   };
 }
 
+/**
+ * Issue #688 — resolve descriptor UIs to their display names via the in-memory
+ * MeSH map. Used by the People-search match-provenance path to turn a scholar's
+ * matched descendant UIs into human-readable narrower terms. Returns a Map
+ * keyed only by the UIs that resolved (unknown UIs omitted). Fails closed (empty
+ * map) on a map-load error, mirroring `resolveMeshDescriptor`.
+ */
+export async function descriptorLabelsForUis(
+  uis: string[],
+): Promise<Map<string, string>> {
+  if (uis.length === 0) return new Map();
+  let map: MeshMap;
+  try {
+    map = await getMeshMap();
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "mesh_map_load_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return new Map();
+  }
+  const out = new Map<string, string>();
+  for (const ui of uis) {
+    const row = map.byUi.get(ui);
+    if (row) out.set(ui, row.name);
+  }
+  return out;
+}
+
 /** @internal — test-only hook. Resets the module-level MeSH cache. */
 export function _resetMeshMapForTests(): void {
   meshMapCache = null;

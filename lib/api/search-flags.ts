@@ -119,6 +119,22 @@ export function resolveDeptLeadershipBoost(): boolean {
   return process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST !== "off";
 }
 
+/**
+ * Issue #688 — surface MeSH match provenance on People results. When a
+ * topic/unclassified search resolves to a descriptor, the §6.1.3 attribution
+ * boost ranks up scholars tagged with a *narrower* descendant term than the
+ * one typed (e.g. `Microbiome` surfacing a `Mycobiome` scholar). With this on,
+ * each such hit carries the narrower term(s) so the UI can explain the match;
+ * the query-keyed highlighter can't (the typed term isn't in the scholar's
+ * text). Pure additive metadata — no effect on ranking or the result set.
+ *
+ * Default off until eval; this is an explainability/UX change, not a ranking
+ * change, so it gets its own lever independent of `SEARCH_PEOPLE_RELEVANCE_MODE`.
+ */
+export function resolvePeopleMatchProvenance(): boolean {
+  return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE === "on";
+}
+
 export type PubRecencyMode = "off" | "gentle" | "strong";
 
 /**
