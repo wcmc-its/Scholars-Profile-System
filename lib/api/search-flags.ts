@@ -135,6 +135,31 @@ export function resolvePeopleMatchProvenance(): boolean {
   return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE === "on";
 }
 
+/**
+ * Issue #702 — People-result match explainability. People highlighting is keyed
+ * to only three self-reported fields (`preferredName` / `areasOfInterest` /
+ * `overview`), but topic relevance scores heavily on publication-derived fields
+ * (`publicationTitles^6` / `publicationMesh^4`). A scholar admitted purely on
+ * publication evidence therefore has nothing to highlight in the bio fields and
+ * the card renders bare (≈86% of top topic-query results, measured). With this
+ * on, `searchPeople`:
+ *   - also highlights `publicationTitles` / `publicationMesh` so the card can
+ *     render a "Matched in publications: …" snippet (`pubHighlight`), and
+ *   - emits `matchedOnFields` (derived from which fields actually produced a
+ *     highlight fragment) so the card can render a last-resort "Matched on …"
+ *     chip when there is no snippet and no MeSH provenance note.
+ * `publicationAbstracts` is deliberately NOT highlighted — a long, raw,
+ * possibly-sensitive blob makes a poor snippet.
+ *
+ * Pure presentation metadata — no effect on the query predicate, scoring, or
+ * result set. Default off until eval; a separate lever from
+ * `SEARCH_PEOPLE_MATCH_PROVENANCE` (the MeSH "why this match" note) and from
+ * `SEARCH_GENERIC_TERM_DEMOTE`, each with an independent rollback trigger.
+ */
+export function resolvePeopleMatchExplain(): boolean {
+  return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN === "on";
+}
+
 export type GenericTermMode = "off" | "resolve" | "on";
 
 /**

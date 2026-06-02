@@ -26,6 +26,7 @@ import {
   resolvePeopleRelevanceMode,
   resolveGenericTermMode,
   resolvePeopleMatchProvenance,
+  resolvePeopleMatchExplain,
 } from "@/lib/api/search-flags";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -521,6 +522,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   // just on a client-side /api/search fetch.
                   matchProvenance: resolvePeopleMatchProvenance(),
                   meshDescriptorName: taxonomyMatch.meshResolution?.name,
+                  // Issue #702 — pub-evidence highlighting + "Matched on" chip so
+                  // a publication-only match isn't left bare on the SSR render.
+                  matchExplain: resolvePeopleMatchExplain(),
                 })}
               />
             )}
