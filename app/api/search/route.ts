@@ -13,6 +13,7 @@ import {
   type FundingStatus,
 } from "@/lib/api/search-funding";
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
+import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
   parseMeshParam,
   resolveConceptMode,
@@ -20,6 +21,7 @@ import {
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
   resolvePeopleMatchProvenance,
+  resolveGenericTermMode,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -49,8 +51,31 @@ export async function GET(request: NextRequest) {
   // the resolver in isolation so a resolver regression doesn't dilute the
   // §3.1 (c) +10ms p95 guardrail (which targets the rebalance's body
   // construction + OpenSearch round-trip, not the resolver).
+  // Issue #692 — generic-term demotion. Strip deprioritized filler tokens once
+  // up front; `removed` is empty when nothing was stripped (incl. the
+  // never-strip-to-empty case), so `genericDemote` and the resolution retry are
+  // both inert unless there is a real content/full split.
+  const genericTermMode = resolveGenericTermMode();
+  const { contentQuery, removed: genericRemoved } = stripDeprioritized(q);
+  const genericStripped = genericTermMode !== "off" && genericRemoved.length > 0;
+  const genericDemote = genericTermMode === "on" && genericRemoved.length > 0;
+
   const taxonomyStart = Date.now();
-  const taxonomyMatch = await matchQueryToTaxonomy(q);
+  let taxonomyMatch = await matchQueryToTaxonomy(q);
+  // Issue #692 §4.1 — full query first; only on a complete MISS (no curated
+  // match AND no MeSH descriptor) retry against the stripped content query.
+  // Full-first protects descriptors built from filler ("gene therapy",
+  // "clinical trial") — those resolve on the first call and never reach here.
+  if (
+    genericStripped &&
+    taxonomyMatch.state === "none" &&
+    taxonomyMatch.meshResolution === null
+  ) {
+    const retry = await matchQueryToTaxonomy(contentQuery);
+    if (retry.state === "matches" || retry.meshResolution !== null) {
+      taxonomyMatch = retry;
+    }
+  }
   const taxonomyMatchMs = Date.now() - taxonomyStart;
   // Issue #259 §6.2 — `?mesh=off` wins over `?mesh=strict` regardless of
   // URL ordering. `parseMeshParam` uses `getAll + includes` so the rule
@@ -170,6 +195,10 @@ export async function GET(request: NextRequest) {
       // §1.11 — `effectiveMeshResolution` honors `?mesh=off`; when off,
       // this is null and the pub query falls back to the §1.2 shape.
       meshResolution: effectiveMeshResolution,
+      // Issue #692 — generic-term demotion (mode `on`). BM25 scores on the
+      // content query (gate) with the full query discounted; inert otherwise.
+      genericDemote,
+      contentQuery,
       // §6.2 — chip's "Narrow to this concept only" opt-in. Forces
       // strict-mode admission under flag = `expanded`. `?mesh=off`
       // precedence is already enforced upstream by nulling the resolution.
@@ -304,6 +333,11 @@ export async function GET(request: NextRequest) {
     // descriptor name frames the "… narrower term of {name}" string.
     matchProvenance: resolvePeopleMatchProvenance(),
     meshDescriptorName: taxonomyMatch.meshResolution?.name,
+    // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
+    // and highlight on the content query (full query discounted); inert
+    // otherwise and never applied to name/department shapes.
+    genericDemote,
+    contentQuery,
     // Issue #532 — env-gated dept-shape leadership boost. Ignored for
     // non-dept shapes inside `searchPeople`.
     deptLeadershipBoost: resolveDeptLeadershipBoost(),

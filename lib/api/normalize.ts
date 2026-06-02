@@ -1,0 +1,28 @@
+/**
+ * Query/term normalization shared by the taxonomy resolver (#259) and the
+ * generic-term demotion path (#692). Extracted to a dependency-free leaf module
+ * so consumers like `deprioritized-terms.ts` can match tokens against the SAME
+ * normalization the MeSH resolver uses, without importing the resolver's Prisma
+ * graph. `search-taxonomy.ts` re-exports this, so existing
+ * `import { normalizeForMatch } from "@/lib/api/search-taxonomy"` call sites are
+ * unaffected.
+ *
+ * Lowercase + strip non-alphanumeric. Handles "Cardio-oncology" ↔
+ * "cardio oncology" ↔ "cardiooncology" without stemming.
+ *
+ * The standalone connector word "and" is dropped first (issue #690 / #642
+ * Bucket A) so it collapses the same way the ampersand already does — "&"
+ * strips to nothing as a non-alphanumeric char, but the literal word "and"
+ * survived and blocked the match. Dropping it lets a department-style query
+ * like "Pathology and Laboratory Medicine" substring-match the curated topic
+ * "Pathology & Laboratory Medicine". Whole word only (`\band\b`), so
+ * "Andrology", "island", "command", "Anderson" are untouched; an audit over
+ * all 67 topics + 267k MeSH surface forms found this introduces no topic-label
+ * or MeSH-descriptor key collisions.
+ */
+export function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\band\b/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
+}
