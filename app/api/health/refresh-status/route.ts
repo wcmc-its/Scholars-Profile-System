@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isAuthorizedBearer } from "@/lib/revalidate-auth";
+import { apiError } from "@/lib/api/error-response";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
     if (
       !isAuthorizedBearer(request.headers.get("authorization"), [healthToken])
     ) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return apiError("Unauthorized", 401);
     }
   }
 

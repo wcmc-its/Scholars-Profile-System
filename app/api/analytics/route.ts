@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handleAnalyticsBeacon } from "@/lib/api/analytics";
+import { apiError } from "@/lib/api/error-response";
 
 /**
  * POST /api/analytics — client-side analytics beacon endpoint (D-05).
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const payload = await request.json().catch(() => null);
   if (payload === null) {
-    return NextResponse.json({ error: "invalid payload" }, { status: 400 });
+    return apiError("invalid payload", 400);
   }
   handleAnalyticsBeacon(payload);
   return new NextResponse(null, { status: 204 });

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getRevalidateTokens, isAuthorizedBearer } from "@/lib/revalidate-auth";
 import { isAllowedRevalidatePath } from "@/lib/revalidate-allowlist";
+import { apiError } from "@/lib/api/error-response";
 
 /**
  * POST /api/revalidate?path={p}
@@ -37,26 +38,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (acceptedTokens.length === 0) {
     // Server misconfigured — treat as 500 rather than silently approving any
     // request. Surfaces the operational issue to ETL logs immediately.
-    return NextResponse.json(
-      { error: "server misconfigured: SCHOLARS_REVALIDATE_TOKEN not set" },
-      { status: 500 },
-    );
+    return apiError("server misconfigured: SCHOLARS_REVALIDATE_TOKEN not set", 500);
   }
 
   if (
     !isAuthorizedBearer(request.headers.get("authorization"), acceptedTokens)
   ) {
     // Do NOT echo the received token. T-02-09-03.
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return apiError("unauthorized", 401);
   }
 
   const path = request.nextUrl.searchParams.get("path");
   if (!path) {
-    return NextResponse.json({ error: "missing path" }, { status: 400 });
+    return apiError("missing path", 400);
   }
 
   if (!isAllowedRevalidatePath(path)) {
-    return NextResponse.json({ error: "path not allowed" }, { status: 400 });
+    return apiError("path not allowed", 400);
   }
 
   revalidatePath(path);
