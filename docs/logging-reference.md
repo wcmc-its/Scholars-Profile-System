@@ -54,6 +54,17 @@ for, grouped by what they tell you. (Enumerated from `app/` + `lib/`.)
 | `export_publications` | A Word/bibliography export was generated. |
 | `sparse_state_hide` | A sparse profile section was hidden (completeness behavior). |
 
+### Error handling / not-found (#668)
+
+Server-side (these reach this log group):
+
+| Event | Meaning |
+|---|---|
+| `not_found` | A 404 was served at the origin. Carries `{ path, pattern }` (`pattern` = `vivo` / `profile` / `other`). Generalizes `vivo_404` (which is kept, unchanged, for redirect-map-pruning continuity). Logs the path only — never query strings. |
+| `search_degraded` | The `/search` backend (OpenSearch) failed; emitted server-side from the page's badge-count fetch before the throw reaches `search/error.tsx`. Carries `{ q_len, reason }` — query **length** only, never the text. Corroborates the AWS-side `ClusterStatus.red` alarm from the request side (alarm candidate: sustained `search_degraded` > N/min). |
+
+Client-side (browser console → RUM via [#595](https://github.com/wcmc-its/Scholars-Profile-System/issues/595); **not** this log group): `error_boundary` (a segment `error.tsx` rendered — `{ digest, route?, kind }`, `kind` ∈ `db`/`search`/`unknown`) and `global_error` (the root `global-error.tsx` rendered — a root-layout failure, should be **rare**; `{ digest, kind }`; alarm candidate once RUM ingestion lands: rate > 0). The authoritative *server* record of a thrown render is Next.js's own error+`digest` log line; these two are the browser correlate, keyed by the same `digest`.
+
 ### Write path / auth
 
 | Event | Meaning |

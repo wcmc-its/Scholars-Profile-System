@@ -1,6 +1,6 @@
 # Error handling & not-found — SPEC
 
-**Status:** Draft — P1–P3 implemented (this branch); P4–P6 pending.
+**Status:** P1–P4 shipped (P4 deployed both envs 2026-06-02); P5 helper + initial adoption + P6 docs on this branch. Remaining: full P5 route retrofit + P6 alarms (#595), and the deferred `/search` 200-degrade.
 **Date:** 2026-06-01
 **Authors:** Scholars Profile System development team
 **Implements:** [#668](https://github.com/wcmc-its/Scholars-Profile-System/issues/668) — error handling: 404 recovery UX + error boundaries + degraded-search + error-response edge caching
@@ -133,18 +133,20 @@ Constraints:
 
 ---
 
-## §5 — API error envelope
+## §5 — API error responses
+
+> **Reconciled with the live convention (P5).** This section originally proposed a **nested** envelope `{ error: { code, message, requestId } }`. Implementing that was rejected after confirming the codebase's actual, working convention: routes return a **flat** `{ "error": "<code>" }`, and UI clients (the `/edit/*` cards, the feedback form) read `data.error` as a **string** via `mapErrorToMessage` / `humanizeError`. A nested envelope would have broken every one of those clients. P5 therefore standardizes the flat shape and the `no-store` invariant, not a new body shape.
 
 A single JSON error shape for `app/api/*`:
 
 ```jsonc
-{ "error": { "code": "not_found" | "bad_request" | "unauthorized" | "rate_limited" | "internal" | "upstream_unavailable",
-             "message": "<safe, user-facing>", "requestId": "<optional>" } }
+{ "error": "<code-or-short-safe-message>" }
 ```
 
-- A small helper (`lib/api/error-response.ts`) returns `NextResponse.json(envelope, { status, headers: { "Cache-Control": "no-store" } })` so status code, body shape, and no-store are consistent.
-- Never leak stack traces or driver errors in `message`; log the detail server-side (§6) and return a generic safe message for `internal` / `upstream_unavailable`.
+- A small helper — `lib/api/error-response.ts` `apiError(code, status)` — returns `NextResponse.json({ error: code }, { status, headers: { "Cache-Control": "no-store" } })`, so status code, body shape, and the no-store header are consistent. (This response-header `no-store` is distinct from the §4 CloudFront `CustomErrorResponses`, which govern edge-side caching of origin 4xx/5xx.)
+- `error` is a stable lowercase **code** (e.g. `unauthorized`, `not_found`) or a short safe message — never raw error/driver text (that may leak internals). Clients map known codes to copy and fall back for unknown values.
 - Status codes follow §7. Auth routes keep their existing redirect behavior (not JSON).
+- **Adoption is incremental.** P5 ships the helper + the standard and adopts it in the operational routes where it is verifiably safe (`/api/revalidate`, `/api/analytics`, `/api/health/refresh-status`). Routes already returning `{ ok: false, error }` (e.g. `/api/directory/people`, `/api/feedback/submit`) keep that variant; the broader retrofit is follow-up and must update each route's client in lockstep.
 
 ---
 
@@ -227,12 +229,12 @@ docs/
 
 | Phase | Deliverable | Deploy path |
 |---|---|---|
-| **P1** | `global-error.tsx` + `(public)/error.tsx` + shared `error-content.tsx` + `errors.ts` emitters | App deploy (push → staging; prod via reviewer gate) |
-| **P2** | 404 recovery UX: upgrade `app/not-found.tsx`, add `(public)/not-found.tsx`, `not-found-content.tsx` | App deploy |
-| **P3** | `/search` degraded state: `lib/api/search.ts` catch + `search/error.tsx` | App deploy |
-| **P4** | Edge caching of errors: `EdgeStack` `CustomErrorResponse` + synth guard | **Manual EdgeStack deploy** (3 context flags — see EdgeStack memo); `--strict` diff first |
-| **P5** | API error envelope: `lib/api/error-response.ts` + route adoption | App deploy |
-| **P6** | Telemetry doc + alarm candidates | Docs + `SLOs.md`/#595 follow-on |
+| **P1** ✅ | `global-error.tsx` + `(public)/error.tsx` + shared `error-content.tsx` + `errors.ts` emitters | Merged #674 (master; staging app deployed, prod via reviewer gate) |
+| **P2** ✅ | 404 recovery UX: upgrade `app/not-found.tsx`, add `(public)/not-found.tsx`, `not-found-content.tsx` | Merged #674 |
+| **P3** ✅ | `/search` degraded state (branded 500 boundary + server-side `search_degraded`) | Merged #674 |
+| **P4** ✅ | Edge caching of errors: `EdgeStack` `errorResponses` + ratchet guard | Merged #676; **deployed both envs** 2026-06-02 (`--exclusively` + 3 ctx flags after clean `--strict` diff) |
+| **P5** ◑ | `lib/api/error-response.ts` `apiError` helper (flat shape, no-store) + tests + initial adoption (`revalidate`/`analytics`/`health/refresh-status`) | App deploy. **Full route retrofit = follow-up** (needs per-route client updates). |
+| **P6** ✅ | Telemetry events documented in `logging-reference.md`; alarm candidates noted (→ `SLOs.md`/#595) | Docs |
 
 P1–P3 are the launch-quality core (Gate A candidate). P4 is deploy-gated and independent. P5–P6 are iterate-after.
 
