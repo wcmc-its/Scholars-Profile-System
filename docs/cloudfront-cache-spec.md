@@ -16,6 +16,7 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 
 | # | Path pattern | Cache policy | Origin request policy | Allowed methods | Notes |
 |---|---|---|---|---|---|
+| 0 | `/_next/static/*` | `CachingOptimized` (long TTL) | **None** (cookies stripped) | GET, HEAD, OPTIONS | **Evaluated first.** Content-hashed, immutable Next.js build assets (JS/CSS chunks). The origin sets `Cache-Control: public, max-age=31536000, immutable` and the filename changes when content does, so these are safe to cache a year at the edge — and **must** cache long *independently of HTML*, since the default behavior is now clamped to a 60 s ceiling (see below). Without this dedicated behavior every chunk inherits that 60 s and stampedes the origin. See §"HTML vs. immutable-asset cache split". |
 | 1 | `/api/edit*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | Writer route. Forwards all cookies, headers, query string. Does not yet exist in code (lands with B01 #100 + B02 #101). |
 | 2 | `/edit*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS | Writer page route — `/edit*` (not `/edit/*`) so the bare `/edit` self-editor also forwards cookies; `/edit/*` does not match `/edit` and would fall to the cacheable default behavior (cookie stripped → SSO redirect loop). Same auth as `/api/edit*`. |
 | 3 | `/api/auth/*` | `CachingDisabled` | `AllViewer` | GET, HEAD, OPTIONS, POST | SSO endpoints (B01 #100) — SAML login redirect, ACS callback (POST), SP metadata, logout (POST). Forwards all cookies; the session cookie is set here, so these responses must never be edge-cached. Pairs with the `/api/edit*` and `/edit*` writer behaviors above. |
@@ -39,7 +40,7 @@ CloudFront evaluates path patterns in order. Specific patterns must precede the 
 | 21 | `/departments/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Dept + `…/divisions/*` listings; read `page`/`tab`/`sort`. |
 | 22 | `/centers/*` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. Center listings; read `page`/`tab`/`sort`. |
 | 23 | `/topics/*/scholars` | `sps-query-keyed-${env}` (custom) | **None** (cookies stripped) | GET, HEAD, OPTIONS | #634 Group B. ISR page; reads `q`/`role`/`page`. Stays cacheable, keyed per query. |
-| 24 | `*` (default) | `CachingOptimized` | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All remaining cacheable routes — read-only pages and API, sitemap, OG images. **Note:** this policy strips the query string from the cache key (see §Cache key); routes that depend on it get a dedicated behavior above. |
+| 24 | `*` (default) | `sps-default-rsc-${env}` (custom, **60 s max TTL**) | **None** (do not forward cookies, headers, or query string beyond the cache-policy spec) | GET, HEAD, OPTIONS | All remaining cacheable routes — read-only HTML pages, sitemap, OG images. Uses the custom RSC-aware policy (mirrors `Managed-CachingOptimized` but keys on the `RSC`/`Next-Router-Prefetch` headers for App Router soft-nav), with its **edge max TTL clamped to 60 s** so a force-static page's `s-maxage=31536000` cannot pin year-stale HTML at the edge (see §"HTML vs. immutable-asset cache split"). Also carries the dedicated `sps-html-headers-${env}` response-headers policy (HSTS + `Cache-Control: public, max-age=0, must-revalidate`) so browsers revalidate too. **Note:** this policy strips the query string from the cache key (see §Cache key); routes that depend on it get a dedicated behavior above. |
 
 > **Ordering note (#634):** CloudFront uses the **first** matching behavior in list order (not most-specific). The two `/scholars/*/co-pubs/*export` behaviors (#18/#19) must therefore be evaluated **before** `/scholars/*` (#20), since `*` spans slashes and `/scholars/*` matches `/scholars/<slug>/co-pubs/export`. The CDK emits all uncacheable behaviors before the Group B query-keyed ones, which preserves this.
 
@@ -76,10 +77,20 @@ Cookie: session=user-B
 
 | Behavior class | Min TTL | Default TTL | Max TTL |
 |---|---|---|---|
-| Default cacheable | 0 | 86400 (24 h) | 31536000 (1 y) |
+| Immutable assets (`/_next/static/*`) | 1 | 86400 (24 h) | 31536000 (1 y) |
+| Default cacheable (HTML) | 0 | 60 | **60** |
+| Query-keyed cacheable (Group B, ISR) | 1 | 86400 (24 h) | 31536000 (1 y) |
 | Uncacheable | 0 | 0 | 0 |
 
-Default TTL is 24 h to match the `revalidate = 86400` declaration on `/scholars/[slug]` and `/sitemap.xml`. Origin `Cache-Control: max-age=…` (e.g. on `/og/*`) overrides the default. Min TTL of 0 lets `Cache-Control: no-store` from the origin take effect; max TTL of 1 y is a ceiling, not a target.
+- **Immutable assets** keep the long ceiling (`Managed-CachingOptimized`): their URLs are content-hashed, so a year-long edge cache is correct by construction.
+- **Default cacheable (HTML)** is clamped to a **60 s max TTL**. Force-static pages (`revalidate = false`, e.g. `/about`) ship `Cache-Control: s-maxage=31536000`; `MaxTTL` is the ceiling CloudFront honors, so that bogus year collapses to 60 s. `MinTTL` 0 lets `Cache-Control: no-store` take effect. The non-content-hashed semi-static resources on this behavior (`/og/*`, `/sitemap.xml`, `/robots.txt`) inherit the same 60 s ceiling — correct, because they are **not** content-hashed and therefore carry the same staleness risk as HTML; long edge caching of a mutable URL is exactly what this clamp prevents.
+- **Query-keyed cacheable (Group B)** — the ISR pages (`/scholars/*`, dept/center/division, `/topics/*/scholars`) — keep the long ceiling. They are `revalidate`-based (short `s-maxage`), so their edge copy refreshes within the revalidate window; they are not subject to the year-long staleness and clamping them would kill caching of the highest-traffic content.
+
+### HTML vs. immutable-asset cache split
+
+The default behavior originally allowed a 1-year `MaxTTL`, and Next stamps **force-static HTML** with `Cache-Control: s-maxage=31536000`. CloudFront therefore cached `/about`'s HTML for a year. That HTML hard-references content-hashed chunks (`/_next/static/chunks/main-app-<hash>.js`); a later deploy rotated those hashes and removed the old files, so the year-stale HTML pointed at a `main-app-*.js` that now **404s** → the App Router bootstrap failed to load → `"Application error: a client-side exception has occurred."` Only the long-cached static pages broke; dynamic pages (`no-store`) always pulled the current build.
+
+`s-maxage` is a shared-cache directive that is only ever correct for content-hashed *assets*, never for the *documents* that reference them. The fix is the split above — HTML edge TTL clamped to 60 s (a bad deploy self-corrects in ≤60 s instead of up to a year), assets kept long on their own behavior — plus a viewer `Cache-Control: max-age=0, must-revalidate` override on HTML (the `sps-html-headers-${env}` response-headers policy) so browsers revalidate too. Response-headers policies are applied to the viewer response *after* the cache decision, so the override does not affect the 60 s edge TTL. A `ChunkLoadError` self-heal in `app/global-error.tsx` (one throttled reload) covers the residual post-boot navigation race; an S3-hosted immutable-asset origin (follow-up) will make the 404 impossible by retaining old hashes across deploys.
 
 ## Error-response caching (#668 §4)
 
@@ -99,7 +110,7 @@ Two invariants, both enforced by the synth guard in `cdk/test/edge-stack.test.ts
 
 Acceptance criteria for B07 #106:
 
-1. **Distribution has at least two behaviors** — the table above defines the default plus 23 additional behaviors; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
+1. **Distribution has at least two behaviors** — the table above defines the default plus 25 additional behaviors; minimum is satisfied as long as the default cacheable + at least one uncacheable behavior exist.
 2. **Cache key inspector test** — same URL with two different `Cookie:` values produces the same cache key for any path covered by the default behavior. Run from the CloudFront console: Distribution → Behaviors → Default → Cache Policy → "Test cache policy."
 3. **Writer route forwards cookies** — `curl -v https://<staging-domain>/api/edit/ping --cookie "session=test"` and confirm the origin access log records `session=test` in the request headers.
 4. **End-to-end edit smoke test** — once B01 #100 (SSO) and B02 #101 (authz predicate) land, perform a full self-edit through CloudFront and confirm the write reaches Aurora and the audit log captures it. Blocked on those issues.
@@ -108,7 +119,7 @@ Acceptance criteria for B07 #106:
 
 The addendum names a subset of routes; the codebase has more. The following are placed by judgment:
 
-- `/about`, `/about/methodology`, `/browse`, `/topics/*` (the topic detail page) — cacheable, no session or query-string reads. **Leave in default cacheable.**
+- `/about`, `/about/methodology`, `/browse`, `/topics/*` (the topic detail page) — cacheable, no session or query-string reads. **Leave in default cacheable** (now a 60 s edge ceiling — see §Cache TTLs; `/about` is force-static and was the page broken by the year-long HTML cache).
 - `/centers/*`, `/departments/*` (+ `…/divisions/*`), `/scholars/*`, `/topics/*/scholars` — cacheable **but** read `searchParams`. **Updated by #634:** these now have dedicated **query-keyed** behaviors (`sps-query-keyed-${env}`) so the page stays cached while the query string keys the cache. They were originally left on the default, which silently stripped the param (#634).
 - `/api/scholars/*/popover-context`, `/api/topics/*/publications`, `/api/search`, `/api/search/suggest`, `/api/directory/people`, `/api/nih-portfolio` — read-only JSON / proxies that read the query string (and, for `/api/directory/people` + `/about/feedback`, the session cookie). **Updated by #490 / #624 / #634:** these now have dedicated `CachingDisabled` + `AllViewer` behaviors. Originally recommended for the default cacheable, which was wrong — `force-dynamic` disables Next's route cache but does **not** stop CloudFront caching, and the default stripped their query string.
 - `/og/*` — origin sets `Cache-Control` aggressively, no query-string dependence. **Leave in default cacheable** so origin TTL is honored.

@@ -4,6 +4,26 @@ import { useEffect } from "react";
 import { logGlobalError } from "@/lib/analytics/errors";
 
 /**
+ * A webpack/Next dynamic-import that 404s (its content-hashed chunk was rotated
+ * out by a redeploy after this HTML was served) throws a `ChunkLoadError`. This
+ * is the post-boot navigation race that survives the EdgeStack 60s HTML clamp:
+ * a tab open across a deploy that then lazy-loads a now-missing chunk. We can
+ * recover transparently with a single hard reload, which re-fetches fresh HTML
+ * pointing at the current chunks. (It does NOT cover the *bootstrap* chunk
+ * `main-app-*.js` 404 -- that fails before React mounts, so this component
+ * never renders; the 60s edge clamp + the L2 S3-asset retention cover that.)
+ */
+function isChunkLoadError(error: Error): boolean {
+  const name = error?.name ?? "";
+  const message = error?.message ?? "";
+  return (
+    name === "ChunkLoadError" ||
+    /Loading (CSS )?chunk [^\s]+ failed/i.test(message) ||
+    /Failed to fetch dynamically imported module/i.test(message)
+  );
+}
+
+/**
  * Root error boundary (#668 §1). This is the true last resort: it catches
  * errors thrown in the ROOT layout itself (or anything that escapes a segment
  * boundary) and **replaces `app/layout.tsx` entirely**, including `<html>` /
@@ -25,6 +45,24 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     logGlobalError({ digest: error.digest });
+
+    // Self-heal a stale-chunk error with one hard reload. Throttled to at most
+    // once per 10s via sessionStorage so a reload that immediately re-errors
+    // (chunk genuinely gone) falls through to the manual recovery UI below
+    // instead of looping, while a genuine chunk error later in the session can
+    // still self-heal once. sessionStorage may be unavailable (private mode);
+    // a failed read/write just skips the self-heal.
+    if (!isChunkLoadError(error)) return;
+    const KEY = "sps-chunk-reload-at";
+    try {
+      const last = Number(window.sessionStorage.getItem(KEY) ?? "0");
+      if (Date.now() - last > 10_000) {
+        window.sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+      }
+    } catch {
+      // sessionStorage blocked -> no self-heal; the UI below is the fallback.
+    }
   }, [error]);
 
   return (

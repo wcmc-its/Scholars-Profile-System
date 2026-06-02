@@ -26,18 +26,29 @@ export interface EdgeStackProps extends StackProps {
 /**
  * EdgeStack — CloudFront distribution fronting the SPS public ALB (B07 + B14).
  *
- * Implements the behaviors in `docs/cloudfront-cache-spec.md`. Three classes:
- *   1. One cacheable default behavior (`Managed-CachingOptimized`) for the
- *      bulk of read-only pages and APIs.
- *   2. Uncacheable behaviors (`Managed-CachingDisabled` + `Managed-AllViewer`)
+ * Implements the behaviors in `docs/cloudfront-cache-spec.md`. Four classes:
+ *   1. One cacheable default behavior (custom `sps-default-rsc-*`, mirroring
+ *      Managed-CachingOptimized) for the bulk of read-only HTML pages. Its
+ *      edge `maxTtl` is clamped to 60s so a force-static page's bogus
+ *      `s-maxage=31536000` cannot pin year-stale HTML at the edge (the cause
+ *      of the /about "client-side exception": stale HTML -> rotated-out chunk
+ *      404 -> dead App Router bootstrap). The default also gets a dedicated
+ *      `sps-html-headers-*` policy overriding viewer `Cache-Control` to
+ *      `max-age=0, must-revalidate`.
+ *   2. A long-cache behavior for `/_next/static/*` (Managed-CachingOptimized):
+ *      content-hashed, immutable build assets that MUST stay cached a year,
+ *      independent of the 60s HTML ceiling above.
+ *   3. Uncacheable behaviors (`Managed-CachingDisabled` + `Managed-AllViewer`)
  *      for writer routes, SSO endpoints, mutating internal endpoints, the
  *      health probe, telemetry, on-demand exports, and every query-string
  *      DYNAMIC route (search + the #634 Group A API/feedback/export routes).
- *   3. Query-keyed CACHEABLE behaviors (#634 Group B) for the high-traffic
+ *   4. Query-keyed CACHEABLE behaviors (#634 Group B) for the high-traffic
  *      ISR pages (profile, dept/center/division, topic-scholars) that read
  *      `searchParams`: a custom cache policy that keeps them edge-cacheable
  *      but puts the query string in the cache key and forwards it to the
- *      origin -- without forwarding cookies.
+ *      origin -- without forwarding cookies. These are `revalidate`-based
+ *      (short `s-maxage`), so unlike the force-static pages they refresh
+ *      within the revalidate window and need no `maxTtl` clamp.
  * The cache key on the default and the query-keyed behaviors both exclude
  * cookies and all headers beyond `Accept-Encoding` — the single most
  * important knob in the spec, since forwarding cookies on cacheable routes
@@ -154,6 +165,57 @@ export class EdgeStack extends Stack {
     );
 
     // ------------------------------------------------------------------
+    // HTML response-headers policy (default behavior only).
+    //
+    // Next.js stamps `Cache-Control: s-maxage=31536000` on force-static HTML
+    // (revalidate=false pages such as /about). `s-maxage` is a SHARED-cache
+    // directive that is only ever correct for content-hashed assets, never for
+    // the HTML documents that REFERENCE them: an HTML page cached for a year
+    // keeps pointing at `/_next/static/chunks/main-app-<hash>.js` long after a
+    // redeploy rotates that hash and the old file 404s -> the App Router
+    // bootstrap fails to load -> "Application error: a client-side exception."
+    //
+    // Two knobs fix this without a deploy-time invalidation:
+    //   1. The default cache policy below clamps the EDGE TTL to 60s (so a bad
+    //      deploy self-corrects in <=60s regardless of the origin's bogus year).
+    //   2. This policy overrides the VIEWER Cache-Control to `max-age=0,
+    //      must-revalidate` so browsers revalidate too. Response-headers
+    //      policies are applied to the viewer-facing response AFTER CloudFront's
+    //      own caching decision, so this does NOT affect the 60s edge TTL.
+    //
+    // Carries the same HSTS as `securityHeaders` so HTML keeps the security
+    // header. Applied to the DEFAULT behavior only -- `/_next/static/*` keeps
+    // `securityHeaders` (immutable assets must stay long-cached in the browser),
+    // and the #634 Group B ISR pages keep `securityHeaders` too: they are
+    // `revalidate`-based (short `s-maxage`), so their edge copy refreshes within
+    // the revalidate window and is not vulnerable to the year-long staleness.
+    // ------------------------------------------------------------------
+    const htmlHeaders = new cloudfront.ResponseHeadersPolicy(
+      this,
+      "HtmlHeaders",
+      {
+        responseHeadersPolicyName: `sps-html-headers-${env}`,
+        comment: `SPS HTML headers (${env}) -- HSTS + no-store Cache-Control so HTML never outlives a deploy.`,
+        securityHeadersBehavior: {
+          strictTransportSecurity: {
+            accessControlMaxAge: Duration.days(730),
+            includeSubdomains: true,
+            override: true,
+          },
+        },
+        customHeadersBehavior: {
+          customHeaders: [
+            {
+              header: "Cache-Control",
+              value: "public, max-age=0, must-revalidate",
+              override: true,
+            },
+          ],
+        },
+      },
+    );
+
+    // ------------------------------------------------------------------
     // Origin (plan D7).
     //
     // HTTP-only on port 80 -- the public ALB has no TLS listener today
@@ -235,10 +297,19 @@ export class EdgeStack extends Stack {
       ),
       enableAcceptEncodingGzip: true,
       enableAcceptEncodingBrotli: true,
-      // Mirror Managed-CachingOptimized TTLs (1s / 1d / 1y).
-      minTtl: Duration.seconds(1),
-      defaultTtl: Duration.days(1),
-      maxTtl: Duration.days(365),
+      // Clamp the EDGE TTL to 60s. The default behavior serves HTML documents
+      // (the force-static pages such as /about, plus sitemap/OG/misc). Next
+      // stamps force-static HTML with `s-maxage=31536000`; `maxTtl` is the
+      // ceiling CloudFront will honor, so that bogus year collapses to 60s here
+      // -- a bad deploy (rotated chunk hashes the year-cached HTML still points
+      // at) self-corrects within a minute instead of persisting for up to a
+      // year. Immutable assets are NOT affected: `/_next/static/*` has its own
+      // long-cache behavior (CachingOptimized) added below. `defaultTtl` 60s
+      // bounds header-less responses to the same ceiling; `minTtl` 0 so a
+      // `no-store`/`private` page is never force-cached.
+      minTtl: Duration.seconds(0),
+      defaultTtl: Duration.seconds(60),
+      maxTtl: Duration.seconds(60),
     });
 
     // Each entry: [pathPattern, allowedMethods]. Order matters because
@@ -419,6 +490,29 @@ export class EdgeStack extends Stack {
     ];
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};
+
+    // Immutable, content-hashed Next.js build assets (`/_next/static/*`).
+    // Added FIRST so it is unambiguously evaluated before any other pattern
+    // (none of which match `/_next/static/*`, but first-match-wins makes the
+    // intent explicit). These files carry `Cache-Control: public,
+    // max-age=31536000, immutable` from the origin and their filenames change
+    // when content changes, so they are safe to cache a year at the edge -- and
+    // MUST cache independently of HTML: the default behavior is now clamped to a
+    // 60s `maxTtl`, so without this dedicated behavior every chunk would inherit
+    // that 60s ceiling and stampede the origin. `CachingOptimized` keys on URL +
+    // Accept-Encoding (no cookies, no RSC headers -- assets have no soft-nav
+    // variant) and respects the origin's immutable TTL. Same ALB origin as
+    // everything else today; L2 (#follow-up) moves these to an S3 origin so old
+    // hashes survive a deploy and never 404 in the first place.
+    additionalBehaviors["/_next/static/*"] = {
+      origin,
+      cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+      responseHeadersPolicy: securityHeaders,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+      compress: true,
+    };
+
     // Uncacheable (existing + #634 Group A) FIRST so the scholars-export
     // behaviors precede the cacheable `/scholars/*` glob (first-match-wins).
     for (const [pathPattern, allowedMethods] of uncacheableBehaviors) {
@@ -531,7 +625,11 @@ export class EdgeStack extends Stack {
         origin,
         cachePolicy: defaultRscCache,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-        responseHeadersPolicy: securityHeaders,
+        // HTML-specific headers: HSTS + a `max-age=0, must-revalidate`
+        // Cache-Control override so browsers revalidate HTML and never serve a
+        // year-stale document referencing rotated-out chunks. Edge TTL is
+        // governed by `defaultRscCache` (60s), not by this header.
+        responseHeadersPolicy: htmlHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         compress: true,
       },

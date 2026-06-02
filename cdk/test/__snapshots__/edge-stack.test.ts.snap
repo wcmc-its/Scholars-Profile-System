@@ -37,9 +37,9 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Properties": {
         "CachePolicyConfig": {
           "Comment": "SPS default cache (prod) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
-          "DefaultTTL": 86400,
-          "MaxTTL": 31536000,
-          "MinTTL": 1,
+          "DefaultTTL": 60,
+          "MaxTTL": 60,
+          "MinTTL": 0,
           "Name": "sps-default-rsc-prod",
           "ParametersInCacheKeyAndForwardedToOrigin": {
             "CookiesConfig": {
@@ -66,6 +66,21 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
       "Properties": {
         "DistributionConfig": {
           "CacheBehaviors": [
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+              "Compress": true,
+              "PathPattern": "/_next/static/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
             {
               "AllowedMethods": [
                 "GET",
@@ -525,7 +540,7 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
             },
             "Compress": true,
             "ResponseHeadersPolicyId": {
-              "Ref": "SecurityHeadersE66B69D3",
+              "Ref": "HtmlHeadersD748949D",
             },
             "TargetOriginId": "SpsEdgeprodDistributionOrigin13FA7C7AF",
             "ViewerProtocolPolicy": "redirect-to-https",
@@ -580,6 +595,31 @@ exports[`EdgeStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::MonitoringSubscription",
+    },
+    "HtmlHeadersD748949D": {
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Comment": "SPS HTML headers (prod) -- HSTS + no-store Cache-Control so HTML never outlives a deploy.",
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "Cache-Control",
+                "Override": true,
+                "Value": "public, max-age=0, must-revalidate",
+              },
+            ],
+          },
+          "Name": "sps-html-headers-prod",
+          "SecurityHeadersConfig": {
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 63072000,
+              "IncludeSubdomains": true,
+              "Override": true,
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
     },
     "LogsBucket9C4D8843": {
       "DeletionPolicy": "Retain",
@@ -787,9 +827,9 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Properties": {
         "CachePolicyConfig": {
           "Comment": "SPS default cache (staging) -- Managed-CachingOptimized plus RSC header keying so App Router soft navigation works.",
-          "DefaultTTL": 86400,
-          "MaxTTL": 31536000,
-          "MinTTL": 1,
+          "DefaultTTL": 60,
+          "MaxTTL": 60,
+          "MinTTL": 0,
           "Name": "sps-default-rsc-staging",
           "ParametersInCacheKeyAndForwardedToOrigin": {
             "CookiesConfig": {
@@ -816,6 +856,21 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
       "Properties": {
         "DistributionConfig": {
           "CacheBehaviors": [
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+              ],
+              "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+              "Compress": true,
+              "PathPattern": "/_next/static/*",
+              "ResponseHeadersPolicyId": {
+                "Ref": "SecurityHeadersE66B69D3",
+              },
+              "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
             {
               "AllowedMethods": [
                 "GET",
@@ -1275,7 +1330,7 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
             },
             "Compress": true,
             "ResponseHeadersPolicyId": {
-              "Ref": "SecurityHeadersE66B69D3",
+              "Ref": "HtmlHeadersD748949D",
             },
             "TargetOriginId": "SpsEdgestagingDistributionOrigin145B7DDC3",
             "ViewerProtocolPolicy": "redirect-to-https",
@@ -1330,6 +1385,31 @@ exports[`EdgeStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::CloudFront::MonitoringSubscription",
+    },
+    "HtmlHeadersD748949D": {
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Comment": "SPS HTML headers (staging) -- HSTS + no-store Cache-Control so HTML never outlives a deploy.",
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "Cache-Control",
+                "Override": true,
+                "Value": "public, max-age=0, must-revalidate",
+              },
+            ],
+          },
+          "Name": "sps-html-headers-staging",
+          "SecurityHeadersConfig": {
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 63072000,
+              "IncludeSubdomains": true,
+              "Override": true,
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
     },
     "LogsBucket9C4D8843": {
       "DeletionPolicy": "Retain",
