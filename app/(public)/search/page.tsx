@@ -636,7 +636,7 @@ function ModeTabs({
   const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
   const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
   return (
-    <nav className="mx-auto flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+    <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
       <ModeTab
         href={peopleHref}
         label="Scholars"
