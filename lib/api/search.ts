@@ -60,7 +60,9 @@ import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
 import {
   computeMatchProvenance,
+  computeMatchedOnFields,
   type MatchProvenance,
+  type MatchField,
 } from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
@@ -175,14 +177,31 @@ export type PeopleHit = {
   grantCount: number;
   hasActiveGrants: boolean;
   identityImageEndpoint: string;
+  /** Highlight fragments from the scholar's self-reported fields
+   *  (`preferredName` / `areasOfInterest` / `overview`). */
   highlight?: string[];
   /**
-   * Issue #688 — present only when `SEARCH_PEOPLE_MATCH_PROVENANCE` is on, the
-   * topic/unclassified search resolved to a MeSH descriptor, AND this scholar
-   * matched via a *narrower* descendant term (the §6.1.3 subsumption boost).
-   * Omitted in every other case.
+   * Issue #702 — highlight fragments from publication-derived fields
+   * (`publicationTitles` / `publicationMesh`), kept separate from `highlight`
+   * so the card can prefix them "Matched in publications: …". Present only when
+   * `SEARCH_PEOPLE_MATCH_EXPLAIN` is on and a pub field actually matched.
+   */
+  pubHighlight?: string[];
+  /**
+   * Issue #688 / #702 — present only when `SEARCH_PEOPLE_MATCH_PROVENANCE` is
+   * on, the topic/unclassified search resolved to a MeSH descriptor, AND this
+   * scholar matched the descriptor directly (`concept`) or via a *narrower*
+   * descendant term (`narrower`; the §6.1.3 subsumption boost). Omitted
+   * otherwise.
    */
   matchProvenance?: MatchProvenance;
+  /**
+   * Issue #702 — the human field labels this scholar matched on, derived from
+   * which highlight fields fired. Present only when `SEARCH_PEOPLE_MATCH_EXPLAIN`
+   * is on and at least one known field matched; drives the last-resort
+   * "Matched on …" chip when there is neither a snippet nor a MeSH note.
+   */
+  matchedOnFields?: MatchField[];
 };
 
 export type PublicationHit = {
@@ -466,6 +485,16 @@ export async function searchPeople(opts: {
    */
   matchProvenance?: boolean;
   /**
+   * Issue #702 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time by the
+   * route. When true, the People highlight block also highlights
+   * `publicationTitles` / `publicationMesh` (surfaced as `pubHighlight`) and a
+   * few detection-only fields, and each hit carries `matchedOnFields`. Pure
+   * presentation metadata: no effect on the query predicate, scoring, or result
+   * set (it only widens the `highlight` request). Headless callers default to
+   * `false`.
+   */
+  matchExplain?: boolean;
+  /**
    * Issue #688 — the resolved descriptor's display name (the term the user
    * effectively searched), passed alongside `meshDescendantUis` so the
    * provenance string can read "… narrower term of {name}". Absent when the
@@ -521,6 +550,12 @@ export async function searchPeople(opts: {
     !!opts.contentQuery &&
     opts.contentQuery !== trimmed;
   const contentQuery = demoteGeneric ? (opts.contentQuery as string) : trimmed;
+
+  // Issue #702 — match-explainability. When on, widen the highlight request so a
+  // pub-only match has something to show ("Matched in publications: …") and the
+  // card can derive a "Matched on …" chip. Default-off ⇒ the highlight block and
+  // hit emission below are byte-identical to the pre-#702 shape.
+  const matchExplain = opts.matchExplain === true;
 
   // Issue #259 §1.1 — the people-index query restructure (cross_fields + msm
   // over high-evidence fields, abstracts in a scoring-only should). It was a
@@ -1226,17 +1261,43 @@ export async function searchPeople(opts: {
         preferredName: {},
         areasOfInterest: {},
         overview: {},
+        // Issue #702 — when match-explain is on, also highlight pub-evidence
+        // fields (one bounded fragment, surfaced as `pubHighlight`) and a few
+        // detection-only fields (name/title/dept) whose mere presence drives the
+        // "Matched on …" chip. `publicationAbstracts` is deliberately excluded.
+        ...(matchExplain
+          ? {
+              publicationTitles: { number_of_fragments: 1, fragment_size: 150 },
+              publicationMesh: { number_of_fragments: 1, fragment_size: 150 },
+              fullName: {},
+              primaryTitle: {},
+              primaryDepartment: {},
+            }
+          : {}),
       },
       // Issue #692 — when demoting, restrict highlighting to the content query
       // so stripped generics ("Research") are never <mark>-ed. Without this the
       // discount clause's full query would still drive highlights. Omitted when
-      // not demoting, so the default-off highlight body is unchanged.
+      // not demoting, so the default-off highlight body is unchanged. #702 — the
+      // widened field set rides the same content-only query so generics stay
+      // un-marked across the pub/detection fields too.
       ...(demoteGeneric
         ? {
             highlight_query: {
               multi_match: {
                 query: contentQuery,
-                fields: ["preferredName", "areasOfInterest", "overview"],
+                fields: matchExplain
+                  ? [
+                      "preferredName",
+                      "areasOfInterest",
+                      "overview",
+                      "publicationTitles",
+                      "publicationMesh",
+                      "fullName",
+                      "primaryTitle",
+                      "primaryDepartment",
+                    ]
+                  : ["preferredName", "areasOfInterest", "overview"],
                 type: "best_fields",
                 operator: "or",
               },
@@ -1309,30 +1370,60 @@ export async function searchPeople(opts: {
     : new Map<string, string>();
   const provenanceParent = opts.meshDescriptorName ?? "";
 
+  // Issue #702 — partition the highlight response. `highlight` keeps the
+  // self-reported fragments (the pre-#702 contract, byte-identical when
+  // match-explain is off); `pubHighlight` carries the pub-evidence fragments so
+  // the card can label them; the detection-only keys (name/title/dept) feed only
+  // the "Matched on …" chip via `computeMatchedOnFields`.
+  const SELF_HIGHLIGHT_FIELDS = ["preferredName", "areasOfInterest", "overview"];
+  const PUB_HIGHLIGHT_FIELDS = ["publicationTitles", "publicationMesh"];
+
   return {
-    hits: r.hits.hits.map((h) => ({
-      cwid: h._source.cwid,
-      slug: h._source.slug,
-      preferredName: h._source.preferredName,
-      primaryTitle: h._source.primaryTitle,
-      primaryDepartment: h._source.primaryDepartment,
-      deptName: h._source.deptName ?? h._source.primaryDepartment,
-      divisionName: h._source.divisionName,
-      roleCategory: h._source.personType,
-      pubCount: h._source.publicationCount,
-      grantCount: h._source.grantCount,
-      hasActiveGrants: h._source.hasActiveGrants,
-      identityImageEndpoint: identityImageEndpoint(h._source.cwid),
-      highlight: h.highlight ? Object.values(h.highlight).flat() : undefined,
-      matchProvenance: provenanceOn
-        ? computeMatchProvenance({
-            publicationMeshUi: h._source.publicationMeshUi,
-            descendantUis: meshDescendantUis,
-            parentTerm: provenanceParent,
-            labels: provenanceLabels,
-          })
-        : undefined,
-    })),
+    hits: r.hits.hits.map((h) => {
+      const hl = h.highlight;
+      let highlight: string[] | undefined;
+      let pubHighlight: string[] | undefined;
+      let matchedOnFields: MatchField[] | undefined;
+      if (hl) {
+        if (matchExplain) {
+          const self = SELF_HIGHLIGHT_FIELDS.flatMap((f) => hl[f] ?? []);
+          const pub = PUB_HIGHLIGHT_FIELDS.flatMap((f) => hl[f] ?? []);
+          highlight = self.length > 0 ? self : undefined;
+          pubHighlight = pub.length > 0 ? pub : undefined;
+          const fields = computeMatchedOnFields(Object.keys(hl));
+          matchedOnFields = fields.length > 0 ? fields : undefined;
+        } else {
+          // Pre-#702 path: only the three self fields are highlighted, so the
+          // flattened values are exactly the self fragments.
+          highlight = Object.values(hl).flat();
+        }
+      }
+      return {
+        cwid: h._source.cwid,
+        slug: h._source.slug,
+        preferredName: h._source.preferredName,
+        primaryTitle: h._source.primaryTitle,
+        primaryDepartment: h._source.primaryDepartment,
+        deptName: h._source.deptName ?? h._source.primaryDepartment,
+        divisionName: h._source.divisionName,
+        roleCategory: h._source.personType,
+        pubCount: h._source.publicationCount,
+        grantCount: h._source.grantCount,
+        hasActiveGrants: h._source.hasActiveGrants,
+        identityImageEndpoint: identityImageEndpoint(h._source.cwid),
+        highlight,
+        pubHighlight,
+        matchedOnFields,
+        matchProvenance: provenanceOn
+          ? computeMatchProvenance({
+              publicationMeshUi: h._source.publicationMeshUi,
+              descendantUis: meshDescendantUis,
+              parentTerm: provenanceParent,
+              labels: provenanceLabels,
+            })
+          : undefined,
+      };
+    }),
     total: r.hits.total.value,
     page,
     pageSize: PAGE_SIZE,

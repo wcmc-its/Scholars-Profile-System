@@ -87,26 +87,45 @@ function HighlightedSnippet({ html }: { html: string }) {
   );
 }
 
-// Issue #688 — "why this match" note for a MeSH subsumption hit: the scholar
-// surfaced because a publication is tagged with a *narrower* term than the one
-// searched (e.g. "Microbiome" → Mycobiome). The query-keyed <mark> highlighter
-// can't explain this (the typed term isn't in their text), so we spell it out.
-// Quiet left-rule aside; "Why this match" uses the role-tag micro-label so the
-// eye lands on the bolded term, not the boilerplate.
+// Issue #688 / #702 — "why this match" note for a MeSH attribution hit: the
+// scholar surfaced because a publication is tagged with the searched concept
+// itself (`concept`) or a *narrower* term than the one searched (`narrower`,
+// e.g. "Microbiome" → Mycobiome). The query-keyed <mark> highlighter can't
+// explain this (the typed term isn't necessarily in their text), so we spell it
+// out. Quiet left-rule aside; "Why this match" uses the role-tag micro-label so
+// the eye lands on the bolded term, not the boilerplate.
 function MatchProvenanceNote({
   provenance,
 }: {
   provenance: NonNullable<PeopleHit["matchProvenance"]>;
 }) {
-  const MAX = 3;
-  const shown = provenance.descendantTerms.slice(0, MAX);
-  const extra = provenance.descendantTerms.length - shown.length;
-  const plural = shown.length > 1 || extra > 0;
   return (
     <div className="mt-2 border-l-2 border-[#e3cfcf] pl-2.5 text-[13px] leading-snug text-[#4a4a4a]">
       <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
         Why this match
       </span>
+      {provenance.kind === "narrower" ? (
+        <NarrowerTerms parentTerm={provenance.parentTerm} terms={provenance.descendantTerms} />
+      ) : (
+        <>
+          publications tagged{" "}
+          <strong className="font-semibold text-[#1a1a1a]">
+            &ldquo;{provenance.parentTerm}&rdquo;
+          </strong>
+          .
+        </>
+      )}
+    </div>
+  );
+}
+
+function NarrowerTerms({ parentTerm, terms }: { parentTerm: string; terms: string[] }) {
+  const MAX = 3;
+  const shown = terms.slice(0, MAX);
+  const extra = terms.length - shown.length;
+  const plural = shown.length > 1 || extra > 0;
+  return (
+    <>
       {shown.map((term, i) => (
         <span key={i}>
           {i === 0 ? "" : i === shown.length - 1 ? " and " : ", "}
@@ -115,7 +134,53 @@ function MatchProvenanceNote({
       ))}
       {extra > 0 ? <span> +{extra} more</span> : null}
       {` — ${plural ? "narrower terms" : "a narrower term"} of `}
-      <span>&ldquo;{provenance.parentTerm}&rdquo;</span>.
+      <span>&ldquo;{parentTerm}&rdquo;</span>.
+    </>
+  );
+}
+
+// Issue #702 — a match whose only highlightable evidence is in the scholar's
+// publications (title / MeSH label text). Labeled so the snippet reads as their
+// publications, not self-reported bio. Routes through the same #20 sanitizers.
+function PubMatchSnippet({ html }: { html: string }) {
+  return (
+    <div className="mt-1 text-[13px] leading-snug text-[#4a4a4a]">
+      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
+        Matched in publications
+      </span>
+      <HighlightedSnippet html={html} />
+    </div>
+  );
+}
+
+const MATCH_FIELD_LABELS: Record<
+  NonNullable<PeopleHit["matchedOnFields"]>[number],
+  string
+> = {
+  name: "name",
+  title: "title",
+  department: "department",
+  interests: "research interests",
+  overview: "overview",
+  publications: "publications",
+};
+
+function joinFields(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+// Issue #702 — last-resort "Matched on …" chip, rendered only when there is no
+// snippet and no MeSH note, so a topically-relevant card is never fully bare.
+// Derived from which highlight fields actually fired (publication/dept/title/…).
+function MatchedOnChip({ fields }: { fields: NonNullable<PeopleHit["matchedOnFields"]> }) {
+  return (
+    <div className="mt-2 text-[13px] leading-snug text-[#4a4a4a]">
+      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
+        Matched on
+      </span>
+      {joinFields(fields.map((f) => MATCH_FIELD_LABELS[f]))}
     </div>
   );
 }
@@ -153,6 +218,13 @@ export function PeopleResultCard({
 
   const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
   const snippet = hit.highlight && hit.highlight.length > 0 ? hit.highlight[0] : null;
+  // Issue #702 — explainability precedence: self-reported snippet → "Matched in
+  // publications" snippet → "Why this match" MeSH note → "Matched on" chip. The
+  // pub snippet and chip are only ever populated when SEARCH_PEOPLE_MATCH_EXPLAIN
+  // is on, so with the flag off this is byte-identical to the pre-#702 render.
+  const pubSnippet =
+    !snippet && hit.pubHighlight && hit.pubHighlight.length > 0 ? hit.pubHighlight[0] : null;
+  const matchedOn = hit.matchedOnFields;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
@@ -186,9 +258,14 @@ export function PeopleResultCard({
           <div className="text-[13px] leading-snug text-[#4a4a4a]">
             <HighlightedSnippet html={snippet} />
           </div>
+        ) : pubSnippet ? (
+          <PubMatchSnippet html={pubSnippet} />
         ) : null}
         {hit.matchProvenance ? (
           <MatchProvenanceNote provenance={hit.matchProvenance} />
+        ) : null}
+        {!snippet && !pubSnippet && !hit.matchProvenance && matchedOn && matchedOn.length > 0 ? (
+          <MatchedOnChip fields={matchedOn} />
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">

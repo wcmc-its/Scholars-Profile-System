@@ -21,6 +21,7 @@ import {
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
   resolvePeopleMatchProvenance,
+  resolvePeopleMatchExplain,
   resolveGenericTermMode,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -333,6 +334,9 @@ export async function GET(request: NextRequest) {
     // descriptor name frames the "… narrower term of {name}" string.
     matchProvenance: resolvePeopleMatchProvenance(),
     meshDescriptorName: taxonomyMatch.meshResolution?.name,
+    // Issue #702 — env-gated pub-evidence highlighting + "Matched on" chip so a
+    // publication-only match isn't left bare. Pure presentation metadata.
+    matchExplain: resolvePeopleMatchExplain(),
     // Issue #692 — generic-term demotion (mode `on`). Topic/hybrid bodies score
     // and highlight on the content query (full query discounted); inert
     // otherwise and never applied to name/department shapes.
