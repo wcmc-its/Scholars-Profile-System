@@ -148,6 +148,11 @@
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
   }
+  /* Give underlines a 1px gap from the text baseline (hover or static). Links
+     that set their own underline-offset utility (-2/-4) still win the cascade. */
+  a {
+    text-underline-offset: 1px;
+  }
 }
 
 /* Page-subject header. Applied to the single element per page that names

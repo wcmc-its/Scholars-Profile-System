@@ -42,11 +42,12 @@ function RoleTag({ role }: { role: string }) {
   );
 }
 
-// Inline match highlight rendered as bold text — never the post-it-yellow
-// background style the mockup explicitly calls out as an anti-pattern.
+// Inline match highlight: query terms get a 10% Cornell-red background tint
+// (#707 parity with the pub tab) — never the post-it-yellow <mark> default the
+// mockup calls out as an anti-pattern, and not a recolored red glyph.
 //
 // The OpenSearch query in lib/api/search.ts wraps matches in <mark>; this
-// renderer rewrites them as <strong> with the design's typographic weight.
+// renderer restyles them as a tinted <mark> pill, keeping the glyph weight.
 // (Issue #20 — earlier code split on <em> and let <mark> tags fall through
 // as literal text.) The `overview` field can contain raw HTML (<p>, <br>,
 // &nbsp;, &amp;, etc.) from the source bios; strip non-mark tags and
@@ -77,15 +78,41 @@ function HighlightedSnippet({ html }: { html: string }) {
     <>
       {cleaned.split(/(<mark>.*?<\/mark>)/g).map((part, i) =>
         part.startsWith("<mark>") ? (
-          <strong key={i} className="font-semibold text-[#1a1a1a]">
+          // 10% Cornell-red tint behind the match, glyph kept as-is (#707
+          // parity). `<mark>` overrides the browser's yellow default;
+          // box-decoration-clone keeps the pill intact across line wraps.
+          <mark
+            key={i}
+            className="box-decoration-clone rounded-[3px] bg-[#b31b1b]/10 px-[3px] font-semibold text-[#1a1a1a]"
+          >
             {part.replace(/<\/?mark>/g, "")}
-          </strong>
+          </mark>
         ) : (
           <span key={i}>{part}</span>
         ),
       )}
     </>
   );
+}
+
+// The pub-evidence highlight is a single ~150-char fragment cut from the
+// concatenated `publicationTitles` blob (lib/search-index-docs.ts —
+// titleParts.join(" ")). A prolific author with many identically-titled papers
+// ("Inflammatory breast cancer.") packs the same sentence into that window
+// repeatedly. Collapse consecutive duplicate title-sentences (compared
+// tag-/case-insensitively) and keep the first few distinct ones so the snippet
+// reads as evidence, not a stutter.
+export function collapseRepeatedTitles(html: string): string {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const seg of html.split(/(?<=[.?!])\s+/)) {
+    const key = seg.replace(/<[^>]*>/g, "").toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(seg);
+    if (kept.length >= 3) break;
+  }
+  return kept.join(" ");
 }
 
 // Issue #702 — a match whose only highlightable evidence is in the scholar's
@@ -97,7 +124,7 @@ function PubMatchSnippet({ html }: { html: string }) {
       <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
         Matched in publications
       </span>
-      <HighlightedSnippet html={html} />
+      <HighlightedSnippet html={collapseRepeatedTitles(html)} />
     </div>
   );
 }

@@ -63,9 +63,10 @@ export type MatchProvenance =
  *     descendants (so the MeSH attribution boost didn't explain this hit — it
  *     matched on analyzed text instead, which ordinary highlighting covers).
  *
- * Otherwise returns the more specific framing available: `narrower` when the
- * scholar carries a strictly-narrower descendant, else `concept` for a direct
- * descriptor match.
+ * Otherwise prefers a *direct* match on the resolved descriptor (`concept`) —
+ * the optimal, least-surprising explanation — and falls back to `narrower` only
+ * when the scholar carries solely strictly-narrower descendant(s) (the typed
+ * term is absent from their tags and only a descendant explains the match).
  *
  * @param publicationMeshUi  the scholar's descriptor UIs (`_source.publicationMeshUi`)
  * @param descendantUis      resolved descriptor's `[self, ...descendants]` (invariant: `[0]` is the parent)
@@ -83,20 +84,25 @@ export function computeMatchProvenance(opts: {
   if (descendantUis.length === 0) return undefined; // no descriptor resolved
 
   const have = new Set(publicationMeshUi);
-  // Skip index 0 (the resolved descriptor itself) — narrower matches are the
-  // more specific explanation. Preserving `descendantUis` order keeps the
-  // output deterministic (tree-walk order) and already-deduped.
+
+  // Prefer a *direct* match on the resolved descriptor (index 0): when the
+  // scholar carries the searched concept itself, "tagged X" is the optimal,
+  // least-surprising explanation — even if they ALSO carry narrower descendants.
+  // (Pre-fix this ran last, so a scholar tagged with both "Breast Neoplasms" and
+  // its children read "… narrower terms of Breast Neoplasms", hiding the direct
+  // hit.) Narrower framing is reserved for the case below, where the typed term
+  // is absent from the scholar's tags and only a descendant explains the match.
+  if (have.has(descendantUis[0])) {
+    return { kind: "concept", parentTerm };
+  }
+
+  // Only-narrower match: surface the descendant term(s) the scholar carries.
+  // Preserving `descendantUis` order keeps the output deterministic (tree-walk
+  // order) and already-deduped.
   const matchedUis = descendantUis.slice(1).filter((ui) => have.has(ui));
   if (matchedUis.length > 0) {
     const descendantTerms = matchedUis.map((ui) => labels.get(ui) ?? ui);
     return { kind: "narrower", parentTerm, descendantTerms };
-  }
-
-  // #702 — no narrower term, but the scholar is tagged with the resolved
-  // descriptor itself: a direct concept match. #688 returned `undefined` here;
-  // we now explain it so a topically-relevant card isn't left bare.
-  if (have.has(descendantUis[0])) {
-    return { kind: "concept", parentTerm };
   }
 
   return undefined;

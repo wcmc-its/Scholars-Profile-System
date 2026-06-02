@@ -71,7 +71,9 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
     });
   });
 
-  it("prefers the narrower framing when the scholar carries BOTH the parent and a descendant", () => {
+  it("prefers the direct concept framing when the scholar carries BOTH the parent and a descendant", () => {
+    // A direct hit on the searched descriptor is the optimal, least-surprising
+    // explanation; the narrower terms must not hide it (#688/#702 refinement).
     expect(
       computeMatchProvenance({
         publicationMeshUi: [MICROBIOTA, "D000072761"], // parent + Mycobiome
@@ -79,7 +81,7 @@ describe("computeMatchProvenance — narrower terms (#688)", () => {
         parentTerm: "Microbiota",
         labels: LABELS,
       }),
-    ).toEqual({ kind: "narrower", parentTerm: "Microbiota", descendantTerms: ["Mycobiome"] });
+    ).toEqual({ kind: "concept", parentTerm: "Microbiota" });
   });
 
   it("falls back to the UI code when a label is missing", () => {
