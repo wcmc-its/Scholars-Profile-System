@@ -336,6 +336,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "https://scholars.weill.cornell.edu",
               },
               {
+                "Name": "SEARCH_GENERIC_TERM_DEMOTE",
+                "Value": "off",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
+                "Value": "off",
+              },
+              {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
@@ -3194,6 +3202,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
                 "Value": "https://scholars-staging.weill.cornell.edu",
+              },
+              {
+                "Name": "SEARCH_GENERIC_TERM_DEMOTE",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
