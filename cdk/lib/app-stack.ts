@@ -1306,6 +1306,14 @@ export class AppStack extends Stack {
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       circuitBreaker: { rollback: true },
+      // A freshly placed task reports 503 on /api/health until its startup
+      // warm-up pass completes (lib/warmup.ts flips the lib/warmup-state.ts
+      // latch; self-bounded by WARMUP_BUDGET_MS ~15s). Give ECS a grace window
+      // comfortably larger than that budget + the 2x30s ALB healthy threshold
+      // so it never treats a still-warming task as failed and trips the circuit
+      // breaker above into a deploy rollback. Steady-state liveness is
+      // unaffected: the latch is one-way, so once warm the check stays 200.
+      healthCheckGracePeriod: Duration.seconds(120),
       enableExecuteCommand: false,
     });
     // Manual L1 attachment to the target group. Calling

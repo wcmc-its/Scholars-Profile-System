@@ -16,4 +16,14 @@ export async function register(): Promise<void> {
   }
   const { initTracing } = await import("./lib/tracing/init");
   initTracing();
+
+  // Startup cache + connection-pool warm-up (see lib/warmup.ts). Skip the
+  // production BUILD phase — register() can fire there, and there are no live
+  // dependencies to warm. Fire-and-forget: warmUp() self-bounds and always
+  // flips the readiness latch, so boot is never blocked on it and a rejection
+  // can't escape (the trailing .catch is belt-and-suspenders).
+  if (process.env.NEXT_PHASE !== "phase-production-build") {
+    const { warmUp } = await import("./lib/warmup");
+    void warmUp().catch(() => {});
+  }
 }
