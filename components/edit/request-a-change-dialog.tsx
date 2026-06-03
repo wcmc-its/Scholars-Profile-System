@@ -51,6 +51,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   education: "Education",
   funding: "Funding",
   publications: "Publications",
+  "org-unit": "Org Unit",
 };
 
 /** The footer verb for an action (its config `cta`, else a sensible default). */
