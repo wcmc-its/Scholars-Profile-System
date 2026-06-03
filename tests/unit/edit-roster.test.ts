@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-import { loadEditRoster } from "@/lib/api/edit-roster";
+import { loadEditRoster, loadRosterFacets } from "@/lib/api/edit-roster";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 type FakeClient = { scholar: { findMany: AnyMock; count: AnyMock } };
@@ -27,6 +27,7 @@ function row(over: Record<string, unknown> = {}) {
     preferredName: "Pat Scholar",
     primaryTitle: "Professor of Medicine",
     status: "active",
+    roleCategory: "full_time_faculty",
     department: { name: "Medicine" },
     division: { name: "Cardiology" },
     ...over,
@@ -46,6 +47,7 @@ describe("loadEditRoster — mapping", () => {
       name: "Pat Scholar",
       title: "Professor of Medicine",
       unit: "Medicine",
+      roleCategory: "full_time_faculty",
       isVisible: true,
     });
   });
@@ -122,6 +124,57 @@ describe("loadEditRoster — filters", () => {
     await loadEditRoster({ unitCodeScope: [] }, asClient(c));
     const and = c.scholar.findMany.mock.calls[0][0].where.AND;
     expect(and[0].OR[0].deptCode.in).toEqual([]);
+  });
+
+  it("roleCategory (person type) filters where.roleCategory", async () => {
+    const c = fakeClient();
+    await loadEditRoster({ roleCategory: "full_time_faculty" }, asClient(c));
+    expect(c.scholar.findMany.mock.calls[0][0].where.roleCategory).toBe("full_time_faculty");
+  });
+
+  it("a department/division unit filter sets the matching code column", async () => {
+    const dept = fakeClient();
+    await loadEditRoster({ unit: { kind: "department", code: "N1280" } }, asClient(dept));
+    expect(dept.scholar.findMany.mock.calls[0][0].where.deptCode).toBe("N1280");
+
+    const div = fakeClient();
+    await loadEditRoster({ unit: { kind: "division", code: "D42" } }, asClient(div));
+    expect(div.scholar.findMany.mock.calls[0][0].where.divCode).toBe("D42");
+  });
+
+  it("a center unit filter restricts where.cwid to active-by-date members", async () => {
+    const c = {
+      scholar: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      centerMembership: {
+        findMany: vi.fn().mockResolvedValue([
+          { cwid: "current", startDate: null, endDate: null },
+          { cwid: "expired", startDate: null, endDate: new Date("2000-01-01") },
+        ]),
+      },
+    };
+    await loadEditRoster({ unit: { kind: "center", code: "meyer" } }, c as unknown as RosterClient);
+    expect(c.scholar.findMany.mock.calls[0][0].where.cwid).toEqual({ in: ["current"] });
+  });
+});
+
+describe("loadRosterFacets", () => {
+  it("returns the unit lists + role categories present on non-deleted scholars", async () => {
+    const c = {
+      department: { findMany: vi.fn().mockResolvedValue([{ code: "N1280", name: "Medicine" }]) },
+      division: { findMany: vi.fn().mockResolvedValue([{ code: "D1", name: "Cardiology" }]) },
+      center: { findMany: vi.fn().mockResolvedValue([{ code: "meyer", name: "Meyer Cancer Center" }]) },
+      scholar: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ roleCategory: "full_time_faculty" }, { roleCategory: "postdoc" }]),
+      },
+    };
+    const facets = await loadRosterFacets(c as unknown as Parameters<typeof loadRosterFacets>[0]);
+    expect(facets.departments).toEqual([{ code: "N1280", name: "Medicine" }]);
+    expect(facets.centers[0].name).toBe("Meyer Cancer Center");
+    expect(facets.roleCategories.map((r) => r.value).sort()).toEqual(["full_time_faculty", "postdoc"]);
+    // Labels come from formatRoleCategory (non-empty display strings).
+    expect(facets.roleCategories.every((r) => r.label.length > 0)).toBe(true);
   });
 });
 

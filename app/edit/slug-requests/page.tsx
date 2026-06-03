@@ -47,6 +47,14 @@ export default async function SlugRequestsPage() {
 
   const requests = await loadSlugRequestQueue(db.read);
 
+  // Back-link to the admin's own self-edit surface — only when they have a
+  // (non-deleted) profile, so a staff superuser without one never gets a 404.
+  const self = await db.read.scholar.findUnique({
+    where: { cwid: session.cwid },
+    select: { deletedAt: true },
+  });
+  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
+
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="slug-requests-page">
       <header className="bg-apollo-bar text-white">
@@ -61,7 +69,11 @@ export default async function SlugRequestsPage() {
         </div>
       </header>
 
-      <AdminSubnav active="slug-requests" pendingSlugRequests={requests.length} />
+      <AdminSubnav
+        active="slug-requests"
+        pendingSlugRequests={requests.length}
+        selfEditHref={selfEditHref}
+      />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">Profile URL requests</h1>

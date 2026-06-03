@@ -14,7 +14,12 @@ import { redirect } from "next/navigation";
 
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { ProfilesRoster } from "@/components/edit/profiles-roster";
-import { loadEditRoster, type EditRosterStatusFilter } from "@/lib/api/edit-roster";
+import {
+  loadEditRoster,
+  loadRosterFacets,
+  type EditRosterStatusFilter,
+  type EditRosterUnitFilter,
+} from "@/lib/api/edit-roster";
 import { getEditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
@@ -33,10 +38,31 @@ function parseStatus(v: string | undefined): EditRosterStatusFilter {
   return v === "visible" || v === "hidden" ? v : "all";
 }
 
+/** Decode the org-unit select value (`dept:CODE` | `div:CODE` | `center:CODE`)
+ *  into a roster unit filter. Unknown/empty ⇒ no filter. */
+function parseUnit(v: string | undefined): EditRosterUnitFilter | undefined {
+  if (!v) return undefined;
+  const sep = v.indexOf(":");
+  if (sep < 0) return undefined;
+  const kind = v.slice(0, sep);
+  const code = v.slice(sep + 1);
+  if (!code) return undefined;
+  if (kind === "dept") return { kind: "department", code };
+  if (kind === "div") return { kind: "division", code };
+  if (kind === "center") return { kind: "center", code };
+  return undefined;
+}
+
 export default async function EditScholarsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string; status?: string; page?: string }>;
+  searchParams?: Promise<{
+    q?: string;
+    status?: string;
+    page?: string;
+    unit?: string;
+    type?: string;
+  }>;
 }) {
   const session = await getEditSession();
   if (!session) {
@@ -48,15 +74,27 @@ export default async function EditScholarsPage({
     return <ForbiddenEditPage />;
   }
 
-  const { q, status, page } = (await searchParams) ?? {};
+  const { q, status, page, unit: unitParam, type } = (await searchParams) ?? {};
   const query = (q ?? "").trim();
   const statusFilter = parseStatus(status);
+  const unit = parseUnit(unitParam);
+  const roleCategory = (type ?? "").trim() || undefined;
   const pageNum = Math.max(Number.parseInt(page ?? "0", 10) || 0, 0);
 
-  const { entries, total } = await loadEditRoster(
-    { query, status: statusFilter, limit: PAGE_SIZE, offset: pageNum * PAGE_SIZE },
-    db.read,
-  );
+  const [{ entries, total }, facets] = await Promise.all([
+    loadEditRoster(
+      {
+        query,
+        status: statusFilter,
+        roleCategory,
+        unit,
+        limit: PAGE_SIZE,
+        offset: pageNum * PAGE_SIZE,
+      },
+      db.read,
+    ),
+    loadRosterFacets(db.read),
+  ]);
 
   // The "URL requests" admin tab + pending-count pill (#497 PR-3c); `null` when
   // the slug-request feature is off, which hides the tab.
@@ -64,15 +102,28 @@ export default async function EditScholarsPage({
     ? await countPendingSlugRequests(db.read)
     : null;
 
+  // Back-link to the admin's own self-edit surface — only when they actually
+  // have a (non-deleted) profile, so a staff superuser without one never gets
+  // a link that 404s.
+  const self = await db.read.scholar.findUnique({
+    where: { cwid: session.cwid },
+    select: { deletedAt: true },
+  });
+  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
+
   return (
     <ProfilesRoster
       entries={entries}
       total={total}
       query={query}
       status={statusFilter}
+      unit={unitParam ?? ""}
+      roleCategory={roleCategory ?? ""}
+      facets={facets}
       page={pageNum}
       pageSize={PAGE_SIZE}
       pendingSlugRequests={pendingSlugRequests}
+      selfEditHref={selfEditHref}
     />
   );
 }

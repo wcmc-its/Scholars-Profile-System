@@ -12,6 +12,8 @@ import { redirect, notFound } from "next/navigation";
 
 import { EditPage } from "@/components/edit/edit-page";
 import { getSession } from "@/lib/auth/session-server";
+import { getEffectiveCwid } from "@/lib/auth/effective-identity";
+import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
@@ -36,7 +38,12 @@ export default async function EditSelfPage({
     // Belt-and-braces: middleware also covers this with a 302 → login.
     redirect("/api/auth/saml/login?return=/edit");
   }
-  const ctx = await loadEditContext(session.cwid, db.read);
+  // Resolve identity via the effective seam, mirroring the write path
+  // (`lib/edit/request.ts`). When not impersonating this returns `session.cwid`
+  // byte-identically; while impersonating target T it returns T, so /edit loads
+  // T's context and renders the self-edit surface for them (#637).
+  const editCwid = getEffectiveCwid(session);
+  const ctx = await loadEditContext(editCwid, db.read);
   if (!ctx) {
     // A signed-in user whose scholar row was hard-archived (deletedAt set)
     // has nothing to edit. This is rare — the ED ETL would have to have
@@ -45,12 +52,18 @@ export default async function EditSelfPage({
   }
   const { attr } = (await searchParams) ?? {};
 
+  // A superuser editing their own profile gets a cross-link to the admin
+  // Profiles roster in the editor sub-nav. Fail-closed (no link) on any
+  // directory hiccup, like every other superuser gate. Reads the EFFECTIVE
+  // identity so the admin link hides while down-scoped to a plain scholar (#637).
+  const canBrowseProfiles = await isSuperuser(editCwid).catch(() => false);
+
   // The "Profile URL" request card (#497 PR-3) is flag-gated. When on, seed it
   // with the scholar's latest request so the card opens in the right state
   // (Pending / Rejected / Just-approved) without a client round-trip.
   const slugRequestEnabled = isSlugRequestEnabled();
   const latestSlugRequest = slugRequestEnabled
-    ? await loadLatestSlugRequest(session.cwid, db.read)
+    ? await loadLatestSlugRequest(editCwid, db.read)
     : null;
 
   return (
@@ -60,6 +73,7 @@ export default async function EditSelfPage({
       attr={attr}
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
+      canBrowseProfiles={canBrowseProfiles}
     />
   );
 }

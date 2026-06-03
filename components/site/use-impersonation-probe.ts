@@ -44,6 +44,10 @@ export type ImpersonationProbe = {
   scholar: ProbeScholar | null;
   impersonating: ProbeImpersonating | null;
   canImpersonate: boolean;
+  /** Whether the real signed-in CWID may reach the admin Profiles roster
+   *  (`isSuperuser`). Independent of the impersonation flag — true for any
+   *  superuser, dark deployment or not. Gates the "Manage profiles" entry. */
+  canBrowseProfiles: boolean;
 };
 
 /**
@@ -78,6 +82,7 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
           scholar: data.scholar ?? null,
           impersonating: data.impersonating ?? null,
           canImpersonate: data.canImpersonate ?? false,
+          canBrowseProfiles: data.canBrowseProfiles ?? false,
         });
       })
       .catch(() => {

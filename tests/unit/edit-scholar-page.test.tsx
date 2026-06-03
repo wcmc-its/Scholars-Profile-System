@@ -21,6 +21,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const {
+  mockGetSession,
   mockGetEditSession,
   mockLoadEditContext,
   mockRedirect,
@@ -28,6 +29,7 @@ const {
   mockEditPage,
   mockForbiddenEditPage,
 } = vi.hoisted(() => ({
+  mockGetSession: vi.fn(),
   mockGetEditSession: vi.fn(),
   mockLoadEditContext: vi.fn(),
   mockRedirect: vi.fn((url: string) => {
@@ -50,7 +52,11 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
 }));
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+// The page resolves the login gate from the RAW session (session-server) and
+// the authorization identity from the EFFECTIVE seam (effective-identity), so
+// impersonation re-derives the self/superuser branch (#637).
+vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
 vi.mock("@/components/edit/edit-page", () => ({ EditPage: mockEditPage }));
@@ -75,6 +81,9 @@ function params(cwid: string): Promise<{ cwid: string }> {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Raw session present by default (the SAML-login gate keys on the real human);
+  // the effective session drives the authorization branch per test.
+  mockGetSession.mockResolvedValue({ cwid: "raw" });
   mockGetEditSession.mockResolvedValue(null);
   mockLoadEditContext.mockResolvedValue(null);
 });
@@ -87,7 +96,7 @@ function asElement(value: unknown): ReactElementLike {
 
 describe("/edit/scholar/[cwid] — authorization matrix", () => {
   it("signed-out → SAML redirect with the requested URL as ?return=", async () => {
-    mockGetEditSession.mockResolvedValue(null);
+    mockGetSession.mockResolvedValue(null);
     await expect(EditScholarPage({ params: params("other7") })).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/scholar/other7",
     );
@@ -95,7 +104,7 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
   });
 
   it("signed-out with a cwid that needs URL-encoding → return is encoded", async () => {
-    mockGetEditSession.mockResolvedValue(null);
+    mockGetSession.mockResolvedValue(null);
     await expect(EditScholarPage({ params: params("a/b c") })).rejects.toThrow(
       "__REDIRECT__:/api/auth/saml/login?return=/edit/scholar/a%2Fb%20c",
     );

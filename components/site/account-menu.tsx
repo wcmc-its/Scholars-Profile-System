@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDownIcon, ChevronLeftIcon, EyeIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, EyeIcon, UsersIcon } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -52,6 +52,10 @@ export function AccountMenu({ scholar }: AccountMenuProps) {
   // request (the cookie-forwarding auth probe is header-auth-slot.tsx's job).
   const probe = useImpersonationProbe(open);
   const canImpersonate = probe?.canImpersonate ?? false;
+  // A superuser also gets a "Manage profiles" entry to the admin roster
+  // (`/edit/scholars`). Independent of the impersonation flag, so it appears
+  // even when "View as" is dark.
+  const canBrowseProfiles = probe?.canBrowseProfiles ?? false;
 
   // Reset to the menu whenever the popover closes so it reopens on the rows.
   function onOpenChange(next: boolean) {
@@ -103,17 +107,32 @@ export function AccountMenu({ scholar }: AccountMenuProps) {
                 <Separator className="my-1" />
               </>
             ) : null}
-            {canImpersonate ? (
+            {canBrowseProfiles || canImpersonate ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => setView("switcher")}
-                  className={`${ROW_CLASS} flex w-full items-center gap-2 text-left`}
-                  data-testid="account-menu-view-as"
-                >
-                  <EyeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  View as…
-                </button>
+                {canBrowseProfiles ? (
+                  <Link
+                    href="/edit/scholars"
+                    className={`${ROW_CLASS} flex w-full items-center gap-2`}
+                    data-testid="account-menu-manage-profiles"
+                  >
+                    <UsersIcon
+                      className="size-4 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    Manage profiles
+                  </Link>
+                ) : null}
+                {canImpersonate ? (
+                  <button
+                    type="button"
+                    onClick={() => setView("switcher")}
+                    className={`${ROW_CLASS} flex w-full items-center gap-2 text-left`}
+                    data-testid="account-menu-view-as"
+                  >
+                    <EyeIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    View as…
+                  </button>
+                ) : null}
                 <Separator className="my-1" />
               </>
             ) : null}

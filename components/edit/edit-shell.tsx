@@ -10,6 +10,7 @@
  * `--apollo-maroon`). Layout-independent of the data contract.
  */
 import Link from "next/link";
+import { ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 
@@ -24,6 +25,10 @@ export type EditShellProps = {
   basePath: string;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
+  /** Self mode only: the viewer is a superuser, so the sub-nav adds a link
+   *  across to the Profiles roster (`/edit/scholars`). Ignored in superuser
+   *  mode, where the "Profiles" tab is always a link back to that roster. */
+  canBrowseProfiles?: boolean;
   /** Optional block rendered inside the rail column, below the attribute rail
    *  (e.g. a department's sibling-divisions list). Omitted ⇒ no visible change
    *  for the existing /edit/scholar callers. */
@@ -38,6 +43,7 @@ export function EditShell({
   activeAttr,
   basePath,
   previewHref,
+  canBrowseProfiles = false,
   subRail,
   children,
 }: EditShellProps) {
@@ -62,12 +68,39 @@ export function EditShell({
         </div>
       </header>
 
-      {/* Sub-nav — maroon underline on the active tab. */}
+      {/* Sub-nav — maroon underline on the active tab. From a superuser detail
+          edit the "Profiles" tab links back up to the roster; a superuser on
+          their own /edit gets a "Profiles" link across to it. */}
       <div className="border-border border-b">
-        <div className="mx-auto max-w-[var(--max-content)] px-6">
-          <span className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium">
-            {isSuperuser ? "Profiles" : "My Profile"}
-          </span>
+        <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+          {isSuperuser ? (
+            <Link
+              href="/edit/scholars"
+              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 border-b-2 border-transparent py-3 text-sm"
+              data-testid="edit-subnav-profiles"
+            >
+              <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+              Profiles
+            </Link>
+          ) : (
+            <>
+              <span
+                className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
+                aria-current="page"
+              >
+                My Profile
+              </span>
+              {canBrowseProfiles && (
+                <Link
+                  href="/edit/scholars"
+                  className="text-muted-foreground hover:text-foreground inline-block border-b-2 border-transparent py-3 text-sm"
+                  data-testid="edit-subnav-profiles"
+                >
+                  All profiles
+                </Link>
+              )}
+            </>
+          )}
         </div>
       </div>
 
