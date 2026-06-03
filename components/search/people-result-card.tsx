@@ -4,7 +4,7 @@ import Link from "next/link";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { formatRoleCategory } from "@/lib/role-display";
 import { profilePath } from "@/lib/profile-url";
-import { MatchProvenanceNote } from "@/components/search/match-provenance-note";
+import { MatchReason } from "@/components/search/match-reason";
 import type { ActivityFilter, PeopleHit } from "@/lib/api/search";
 
 /**
@@ -88,52 +88,6 @@ function HighlightedSnippet({ html }: { html: string }) {
   );
 }
 
-// Issue #702 — a match whose only highlightable evidence is in the scholar's
-// publications (title / MeSH label text). Labeled so the snippet reads as their
-// publications, not self-reported bio. Routes through the same #20 sanitizers.
-function PubMatchSnippet({ html }: { html: string }) {
-  return (
-    <div className="mt-1 text-[13px] leading-snug text-[#4a4a4a]">
-      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
-        Matched in publications
-      </span>
-      <HighlightedSnippet html={html} />
-    </div>
-  );
-}
-
-const MATCH_FIELD_LABELS: Record<
-  NonNullable<PeopleHit["matchedOnFields"]>[number],
-  string
-> = {
-  name: "name",
-  title: "title",
-  department: "department",
-  interests: "research interests",
-  overview: "overview",
-  publications: "publications",
-};
-
-function joinFields(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
-}
-
-// Issue #702 — last-resort "Matched on …" chip, rendered only when there is no
-// snippet and no MeSH note, so a topically-relevant card is never fully bare.
-// Derived from which highlight fields actually fired (publication/dept/title/…).
-function MatchedOnChip({ fields }: { fields: NonNullable<PeopleHit["matchedOnFields"]> }) {
-  return (
-    <div className="mt-2 text-[13px] leading-snug text-[#4a4a4a]">
-      <span className="mr-1.5 text-[9.5px] font-medium uppercase tracking-[0.05em] text-[#5f594d]">
-        Matched on
-      </span>
-      {joinFields(fields.map((f) => MATCH_FIELD_LABELS[f]))}
-    </div>
-  );
-}
-
 export function PeopleResultCard({
   hit,
   position,
@@ -167,13 +121,6 @@ export function PeopleResultCard({
 
   const roleLabel = hit.roleCategory ? formatRoleCategory(hit.roleCategory) : null;
   const snippet = hit.highlight && hit.highlight.length > 0 ? hit.highlight[0] : null;
-  // Issue #702 — explainability precedence: self-reported snippet → "Matched in
-  // publications" snippet → "Why this match" MeSH note → "Matched on" chip. The
-  // pub snippet and chip are only ever populated when SEARCH_PEOPLE_MATCH_EXPLAIN
-  // is on, so with the flag off this is byte-identical to the pre-#702 render.
-  const pubSnippet =
-    !snippet && hit.pubHighlight && hit.pubHighlight.length > 0 ? hit.pubHighlight[0] : null;
-  const matchedOn = hit.matchedOnFields;
 
   const pubLabel = hit.pubCount === 1 ? "pub" : "pubs";
   const grantLabel = hit.grantCount === 1 ? "grant" : "grants";
@@ -203,18 +150,15 @@ export function PeopleResultCard({
         {deptLine ? (
           <div className="mb-2 text-xs text-muted-foreground">{deptLine}</div>
         ) : null}
-        {snippet ? (
+        {/* PLAN R4 — one reason line per scholar: the pub-evidence/concept reason
+            explains ranking (mockup); a self-reported bio highlight is the
+            self-evident fallback when no reason was computed. */}
+        {hit.matchReason ? (
+          <MatchReason kind={hit.matchReason.icon}>{hit.matchReason.text}</MatchReason>
+        ) : snippet ? (
           <div className="text-[13px] leading-snug text-[#4a4a4a]">
             <HighlightedSnippet html={snippet} />
           </div>
-        ) : pubSnippet ? (
-          <PubMatchSnippet html={pubSnippet} />
-        ) : null}
-        {hit.matchProvenance ? (
-          <MatchProvenanceNote provenance={hit.matchProvenance} />
-        ) : null}
-        {!snippet && !pubSnippet && !hit.matchProvenance && matchedOn && matchedOn.length > 0 ? (
-          <MatchedOnChip fields={matchedOn} />
         ) : null}
       </div>
       <div className="flex flex-col items-end gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">

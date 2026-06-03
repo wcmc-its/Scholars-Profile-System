@@ -202,6 +202,13 @@ export type PeopleHit = {
    * "Matched on …" chip when there is neither a snippet nor a MeSH note.
    */
   matchedOnFields?: MatchField[];
+  /**
+   * PLAN R4 — the single "why this match" reason line the card renders, picked
+   * from the strongest signal (pub-evidence count, else the resolved concept).
+   * Present only when a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on.
+   * Supersedes the pubHighlight / matchProvenance / matchedOnFields card surfaces.
+   */
+  matchReason?: { icon: "publications" | "concept" | "area"; text: string };
 };
 
 export type PublicationHit = {
@@ -1399,6 +1406,96 @@ export async function searchPeople(opts: {
     : new Map<string, string>();
   const provenanceParent = opts.meshDescriptorName ?? "";
 
+  // PLAN R4 — per-scholar "why this match" reason. When a concept resolved, ONE
+  // aggregation on the publications index gives, per page cwid, the distinct
+  // pmid count of the scholar's pubs tagged with the resolved descriptor set
+  // (`tagged`) and matching the literal query in title/abstract (`mention`),
+  // both exact via `cardinality` — distinct by construction, so neither can
+  // exceed the scholar's total. No reindex. Skipped on the count-only badge path
+  // (returned above) and under `exact` scope (empty `meshDescendantUis`).
+  const reasonCounts = new Map<string, { tagged: number; mention: number }>();
+  const pageCwids = r.hits.hits.map((h) => h._source.cwid);
+  if (
+    matchExplain &&
+    applyTopicTemplate &&
+    meshDescendantUis.length > 0 &&
+    provenanceParent.length > 0 &&
+    pageCwids.length > 0
+  ) {
+    const aggResp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: {
+        size: 0,
+        query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
+        aggs: {
+          byAuthor: {
+            terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+            aggs: {
+              tagged: {
+                filter: { terms: { meshDescriptorUi: meshDescendantUis } },
+                aggs: { d: { cardinality: { field: "pmid" } } },
+              },
+              mention: {
+                filter: {
+                  multi_match: {
+                    query: contentQuery,
+                    fields: ["title", "abstract"],
+                    operator: "and",
+                  },
+                },
+                aggs: { d: { cardinality: { field: "pmid" } } },
+              },
+            },
+          },
+        },
+      } as object,
+    });
+    const buckets =
+      (
+        aggResp.body as {
+          aggregations?: {
+            byAuthor?: {
+              buckets?: Array<{
+                key: string;
+                tagged?: { d?: { value?: number } };
+                mention?: { d?: { value?: number } };
+              }>;
+            };
+          };
+        }
+      ).aggregations?.byAuthor?.buckets ?? [];
+    for (const b of buckets) {
+      reasonCounts.set(b.key, {
+        tagged: b.tagged?.d?.value ?? 0,
+        mention: b.mention?.d?.value ?? 0,
+      });
+    }
+  }
+
+  // Strongest-signal reason: pub-evidence count (document) → concept fallback
+  // (sparkle). Y = the scholar's `publicationCount` (the badge number); X is
+  // capped at Y so the phrasing stays coherent under any index drift.
+  const buildMatchReason = (
+    cwid: string,
+    pubCount: number,
+    hasProvenance: boolean,
+  ): PeopleHit["matchReason"] => {
+    const c = reasonCounts.get(cwid);
+    if (c && c.tagged > 0)
+      return {
+        icon: "publications",
+        text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+      };
+    if (c && c.mention > 0)
+      return {
+        icon: "publications",
+        text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+      };
+    if (hasProvenance)
+      return { icon: "concept", text: `via related concept ${provenanceParent}` };
+    return undefined;
+  };
+
   // Issue #702 — partition the highlight response. `highlight` keeps the
   // self-reported fragments (the pre-#702 contract, byte-identical when
   // match-explain is off); `pubHighlight` carries the pub-evidence fragments so
@@ -1427,6 +1524,14 @@ export async function searchPeople(opts: {
           highlight = Object.values(hl).flat();
         }
       }
+      const prov = provenanceOn
+        ? computeMatchProvenance({
+            publicationMeshUi: h._source.publicationMeshUi,
+            descendantUis: meshDescendantUis,
+            parentTerm: provenanceParent,
+            labels: provenanceLabels,
+          })
+        : undefined;
       return {
         cwid: h._source.cwid,
         slug: h._source.slug,
@@ -1443,14 +1548,8 @@ export async function searchPeople(opts: {
         highlight,
         pubHighlight,
         matchedOnFields,
-        matchProvenance: provenanceOn
-          ? computeMatchProvenance({
-              publicationMeshUi: h._source.publicationMeshUi,
-              descendantUis: meshDescendantUis,
-              parentTerm: provenanceParent,
-              labels: provenanceLabels,
-            })
-          : undefined,
+        matchProvenance: prov,
+        matchReason: buildMatchReason(h._source.cwid, h._source.publicationCount, prov != null),
       };
     }),
     total: r.hits.total.value,
