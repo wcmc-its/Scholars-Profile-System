@@ -802,6 +802,7 @@ async function PeopleResults({
     // `pi_min` is only meaningful for pi=multi; default value is dropped
     // from the URL to keep saved bookmarks tidy.
     if (pi === "multi" && piMin !== PI_MIN_FLOOR) sp.set("pi_min", String(piMin));
+    if (scope !== "expanded") sp.set("match", scope);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -843,7 +844,9 @@ async function PeopleResults({
       if (clamped !== PI_MIN_FLOOR) sp.set("pi_min", String(clamped));
     });
 
-  const clearAllHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
+  const clearAllParams = new URLSearchParams({ q, type: "people" });
+  if (scope !== "expanded") clearAllParams.set("match", scope);
+  const clearAllHref = `/search?${clearAllParams.toString()}`;
 
   // One chip per selected value.
   const chips: Array<{ label: React.ReactNode; ariaLabel?: string; removeHref: string }> = [];
@@ -1074,6 +1077,7 @@ async function PublicationsResults({
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
+    if (scope !== "expanded") sp.set("match", scope);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -1099,7 +1103,9 @@ async function PublicationsResults({
       for (const v of current) if (v !== value) sp.append(axis, v);
     });
 
-  const clearAllHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
+  const clearAllParams = new URLSearchParams({ q, type: "publications" });
+  if (scope !== "expanded") clearAllParams.set("match", scope);
+  const clearAllHref = `/search?${clearAllParams.toString()}`;
 
   const ROLE_LABEL: Record<"first" | "senior" | "middle", string> = {
     first: "First author",
@@ -1355,6 +1361,7 @@ async function FundingResults({
     for (const v of filters.department ?? []) sp.append("department", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
+    if (scope !== "expanded") sp.set("match", scope);
     if (resetPage) sp.delete("page");
     mut(sp);
     return `/search?${sp.toString()}`;
@@ -1379,7 +1386,9 @@ async function FundingResults({
       for (const v of current) if (v !== value) sp.append(axis, v);
     });
 
-  const clearAllHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
+  const clearAllParams = new URLSearchParams({ q, type: "funding" });
+  if (scope !== "expanded") clearAllParams.set("match", scope);
+  const clearAllHref = `/search?${clearAllParams.toString()}`;
   const hasActiveFilters = !!(
     filters.funder?.length ||
     filters.directFunder?.length ||
@@ -1488,7 +1497,7 @@ async function FundingResults({
           </span>
           <div className="flex items-center gap-2 text-[13px] text-[#5a5a5a]">
             <span>Sort:</span>
-            <FundingSortLinks q={q} filters={filters} sort={sort} />
+            <FundingSortLinks q={q} filters={filters} sort={sort} scope={scope} />
           </div>
         </div>
         {result.hits.length === 0 ? (
@@ -1713,10 +1722,12 @@ function FundingSortLinks({
   q,
   filters,
   sort,
+  scope,
 }: {
   q: string;
   filters: FundingFilters;
   sort: FundingSort;
+  scope: Scope;
 }) {
   const opts: Array<{ value: FundingSort; label: string }> = [
     { value: "relevance", label: "Relevance" },
@@ -1737,6 +1748,7 @@ function FundingSortLinks({
     for (const v of filters.department ?? []) sp.append("department", v);
     for (const v of filters.role ?? []) sp.append("role", v);
     for (const v of filters.investigator ?? []) sp.append("investigator", v);
+    if (scope !== "expanded") sp.set("match", scope);
     return `/search?${sp.toString()}`;
   };
   return (
