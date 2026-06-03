@@ -138,14 +138,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ED-locked gate (#728 § 2.2 #3 / § 5 MUST-7). An ED-sourced grant
-  // (`source` LIKE 'ED:%') is owned by the nightly Enterprise Directory import:
-  // a non-superuser may not edit-role or revoke it (the ETL would simply
-  // re-assert it). A Superuser override is permitted (it falls through) but is
-  // re-asserted on the next ETL run unless the member also left the population.
-  // The check is on the in-memory loaded row — a brand-new grant (`existing`
-  // is null, ED rows are ETL-created only) is never ED-locked. Reads the
-  // EFFECTIVE identity, so an impersonated non-superuser (#637) is also blocked.
-  if (existing && existing.source.startsWith("ED:") && !session.isSuperuser) {
+  // (`source` LIKE 'ED:%') is owned by the nightly Web Directory (Enterprise
+  // Directory) import and is READ-ONLY here for EVERYONE — superusers included.
+  // A superuser "override" would only be re-asserted on the next sync, so it is
+  // a silent-revert footgun; the role is changed at the source, not here
+  // (amended 2026-06-03, was superuser-overridable). The check is on the
+  // in-memory loaded row — a brand-new grant (`existing` is null, ED rows are
+  // ETL-created only) is never ED-locked.
+  if (existing && existing.source.startsWith("ED:")) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: cwid,

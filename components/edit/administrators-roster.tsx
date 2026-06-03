@@ -47,19 +47,19 @@ function provenanceBadge(source: string): { label: string; className: string } {
       return { label: "Manual", className: "bg-slate-100 text-slate-700 ring-slate-200" };
     case "ED:DA":
       return {
-        label: "ED — Department Administrator",
+        label: "Department Administrator",
         className: "bg-blue-50 text-blue-800 ring-blue-200",
       };
     case "ED:DivA":
       return {
-        label: "ED — Division Administrator",
+        label: "Division Administrator",
         className: "bg-teal-50 text-teal-700 ring-teal-200",
       };
     case "ED:IAMDELA":
-      return { label: "ED — IAMDELA", className: "bg-amber-50 text-amber-800 ring-amber-200" };
+      return { label: "IAMDELA", className: "bg-amber-50 text-amber-800 ring-amber-200" };
     case "ED:DivA-IAMDELA":
       return {
-        label: "ED — DivA-IAMDELA",
+        label: "DivA-IAMDELA",
         className: "bg-violet-50 text-violet-700 ring-violet-200",
       };
     default:
@@ -85,7 +85,7 @@ const PROVENANCE_BADGE_BASE =
 
 /** The caveat shown beside ED-locked controls (§ 4.4). */
 const ED_LOCKED_NOTE =
-  "Managed by the Enterprise Directory; changes are reverted on the next import — request a change to the source.";
+  "Managed through the Web Directory. This grant is read-only here; the role is set at the source and restored on the next sync.";
 
 export type AdministratorsRosterProps = {
   entries: ReadonlyArray<AdminRosterEntry>;
@@ -340,8 +340,8 @@ export function AdministratorsRoster({
 
       {showDegradedNote && (
         <p className="text-muted-foreground text-sm" data-testid="administrators-name-degraded-note">
-          Some names resolve from the Enterprise Directory and are unavailable until directory
-          routing (#443) lands; unit scope, role, and provenance below are accurate.
+          Some names resolve from the Web Directory and are unavailable until directory routing
+          (#443) lands; unit scope, role, and provenance below are accurate.
         </p>
       )}
 
@@ -401,9 +401,10 @@ export function AdministratorsRoster({
                     {entry.grants.map((grant) => {
                       const prov = provenanceBadge(grant.source);
                       const edLocked = isEdSourced(grant.source);
-                      // Non-superusers cannot touch ED rows (matches the route's
-                      // `ed_locked` gate); superusers can, but see the caveat.
-                      const controlsDisabled = edLocked && !isSuperuser;
+                      // ED-sourced rows are read-only for EVERYONE (matches the
+                      // route's `ed_locked` gate) — they're managed in the Web
+                      // Directory, so a local change would just be re-synced.
+                      const controlsDisabled = edLocked;
                       const rowKey = `${grant.entityType}:${grant.entityId}`;
                       const busy = busyKey === `${entry.cwid}:${rowKey}`;
                       const revokeDisabled = controlsDisabled || isSelf || busy;
@@ -419,7 +420,7 @@ export function AdministratorsRoster({
                               {KIND_LABEL[grant.entityType]}
                             </Badge>
                           </td>
-                          <td className="py-2 pl-6 align-middle">
+                          <td className="py-2 pl-6">
                             <RadioGroup
                               value={grant.role}
                               onValueChange={(v) =>
@@ -445,7 +446,7 @@ export function AdministratorsRoster({
                               </label>
                             </RadioGroup>
                           </td>
-                          <td className="py-2 pl-6 align-middle whitespace-nowrap">
+                          <td className="py-2 pl-6 whitespace-nowrap">
                             <span className={`${PROVENANCE_BADGE_BASE} ${prov.className}`}>
                               {prov.label}
                             </span>
@@ -471,12 +472,12 @@ export function AdministratorsRoster({
                               </Button>
                               {edLocked && (
                                 <span
-                                  className="text-muted-foreground inline-flex items-center gap-1 text-xs"
+                                  className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
                                   title={ED_LOCKED_NOTE}
                                   data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                                 >
                                   <Lock className="size-3" aria-hidden />
-                                  ED-managed
+                                  Managed through Web Directory
                                   <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
                                 </span>
                               )}
@@ -532,7 +533,7 @@ function unitOptions(roster: ReadonlyArray<AdminRosterEntry>): AddAdminUnit[] {
 function mapErrorToMessage(code: string): string {
   switch (code) {
     case "ed_locked":
-      return "This grant is managed by the Enterprise Directory and can't be changed here.";
+      return "This grant is managed through the Web Directory and can't be changed here.";
     case "scope_violation":
     case "authority_violation":
     case "not_unit_owner":

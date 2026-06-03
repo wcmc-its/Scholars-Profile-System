@@ -112,8 +112,16 @@ export default async function AdministratorsPage() {
         <h1 className="mb-1 text-xl font-semibold">Administrators</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Everyone with an Owner or Curator grant on an org unit, grouped by person. Add, change a
-          role, or revoke a grant from each card. Grants sourced from the Enterprise Directory are
-          managed upstream and are read-only here.
+          role, or revoke a grant from each card. Grants sourced from the{" "}
+          <a
+            href="https://directory.weill.cornell.edu/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--apollo-maroon)] underline"
+          >
+            Web Directory
+          </a>{" "}
+          are managed there and read-only here.
         </p>
         <AdministratorsRoster
           entries={entries}

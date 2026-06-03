@@ -186,10 +186,12 @@ independent, already-shipped mechanisms plus one new gate:
    guard in `app/api/edit/grant/route.ts` blocks an *owner* revoking *themselves*, but
    nothing today stops a holder editing/revoking their own ED-sourced row via the UI, nor a
    Superuser silently mutating an ED row that the next ETL run will simply re-assert. Add to
-   the grant route: **an `action` against a row with `source` LIKE `ED:%` is refused for
-   non-superusers** (reason `ed_locked`, a new `AuthzDenialReason`), and for superusers it is
-   permitted but emits a distinct audit note (the ETL will reconcile it back unless the
-   member also left the ED population). See § 5 MUST-7.
+   the grant route: **an `action` against a row with `source` LIKE `ED:%` is refused** (reason
+   `ed_locked`, a new `AuthzDenialReason`) — for **everyone, superusers included** (amended
+   2026-06-03: a superuser override would only be re-synced on the next import, a silent-revert
+   footgun; the role is changed at the source — the Web Directory). The tab is labelled "managed
+   through the Web Directory … read-only here", so the gate makes the behaviour match the
+   promise. See § 5 MUST-7.
 
    **Implementation detail (the gate has nothing to read until `source` is surfaced).** The
    route's existing idempotency probe selects only `{ role, grantedBy }`
@@ -635,9 +637,10 @@ The user reviews specs as a security expert. Requirements are MUSTs.
 - **MUST-5** An empty LDAP fetch for a population skips that population's reconcile (no wipe).
 - **MUST-6** LDAP bind/search failure ⇒ `EtlRun status='failed'`, zero writes, zero deletes,
   non-fatal exit.
-- **MUST-7** `/api/edit/grant` refuses a non-superuser `grant`/`revoke` against a
-  `source LIKE 'ED:%'` row (new reason `ed_locked`); a superuser override is permitted but the
-  ETL re-asserts on the next run unless the member also left the ED population.
+- **MUST-7** `/api/edit/grant` refuses any `grant`/`revoke` against a `source LIKE 'ED:%'` row
+  (new reason `ed_locked`) — for **everyone, superusers included** (amended 2026-06-03; the
+  earlier superuser override was a silent-revert footgun). ED-sourced grants are read-only in
+  the tab; the role is changed at the source (the Web Directory).
 - **MUST-8** All org-unit creation is superuser-only: `createCodedDivision` already is; the
   `centerType==='institute'` branch of `createInformalCenter` already is (`route.ts:172`,
   unchanged); the **only** branch narrowed is the default-`center` branch at `route.ts:192`
@@ -732,7 +735,7 @@ Edge-reachable module changes (LDAP/superuser imports must not leak into middlew
 | 7 | Org unit later renamed (code stable) | No effect — `UnitAdmin.entityId` is the stable `code`, not the name; grant follows the code. |
 | 8 | Org unit deleted (e.g. `Division` cascade) | The `UnitAdmin` row is orphaned (no FK by design); the next ETL run's `skipped_no_unit` does not re-touch it, but it grants access to a nonexistent unit. Audit-SQL Q3 (§ below) flags orphans for cleanup. |
 | 9 | Non-superuser tries to revoke/edit an `ED:%` row in the tab | `403 ed_locked`; control is rendered disabled so the click is normally prevented (MUST-7). |
-| 10 | Superuser edits an `ED:%` row | Allowed; next ETL run re-asserts the ED role unless the member also left the population (MUST-7 note). |
+| 10 | Superuser tries to revoke/edit an `ED:%` row | **Also `403 ed_locked`; controls rendered disabled** — ED-sourced grants are read-only for everyone (amended 2026-06-03; the superuser override was removed as a silent-revert footgun). |
 | 11 | Imported `curator` tries to grant anyone | `403 authority_violation` from `canGrant` — curators delegate nothing (MUST-1). |
 | 12 | Imported admin tries to edit a unit they were not assigned | `403 not_curator` / `scope_violation`; `getEffectiveUnitRole` = `none` for that unit. |
 | 13 | Non-superuser attempts org-unit create (Phase D on) | `403 not_superuser`; UI offers the "Request a new org unit" affordance instead (MUST-8). |

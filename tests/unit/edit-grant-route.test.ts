@@ -15,7 +15,7 @@
  * #728 Phase C — the ED-locked gate (§ 2.2 #3 / § 5 MUST-7):
  *  - Non-superuser revoke of a `source LIKE 'ED:%'` row → 403 ed_locked, no write.
  *  - Non-superuser re-grant (role change) of an ED row → 403 ed_locked, no write.
- *  - Superuser override of an ED row → 200 (write proceeds).
+ *  - Superuser action on an ED row → 403 ed_locked (read-only for everyone).
  *  - Non-ED ("manual") row is unaffected (regression).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -339,7 +339,7 @@ describe("/api/edit/grant", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("Superuser override of an ED row is allowed (write proceeds)", async () => {
+  it("Superuser is ALSO blocked on an ED row → 403 ed_locked (read-only for everyone)", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
     mockUnitAdminFindUnique.mockResolvedValue({
       role: "curator",
@@ -355,8 +355,10 @@ describe("/api/edit/grant", () => {
         action: "grant",
       }),
     );
-    expect(res.status).toBe(200);
-    expect(mockTxUnitAdminUpsert).toHaveBeenCalledOnce();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "ed_locked" });
+    expect(mockTxUnitAdminUpsert).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("Non-ED (manual) row is unaffected by the gate (regression)", async () => {

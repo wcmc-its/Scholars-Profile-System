@@ -315,7 +315,7 @@ describe("AdministratorsRoster — Phase C write controls", () => {
     ).toBeNull();
   });
 
-  it("a superuser sees ED-row controls ENABLED but the caveat note still shows", () => {
+  it("a superuser ALSO sees ED-row controls DISABLED (read-only for everyone)", () => {
     stubRouter();
     render(
       <AdministratorsRoster
@@ -325,11 +325,16 @@ describe("AdministratorsRoster — Phase C write controls", () => {
         nameResolutionDegraded={false}
       />,
     );
+    // ED rows are managed in the Web Directory — read-only here for everyone,
+    // superusers included (no override; it would just be re-synced).
     const revoke = screen.getByTestId(
       "administrators-revoke-acd4005-department-N1280",
     ) as HTMLButtonElement;
-    expect(revoke.disabled).toBe(false);
-    // The caveat is still surfaced so the override isn't silently undone.
+    expect(revoke.disabled).toBe(true);
+    const curator = screen.getByTestId(
+      "administrators-role-curator-acd4005-department:N1280",
+    ) as HTMLButtonElement;
+    expect(curator.disabled).toBe(true);
     expect(
       screen.getByTestId("administrators-ed-locked-note-acd4005-department-N1280"),
     ).toBeTruthy();
