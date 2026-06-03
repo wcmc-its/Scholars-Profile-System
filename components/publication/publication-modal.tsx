@@ -577,7 +577,7 @@ function TopicListItem({
                 <Link
                   href={`/topics/${topic.topicSlug}?subtopic=${encodeURIComponent(
                     s.slug,
-                  )}`}
+                  )}#publications`}
                   className={`hover:underline ${
                     isPrimary ? "text-foreground/90 font-medium" : ""
                   }`}

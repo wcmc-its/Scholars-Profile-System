@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { SubtopicRail, type SubtopicRailItem } from "@/components/topic/subtopic-rail";
 import { PublicationFeed } from "@/components/topic/publication-feed";
@@ -36,9 +36,24 @@ function SubtopicPublicationLayoutInner({
       : null,
   );
 
+  // Scroll the publications section into view when a subtopic deep-link
+  // resolves. The URL fragment alone is unreliable: the section is
+  // server-rendered (so #publications scrolls on initial load), but links that
+  // set ?subtopic= without the fragment (e.g. the publication modal) never
+  // scroll, and even with the fragment the active subtopic's header + scholars
+  // row hydrate client-side, shifting layout after the browser's first scroll.
+  // Scroll explicitly, once per distinct requested subtopic.
+  const lastScrolledRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (requestedSubtopic && subtopics.some((s) => s.id === requestedSubtopic)) {
       setActiveSubtopic(requestedSubtopic);
+      if (lastScrolledRef.current !== requestedSubtopic) {
+        lastScrolledRef.current = requestedSubtopic;
+        requestAnimationFrame(() => {
+          document.getElementById("publications")?.scrollIntoView();
+        });
+      }
     }
   }, [requestedSubtopic, subtopics]);
 
@@ -57,7 +72,7 @@ function SubtopicPublicationLayoutInner({
     activeSubtopic !== null && subtopicLabel !== null && subtopicLabel.length > 0;
 
   return (
-    <div id="publications" className="mt-16 scroll-mt-16">
+    <div className="mt-16">
       <hr className="mb-10 border-border" />
     <div className="flex flex-col gap-6 lg:flex-row lg:gap-8">
       {hasSubtopics && (
