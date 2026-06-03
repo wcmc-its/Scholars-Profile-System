@@ -60,14 +60,13 @@ import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
 import {
   computeMatchProvenance,
-  computeMatchedOnFields,
   type MatchProvenance,
-  type MatchField,
 } from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
   resolvePubRecencyMode,
   type PubRecencyMode,
+  type Scope,
 } from "@/lib/api/search-flags";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
@@ -178,30 +177,17 @@ export type PeopleHit = {
   hasActiveGrants: boolean;
   identityImageEndpoint: string;
   /** Highlight fragments from the scholar's self-reported fields
-   *  (`preferredName` / `areasOfInterest` / `overview`). */
+   *  (`preferredName` / `areasOfInterest` / `overview`). The card renders the
+   *  first as a self-evident snippet fallback when no `matchReason` was computed. */
   highlight?: string[];
   /**
-   * Issue #702 — highlight fragments from publication-derived fields
-   * (`publicationTitles` / `publicationMesh`), kept separate from `highlight`
-   * so the card can prefix them "Matched in publications: …". Present only when
-   * `SEARCH_PEOPLE_MATCH_EXPLAIN` is on and a pub field actually matched.
+   * PLAN R4 — the single "why this match" reason line the card renders, picked
+   * from the strongest signal (pub-evidence count, else the resolved concept).
+   * Present only when a concept resolved and `SEARCH_PEOPLE_MATCH_EXPLAIN` is on.
+   * Supersedes the prior pub-highlight / match-provenance / matched-on-fields
+   * card surfaces (#688 / #702), now removed.
    */
-  pubHighlight?: string[];
-  /**
-   * Issue #688 / #702 — present only when `SEARCH_PEOPLE_MATCH_PROVENANCE` is
-   * on, the topic/unclassified search resolved to a MeSH descriptor, AND this
-   * scholar matched the descriptor directly (`concept`) or via a *narrower*
-   * descendant term (`narrower`; the §6.1.3 subsumption boost). Omitted
-   * otherwise.
-   */
-  matchProvenance?: MatchProvenance;
-  /**
-   * Issue #702 — the human field labels this scholar matched on, derived from
-   * which highlight fields fired. Present only when `SEARCH_PEOPLE_MATCH_EXPLAIN`
-   * is on and at least one known field matched; drives the last-resort
-   * "Matched on …" chip when there is neither a snippet nor a MeSH note.
-   */
-  matchedOnFields?: MatchField[];
+  matchReason?: { icon: "publications" | "concept" | "area"; text: string };
 };
 
 export type PublicationHit = {
@@ -494,6 +480,18 @@ export async function searchPeople(opts: {
    */
   meshDescendantUis?: string[];
   /**
+   * PLAN R5 / handoff item 3 — the user-facing match scope. Drives the
+   * concept-only result-SET gate: when `concept`, an additional
+   * `terms { publicationMeshUi: descendantUis }` predicate is pushed into the
+   * always-on `queryFilter` so the People list AND all badge counts shrink to
+   * scholars with at least one publication tagged within the resolved
+   * descriptor's descendant set (the same set the ×1.5 boost and the per-row
+   * reason counts already use). `exact` rides the empty-`descendantUis` path
+   * (boost dropped, no set gate); `expanded` (default) is byte-identical to the
+   * pre-gate body — it pushes nothing. Absent ⇒ `expanded`.
+   */
+  scope?: Scope;
+  /**
    * Issue #688 — `SEARCH_PEOPLE_MATCH_PROVENANCE` resolved at request time by
    * the route. When true (and the topic template ran against a resolved
    * descriptor), each hit that matched via a narrower descendant term carries
@@ -502,13 +500,13 @@ export async function searchPeople(opts: {
    */
   matchProvenance?: boolean;
   /**
-   * Issue #702 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time by the
-   * route. When true, the People highlight block also highlights
-   * `publicationTitles` / `publicationMesh` (surfaced as `pubHighlight`) and a
-   * few detection-only fields, and each hit carries `matchedOnFields`. Pure
-   * presentation metadata: no effect on the query predicate, scoring, or result
-   * set (it only widens the `highlight` request). Headless callers default to
-   * `false`.
+   * Issue #702 / PLAN R4 — `SEARCH_PEOPLE_MATCH_EXPLAIN` resolved at request time
+   * by the route. When true (and a concept resolved against the topic template),
+   * `searchPeople` runs ONE extra publications-index aggregation to count each
+   * page scholar's on-topic publications (the `reasonCounts` distinct-pmid agg),
+   * which feeds the per-row `matchReason` line. Pure presentation metadata: no
+   * effect on the people query predicate, scoring, or result set. Headless
+   * callers default to `false`.
    */
   matchExplain?: boolean;
   /**
@@ -939,6 +937,19 @@ export async function searchPeople(opts: {
   if (sparseClause) queryFilter.push(sparseClause);
   if (topicClause) queryFilter.push(topicClause);
 
+  // PLAN R5 / handoff item 3 — concept-only result-SET gate. Under `concept`
+  // scope (and only when the query resolved to a descriptor, so
+  // `meshDescendantUis` is non-empty), admit only scholars with at least one
+  // publication tagged within the descendant set — the same set already used by
+  // the ×1.5 attribution boost and the per-row reason counts. Pushed into the
+  // always-on filter so the People list, the facet aggregations, AND the
+  // countOnly badge all shrink together. `expanded` pushes nothing here, so its
+  // query body stays byte-identical to today; `exact` rides the empty-set path
+  // (`meshDescendantUis = []` ⇒ the guard is skipped, boost-drop only).
+  if (opts.scope === "concept" && meshDescendantUis.length > 0) {
+    queryFilter.push({ terms: { publicationMeshUi: meshDescendantUis } });
+  }
+
   // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
   // the query predicate (must + always-on filters); scoring, post_filter,
   // aggs, and highlight don't change it, so a bare size:0 query returns the
@@ -1274,59 +1285,26 @@ export async function searchPeople(opts: {
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
     aggs,
     highlight: {
-      // Issue #702 — `publicationTitles` is a concatenated blob of every title
-      // on the scholar; for a prolific author it exceeds the index's
-      // `highlight.max_analyzed_offset` (1,000,000 by default), and OpenSearch
-      // throws `illegal_argument_exception` for the WHOLE search rather than
-      // skipping that field. Capping the analyzed offset truncates analysis
-      // instead of failing — the matched term is almost always in the first
-      // window, and a miss falls back to the chip (still non-blank). NB the
-      // query-level parameter is `max_analyzer_offset` (OpenSearch), distinct
-      // from the `index.highlight.max_analyzed_offset` index setting it bounds.
-      // Only set when match-explain adds the blob fields, so the flag-off body
-      // is unchanged.
-      ...(matchExplain ? { max_analyzer_offset: 900000 } : {}),
+      // The card's only highlight surface is the self-reported snippet fallback,
+      // so only the three self-reported fields are highlighted. (The #702
+      // pub-evidence / detection-field widening fed the now-removed
+      // `pubHighlight` / `matchedOnFields` card surfaces; the per-row reason line
+      // is driven by the `reasonCounts` aggregation below, not by highlighting.)
       fields: {
         preferredName: {},
         areasOfInterest: {},
         overview: {},
-        // Issue #702 — when match-explain is on, also highlight pub-evidence
-        // fields (one bounded fragment, surfaced as `pubHighlight`) and a few
-        // detection-only fields (name/title/dept) whose mere presence drives the
-        // "Matched on …" chip. `publicationAbstracts` is deliberately excluded.
-        ...(matchExplain
-          ? {
-              publicationTitles: { number_of_fragments: 1, fragment_size: 150 },
-              publicationMesh: { number_of_fragments: 1, fragment_size: 150 },
-              fullName: {},
-              primaryTitle: {},
-              primaryDepartment: {},
-            }
-          : {}),
       },
       // Issue #692 — when demoting, restrict highlighting to the content query
       // so stripped generics ("Research") are never <mark>-ed. Without this the
       // discount clause's full query would still drive highlights. Omitted when
-      // not demoting, so the default-off highlight body is unchanged. #702 — the
-      // widened field set rides the same content-only query so generics stay
-      // un-marked across the pub/detection fields too.
+      // not demoting, so the default-off highlight body is unchanged.
       ...(demoteGeneric
         ? {
             highlight_query: {
               multi_match: {
                 query: contentQuery,
-                fields: matchExplain
-                  ? [
-                      "preferredName",
-                      "areasOfInterest",
-                      "overview",
-                      "publicationTitles",
-                      "publicationMesh",
-                      "fullName",
-                      "primaryTitle",
-                      "primaryDepartment",
-                    ]
-                  : ["preferredName", "areasOfInterest", "overview"],
+                fields: ["preferredName", "areasOfInterest", "overview"],
                 type: "best_fields",
                 operator: "or",
               },
@@ -1399,34 +1377,113 @@ export async function searchPeople(opts: {
     : new Map<string, string>();
   const provenanceParent = opts.meshDescriptorName ?? "";
 
-  // Issue #702 — partition the highlight response. `highlight` keeps the
-  // self-reported fragments (the pre-#702 contract, byte-identical when
-  // match-explain is off); `pubHighlight` carries the pub-evidence fragments so
-  // the card can label them; the detection-only keys (name/title/dept) feed only
-  // the "Matched on …" chip via `computeMatchedOnFields`.
-  const SELF_HIGHLIGHT_FIELDS = ["preferredName", "areasOfInterest", "overview"];
-  const PUB_HIGHLIGHT_FIELDS = ["publicationTitles", "publicationMesh"];
+  // PLAN R4 — per-scholar "why this match" reason. When a concept resolved, ONE
+  // aggregation on the publications index gives, per page cwid, the distinct
+  // pmid count of the scholar's pubs tagged with the resolved descriptor set
+  // (`tagged`) and matching the literal query in title/abstract (`mention`),
+  // both exact via `cardinality` — distinct by construction, so neither can
+  // exceed the scholar's total. No reindex. Skipped on the count-only badge path
+  // (returned above) and under `exact` scope (empty `meshDescendantUis`).
+  const reasonCounts = new Map<string, { tagged: number; mention: number }>();
+  const pageCwids = r.hits.hits.map((h) => h._source.cwid);
+  if (
+    matchExplain &&
+    applyTopicTemplate &&
+    meshDescendantUis.length > 0 &&
+    provenanceParent.length > 0 &&
+    pageCwids.length > 0
+  ) {
+    const aggResp = await searchClient().search({
+      index: PUBLICATIONS_INDEX,
+      body: {
+        size: 0,
+        query: { bool: { filter: [{ terms: { wcmAuthorCwids: pageCwids } }] } },
+        aggs: {
+          byAuthor: {
+            terms: { field: "wcmAuthorCwids", include: pageCwids, size: pageCwids.length },
+            aggs: {
+              tagged: {
+                filter: { terms: { meshDescriptorUi: meshDescendantUis } },
+                aggs: { d: { cardinality: { field: "pmid" } } },
+              },
+              mention: {
+                filter: {
+                  multi_match: {
+                    query: contentQuery,
+                    fields: ["title", "abstract"],
+                    operator: "and",
+                  },
+                },
+                aggs: { d: { cardinality: { field: "pmid" } } },
+              },
+            },
+          },
+        },
+      } as object,
+    });
+    const buckets =
+      (
+        aggResp.body as {
+          aggregations?: {
+            byAuthor?: {
+              buckets?: Array<{
+                key: string;
+                tagged?: { d?: { value?: number } };
+                mention?: { d?: { value?: number } };
+              }>;
+            };
+          };
+        }
+      ).aggregations?.byAuthor?.buckets ?? [];
+    for (const b of buckets) {
+      reasonCounts.set(b.key, {
+        tagged: b.tagged?.d?.value ?? 0,
+        mention: b.mention?.d?.value ?? 0,
+      });
+    }
+  }
+
+  // Strongest-signal reason: pub-evidence count (document) → concept fallback
+  // (sparkle). Y = the scholar's `publicationCount` (the badge number); X is
+  // capped at Y so the phrasing stays coherent under any index drift.
+  const buildMatchReason = (
+    cwid: string,
+    pubCount: number,
+    hasProvenance: boolean,
+  ): PeopleHit["matchReason"] => {
+    const c = reasonCounts.get(cwid);
+    if (c && c.tagged > 0)
+      return {
+        icon: "publications",
+        text: `${Math.min(c.tagged, pubCount)} of ${pubCount} publications tagged ${provenanceParent}`,
+      };
+    if (c && c.mention > 0)
+      return {
+        icon: "publications",
+        text: `${Math.min(c.mention, pubCount)} of ${pubCount} publications mention “${contentQuery}”`,
+      };
+    if (hasProvenance)
+      return { icon: "concept", text: `via related concept ${provenanceParent}` };
+    return undefined;
+  };
 
   return {
     hits: r.hits.hits.map((h) => {
       const hl = h.highlight;
-      let highlight: string[] | undefined;
-      let pubHighlight: string[] | undefined;
-      let matchedOnFields: MatchField[] | undefined;
-      if (hl) {
-        if (matchExplain) {
-          const self = SELF_HIGHLIGHT_FIELDS.flatMap((f) => hl[f] ?? []);
-          const pub = PUB_HIGHLIGHT_FIELDS.flatMap((f) => hl[f] ?? []);
-          highlight = self.length > 0 ? self : undefined;
-          pubHighlight = pub.length > 0 ? pub : undefined;
-          const fields = computeMatchedOnFields(Object.keys(hl));
-          matchedOnFields = fields.length > 0 ? fields : undefined;
-        } else {
-          // Pre-#702 path: only the three self fields are highlighted, so the
-          // flattened values are exactly the self fragments.
-          highlight = Object.values(hl).flat();
-        }
-      }
+      // Only the three self-reported fields are highlighted (see the request
+      // body above), so the flattened fragments are exactly the self snippet the
+      // card falls back to when no `matchReason` was computed.
+      const highlight = hl ? Object.values(hl).flat() : undefined;
+      // `prov` still feeds the per-row reason (`buildMatchReason`, concept
+      // fallback); it is no longer surfaced as a hit field of its own.
+      const prov = provenanceOn
+        ? computeMatchProvenance({
+            publicationMeshUi: h._source.publicationMeshUi,
+            descendantUis: meshDescendantUis,
+            parentTerm: provenanceParent,
+            labels: provenanceLabels,
+          })
+        : undefined;
       return {
         cwid: h._source.cwid,
         slug: h._source.slug,
@@ -1441,16 +1498,7 @@ export async function searchPeople(opts: {
         hasActiveGrants: h._source.hasActiveGrants,
         identityImageEndpoint: identityImageEndpoint(h._source.cwid),
         highlight,
-        pubHighlight,
-        matchedOnFields,
-        matchProvenance: provenanceOn
-          ? computeMatchProvenance({
-              publicationMeshUi: h._source.publicationMeshUi,
-              descendantUis: meshDescendantUis,
-              parentTerm: provenanceParent,
-              labels: provenanceLabels,
-            })
-          : undefined,
+        matchReason: buildMatchReason(h._source.cwid, h._source.publicationCount, prov != null),
       };
     }),
     total: r.hits.total.value,

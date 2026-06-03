@@ -40,6 +40,10 @@ const baseHit: FundingHit = {
   applId: null,
   publications: [],
   coreProjectNum: null,
+  titleHighlight: null,
+  matchedLiteralTitle: false,
+  matchedConcept: false,
+  matchedFundedPubs: 0,
 };
 
 describe("FundingResultRow — basics", () => {
@@ -168,5 +172,71 @@ describe("FundingResultRow — award identifier", () => {
       />,
     );
     expect(screen.getByText("OCRA-2024-091")).toBeTruthy();
+  });
+});
+
+describe("FundingResultRow — PLAN P4 match-reason line", () => {
+  it("renders no reason line for a plain hit (no concept mapping, no signals)", () => {
+    const { container } = render(<FundingResultRow hit={baseHit} />);
+    expect(container.textContent).not.toMatch(/Matched through/);
+    expect(container.textContent).not.toMatch(/via related concept/);
+  });
+
+  it("suppresses the reason line on a literal title hit even with other signals", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{
+          ...baseHit,
+          titleHighlight: "PARP inhibitor in <mark>ovarian</mark> cancer",
+          matchedLiteralTitle: true,
+          matchedConcept: true,
+          matchedFundedPubs: 3,
+        }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    // The literal title hit is self-evident → no reason line of either kind.
+    expect(container.textContent).not.toMatch(/Matched through/);
+    expect(container.textContent).not.toMatch(/via related concept/);
+    // The highlighted fragment renders (the <mark> survives the sanitizer).
+    expect(container.querySelector("mark")).toBeTruthy();
+  });
+
+  it("renders the funded-outputs reason (X of Y) when there are on-topic funded pubs", () => {
+    render(
+      <FundingResultRow
+        hit={{ ...baseHit, pubCount: 12, matchedConcept: true, matchedFundedPubs: 4 }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    expect(screen.getByText(/Matched through 4 of 12 funded\s+publications/)).toBeTruthy();
+  });
+
+  it("funded-outputs takes precedence over the concept reason", () => {
+    const { container } = render(
+      <FundingResultRow
+        hit={{ ...baseHit, pubCount: 9, matchedConcept: true, matchedFundedPubs: 2 }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    expect(container.textContent).toMatch(/Matched through 2 of 9 funded/);
+    expect(container.textContent).not.toMatch(/via related concept/);
+  });
+
+  it("renders the concept reason when matched only by concept (no funded outputs)", () => {
+    render(
+      <FundingResultRow
+        hit={{ ...baseHit, matchedConcept: true, matchedFundedPubs: 0 }}
+        conceptLabel="Ovarian Neoplasms"
+      />,
+    );
+    expect(screen.getByText(/via related concept Ovarian Neoplasms/)).toBeTruthy();
+  });
+
+  it("renders no concept reason when no concept label resolved", () => {
+    const { container } = render(
+      <FundingResultRow hit={{ ...baseHit, matchedConcept: true, matchedFundedPubs: 0 }} />,
+    );
+    expect(container.textContent).not.toMatch(/via related concept/);
   });
 });

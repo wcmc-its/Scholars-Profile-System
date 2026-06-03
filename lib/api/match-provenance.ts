@@ -15,10 +15,8 @@
  *   - `concept`  — a direct match on the resolved descriptor itself (#702; the
  *     case #688 deliberately skipped, which is the most common topical match).
  *
- * Issue #702 also adds `computeMatchedOnFields`: a pure mapping from the
- * OpenSearch highlight field keys that fired to a small, deduped, ordered set
- * of human field labels, so the card can render a last-resort "Matched on …"
- * chip when there is neither a snippet nor a MeSH note.
+ * The result drives the People-tab per-row `matchReason` (`buildMatchReason`,
+ * `lib/api/search.ts`) and the Publications-tab "via related concept" note.
  *
  * Pure and side-effect-free so it unit-tests without OpenSearch/Prisma. The
  * label lookup is resolved upstream (`descriptorLabelsForUis`) and passed in.
@@ -100,56 +98,4 @@ export function computeMatchProvenance(opts: {
   }
 
   return undefined;
-}
-
-/**
- * Issue #702 — the human-facing match-on field labels the "Matched on …" chip
- * can render, in display priority order.
- */
-export type MatchField =
-  | "name"
-  | "title"
-  | "department"
-  | "interests"
-  | "overview"
-  | "publications";
-
-/**
- * OpenSearch highlight field key → human field label. With `require_field_match`
- * (the OpenSearch default) a field only produces a highlight fragment when it
- * matched the query, so the set of fired keys is an accurate "matched on" signal.
- * Keys absent here are ignored.
- */
-const HIGHLIGHT_KEY_TO_FIELD: Readonly<Record<string, MatchField>> = {
-  preferredName: "name",
-  fullName: "name",
-  primaryTitle: "title",
-  primaryDepartment: "department",
-  areasOfInterest: "interests",
-  overview: "overview",
-  publicationTitles: "publications",
-  publicationMesh: "publications",
-};
-
-const MATCH_FIELD_ORDER: readonly MatchField[] = [
-  "name",
-  "title",
-  "department",
-  "interests",
-  "overview",
-  "publications",
-];
-
-/**
- * Map the OpenSearch highlight field keys that fired for a hit to a deduped,
- * priority-ordered set of human field labels. Pure; empty result when no known
- * field produced a fragment.
- */
-export function computeMatchedOnFields(highlightKeys: Iterable<string>): MatchField[] {
-  const present = new Set<MatchField>();
-  for (const key of highlightKeys) {
-    const field = HIGHLIGHT_KEY_TO_FIELD[key];
-    if (field) present.add(field);
-  }
-  return MATCH_FIELD_ORDER.filter((f) => present.has(f));
 }

@@ -10,6 +10,8 @@ import { PersonPopover } from "@/components/scholar/person-popover";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { ExpandedGrant, expandLabel } from "@/components/funding/expanded-grant";
+import { highlightedTitleHtml } from "@/components/search/publication-result-row";
+import { MatchReason } from "@/components/search/match-reason";
 import { profilePath } from "@/lib/profile-url";
 import type { FundingFilters, FundingHit } from "@/lib/api/search-funding";
 
@@ -54,6 +56,7 @@ export function FundingResultRow({
   total,
   filters,
   applId,
+  conceptLabel,
 }: {
   hit: FundingHit;
   /** Optional analytics context. Issue #80 item 9 — when present, clicks
@@ -67,6 +70,9 @@ export function FundingResultRow({
    *  award serial in the right column links out to RePORTER. Mirrors the
    *  profile Grants section's NIH-link behavior (issue #80 follow-up). */
   applId?: number;
+  /** PLAN P4 — resolved MeSH concept label for the query→concept reason line.
+   *  Null when no query→MeSH mapping resolved (no reason row renders). */
+  conceptLabel?: string | null;
 }) {
   const startYear = hit.startDate.slice(0, 4);
   const endYear = hit.endDate.slice(0, 4);
@@ -104,10 +110,17 @@ export function FundingResultRow({
   return (
     <article className="grid grid-cols-[1fr_auto] items-baseline gap-4 border-t border-[#e3e2dd] py-5">
       <div className="min-w-0">
-        {/* Title — two-line clamp. */}
+        {/* Title — two-line clamp. PLAN P4: when the query literally matched the
+            title, render the highlighted fragment (same sanitize + pale-tint
+            pill as the Publications row) so the literal hit is self-evident and
+            the reason line is suppressed below. */}
         <h3
           className="text-[15px] font-medium leading-snug text-[#1a1a1a] line-clamp-2"
-          dangerouslySetInnerHTML={{ __html: sanitizePubTitle(hit.title) }}
+          dangerouslySetInnerHTML={{
+            __html: hit.titleHighlight
+              ? highlightedTitleHtml(hit.titleHighlight)
+              : sanitizePubTitle(hit.title),
+          }}
         />
 
         {/* People row + inline pills. */}
@@ -190,6 +203,20 @@ export function FundingResultRow({
             </>
           ) : null}
         </div>
+
+        {/* PLAN P4 — quiet "why this match" line. Precedence: a literal title hit
+            is self-evident (highlighted title) → no reason; else funded-outputs
+            (X of Y on-topic funded publications, document icon); else a related-
+            concept admission (sparkle). Renders nothing when the match is a plain
+            title hit or no concept mapping exists. */}
+        {hit.matchedLiteralTitle ? null : hit.matchedFundedPubs > 0 ? (
+          <MatchReason kind="publications">
+            Matched through {hit.matchedFundedPubs} of {hit.pubCount} funded
+            publications
+          </MatchReason>
+        ) : hit.matchedConcept && conceptLabel ? (
+          <MatchReason kind="concept">via related concept {conceptLabel}</MatchReason>
+        ) : null}
 
         {canExpand ? (
           <button

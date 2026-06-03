@@ -4,6 +4,7 @@
  * Lifted out of `page.tsx` so unit tests can import them without dragging
  * in Prisma + the full server-rendered page module. Pure functions only.
  */
+import type { Scope } from "@/lib/api/search-flags";
 
 /**
  * Issue #259 §1.11 / §6.2 — params dropped on every mesh-mode transition.
@@ -50,6 +51,31 @@ export function buildMeshHref(
     else out.append(k, v);
   }
   if (mode !== "clear") out.set("mesh", mode);
+  const qs = out.toString();
+  return qs.length > 0 ? `/search?${qs}` : "/search";
+}
+
+/**
+ * PLAN R2 — build a URL that engages a match-scope. Sets `?match=<scope>`,
+ * dropping it for the default `expanded` so default URLs stay clean. Strips
+ * `mesh` (legacy alias), `page`, and `sort` on every scope change — same
+ * rationale as `buildMeshHref` (the candidate set + concept-coupled sorts
+ * change). Repeated/multi-select params keep their original order.
+ */
+const STRIPPED_ON_SCOPE_TRANSITION = new Set(["match", "mesh", "page", "sort"]);
+
+export function buildScopeHref(
+  sp: Record<string, string | string[] | undefined>,
+  scope: Scope,
+): string {
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (STRIPPED_ON_SCOPE_TRANSITION.has(k)) continue;
+    if (v === undefined) continue;
+    if (Array.isArray(v)) for (const item of v) out.append(k, item);
+    else out.append(k, v);
+  }
+  if (scope !== "expanded") out.set("match", scope);
   const qs = out.toString();
   return qs.length > 0 ? `/search?${qs}` : "/search";
 }

@@ -21,13 +21,37 @@ vi.mock("@/lib/db", () => ({
 }));
 
 let lastRequest: { index: string; body: Record<string, unknown> } | null = null;
+const requests: Array<{ index: string; body: Record<string, unknown> }> = [];
+/** PLAN P4 — funded-outputs pub-index agg response, keyed by projectId. The
+ *  test sets this before a run; the mock returns it when the search hits the
+ *  publications index. Empty → no funded-outputs counts. */
+let pubAggByProject: Record<string, number> = {};
 
 vi.mock("@/lib/search", () => ({
   FUNDING_INDEX: "scholars-funding",
+  PUBLICATIONS_INDEX: "scholars-publications",
   FUNDING_FIELD_BOOSTS: ["title^4", "sponsorText^2", "peopleNames^1"],
   searchClient: () => ({
     async search(req: { index: string; body: Record<string, unknown> }) {
       lastRequest = req;
+      requests.push(req);
+      // PLAN P4 — funded-outputs aggregation against the publications index.
+      if (req.index === "scholars-publications") {
+        return {
+          body: {
+            aggregations: {
+              byProject: {
+                buckets: Object.fromEntries(
+                  Object.entries(pubAggByProject).map(([projectId, value]) => [
+                    projectId,
+                    { doc_count: value, d: { value } },
+                  ]),
+                ),
+              },
+            },
+          },
+        };
+      }
       return {
         body: {
           hits: {
@@ -58,7 +82,15 @@ vi.mock("@/lib/search", () => ({
                       role: "PI",
                     },
                   ],
+                  pubCount: 3,
+                  publications: [
+                    { pmid: "111", title: "P1", journal: null, year: 2020, citationCount: 0, isLowerConfidence: false },
+                    { pmid: "222", title: "P2", journal: null, year: 2021, citationCount: 0, isLowerConfidence: false },
+                    { pmid: "333", title: "P3", journal: null, year: 2022, citationCount: 0, isLowerConfidence: false },
+                  ],
                 },
+                highlight: { title: ["A study of <mark>widgets</mark>"] },
+                matched_queries: ["concept"],
               },
             ],
           },
@@ -93,6 +125,8 @@ vi.mock("@/lib/search", () => ({
 
 beforeEach(() => {
   lastRequest = null;
+  requests.length = 0;
+  pubAggByProject = {};
 });
 afterEach(() => {
   vi.clearAllMocks();
@@ -373,5 +407,124 @@ describe("searchFunding — issue #295 MeSH concept clause", () => {
     >;
     expect(aggs.funders.filter.bool.must).toHaveLength(1);
     expect(aggs.funders.filter.bool.must[0]).toHaveProperty("bool");
+  });
+});
+
+describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries)", () => {
+  const conceptOriginal = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
+  beforeEach(() => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    process.env.SEARCH_FUNDING_MATCH_REASON = "on";
+  });
+  afterEach(() => {
+    if (conceptOriginal === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    else process.env.SEARCH_FUNDING_TAB_CONCEPT = conceptOriginal;
+    if (reasonOriginal === undefined) delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    else process.env.SEARCH_FUNDING_MATCH_REASON = reasonOriginal;
+  });
+
+  const NEOPLASMS: MeshResolution = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    matchedForm: "neoplasms",
+    confidence: "exact",
+    scopeNote: null,
+    entryTerms: [],
+    curatedTopicAnchors: [],
+    descendantUis: ["D009369", "D001943"],
+  };
+
+  const fundingRequest = () =>
+    requests.find((req) => req.index === "scholars-funding")!;
+  const pubRequest = () => requests.find((req) => req.index === "scholars-publications");
+
+  it("tags the expanded concept terms clause with _name 'concept' (score-neutral)", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const must = (fundingRequest().body.query as { bool: { must: unknown[] } }).bool.must;
+    const should = (must[0] as { bool: { should: unknown[] } }).bool.should;
+    expect(should[1]).toEqual({
+      terms: { meshDescriptorUi: ["D009369", "D001943"], boost: 4, _name: "concept" },
+    });
+  });
+
+  it("tags the concept-only terms clause with _name 'concept'", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS, scope: "concept" });
+    const must = (fundingRequest().body.query as { bool: { must: unknown[] } }).bool.must;
+    expect(must[0]).toEqual({
+      terms: { meshDescriptorUi: ["D009369", "D001943"], _name: "concept" },
+    });
+  });
+
+  it("adds a title highlight to the full-body funding query", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const highlight = fundingRequest().body.highlight as {
+      fields: { title: unknown };
+      highlight_query: unknown;
+    };
+    expect(highlight.fields.title).toEqual({ number_of_fragments: 0 });
+    expect(highlight.highlight_query).toEqual({ match: { title: "cancer" } });
+  });
+
+  it("runs a per-project pub-index cardinality(pmid) agg over the funded pmids", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const body = pubRequest()!.body as {
+      size: number;
+      query: { bool: { filter: unknown[] } };
+      aggs: { byProject: { filters: { filters: Record<string, unknown> }; aggs: unknown } };
+    };
+    expect(body.size).toBe(0);
+    // Top-level filter: the union of funded pmids ∩ the resolved descendant set.
+    expect(body.query.bool.filter).toContainEqual({ terms: { pmid: ["111", "222", "333"] } });
+    expect(body.query.bool.filter).toContainEqual({
+      terms: { meshDescriptorUi: ["D009369", "D001943"] },
+    });
+    // One named per-project filter scoped to that project's pmids; cardinality sub-agg.
+    expect(body.aggs.byProject.filters.filters).toEqual({
+      "ACC-001": { terms: { pmid: ["111", "222", "333"] } },
+    });
+    expect(body.aggs.byProject.aggs).toEqual({ d: { cardinality: { field: "pmid" } } });
+  });
+
+  it("emits matchedFundedPubs (X, distinct-pmid) capped at pubCount (Y)", async () => {
+    pubAggByProject = { "ACC-001": 2 };
+    const result = await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    expect(result.hits[0].matchedFundedPubs).toBe(2);
+    expect(result.hits[0].pubCount).toBe(3);
+  });
+
+  it("caps X at Y when the agg over-counts vs the uncapped pubCount", async () => {
+    pubAggByProject = { "ACC-001": 99 };
+    const result = await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    // Math.min(X, pubCount) keeps "X of Y" coherent (PUB_LIST_CAP edge).
+    expect(result.hits[0].matchedFundedPubs).toBe(3);
+  });
+
+  it("emits matchedConcept from matched_queries and matchedLiteralTitle + titleHighlight from the highlight", async () => {
+    pubAggByProject = { "ACC-001": 1 };
+    const result = await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    expect(result.hits[0].matchedConcept).toBe(true);
+    expect(result.hits[0].matchedLiteralTitle).toBe(true);
+    expect(result.hits[0].titleHighlight).toBe("A study of <mark>widgets</mark>");
+  });
+
+  it("skips the pub-index agg and emits zero/false reason fields when no concept resolved", async () => {
+    const result = await runSearch({ q: "cancer", meshResolution: null });
+    expect(pubRequest()).toBeUndefined();
+    expect(result.hits[0].matchedFundedPubs).toBe(0);
+    expect(result.hits[0].matchedConcept).toBe(false);
+  });
+
+  it("leaves the funding query body untagged when the reason flag is off (expanded non-regression)", async () => {
+    delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const must = (fundingRequest().body.query as { bool: { must: unknown[] } }).bool.must;
+    const should = (must[0] as { bool: { should: unknown[] } }).bool.should;
+    // No `_name`, no highlight, no pub-index agg → byte-identical to today's body.
+    expect(should[1]).toEqual({
+      terms: { meshDescriptorUi: ["D009369", "D001943"], boost: 4 },
+    });
+    expect(fundingRequest().body.highlight).toBeUndefined();
+    expect(pubRequest()).toBeUndefined();
   });
 });

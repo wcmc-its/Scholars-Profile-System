@@ -9,15 +9,9 @@
  * Microbiota (D064307), descendants include Mycobiome (D000072761); a
  * Mycobiome-only scholar reads "Mycobiome — narrower term of Microbiota", a
  * Microbiota-tagged scholar reads "publications tagged Microbiota".
- *
- * `computeMatchedOnFields` (#702) maps the highlight field keys that fired to
- * the human field labels that drive the last-resort "Matched on …" chip.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  computeMatchProvenance,
-  computeMatchedOnFields,
-} from "@/lib/api/match-provenance";
+import { computeMatchProvenance } from "@/lib/api/match-provenance";
 import {
   resolvePeopleMatchProvenance,
   resolvePeopleMatchExplain,
@@ -152,32 +146,6 @@ describe("computeMatchProvenance — nothing to explain", () => {
         labels: LABELS,
       }),
     ).toBeUndefined();
-  });
-});
-
-describe("computeMatchedOnFields (#702)", () => {
-  it("maps highlight keys to deduped, priority-ordered field labels", () => {
-    // Out-of-order input, name twice (preferredName + fullName) → one "name".
-    expect(
-      computeMatchedOnFields([
-        "publicationTitles",
-        "overview",
-        "fullName",
-        "preferredName",
-        "primaryDepartment",
-      ]),
-    ).toEqual(["name", "department", "overview", "publications"]);
-  });
-
-  it("collapses both publication fields to a single 'publications'", () => {
-    expect(computeMatchedOnFields(["publicationMesh", "publicationTitles"])).toEqual([
-      "publications",
-    ]);
-  });
-
-  it("ignores unknown keys and returns empty when nothing known fired", () => {
-    expect(computeMatchedOnFields(["leadership.chairOf", "somethingElse"])).toEqual([]);
-    expect(computeMatchedOnFields([])).toEqual([]);
   });
 });
 
