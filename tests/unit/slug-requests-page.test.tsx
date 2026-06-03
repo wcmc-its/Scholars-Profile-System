@@ -29,7 +29,9 @@ const {
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
+}));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
 vi.mock("@/components/edit/admin-subnav", () => ({
   AdminSubnav: (p: { pendingSlugRequests: number | null }) => (

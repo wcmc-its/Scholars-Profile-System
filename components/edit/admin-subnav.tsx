@@ -10,15 +10,21 @@
  * that doesn't exist isn't advertised.
  */
 import Link from "next/link";
+import { ChevronLeftIcon } from "lucide-react";
 
 export type AdminSubnavActive = "profiles" | "slug-requests";
 
 export function AdminSubnav({
   active,
   pendingSlugRequests,
+  selfEditHref,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
+  /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
+   *  `null`/omitted when the viewer has no profile of their own (a staff
+   *  superuser), so the link never lands on a 404. */
+  selfEditHref?: string | null;
 }) {
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
@@ -33,6 +39,16 @@ export function AdminSubnav({
             count={pendingSlugRequests}
           />
         )}
+        {selfEditHref ? (
+          <Link
+            href={selfEditHref}
+            className="text-muted-foreground hover:text-foreground ml-auto inline-flex items-center gap-1 py-3 text-sm"
+            data-testid="admin-subnav-self-edit"
+          >
+            <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+            My profile
+          </Link>
+        ) : null}
       </div>
     </div>
   );

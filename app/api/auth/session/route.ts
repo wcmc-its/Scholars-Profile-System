@@ -57,7 +57,13 @@ export async function GET(): Promise<NextResponse> {
 
   if (!session) {
     return NextResponse.json(
-      { authenticated: false, scholar: null, impersonating: null, canImpersonate: false },
+      {
+        authenticated: false,
+        scholar: null,
+        impersonating: null,
+        canImpersonate: false,
+        canBrowseProfiles: false,
+      },
       { headers: noStore },
     );
   }
@@ -72,13 +78,21 @@ export async function GET(): Promise<NextResponse> {
     })
     .catch(() => null);
 
-  // R1 — only a superuser may initiate impersonation. Live LDAPS check against
-  // the REAL cwid; `isSuperuser` is fail-closed, so a directory hiccup just
-  // hides the switcher. The flag-off short-circuit lives in `impersonationActive`
-  // (overlay path) and is mirrored here so a dark deployment never advertises
-  // the entry: `canImpersonate` is meaningless without the feature.
+  // The superuser verdict, resolved once and reused below. Live LDAPS check
+  // against the REAL cwid; `isSuperuser` is fail-closed, so a directory hiccup
+  // just hides the superuser surfaces.
+  const superuser = await isSuperuser(session.cwid).catch(() => false);
+
+  // R1 — only a superuser may initiate impersonation, AND the feature must be
+  // enabled. The flag-off short-circuit (mirrored from `impersonationActive`)
+  // keeps a dark deployment from advertising the switcher entry.
   const featureEnabled = process.env.IMPERSONATION_ENABLED === "true";
-  const canImpersonate = featureEnabled && (await isSuperuser(session.cwid).catch(() => false));
+  const canImpersonate = featureEnabled && superuser;
+
+  // The admin Profiles-roster entry (`/edit/scholars`) rides the same verdict
+  // but, unlike `canImpersonate`, is INDEPENDENT of the impersonation flag — a
+  // superuser reaches the roster whether or not "View as" is enabled.
+  const canBrowseProfiles = superuser;
 
   // The live overlay's target, if any. `impersonationActive` already folds in
   // the flag and the read-time TTL, so a stale or flag-off overlay yields null.
@@ -113,7 +127,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   return NextResponse.json(
-    { authenticated: true, scholar, impersonating, canImpersonate },
+    { authenticated: true, scholar, impersonating, canImpersonate, canBrowseProfiles },
     { headers: noStore },
   );
 }

@@ -72,6 +72,9 @@ export type EditPageProps = {
   /** The scholar's latest `SlugRequest` (self mode only), seeding the request
    *  card's state machine. `null` when they have never filed one. */
   latestSlugRequest?: SlugRequestSummary | null;
+  /** Self mode only: the viewer is a superuser, so the shell shows a link
+   *  across to the Profiles roster. Forwarded to `EditShell`. */
+  canBrowseProfiles?: boolean;
 };
 
 export function EditPage({
@@ -80,6 +83,7 @@ export function EditPage({
   attr,
   slugRequestEnabled = false,
   latestSlugRequest = null,
+  canBrowseProfiles = false,
 }: EditPageProps) {
   const visible = ATTRIBUTES.filter((a) => {
     if (!a.modes.includes(mode)) return false;
@@ -108,6 +112,7 @@ export function EditPage({
       activeAttr={active.key}
       basePath={basePath}
       previewHref={profilePath(ctx.scholar.slug)}
+      canBrowseProfiles={canBrowseProfiles}
     >
       {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest)}
     </EditShell>

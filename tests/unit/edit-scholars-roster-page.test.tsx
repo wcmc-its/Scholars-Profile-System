@@ -6,24 +6,35 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-const { mockGetEditSession, mockLoadEditRoster, mockRedirect, mockRoster, mockForbidden } = vi.hoisted(
-  () => ({
-    mockGetEditSession: vi.fn(),
-    mockLoadEditRoster: vi.fn(),
-    mockRedirect: vi.fn((url: string) => {
-      throw new Error(`__REDIRECT__:${url}`);
-    }),
-    mockRoster: vi.fn(() => null),
-    mockForbidden: vi.fn(() => null),
+const {
+  mockGetEditSession,
+  mockLoadEditRoster,
+  mockLoadRosterFacets,
+  mockRedirect,
+  mockRoster,
+  mockForbidden,
+} = vi.hoisted(() => ({
+  mockGetEditSession: vi.fn(),
+  mockLoadEditRoster: vi.fn(),
+  mockLoadRosterFacets: vi.fn(),
+  mockRedirect: vi.fn((url: string) => {
+    throw new Error(`__REDIRECT__:${url}`);
   }),
-);
+  mockRoster: vi.fn(() => null),
+  mockForbidden: vi.fn(() => null),
+}));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
 vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
-vi.mock("@/lib/api/edit-roster", () => ({ loadEditRoster: mockLoadEditRoster }));
+vi.mock("@/lib/api/edit-roster", () => ({
+  loadEditRoster: mockLoadEditRoster,
+  loadRosterFacets: mockLoadRosterFacets,
+}));
 vi.mock("@/components/edit/profiles-roster", () => ({ ProfilesRoster: mockRoster }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({ ForbiddenEditPage: mockForbidden }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+vi.mock("@/lib/db", () => ({
+  db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
+}));
 
 import EditScholarsPage from "@/app/edit/scholars/page";
 
@@ -38,6 +49,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   mockLoadEditRoster.mockResolvedValue({ entries: [], total: 0 });
+  mockLoadRosterFacets.mockResolvedValue({
+    departments: [],
+    divisions: [],
+    centers: [],
+    roleCategories: [],
+  });
 });
 
 describe("/edit/scholars — authorization", () => {

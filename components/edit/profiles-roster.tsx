@@ -15,27 +15,50 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { EditRosterEntry, EditRosterStatusFilter } from "@/lib/api/edit-roster";
+import { formatRoleCategory } from "@/lib/role-display";
+import type {
+  EditRosterEntry,
+  EditRosterStatusFilter,
+  RosterFacets,
+} from "@/lib/api/edit-roster";
 
 export type ProfilesRosterProps = {
   entries: ReadonlyArray<EditRosterEntry>;
   total: number;
   query: string;
   status: EditRosterStatusFilter;
+  /** Selected org-unit filter, raw select value ("dept:CODE" | "div:CODE" |
+   *  "center:CODE" | ""). */
+  unit: string;
+  /** Selected person-type (roleCategory) filter, raw DB value or "". */
+  roleCategory: string;
+  /** Dropdown option lists for the org-unit + person-type filters. */
+  facets: RosterFacets;
   page: number;
   pageSize: number;
   /** Pending slug-request count for the admin sub-nav pill; `null` when the
    *  slug-request feature is off (the "URL requests" tab is then hidden). */
   pendingSlugRequests: number | null;
+  /** Link back to the viewer's own self-edit surface, forwarded to the
+   *  sub-nav; `null` when they have no profile of their own. */
+  selfEditHref?: string | null;
 };
 
 const BASE = "/edit/scholars";
 
-function pageHref(page: number, query: string, status: EditRosterStatusFilter): string {
+function pageHref(opts: {
+  page: number;
+  query: string;
+  status: EditRosterStatusFilter;
+  unit: string;
+  roleCategory: string;
+}): string {
   const p = new URLSearchParams();
-  if (query) p.set("q", query);
-  if (status !== "all") p.set("status", status);
-  if (page > 0) p.set("page", String(page));
+  if (opts.query) p.set("q", opts.query);
+  if (opts.status !== "all") p.set("status", opts.status);
+  if (opts.unit) p.set("unit", opts.unit);
+  if (opts.roleCategory) p.set("type", opts.roleCategory);
+  if (opts.page > 0) p.set("page", String(opts.page));
   const qs = p.toString();
   return qs ? `${BASE}?${qs}` : BASE;
 }
@@ -45,9 +68,13 @@ export function ProfilesRoster({
   total,
   query,
   status,
+  unit,
+  roleCategory,
+  facets,
   page,
   pageSize,
   pendingSlugRequests,
+  selfEditHref,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -67,7 +94,11 @@ export function ProfilesRoster({
           <span className="font-semibold">Scholars Profile Console</span>
         </div>
       </header>
-      <AdminSubnav active="profiles" pendingSlugRequests={pendingSlugRequests} />
+      <AdminSubnav
+        active="profiles"
+        pendingSlugRequests={pendingSlugRequests}
+        selfEditHref={selfEditHref}
+      />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-4 text-xl font-semibold">Profiles</h1>
@@ -86,6 +117,58 @@ export function ProfilesRoster({
               placeholder="e.g. Smith or abc1001"
               className="w-64"
             />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="roster-unit" className="text-muted-foreground text-xs">
+              Org unit
+            </label>
+            <select
+              id="roster-unit"
+              name="unit"
+              defaultValue={unit}
+              className="border-input h-9 max-w-[16rem] rounded-md border bg-transparent px-3 text-sm"
+            >
+              <option value="">All units</option>
+              <optgroup label="Departments">
+                {facets.departments.map((d) => (
+                  <option key={`dept:${d.code}`} value={`dept:${d.code}`}>
+                    {d.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Divisions">
+                {facets.divisions.map((d) => (
+                  <option key={`div:${d.code}`} value={`div:${d.code}`}>
+                    {d.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Centers">
+                {facets.centers.map((c) => (
+                  <option key={`center:${c.code}`} value={`center:${c.code}`}>
+                    {c.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="roster-type" className="text-muted-foreground text-xs">
+              Person type
+            </label>
+            <select
+              id="roster-type"
+              name="type"
+              defaultValue={roleCategory}
+              className="border-input h-9 rounded-md border bg-transparent px-3 text-sm"
+            >
+              <option value="">All</option>
+              {facets.roleCategories.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="roster-status" className="text-muted-foreground text-xs">
@@ -118,6 +201,7 @@ export function ProfilesRoster({
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Title</th>
                 <th className="px-3 py-2 font-medium">Unit</th>
+                <th className="px-3 py-2 font-medium">Type</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">
                   <span className="sr-only">Edit</span>
@@ -127,7 +211,7 @@ export function ProfilesRoster({
             <tbody className="divide-border divide-y">
               {entries.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-muted-foreground px-3 py-6 text-center">
+                  <td colSpan={6} className="text-muted-foreground px-3 py-6 text-center">
                     No profiles match your search.
                   </td>
                 </tr>
@@ -140,6 +224,9 @@ export function ProfilesRoster({
                     </td>
                     <td className="text-muted-foreground px-3 py-2">{e.title ?? "—"}</td>
                     <td className="text-muted-foreground px-3 py-2">{e.unit ?? "—"}</td>
+                    <td className="text-muted-foreground px-3 py-2">
+                      {formatRoleCategory(e.roleCategory) ?? "—"}
+                    </td>
                     <td className="px-3 py-2">
                       <Badge variant={e.isVisible ? "secondary" : "outline"}>
                         {e.isVisible ? "Visible" : "Hidden"}
@@ -164,14 +251,14 @@ export function ProfilesRoster({
         {(hasPrev || hasNext) && (
           <div className="mt-4 flex items-center justify-between">
             {hasPrev ? (
-              <Link href={pageHref(page - 1, query, status)} className="text-sm underline" data-testid="roster-prev">
+              <Link href={pageHref({ page: page - 1, query, status, unit, roleCategory })} className="text-sm underline" data-testid="roster-prev">
                 ← Previous
               </Link>
             ) : (
               <span />
             )}
             {hasNext ? (
-              <Link href={pageHref(page + 1, query, status)} className="text-sm underline" data-testid="roster-next">
+              <Link href={pageHref({ page: page + 1, query, status, unit, roleCategory })} className="text-sm underline" data-testid="roster-next">
                 Next →
               </Link>
             ) : (

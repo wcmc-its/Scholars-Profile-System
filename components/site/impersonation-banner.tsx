@@ -149,7 +149,6 @@ export function ImpersonationBanner() {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-6 py-2">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p className="text-sm leading-tight">
-            <span aria-hidden="true">👁 </span>
             Viewing as{" "}
             <strong className="font-semibold">{impersonating.targetName}</strong>
             {" · "}

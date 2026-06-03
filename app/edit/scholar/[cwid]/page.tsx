@@ -23,7 +23,8 @@ import { notFound, redirect } from "next/navigation";
 import { EditPage } from "@/components/edit/edit-page";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { requireSuperuserGet } from "@/lib/edit/authz";
@@ -46,8 +47,21 @@ export default async function EditScholarPage({
 }) {
   const { cwid: targetCwid } = await params;
 
-  const session = await getEditSession();
+  // RAW session existence check + SAML redirect (invariant 4): the login gate
+  // turns on whether a real human is signed in, never the impersonation overlay.
+  const raw = await getSession();
+  if (!raw) {
+    redirect(`/api/auth/saml/login?return=/edit/scholar/${encodeURIComponent(targetCwid)}`);
+  }
+
+  // Authorization identity resolves via the effective seam, mirroring the write
+  // path (`lib/edit/request.ts`). While impersonating target T, `session.cwid`
+  // is T and `session.isSuperuser` re-derives from T — so /edit/scholar/T is
+  // self mode and /edit/scholar/U (U≠T) 403s because effective(T) is not a
+  // superuser (#637). Non-impersonating: effective == raw, byte-identical.
+  const session = await getEffectiveEditSession();
   if (!session) {
+    // Defensive — `raw` is already non-null, so this branch is unreachable.
     redirect(`/api/auth/saml/login?return=/edit/scholar/${encodeURIComponent(targetCwid)}`);
   }
 
