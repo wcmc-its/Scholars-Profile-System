@@ -46,6 +46,7 @@ in **§10**.
 | What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) |
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
+| Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
@@ -147,6 +148,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | Doc | Answers |
 |---|---|
 | [`search.md`](./search.md) | How unified `/search` ranks people, publications, and grants, and what signal backs each rank. |
+| [`search-recall.md`](./search-recall.md) | **Why some obvious queries return too few people** (`covid19`→9 vs `covid-19`→1,425; `tylenol`→0). The *recall* counterpart to `search.md` (ranking): the two independent admission gaps — alphanumeric tokenization (#725/PR #727) and MeSH concept-resolution being ranking-only (#726) — with root causes, the fixes, validation, deploy sequencing, and limits. |
 | [`search-publications.md`](./search-publications.md) | Example-driven explainer for the Publications tab of `/search`. |
 | [`browse-vs-search.md`](./browse-vs-search.md) | The distinct jobs of the browse pages vs search. |
 | [`suggested-search-chips.md`](./suggested-search-chips.md) | Where the homepage "Try:" suggestion chips come from and **how to refresh them** — the curated lay-term master (`data/suggested-searches.json`), the runtime pool + sampler, and the repeatable method (mine the taxonomy → verify WCM depth → keep the lay-term↔MeSH gap). Reach for this when a chip looks stale or thin, or when it's time to regenerate the list. |
@@ -229,7 +231,9 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-03 — §8 added [`suggested-search-chips.md`](./suggested-search-chips.md):
+*Last updated: 2026-06-03 — §0/§8 added [`search-recall.md`](./search-recall.md): why `covid19`/`tylenol`
+return too few people — the alphanumeric-tokenization gap (#725/PR #727) and the MeSH concept-resolution-is-ranking-only
+gap (#726), with root causes, fixes, validation, deploy sequencing, and limits. Earlier 2026-06-03 — §8 added [`suggested-search-chips.md`](./suggested-search-chips.md):
 the homepage "Try:" chips were swapped from generic department/topic names to a curated 169-term
 lay-term master (`data/suggested-searches.json`), sampled broadly per page load; the doc captures
 the repeatable refresh method. 2026-06-01 — added [`retracted-publications.md`](./retracted-publications.md)
