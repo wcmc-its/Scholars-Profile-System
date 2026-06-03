@@ -15,7 +15,11 @@ import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
-import { ScopeControl, ScopeNote } from "@/components/search/scope-control";
+import {
+  ScopeControl,
+  ScopeNote,
+  type ConceptInfo,
+} from "@/components/search/scope-control";
 import { buildMeshHref, buildScopeHref } from "./url-helpers";
 import {
   type Scope,
@@ -161,7 +165,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   const { meshOff, meshStrict } = scopeToMeshParams(scope);
   // PLAN R2/R3 — resolved concept label (null = no query→MeSH mapping → no scope
   // row) + the three `?match=` hrefs, shared by all three tabs.
-  const conceptLabel = taxonomyMatch.meshResolution?.name ?? null;
+  const concept: ConceptInfo | null = taxonomyMatch.meshResolution
+    ? {
+        label: taxonomyMatch.meshResolution.name,
+        descriptorUi: taxonomyMatch.meshResolution.descriptorUi,
+        definition: taxonomyMatch.meshResolution.scopeNote,
+      }
+    : null;
   const scopeHrefs = {
     exact: buildScopeHref(sp, "exact"),
     expanded: buildScopeHref(sp, "expanded"),
@@ -493,7 +503,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
                 scope={scope}
-                conceptLabel={conceptLabel}
+                concept={concept}
                 scopeHrefs={scopeHrefs}
               />
             ) : type === "funding" ? (
@@ -503,7 +513,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 sort={sort as FundingSort}
                 filters={fundingFilters}
                 scope={scope}
-                conceptLabel={conceptLabel}
+                concept={concept}
                 scopeHrefs={scopeHrefs}
                 resultPromise={searchFunding({
                   q,
@@ -527,7 +537,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 pi={pi}
                 piMin={piMin}
                 scope={scope}
-                conceptLabel={conceptLabel}
+                concept={concept}
                 scopeHrefs={scopeHrefs}
                 resultPromise={searchPeople({
                   q,
@@ -766,7 +776,7 @@ async function PeopleResults({
   pi,
   piMin,
   scope,
-  conceptLabel,
+  concept,
   scopeHrefs,
   resultPromise,
 }: {
@@ -779,7 +789,7 @@ async function PeopleResults({
   pi: PiFilter | undefined;
   piMin: number;
   scope: Scope;
-  conceptLabel: string | null;
+  concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
   /** Perf streaming — the active full search, awaited here so this component
    *  suspends and the page shell (header + tabs + counts) paints first. */
@@ -791,9 +801,9 @@ async function PeopleResults({
     resolveDeptDivLabels(),
   ]);
   // PLAN R2/R3 — scope control + explanation line above the results toolbar.
-  const scopeRow = conceptLabel ? (
+  const scopeRow = concept ? (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeNote scope={scope} query={q} concept={concept} />
       <ScopeControl active={scope} hrefs={scopeHrefs} />
     </div>
   ) : null;
@@ -1000,7 +1010,7 @@ async function PublicationsResults({
   chipMode,
   broadenHref,
   scope,
-  conceptLabel,
+  concept,
   scopeHrefs,
 }: {
   q: string;
@@ -1030,7 +1040,7 @@ async function PublicationsResults({
   /** PLAN R2/R3 — active scope, resolved concept label (null = no query→MeSH
    *  mapping, so no scope row renders), and the three `?match=` hrefs. */
   scope: Scope;
-  conceptLabel: string | null;
+  concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
 }) {
   const result = await resultPromise;
@@ -1217,10 +1227,10 @@ async function PublicationsResults({
 
   // PLAN R2/R3 — the unified scope control + quiet explanation line replace the
   // §638 MeSH boost banner and the §265 interpretation popover. Rendered only
-  // when a query→MeSH mapping resolved (`conceptLabel`).
-  const scopeRow = conceptLabel ? (
+  // when a query→MeSH mapping resolved (`concept`).
+  const scopeRow = concept ? (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeNote scope={scope} query={q} concept={concept} />
       <ScopeControl active={scope} hrefs={scopeHrefs} />
     </div>
   ) : null;
@@ -1337,7 +1347,7 @@ async function FundingResults({
   sort,
   filters,
   scope,
-  conceptLabel,
+  concept,
   scopeHrefs,
   resultPromise,
 }: {
@@ -1346,16 +1356,16 @@ async function FundingResults({
   sort: FundingSort;
   filters: FundingFilters;
   scope: Scope;
-  conceptLabel: string | null;
+  concept: ConceptInfo | null;
   scopeHrefs: Record<Scope, string>;
   /** Perf streaming — see PeopleResults.resultPromise. */
   resultPromise: Promise<FundingResultData>;
 }) {
   const result = await resultPromise;
   // PLAN R2/R3 — scope control + explanation line (Funding is net-new here).
-  const scopeRow = conceptLabel ? (
+  const scopeRow = concept ? (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeNote scope={scope} query={q} concept={concept} />
       <ScopeControl active={scope} hrefs={scopeHrefs} />
     </div>
   ) : null;
@@ -1524,7 +1534,7 @@ async function FundingResults({
             pageSize={result.pageSize}
             total={result.total}
             filters={filters}
-            conceptLabel={conceptLabel}
+            conceptLabel={concept?.label ?? null}
           />
         )}
         <Pagination
