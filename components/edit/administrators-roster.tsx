@@ -31,6 +31,7 @@ import {
 } from "@/components/edit/add-administrator-dialog";
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import type { DirectoryValue } from "@/components/edit/directory-people-typeahead";
+import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,9 @@ export type AdministratorsRosterProps = {
    * directory fetch settles.
    */
   nameResolutionDegraded: boolean;
+  /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729).
+   *  Optional + default-off: the button is a launcher only; the route enforces all policy. */
+  canImpersonate?: boolean;
 };
 
 /** A person's enriched display fields, in the resolved precedence order. */
@@ -117,6 +121,7 @@ export function AdministratorsRoster({
   isSuperuser,
   actorCwid,
   nameResolutionDegraded,
+  canImpersonate = false,
 }: AdministratorsRosterProps) {
   // Directory rows keyed by CWID; empty until (and unless) the fetch succeeds.
   const [directory, setDirectory] = React.useState<Map<string, DirectoryPerson>>(new Map());
@@ -365,24 +370,31 @@ export function AdministratorsRoster({
               data-testid={`administrators-card-${entry.cwid}`}
             >
               <CardHeader>
-                <CardTitle className="text-base">
-                  <span className="font-medium">{person.name}</span>
-                  {person.title && (
-                    <span className="text-muted-foreground font-normal"> · {person.title}</span>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <CardTitle className="text-base">
+                      <span className="font-medium">{person.name}</span>
+                      {person.title && (
+                        <span className="text-muted-foreground font-normal"> · {person.title}</span>
+                      )}
+                      <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
+                        {entry.cwid}
+                      </span>
+                    </CardTitle>
+                    {person.email && (
+                      <a
+                        href={`mailto:${person.email}`}
+                        className="text-muted-foreground text-xs hover:underline"
+                        data-testid={`administrators-email-${entry.cwid}`}
+                      >
+                        {person.email}
+                      </a>
+                    )}
+                  </div>
+                  {canImpersonate && !isSelf && (
+                    <ViewAsButton targetCwid={entry.cwid} targetName={person.name} />
                   )}
-                  <span className="text-muted-foreground ml-2 text-xs font-normal tabular-nums">
-                    {entry.cwid}
-                  </span>
-                </CardTitle>
-                {person.email && (
-                  <a
-                    href={`mailto:${person.email}`}
-                    className="text-muted-foreground text-xs hover:underline"
-                    data-testid={`administrators-email-${entry.cwid}`}
-                  >
-                    {person.email}
-                  </a>
-                )}
+                </div>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 <table

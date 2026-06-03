@@ -12,6 +12,7 @@
 import Link from "next/link";
 
 import { AdminSubnav } from "@/components/edit/admin-subnav";
+import { ViewAsButton } from "@/components/edit/view-as-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,10 @@ export type ProfilesRosterProps = {
   /** Link back to the viewer's own self-edit surface, forwarded to the
    *  sub-nav; `null` when they have no profile of their own. */
   selfEditHref?: string | null;
+  /** Whether the viewer can launch "View as" (impersonation flag on + superuser, #729). */
+  canImpersonate: boolean;
+  /** The viewer's own cwid — the "View as" button is hidden on their own row. */
+  viewerCwid: string;
 };
 
 const BASE = "/edit/scholars";
@@ -79,6 +84,8 @@ export function ProfilesRoster({
   pendingSlugRequests,
   administratorsTab,
   selfEditHref,
+  canImpersonate,
+  viewerCwid,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min((page + 1) * pageSize, total);
@@ -209,7 +216,7 @@ export function ProfilesRoster({
                 <th className="px-3 py-2 font-medium">Type</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">
-                  <span className="sr-only">Edit</span>
+                  <span className="sr-only">Actions</span>
                 </th>
               </tr>
             </thead>
@@ -238,13 +245,18 @@ export function ProfilesRoster({
                       </Badge>
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <Link
-                        href={`/edit/scholar/${e.cwid}`}
-                        className="text-[var(--apollo-maroon)] underline"
-                        data-testid={`roster-edit-${e.cwid}`}
-                      >
-                        Edit
-                      </Link>
+                      <div className="flex items-center justify-end gap-3">
+                        {canImpersonate && e.cwid !== viewerCwid && (
+                          <ViewAsButton targetCwid={e.cwid} targetName={e.name} />
+                        )}
+                        <Link
+                          href={`/edit/scholar/${e.cwid}`}
+                          className="text-[var(--apollo-maroon)] underline"
+                          data-testid={`roster-edit-${e.cwid}`}
+                        >
+                          Edit
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))

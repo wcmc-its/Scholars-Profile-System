@@ -27,7 +27,10 @@ const {
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect }));
-vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({
+  getEffectiveEditSession: mockGetEditSession,
+  impersonationEnabled: () => false,
+}));
 vi.mock("@/lib/edit/administrators", () => ({
   isAdministratorsTabEnabled: mockIsTabEnabled,
   loadOwnerManagedUnitScope: mockLoadOwnerScope,

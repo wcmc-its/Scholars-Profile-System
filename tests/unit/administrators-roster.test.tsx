@@ -403,3 +403,48 @@ describe("AdministratorsRoster — Phase C write controls", () => {
     expect(screen.queryByTestId("administrators-add-fac001")).toBeNull();
   });
 });
+
+// ── #729 — per-card "View as" launch shortcut gating ─────────────────────────
+
+describe("AdministratorsRoster — View as (#729)", () => {
+  it("renders a View-as button on other people's cards when canImpersonate", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow({ cwid: "fac001" })]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+        canImpersonate
+      />,
+    );
+    expect(screen.getByTestId("view-as-fac001")).toBeTruthy();
+  });
+
+  it("hides the View-as button on the viewer's own card", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow({ cwid: "fac001" })]}
+        isSuperuser
+        actorCwid="fac001"
+        nameResolutionDegraded={false}
+        canImpersonate
+      />,
+    );
+    expect(screen.queryByTestId("view-as-fac001")).toBeNull();
+  });
+
+  it("hides the View-as button when canImpersonate is off (default)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow({ cwid: "fac001" })]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    expect(screen.queryByTestId("view-as-fac001")).toBeNull();
+  });
+});

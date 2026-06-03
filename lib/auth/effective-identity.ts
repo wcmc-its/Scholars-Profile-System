@@ -35,7 +35,7 @@ import { type EditSession, isSuperuser } from "@/lib/auth/superuser";
 const TTL = Number(process.env.IMPERSONATION_TTL_SECONDS ?? 1800);
 
 /** Whether the impersonation feature is enabled at all (default off). */
-function impersonationEnabled(): boolean {
+export function impersonationEnabled(): boolean {
   return process.env.IMPERSONATION_ENABLED === "true";
 }
 

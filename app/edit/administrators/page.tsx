@@ -19,7 +19,7 @@ import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { AdministratorsRoster } from "@/components/edit/administrators-roster";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadUnitAdministratorRoster } from "@/lib/api/administrators-roster";
-import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
+import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
   isAdministratorsTabEnabled,
@@ -128,6 +128,7 @@ export default async function AdministratorsPage() {
           isSuperuser={session.isSuperuser}
           actorCwid={session.cwid}
           nameResolutionDegraded={nameResolutionDegraded}
+          canImpersonate={impersonationEnabled() && session.isSuperuser}
         />
       </main>
     </div>
