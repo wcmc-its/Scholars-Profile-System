@@ -149,6 +149,7 @@ ADRs capture decisions and their rationale; reach for these when a colleague ask
 | [`search.md`](./search.md) | How unified `/search` ranks people, publications, and grants, and what signal backs each rank. |
 | [`search-publications.md`](./search-publications.md) | Example-driven explainer for the Publications tab of `/search`. |
 | [`browse-vs-search.md`](./browse-vs-search.md) | The distinct jobs of the browse pages vs search. |
+| [`suggested-search-chips.md`](./suggested-search-chips.md) | Where the homepage "Try:" suggestion chips come from and **how to refresh them** — the curated lay-term master (`data/suggested-searches.json`), the runtime pool + sampler, and the repeatable method (mine the taxonomy → verify WCM depth → keep the lay-term↔MeSH gap). Reach for this when a chip looks stale or thin, or when it's time to regenerate the list. |
 | [`people-relevance-baseline.md`](./people-relevance-baseline.md) | The frozen baseline behind People-tab relevance (eval-owner signed off). |
 | [`taxonomy-aware-search.md`](./taxonomy-aware-search.md) | Taxonomy/MeSH-aware relevance re-weighting (v2.2). |
 | [`feedback-handling-matrix.md`](./feedback-handling-matrix.md) | How user feedback is routed (and the planned ServiceNow intake). |
@@ -228,7 +229,10 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-01 — added [`retracted-publications.md`](./retracted-publications.md)
+*Last updated: 2026-06-03 — §8 added [`suggested-search-chips.md`](./suggested-search-chips.md):
+the homepage "Try:" chips were swapped from generic department/topic names to a curated 169-term
+lay-term master (`data/suggested-searches.json`), sampled broadly per page load; the doc captures
+the repeatable refresh method. 2026-06-01 — added [`retracted-publications.md`](./retracted-publications.md)
 (§0 triage + §8): why retracted papers don't display and why the nightly PubMed-retraction
 step (#604, PR #625) is required to close the ReCiter re-fetch gap. 2026-05-29 — §10 app-tier autoscaling resolved: `AppStack` now ships a
 target-tracking policy (#596) and the docs are reconciled; the row is narrowed to

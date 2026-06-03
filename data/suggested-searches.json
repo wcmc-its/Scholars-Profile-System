@@ -1,0 +1,1523 @@
+[
+  {
+    "id": 1,
+    "area": "Cancer Biology (General)",
+    "label": "CAR-T cell therapy",
+    "mesh": "Receptors, Chimeric Antigen; Immunotherapy, Adoptive",
+    "wcm_pubs_2023_present": 461,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 2,
+    "area": "Cancer Biology (General)",
+    "label": "Immune checkpoint inhibitors",
+    "mesh": "Immune Checkpoint Inhibitors",
+    "wcm_pubs_2023_present": 1348,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 3,
+    "area": "Cancer Biology (General)",
+    "label": "Bispecific antibodies",
+    "mesh": "Antibodies, Bispecific",
+    "wcm_pubs_2023_present": 303,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 4,
+    "area": "Cancer Biology (General)",
+    "label": "Antibody-drug conjugates",
+    "mesh": "Immunoconjugates",
+    "wcm_pubs_2023_present": 303,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 5,
+    "area": "Cancer Biology (General)",
+    "label": "Oncolytic virotherapy",
+    "mesh": "Oncolytic Virotherapy",
+    "wcm_pubs_2023_present": 114,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 6,
+    "area": "Cancer Biology (General)",
+    "label": "Tumor-infiltrating lymphocytes",
+    "mesh": "Lymphocytes, Tumor-Infiltrating",
+    "wcm_pubs_2023_present": 190,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 7,
+    "area": "Cancer Biology (General)",
+    "label": "Neoantigen cancer vaccines",
+    "mesh": "Cancer Vaccines; Antigens, Neoplasm",
+    "wcm_pubs_2023_present": 1188,
+    "replaces": "",
+    "notes": "Count broadened by 'Antigens, Neoplasm' MeSH; treat as upper bound"
+  },
+  {
+    "id": 8,
+    "area": "Cancer Biology (General)",
+    "label": "Tumor microenvironment",
+    "mesh": "Tumor Microenvironment",
+    "wcm_pubs_2023_present": 972,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 9,
+    "area": "Genetics, Genomics & Precision Medicine",
+    "label": "Liquid biopsy / circulating tumor DNA",
+    "mesh": "Liquid Biopsy; Circulating Tumor DNA",
+    "wcm_pubs_2023_present": 331,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 10,
+    "area": "Cancer Biology (General)",
+    "label": "Minimal residual disease",
+    "mesh": "Neoplasm, Residual",
+    "wcm_pubs_2023_present": 278,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 11,
+    "area": "Cancer Biology (General)",
+    "label": "PARP inhibitors",
+    "mesh": "Poly(ADP-ribose) Polymerase Inhibitors",
+    "wcm_pubs_2023_present": 196,
+    "replaces": "",
+    "notes": "Alt swap for Gynecologic Oncology chip"
+  },
+  {
+    "id": 12,
+    "area": "Cancer Biology (General)",
+    "label": "KRAS inhibitors",
+    "mesh": "Proto-Oncogene Proteins p21(ras), antag./inhib.",
+    "wcm_pubs_2023_present": 149,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 13,
+    "area": "Drug Discovery & Pharmacology",
+    "label": "Targeted protein degradation (PROTAC)",
+    "mesh": "Proteolysis Targeting Chimera",
+    "wcm_pubs_2023_present": 185,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 14,
+    "area": "Genetics, Genomics & Precision Medicine",
+    "label": "Patient-derived organoids",
+    "mesh": "Organoids",
+    "wcm_pubs_2023_present": 265,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 15,
+    "area": "Hematology",
+    "label": "Clonal hematopoiesis",
+    "mesh": "Clonal Hematopoiesis",
+    "wcm_pubs_2023_present": 95,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 16,
+    "area": "Cancer Biology (General)",
+    "label": "Cancer epigenetics / DNA methylation",
+    "mesh": "DNA Methylation; Epigenomics",
+    "wcm_pubs_2023_present": 1186,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 17,
+    "area": "Cell & Molecular Biology",
+    "label": "Ferroptosis",
+    "mesh": "Ferroptosis",
+    "wcm_pubs_2023_present": 62,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 18,
+    "area": "Hematology",
+    "label": "Myelodysplastic syndromes",
+    "mesh": "Myelodysplastic Syndromes",
+    "wcm_pubs_2023_present": 196,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 19,
+    "area": "Single-Cell & Spatial Biology",
+    "label": "Spatial transcriptomics",
+    "mesh": "Spatial Transcriptomics",
+    "wcm_pubs_2023_present": 581,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 20,
+    "area": "Single-Cell & Spatial Biology",
+    "label": "Single-cell RNA sequencing",
+    "mesh": "Single-Cell Gene Expression Analysis",
+    "wcm_pubs_2023_present": 581,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 21,
+    "area": "Gene & Cell Therapy",
+    "label": "CRISPR / gene editing",
+    "mesh": "CRISPR-Cas Systems; Gene Editing",
+    "wcm_pubs_2023_present": 534,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 22,
+    "area": "Gene & Cell Therapy",
+    "label": "Base & prime editing",
+    "mesh": "Gene Editing",
+    "wcm_pubs_2023_present": 175,
+    "replaces": "",
+    "notes": "Overlaps CRISPR/gene editing (#21) on MeSH 'Gene Editing'"
+  },
+  {
+    "id": 23,
+    "area": "Cell & Molecular Biology",
+    "label": "Extracellular vesicles / exosomes",
+    "mesh": "Extracellular Vesicles; Exosomes",
+    "wcm_pubs_2023_present": 203,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 24,
+    "area": "Radiology, Medical Imaging & Medical Physics",
+    "label": "Radiomics",
+    "mesh": "Radiomics",
+    "wcm_pubs_2023_present": 73,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 25,
+    "area": "Infectious Disease & Host Defense",
+    "label": "mRNA vaccines",
+    "mesh": "mRNA Vaccines",
+    "wcm_pubs_2023_present": 148,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 26,
+    "area": "Gene & Cell Therapy",
+    "label": "Antisense oligonucleotides",
+    "mesh": "Oligonucleotides, Antisense",
+    "wcm_pubs_2023_present": 123,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 27,
+    "area": "Gene & Cell Therapy",
+    "label": "siRNA therapeutics",
+    "mesh": "RNA, Small Interfering",
+    "wcm_pubs_2023_present": 123,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 28,
+    "area": "Gene & Cell Therapy",
+    "label": "AAV gene therapy",
+    "mesh": "Dependovirus; Genetic Therapy",
+    "wcm_pubs_2023_present": 120,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 29,
+    "area": "Microbiome Research",
+    "label": "Gut microbiome",
+    "mesh": "Gastrointestinal Microbiome",
+    "wcm_pubs_2023_present": 528,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 30,
+    "area": "Microbiome Research",
+    "label": "Fecal microbiota transplantation",
+    "mesh": "Fecal Microbiota Transplantation",
+    "wcm_pubs_2023_present": 89,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 31,
+    "area": "Gastroenterology, Hepatology & Pancreatic Disease",
+    "label": "Inflammatory bowel disease",
+    "mesh": "Inflammatory Bowel Diseases",
+    "wcm_pubs_2023_present": 680,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 32,
+    "area": "Infectious Disease & Host Defense",
+    "label": "Antimicrobial resistance",
+    "mesh": "Drug Resistance, Microbial",
+    "wcm_pubs_2023_present": 645,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 33,
+    "area": "Metabolic & Endocrine Disease",
+    "label": "GLP-1 receptor agonists",
+    "mesh": "Glucagon-Like Peptide-1 Receptor Agonists",
+    "wcm_pubs_2023_present": 157,
+    "replaces": "",
+    "notes": "Alt swap for Pharmacology chip"
+  },
+  {
+    "id": 34,
+    "area": "Metabolic & Endocrine Disease",
+    "label": "SGLT2 inhibitors",
+    "mesh": "Sodium-Glucose Transporter 2 Inhibitors",
+    "wcm_pubs_2023_present": 75,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 35,
+    "area": "Gastroenterology, Hepatology & Pancreatic Disease",
+    "label": "MASLD / nonalcoholic fatty liver",
+    "mesh": "Non-alcoholic Fatty Liver Disease",
+    "wcm_pubs_2023_present": 208,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 36,
+    "area": "Cardiovascular Disease",
+    "label": "Heart failure with preserved EF (HFpEF)",
+    "mesh": "Heart Failure",
+    "wcm_pubs_2023_present": 110,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 37,
+    "area": "Cardiovascular Disease",
+    "label": "Cardiac amyloidosis",
+    "mesh": "Amyloidosis; Cardiomyopathies",
+    "wcm_pubs_2023_present": 45,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 38,
+    "area": "Cardiovascular Disease",
+    "label": "Transcatheter aortic valve replacement",
+    "mesh": "Transcatheter Aortic Valve Replacement",
+    "wcm_pubs_2023_present": 147,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 39,
+    "area": "Neurodegenerative Disease",
+    "label": "Tauopathy / tau protein",
+    "mesh": "tauopathies; tau Proteins",
+    "wcm_pubs_2023_present": 557,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 40,
+    "area": "Neurodegenerative Disease",
+    "label": "Amyloid-beta / Alzheimer disease",
+    "mesh": "Amyloid beta-Peptides; Alzheimer Disease",
+    "wcm_pubs_2023_present": 1119,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 41,
+    "area": "Neuroscience & Neurology",
+    "label": "Neuroinflammation",
+    "mesh": "Neuroinflammatory Diseases",
+    "wcm_pubs_2023_present": 305,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 42,
+    "area": "Neurodegenerative Disease",
+    "label": "Alpha-synuclein / Parkinson disease",
+    "mesh": "alpha-Synuclein; Parkinson Disease",
+    "wcm_pubs_2023_present": 454,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 43,
+    "area": "Aging & Geroscience",
+    "label": "Cellular senescence / senolytics",
+    "mesh": "Cellular Senescence",
+    "wcm_pubs_2023_present": 122,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 44,
+    "area": "Neuroscience & Neurology",
+    "label": "Deep brain stimulation",
+    "mesh": "Deep Brain Stimulation",
+    "wcm_pubs_2023_present": 95,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 45,
+    "area": "Infectious Disease & Host Defense",
+    "label": "Long COVID",
+    "mesh": "Post-Acute COVID-19 Syndrome",
+    "wcm_pubs_2023_present": 355,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 46,
+    "area": "Global & Public Health",
+    "label": "HIV pre-exposure prophylaxis (PrEP)",
+    "mesh": "Pre-Exposure Prophylaxis",
+    "wcm_pubs_2023_present": 52,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 47,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "In vitro fertilization",
+    "mesh": "Fertilization in Vitro; Reproductive Techniques, Assisted",
+    "wcm_pubs_2023_present": 490,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 48,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "Preimplantation genetic testing",
+    "mesh": "Preimplantation Diagnosis; Genetic Testing",
+    "wcm_pubs_2023_present": 45,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 49,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "Fertility preservation",
+    "mesh": "Fertility Preservation",
+    "wcm_pubs_2023_present": 155,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 50,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "Endometriosis",
+    "mesh": "Endometriosis",
+    "wcm_pubs_2023_present": 58,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 51,
+    "area": "Health Equity & Social Determinants of Health",
+    "label": "Social determinants of health",
+    "mesh": "Social Determinants of Health",
+    "wcm_pubs_2023_present": 323,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 52,
+    "area": "Health Equity & Social Determinants of Health",
+    "label": "Health equity & disparities",
+    "mesh": "Health Equity; Healthcare Disparities",
+    "wcm_pubs_2023_present": 2651,
+    "replaces": "",
+    "notes": "Very broad umbrella term; treat as upper bound"
+  },
+  {
+    "id": 53,
+    "area": "Maternal & Child Health",
+    "label": "Maternal mortality & morbidity",
+    "mesh": "Maternal Mortality",
+    "wcm_pubs_2023_present": 515,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 54,
+    "area": "Substance Use & Addiction Medicine",
+    "label": "Opioid use disorder / overdose",
+    "mesh": "Opioid-Related Disorders; Opiate Overdose",
+    "wcm_pubs_2023_present": 307,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 55,
+    "area": "Health Services Research & Health Policy",
+    "label": "Comparative effectiveness research",
+    "mesh": "Comparative Effectiveness Research",
+    "wcm_pubs_2023_present": 293,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 56,
+    "area": "Health Services Research & Health Policy",
+    "label": "Value-based care",
+    "mesh": "Value-Based Health Care",
+    "wcm_pubs_2023_present": 328,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 57,
+    "area": "Epidemiology & Population Health",
+    "label": "Pharmacoepidemiology",
+    "mesh": "Pharmacoepidemiology",
+    "wcm_pubs_2023_present": 58,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 58,
+    "area": "Digital Health & Telemedicine",
+    "label": "Telemedicine / telehealth",
+    "mesh": "Telemedicine",
+    "wcm_pubs_2023_present": 533,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 59,
+    "area": "Health Services Research & Health Policy",
+    "label": "Patient-reported outcomes",
+    "mesh": "Patient Reported Outcome Measures",
+    "wcm_pubs_2023_present": 1901,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 60,
+    "area": "Biostatistics & Quantitative Health Sciences",
+    "label": "Mendelian randomization",
+    "mesh": "Mendelian Randomization Analysis",
+    "wcm_pubs_2023_present": 66,
+    "replaces": "",
+    "notes": "Matches on text more than a single MeSH descriptor"
+  },
+  {
+    "id": 61,
+    "area": "Genetics, Genomics & Precision Medicine",
+    "label": "Polygenic risk scores",
+    "mesh": "Genetic Risk Score",
+    "wcm_pubs_2023_present": 112,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 62,
+    "area": "Biomedical Informatics",
+    "label": "Electronic health records",
+    "mesh": "Electronic Health Records",
+    "wcm_pubs_2023_present": 741,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 63,
+    "area": "Biomedical Informatics",
+    "label": "Clinical decision support",
+    "mesh": "Decision Support Systems, Clinical",
+    "wcm_pubs_2023_present": 823,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 64,
+    "area": "Biomedical Informatics",
+    "label": "Clinical natural language processing",
+    "mesh": "Natural Language Processing",
+    "wcm_pubs_2023_present": 172,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 65,
+    "area": "Biomedical Informatics",
+    "label": "Real-world evidence",
+    "mesh": "Real-World Data; Real-World Evidence",
+    "wcm_pubs_2023_present": 687,
+    "replaces": "",
+    "notes": "New MeSH terms; matches on text more than descriptor"
+  },
+  {
+    "id": 66,
+    "area": "Biomedical Informatics",
+    "label": "Health information exchange / interoperability",
+    "mesh": "Health Information Exchange",
+    "wcm_pubs_2023_present": 147,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 67,
+    "area": "Biomedical Informatics",
+    "label": "Large language models in medicine",
+    "mesh": "Large Language Models",
+    "wcm_pubs_2023_present": 131,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 68,
+    "area": "Aging & Geroscience",
+    "label": "Frailty",
+    "mesh": "Frailty",
+    "wcm_pubs_2023_present": 207,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 69,
+    "area": "Aging & Geroscience",
+    "label": "Sarcopenia",
+    "mesh": "Sarcopenia",
+    "wcm_pubs_2023_present": 65,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 70,
+    "area": "Autoimmune & Rheumatologic Disease",
+    "label": "Systemic lupus erythematosus",
+    "mesh": "Lupus Erythematosus, Systemic",
+    "wcm_pubs_2023_present": 296,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 71,
+    "area": "Autoimmune & Rheumatologic Disease",
+    "label": "JAK inhibitors",
+    "mesh": "Janus Kinase Inhibitors",
+    "wcm_pubs_2023_present": 113,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 72,
+    "area": "Biochemistry & Biophysics",
+    "label": "Cryo-electron microscopy",
+    "mesh": "Cryoelectron Microscopy",
+    "wcm_pubs_2023_present": 143,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 73,
+    "area": "Biochemistry & Biophysics",
+    "label": "G protein-coupled receptors",
+    "mesh": "Receptors, G-Protein-Coupled",
+    "wcm_pubs_2023_present": 607,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 74,
+    "area": "Bioethics, Medical Humanities & Clinician Wellbeing",
+    "label": "Physician burnout",
+    "mesh": "Burnout, Professional",
+    "wcm_pubs_2023_present": 103,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 75,
+    "area": "Bioethics, Medical Humanities & Clinician Wellbeing",
+    "label": "Advance care planning / goals of care",
+    "mesh": "Advance Care Planning",
+    "wcm_pubs_2023_present": 670,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 76,
+    "area": "Biomedical Engineering",
+    "label": "Tissue engineering & regenerative medicine",
+    "mesh": "Tissue Engineering; Regenerative Medicine",
+    "wcm_pubs_2023_present": 1304,
+    "replaces": "",
+    "notes": "Count broadened by 'Regenerative Medicine'; treat as upper bound"
+  },
+  {
+    "id": 77,
+    "area": "Biomedical Engineering",
+    "label": "Wearable devices & sensors",
+    "mesh": "Wearable Electronic Devices",
+    "wcm_pubs_2023_present": 99,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 78,
+    "area": "Biostatistics & Quantitative Health Sciences",
+    "label": "Causal inference",
+    "mesh": "Causality",
+    "wcm_pubs_2023_present": 194,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 79,
+    "area": "Biostatistics & Quantitative Health Sciences",
+    "label": "Adaptive clinical trial design",
+    "mesh": "Adaptive Clinical Trials as Topic",
+    "wcm_pubs_2023_present": 88,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 80,
+    "area": "Breast Cancer",
+    "label": "Triple-negative breast cancer",
+    "mesh": "Triple Negative Breast Neoplasms",
+    "wcm_pubs_2023_present": 304,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 81,
+    "area": "Breast Cancer",
+    "label": "CDK4/6 inhibitors",
+    "mesh": "Cyclin-Dependent Kinase 4/6, antag./inhib.",
+    "wcm_pubs_2023_present": 91,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 82,
+    "area": "Cardiovascular Disease",
+    "label": "Cardio-oncology / cardiotoxicity",
+    "mesh": "Cardiotoxicity",
+    "wcm_pubs_2023_present": 156,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 83,
+    "area": "Cardiovascular Disease",
+    "label": "Atrial fibrillation ablation",
+    "mesh": "Catheter Ablation; Atrial Fibrillation",
+    "wcm_pubs_2023_present": 169,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 84,
+    "area": "Cell & Molecular Biology",
+    "label": "Autophagy",
+    "mesh": "Autophagy",
+    "wcm_pubs_2023_present": 351,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 85,
+    "area": "Cell & Molecular Biology",
+    "label": "m6A RNA methylation / epitranscriptomics",
+    "mesh": "Epitranscriptomics; RNA Methylation",
+    "wcm_pubs_2023_present": 212,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 86,
+    "area": "Dermatology & Skin Disease",
+    "label": "Atopic dermatitis (dupilumab)",
+    "mesh": "Dermatitis, Atopic",
+    "wcm_pubs_2023_present": 143,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 87,
+    "area": "Melanoma & Skin Cancer",
+    "label": "Melanoma",
+    "mesh": "Melanoma",
+    "wcm_pubs_2023_present": 894,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 88,
+    "area": "Developmental Biology",
+    "label": "Induced pluripotent stem cells",
+    "mesh": "Induced Pluripotent Stem Cells",
+    "wcm_pubs_2023_present": 173,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 89,
+    "area": "Drug Discovery & Pharmacology",
+    "label": "Drug repurposing",
+    "mesh": "Drug Repositioning",
+    "wcm_pubs_2023_present": 107,
+    "replaces": "Pharmacology",
+    "notes": ""
+  },
+  {
+    "id": 90,
+    "area": "Drug Discovery & Pharmacology",
+    "label": "Structure-based drug design",
+    "mesh": "Drug Design",
+    "wcm_pubs_2023_present": 61,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 91,
+    "area": "Emergency & Critical Care Medicine",
+    "label": "Sepsis",
+    "mesh": "Sepsis",
+    "wcm_pubs_2023_present": 689,
+    "replaces": "Emergency Medicine",
+    "notes": ""
+  },
+  {
+    "id": 92,
+    "area": "Emergency & Critical Care Medicine",
+    "label": "ECMO (extracorporeal membrane oxygenation)",
+    "mesh": "Extracorporeal Membrane Oxygenation",
+    "wcm_pubs_2023_present": 162,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 93,
+    "area": "Environmental & Planetary Health",
+    "label": "Air pollution / particulate matter",
+    "mesh": "Air Pollution; Particulate Matter",
+    "wcm_pubs_2023_present": 112,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 94,
+    "area": "Environmental & Planetary Health",
+    "label": "Climate change & health",
+    "mesh": "Climate Change",
+    "wcm_pubs_2023_present": 59,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 95,
+    "area": "Gastroenterology, Hepatology & Pancreatic Disease",
+    "label": "Liver cirrhosis / portal hypertension",
+    "mesh": "Liver Cirrhosis",
+    "wcm_pubs_2023_present": 1267,
+    "replaces": "",
+    "notes": "Count broadened by 'fibrosis' MeSH; treat as upper bound"
+  },
+  {
+    "id": 96,
+    "area": "Gastrointestinal Cancer",
+    "label": "Pancreatic cancer",
+    "mesh": "Pancreatic Neoplasms; Carcinoma, Pancreatic Ductal",
+    "wcm_pubs_2023_present": 663,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 97,
+    "area": "Gastrointestinal Cancer",
+    "label": "Colorectal cancer",
+    "mesh": "Colorectal Neoplasms",
+    "wcm_pubs_2023_present": 852,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 98,
+    "area": "Genetics, Genomics & Precision Medicine",
+    "label": "Whole-genome / exome sequencing",
+    "mesh": "Whole Genome Sequencing; Exome Sequencing",
+    "wcm_pubs_2023_present": 731,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 99,
+    "area": "Genetics, Genomics & Precision Medicine",
+    "label": "Pharmacogenomics",
+    "mesh": "Pharmacogenetics",
+    "wcm_pubs_2023_present": 129,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 100,
+    "area": "Global & Public Health",
+    "label": "Tuberculosis",
+    "mesh": "Tuberculosis",
+    "wcm_pubs_2023_present": 597,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 101,
+    "area": "Global & Public Health",
+    "label": "HIV / AIDS",
+    "mesh": "HIV Infections",
+    "wcm_pubs_2023_present": 1457,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 102,
+    "area": "Gynecologic Oncology",
+    "label": "Ovarian cancer",
+    "mesh": "Ovarian Neoplasms",
+    "wcm_pubs_2023_present": 729,
+    "replaces": "Gynecologic Oncology",
+    "notes": ""
+  },
+  {
+    "id": 103,
+    "area": "Health Economics",
+    "label": "Cost-effectiveness analysis",
+    "mesh": "Cost-Effectiveness Analysis",
+    "wcm_pubs_2023_present": 279,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 104,
+    "area": "Health Services Research & Health Policy",
+    "label": "Patient safety & quality improvement",
+    "mesh": "Patient Safety; Quality Improvement",
+    "wcm_pubs_2023_present": 2732,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 105,
+    "area": "Health Services Research & Health Policy",
+    "label": "Hospital readmissions",
+    "mesh": "Patient Readmission",
+    "wcm_pubs_2023_present": 477,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 106,
+    "area": "Hematology",
+    "label": "Multiple myeloma",
+    "mesh": "Multiple Myeloma",
+    "wcm_pubs_2023_present": 376,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 107,
+    "area": "Hematology",
+    "label": "Acute myeloid leukemia",
+    "mesh": "Leukemia, Myeloid, Acute",
+    "wcm_pubs_2023_present": 571,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 108,
+    "area": "Immunology & Inflammation",
+    "label": "Inflammasome / NLRP3",
+    "mesh": "Inflammasomes",
+    "wcm_pubs_2023_present": 121,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 109,
+    "area": "Immunology & Inflammation",
+    "label": "Regulatory T cells",
+    "mesh": "T-Lymphocytes, Regulatory",
+    "wcm_pubs_2023_present": 232,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 110,
+    "area": "Infectious Disease & Host Defense",
+    "label": "Invasive fungal infections / antifungal resistance",
+    "mesh": "Invasive Fungal Infections; Antifungal Agents",
+    "wcm_pubs_2023_present": 203,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 111,
+    "area": "Infectious Disease & Host Defense",
+    "label": "Clostridioides difficile",
+    "mesh": "Clostridioides difficile",
+    "wcm_pubs_2023_present": 65,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 112,
+    "area": "Lung Cancer",
+    "label": "Non-small cell lung cancer",
+    "mesh": "Carcinoma, Non-Small-Cell Lung",
+    "wcm_pubs_2023_present": 745,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 113,
+    "area": "Lung Cancer",
+    "label": "EGFR-mutant lung cancer (osimertinib)",
+    "mesh": "ErbB Receptors",
+    "wcm_pubs_2023_present": 167,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 114,
+    "area": "Maternal & Child Health",
+    "label": "Preeclampsia",
+    "mesh": "Pre-Eclampsia",
+    "wcm_pubs_2023_present": 145,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 115,
+    "area": "Maternal & Child Health",
+    "label": "Preterm birth",
+    "mesh": "Premature Birth",
+    "wcm_pubs_2023_present": 210,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 116,
+    "area": "Medical Education & Healthcare Workforce",
+    "label": "Simulation-based medical education",
+    "mesh": "Simulation Training",
+    "wcm_pubs_2023_present": 180,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 117,
+    "area": "Medical Education & Healthcare Workforce",
+    "label": "Graduate medical education",
+    "mesh": "Education, Medical, Graduate; Internship and Residency",
+    "wcm_pubs_2023_present": 1238,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 118,
+    "area": "Mental Health & Psychiatry",
+    "label": "Treatment-resistant depression",
+    "mesh": "Depressive Disorder, Treatment-Resistant",
+    "wcm_pubs_2023_present": 319,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 119,
+    "area": "Mental Health & Psychiatry",
+    "label": "Transcranial magnetic stimulation",
+    "mesh": "Transcranial Magnetic Stimulation",
+    "wcm_pubs_2023_present": 83,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 120,
+    "area": "Metabolic & Endocrine Disease",
+    "label": "Obesity",
+    "mesh": "Obesity",
+    "wcm_pubs_2023_present": 1870,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 121,
+    "area": "Metabolic & Endocrine Disease",
+    "label": "Osteoporosis",
+    "mesh": "Osteoporosis",
+    "wcm_pubs_2023_present": 196,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 122,
+    "area": "Musculoskeletal & Orthopedic Medicine",
+    "label": "Osteoarthritis",
+    "mesh": "Osteoarthritis",
+    "wcm_pubs_2023_present": 351,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 123,
+    "area": "Musculoskeletal & Orthopedic Medicine",
+    "label": "Total joint arthroplasty",
+    "mesh": "Arthroplasty, Replacement",
+    "wcm_pubs_2023_present": 605,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 124,
+    "area": "Nephrology & Renal Disease",
+    "label": "Chronic kidney disease",
+    "mesh": "Renal Insufficiency, Chronic",
+    "wcm_pubs_2023_present": 582,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 125,
+    "area": "Nephrology & Renal Disease",
+    "label": "Acute kidney injury",
+    "mesh": "Acute Kidney Injury",
+    "wcm_pubs_2023_present": 340,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 126,
+    "area": "Neuro-Oncology",
+    "label": "Glioblastoma",
+    "mesh": "Glioblastoma; Glioma",
+    "wcm_pubs_2023_present": 583,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 127,
+    "area": "Neuro-Oncology",
+    "label": "Brain metastases",
+    "mesh": "Brain Neoplasms",
+    "wcm_pubs_2023_present": 1005,
+    "replaces": "",
+    "notes": "Maps to broad 'Brain Neoplasms'; treat as upper bound"
+  },
+  {
+    "id": 128,
+    "area": "Neurodegenerative Disease",
+    "label": "Amyotrophic lateral sclerosis (ALS)",
+    "mesh": "Amyotrophic Lateral Sclerosis",
+    "wcm_pubs_2023_present": 145,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 129,
+    "area": "Neurodegenerative Disease",
+    "label": "Multiple sclerosis",
+    "mesh": "Multiple Sclerosis",
+    "wcm_pubs_2023_present": 297,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 130,
+    "area": "Neuroscience & Neurology",
+    "label": "Ischemic stroke / thrombectomy",
+    "mesh": "Ischemic Stroke; Thrombectomy",
+    "wcm_pubs_2023_present": 827,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 131,
+    "area": "Neuroscience & Neurology",
+    "label": "Optogenetics",
+    "mesh": "Optogenetics",
+    "wcm_pubs_2023_present": 59,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 132,
+    "area": "Ophthalmology & Vision Science",
+    "label": "Age-related macular degeneration",
+    "mesh": "Macular Degeneration",
+    "wcm_pubs_2023_present": 140,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 133,
+    "area": "Ophthalmology & Vision Science",
+    "label": "Diabetic retinopathy",
+    "mesh": "Diabetic Retinopathy",
+    "wcm_pubs_2023_present": 158,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 134,
+    "area": "Otolaryngology & Head and Neck Medicine",
+    "label": "Head & neck squamous cell carcinoma",
+    "mesh": "Squamous Cell Carcinoma of Head and Neck",
+    "wcm_pubs_2023_present": 153,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 135,
+    "area": "Otolaryngology & Head and Neck Medicine",
+    "label": "Hearing loss / cochlear implants",
+    "mesh": "Hearing Loss; Cochlear Implants",
+    "wcm_pubs_2023_present": 106,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 136,
+    "area": "Pain Management & Anesthesiology",
+    "label": "Chronic pain",
+    "mesh": "Chronic Pain",
+    "wcm_pubs_2023_present": 633,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 137,
+    "area": "Pain Management & Anesthesiology",
+    "label": "Regional anesthesia",
+    "mesh": "Anesthesia, Conduction; Nerve Block",
+    "wcm_pubs_2023_present": 327,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 138,
+    "area": "Palliative & End-of-Life Care",
+    "label": "Palliative care",
+    "mesh": "Palliative Care; Hospice Care",
+    "wcm_pubs_2023_present": 1004,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 139,
+    "area": "Pathology & Laboratory Medicine",
+    "label": "Digital / computational pathology",
+    "mesh": "Image Interpretation, Computer-Assisted",
+    "wcm_pubs_2023_present": 46,
+    "replaces": "",
+    "notes": "Clean count modest; broader computational/molecular-pathology matches are subheading artifacts"
+  },
+  {
+    "id": 140,
+    "area": "Pediatrics & Neonatology",
+    "label": "Congenital heart disease",
+    "mesh": "Heart Defects, Congenital",
+    "wcm_pubs_2023_present": 302,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 141,
+    "area": "Pediatrics & Neonatology",
+    "label": "Neonatal intensive care",
+    "mesh": "Intensive Care, Neonatal",
+    "wcm_pubs_2023_present": 689,
+    "replaces": "",
+    "notes": "Overlaps Preterm birth (#115)"
+  },
+  {
+    "id": 142,
+    "area": "Primary Care & General Internal Medicine",
+    "label": "Hypertension",
+    "mesh": "Hypertension",
+    "wcm_pubs_2023_present": 2196,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 143,
+    "area": "Primary Care & General Internal Medicine",
+    "label": "Cancer screening",
+    "mesh": "Early Detection of Cancer",
+    "wcm_pubs_2023_present": 1315,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 144,
+    "area": "Prostate & Urologic Cancer",
+    "label": "Prostate cancer",
+    "mesh": "Prostatic Neoplasms",
+    "wcm_pubs_2023_present": 2121,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 145,
+    "area": "Prostate & Urologic Cancer",
+    "label": "PSMA PET imaging",
+    "mesh": "Prostate-Specific Membrane Antigen",
+    "wcm_pubs_2023_present": 196,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 146,
+    "area": "Pulmonary & Critical Care Medicine",
+    "label": "Acute respiratory distress syndrome (ARDS)",
+    "mesh": "Respiratory Distress Syndrome",
+    "wcm_pubs_2023_present": 210,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 147,
+    "area": "Pulmonary & Critical Care Medicine",
+    "label": "Idiopathic pulmonary fibrosis / ILD",
+    "mesh": "Idiopathic Pulmonary Fibrosis; Lung Diseases, Interstitial",
+    "wcm_pubs_2023_present": 368,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 148,
+    "area": "Radiology, Medical Imaging & Medical Physics",
+    "label": "Deep learning in radiology",
+    "mesh": "Deep Learning",
+    "wcm_pubs_2023_present": 332,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 149,
+    "area": "Radiology, Medical Imaging & Medical Physics",
+    "label": "Molecular imaging",
+    "mesh": "Molecular Imaging",
+    "wcm_pubs_2023_present": 1770,
+    "replaces": "",
+    "notes": "Broad descriptor (PET/SPECT/optical); treat as upper bound"
+  },
+  {
+    "id": 150,
+    "area": "Rehabilitation & Disability Medicine",
+    "label": "Spinal cord injury",
+    "mesh": "Spinal Cord Injuries",
+    "wcm_pubs_2023_present": 184,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 151,
+    "area": "Rehabilitation & Disability Medicine",
+    "label": "Stroke rehabilitation",
+    "mesh": "Stroke Rehabilitation; Neurological Rehabilitation",
+    "wcm_pubs_2023_present": 452,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 152,
+    "area": "Research Infrastructure & Scientific Workforce",
+    "label": "Biobanking",
+    "mesh": "Biological Specimen Banks",
+    "wcm_pubs_2023_present": 316,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 153,
+    "area": "Sleep Medicine & Circadian Biology",
+    "label": "Obstructive sleep apnea",
+    "mesh": "Sleep Apnea, Obstructive",
+    "wcm_pubs_2023_present": 167,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 154,
+    "area": "Sleep Medicine & Circadian Biology",
+    "label": "Circadian rhythm",
+    "mesh": "Circadian Rhythm",
+    "wcm_pubs_2023_present": 79,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 155,
+    "area": "Stem Cell & Regenerative Medicine",
+    "label": "Hematopoietic stem cell transplantation",
+    "mesh": "Hematopoietic Stem Cell Transplantation",
+    "wcm_pubs_2023_present": 830,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 156,
+    "area": "Substance Use & Addiction Medicine",
+    "label": "Alcohol use disorder",
+    "mesh": "Alcoholism",
+    "wcm_pubs_2023_present": 355,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 157,
+    "area": "Substance Use & Addiction Medicine",
+    "label": "Smoking cessation",
+    "mesh": "Smoking Cessation; Tobacco Use",
+    "wcm_pubs_2023_present": 325,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 158,
+    "area": "Surgery & Perioperative Medicine",
+    "label": "Robotic surgery",
+    "mesh": "Robotic Surgical Procedures",
+    "wcm_pubs_2023_present": 557,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 159,
+    "area": "Surgery & Perioperative Medicine",
+    "label": "Bariatric surgery",
+    "mesh": "Bariatric Surgery",
+    "wcm_pubs_2023_present": 896,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 160,
+    "area": "Systems Biology",
+    "label": "Metabolomics",
+    "mesh": "Metabolomics; Metabolome",
+    "wcm_pubs_2023_present": 672,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 161,
+    "area": "Systems Biology",
+    "label": "Proteomics",
+    "mesh": "Proteomics; Proteome",
+    "wcm_pubs_2023_present": 797,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 162,
+    "area": "Translational & Clinical Science",
+    "label": "Phase I clinical trials (first-in-human)",
+    "mesh": "Clinical Trials, Phase I as Topic",
+    "wcm_pubs_2023_present": 578,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 163,
+    "area": "Transplantation Medicine",
+    "label": "Kidney transplantation",
+    "mesh": "Kidney Transplantation",
+    "wcm_pubs_2023_present": 540,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 164,
+    "area": "Transplantation Medicine",
+    "label": "Graft-versus-host disease",
+    "mesh": "Graft vs Host Disease",
+    "wcm_pubs_2023_present": 322,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 165,
+    "area": "Urology & Men's Health",
+    "label": "Kidney stones / nephrolithiasis",
+    "mesh": "Kidney Calculi; Nephrolithiasis",
+    "wcm_pubs_2023_present": 64,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 166,
+    "area": "Urology & Men's Health",
+    "label": "Bladder cancer",
+    "mesh": "Urinary Bladder Neoplasms",
+    "wcm_pubs_2023_present": 1020,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 167,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "Polycystic ovary syndrome (PCOS)",
+    "mesh": "Polycystic Ovary Syndrome",
+    "wcm_pubs_2023_present": 73,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 168,
+    "area": "Women's Health & Reproductive Medicine",
+    "label": "Menopause / hormone therapy",
+    "mesh": "Menopause; Hormone Replacement Therapy",
+    "wcm_pubs_2023_present": 333,
+    "replaces": "",
+    "notes": ""
+  },
+  {
+    "id": 169,
+    "area": "Implementation Science",
+    "label": "Implementation science",
+    "mesh": "Implementation Science",
+    "wcm_pubs_2023_present": 542,
+    "replaces": "Implementation Science",
+    "notes": "Already a homepage chip — clean MeSH + strong volume, keep as-is"
+  }
+]
