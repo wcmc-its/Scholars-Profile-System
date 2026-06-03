@@ -891,6 +891,18 @@ export class AppStack extends Stack {
         // in lib/profile-url.ts. Deployed manually (cdk deploy --exclusively
         // Sps-App-<env>); the CD pipeline only re-rolls the image.
         PROFILE_CANONICAL: "root",
+        // #443 INTERIM superuser allowlist. The live LDAP superuser check
+        // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
+        // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
+        // + WCM firewall are pending the network team, the same gap that blocks
+        // ETL #443. SCHOLARS_SUPERUSER_GROUP_CN is therefore intentionally left
+        // UNSET (setting it would make every authenticated user's session probe
+        // hang ~10s on the LDAPS connect timeout). This comma-separated CWID
+        // allowlist confers the superuser tier WITHOUT LDAP so a tightly-scoped
+        // operator set can use the admin features (incl. #637 "View as") now.
+        // REMOVE this and set SCHOLARS_SUPERUSER_GROUP_CN once VPC->WCM LDAPS
+        // routing lands. CWIDs are directory usernames, not secrets.
+        SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),

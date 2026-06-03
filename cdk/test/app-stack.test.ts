@@ -1444,6 +1444,17 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
       });
 
+      it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
+        // The live LDAP superuser check can't reach the WCM directory yet, so
+        // the allowlist confers the tier without LDAP and the group CN stays
+        // unset (else every session probe hangs on the LDAPS connect timeout).
+        const env = appContainerEnv();
+        expect(env.get("SCHOLARS_SUPERUSER_CWIDS")).toBe(
+          "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        );
+        expect(env.has("SCHOLARS_SUPERUSER_GROUP_CN")).toBe(false);
+      });
+
       it("the task role has zero AWS managed policies attached", () => {
         // The grant lands as an inline AWS::IAM::Policy resource attached
         // to the role; the role itself must not import a managed policy.

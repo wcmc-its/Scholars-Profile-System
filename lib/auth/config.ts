@@ -222,3 +222,27 @@ export interface SuperuserConfig {
 export function getSuperuserConfig(): SuperuserConfig {
   return { groupCn: optionalEnv("SCHOLARS_SUPERUSER_GROUP_CN") };
 }
+
+/**
+ * Interim superuser allowlist (#443). The SPS VPC has no route to the WCM
+ * directory yet (TGW + WCM firewall pending), so the live LDAP group check in
+ * `isSuperuser()` cannot succeed in any deployed env. `SCHOLARS_SUPERUSER_CWIDS`
+ * — a comma-separated CWID list — confers the superuser tier without LDAP, so a
+ * tightly-scoped operator set can use the admin features (incl. #637 "View as")
+ * in the meantime. Lower-cased + de-duplicated for case-insensitive matching;
+ * empty (the default) is a no-op, leaving the LDAP group as the sole source of
+ * truth. REMOVE the env var once VPC->WCM LDAPS routing lands and
+ * `SCHOLARS_SUPERUSER_GROUP_CN` is set.
+ */
+export function getSuperuserAllowlist(): string[] {
+  const raw = optionalEnv("SCHOLARS_SUPERUSER_CWIDS");
+  if (!raw) return [];
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0),
+    ),
+  ];
+}

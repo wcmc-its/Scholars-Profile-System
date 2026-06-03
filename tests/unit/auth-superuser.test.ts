@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   process.env.SCHOLARS_SUPERUSER_GROUP_CN = GROUP_CN;
   delete process.env.SCHOLARS_LDAP_SEARCH_BASE;
+  delete process.env.SCHOLARS_SUPERUSER_CWIDS;
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
@@ -116,6 +117,42 @@ describe("isSuperuser", () => {
   it("is false and never touches LDAP for an empty CWID", async () => {
     expect(await isSuperuser("")).toBe(false);
     expect(mockedOpenLdap).not.toHaveBeenCalled();
+  });
+
+  // Interim allowlist (#443) — confers superuser without LDAP while the SPS VPC
+  // has no route to the WCM directory.
+  describe("SCHOLARS_SUPERUSER_CWIDS allowlist", () => {
+    it("is true for a listed CWID without touching LDAP", async () => {
+      process.env.SCHOLARS_SUPERUSER_CWIDS = "paa2013,drw2004,mrj4001";
+      expect(await isSuperuser("drw2004")).toBe(true);
+      expect(mockedOpenLdap).not.toHaveBeenCalled();
+    });
+
+    it("matches case-insensitively (assertion CWID casing varies)", async () => {
+      process.env.SCHOLARS_SUPERUSER_CWIDS = "paa2013, drw2004 ,MRJ4001";
+      expect(await isSuperuser("Mrj4001")).toBe(true);
+      expect(await isSuperuser("PAA2013")).toBe(true);
+      expect(mockedOpenLdap).not.toHaveBeenCalled();
+    });
+
+    it("falls through to the LDAP group check for a CWID not on the list", async () => {
+      process.env.SCHOLARS_SUPERUSER_CWIDS = "paa2013";
+      mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(1))));
+      expect(await isSuperuser("abc1234")).toBe(true);
+      expect(mockedOpenLdap).toHaveBeenCalledTimes(1);
+    });
+
+    it("is a no-op when unset — behavior is the pure LDAP check", async () => {
+      mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
+      expect(await isSuperuser("abc1234")).toBe(false);
+      expect(mockedOpenLdap).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not grant a listed CWID when the value is blank/whitespace", async () => {
+      process.env.SCHOLARS_SUPERUSER_CWIDS = " , ";
+      mockedOpenLdap.mockResolvedValue(asClient(fakeClient(async () => entries(0))));
+      expect(await isSuperuser("paa2013")).toBe(false);
+    });
   });
 });
 
