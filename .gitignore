@@ -82,6 +82,8 @@ data/*
 !data/seo/
 data/seo/*
 !data/seo/rank-basket.json
+# The rank-stratified name cohort (#684) is the same kind of fixed instrument.
+!data/seo/rank-cohort-basket.json
 # Same rationale for the rival-benchmark instrument: the generated rival basket
 # plus its two hand-authored inputs are committed and reviewed; snapshots stay ignored.
 !data/seo/rival-basket.json

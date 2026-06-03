@@ -5,6 +5,7 @@
  *   npm run seo:track                           # live run (needs SERPAPI_KEY)
  *   npm run seo:track -- --type topical         # only the topical queries
  *   npm run seo:track -- --limit 5 --no-cache   # cheap fresh test run
+ *   npm run seo:track -- --capture-top 5        # also store top-5 organic per row
  *
  * One SerpAPI search per query covers ALL targets at once — the new Scholars
  * host and the legacy VIVO host are located in the same organic-results list —
@@ -47,6 +48,7 @@ interface Args {
   delayMs: number;
   maxPerHour: number;
   noCache: boolean;
+  captureTop: number;
   out: string | null;
 }
 
@@ -70,6 +72,9 @@ function parseArgs(argv: string[]): Args {
     // Higher tiers: pass e.g. --max-per-hour 1000 (Developer) / 3000 (Production).
     maxPerHour: Number(get("--max-per-hour") ?? 200),
     noCache: argv.includes("--no-cache"),
+    // 0 = off (default; snapshots stay lean). >0 stores the top-N organic
+    // {position,title,link} per row from the SAME response — no extra searches.
+    captureTop: Number(get("--capture-top") ?? 0),
     out: get("--out") ?? null,
   };
 }
@@ -217,10 +222,23 @@ async function main(): Promise<void> {
         matchGroup: q.matchGroup,
         hIndex: q.hIndex,
         academicAge: q.academicAge,
+        rankTier: q.rankTier,
+        slug: q.slug,
         placements: basket.targets.map((t) => ({
           targetKey: t.key,
           ...findDomainRank(res.organic_results, t.hosts, t.pathPrefix),
         })),
+        // Opt-in (--capture-top N): the top-N organic results from this SAME
+        // response, so the cohort report can show which page wins a name search
+        // and classify a no-WCM-result row. Omitted entirely when capture is off.
+        ...(args.captureTop > 0
+          ? {
+              topResults: (res.organic_results ?? [])
+                .filter((r) => typeof r.position === "number")
+                .slice(0, args.captureTop)
+                .map((r) => ({ position: r.position, title: r.title, link: r.link })),
+            }
+          : {}),
         aiOverview: {
           status: aiOverviewPerTarget[0]?.status ?? "absent",
           placements: aiOverviewPerTarget.map((p) => ({

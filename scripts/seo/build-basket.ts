@@ -1,15 +1,27 @@
 /**
  * Build a Google-rank query basket from the live corpus.
  *
- * Two modes:
+ * Three modes:
  *   npm run seo:basket                       # CUTOVER basket (default; unchanged)
  *   npm run seo:basket -- --scholars 50
  *   npm run seo:basket -- --topic-variant plain --scholars 0
  *   npm run seo:basket -- --mode rivals      # RIVAL-institution benchmark basket
  *   npm run seo:basket -- --mode rivals --expert-templates "{topic} researcher,{topic} expert"
+ *   npm run seo:basket -- --mode cohort      # RANK-STRATIFIED name-query cohort (#684)
+ *   npm run seo:basket -- --mode cohort --per-rank 12
  *
- *   cutover → data/seo/rank-basket.json   (VIVO → Scholars before/after)
- *   rivals  → data/seo/rival-basket.json  (WCM vs peer profiles platforms)
+ *   cutover → data/seo/rank-basket.json         (VIVO → Scholars before/after)
+ *   rivals  → data/seo/rival-basket.json        (WCM vs peer profiles platforms)
+ *   cohort  → data/seo/rank-cohort-basket.json  (does the profile win the name search, by rank?)
+ *
+ * COHORT queries (#684 — "the buried-profile problem is rank-dependent"):
+ *  - BRANDED — "<scholar name> weill cornell" for a rank-stratified sample
+ *    (Instructor / Assistant / Associate / full Professor, parsed from
+ *    primary_title), N per tier. The top-30-by-publication cutover basket is
+ *    senior-skewed; this samples across seniority so the name-query story is
+ *    fair institution-wide, not just for the most-published. Each row carries
+ *    `rankTier` so seo:cohort segments rank by tier. Targets add a `wcm-any`
+ *    umbrella (every WCM host) so a row with NO WCM result at all is flagged.
  *
  * CUTOVER queries (the existing instrument):
  *  - TOPICAL — ReciterAI topic labels, "plain" + "brand" (+ "weill cornell").
@@ -36,6 +48,7 @@ import type { Basket, BasketQuery, BasketTarget } from "@/lib/seo/rank-basket";
 const DATA_DIR = path.resolve(process.cwd(), "data", "seo");
 const CUTOVER_OUT = path.join(DATA_DIR, "rank-basket.json");
 const RIVAL_OUT = path.join(DATA_DIR, "rival-basket.json");
+const COHORT_OUT = path.join(DATA_DIR, "rank-cohort-basket.json");
 const FLAGSHIP_FILE = path.join(DATA_DIR, "flagship-queries.json");
 const MATCHED_FILE = path.join(DATA_DIR, "matched-researchers.json");
 
@@ -77,14 +90,40 @@ const RIVAL_TARGETS: BasketTarget[] = [
   { key: "einstein", label: "Einstein", hosts: ["einstein.elsevierpure.com"], institution: "Einstein", platform: "Elsevier Pure", surfaceType: "research-profiles" },
 ];
 
+/**
+ * COHORT targets (#684). Same `new`/`vivo` profile targets as cutover, plus the
+ * `wcm-clinical` bio surface (the recurring junior-faculty competitor) and a
+ * `wcm-any` umbrella whose hosts suffix-match EVERY WCM property — so a branded
+ * row where `wcm-any` has no placement is genuinely "no WCM result at all" (an
+ * indexing gap or name-ambiguity case worth a separate look), not just a profile
+ * that lost to one of the person's own pages. The new Scholars host is firewalled
+ * pre-cutover (#502/#125), so `new` is 0 by construction; the legacy `vivo`
+ * profile is the surface that ranks today and that the new host inherits via 301.
+ */
+const COHORT_TARGETS: BasketTarget[] = [
+  { key: "new", label: "Scholars (new)", hosts: ["scholars.weill.cornell.edu"], institution: "WCM", surfaceType: "research-profiles" },
+  { key: "vivo", label: "VIVO (legacy)", hosts: ["vivo.weill.cornell.edu", "vivo.med.cornell.edu"], institution: "WCM", surfaceType: "research-profiles" },
+  { key: "wcm-clinical", label: "WCM clinical", hosts: ["weillcornell.org"], institution: "WCM", surfaceType: "clinical" },
+  { key: "wcm-any", label: "Any WCM page", hosts: ["weill.cornell.edu", "med.cornell.edu", "weillcornell.org"], institution: "WCM" },
+];
+
+/**
+ * Rank tiers parsed from `scholar.primary_title`, ordered junior → senior. The
+ * matcher is order-sensitive: "assistant/associate professor" must be tested
+ * before the bare "professor" fallback. "Other" titles (research scientist,
+ * lecturer, dean-only, etc.) are excluded from the stratified sample.
+ */
+const RANK_TIERS = ["Instructor", "Assistant Professor", "Associate Professor", "Professor (full)"] as const;
+
 const DEFAULT_EXPERT_TEMPLATES = ["{topic} researcher", "{topic} expert", "leading {topic} researcher"];
 
-type Mode = "cutover" | "rivals";
+type Mode = "cutover" | "rivals" | "cohort";
 type TopicVariant = "plain" | "brand" | "both";
 
 interface Args {
   mode: Mode;
   scholars: number;
+  perRank: number;
   topicVariant: TopicVariant;
   brandSuffix: string;
   expertTemplates: string[];
@@ -106,8 +145,8 @@ function parseArgs(argv: string[]): Args {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   const mode = (get("--mode") ?? "cutover") as Mode;
-  if (!["cutover", "rivals"].includes(mode)) {
-    throw new Error(`--mode must be cutover|rivals, got ${mode}`);
+  if (!["cutover", "rivals", "cohort"].includes(mode)) {
+    throw new Error(`--mode must be cutover|rivals|cohort, got ${mode}`);
   }
   const variant = (get("--topic-variant") ?? "both") as TopicVariant;
   if (!["plain", "brand", "both"].includes(variant)) {
@@ -117,13 +156,15 @@ function parseArgs(argv: string[]): Args {
   const expertTemplates = tplRaw
     ? tplRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : DEFAULT_EXPERT_TEMPLATES;
+  const defaultOut = mode === "rivals" ? RIVAL_OUT : mode === "cohort" ? COHORT_OUT : CUTOVER_OUT;
   return {
     mode,
     scholars: Number(get("--scholars") ?? 30),
+    perRank: Number(get("--per-rank") ?? 8),
     topicVariant: variant,
     brandSuffix: get("--brand-suffix") ?? "weill cornell",
     expertTemplates,
-    out: get("--out") ?? (mode === "rivals" ? RIVAL_OUT : CUTOVER_OUT),
+    out: get("--out") ?? defaultOut,
   };
 }
 
@@ -175,6 +216,70 @@ async function scholarQueries(limit: number, brandSuffix: string): Promise<Baske
     slug: r.slug,
     label: r.full_name,
   }));
+}
+
+// ── cohort-mode queries (#684 rank-stratified name search) ────────────────
+
+/**
+ * A rank-stratified sample of `perRank` scholars per tier. Inclusion: active,
+ * not-deleted, AND has ≥1 publication_topic (so the profile has indexable
+ * content — an empty stub ranking or not is uninformative). Tier is derived
+ * from primary_title with the same order-sensitive CASE the report uses; rows
+ * are ordered by cwid ASC within tier for a deterministic, committed-diff-clean
+ * selection. Returns branded "<name> weill cornell" queries tagged with rankTier.
+ */
+async function cohortQueries(perRank: number, brandSuffix: string): Promise<BasketQuery[]> {
+  if (perRank <= 0) return [];
+  const rows = await prisma.$queryRaw<
+    Array<{ cwid: string; full_name: string; slug: string; rank_tier: string }>
+  >`
+    SELECT cwid, full_name, slug, rank_tier
+    FROM (
+      SELECT cwid, full_name, slug, rank_tier,
+             ROW_NUMBER() OVER (PARTITION BY rank_tier ORDER BY cwid ASC) AS rn
+      FROM (
+        SELECT s.cwid, s.full_name, s.slug,
+          CASE
+            WHEN LOWER(s.primary_title) LIKE '%instructor%'          THEN 'Instructor'
+            WHEN LOWER(s.primary_title) LIKE '%assistant professor%' THEN 'Assistant Professor'
+            WHEN LOWER(s.primary_title) LIKE '%associate professor%' THEN 'Associate Professor'
+            WHEN LOWER(s.primary_title) LIKE '%professor%'           THEN 'Professor (full)'
+            ELSE 'Other'
+          END AS rank_tier
+        FROM scholar s
+        WHERE s.deleted_at IS NULL AND s.status = 'active'
+          AND EXISTS (SELECT 1 FROM publication_topic pt WHERE pt.cwid = s.cwid)
+      ) tiered
+      WHERE rank_tier <> 'Other'
+    ) ranked
+    WHERE rn <= ${perRank}
+    ORDER BY FIELD(rank_tier, 'Instructor', 'Assistant Professor', 'Associate Professor', 'Professor (full)'), rn
+  `;
+  return rows.map((r) => ({
+    id: `cohort:${r.cwid}`,
+    query: `${r.full_name} ${brandSuffix}`,
+    type: "branded" as const,
+    cwid: r.cwid,
+    slug: r.slug,
+    rankTier: r.rank_tier,
+    label: r.full_name,
+  }));
+}
+
+async function buildCohort(args: Args): Promise<Basket> {
+  const branded = await cohortQueries(args.perRank, args.brandSuffix);
+  const byTier = branded.reduce<Record<string, number>>((acc, q) => {
+    acc[q.rankTier ?? "?"] = (acc[q.rankTier ?? "?"] ?? 0) + 1;
+    return acc;
+  }, {});
+  const tierSummary = RANK_TIERS.map((t) => `${byTier[t] ?? 0} ${t}`).join(", ");
+  return {
+    generatedAt: new Date().toISOString(),
+    source: `rank-stratified name cohort (#684) — ${branded.length} branded across ${RANK_TIERS.length} tiers (${tierSummary}); inclusion: active scholar with ≥1 publication_topic`,
+    targets: COHORT_TARGETS,
+    searchDefaults: SEARCH_DEFAULTS,
+    queries: branded,
+  };
 }
 
 // ── rivals-mode queries ───────────────────────────────────────────────────
@@ -285,7 +390,12 @@ async function buildRivals(args: Args): Promise<Basket> {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const basket = args.mode === "rivals" ? await buildRivals(args) : await buildCutover(args);
+  const basket =
+    args.mode === "rivals"
+      ? await buildRivals(args)
+      : args.mode === "cohort"
+        ? await buildCohort(args)
+        : await buildCutover(args);
 
   await fs.mkdir(path.dirname(args.out), { recursive: true });
   await fs.writeFile(args.out, JSON.stringify(basket, null, 2) + "\n", "utf8");

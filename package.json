@@ -74,7 +74,8 @@
     "seo:standings": "tsx scripts/seo/standings-rank.ts",
     "seo:enrich-matched": "tsx scripts/seo/enrich-matched.ts",
     "seo:llm-rank": "tsx scripts/seo/llm-rank.ts",
-    "seo:llm-mention": "tsx scripts/seo/llm-mention.ts"
+    "seo:llm-mention": "tsx scripts/seo/llm-mention.ts",
+    "seo:cohort": "tsx scripts/seo/cohort-report.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.80",
