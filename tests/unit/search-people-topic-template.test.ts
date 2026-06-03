@@ -56,6 +56,11 @@ vi.mock("@/lib/search", () => ({
   PEOPLE_PROMINENCE_GRANT_WEIGHT: 0.5,
   PEOPLE_FULL_TIME_FACULTY_PERSON_TYPE: "full_time_faculty",
   PUBLICATION_FIELD_BOOSTS: ["title^1"],
+  // #726 — searchPeople now dereferences these on the topic-attribution path.
+  MESH_ADMIT_WEIGHT: { exact: 3, "anchored-entry": 1.5, entry: 0.7 },
+  MESH_ATTRIBUTION_WEIGHT: { exact: 1.5, "anchored-entry": 1.3, entry: 1.15 },
+  MESH_ESCALATION_THRESHOLD: 50,
+  MESH_MIN_MATCHED_FORM_LEN: 4,
   searchClient: () => ({
     async search(req: { body: Record<string, unknown> }) {
       capturedBodies.push(req.body);

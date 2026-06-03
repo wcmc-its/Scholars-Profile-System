@@ -38,6 +38,10 @@ import {
   type RankingSources,
 } from "@/lib/api/search-ranking";
 import {
+  MESH_ADMIT_WEIGHT,
+  MESH_ATTRIBUTION_WEIGHT,
+  MESH_ESCALATION_THRESHOLD,
+  MESH_MIN_MATCHED_FORM_LEN,
   PEOPLE_ABSTRACTS_BOOST,
   PEOPLE_DEPT_LEADERSHIP_CHAIR_WEIGHT,
   PEOPLE_DEPT_LEADERSHIP_CHIEF_WEIGHT,
@@ -55,6 +59,7 @@ import {
   PUBLICATIONS_INDEX,
   PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
+  type MeshMatchTier,
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
@@ -479,6 +484,18 @@ export async function searchPeople(opts: {
    * boost function is simply omitted then.
    */
   meshDescendantUis?: string[];
+  /**
+   * #726 — match-type signals for the MeSH concept-admission escalation,
+   * derived by the caller from the resolved `MeshResolution`. `meshMatchTier`
+   * grades trust (exact > anchored-entry > entry) to weight admission + the
+   * attribution boost; `meshAmbiguous` / `meshMatchedFormLength` gate the
+   * sparse-escalation floor (don't escalate on an ambiguous or ultra-short
+   * resolution). Absent ⇒ no concept-admission escalation (boost-only — today's
+   * behaviour).
+   */
+  meshMatchTier?: MeshMatchTier;
+  meshAmbiguous?: boolean;
+  meshMatchedFormLength?: number;
   /**
    * PLAN R5 / handoff item 3 — the user-facing match scope. Drives the
    * concept-only result-SET gate: when `concept`, an additional
@@ -950,6 +967,86 @@ export async function searchPeople(opts: {
     queryFilter.push({ terms: { publicationMeshUi: meshDescendantUis } });
   }
 
+  // Issue #726 — match-type tier (set by the caller from the resolved
+  // descriptor's confidence + curated-anchor count). Drives the graduated
+  // attribution weight below and the concept-admission boost. Defaults to
+  // `exact` so an un-threaded caller keeps the pre-#726 flat ×1.5 attribution.
+  const meshTier: MeshMatchTier = opts.meshMatchTier ?? "exact";
+
+  // Issue #726 — escalate-on-sparse concept admission (recall floor, not a
+  // maximizer). When the topic query resolved to a TRUSTWORTHY descriptor
+  // (unambiguous, matched form >= MESH_MIN_MATCHED_FORM_LEN) and the lexical
+  // result is sparse (< MESH_ESCALATION_THRESHOLD), OR-in a
+  // `terms { publicationMeshUi }` admission so concept-tagged scholars surface
+  // on an otherwise-thin page (e.g. tylenol → acetaminophen authors). The
+  // decision is COUNT-GATED by a cheap size:0 pre-count of the lexical
+  // admission so common queries keep count == lexical and aren't diluted; the
+  // two-pass cost is paid only on the eligible/sparse path. The floor is
+  // ambiguity OR an ultra-short matched form — NOT anchor status — so an
+  // unanchored entry-term still escalates (the tylenol 0→N recall win).
+  //
+  // EXCLUDES `concept` scope: that scope already pushes the SAME
+  // `terms { publicationMeshUi }` clause into the always-on `queryFilter`
+  // above (the #718 result-SET gate), so every surviving doc carries the tag.
+  // OR-ing it into the topic `must` would then satisfy minimum_should_match for
+  // every doc and make the lexical clause optional — silently widening the
+  // precision gate from "lexical ∩ tagged" to "all tagged", the opposite of
+  // what concept scope promises. Under `concept` the gate is the admission, so
+  // escalation is both redundant and harmful (and the pre-count is wasted).
+  const meshConceptEligible =
+    applyTopicTemplate &&
+    opts.scope !== "concept" &&
+    meshDescendantUis.length > 0 &&
+    !opts.meshAmbiguous &&
+    (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN;
+  if (meshConceptEligible) {
+    const preCount = await searchClient().search({
+      index: PEOPLE_INDEX,
+      body: {
+        size: 0,
+        track_total_hits: true,
+        query: { bool: { must, filter: queryFilter } },
+      } as object,
+    });
+    const lexicalTotal =
+      (preCount.body as unknown as { hits: { total: { value: number } } })
+        .hits.total.value;
+    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) {
+      // applyTopicTemplate ⇒ queryBranch IS the topic-shape body (the name /
+      // dept / hybrid arms are mutually exclusive shapes), so its `bool.must`
+      // is the lexical clause. Wrap it in a should that ALSO admits
+      // concept-tagged docs. A concept-only doc (no lexical hit) scores ONLY
+      // this terms clause's constant boost (MESH_ADMIT_WEIGHT[tier]); a genuine
+      // lexical hit scores BM25 over the high-evidence topic fields
+      // (publicationTitles^6, publicationMesh^4, …), which empirically runs well
+      // above the admit boosts (entry 0.7 … exact 3), so lexical sorts on top
+      // and the admit weights only order the concept-only tail by match-type
+      // trust (see docs/search-recall.md; the runtime order check is the gate).
+      // Mutated AFTER the pre-count's request was dispatched, so the count above
+      // stays lexical; `must` references this object, so the count-only badge
+      // below and the full search share the admitted set.
+      const topicBool = (
+        queryBranch as { bool: { must: Record<string, unknown>[] } }
+      ).bool;
+      topicBool.must = [
+        {
+          bool: {
+            should: [
+              ...topicBool.must,
+              {
+                terms: {
+                  publicationMeshUi: meshDescendantUis,
+                  boost: MESH_ADMIT_WEIGHT[meshTier],
+                },
+              },
+            ],
+            minimum_should_match: 1,
+          },
+        },
+      ];
+    }
+  }
+
   // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
   // the query predicate (must + always-on filters); scoring, post_filter,
   // aggs, and highlight don't change it, so a bare size:0 query returns the
@@ -1091,8 +1188,8 @@ export async function searchPeople(opts: {
     // Issue #310 / SPEC §9 — `attributionBoostFired` telemetry. Counts docs in
     // the scored set (must + always-on filters, i.e. the function_score scope,
     // before post_filter) that ALSO carry a descendant UI. `doc_count > 0`
-    // means the ×1.5 boost moved at least one result. Only added when the
-    // topic template is active AND the query resolved to a descriptor.
+    // means the attribution boost (#726-graduated) moved at least one result.
+    // Only added when the topic template is active AND the query resolved.
     ...(applyTopicTemplate && meshDescendantUis.length > 0
       ? {
           attributionMatch: {
@@ -1115,9 +1212,10 @@ export async function searchPeople(opts: {
   // composed via `score_mode: multiply`; a function whose filter doesn't match
   // a doc contributes a factor of 1, so they compose cleanly.
   //
-  //   1. Attribution: ×1.5 for scholars whose publicationMeshUi intersects the
-  //      resolved descriptor's descendantUis (the §0.3 Phase-2A mechanism).
-  //      Omitted when the query didn't resolve to a descriptor.
+  //   1. Attribution: MESH_ATTRIBUTION_WEIGHT[tier] (#726: exact 1.5 /
+  //      anchored-entry 1.3 / entry 1.15) for scholars whose publicationMeshUi
+  //      intersects the resolved descriptor's descendantUis (the §0.3 Phase-2A
+  //      mechanism). Omitted when the query didn't resolve to a descriptor.
   //   2. Productive-author: ×1.2 for >= 20 pubs, ×1.1 for [5, 20). Mutually
   //      exclusive ranges so a prolific author gets 1.2, not 1.1×1.2.
   //   3. Sparse decay (§6.1.5): ×0.7 for scholars lacking ALL of a non-trivial
@@ -1129,7 +1227,10 @@ export async function searchPeople(opts: {
     if (meshDescendantUis.length > 0) {
       scoreFunctions.push({
         filter: { terms: { publicationMeshUi: meshDescendantUis } },
-        weight: 1.5,
+        // Issue #726 — graduate the former flat ×1.5 by match-type trust
+        // (exact 1.5 / anchored-entry 1.3 / entry 1.15). Always-on when a
+        // descriptor resolved, independent of the escalation gate above.
+        weight: MESH_ATTRIBUTION_WEIGHT[meshTier],
       });
     }
     scoreFunctions.push({

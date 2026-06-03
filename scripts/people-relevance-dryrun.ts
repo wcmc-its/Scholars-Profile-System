@@ -27,6 +27,7 @@
  *     npx tsx scripts/people-relevance-dryrun.ts                 # v3
  */
 import { searchPeople } from "@/lib/api/search";
+import { meshMatchTier, type MeshMatchTier } from "@/lib/search";
 import {
   classifyPeopleQuery,
   type PeopleQueryShape,
@@ -66,16 +67,33 @@ const MODE: "legacy" | "v3" =
 async function classify(
   query: string,
   sets: Awaited<ReturnType<typeof getPeopleClassifierSets>>,
-): Promise<{ shape: PeopleQueryShape; meshDescendantUis?: string[] }> {
+): Promise<{
+  shape: PeopleQueryShape;
+  meshDescendantUis?: string[];
+  meshMatchTier?: MeshMatchTier;
+  meshAmbiguous?: boolean;
+  meshMatchedFormLength?: number;
+}> {
   const taxonomy = await matchQueryToTaxonomy(query);
+  const res = taxonomy.meshResolution;
   const shape = classifyPeopleQuery({
     query,
-    meshResolved: taxonomy.meshResolution != null,
+    meshResolved: res != null,
     knownCwids: sets.cwids,
     knownSurnames: sets.surnames,
     knownDepartments: sets.departments,
   });
-  return { shape, meshDescendantUis: taxonomy.meshResolution?.descendantUis };
+  return {
+    shape,
+    meshDescendantUis: res?.descendantUis,
+    // #726 — thread the same tier + floor inputs production uses, so the dryrun
+    // exercises the graduated attribution AND the sparse concept escalation.
+    meshMatchTier: res
+      ? meshMatchTier(res.confidence, res.curatedTopicAnchors.length)
+      : undefined,
+    meshAmbiguous: res?.ambiguous,
+    meshMatchedFormLength: res?.matchedForm.length,
+  };
 }
 
 async function main() {
@@ -103,7 +121,13 @@ async function main() {
     let err = "";
     let cls = "-";
     try {
-      const { shape, meshDescendantUis } = await classify(c.query, sets);
+      const {
+        shape,
+        meshDescendantUis,
+        meshMatchTier,
+        meshAmbiguous,
+        meshMatchedFormLength,
+      } = await classify(c.query, sets);
       cls = shape;
       const r = await searchPeople(
         MODE === "v3"
@@ -112,6 +136,9 @@ async function main() {
               relevanceMode: "v3",
               shape,
               meshDescendantUis,
+              meshMatchTier,
+              meshAmbiguous,
+              meshMatchedFormLength,
               // Issue #532 — surface the env-gated dept-leadership boost so
               // the dryrun mirrors the route's behavior under either flag
               // state. Toggle by exporting SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST.

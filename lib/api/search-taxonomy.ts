@@ -101,6 +101,14 @@ export type MeshResolution = {
    * the publications-branch `search_query` line for baseline analysis only.
    */
   descendantUis: string[];
+  /**
+   * #726 — true when the normalized query matched more than one candidate
+   * descriptor (the resolver tiebreaks a winner). A unique match is
+   * trustworthy; an ambiguous one is the risky case the sparse-escalation
+   * floor guards against. Optional so existing fixtures need not set it;
+   * the resolver always populates it.
+   */
+  ambiguous?: boolean;
 };
 
 export type TaxonomyMatchResult =
@@ -813,6 +821,8 @@ export async function resolveMeshDescriptor(
     // (post-eager-precompute) and the defensive lazy-fallback path go through
     // a single implementation. Invariant: descendantUis[0] === descriptorUi.
     descendantUis: getOrComputeDescendants(map, winner.row.descriptorUi),
+    // #726 — more than one candidate descriptor normalized to this query key.
+    ambiguous: candidates.length > 1,
   };
 }
 
