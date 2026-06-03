@@ -111,12 +111,14 @@ export default async function AdministratorsPage() {
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">Administrators</h1>
         <p className="text-muted-foreground mb-6 text-sm">
-          Everyone with an Owner or Curator grant on an org unit, grouped by person. Read-only —
-          unit scope, role, and provenance for each grant.
+          Everyone with an Owner or Curator grant on an org unit, grouped by person. Add, change a
+          role, or revoke a grant from each card. Grants sourced from the Enterprise Directory are
+          managed upstream and are read-only here.
         </p>
         <AdministratorsRoster
           entries={entries}
           isSuperuser={session.isSuperuser}
+          actorCwid={session.cwid}
           nameResolutionDegraded={nameResolutionDegraded}
         />
       </main>

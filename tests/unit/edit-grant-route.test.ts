@@ -11,6 +11,12 @@
  *  - Self-revoke by a non-Superuser → 403 cannot_revoke_self (T7 footgun).
  *  - Unit not found → 400 unit_not_found.
  *  - Audit row records `grant_change` with `target_entity_type` + role.
+ *
+ * #728 Phase C — the ED-locked gate (§ 2.2 #3 / § 5 MUST-7):
+ *  - Non-superuser revoke of a `source LIKE 'ED:%'` row → 403 ed_locked, no write.
+ *  - Non-superuser re-grant (role change) of an ED row → 403 ed_locked, no write.
+ *  - Superuser override of an ED row → 200 (write proceeds).
+ *  - Non-ED ("manual") row is unaffected (regression).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
@@ -235,7 +241,11 @@ describe("/api/edit/grant", () => {
   });
 
   it("Owner revokes a grant (writes the delete + audit row)", async () => {
-    mockUnitAdminFindUnique.mockResolvedValue({ role: "curator", grantedBy: "own001" });
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "curator",
+      grantedBy: "own001",
+      source: "manual",
+    });
     const res = await POST(
       post({
         entityType: "department",
@@ -266,7 +276,11 @@ describe("/api/edit/grant", () => {
 
   it("Superuser self-revoke is allowed (backstop)", async () => {
     mockGetEditSession.mockResolvedValue(SUPERUSER);
-    mockUnitAdminFindUnique.mockResolvedValue({ role: "owner", grantedBy: SUPERUSER.cwid });
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "owner",
+      grantedBy: SUPERUSER.cwid,
+      source: "manual",
+    });
     const res = await POST(
       post({
         entityType: "department",
@@ -277,6 +291,91 @@ describe("/api/edit/grant", () => {
       }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // ── #728 Phase C — ED-locked gate (§ 2.2 #3 / § 5 MUST-7) ──────────────────
+
+  it("Non-superuser revoke of an ED row → 403 ed_locked (no write)", async () => {
+    // OWNER (non-superuser) is the default session; they own MED.
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "curator",
+      grantedBy: "ED-ETL",
+      source: "ED:DA",
+    });
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        cwid: "ed0001",
+        role: "curator",
+        action: "revoke",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "ed_locked" });
+    expect(mockTxUnitAdminDelete).not.toHaveBeenCalled();
+    expect(mockTxUnitAdminUpsert).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("Non-superuser re-grant (role change) of an ED row → 403 ed_locked (no write)", async () => {
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "curator",
+      grantedBy: "ED-ETL",
+      source: "ED:IAMDELA",
+    });
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        cwid: "ed0001",
+        role: "owner",
+        action: "grant",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "ed_locked" });
+    expect(mockTxUnitAdminUpsert).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("Superuser override of an ED row is allowed (write proceeds)", async () => {
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "curator",
+      grantedBy: "ED-ETL",
+      source: "ED:DA",
+    });
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        cwid: "ed0001",
+        role: "owner",
+        action: "grant",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminUpsert).toHaveBeenCalledOnce();
+  });
+
+  it("Non-ED (manual) row is unaffected by the gate (regression)", async () => {
+    mockUnitAdminFindUnique.mockResolvedValue({
+      role: "curator",
+      grantedBy: "own001",
+      source: "manual",
+    });
+    const res = await POST(
+      post({
+        entityType: "department",
+        entityId: "MED",
+        cwid: "man001",
+        role: "owner",
+        action: "grant",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxUnitAdminUpsert).toHaveBeenCalledOnce();
   });
 
   it("Unit not found → 400 unit_not_found", async () => {

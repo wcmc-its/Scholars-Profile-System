@@ -126,15 +126,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  // Idempotency probe.
+  // Idempotency probe. `source` is read for the ED-locked gate below.
   const existing = await db.read.unitAdmin.findUnique({
     where: {
       entityType_entityId_cwid: { entityType, entityId, cwid },
     },
-    select: { role: true, grantedBy: true },
+    select: { role: true, grantedBy: true, source: true },
   });
   if (action === "revoke" && !existing) {
     return editOk({ entityType, entityId, cwid, action: "revoke", changed: false });
+  }
+
+  // ED-locked gate (#728 § 2.2 #3 / § 5 MUST-7). An ED-sourced grant
+  // (`source` LIKE 'ED:%') is owned by the nightly Enterprise Directory import:
+  // a non-superuser may not edit-role or revoke it (the ETL would simply
+  // re-assert it). A Superuser override is permitted (it falls through) but is
+  // re-asserted on the next ETL run unless the member also left the population.
+  // The check is on the in-memory loaded row — a brand-new grant (`existing`
+  // is null, ED rows are ETL-created only) is never ED-locked. Reads the
+  // EFFECTIVE identity, so an impersonated non-superuser (#637) is also blocked.
+  if (existing && existing.source.startsWith("ED:") && !session.isSuperuser) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: cwid,
+      path: PATH,
+      reason: "ed_locked",
+      targetEntityType: entityType,
+      targetEntityId: entityId,
+      role,
+    });
+    return editError(403, "ed_locked");
   }
 
   // Write — insert (upsert) or hard-delete + B03 audit row, one transaction.
