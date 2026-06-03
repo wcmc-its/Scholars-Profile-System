@@ -80,14 +80,27 @@ export const peopleIndexMapping = {
         scholar_text: {
           type: "custom" as const,
           tokenizer: "standard",
-          filter: ["lowercase", "english_stop", "english_stemmer"],
+          // `alnum_delimiter` + `flatten_graph` split letter↔digit boundaries
+          // (preserving the fused original) so "covid19" and "covid-19" share a
+          // token set. Without it the standard tokenizer keeps "covid19" as one
+          // token that never matches the indexed "COVID-19" (covid+19), and the
+          // People tab collapses from ~1,425 to 9. Applied at index AND search
+          // time — scholar_text has no search_analyzer override. (#725)
+          filter: [
+            "lowercase",
+            "alnum_delimiter",
+            "flatten_graph",
+            "english_stop",
+            "english_stemmer",
+          ],
         },
         // The completion suggester's default analyzer is `simple`, which
         // strips digits — so a CWID like "pja9004" indexes as the bare
         // prefix "pja" and any digits-only-different query (e.g.
         // "pja2002") spuriously matches it. Use a digits-preserving
         // analyzer (standard tokenizer keeps letter+digit runs intact)
-        // so CWIDs survive while names still tokenize cleanly.
+        // so CWIDs survive while names still tokenize cleanly. NOTE: kept
+        // OFF the alnum_delimiter split so CWIDs stay fused (#725).
         scholar_suggest: {
           type: "custom" as const,
           tokenizer: "standard",
@@ -95,6 +108,19 @@ export const peopleIndexMapping = {
         },
       },
       filter: {
+        // #725 — split glued alphanumerics (covid19 -> covid+19, p53 -> p+53)
+        // while keeping the fused original. `flatten_graph` (in the analyzer
+        // chain) makes the multi-position output safe for the stop/stemmer
+        // filters that follow. No `catenate_*`: the standard tokenizer already
+        // strips hyphens, so there is nothing to re-join, and a duplicate
+        // same-position token would skew BM25.
+        alnum_delimiter: {
+          type: "word_delimiter_graph",
+          split_on_numerics: true,
+          preserve_original: true,
+          generate_word_parts: true,
+          generate_number_parts: true,
+        },
         english_stop: { type: "stop", stopwords: "_english_" },
         english_stemmer: { type: "stemmer", language: "english" },
       },
@@ -335,10 +361,28 @@ export const fundingIndexMapping = {
         funding_text: {
           type: "custom" as const,
           tokenizer: "standard",
-          filter: ["lowercase", "english_stop", "english_stemmer"],
+          // See scholar_text / #725: split letter↔digit boundaries so a funding
+          // search for "covid19" matches grants indexed under "COVID-19"
+          // (0 -> 103 scholars-funding hits). Index AND search time.
+          filter: [
+            "lowercase",
+            "alnum_delimiter",
+            "flatten_graph",
+            "english_stop",
+            "english_stemmer",
+          ],
         },
       },
       filter: {
+        // #725 — see scholar_text. Glued-alphanumeric split for funding titles,
+        // sponsor text, and people names.
+        alnum_delimiter: {
+          type: "word_delimiter_graph",
+          split_on_numerics: true,
+          preserve_original: true,
+          generate_word_parts: true,
+          generate_number_parts: true,
+        },
         english_stop: { type: "stop", stopwords: "_english_" },
         english_stemmer: { type: "stemmer", language: "english" },
       },
