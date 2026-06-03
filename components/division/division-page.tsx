@@ -11,6 +11,7 @@ import {
   getDivision,
   getDivisionFaculty,
   getDivisionPublicationsList,
+  getDivisionGrantsList,
 } from "@/lib/api/divisions";
 import { getSpotlightCardsForDivision } from "@/lib/api/spotlight";
 import { LeaderCard } from "@/components/scholar/leader-card";
@@ -19,7 +20,8 @@ import { DepartmentFacultyClient } from "@/components/department/department-facu
 import { Spotlight } from "@/components/shared/spotlight";
 import { DeptTabs } from "@/components/department/dept-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
-import type { PubSort } from "@/lib/api/dept-lists";
+import { DeptGrantsList } from "@/components/department/dept-grants-list";
+import type { PubSort, GrantSort } from "@/lib/api/dept-lists";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -29,7 +31,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications";
+type Tab = "scholars" | "publications" | "grants";
 
 export async function DivisionPage({
   deptSlug,
@@ -71,6 +73,13 @@ export async function DivisionPage({
       ? await getDivisionPublicationsList(detail.division.code, {
           page: Math.max(0, page - 1),
           sort: (sort === "most_cited" ? "most_cited" : "newest") as PubSort,
+        })
+      : null;
+  const grantsList =
+    tab === "grants"
+      ? await getDivisionGrantsList(detail.division.code, {
+          page: Math.max(0, page - 1),
+          sort: (sort === "end_date" ? "end_date" : "most_recent") as GrantSort,
         })
       : null;
 
@@ -195,6 +204,9 @@ export async function DivisionPage({
               detail.stats.publications > 0
                 ? { value: detail.stats.publications, label: "publications" }
                 : null,
+              detail.stats.activeGrants > 0
+                ? { value: detail.stats.activeGrants, label: "active grants" }
+                : null,
             ].filter(Boolean) as Array<{ value: number; label: string }>
           ).map((s, i, all) => (
             <span key={s.label}>
@@ -220,6 +232,7 @@ export async function DivisionPage({
           basePath={basePath}
           scholarsCount={detail.stats.scholars}
           publicationsCount={detail.stats.publications}
+          grantsCount={detail.stats.activeGrants}
         />
 
         {tab === "scholars" && faculty && (
@@ -240,6 +253,16 @@ export async function DivisionPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={(sort === "most_cited" ? "most_cited" : "newest") as PubSort}
+            basePath={basePath}
+          />
+        )}
+        {tab === "grants" && grantsList && (
+          <DeptGrantsList
+            hits={grantsList.hits}
+            total={grantsList.total}
+            page={grantsList.page + 1}
+            pageSize={grantsList.pageSize}
+            sort={(sort === "end_date" ? "end_date" : "most_recent") as GrantSort}
             basePath={basePath}
           />
         )}

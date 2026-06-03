@@ -26,6 +26,7 @@ import {
   isUnitSuppressed,
   loadUnitFieldOverrides,
   mergeUnitFields,
+  resolveActiveGrantSuppression,
 } from "@/lib/api/manual-layer";
 
 export type DepartmentChair = {
@@ -216,12 +217,21 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
     prisma.publicationTopic.count({
       where: { scholar: { deptCode: dept.code, deletedAt: null, status: "active" } },
     }),
-    prisma.grant.count({
-      where: {
-        scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
-        endDate: { gte: now },
-      },
-    }),
+    // #481(b) — count active grants excluding #160-suppressed rows, so the
+    // hero stat agrees with the Grants-tab list/badge.
+    prisma.grant
+      .findMany({
+        where: {
+          scholar: { deptCode: dept.code, deletedAt: null, status: "active" },
+          endDate: { gte: now },
+        },
+        select: { externalId: true, id: true },
+      })
+      .then((rows) =>
+        resolveActiveGrantSuppression(rows, prisma).then(
+          (r) => r.unsuppressedKeyCount,
+        ),
+      ),
   ]);
 
   const stats: DepartmentStats = {

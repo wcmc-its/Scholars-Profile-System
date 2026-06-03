@@ -4,7 +4,9 @@ import { getDepartment, getDepartmentFaculty } from "@/lib/api/departments";
 import { getSpotlightCardsForDepartment } from "@/lib/api/spotlight";
 import {
   getDeptPublicationsList,
+  getDeptGrantsList,
   type PubSort,
+  type GrantSort,
 } from "@/lib/api/dept-lists";
 import { LeaderCard } from "@/components/scholar/leader-card";
 import { SectionInfoButton } from "@/components/shared/section-info-button";
@@ -12,6 +14,7 @@ import { DepartmentFacultyClient } from "@/components/department/department-facu
 import { Spotlight } from "@/components/shared/spotlight";
 import { DeptTabs } from "@/components/department/dept-tabs";
 import { DeptPublicationsList } from "@/components/department/dept-publications-list";
+import { DeptGrantsList } from "@/components/department/dept-grants-list";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -21,7 +24,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
-type Tab = "scholars" | "publications";
+type Tab = "scholars" | "publications" | "grants";
 
 export async function DepartmentPage({
   deptSlug,
@@ -64,6 +67,13 @@ export async function DepartmentPage({
       ? await getDeptPublicationsList(detail.dept.code, {
           page: Math.max(0, page - 1),
           sort: (sort === "most_cited" ? "most_cited" : "newest") as PubSort,
+        })
+      : null;
+  const grantsList =
+    tab === "grants"
+      ? await getDeptGrantsList(detail.dept.code, {
+          page: Math.max(0, page - 1),
+          sort: (sort === "end_date" ? "end_date" : "most_recent") as GrantSort,
         })
       : null;
 
@@ -212,6 +222,7 @@ export async function DepartmentPage({
           basePath={basePath}
           scholarsCount={detail.stats.scholars}
           publicationsCount={detail.stats.publications}
+          grantsCount={detail.stats.activeGrants}
         />
 
         {tab === "scholars" && faculty && (
@@ -239,6 +250,17 @@ export async function DepartmentPage({
             page={pubsList.page + 1}
             pageSize={pubsList.pageSize}
             sort={(sort === "most_cited" ? "most_cited" : "newest") as PubSort}
+            basePath={basePath}
+          />
+        )}
+
+        {tab === "grants" && grantsList && (
+          <DeptGrantsList
+            hits={grantsList.hits}
+            total={grantsList.total}
+            page={grantsList.page + 1}
+            pageSize={grantsList.pageSize}
+            sort={(sort === "end_date" ? "end_date" : "most_recent") as GrantSort}
             basePath={basePath}
           />
         )}
