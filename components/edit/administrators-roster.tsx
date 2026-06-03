@@ -393,7 +393,7 @@ export function AdministratorsRoster({
                     <tr className="text-muted-foreground border-border border-b text-left">
                       <th className="py-2 font-medium">Org unit</th>
                       <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
-                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Provenance</th>
+                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Source</th>
                       <th className="py-2 pl-6 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
@@ -416,7 +416,7 @@ export function AdministratorsRoster({
                         >
                           <td className="py-2">
                             <span className="font-medium">{grant.unitName}</span>
-                            <Badge variant="outline" className="ml-2">
+                            <Badge variant="secondary" className="ml-2">
                               {KIND_LABEL[grant.entityType]}
                             </Badge>
                           </td>
@@ -471,15 +471,18 @@ export function AdministratorsRoster({
                                 Revoke
                               </Button>
                               {edLocked && (
-                                <span
-                                  className="text-muted-foreground inline-flex items-center gap-1 text-xs whitespace-nowrap"
+                                <a
+                                  href="https://directory.weill.cornell.edu/"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-muted-foreground hover:text-[var(--apollo-maroon)] inline-flex items-center gap-1 text-xs whitespace-nowrap hover:underline"
                                   title={ED_LOCKED_NOTE}
                                   data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                                 >
                                   <Lock className="size-3" aria-hidden />
                                   Managed through Web Directory
                                   <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
-                                </span>
+                                </a>
                               )}
                             </div>
                           </td>
