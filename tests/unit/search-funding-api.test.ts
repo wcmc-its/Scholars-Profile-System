@@ -528,3 +528,60 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
     expect(pubRequest()).toBeUndefined();
   });
 });
+
+describe("searchFunding — SEARCH_FUNDING_MESH_GATE (funded-pub MeSH gate)", () => {
+  const conceptOriginal = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  const gateOriginal = process.env.SEARCH_FUNDING_MESH_GATE;
+  const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
+  beforeEach(() => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    // Pin the reason layer off so the gate `terms` clause is untagged — this
+    // block isolates the admission FIELD, not the `_name` provenance.
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
+  });
+  afterEach(() => {
+    if (conceptOriginal === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    else process.env.SEARCH_FUNDING_TAB_CONCEPT = conceptOriginal;
+    if (gateOriginal === undefined) delete process.env.SEARCH_FUNDING_MESH_GATE;
+    else process.env.SEARCH_FUNDING_MESH_GATE = gateOriginal;
+    if (reasonOriginal === undefined) delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    else process.env.SEARCH_FUNDING_MATCH_REASON = reasonOriginal;
+  });
+
+  const NEOPLASMS: MeshResolution = {
+    descriptorUi: "D009369",
+    name: "Neoplasms",
+    matchedForm: "neoplasms",
+    confidence: "exact",
+    scopeNote: null,
+    entryTerms: [],
+    curatedTopicAnchors: [],
+    descendantUis: ["D009369", "D001943"],
+  };
+  const mustOf = () =>
+    (lastRequest!.body.query as { bool: { must: unknown[] } }).bool.must;
+
+  it("gates concept-scope admission on meshDescriptorUi by default (byte-identical)", async () => {
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS, scope: "concept" });
+    expect(mustOf()[0]).toEqual({
+      terms: { meshDescriptorUi: ["D009369", "D001943"] },
+    });
+  });
+
+  it("gates on fundedPubMeshUi when SEARCH_FUNDING_MESH_GATE=fundedPubMeshUi", async () => {
+    process.env.SEARCH_FUNDING_MESH_GATE = "fundedPubMeshUi";
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS, scope: "concept" });
+    expect(mustOf()[0]).toEqual({
+      terms: { fundedPubMeshUi: ["D009369", "D001943"] },
+    });
+  });
+
+  it("switches the expanded OR-clause admission field too", async () => {
+    process.env.SEARCH_FUNDING_MESH_GATE = "fundedPubMeshUi";
+    await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
+    const should = (mustOf()[0] as { bool: { should: unknown[] } }).bool.should;
+    expect(should[1]).toEqual({
+      terms: { fundedPubMeshUi: ["D009369", "D001943"], boost: 4 },
+    });
+  });
+});

@@ -28,6 +28,7 @@ import {
   type PublicationSuppressions,
 } from "@/lib/api/manual-layer";
 import { isFundingActive } from "@/lib/api/search-funding";
+import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -87,34 +88,12 @@ export function extractMeshLabels(raw: unknown): string[] {
   return out;
 }
 
-/**
- * Extract NLM MeSH descriptor UIs from `Publication.meshTerms`.
- *
- * The JSON column shape verified at the time of this PR (2026-05): 100% of
- * rows with non-empty `mesh_terms` are arrays of `{ ui, label }` objects.
- * No bare-string rows remain in production. The bare-string branch in
- * `extractMeshLabels` is dead code in the current corpus but is preserved
- * there for defense-in-depth; here we only emit UIs from the object shape.
- *
- * Returns deduped UIs in source order. Drops rows missing a valid string
- * `ui` (defensive — should be unreachable under the ETL contract per #278).
- *
- * Exported for unit tests.
- */
-export function extractMeshDescriptorUis(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object" || !("ui" in item)) continue;
-    const ui = (item as { ui: unknown }).ui;
-    if (typeof ui !== "string" || ui.length === 0) continue;
-    if (seen.has(ui)) continue;
-    seen.add(ui);
-    out.push(ui);
-  }
-  return out;
-}
+// `extractMeshDescriptorUis` — the shared MeSH-UI choke point — now lives in
+// its own dependency-free module (`@/lib/mesh-descriptor-uis`) so the funding
+// ETL projection can reuse it without importing this file (which pulls in
+// search-runtime deps). Re-exported here so existing `@/lib/search-index-docs`
+// importers and the snapshot test keep resolving it unchanged.
+export { extractMeshDescriptorUis };
 
 // ---------------------------------------------------------------------------
 // Pure helpers — name slices for the OpenSearch completion suggester.

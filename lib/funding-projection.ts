@@ -16,6 +16,7 @@
 
 import { coreProjectNum } from "@/lib/award-number";
 import type { Prisma } from "@/lib/generated/prisma/client";
+import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { getSponsor } from "@/lib/sponsor-lookup";
 
@@ -54,6 +55,11 @@ export type GrantRowForIndex = {
       journal: string | null;
       year: number | null;
       citationCount: number;
+      /** Funding reindex — `Publication.meshTerms` JSON ([{ui,label}]). Typed
+       *  `unknown` like the other JSON columns; `projectFromRows` routes it
+       *  through `extractMeshDescriptorUis` into `FundingDoc.fundedPubMeshUi`.
+       *  Optional so existing test fixtures need not supply it. */
+      meshTerms?: unknown;
     };
   }>;
   /** RePORTER abstract for this grant (Phase 2 ETL). Optional. The
@@ -132,6 +138,14 @@ export type FundingDoc = {
    *  named to match the publications index, so one `terms` template hits
    *  both. Empty array when no keyword on the project resolved. */
   meshDescriptorUi: string[];
+  /** Funding reindex — distinct union of NLM MeSH descriptor UIs from the
+   *  project's FUNDED publications (vs `meshDescriptorUi`, which is RePORTER
+   *  *project* keywords). Routed through the same `extractMeshDescriptorUis`
+   *  choke point as the publications index and computed over the COMPLETE
+   *  funded-pub set (before the PUB_LIST_CAP truncation). Powers the funding
+   *  concept result-set gate under `SEARCH_FUNDING_MESH_GATE=fundedPubMeshUi`.
+   *  Empty when no funded pub carries MeSH. */
+  fundedPubMeshUi: string[];
   /** Issue #86 — count of DISTINCT pmids attributed to the project across
    *  all its scholar rows. Drives the pubCount sort and the inline pub
    *  count on the result row. */
@@ -218,7 +232,9 @@ export const GRANT_INDEX_SELECT = {
       sourceReciterdb: true,
       reciterdbFirstSeen: true,
       publication: {
-        select: { title: true, journal: true, year: true, citationCount: true },
+        // `meshTerms` (#funding-reindex): the funded pub's NLM MeSH, unioned
+        // into FundingDoc.fundedPubMeshUi for the concept result-set gate.
+        select: { title: true, journal: true, year: true, citationCount: true, meshTerms: true },
       },
     },
   },
@@ -435,6 +451,10 @@ export function projectFromRows(
     /** Earliest reciterdbFirstSeen across rows — most conservative for
      *  the 12-month cutoff (oldest sighting wins). */
     earliestReciterdbFirstSeen: Date | null;
+    /** Funded-pub MeSH descriptor UIs (via the shared extractMeshDescriptorUis
+     *  choke point). Same per pmid across rows — first-seen wins, like
+     *  title/journal. */
+    meshUis: string[];
   };
   const pubsByPmid = new Map<string, PubAccum>();
   for (const r of rows) {
@@ -459,6 +479,7 @@ export function projectFromRows(
           sourceReporter: p.sourceReporter,
           sourceReciterdb: p.sourceReciterdb,
           earliestReciterdbFirstSeen: p.reciterdbFirstSeen,
+          meshUis: extractMeshDescriptorUis(p.publication.meshTerms),
         });
       }
     }
@@ -523,6 +544,23 @@ export function projectFromRows(
     }
   }
 
+  // Funding reindex — fundedPubMeshUi: distinct union of the MeSH descriptor
+  // UIs of the project's FUNDED publications. Computed over the COMPLETE
+  // funded-pub set (`pubsByPmid`, before the `publicationsList` PUB_LIST_CAP
+  // truncation) so the largest grants aren't under-tagged. Distinct by pmid by
+  // construction (pubsByPmid is keyed by pmid; UIs deduped within a pub by
+  // extractMeshDescriptorUis and across pubs here). Distinct from
+  // `meshDescriptorUi` above, which is RePORTER *project* keywords.
+  const fundedMeshSeen = new Set<string>();
+  const fundedPubMeshUi: string[] = [];
+  for (const p of pubsByPmid.values()) {
+    for (const ui of p.meshUis) {
+      if (fundedMeshSeen.has(ui)) continue;
+      fundedMeshSeen.add(ui);
+      fundedPubMeshUi.push(ui);
+    }
+  }
+
   // Date range: union across the group. With coreProjectNum-based
   // grouping (etl/search-index/index.ts), one project may cover
   // multiple InfoEd Account_Numbers for renewals, no-cost extensions,
@@ -566,6 +604,7 @@ export function projectFromRows(
     keywords,
     keywordsText: keywords.join(" "),
     meshDescriptorUi,
+    fundedPubMeshUi,
     pubCount: pubsByPmid.size,
     applId,
     publications: publicationsList,

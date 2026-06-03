@@ -395,6 +395,12 @@ export const fundingIndexMapping = {
       // index so one `terms` query template hits both. Queried via `terms`,
       // never aggregated as a facet.
       meshDescriptorUi: { type: "keyword" },
+      // Funding reindex — distinct union of the MeSH descriptor UIs of the
+      // project's FUNDED publications (vs `meshDescriptorUi` = RePORTER project
+      // keywords). The concept result-set gate filters this ∩ descendantUis
+      // when SEARCH_FUNDING_MESH_GATE=fundedPubMeshUi. `terms` only, never a
+      // facet; populated by lib/funding-projection.ts.
+      fundedPubMeshUi: { type: "keyword" },
       // Issue #86 — RePORTER application ID; outbound deep-link target
       // from the expanded result row.
       applId: { type: "integer" },

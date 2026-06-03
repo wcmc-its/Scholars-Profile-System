@@ -161,6 +161,29 @@ export function resolveFundingMatchReason(): boolean {
 }
 
 /**
+ * Funding reindex — which funding-index field the concept result-SET gate
+ * filters on. When a query resolves to a descriptor and `scope=concept`,
+ * `searchFunding` admits grants whose MeSH ∩ the resolved descendant set is
+ * non-empty. Two candidate signals:
+ *
+ *   - `meshDescriptorUi` (**default**) — RePORTER *project* keywords. Always
+ *     present in the funding index today; the safe pre-reindex value.
+ *   - `fundedPubMeshUi` — the MeSH of the grant's *funded publications*, which
+ *     matches the "Matched through X of Y funded publications" reason (higher
+ *     fidelity). Only set `SEARCH_FUNDING_MESH_GATE=fundedPubMeshUi` AFTER the
+ *     funding index has been reindexed with that field (lib/funding-projection.ts):
+ *     flipping it before the reindex empties funding concept results because
+ *     the field is absent on the live docs.
+ *
+ * Unknown values fall through to the safe `meshDescriptorUi` default.
+ */
+export function resolveFundingMeshGateField(): "meshDescriptorUi" | "fundedPubMeshUi" {
+  return process.env.SEARCH_FUNDING_MESH_GATE === "fundedPubMeshUi"
+    ? "fundedPubMeshUi"
+    : "meshDescriptorUi";
+}
+
+/**
  * Issue #532 — dept-shape leadership boost (chair / division chief). When
  * on, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
  * body in a multiplicative `function_score` that promotes the dept's chair
