@@ -676,6 +676,17 @@ modules kept out of the Edge bundle.
 
 ### Phase A prerequisite — P-A1: ETL DB role must hold `unit_admin` INSERT/DELETE (hard gate)
 
+> **✅ RESOLVED 2026-06-03 (code-derived — NO grant change needed).** The ETL writes via
+> `db.write` (`lib/db.ts:48`: "Aurora writer endpoint. Mutations, ETL, seed, migrations") =
+> the `app_rw` role, whose ADR-009 golden grant is **database-wide**
+> `GRANT SELECT, INSERT, UPDATE, DELETE ON `scholars`.*` (`scripts/verify-db-grants.ts`).
+> `unit_admin` lives in the `scholars` DB (`@@map("unit_admin")`) and the ED ETL already writes
+> `scholars.*` tables (Department/Division), so INSERT/DELETE on `unit_admin` is already covered
+> — no per-table grant edit. This is **unlike #493**, which was the SEPARATE `scholars_audit`
+> DB needing its own grant. The importer MUST NOT write `scholars_audit` (the ETL role lacks
+> that grant), which is exactly why §3.7 defaults to no per-grant ETL audit. The deploy-time
+> `db:verify-grants` gate already asserts this golden set. Text below retained for the record.
+
 This is a **prerequisite checklist item, not just an open question.** The ETL writes
 `unit_admin` (INSERT via upsert, DELETE via the reconcile sweep). Per the #493 precedent — the
 `/edit` audit INSERT failed with "Please try again" in prod because the in-tx INSERT grant was
@@ -816,12 +827,13 @@ expected launch state, not a defect (OQ-12).
 ## 10. Open questions (for the user / stakeholders)
 
 **Phase-0 RESOLVED (see §0):** OQ-1, OQ-2, OQ-5 (probe); OQ-3 → all four populations = `curator`;
-OQ-9 → superusers **and** unit Owners (subtree-scoped); OQ-11 → new issue filed. Import set =
-`;da` + `;diva` + `;iamdela` + `;diva-iamdela` (exclude `;dd`); unmapped + deep (L3–6) units
-skip-and-log. **Still open:** OQ-4 (LDAP routing #443 / nightly-step wiring), OQ-6 (manual-vs-ED
-conflict policy), OQ-7 (centers ⇒ confirm centers carry no admin tag), OQ-8 (flags / ETL audit /
-mailer-on), **OQ-10/P-A1** (`unit_admin` INSERT/DELETE grant parity staging==prod — hard
-prereq), OQ-12 (name-less tab under #443), OQ-13 (request audit key), OQ-14 (directory-API gate).
+OQ-9 → superusers **and** unit Owners (subtree-scoped); OQ-11 → #728 filed;
+**OQ-10/P-A1** → no grant change needed (`unit_admin` ∈ `scholars.*`, already in the `app_rw`
+golden grant — see §6). Import set = `;da` + `;diva` + `;iamdela` + `;diva-iamdela` (exclude
+`;dd`); unmapped + deep (L3–6) units skip-and-log. **Still open:** OQ-4 (LDAP routing #443 /
+nightly-step wiring), OQ-6 (manual-vs-ED conflict policy), OQ-7 (centers ⇒ confirm centers carry
+no admin tag), OQ-8 (flags / ETL audit / mailer-on), OQ-12 (name-less tab under #443), OQ-13
+(request audit key), OQ-14 (directory-API gate).
 
 1. **(OQ-1) Group identity.** Exact LDAP cn/DN/objectClass for DAs, IAMDELA, DivA-IAMDELA
    under `ou=Groups`, and whether membership is static `member` or dynamic `memberURL`?
