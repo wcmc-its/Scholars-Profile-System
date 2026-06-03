@@ -360,8 +360,15 @@ export async function GET(request: NextRequest) {
     shape: queryShape,
     // Issue #310 / SPEC §6.1.3 — the resolved descriptor's descendant-UI set
     // drives the topic-shape attribution boost; searchPeople ignores it for
-    // non-topic shapes.
-    meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+    // non-topic shapes. `meshOff` (scope=exact) suppresses it so the API matches
+    // the SSR page, which passes `undefined` under "Exact word" to drop the boost.
+    meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+    // #718 — concept-only result-SET gate. The SSR page threads `scope` into its
+    // badge + streamed `searchPeople` calls (concept → people are gated to the
+    // descriptor's `publicationMeshUi`); the route handler must pass it too, or
+    // the API people count (ungated, 76) disagrees with the rendered Scholars
+    // badge (gated, 5) for the identical request.
+    scope,
     // Issue #688 — env-gated narrower-term match provenance. searchPeople only
     // attaches it on topic/unclassified hits that matched via a descendant; the
     // descriptor name frames the "… narrower term of {name}" string.
