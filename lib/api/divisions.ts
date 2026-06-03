@@ -34,6 +34,7 @@ import {
   loadPublicationSuppressions,
   loadUnitFieldOverrides,
   mergeUnitFields,
+  resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 

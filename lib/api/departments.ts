@@ -26,6 +26,7 @@ import {
   isUnitSuppressed,
   loadUnitFieldOverrides,
   mergeUnitFields,
+  resolveActiveGrantSuppression,
 } from "@/lib/api/manual-layer";
 
 export type DepartmentChair = {

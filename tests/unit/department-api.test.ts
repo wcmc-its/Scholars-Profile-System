@@ -25,8 +25,10 @@ const {
   mockDivisionFindFirst,
   mockGrantCount,
   mockGrantGroupBy,
+  mockGrantFindMany,
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
+  mockSuppressionFindMany,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -42,8 +44,10 @@ const {
   mockDivisionFindFirst: vi.fn(),
   mockGrantCount: vi.fn(),
   mockGrantGroupBy: vi.fn(),
+  mockGrantFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -69,9 +73,13 @@ vi.mock("@/lib/db", () => ({
     grant: {
       count: mockGrantCount,
       groupBy: mockGrantGroupBy,
+      findMany: mockGrantFindMany,
     },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
-    suppression: { findFirst: mockSuppressionFindFirst },
+    suppression: {
+      findFirst: mockSuppressionFindFirst,
+      findMany: mockSuppressionFindMany,
+    },
   },
 }));
 
@@ -141,6 +149,13 @@ function mockDefaultDeptSetup() {
   mockScholarGroupBy.mockResolvedValue([]);
   mockPublicationTopicCount.mockResolvedValue(1500);
   mockGrantCount.mockResolvedValue(25);
+  // #481(b) — activeGrants now derives from grant.findMany + #160 suppression
+  // resolution (resolveActiveGrantSuppression → distinct unsuppressed keys),
+  // not grant.count. 25 distinct active grants, none suppressed → 25.
+  mockGrantFindMany.mockResolvedValue(
+    Array.from({ length: 25 }, (_, i) => ({ externalId: `grant-${i}`, id: `grant-${i}` })),
+  );
+  mockSuppressionFindMany.mockResolvedValue([]);
 }
 
 describe("getDepartment", () => {
@@ -186,8 +201,10 @@ describe("getDepartment", () => {
     mockScholarCount.mockResolvedValue(100);
     mockPublicationTopicCount.mockResolvedValue(500);
     mockGrantCount.mockResolvedValue(10);
+    mockGrantFindMany.mockResolvedValue([]);
     mockFieldOverrideFindMany.mockResolvedValue([]);
     mockSuppressionFindFirst.mockResolvedValue(null);
+    mockSuppressionFindMany.mockResolvedValue([]);
 
     const result = await getDepartment("medicine");
     expect(result).not.toBeNull();
@@ -252,6 +269,27 @@ describe("getDepartment", () => {
     expect(result!.dept.name).toBe("Department of Medicine");
     expect(result!.dept.slug).toBe("medicine");
     expect(result!.dept.description).toBe("The department of medicine.");
+  });
+
+  it("activeGrants excludes #160-suppressed active grants (#481(b))", async () => {
+    mockDefaultDeptSetup();
+    // 4 active grant rows; one (grant-2) is #160-suppressed → the hero stat
+    // must drop it so it agrees with the Grants-tab list/badge.
+    mockGrantFindMany.mockResolvedValue([
+      { externalId: "grant-1", id: "g1" },
+      { externalId: "grant-2", id: "g2" },
+      { externalId: "grant-3", id: "g3" },
+      { externalId: "grant-4", id: "g4" },
+    ]);
+    mockSuppressionFindMany.mockResolvedValue([{ entityId: "grant-2" }]);
+
+    const result = await getDepartment("medicine");
+
+    expect(result!.stats.activeGrants).toBe(3);
+    // the suppression lookup is scoped to active (non-revoked) grant suppressions
+    const supCall = mockSuppressionFindMany.mock.calls[0][0];
+    expect(supCall.where.entityType).toBe("grant");
+    expect(supCall.where.revokedAt).toBeNull();
   });
 });
 

@@ -30,6 +30,7 @@ import {
   isAuthorHidden,
   isUnitSuppressed,
   loadPublicationSuppressions,
+  resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 

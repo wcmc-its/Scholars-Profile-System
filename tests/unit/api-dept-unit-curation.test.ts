@@ -26,8 +26,10 @@ const {
   mockTopicFindMany,
   mockDivisionFindMany,
   mockGrantCount,
+  mockGrantFindMany,
   mockFieldOverrideFindMany,
   mockSuppressionFindFirst,
+  mockSuppressionFindMany,
 } = vi.hoisted(() => ({
   mockDepartmentFindUnique: vi.fn(),
   mockScholarFindUnique: vi.fn(),
@@ -40,8 +42,10 @@ const {
   mockTopicFindMany: vi.fn(),
   mockDivisionFindMany: vi.fn(),
   mockGrantCount: vi.fn(),
+  mockGrantFindMany: vi.fn(),
   mockFieldOverrideFindMany: vi.fn(),
   mockSuppressionFindFirst: vi.fn(),
+  mockSuppressionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -60,9 +64,12 @@ vi.mock("@/lib/db", () => ({
     },
     topic: { findMany: mockTopicFindMany },
     division: { findMany: mockDivisionFindMany },
-    grant: { count: mockGrantCount },
+    grant: { count: mockGrantCount, findMany: mockGrantFindMany },
     fieldOverride: { findMany: mockFieldOverrideFindMany },
-    suppression: { findFirst: mockSuppressionFindFirst },
+    suppression: {
+      findFirst: mockSuppressionFindFirst,
+      findMany: mockSuppressionFindMany,
+    },
   },
 }));
 
@@ -95,8 +102,12 @@ function defaultBaselineMocks() {
   mockScholarGroupBy.mockResolvedValue([]);
   mockPublicationTopicCount.mockResolvedValue(1500);
   mockGrantCount.mockResolvedValue(25);
+  // activeGrants now uses grant.findMany + #160 suppression resolution; these
+  // #540 read-merge tests don't assert the count, just need the call mocked.
+  mockGrantFindMany.mockResolvedValue([]);
   mockFieldOverrideFindMany.mockResolvedValue([]);
   mockSuppressionFindFirst.mockResolvedValue(null);
+  mockSuppressionFindMany.mockResolvedValue([]);
 }
 
 describe("getDepartment — unit-curation read-merge (#540)", () => {
