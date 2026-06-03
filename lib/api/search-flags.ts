@@ -78,6 +78,55 @@ export function parseMeshParam(
   return { meshOff, meshStrict };
 }
 
+export type Scope = "exact" | "expanded" | "concept";
+
+/**
+ * PLAN R2/R6 — the user-facing match-scope: one control replacing the split
+ * `?mesh=` + `SEARCH_*_CONCEPT_MODE` primitives. Three values; default
+ * "expanded" (today's union). Parses `?match=exact|expanded|concept`; when
+ * `match` is absent the legacy `?mesh=` param maps in for one release
+ * (`mesh=off` → exact, `mesh=strict` → concept; off wins, matching
+ * `parseMeshParam`). Anything unrecognized → "expanded".
+ *
+ * Accepts a Web `URLSearchParams` (route handler) or a Next.js searchParams
+ * object (page), same as `parseMeshParam`.
+ */
+export function parseScopeParam(
+  source: URLSearchParams | Record<string, string | string[] | undefined>,
+): Scope {
+  const valuesOf = (key: string): string[] => {
+    if (source instanceof URLSearchParams) return source.getAll(key);
+    const raw = source[key];
+    return Array.isArray(raw) ? raw : raw !== undefined ? [raw] : [];
+  };
+  const match = valuesOf("match");
+  if (match.includes("exact")) return "exact";
+  if (match.includes("concept")) return "concept";
+  if (match.includes("expanded")) return "expanded";
+  // Back-compat alias: legacy `?mesh=` (off wins over strict, per parseMeshParam).
+  const mesh = valuesOf("mesh");
+  if (mesh.includes("off")) return "exact";
+  if (mesh.includes("strict")) return "concept";
+  return "expanded";
+}
+
+/**
+ * Bridge the user-facing scope onto the existing query levers
+ * (`meshOff` / `meshStrict`) so the proven concept-mode machinery in
+ * `searchPublications` / `searchFunding` is reused unchanged:
+ *
+ *   exact    → meshOff    (null resolution → literal-only admission)
+ *   expanded → neither    (today's default union; byte-identical)
+ *   concept  → meshStrict (concept-only admission, today's `concept_filtered`)
+ *
+ * Keeping this a pure mapping makes the `expanded` default byte-identical to the
+ * pre-scope query, and lets `exact`/`concept` ride the already-tested `?mesh=`
+ * paths. (People result-set gating is deferred to its own phase.)
+ */
+export function scopeToMeshParams(scope: Scope): { meshOff: boolean; meshStrict: boolean } {
+  return { meshOff: scope === "exact", meshStrict: scope === "concept" };
+}
+
 /**
  * Issue #295 — funding-tab concept clause. When `on`, `searchFunding` adds a
  * resolved-MeSH OR-of-evidence clause so a concept query also matches NIH

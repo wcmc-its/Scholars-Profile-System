@@ -20,7 +20,8 @@ import { SearchInterpretationPopover } from "@/components/search/search-interpre
 import { buildSearchInterpretation } from "@/lib/api/search-interpretation";
 import { buildMeshHref } from "./url-helpers";
 import {
-  parseMeshParam,
+  parseScopeParam,
+  scopeToMeshParams,
   resolveConceptMode,
   resolveDeptLeadershipBoost,
   resolvePeopleRelevanceMode,
@@ -154,7 +155,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   //                return `conceptImpactScore: null`.
   // Precedence rule: `?mesh=off` wins over `?mesh=strict` regardless of URL
   // order. Shared helper guarantees route handler + SSR page agree.
-  const { meshOff, meshStrict } = parseMeshParam(sp);
+  // PLAN R2/R6 — one `?match=exact|expanded|concept` scope (default expanded)
+  // replaces the URL `?mesh=` surface, bridged onto the existing meshOff/meshStrict
+  // levers so `expanded` stays byte-identical and `?mesh=off|strict` keeps working.
+  const { meshOff, meshStrict } = scopeToMeshParams(parseScopeParam(sp));
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
   // §5 / §7.1 — chip mode discriminator. Single source of truth shared with
   // `searchPublications`'s body construction and the route handler's log.
@@ -374,13 +378,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
 
   return (
     <main>
-      <SearchMeta
-        q={q}
-        peopleCount={peopleResult.total}
-        pubCount={pubsResult.total}
-        fundingCount={fundingResult.total}
-        taxonomyMatch={taxonomyMatch}
-      />
+      <SearchMeta q={q} taxonomyMatch={taxonomyMatch} />
       {/* Issue #638 — the research-area suggestion now renders as a compact
           card inside the SearchMeta header (top-right), and the MeSH boost
           (§259) + search-interpretation (§265) affordances move into the
@@ -571,19 +569,13 @@ function collectAliases(short: string): string[] {
 }
 
 /* ============================================================
- * Search-meta strip — h1 with quoted query span + counts subhead
+ * Search-meta strip — h1 with quoted query span (PLAN R1: counts subhead removed)
  * ============================================================ */
 function SearchMeta({
   q,
-  peopleCount,
-  pubCount,
-  fundingCount,
   taxonomyMatch,
 }: {
   q: string;
-  peopleCount: number;
-  pubCount: number;
-  fundingCount: number;
   taxonomyMatch: TaxonomyMatchResult;
 }) {
   return (
@@ -605,11 +597,10 @@ function SearchMeta({
           "Browse"
         )}
       </h1>
-      <div className="text-[13px] text-muted-foreground">
-        {peopleCount.toLocaleString()} {peopleCount === 1 ? "scholar" : "scholars"} ·{" "}
-        {pubCount.toLocaleString()} publications · {fundingCount.toLocaleString()} funding
-      </div>
-      {/* #709 — Research Areas chip row: below the count line, above the tabs.
+      {/* PLAN R1 — the duplicated "{n} scholars · {n} publications · {n} funding"
+          summary line was removed: the per-type counts already live on the tab
+          badges, which also act as the switcher. */}
+      {/* #709 — Research Areas chip row: below the heading, above the tabs.
           Replaces the top-right "Research area at WCM" card (RA-1/RA-2). */}
       <ResearchAreasRow result={taxonomyMatch} />
     </div>
