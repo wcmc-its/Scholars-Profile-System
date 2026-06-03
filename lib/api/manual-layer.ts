@@ -226,6 +226,40 @@ export async function loadAllGrantSuppressions(
 }
 
 /**
+ * Resolve #160 grant suppression for a set of active grant rows.
+ *
+ * A grant row is per-investigator and keyed on its stable `externalId` (#352);
+ * a suppression on that `externalId` hides exactly that row (ADR-005 keying /
+ * #160 D1). This is the shared predicate for the aggregate grant surfaces —
+ * department / division / center listings and their active-grant counts — so
+ * the Grants-tab list, its badge, and the hero stat all drop the same rows and
+ * stay in agreement (#481(b): suppressed grants must neither list nor inflate a
+ * count). Mirrors the row-drop the funding search-index build applies before
+ * grouping (`etl/search-index/index.ts`).
+ *
+ * Returns the active suppressed `externalId` set (for filtering rows before
+ * grouping) and the distinct unsuppressed key count (`externalId`, or `id` when
+ * `externalId` is null — a null id can carry no suppression). Per-request and
+ * id-scoped via {@link loadEntitySuppressions}, never the whole-table batch
+ * load, per the ADR-005 immediacy rule.
+ */
+export async function resolveActiveGrantSuppression(
+  rows: ReadonlyArray<{ externalId: string | null; id: string }>,
+  client: SuppressionReadClient,
+): Promise<{ suppressed: ReadonlySet<string>; unsuppressedKeyCount: number }> {
+  const externalIds = rows
+    .map((r) => r.externalId)
+    .filter((x): x is string => x !== null);
+  const suppressed = await loadEntitySuppressions("grant", externalIds, client);
+  const keys = new Set<string>();
+  for (const r of rows) {
+    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
+    keys.add(r.externalId ?? r.id);
+  }
+  return { suppressed, unsuppressedKeyCount: keys.size };
+}
+
+/**
  * True when this `(pmid, cwid)` WCM authorship is hidden by an active per-author
  * suppression — the scholar must then be omitted from that publication's
  * rendered author chips, profile links, and author-derived counts

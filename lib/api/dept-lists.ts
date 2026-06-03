@@ -23,6 +23,7 @@ import type {
 import {
   isAuthorHidden,
   loadPublicationSuppressions,
+  resolveActiveGrantSuppression,
   resolveDarkPmids,
 } from "@/lib/api/manual-layer";
 
@@ -159,13 +160,15 @@ export async function getDeptGrantsList(
   };
 
   // Count distinct externalIds (grants) — fall back to count of rows when
-  // externalId is null.
+  // externalId is null. #160/#481(b) — drop suppressed grants from the count
+  // and (below) from the grouping, so the list and its badge never surface a
+  // hidden grant.
   const distinctRows = (await prisma.grant.findMany({
     where: baseWhere,
     select: { externalId: true, id: true },
   })) as Array<{ externalId: string | null; id: string }>;
-  const totalKeys = new Set(distinctRows.map((r) => r.externalId ?? r.id));
-  const total = totalKeys.size;
+  const { suppressed, unsuppressedKeyCount: total } =
+    await resolveActiveGrantSuppression(distinctRows, prisma);
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: PAGE_SIZE };
   }
@@ -218,6 +221,9 @@ export async function getDeptGrantsList(
     return /^(PI|Co-PI|MPI)/i.test(role);
   }
   for (const r of all) {
+    // #160/#481(b) — skip suppressed grant rows before grouping (keyed on the
+    // same externalId set the count excluded above).
+    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
     const key = r.externalId ?? `__solo__${r.cwid}-${r.startDate.toISOString()}`;
     const existing = groups.get(key);
     const sortKey =

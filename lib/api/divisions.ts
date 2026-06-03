@@ -236,10 +236,13 @@ export async function getDivision(
             },
             select: { externalId: true, id: true },
           })
-          .then((rows) => {
-            const keys = new Set(rows.map((r) => r.externalId ?? r.id));
-            return keys.size;
-          }),
+          // #481(b) — exclude #160-suppressed grants so the stat agrees with
+          // the Grants-tab list/badge.
+          .then((rows) =>
+            resolveActiveGrantSuppression(rows, prisma).then(
+              (r) => r.unsuppressedKeyCount,
+            ),
+          ),
   ]);
 
   return {
@@ -756,8 +759,10 @@ export async function getDivisionGrantsList(
     where: baseWhere,
     select: { externalId: true, id: true },
   })) as Array<{ externalId: string | null; id: string }>;
-  const totalKeys = new Set(distinctRows.map((r) => r.externalId ?? r.id));
-  const total = totalKeys.size;
+  // #160/#481(b) — drop suppressed grants from the count and (below) the
+  // grouping so a hidden grant never lists or inflates the badge.
+  const { suppressed, unsuppressedKeyCount: total } =
+    await resolveActiveGrantSuppression(distinctRows, prisma);
   if (total === 0) {
     return { hits: [], total: 0, page, pageSize: GRANT_PAGE_SIZE };
   }
@@ -807,6 +812,8 @@ export async function getDivisionGrantsList(
     return /^(PI|Co-PI|MPI)/i.test(role);
   }
   for (const r of all) {
+    // #160/#481(b) — skip suppressed grant rows before grouping.
+    if (r.externalId !== null && suppressed.has(r.externalId)) continue;
     const key = r.externalId ?? `__solo__${r.cwid}-${r.startDate.toISOString()}`;
     const existing = groups.get(key);
     const sortKey =
