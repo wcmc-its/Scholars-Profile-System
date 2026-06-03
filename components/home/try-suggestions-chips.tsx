@@ -3,8 +3,9 @@
 /**
  * Rotating "Try:" suggestion chips beneath the home-page hero search.
  *
- * Picks a random sample from the 200-entry pool at mount, so each visitor
- * sees a different cross-section of departments, topics, and subtopics.
+ * Picks a random sample from the curated lay-term research-topic pool at mount,
+ * so each visitor sees a different broad cross-section of current WCM research
+ * topics (see `lib/hero-search-suggestions.ts` / `docs/suggested-search-chips.md`).
  * Client-only sampling avoids ISR cache freeze (server-rendered chips would
  * be identical for every visitor inside the 6h revalidate window).
  *
