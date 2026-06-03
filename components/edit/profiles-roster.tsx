@@ -39,6 +39,9 @@ export type ProfilesRosterProps = {
   /** Pending slug-request count for the admin sub-nav pill; `null` when the
    *  slug-request feature is off (the "URL requests" tab is then hidden). */
   pendingSlugRequests: number | null;
+  /** Forwarded to the sub-nav: `null` hides the "Administrators" tab (the
+   *  feature is flag-gated, #728 Phase B); a number shows it. */
+  administratorsTab?: number | null;
   /** Link back to the viewer's own self-edit surface, forwarded to the
    *  sub-nav; `null` when they have no profile of their own. */
   selfEditHref?: string | null;
@@ -74,6 +77,7 @@ export function ProfilesRoster({
   page,
   pageSize,
   pendingSlugRequests,
+  administratorsTab,
   selfEditHref,
 }: ProfilesRosterProps) {
   const start = total === 0 ? 0 : page * pageSize + 1;
@@ -97,6 +101,7 @@ export function ProfilesRoster({
       <AdminSubnav
         active="profiles"
         pendingSlugRequests={pendingSlugRequests}
+        administratorsTab={administratorsTab}
         selfEditHref={selfEditHref}
       />
 

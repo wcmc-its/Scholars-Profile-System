@@ -12,15 +12,20 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
-export type AdminSubnavActive = "profiles" | "slug-requests";
+export type AdminSubnavActive = "profiles" | "slug-requests" | "administrators";
 
 export function AdminSubnav({
   active,
   pendingSlugRequests,
+  administratorsTab,
   selfEditHref,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
+  /** `null` hides the "Administrators" tab — the feature is flag-gated
+   *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
+   *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
+  administratorsTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
    *  superuser), so the link never lands on a 404. */
@@ -37,6 +42,14 @@ export function AdminSubnav({
             label="URL requests"
             active={active === "slug-requests"}
             count={pendingSlugRequests}
+          />
+        )}
+        {administratorsTab !== null && administratorsTab !== undefined && (
+          <AdminTab
+            href="/edit/administrators"
+            id="administrators"
+            label="Administrators"
+            active={active === "administrators"}
           />
         )}
         {selfEditHref ? (
