@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Info, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import type { Scope } from "@/lib/api/search-flags";
 
 /**
@@ -70,35 +70,51 @@ export function ScopeNote({
   query: string;
   conceptLabel: string;
 }) {
-  const text =
-    scope === "exact"
-      ? `Matching the exact word “${query}”.`
-      : scope === "concept"
-        ? `Matching the ${conceptLabel} concept only.`
-        : `Also matching the related concept ${conceptLabel}.`;
   const definition =
     `MeSH (Medical Subject Headings) is the U.S. National Library of Medicine’s ` +
     `controlled vocabulary for biomedical literature. ${conceptLabel} is its preferred ` +
     `term for “${query}”.`;
+  const definitionId = `mesh-def-${conceptLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")}`;
+
+  // The MeSH concept name carries its own definition on hover + keyboard focus
+  // (pure CSS group-hover / group-focus-within — no JS, so this stays a server
+  // component), replacing the old standalone ⓘ. The tooltip is anchored to the
+  // note row (which holds `relative`), not the term, so a long concept label is
+  // free to wrap on narrow viewports. Exact-word scope names the typed query,
+  // not a MeSH concept, so it renders plain with no term affordance.
+  const term = (
+    <span className="group inline">
+      <button
+        type="button"
+        aria-describedby={definitionId}
+        className="inline whitespace-normal rounded-sm text-left font-semibold text-foreground underline decoration-muted-foreground decoration-dotted decoration-1 underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
+      >
+        {conceptLabel}
+      </button>
+      <span
+        id={definitionId}
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-[300px] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-2.5 text-left text-[12.5px] font-normal leading-[1.5] text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {definition}
+      </span>
+    </span>
+  );
+
   return (
-    <div className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground">
+    <div className="relative inline-flex items-center gap-1.5 text-[13px] text-muted-foreground">
       <Sparkles aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
-      <span>{text}</span>
-      {/* ⓘ — pure CSS hover + keyboard-focus (group-focus-within) tooltip; no JS. */}
-      <span className="group relative inline-flex">
-        <button
-          type="button"
-          aria-label="What is a MeSH concept?"
-          className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
-        >
-          <Info aria-hidden className="size-3.5" strokeWidth={2} />
-        </button>
-        <span
-          role="tooltip"
-          className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 w-[300px] -translate-x-1/2 rounded-md border border-border bg-popover p-2.5 text-left text-[12.5px] font-normal leading-[1.5] text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-        >
-          {definition}
-        </span>
+      <span>
+        {scope === "exact" ? (
+          <>Matching the exact word “{query}”.</>
+        ) : scope === "concept" ? (
+          <>Matching the {term} concept only.</>
+        ) : (
+          <>Also matching the related concept {term}.</>
+        )}
       </span>
     </div>
   );
