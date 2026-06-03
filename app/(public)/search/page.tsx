@@ -279,6 +279,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
       meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+      // PLAN R5 / handoff item 3 — concept-only result-SET gate. Must match the
+      // streamed full search's predicate or the badge count would disagree with
+      // the list (`concept` shrinks the set; `expanded`/`exact` leave it alone).
+      scope,
       // Issue #532 — env-gated dept-shape leadership boost (kept so the count
       // matches the streamed full search's predicate; it's a scoring function
       // and doesn't change the total, but passing it keeps the calls aligned).
@@ -332,6 +336,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // `effectiveMeshResolution` (honors `?mesh=off`) passed to
       // searchPublications above.
       meshResolution: effectiveMeshResolution,
+      // PLAN R5 / handoff item 3 — concept-only result-SET gate. Kept in lockstep
+      // with the streamed full funding search so the badge matches the list
+      // (`concept` shrinks the set; `expanded`/`exact` leave today's body alone).
+      scope,
       // Perf — badge count only; the funding tab's full result streams below.
       countOnly: true,
     }),
@@ -503,6 +511,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   sort: sort as FundingSort,
                   filters: fundingFilters,
                   meshResolution: effectiveMeshResolution,
+                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
+                  // (in lockstep with the countOnly badge call above).
+                  scope,
                 })}
               />
             ) : (
@@ -532,6 +543,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   relevanceMode: peopleRelevanceMode,
                   shape: peopleQueryShape,
                   meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
+                  // (kept in lockstep with the countOnly badge call above).
+                  scope,
                   deptLeadershipBoost: resolveDeptLeadershipBoost(),
                   // Issue #692 — generic-term demotion on the streamed people
                   // tab: gates/highlights on the content query (this is the SSR

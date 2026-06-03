@@ -29,7 +29,7 @@ import {
   searchClient,
 } from "@/lib/search";
 import { coreProjectNum } from "@/lib/award-number";
-import { resolveFundingConceptEnabled } from "@/lib/api/search-flags";
+import { resolveFundingConceptEnabled, type Scope } from "@/lib/api/search-flags";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const PAGE_SIZE = 20;
@@ -237,6 +237,22 @@ export async function searchFunding(opts: {
    */
   meshResolution?: MeshResolution | null;
   /**
+   * PLAN R5 / handoff item 3 — the user-facing match scope. Drives the funding
+   * result-SET admission so the list AND the badge shrink under the non-default
+   * scopes:
+   *   - `exact`    → literal text admission only (drops the #295 concept clause).
+   *   - `expanded` → today's #295 union (text OR `meshDescriptorUi` descendants);
+   *                  byte-identical to the pre-gate body and the headless default.
+   *   - `concept`  → concept-only admission via the `meshDescriptorUi` terms set.
+   * Concept gating here rides the grant's RePORTER project-keyword descriptors
+   * (`meshDescriptorUi`), NOT funded-publication MeSH — that signal isn't
+   * indexed yet (see the `// TODO(P4)` below). Both the concept and exact
+   * branches only diverge from `expanded` when the concept flag is on AND `q`
+   * resolved to a descriptor; otherwise all three collapse to text-only, exactly
+   * as today. Absent ⇒ `expanded`.
+   */
+  scope?: Scope;
+  /**
    * Perf — count-only mode for the inactive search tabs. See the
    * `searchPeople` `countOnly` doc: skips the facet aggregations and the
    * Prisma investigator hydration, returning just `total` for the tab
@@ -277,12 +293,35 @@ export async function searchFunding(opts: {
   // Flag off / no resolution / empty descendant set → text-only, byte-
   // identical to the pre-#295 query.
   const meshResolution = opts.meshResolution ?? null;
+  // PLAN R5 / handoff item 3 — the user-facing match scope drives funding
+  // result-SET admission. `expanded` (and the headless default) is byte-
+  // identical to the pre-gate #295 body below; `exact`/`concept` only diverge
+  // when the concept clause would have applied (flag on + resolved descriptor).
+  const scope = opts.scope ?? "expanded";
   const must: Record<string, unknown>[] = [textClause];
-  if (
+  // The concept evidence set: grants tagged with the resolved descriptor or one
+  // of its tree descendants. TODO(P4): switch to fundedPubMeshUi once funding
+  // reindex lands — `meshDescriptorUi` is RePORTER project keywords, NOT funded-
+  // publication MeSH, so this is a weaker (keyword) admission signal than the
+  // eventual funded-output gate. Until then `concept` shrinks the set by
+  // project-keyword topicality, the only MeSH-shaped field in the funding index.
+  const conceptClauseApplies =
     resolveFundingConceptEnabled() &&
     meshResolution !== null &&
-    meshResolution.descendantUis.length > 0
-  ) {
+    meshResolution.descendantUis.length > 0;
+  if (conceptClauseApplies && scope === "concept") {
+    // Concept-only admission: drop the literal-text predicate, admit purely by
+    // descriptor topicality. The terms set is byte-identical to the `should`
+    // sub-clause `expanded` uses, so the badge/list ride the same evidence set.
+    must[0] = {
+      terms: {
+        meshDescriptorUi: meshResolution.descendantUis,
+      },
+    };
+  } else if (conceptClauseApplies && scope !== "exact") {
+    // `expanded` (default) — today's #295 union: text OR descriptor-tagged.
+    // Pinned byte-identical to the pre-gate body. `exact` deliberately skips
+    // this branch and rides the bare `[textClause]` literal-only admission.
     must[0] = {
       bool: {
         should: [

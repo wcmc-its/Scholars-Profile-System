@@ -68,6 +68,7 @@ import {
   resolveConceptMode,
   resolvePubRecencyMode,
   type PubRecencyMode,
+  type Scope,
 } from "@/lib/api/search-flags";
 // Issue #309 / SPEC §6.1.2 — the classifier's shape enum (cwid / name / …),
 // distinct from the OS-body `PeopleQueryShape` telemetry label below. Aliased
@@ -500,6 +501,18 @@ export async function searchPeople(opts: {
    * boost function is simply omitted then.
    */
   meshDescendantUis?: string[];
+  /**
+   * PLAN R5 / handoff item 3 — the user-facing match scope. Drives the
+   * concept-only result-SET gate: when `concept`, an additional
+   * `terms { publicationMeshUi: descendantUis }` predicate is pushed into the
+   * always-on `queryFilter` so the People list AND all badge counts shrink to
+   * scholars with at least one publication tagged within the resolved
+   * descriptor's descendant set (the same set the ×1.5 boost and the per-row
+   * reason counts already use). `exact` rides the empty-`descendantUis` path
+   * (boost dropped, no set gate); `expanded` (default) is byte-identical to the
+   * pre-gate body — it pushes nothing. Absent ⇒ `expanded`.
+   */
+  scope?: Scope;
   /**
    * Issue #688 — `SEARCH_PEOPLE_MATCH_PROVENANCE` resolved at request time by
    * the route. When true (and the topic template ran against a resolved
@@ -945,6 +958,19 @@ export async function searchPeople(opts: {
   const queryFilter: Record<string, unknown>[] = [];
   if (sparseClause) queryFilter.push(sparseClause);
   if (topicClause) queryFilter.push(topicClause);
+
+  // PLAN R5 / handoff item 3 — concept-only result-SET gate. Under `concept`
+  // scope (and only when the query resolved to a descriptor, so
+  // `meshDescendantUis` is non-empty), admit only scholars with at least one
+  // publication tagged within the descendant set — the same set already used by
+  // the ×1.5 attribution boost and the per-row reason counts. Pushed into the
+  // always-on filter so the People list, the facet aggregations, AND the
+  // countOnly badge all shrink together. `expanded` pushes nothing here, so its
+  // query body stays byte-identical to today; `exact` rides the empty-set path
+  // (`meshDescendantUis = []` ⇒ the guard is skipped, boost-drop only).
+  if (opts.scope === "concept" && meshDescendantUis.length > 0) {
+    queryFilter.push({ terms: { publicationMeshUi: meshDescendantUis } });
+  }
 
   // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
   // the query predicate (must + always-on filters); scoring, post_filter,
