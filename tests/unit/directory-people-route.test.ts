@@ -22,7 +22,15 @@ vi.mock("@/lib/sources/ldap", () => ({
 import { GET } from "@/app/api/directory/people/route";
 
 const SESSION = { cwid: "act001", isSuperuser: false };
-const PERSON = { cwid: "abc123", name: "Ada Lovelace", title: "Professor", dept: "CS" };
+const PERSON = {
+  cwid: "abc123",
+  name: "Ada Lovelace",
+  title: "Professor",
+  dept: "CS",
+  firstName: "Ada",
+  lastName: "Lovelace",
+  email: "ada@med.cornell.edu",
+};
 
 /** Build the request, run the route, and return the response. */
 function get(query: string) {

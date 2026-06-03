@@ -1003,15 +1003,23 @@ function stripTrailingDegree(name: string): string {
 // — name + title + department only, never PII.
 // ---------------------------------------------------------------------------
 
-/** One directory person, projected for a typeahead row. */
+/** One directory person, projected for a typeahead row.
+ *
+ *  `firstName`/`lastName`/`email` are the structured components (#728 Phase B):
+ *  the Administrators roster renders "First Last" + a mailto link from these,
+ *  while `name`/`title`/`dept` keep their existing display semantics so the
+ *  typeahead and access card are untouched. */
 export type DirectoryPerson = {
   cwid: string;
   name: string;
   title: string | null;
   dept: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
 };
 
-/** Narrow per-call attribute list — name + title + department, nothing else. */
+/** Narrow per-call attribute list — name + title + department + mail, nothing else. */
 const DIRECTORY_PEOPLE_ATTRS = [
   "weillCornellEduCWID",
   "displayName",
@@ -1019,6 +1027,7 @@ const DIRECTORY_PEOPLE_ATTRS = [
   "sn",
   "weillCornellEduPrimaryTitle",
   "weillCornellEduDepartment",
+  "mail",
 ] as const;
 
 function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson | null {
@@ -1034,6 +1043,9 @@ function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson
     name,
     title: firstString(entry.weillCornellEduPrimaryTitle),
     dept: firstString(entry.weillCornellEduDepartment),
+    firstName: given,
+    lastName: sn,
+    email: firstString(entry.mail),
   };
 }
 
