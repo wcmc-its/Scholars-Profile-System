@@ -43,4 +43,32 @@ describe("AdminSubnav", () => {
     expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
     expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
   });
+
+  it("hides the Administrators tab when administratorsTab is null", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} administratorsTab={null} />);
+    expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
+  });
+
+  it("hides the Administrators tab when administratorsTab is omitted (undefined)", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    expect(screen.queryByTestId("admin-tab-administrators")).toBeNull();
+  });
+
+  it("shows the Administrators tab when administratorsTab is 0 (no badge)", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} administratorsTab={0} />);
+    const tab = screen.getByTestId("admin-tab-administrators");
+    expect(tab).toBeTruthy();
+    expect(tab.getAttribute("href")).toBe("/edit/administrators");
+    // 0 is a count, not a badge — the pill only renders for count > 0.
+    expect(screen.queryByTestId("admin-subnav-pending-count")).toBeNull();
+  });
+
+  it("marks the Administrators tab active with aria-current", () => {
+    render(
+      <AdminSubnav active="administrators" pendingSlugRequests={null} administratorsTab={0} />,
+    );
+    expect(screen.getByTestId("admin-tab-administrators").getAttribute("aria-current")).toBe(
+      "page",
+    );
+  });
 });

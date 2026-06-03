@@ -15,9 +15,17 @@ import {
 const ATTRS = Object.keys(REQUEST_A_CHANGE) as RequestAttribute[];
 
 describe("REQUEST_A_CHANGE — structure", () => {
-  it("covers the six attributes, each with a heading and ≥1 issue", () => {
+  it("covers the seven attributes, each with a heading and ≥1 issue", () => {
     expect(ATTRS.sort()).toEqual(
-      ["appointments", "education", "funding", "name-title", "photo", "publications"].sort(),
+      [
+        "appointments",
+        "education",
+        "funding",
+        "name-title",
+        "org-unit",
+        "photo",
+        "publications",
+      ].sort(),
     );
     for (const a of ATTRS) {
       expect(REQUEST_A_CHANGE[a].heading.length).toBeGreaterThan(0);
@@ -110,6 +118,16 @@ describe("operator routing decisions", () => {
     expect((issue("appointments", "appointment-title-wrong").action as { email?: string }).email).toBe(
       "support@med.cornell.edu",
     );
+  });
+
+  it("org-unit 'request a new org unit' routes to ITS support (#728 Phase D)", () => {
+    const a = issue("org-unit", "request-new-org-unit").action;
+    expect(a.kind).toBe("route");
+    if (a.kind === "route") {
+      expect(a.email).toBe("support@med.cornell.edu");
+      expect(a.office).toBe("ITS Support");
+      expect(a.sourceSystem).toBe("Enterprise Directory / Scholars");
+    }
   });
 
   it("name / email / photo / ORCID are self-service", () => {

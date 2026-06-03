@@ -34,6 +34,8 @@
     "etl:ed:student-programs": "tsx etl/ed/student-programs.ts",
     "etl:ed:probe-chiefs": "tsx etl/ed/probe-chiefs.ts",
     "etl:ed:probe-divisions": "tsx etl/ed/probe-divisions.ts",
+    "etl:ed:admins": "tsx etl/ed-admins/index.ts",
+    "etl:ed:admins:probe": "tsx etl/ed-admins/probe.ts",
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",

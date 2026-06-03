@@ -8,6 +8,7 @@ import {
   canAccessScholarEditPage,
   requireSuperuserGet,
   verifyRequestOrigin,
+  type AuthzDenialReason,
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
 
@@ -308,5 +309,18 @@ describe("verifyRequestOrigin", () => {
       ok: false,
       reason: "cross_origin",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AuthzDenialReason — `ed_locked` membership (#728 § 2.2 #3 / § 5 MUST-7)
+// ---------------------------------------------------------------------------
+
+describe("AuthzDenialReason — ed_locked is a stable member", () => {
+  it("includes ed_locked in the union (guards the route's editError(403, 'ed_locked'))", () => {
+    // A compile-time guard: if `ed_locked` were dropped from the union this
+    // assignment would fail typecheck, breaking the grant route's gate.
+    const reason: AuthzDenialReason = "ed_locked";
+    expect(reason).toBe("ed_locked");
   });
 });

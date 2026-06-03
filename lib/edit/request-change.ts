@@ -19,6 +19,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   education: "Education",
   funding: "Funding",
   publications: "Publications",
+  "org-unit": "Org Unit",
 };
 
 /** Type guard — is this client-supplied value a known attribute? */

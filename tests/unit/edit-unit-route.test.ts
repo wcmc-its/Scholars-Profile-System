@@ -35,6 +35,7 @@ const {
   mockTxCenterFindUnique,
   mockTxCenterUpdate,
   mockReflectUnitChange,
+  mockIsOrgUnitCreateSuperuserOnly,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -49,6 +50,7 @@ const {
   mockTxCenterFindUnique: vi.fn(),
   mockTxCenterUpdate: vi.fn(),
   mockReflectUnitChange: vi.fn(),
+  mockIsOrgUnitCreateSuperuserOnly: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -79,6 +81,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/edit/revalidation", () => ({
   reflectUnitChange: mockReflectUnitChange,
 }));
+vi.mock("@/lib/edit/unit-create-flags", () => ({
+  isOrgUnitCreateSuperuserOnly: mockIsOrgUnitCreateSuperuserOnly,
+}));
 
 import { POST } from "@/app/api/edit/unit/route";
 
@@ -108,6 +113,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
+  // Default OFF (#728 Phase D): the Owner-create path is preserved, so every
+  // existing create test exercises unchanged behavior. The lockdown tests below
+  // opt in explicitly.
+  mockIsOrgUnitCreateSuperuserOnly.mockReturnValue(false);
   mockGetEditSession.mockResolvedValue(OWNER);
   mockTransaction.mockImplementation(async (cb: (tx: typeof fakeTx) => unknown) => cb(fakeTx));
   mockExecuteRaw.mockResolvedValue(1);
@@ -242,6 +251,58 @@ describe("/api/edit/unit op:'create' — informal center", () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "slug_taken" });
+  });
+});
+
+describe("/api/edit/unit op:'create' — org-unit lockdown (#728 Phase D § 4.5)", () => {
+  it("flag ON: an Owner of the parent dept is refused → 403 not_superuser (no write)", async () => {
+    mockIsOrgUnitCreateSuperuserOnly.mockReturnValue(true);
+    // OWNER (the beforeEach default) owns MED — allowed when the flag is OFF.
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Imaging Working Group",
+        slug: "imaging-working-group",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ ok: false, error: "not_superuser" });
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTxCenterCreate).not.toHaveBeenCalled();
+  });
+
+  it("flag ON: a Superuser still creates the informal center → 200", async () => {
+    mockIsOrgUnitCreateSuperuserOnly.mockReturnValue(true);
+    mockGetEditSession.mockResolvedValue(SUPERUSER);
+    mockUnitAdminFindMany.mockResolvedValue([]);
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Y",
+        slug: "y",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag OFF (default): the Owner-create path is unchanged → 200", async () => {
+    // Explicit regression: the existing default-off behavior must not move.
+    const res = await POST(
+      post({
+        op: "create",
+        unitType: "center",
+        name: "Imaging Working Group",
+        slug: "imaging-working-group",
+        deptCode: "MED",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxCenterCreate).toHaveBeenCalledTimes(1);
   });
 });
 

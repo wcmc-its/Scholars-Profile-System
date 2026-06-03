@@ -66,6 +66,12 @@ async function main() {
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],
     ["ED-Student-Programs", "etl/ed/student-programs.ts"],
+    // #728 — ED admin-role org-unit managers. Runs after ED (which populates the
+    // Department/Division rows this resolves against). Writes gated behind
+    // SELF_EDIT_ED_ADMINS_IMPORT=on; dry-run + fail-closed otherwise, so it is
+    // safe in the chain even before #443 LDAP routing lands. (Deployed Step
+    // Function nightly wiring is held pending OQ-4.)
+    ["ED-Admins", "etl/ed-admins/index.ts"],
     ["RePORTER", "etl/reporter/index.ts"],
     ["NSF", "etl/nsf/index.ts"],
     ["Gates", "etl/gates/index.ts"],

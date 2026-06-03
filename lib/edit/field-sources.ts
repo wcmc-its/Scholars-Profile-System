@@ -25,6 +25,10 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   education: "ASMS",
   funding: "InfoEd",
   publications: "PubMed (attributed by ReCiter)",
+  // #728 Phase D — `org-unit` is a request-only pseudo-attribute (no `/edit`
+  // panel renders a source line for it); the entry exists only because the map
+  // is a total Record over the shared `RequestAttribute` union.
+  "org-unit": "Enterprise Directory / Scholars",
 };
 
 /** The system-of-record label for a sourced `/edit` attribute. */

@@ -18,6 +18,7 @@ describe("isRequestAttribute", () => {
   it("accepts known attributes and rejects anything else", () => {
     expect(isRequestAttribute("education")).toBe(true);
     expect(isRequestAttribute("funding")).toBe(true);
+    expect(isRequestAttribute("org-unit")).toBe(true);
     expect(isRequestAttribute("salary")).toBe(false);
     expect(isRequestAttribute(42)).toBe(false);
     expect(isRequestAttribute(undefined)).toBe(false);
@@ -63,11 +64,26 @@ describe("resolveRequestChange", () => {
   it("returns no-send for an unknown issue id", () => {
     expect(resolveRequestChange("education", "not-an-issue")).toEqual({ kind: "no-send" });
   });
+
+  it("resolves the org-unit request to ITS support (#728 Phase D)", () => {
+    const r = resolveRequestChange("org-unit", "request-new-org-unit");
+    expect(r).toMatchObject({
+      kind: "send",
+      to: "support@med.cornell.edu",
+      office: "ITS Support",
+      sourceSystem: "Enterprise Directory / Scholars",
+      attributeLabel: "Org Unit",
+    });
+  });
 });
 
 describe("subjectFor", () => {
   it("is the fixed attribute-scoped subject", () => {
     expect(subjectFor("Education")).toBe("Scholars profile correction — Education");
+  });
+
+  it("is static for org-unit — no user free text reaches the subject (§ 4.6.1)", () => {
+    expect(subjectFor("Org Unit")).toBe("Scholars profile correction — Org Unit");
   });
 });
 

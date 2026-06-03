@@ -1003,15 +1003,23 @@ function stripTrailingDegree(name: string): string {
 // — name + title + department only, never PII.
 // ---------------------------------------------------------------------------
 
-/** One directory person, projected for a typeahead row. */
+/** One directory person, projected for a typeahead row.
+ *
+ *  `firstName`/`lastName`/`email` are the structured components (#728 Phase B):
+ *  the Administrators roster renders "First Last" + a mailto link from these,
+ *  while `name`/`title`/`dept` keep their existing display semantics so the
+ *  typeahead and access card are untouched. */
 export type DirectoryPerson = {
   cwid: string;
   name: string;
   title: string | null;
   dept: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
 };
 
-/** Narrow per-call attribute list — name + title + department, nothing else. */
+/** Narrow per-call attribute list — name + title + department + mail, nothing else. */
 const DIRECTORY_PEOPLE_ATTRS = [
   "weillCornellEduCWID",
   "displayName",
@@ -1019,6 +1027,7 @@ const DIRECTORY_PEOPLE_ATTRS = [
   "sn",
   "weillCornellEduPrimaryTitle",
   "weillCornellEduDepartment",
+  "mail",
 ] as const;
 
 function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson | null {
@@ -1034,6 +1043,9 @@ function projectDirectoryPerson(entry: Record<string, unknown>): DirectoryPerson
     name,
     title: firstString(entry.weillCornellEduPrimaryTitle),
     dept: firstString(entry.weillCornellEduDepartment),
+    firstName: given,
+    lastName: sn,
+    email: firstString(entry.mail),
   };
 }
 
@@ -1115,4 +1127,115 @@ export async function fetchDirectoryPeopleByCwid(
       // non-fatal — see fetchPersonNamesByCwid.
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// org-unit admin populations  (#728 — ED admin-role org-unit managers)
+//
+// WCM ED carries each org unit's administrators as OPTION-TAGGED subtypes of
+// `weillCornellEduCWID` on the org-unit group entries under
+// `ou=orgunits,ou=Groups` (objectClass `weillCornellEduOrgUnit`). The entry's
+// `cn` is the canonical N-code (= `Department`/`Division.code`). Probe 2026-06-03
+// (`etl/ed-admins/probe.ts`, run live) found these tags: `;da` (Dept Admin),
+// `;diva` (Division Admin), `;iamdela`, `;diva-iamdela` (the four we import) plus
+// `;dd` (EXCLUDED). `;diva` is a DISTINCT population from `;diva-iamdela`.
+//
+// ldapts cannot filter on `attr;tag` (raises "Invalid expression"), so we fetch
+// every org-unit entry and read the tagged keys off it. Minimal attribute list:
+// the unit's identity + the four imported CWID subtypes — never PII.
+// ---------------------------------------------------------------------------
+
+/** The four ED admin populations imported as per-unit curator grants (#728). */
+export const ED_ADMIN_TAGS = ["da", "diva", "iamdela", "diva-iamdela"] as const;
+export type EdAdminTag = (typeof ED_ADMIN_TAGS)[number];
+
+/** `UnitAdmin.source` value stamped per population (the provenance grammar). */
+export const ED_ADMIN_SOURCE: Record<EdAdminTag, string> = {
+  da: "ED:DA",
+  diva: "ED:DivA",
+  iamdela: "ED:IAMDELA",
+  "diva-iamdela": "ED:DivA-IAMDELA",
+};
+
+const DEFAULT_ORGUNITS_BASE = "ou=orgunits,ou=Groups,dc=weill,dc=cornell,dc=edu";
+
+/** One org-unit entry's admin assignments. `code` is the canonical N-code (`cn`). */
+export type EdOrgUnitAdmins = {
+  code: string;
+  displayName: string | null;
+  /** weillCornellEduType — "department" | "division" (informational only; the
+   *  Scholars entityType is resolved from the local unit tables, not this). */
+  unitType: string | null;
+  /** weillCornellEduOrgUnitLevel (1–6). Scholars models level 1 (dept) + 2 (division). */
+  level: number | null;
+  /** lowercased, de-duped CWIDs per imported tag (absent tag ⇒ empty array). */
+  byTag: Record<EdAdminTag, string[]>;
+};
+
+/** Case-insensitively read a `weillCornellEduCWID;<tag>` subtype off an entry. */
+function readTaggedCwids(entry: Record<string, unknown>, tag: EdAdminTag): string[] {
+  const want = `weillcornelleducwid;${tag}`;
+  for (const key of Object.keys(entry)) {
+    if (key.toLowerCase() === want) {
+      return Array.from(
+        new Set(
+          allStrings(entry[key])
+            .map((c) => c.trim().toLowerCase())
+            .filter((c) => c.length > 0),
+        ),
+      );
+    }
+  }
+  return [];
+}
+
+/**
+ * Fetch every org-unit entry under `ou=orgunits` that carries at least one
+ * imported admin tag, with the tagged CWIDs read off each entry. Caller resolves
+ * each `code` (N-code) to a Scholars Department/Division/Center and upserts grants.
+ *
+ * Returns ONLY entries with ≥1 imported-tag CWID — entries with no admin tag, or
+ * only the excluded `;dd` tag, are dropped. Paginated; minimal attribute list.
+ */
+export async function fetchOrgUnitAdmins(client: Client): Promise<EdOrgUnitAdmins[]> {
+  const base = process.env.SCHOLARS_LDAP_ORGUNITS_BASE ?? DEFAULT_ORGUNITS_BASE;
+  const { searchEntries } = await client.search(base, {
+    scope: "sub",
+    filter: "(objectClass=weillCornellEduOrgUnit)",
+    attributes: [
+      "cn",
+      "displayName",
+      "weillCornellEduType",
+      "weillCornellEduOrgUnitLevel",
+      // The bare base attr returns all `;tag` subtypes; the explicit names are
+      // belt-and-suspenders in case a server only returns explicitly-named tags.
+      "weillCornellEduCWID",
+      ...ED_ADMIN_TAGS.map((t) => `weillCornellEduCWID;${t}`),
+    ],
+    paged: { pageSize: 500 },
+  });
+
+  const out: EdOrgUnitAdmins[] = [];
+  for (const e of searchEntries as unknown as Record<string, unknown>[]) {
+    const code = firstString(e.cn);
+    if (!code) continue;
+    const byTag = {} as Record<EdAdminTag, string[]>;
+    let any = false;
+    for (const tag of ED_ADMIN_TAGS) {
+      const cwids = readTaggedCwids(e, tag);
+      byTag[tag] = cwids;
+      if (cwids.length > 0) any = true;
+    }
+    if (!any) continue;
+    const levelRaw = firstString(e.weillCornellEduOrgUnitLevel);
+    const level = levelRaw !== null ? Number.parseInt(levelRaw, 10) : NaN;
+    out.push({
+      code,
+      displayName: firstString(e.displayName),
+      unitType: firstString(e.weillCornellEduType),
+      level: Number.isFinite(level) ? level : null,
+      byTag,
+    });
+  }
+  return out;
 }

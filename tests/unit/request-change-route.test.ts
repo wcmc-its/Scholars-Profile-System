@@ -289,4 +289,61 @@ describe("POST /api/edit/request-change", () => {
       expect(mockSendMail).toHaveBeenCalledTimes(1);
     });
   });
+
+  // #728 Phase D § 4.6.1 — a self-targeted org-unit request needs NO route
+  // change: `targetCwid` is OMITTED, so the route defaults `target = session.cwid`
+  // and the self-gate (`session.cwid === target`) passes for any authenticated
+  // user; the recipient resolves server-side to ITS Support; rate-limited as
+  // usual; 503 → client mailto: fallback while the mailer is dark.
+  describe("self-targeted org-unit request (#728 Phase D)", () => {
+    it("a non-superuser sends with targetCwid omitted → routes to ITS support, 200", async () => {
+      const res = await POST(
+        post({
+          attribute: "org-unit",
+          issueId: "request-new-org-unit",
+          itemId: "Division of Foo (division, parent: MED)",
+          detail: "We need this for the new program.",
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ ok: true, sent: true });
+      const arg = mockSendMail.mock.calls[0][0];
+      expect(arg.to).toBe("support@med.cornell.edu");
+      expect(arg.subject).toBe("Scholars profile correction — Org Unit");
+      expect(arg.text).toContain("Item: Division of Foo (division, parent: MED)");
+      expect(arg.text).toContain("We need this for the new program.");
+    });
+
+    it("is rate-limited against the requester's own cwid (no superuser exemption)", async () => {
+      await POST(post({ attribute: "org-unit", issueId: "request-new-org-unit" }));
+      expect(mockRecordAttempt).toHaveBeenCalledWith("self01");
+    });
+
+    it("503 send_disabled while the mailer is dark → client mailto: fallback", async () => {
+      mockIsMailerConfigured.mockReturnValue(false);
+      const res = await POST(post({ attribute: "org-unit", issueId: "request-new-org-unit" }));
+      expect(res.status).toBe(503);
+      expect(await res.json()).toMatchObject({ error: "send_disabled" });
+      expect(mockSendMail).not.toHaveBeenCalled();
+    });
+
+    it("audit keys on the requester's own cwid (scholar) — no leak, filterable by attribute", async () => {
+      await POST(
+        post({
+          attribute: "org-unit",
+          issueId: "request-new-org-unit",
+          itemId: "Center of Bar (center)",
+        }),
+      );
+      const row = mockAppendAuditRow.mock.calls[0][1];
+      expect(row.targetEntityType).toBe("scholar");
+      expect(row.targetEntityId).toBe("self01");
+      expect(row.afterValues).toMatchObject({
+        attribute: "org-unit",
+        issue_id: "request-new-org-unit",
+        office: "ITS Support",
+        item_id: "Center of Bar (center)",
+      });
+    });
+  });
 });

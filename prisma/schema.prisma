@@ -914,11 +914,16 @@ model UnitAdmin {
   entityId   String     @map("entity_id") @db.VarChar(64) // unit code
   cwid       String     @db.VarChar(32) // grantee
   role       UnitRole
-  grantedBy  String     @map("granted_by") @db.VarChar(32) // actor CWID
+  grantedBy  String     @map("granted_by") @db.VarChar(32) // actor CWID (or "ED-ETL" sentinel)
+  // #728 — provenance. "manual" for human grants; "ED:DA" | "ED:DivA" | "ED:IAMDELA" |
+  // "ED:DivA-IAMDELA" for ED-imported grants. Lets the per-source reconcile spare manual
+  // rows (and other populations' rows) and lets the Administrators tab lock ED-sourced rows.
+  source     String     @default("manual") @db.VarChar(32)
   createdAt  DateTime   @default(now()) @map("created_at")
 
   @@id([entityType, entityId, cwid])
   @@index([cwid])
+  @@index([source]) // #728 — per-source reconcile + Administrators-tab provenance filter
   @@map("unit_admin")
 }
 

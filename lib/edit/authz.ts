@@ -38,7 +38,10 @@ export type AuthzDenialReason =
   /** `canGrant`: the actor's role is below the role they are trying to grant */
   | "authority_violation"
   /** a proxy edit whose target scholar's LDAP-primary unit is outside the actor's scope */
-  | "proxy_target_not_in_unit";
+  | "proxy_target_not_in_unit"
+  // ─── #728 § 2.2 #3 / § 5 MUST-7 ED-locked grant ───
+  /** a grant/revoke against a `unit_admin` row whose `source` LIKE 'ED:%' by a non-superuser */
+  | "ed_locked";
 
 export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
 

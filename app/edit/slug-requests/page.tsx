@@ -16,6 +16,7 @@ import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SlugRequestQueue } from "@/components/edit/slug-request-queue";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
 
@@ -72,6 +73,7 @@ export default async function SlugRequestsPage() {
       <AdminSubnav
         active="slug-requests"
         pendingSlugRequests={requests.length}
+        administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
         selfEditHref={selfEditHref}
       />
 

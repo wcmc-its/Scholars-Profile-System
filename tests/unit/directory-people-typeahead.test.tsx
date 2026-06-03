@@ -15,7 +15,15 @@ async function settle(ms = 350) {
   });
 }
 
-const PERSON = { cwid: "abc123", name: "Ada Lovelace", title: "Professor", dept: "CS" };
+const PERSON = {
+  cwid: "abc123",
+  name: "Ada Lovelace",
+  title: "Professor",
+  dept: "CS",
+  firstName: "Ada",
+  lastName: "Lovelace",
+  email: "ada@med.cornell.edu",
+};
 
 beforeEach(() => {
   vi.useFakeTimers();

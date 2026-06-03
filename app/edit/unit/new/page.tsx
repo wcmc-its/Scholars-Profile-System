@@ -25,6 +25,7 @@
 import { redirect } from "next/navigation";
 
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
+import { RequestNewOrgUnitDialog } from "@/components/edit/request-new-org-unit-dialog";
 import { UnitCreateForm } from "@/components/edit/unit-create-form";
 import type { DepartmentOption } from "@/components/edit/department-picker";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -35,6 +36,7 @@ import {
   logEditDenial,
   type UnitAdminLookup,
 } from "@/lib/edit/authz";
+import { isOrgUnitCreateSuperuserOnly } from "@/lib/edit/unit-create-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +105,21 @@ export default async function NewUnitPage({
           departments={departments}
           fixedDept={null}
         />
+      </CreateChrome>
+    );
+  }
+
+  // #728 Phase D § 4.5: with the lockdown on, org-unit creation is
+  // superuser-only. A non-superuser sees the "Request a new org unit" affordance
+  // (§ 4.6) instead of the Owner center form — the create endpoint now refuses
+  // the same submission, so rendering the form would be a dead end.
+  if (isOrgUnitCreateSuperuserOnly()) {
+    return (
+      <CreateChrome
+        heading="Request a new org unit"
+        subtitle="New org units are created by Scholars superusers. Send a request and we'll route it."
+      >
+        <RequestNewOrgUnitDialog />
       </CreateChrome>
     );
   }

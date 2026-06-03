@@ -100,7 +100,8 @@ export type RequestAttribute =
   | "appointments"
   | "education"
   | "funding"
-  | "publications";
+  | "publications"
+  | "org-unit";
 
 export type AttributeChangeConfig = {
   heading: string;
@@ -429,6 +430,26 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           cta: "Flag duplicate",
           sourceSystem: "ReCiter import",
           note: "Likely an import error — include the duplicate's details so support can merge it.",
+        }),
+      },
+    ],
+  },
+  // #728 Phase D § 4.6 — org units are created by Scholars superusers; everyone
+  // else asks ITS to route the request via the existing #160 mailer. One issue:
+  // the proposed unit travels in the request's `itemId` + `detail` (server-side
+  // recipient resolution; no new mailbox — SUPPORT_EMAIL).
+  "org-unit": {
+    heading: "What would you like to request?",
+    issues: [
+      {
+        id: "request-new-org-unit",
+        label: "Request a new org unit (department, division, or center)",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Enterprise Directory / Scholars",
+          cta: "Request a new org unit",
+          note: "New org units are created by Scholars superusers. Describe the unit (name, type, parent department) and we'll route it.",
         }),
       },
     ],

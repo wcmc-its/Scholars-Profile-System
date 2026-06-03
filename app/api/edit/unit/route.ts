@@ -39,6 +39,7 @@ import {
 import { mintSyntheticUnitCode } from "@/lib/edit/mint-code";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import { reflectUnitChange } from "@/lib/edit/revalidation";
+import { isOrgUnitCreateSuperuserOnly } from "@/lib/edit/unit-create-flags";
 import {
   checkUnitSlugAvailable,
   findUnit,
@@ -183,23 +184,41 @@ async function createInformalCenter(params: {
     centerTypeValue = centerType;
   }
 
-  // Authz: Owner of the named parent dept, or Superuser. SPEC line 213.
-  const effective = await getEffectiveUnitRole(
-    session,
-    { kind: "department", code: deptCode },
-    db.read as unknown as UnitAdminLookup,
-  );
-  const authz = canManageAccess(session, effective);
-  if (!authz.ok) {
-    logEditDenial({
-      actorCwid: session.cwid,
-      targetCwid: deptCode,
-      path: PATH,
-      reason: authz.reason,
-      targetEntityType: "department",
-      targetEntityId: deptCode,
-    });
-    return editError(403, authz.reason);
+  // Authz. By default (flag off): Owner of the named parent dept, or Superuser
+  // (SPEC line 213). With `SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY="on"` (#728
+  // Phase D § 4.5): superuser-only, mirroring the institute carve-out above —
+  // all org-unit creation becomes superuser-only. The lockdown is the explicit
+  // requirement; the flag keeps the Owner-create behavior change opt-in (OQ-8a).
+  if (isOrgUnitCreateSuperuserOnly()) {
+    if (!session.isSuperuser) {
+      logEditDenial({
+        actorCwid: session.cwid,
+        targetCwid: deptCode,
+        path: PATH,
+        reason: "not_superuser",
+        targetEntityType: "department",
+        targetEntityId: deptCode,
+      });
+      return editError(403, "not_superuser");
+    }
+  } else {
+    const effective = await getEffectiveUnitRole(
+      session,
+      { kind: "department", code: deptCode },
+      db.read as unknown as UnitAdminLookup,
+    );
+    const authz = canManageAccess(session, effective);
+    if (!authz.ok) {
+      logEditDenial({
+        actorCwid: session.cwid,
+        targetCwid: deptCode,
+        path: PATH,
+        reason: authz.reason,
+        targetEntityType: "department",
+        targetEntityId: deptCode,
+      });
+      return editError(403, authz.reason);
+    }
   }
 
   // Slug uniqueness — friendly check; the `Center.slug @unique` is the
