@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { FieldSourceLine } from "@/components/edit/field-source-line";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
@@ -31,13 +31,13 @@ export function ReadonlyAttributePanel({
   fields,
 }: ReadonlyAttributePanelProps) {
   return (
-    <section data-slot="readonly-attribute-panel" data-attribute={attribute} className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{heading}</h2>
-        <FieldSourceLine attribute={attribute} />
-        <p className="text-muted-foreground text-sm">{description}</p>
-      </header>
-
+    <EditPanel
+      slot="readonly-attribute-panel"
+      data-attribute={attribute}
+      attribute={attribute}
+      heading={heading}
+      description={description}
+    >
       {fields && fields.length > 0 && (
         <dl className="border-border divide-border divide-y rounded-md border">
           {fields.map((f) => (
@@ -49,19 +49,19 @@ export function ReadonlyAttributePanel({
         </dl>
       )}
 
-      <div className="bg-muted/40 border-border flex flex-col gap-3 rounded-md border p-4">
+      {/* Lighter than the former filled callout so the sourced values above carry
+          more visual weight than the disclaimer (vision-round finding 4.7). */}
+      <div className="border-border flex flex-col items-start gap-2 border-t pt-3">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
           These fields come from WCM systems of record. Use Request a Change to fix one at its source.
         </p>
-        <div>
-          <RequestAChangeDialog
-            attribute={attribute}
-            cwid={cwid}
-            triggerTestId="request-a-change-toggle"
-          />
-        </div>
+        <RequestAChangeDialog
+          attribute={attribute}
+          cwid={cwid}
+          triggerTestId="request-a-change-toggle"
+        />
       </div>
-    </section>
+    </EditPanel>
   );
 }

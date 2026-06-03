@@ -21,11 +21,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
-import { FieldSourceLine } from "@/components/edit/field-source-line";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -108,7 +107,6 @@ export function EntityPanel<T extends EntityRow>({
   filterable = false,
   slot,
 }: EntityPanelProps<T>) {
-  const router = useRouter();
   const [list, setList] = React.useState<T[]>([...entities]);
   const [, startTransition] = React.useTransition();
   const isSuperuser = mode === "superuser";
@@ -175,7 +173,9 @@ export function EntityPanel<T extends EntityRow>({
           state: isSuperuser ? "hidden_by_admin" : "hidden_by_self",
           suppressionId: data.suppressionId,
         } as Partial<T>);
-        router.refresh();
+        // No router.refresh(): local optimistic→committed state is authoritative
+        // and this page is force-dynamic; a refresh just re-fetches the whole
+        // panel needlessly (vision-round T3.7).
       } catch {
         setError(externalId, `We couldn't hide this ${HIDE_NOUN[entityType]}. Please try again.`);
       }
@@ -201,7 +201,6 @@ export function EntityPanel<T extends EntityRow>({
           return;
         }
         commitLocal(externalId, { state: "shown", suppressionId: null } as Partial<T>);
-        router.refresh();
       } catch {
         setError(externalId, `We couldn't restore this ${HIDE_NOUN[entityType]}. Please try again.`);
       }
@@ -211,8 +210,10 @@ export function EntityPanel<T extends EntityRow>({
   // ---- intent routing (self = direct; superuser = dialog-gated) ------------
 
   function onHideClick(e: T) {
-    if (isSuperuser) setHideTarget(e.externalId);
-    else hide(e.externalId, null);
+    // Both modes confirm before hiding (vision-round T2.6) — self gets a
+    // lightweight no-reason confirm; superuser a required-reason one. Parity:
+    // the same verb no longer has three different safety models.
+    setHideTarget(e.externalId);
   }
   function onShowClick(e: T) {
     // A superuser un-hiding a row the SCHOLAR hid overrides their choice → confirm.
@@ -253,13 +254,12 @@ export function EntityPanel<T extends EntityRow>({
   );
 
   return (
-    <section data-slot={slot} className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{copy.heading}</h2>
-        <FieldSourceLine attribute={REQUEST_ATTR[entityType]} />
-        <p className="text-muted-foreground text-sm">{copy.description}</p>
-      </header>
-
+    <EditPanel
+      slot={slot}
+      attribute={REQUEST_ATTR[entityType]}
+      heading={copy.heading}
+      description={copy.description}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm" aria-live="polite">
           <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>{" "}
@@ -289,7 +289,9 @@ export function EntityPanel<T extends EntityRow>({
       ) : rows.length === 0 ? (
         <p className="text-muted-foreground text-sm">No matches for &ldquo;{filter}&rdquo;.</p>
       ) : filterable ? (
-        <ScrollArea className="border-border h-[60vh] rounded-md border">{listBody}</ScrollArea>
+        // Bounded inner scroll on desktop only; on phones an unbounded height
+        // lets the page scroll naturally instead of trapping it (T2.5 / 4.5).
+        <ScrollArea className="border-border rounded-md border md:h-[60vh]">{listBody}</ScrollArea>
       ) : (
         <div className="border-border rounded-md border">{listBody}</div>
       )}
@@ -298,8 +300,12 @@ export function EntityPanel<T extends EntityRow>({
         open={hideTarget !== null}
         onOpenChange={(o) => !o && setHideTarget(null)}
         title={`Hide this ${HIDE_NOUN[entityType]}?`}
-        description={`This removes it from ${scholarName}'s public profile.${copy.hideNote ? ` ${copy.hideNote}` : ""}`}
-        reasonMode="required-text"
+        description={
+          isSuperuser
+            ? `This removes it from ${scholarName}'s public profile.${copy.hideNote ? ` ${copy.hideNote}` : ""}`
+            : `This hides it from your public profile. Hiding is not a correction — the record stays as-is in WCM systems and on internal reports. You can show it again any time.${copy.hideNote ? ` ${copy.hideNote}` : ""}`
+        }
+        reasonMode={isSuperuser ? "required-text" : "none"}
         confirmLabel="Hide"
         confirmVariant="destructive"
         onConfirm={async (reason) => {
@@ -322,7 +328,7 @@ export function EntityPanel<T extends EntityRow>({
           if (t) show(t.externalId, t.suppressionId);
         }}
       />
-    </section>
+    </EditPanel>
   );
 }
 
@@ -368,7 +374,7 @@ function EntityRowView({
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-[var(--apollo-maroon)] font-semibold",
+              "text-apollo-maroon font-semibold",
               isHidden && "text-muted-foreground font-normal",
               state === "locked" && "text-foreground",
             )}
@@ -393,13 +399,27 @@ function EntityRowView({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {state === "shown" && (
-            <Button type="button" variant="ghost" size="sm" onClick={onHide} data-testid={`${testId}-hide`}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              onClick={onHide}
+              data-testid={`${testId}-hide`}
+            >
               <EyeOff />
               Hide
             </Button>
           )}
           {canShow && (
-            <Button type="button" variant="ghost" size="sm" onClick={onShow} data-testid={`${testId}-show`}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              onClick={onShow}
+              data-testid={`${testId}-show`}
+            >
               <Eye />
               Show
             </Button>
