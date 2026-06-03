@@ -14,12 +14,11 @@ import { PublicationResultRow } from "@/components/search/publication-result-row
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
-import { MeshBoostControl } from "@/components/search/mesh-boost-control";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
-import { SearchInterpretationPopover } from "@/components/search/search-interpretation-popover";
-import { buildSearchInterpretation } from "@/lib/api/search-interpretation";
-import { buildMeshHref } from "./url-helpers";
+import { ScopeControl, ScopeNote } from "@/components/search/scope-control";
+import { buildMeshHref, buildScopeHref } from "./url-helpers";
 import {
+  type Scope,
   parseScopeParam,
   scopeToMeshParams,
   resolveConceptMode,
@@ -158,7 +157,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // PLAN R2/R6 — one `?match=exact|expanded|concept` scope (default expanded)
   // replaces the URL `?mesh=` surface, bridged onto the existing meshOff/meshStrict
   // levers so `expanded` stays byte-identical and `?mesh=off|strict` keeps working.
-  const { meshOff, meshStrict } = scopeToMeshParams(parseScopeParam(sp));
+  const scope = parseScopeParam(sp);
+  const { meshOff, meshStrict } = scopeToMeshParams(scope);
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
   // §5 / §7.1 — chip mode discriminator. Single source of truth shared with
   // `searchPublications`'s body construction and the route handler's log.
@@ -475,8 +475,13 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
-                narrowHref={buildMeshHref(sp, "strict")}
-                expandHref={buildMeshHref(sp, "clear")}
+                scope={scope}
+                conceptLabel={taxonomyMatch.meshResolution?.name ?? null}
+                scopeHrefs={{
+                  exact: buildScopeHref(sp, "exact"),
+                  expanded: buildScopeHref(sp, "expanded"),
+                  concept: buildScopeHref(sp, "concept"),
+                }}
               />
             ) : type === "funding" ? (
               <FundingResults
@@ -944,8 +949,9 @@ async function PublicationsResults({
   meshResolution,
   chipMode,
   broadenHref,
-  narrowHref,
-  expandHref,
+  scope,
+  conceptLabel,
+  scopeHrefs,
 }: {
   q: string;
   page: number;
@@ -969,12 +975,13 @@ async function PublicationsResults({
    */
   meshResolution: MeshResolution | null;
   chipMode: "strict" | "expanded_default" | "expanded_narrow";
-  /** #259 §6.2 mesh-mode transition URLs, precomputed by the page (the raw
-   *  `sp` isn't in scope here). off = "Don't use MeSH", strict = "Narrow to
-   *  this concept only", clear = "Expand to related". */
+  /** #274 concept-aware empty-state "search broadly" escape (mesh=off). */
   broadenHref: string;
-  narrowHref: string;
-  expandHref: string;
+  /** PLAN R2/R3 — active scope, resolved concept label (null = no query→MeSH
+   *  mapping, so no scope row renders), and the three `?match=` hrefs. */
+  scope: Scope;
+  conceptLabel: string | null;
+  scopeHrefs: Record<Scope, string>;
 }) {
   const result = await resultPromise;
   // Issue #274 — concept-aware empty state (moved here from the page so the
@@ -1155,45 +1162,14 @@ async function PublicationsResults({
       toggleHref: toggleHref("wcmAuthor", a.cwid),
     }));
 
-  // Issue #638 — MeSH boost control (was the above-tabs ConceptChip banner)
-  // plus the §265 search-interpretation affordance, relocated into the
-  // publications results column. The interpretation popover lives inside the
-  // control's panel when a concept resolved; otherwise it stands alone (the
-  // free-text "no concept matched" explainer), preserving prior behavior.
-  const interpretation = buildSearchInterpretation(meshResolution);
-  const interpretationPopover =
-    q.length > 0 ? (
-      <SearchInterpretationPopover interpretation={interpretation} q={q} />
-    ) : null;
-  const meshControl = meshResolution ? (
-    chipMode === "strict" ? (
-      <MeshBoostControl
-        mode="strict"
-        resolution={meshResolution}
-        matchedQuery={q}
-        broadenHref={broadenHref}
-        interpretationSlot={interpretationPopover}
-      />
-    ) : chipMode === "expanded_default" ? (
-      <MeshBoostControl
-        mode="expanded_default"
-        resolution={meshResolution}
-        matchedQuery={q}
-        narrowHref={narrowHref}
-        broadenHref={broadenHref}
-        interpretationSlot={interpretationPopover}
-      />
-    ) : (
-      <MeshBoostControl
-        mode="expanded_narrow"
-        resolution={meshResolution}
-        matchedQuery={q}
-        expandHref={expandHref}
-        interpretationSlot={interpretationPopover}
-      />
-    )
-  ) : interpretationPopover ? (
-    <div className="mb-3 flex justify-end">{interpretationPopover}</div>
+  // PLAN R2/R3 — the unified scope control + quiet explanation line replace the
+  // §638 MeSH boost banner and the §265 interpretation popover. Rendered only
+  // when a query→MeSH mapping resolved (`conceptLabel`).
+  const scopeRow = conceptLabel ? (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeControl active={scope} hrefs={scopeHrefs} />
+    </div>
   ) : null;
 
   return (
@@ -1222,7 +1198,7 @@ async function PublicationsResults({
         clearAllHref={clearAllHref}
       />
       <section>
-        {meshControl}
+        {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
           tab="publications"
