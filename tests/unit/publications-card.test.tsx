@@ -160,8 +160,8 @@ describe("PublicationsCard — optimistic hide", () => {
     );
     fireEvent.click(screen.getByTestId("pub-hide-a"));
     // After click the optimistic state already flipped — the Show button appears.
+    // No router.refresh(): the committed local list is authoritative (T3.7).
     await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
-    expect(mockRefresh).toHaveBeenCalled();
   });
 
   it("hide POSTs to /api/edit/suppress with the per-author body", async () => {
