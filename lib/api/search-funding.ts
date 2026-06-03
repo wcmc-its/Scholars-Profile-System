@@ -26,10 +26,15 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import {
   FUNDING_INDEX,
   FUNDING_FIELD_BOOSTS,
+  PUBLICATIONS_INDEX,
   searchClient,
 } from "@/lib/search";
 import { coreProjectNum } from "@/lib/award-number";
-import { resolveFundingConceptEnabled, type Scope } from "@/lib/api/search-flags";
+import {
+  resolveFundingConceptEnabled,
+  resolveFundingMatchReason,
+  type Scope,
+} from "@/lib/api/search-flags";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 
 const PAGE_SIZE = 20;
@@ -141,6 +146,27 @@ export type FundingHit = {
    *  Used by the expanded view to build the PubMed grant-search outbound
    *  link. Null for non-NIH grants. */
   coreProjectNum: string | null;
+  /** PLAN P4 — highlighted title fragment (`<mark>`-wrapped) when the literal
+   *  query matched the grant title. Present only under
+   *  `SEARCH_FUNDING_MATCH_REASON=on`; null otherwise (or no title hit). A
+   *  literal-title hit is self-evident from the highlight, so the row suppresses
+   *  the reason line. */
+  titleHighlight: string | null;
+  /** PLAN P4 — the grant was admitted (at least in part) by a literal text hit
+   *  on its title. Derived from `titleHighlight` presence. */
+  matchedLiteralTitle: boolean;
+  /** PLAN P4 — the grant was admitted via the resolved MeSH concept
+   *  (`meshDescriptorUi` ∩ descendant set), read from `matched_queries`. NOTE:
+   *  this is RePORTER project-keyword topicality, a distinct signal from
+   *  funded-publication MeSH (`matchedFundedPubs`). */
+  matchedConcept: boolean;
+  /** PLAN P4 — X = distinct on-topic funded publications: the count of this
+   *  grant's funded pmids whose publication-index MeSH (`meshDescriptorUi`)
+   *  intersects the resolved descendant set, computed by a query-time
+   *  `cardinality(pmid)` aggregation (no reindex). Capped at `pubCount` (Y) for
+   *  coherent "X of Y" phrasing. Present only under the flag + a resolved
+   *  concept; 0 when the grant has no on-topic funded outputs. */
+  matchedFundedPubs: number;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -309,6 +335,13 @@ export async function searchFunding(opts: {
     resolveFundingConceptEnabled() &&
     meshResolution !== null &&
     meshResolution.descendantUis.length > 0;
+  // PLAN P4 — tag the concept-admission `terms` clause with a query name so the
+  // hit map can read `matched_queries` and distinguish a concept hit from a
+  // literal-text hit. `_name` is pure metadata: it does NOT change the clause's
+  // score, so the `expanded` body stays byte-identical to the pre-P4 query (the
+  // HARD `expanded` non-regression invariant holds). Only attached when the
+  // reason flag is on, keeping the flag-off body byte-identical to today.
+  const conceptName = resolveFundingMatchReason() ? { _name: "concept" } : {};
   if (conceptClauseApplies && scope === "concept") {
     // Concept-only admission: drop the literal-text predicate, admit purely by
     // descriptor topicality. The terms set is byte-identical to the `should`
@@ -316,6 +349,7 @@ export async function searchFunding(opts: {
     must[0] = {
       terms: {
         meshDescriptorUi: meshResolution.descendantUis,
+        ...conceptName,
       },
     };
   } else if (conceptClauseApplies && scope !== "exact") {
@@ -330,6 +364,7 @@ export async function searchFunding(opts: {
             terms: {
               meshDescriptorUi: meshResolution.descendantUis,
               boost: 4,
+              ...conceptName,
             },
           },
         ],
@@ -543,6 +578,15 @@ export async function searchFunding(opts: {
     };
   }
 
+  // PLAN P4 — funding has no title highlight today (only `sanitizePubTitle`).
+  // Add one so a literal title hit is self-evident on the row and correctly
+  // suppresses the reason line (mirrors `searchPublications`). `highlight_query`
+  // is a plain `match` on the trimmed query so the marked terms reflect the
+  // literal text hit, independent of the concept-admission `should` clause.
+  // Omitted when the flag is off / query is empty ⇒ body byte-identical to today.
+  const matchReason = resolveFundingMatchReason();
+  const wantTitleHighlight = matchReason && trimmed.length > 0;
+
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
@@ -552,6 +596,16 @@ export async function searchFunding(opts: {
       ? { post_filter: { bool: { filter: userAxisFilters } } }
       : {}),
     ...(sortClause.length > 0 ? { sort: sortClause } : {}),
+    ...(wantTitleHighlight
+      ? {
+          highlight: {
+            fields: { title: { number_of_fragments: 0 } },
+            highlight_query: { match: { title: trimmed } },
+            pre_tags: ["<mark>"],
+            post_tags: ["</mark>"],
+          },
+        }
+      : {}),
     aggs,
   };
 
@@ -567,6 +621,13 @@ export async function searchFunding(opts: {
     role: string;
   };
   type Hit = {
+    /** PLAN P4 — OpenSearch named-query provenance: which `_name`-tagged
+     *  clauses this hit matched. Present only when the reason flag tagged a
+     *  clause (the concept admission); a literal-text hit is read off
+     *  `highlight.title` instead. */
+    matched_queries?: string[];
+    /** PLAN P4 — title highlight fragments under `SEARCH_FUNDING_MATCH_REASON`. */
+    highlight?: { title?: string[] };
     _source: {
       projectId: string;
       title: string;
@@ -637,9 +698,96 @@ export async function searchFunding(opts: {
         )
       : new Map<string, string | null>();
 
+  // PLAN P4 — funded-outputs count X (per project), at QUERY TIME, no reindex.
+  // The funding hit already carries each grant's funded pmids (`publications[]`),
+  // and the publications index has `pmid` + `meshDescriptorUi` (funded-pub MeSH).
+  // So one aggregation against the pub index counts, per project, the distinct
+  // funded pmids whose MeSH intersects the resolved descendant set — the same
+  // query-time `cardinality(pmid)` trick `searchPeople` uses for its scholar
+  // reason counts. The pub index has no project key, so we bucket with a
+  // `filters` agg: one named filter per project scoped to that project's pmid
+  // set, each carrying a `cardinality(pmid)` sub-agg, all under a top-level
+  // `meshDescriptorUi` ∩ descendantUis filter. Distinct-pmid throughout (never
+  // a summed per-UI count) per MEMORY #651.
+  //
+  // CAVEAT (bounded): the stored `publications[]` is capped at PUB_LIST_CAP=250
+  // while `pubCount` (Y) is uncapped, so a mega-grant's X is computed only over
+  // the capped pmid set → a possible X-vs-Y undercount on a handful of grants.
+  // `Math.min(X, pubCount)` keeps the phrasing coherent; the common case is exact.
+  const descendantUis = meshResolution?.descendantUis ?? [];
+  const fundedOutputs = new Map<string, number>();
+  if (matchReason && descendantUis.length > 0 && r.hits.hits.length > 0) {
+    const pmidsByProject = new Map<string, string[]>();
+    const allPmids = new Set<string>();
+    for (const h of r.hits.hits) {
+      const pmids = [
+        ...new Set((h._source.publications ?? []).map((p) => p.pmid).filter(Boolean)),
+      ];
+      if (pmids.length === 0) continue;
+      pmidsByProject.set(h._source.projectId, pmids);
+      for (const p of pmids) allPmids.add(p);
+    }
+    if (allPmids.size > 0) {
+      const projectFilters: Record<string, unknown> = {};
+      for (const [projectId, pmids] of pmidsByProject) {
+        projectFilters[projectId] = { terms: { pmid: pmids } };
+      }
+      const aggResp = await searchClient().search({
+        index: PUBLICATIONS_INDEX,
+        body: {
+          size: 0,
+          query: {
+            bool: {
+              filter: [
+                { terms: { pmid: [...allPmids] } },
+                { terms: { meshDescriptorUi: descendantUis } },
+              ],
+            },
+          },
+          aggs: {
+            byProject: {
+              filters: { filters: projectFilters },
+              aggs: { d: { cardinality: { field: "pmid" } } },
+            },
+          },
+        } as object,
+      });
+      const buckets =
+        (
+          aggResp.body as {
+            aggregations?: {
+              byProject?: {
+                buckets?: Record<string, { d?: { value?: number } }>;
+              };
+            };
+          }
+        ).aggregations?.byProject?.buckets ?? {};
+      for (const [projectId, b] of Object.entries(buckets)) {
+        fundedOutputs.set(projectId, b.d?.value ?? 0);
+      }
+    }
+  }
+
   const hits: FundingHit[] = r.hits.hits.map((h) => {
     const src = h._source;
     const endDate = new Date(src.endDate);
+    const pubCount = src.pubCount ?? 0;
+    // PLAN P4 — three distinct admission paths, kept separate so the row never
+    // conflates a keyword-concept hit with a funded-output hit:
+    //   literal-title ← title highlight presence (self-evident → suppresses reason)
+    //   concept       ← `matched_queries` carries the `_name:"concept"` tag
+    //   funded-outputs← the query-time pub-index agg (X), capped at Y for "X of Y"
+    // All gated on `matchReason` so the flag-off contract is inert regardless of
+    // what the index happens to return.
+    const titleHighlight = matchReason ? (h.highlight?.title?.[0] ?? null) : null;
+    // `conceptClauseApplies` guards against a stale index response: the
+    // `_name:"concept"` clause is only emitted when a concept actually resolved,
+    // so a `matched_queries` tag is only meaningful then.
+    const matchedConcept =
+      matchReason && conceptClauseApplies && (h.matched_queries ?? []).includes("concept");
+    const matchedFundedPubs = matchReason
+      ? Math.min(fundedOutputs.get(src.projectId) ?? 0, pubCount)
+      : 0;
     return {
       projectId: src.projectId,
       title: src.title,
@@ -658,12 +806,16 @@ export async function searchFunding(opts: {
       isMultiPi: src.isMultiPi,
       department: src.department,
       totalPeople: src.totalPeople,
-      pubCount: src.pubCount ?? 0,
+      pubCount,
       abstract: src.abstract ?? null,
       abstractSource: src.abstractSource ?? null,
       applId: src.applId ?? null,
       publications: src.publications ?? [],
       coreProjectNum: coreProjectNum(src.awardNumber),
+      titleHighlight,
+      matchedLiteralTitle: titleHighlight !== null,
+      matchedConcept,
+      matchedFundedPubs,
       people: (src.people ?? []).map((p) => ({
         cwid: p.cwid,
         slug: p.slug,

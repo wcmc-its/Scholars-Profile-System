@@ -1524,6 +1524,7 @@ async function FundingResults({
             pageSize={result.pageSize}
             total={result.total}
             filters={filters}
+            conceptLabel={conceptLabel}
           />
         )}
         <Pagination

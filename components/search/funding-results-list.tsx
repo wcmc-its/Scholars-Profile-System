@@ -17,6 +17,7 @@ export function FundingResultsList({
   pageSize,
   total,
   filters,
+  conceptLabel,
 }: {
   hits: FundingHit[];
   q: string;
@@ -24,6 +25,8 @@ export function FundingResultsList({
   pageSize: number;
   total: number;
   filters: FundingFilters;
+  /** PLAN P4 — resolved MeSH concept label for the per-row reason line. */
+  conceptLabel?: string | null;
 }) {
   const applIdByAward = useNihApplIdMap(hits.map((h) => h.awardNumber));
 
@@ -38,6 +41,7 @@ export function FundingResultsList({
             total={total}
             filters={filters}
             applId={hit.awardNumber ? applIdByAward[hit.awardNumber] : undefined}
+            conceptLabel={conceptLabel}
           />
         </li>
       ))}

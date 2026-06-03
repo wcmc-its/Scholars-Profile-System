@@ -142,6 +142,25 @@ export function resolveFundingConceptEnabled(): boolean {
 }
 
 /**
+ * PLAN P4 — funding-tab per-result reason lines. When `on`, `searchFunding`
+ * adds a funding title highlight, reads `matched_queries` to flag the
+ * concept-admission path, and runs a query-time pub-index aggregation to count
+ * each grant's on-topic funded publications (X of Y). Default `off`.
+ *
+ * No reindex: X is computed at QUERY TIME against the publications index using
+ * the funded pmids the funding hit already carries (mirrors the People-tab
+ * `reasonCounts` aggregation). Pure presentation metadata — no effect on the
+ * funding query predicate, scoring, or result SET (the `_name` tags added under
+ * this flag are score-neutral; the `scope`-driven admission is governed by
+ * `resolveFundingConceptEnabled`, not this flag). A separate lever from
+ * `SEARCH_FUNDING_TAB_CONCEPT` so the reason UI and the concept admission roll
+ * back independently.
+ */
+export function resolveFundingMatchReason(): boolean {
+  return process.env.SEARCH_FUNDING_MATCH_REASON === "on";
+}
+
+/**
  * Issue #532 — dept-shape leadership boost (chair / division chief). When
  * on, the People-tab `department_template` (#311 / SPEC §6.1.4) wraps its
  * body in a multiplicative `function_score` that promotes the dept's chair
