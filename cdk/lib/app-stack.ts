@@ -865,6 +865,18 @@ export class AppStack extends Stack {
         // resolvePeopleMatchProvenance reads on|off (lib/api/search-flags.ts).
         SEARCH_GENERIC_TERM_DEMOTE: "on",
         SEARCH_PEOPLE_MATCH_PROVENANCE: "on",
+        // #713 / #702 / #707 -- "Why this match" explanation lines. Brought to
+        // local-dev parity (these were on in .env.local but never wired here, so
+        // the features worked locally and were silently off in staging+prod):
+        //   SEARCH_PEOPLE_MATCH_EXPLAIN  -> People-tab "N of M publications
+        //     tagged {concept}" / "mention {term}" reason line (adds one bounded
+        //     per-page publications agg; resolvePeopleMatchExplain reads === on).
+        //   SEARCH_PUB_HIGHLIGHT         -> Publications-tab title highlight.
+        //   SEARCH_PUB_MATCH_PROVENANCE  -> Publications-tab match provenance.
+        // All three are query-time/render-only (no reindex prereq).
+        SEARCH_PEOPLE_MATCH_EXPLAIN: "on",
+        SEARCH_PUB_HIGHLIGHT: "on",
+        SEARCH_PUB_MATCH_PROVENANCE: "on",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
