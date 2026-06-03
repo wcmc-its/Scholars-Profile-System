@@ -159,6 +159,14 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   // levers so `expanded` stays byte-identical and `?mesh=off|strict` keeps working.
   const scope = parseScopeParam(sp);
   const { meshOff, meshStrict } = scopeToMeshParams(scope);
+  // PLAN R2/R3 — resolved concept label (null = no query→MeSH mapping → no scope
+  // row) + the three `?match=` hrefs, shared by all three tabs.
+  const conceptLabel = taxonomyMatch.meshResolution?.name ?? null;
+  const scopeHrefs = {
+    exact: buildScopeHref(sp, "exact"),
+    expanded: buildScopeHref(sp, "expanded"),
+    concept: buildScopeHref(sp, "concept"),
+  };
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
   // §5 / §7.1 — chip mode discriminator. Single source of truth shared with
   // `searchPublications`'s body construction and the route handler's log.
@@ -270,7 +278,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       // PR-5: route the §6.1 shape templates on the SSR path too.
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
-      meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+      meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
       // Issue #532 — env-gated dept-shape leadership boost (kept so the count
       // matches the streamed full search's predicate; it's a scoring function
       // and doesn't change the total, but passing it keeps the calls aligned).
@@ -400,6 +408,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           peopleCount={peopleResult.total}
           pubCount={pubsResult.total}
           fundingCount={fundingResult.total}
+          scope={scope}
         />
         {showAZ && azBuckets ? (
           <div className="mx-auto max-w-[1280px] px-6 pt-6">
@@ -476,12 +485,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
                 scope={scope}
-                conceptLabel={taxonomyMatch.meshResolution?.name ?? null}
-                scopeHrefs={{
-                  exact: buildScopeHref(sp, "exact"),
-                  expanded: buildScopeHref(sp, "expanded"),
-                  concept: buildScopeHref(sp, "concept"),
-                }}
+                conceptLabel={conceptLabel}
+                scopeHrefs={scopeHrefs}
               />
             ) : type === "funding" ? (
               <FundingResults
@@ -489,6 +494,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 page={page}
                 sort={sort as FundingSort}
                 filters={fundingFilters}
+                scope={scope}
+                conceptLabel={conceptLabel}
+                scopeHrefs={scopeHrefs}
                 resultPromise={searchFunding({
                   q,
                   page,
@@ -507,6 +515,9 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 activity={activity}
                 pi={pi}
                 piMin={piMin}
+                scope={scope}
+                conceptLabel={conceptLabel}
+                scopeHrefs={scopeHrefs}
                 resultPromise={searchPeople({
                   q,
                   page,
@@ -520,7 +531,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   },
                   relevanceMode: peopleRelevanceMode,
                   shape: peopleQueryShape,
-                  meshDescendantUis: taxonomyMatch.meshResolution?.descendantUis,
+                  meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
                   deptLeadershipBoost: resolveDeptLeadershipBoost(),
                   // Issue #692 — generic-term demotion on the streamed people
                   // tab: gates/highlights on the content query (this is the SSR
@@ -621,16 +632,24 @@ function ModeTabs({
   peopleCount,
   pubCount,
   fundingCount,
+  scope,
 }: {
   q: string;
   activeType: string;
   peopleCount: number;
   pubCount: number;
   fundingCount: number;
+  scope: Scope;
 }) {
-  const peopleHref = `/search?${new URLSearchParams({ q, type: "people" }).toString()}`;
-  const pubHref = `/search?${new URLSearchParams({ q, type: "publications" }).toString()}`;
-  const fundingHref = `/search?${new URLSearchParams({ q, type: "funding" }).toString()}`;
+  // Carry the active match-scope across tab switches (default `expanded` omitted).
+  const tabHref = (t: string) => {
+    const params = new URLSearchParams({ q, type: t });
+    if (scope !== "expanded") params.set("match", scope);
+    return `/search?${params.toString()}`;
+  };
+  const peopleHref = tabHref("people");
+  const pubHref = tabHref("publications");
+  const fundingHref = tabHref("funding");
   return (
     <nav className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
       <ModeTab
@@ -732,6 +751,9 @@ async function PeopleResults({
   activity,
   pi,
   piMin,
+  scope,
+  conceptLabel,
+  scopeHrefs,
   resultPromise,
 }: {
   q: string;
@@ -742,6 +764,9 @@ async function PeopleResults({
   activity: ActivityFilter[];
   pi: PiFilter | undefined;
   piMin: number;
+  scope: Scope;
+  conceptLabel: string | null;
+  scopeHrefs: Record<Scope, string>;
   /** Perf streaming — the active full search, awaited here so this component
    *  suspends and the page shell (header + tabs + counts) paints first. */
   resultPromise: Promise<PeopleResultData>;
@@ -751,6 +776,13 @@ async function PeopleResults({
     resultPromise,
     resolveDeptDivLabels(),
   ]);
+  // PLAN R2/R3 — scope control + explanation line above the results toolbar.
+  const scopeRow = conceptLabel ? (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeControl active={scope} hrefs={scopeHrefs} />
+    </div>
+  ) : null;
   // Two URL builders share one base. `resetPage` is true for any link that
   // changes the result set (toggle a facet, change sort, swap tab) — those
   // should land on page 0. Pagination links pass `resetPage: false` so the
@@ -873,6 +905,7 @@ async function PeopleResults({
         hasActiveFilters={hasActiveFilters}
       />
       <section>
+        {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <ResultsToolbar
           tab="people"
@@ -1283,16 +1316,29 @@ async function FundingResults({
   page,
   sort,
   filters,
+  scope,
+  conceptLabel,
+  scopeHrefs,
   resultPromise,
 }: {
   q: string;
   page: number;
   sort: FundingSort;
   filters: FundingFilters;
+  scope: Scope;
+  conceptLabel: string | null;
+  scopeHrefs: Record<Scope, string>;
   /** Perf streaming — see PeopleResults.resultPromise. */
   resultPromise: Promise<FundingResultData>;
 }) {
   const result = await resultPromise;
+  // PLAN R2/R3 — scope control + explanation line (Funding is net-new here).
+  const scopeRow = conceptLabel ? (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      <ScopeNote scope={scope} query={q} conceptLabel={conceptLabel} />
+      <ScopeControl active={scope} hrefs={scopeHrefs} />
+    </div>
+  ) : null;
   const buildUrl = (
     mut: (sp: URLSearchParams) => void,
     { resetPage = true }: { resetPage?: boolean } = {},
@@ -1429,6 +1475,7 @@ async function FundingResults({
         investigatorTotalDistinct={result.facets.investigatorsTotal}
       />
       <section className="min-w-0">
+        {scopeRow}
         {chips.length > 0 ? <ActiveFilterChips chips={chips} clearAllHref={clearAllHref} /> : null}
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[13px] text-muted-foreground">
