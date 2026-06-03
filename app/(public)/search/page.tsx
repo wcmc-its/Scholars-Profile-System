@@ -49,6 +49,7 @@ import {
   type PublicationsSort,
   type SearchFacetBucket,
 } from "@/lib/api/search";
+import { meshMatchTier } from "@/lib/search";
 import {
   searchFunding,
   type FundingFilters,
@@ -178,6 +179,15 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     concept: buildScopeHref(sp, "concept"),
   };
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
+  // #726 — match-type tier for the graduated attribution boost + sparse concept
+  // admission. Shared by the badge count and the streamed full search so both
+  // agree (badge == list). `meshOff` (Exact word) suppresses it via the null.
+  const meshTier = effectiveMeshResolution
+    ? meshMatchTier(
+        effectiveMeshResolution.confidence,
+        effectiveMeshResolution.curatedTopicAnchors.length,
+      )
+    : undefined;
   // §5 / §7.1 — chip mode discriminator. Single source of truth shared with
   // `searchPublications`'s body construction and the route handler's log.
   const conceptMode = resolveConceptMode();
@@ -289,6 +299,10 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
       relevanceMode: peopleRelevanceMode,
       shape: peopleQueryShape,
       meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+      // #726 — tier + ambiguity/length floor for sparse concept admission.
+      meshMatchTier: meshTier,
+      meshAmbiguous: effectiveMeshResolution?.ambiguous,
+      meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
       // PLAN R5 / handoff item 3 — concept-only result-SET gate. Must match the
       // streamed full search's predicate or the badge count would disagree with
       // the list (`concept` shrinks the set; `expanded`/`exact` leave it alone).
@@ -553,6 +567,11 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                   relevanceMode: peopleRelevanceMode,
                   shape: peopleQueryShape,
                   meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+                  // #726 — tier + ambiguity/length floor (lockstep with the
+                  // countOnly badge call above, so badge == list).
+                  meshMatchTier: meshTier,
+                  meshAmbiguous: effectiveMeshResolution?.ambiguous,
+                  meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
                   // PLAN R5 / handoff item 3 — concept-only result-SET gate
                   // (kept in lockstep with the countOnly badge call above).
                   scope,

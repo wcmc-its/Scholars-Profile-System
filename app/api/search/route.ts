@@ -5,6 +5,7 @@ import {
   type PeopleSort,
   type PublicationsSort,
 } from "@/lib/api/search";
+import { meshMatchTier } from "@/lib/search";
 import {
   searchFunding,
   type FundingFilters,
@@ -342,6 +343,13 @@ export async function GET(request: NextRequest) {
   });
 
   const searchStart = Date.now();
+  // #726 — match-type tier + ambiguity/length floor for the graduated
+  // attribution boost + sparse concept admission. `meshOff` (Exact word) drops
+  // it via the null, matching the SSR page's suppression of the concept layer.
+  const meshRes = meshOff ? null : taxonomyMatch.meshResolution;
+  const meshTier = meshRes
+    ? meshMatchTier(meshRes.confidence, meshRes.curatedTopicAnchors.length)
+    : undefined;
   const result = await searchPeople({
     q,
     page,
@@ -363,6 +371,10 @@ export async function GET(request: NextRequest) {
     // non-topic shapes. `meshOff` (scope=exact) suppresses it so the API matches
     // the SSR page, which passes `undefined` under "Exact word" to drop the boost.
     meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+    // #726 — tier + ambiguity/length floor for sparse concept admission.
+    meshMatchTier: meshTier,
+    meshAmbiguous: meshRes?.ambiguous,
+    meshMatchedFormLength: meshRes?.matchedForm.length,
     // #718 — concept-only result-SET gate. The SSR page threads `scope` into its
     // badge + streamed `searchPeople` calls (concept → people are gated to the
     // descriptor's `publicationMeshUi`); the route handler must pass it too, or

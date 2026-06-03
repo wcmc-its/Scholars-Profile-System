@@ -101,7 +101,7 @@ So entry-term resolution can't expand recall. `tylenol` returns **0** (nobody wr
 ### Design — admit generously, rank by match type
 Decision: set the sparse threshold at **T = 50** and make relevance reward the *type* of match, so weaker matches fill in **below** the precise ones instead of diluting the top. **Recall is an admission question; precision is a ranking question.**
 
-**Admission:** when the lexical result is sparse (< 50), OR `{ terms: { publicationMeshUi: descendantUis } }` into the topic-template `must` (via a `should` + `minimum_should_match: 1`), so a scholar who carries the descriptor but didn't lexically match is still admitted.
+**Admission:** when the lexical result is sparse (< 50), OR `{ terms: { publicationMeshUi: descendantUis } }` into the topic-template `must` (via a `should` + `minimum_should_match: 1`), so a scholar who carries the descriptor but didn't lexically match is still admitted. Escalation is **excluded under `concept` scope** — that scope already pushes the same `terms` clause into the always-on filter (the #718 result-SET gate), so OR-ing it into the `must` would make the lexical clause optional and widen the precision gate to "all tagged"; under `concept` the gate *is* the admission.
 
 **Ranking — the match-type reward ladder (strongest → weakest):**
 1. **Lexical** — query terms present in the scholar's fields. Full BM25. Always on top.
@@ -110,7 +110,7 @@ Decision: set the sparse threshold at **T = 50** and make relevance reward the *
 4. **MeSH unanchored entry-term** — low (the floor tier).
    *(finer: a direct descriptor-UI match outranks a subsumed-descendant match.)*
 
-Concept-only docs carry ~0 BM25, so they already sort beneath lexical hits; the tier weight (computed at query-build from the resolver's `confidence` + `curatedTopicAnchors`, threaded through `searchPeople`) just orders them and caps how near the lexical band they can climb. The existing flat ×1.5 attribution boost becomes this graduated weight.
+A concept-only doc (no lexical hit) scores only the admission `terms` clause's constant boost (`MESH_ADMIT_WEIGHT[tier]`: entry 0.7 → exact 3); a genuine lexical hit scores BM25 over the high-evidence topic fields (`publicationTitles^6`, `publicationMesh^4`, …), which empirically runs well above those admit boosts — so lexical sorts on top and the tier weight (computed at query-build from the resolver's `confidence` + `curatedTopicAnchors`, threaded through `searchPeople`) only orders the concept-only tail by match-type trust. Verified end-to-end: `heart attack` (entry, boost 0.7) and `covid19` (exact, boost 3) both rank every lexical hit above every concept-only admission. The existing flat ×1.5 attribution boost becomes this graduated weight (`MESH_ATTRIBUTION_WEIGHT[tier]`), always-on whenever a descriptor resolved (independent of escalation).
 
 **Why T=50 is safe with ranking:** `heart attack` (49 lexical) shows its 49 literal matches first and the broader Myocardial-Infarction descriptor people *below* — nothing good is pushed down. Escalation is a recall **floor** (don't hand someone a near-empty page), not a recall maximizer.
 
