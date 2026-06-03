@@ -11,7 +11,7 @@
  *     ROW_AREA_CAP=12), routing to Browse beyond what shipped in the payload.
  *   - RA-6/RA-15: chips are real anchor links to /topics/{slug}, focusable.
  *   - RA-7..RA-11/RA-16: hover/focus opens a HoverCard preview (eyebrow, name,
- *     one-line description, publications · subtopics, "View research area →").
+ *     description (clamped to 4 lines), publications · subtopics, "View research area →").
  *     Radix HoverCard supplies the hover-intent delay, focus/blur mirroring,
  *     Esc dismiss, and no focus-trap; it's hover-based so touch just navigates
  *     (RA-13). Everything in it is reachable by clicking through (RA-10).
@@ -104,7 +104,7 @@ function AreaPreview({ area }: { area: TaxonomyMatch }) {
       </div>
       <div className="mt-0.5 font-semibold text-foreground">{area.name}</div>
       {area.description ? (
-        <p className="mt-1 line-clamp-2 text-[12.5px] text-muted-foreground">{area.description}</p>
+        <p className="mt-1 line-clamp-4 text-[12.5px] text-muted-foreground">{area.description}</p>
       ) : null}
       {/* RA-11 — publications · subtopics; scholar count is on the chip. */}
       <div className="mt-2 text-[12px] text-muted-foreground">
