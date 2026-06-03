@@ -55,6 +55,7 @@ import {
   PUBLICATIONS_INDEX,
   PUBLICATIONS_RESTRUCTURED_MSM,
   searchClient,
+  type MeshMatchTier,
 } from "@/lib/search";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
 import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
@@ -479,6 +480,18 @@ export async function searchPeople(opts: {
    * boost function is simply omitted then.
    */
   meshDescendantUis?: string[];
+  /**
+   * #726 — match-type signals for the MeSH concept-admission escalation,
+   * derived by the caller from the resolved `MeshResolution`. `meshMatchTier`
+   * grades trust (exact > anchored-entry > entry) to weight admission + the
+   * attribution boost; `meshAmbiguous` / `meshMatchedFormLength` gate the
+   * sparse-escalation floor (don't escalate on an ambiguous or ultra-short
+   * resolution). Absent ⇒ no concept-admission escalation (boost-only — today's
+   * behaviour).
+   */
+  meshMatchTier?: MeshMatchTier;
+  meshAmbiguous?: boolean;
+  meshMatchedFormLength?: number;
   /**
    * PLAN R5 / handoff item 3 — the user-facing match scope. Drives the
    * concept-only result-SET gate: when `concept`, an additional

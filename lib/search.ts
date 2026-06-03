@@ -549,6 +549,61 @@ export const PEOPLE_TOPIC_HIGH_EVIDENCE_FIELD_BOOSTS: ReadonlyArray<string> = [
 export const PEOPLE_TOPIC_ABSTRACTS_BOOST = 0.5;
 
 /**
+ * #726 — MeSH concept-admission tiers + weights for the People topic template.
+ *
+ * When a query resolves to a MeSH descriptor, scholars carrying that descriptor
+ * (`publicationMeshUi`) can be ADMITTED — not just boosted — but only when the
+ * lexical result is sparse (escalate-on-sparse: a recall floor, not a
+ * maximizer). Relevance rewards the *type* of match so weaker concept matches
+ * rank below the precise lexical ones rather than diluting the top:
+ *
+ *   tier            from                                      trust
+ *   exact           query == descriptor name                  highest
+ *   anchored-entry  entry-term hit + a curated topic anchor   medium
+ *   entry           entry-term hit, no anchor                 lowest (floor)
+ *
+ * `MESH_ADMIT_WEIGHT` is the `terms`-clause boost for concept-only admission;
+ * concept-only docs carry ~0 BM25 and already sort beneath lexical hits, so the
+ * weight just orders them by trust. `MESH_ATTRIBUTION_WEIGHT` graduates the
+ * former flat ×1.5 attribution `function_score` by the same ladder.
+ */
+export type MeshMatchTier = "exact" | "anchored-entry" | "entry";
+
+export function meshMatchTier(
+  confidence: "exact" | "entry-term",
+  anchorCount: number,
+): MeshMatchTier {
+  if (confidence === "exact") return "exact";
+  return anchorCount > 0 ? "anchored-entry" : "entry";
+}
+
+export const MESH_ADMIT_WEIGHT: Record<MeshMatchTier, number> = {
+  exact: 3,
+  "anchored-entry": 1.5,
+  entry: 0.7,
+};
+
+export const MESH_ATTRIBUTION_WEIGHT: Record<MeshMatchTier, number> = {
+  exact: 1.5,
+  "anchored-entry": 1.3,
+  entry: 1.15,
+};
+
+/**
+ * #726 — escalate concept-admission only when the lexical result is this sparse.
+ * Above it the page stands on its own, so we keep count = lexical and don't
+ * dilute common queries.
+ */
+export const MESH_ESCALATION_THRESHOLD = 50;
+
+/**
+ * #726 — don't escalate on an ultra-short matched form (a 2–3 char token is the
+ * most ambiguity-prone, where a wrong resolution on an otherwise-empty page does
+ * the most damage). Paired with the resolver's `ambiguous` flag as the floor.
+ */
+export const MESH_MIN_MATCHED_FORM_LEN = 4;
+
+/**
  * Issue #513 / `docs/people-relevance-baseline.md` §5.4 — v3 prominence factor.
  *
  * The legacy baseline carries no prominence signal, so prominent scholars sink
