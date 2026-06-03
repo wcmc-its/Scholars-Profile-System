@@ -11,6 +11,7 @@ import {
   resolveConceptMode,
   resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
+  resolveFundingMeshGateField,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -167,5 +168,32 @@ describe("resolveDeptLeadershipBoost (#532)", () => {
     expect(resolveDeptLeadershipBoost()).toBe(true);
     process.env.SEARCH_PEOPLE_DEPT_LEADERSHIP_BOOST = "";
     expect(resolveDeptLeadershipBoost()).toBe(true);
+  });
+});
+
+describe("resolveFundingMeshGateField (funding reindex)", () => {
+  const original = process.env.SEARCH_FUNDING_MESH_GATE;
+  beforeEach(() => {
+    delete process.env.SEARCH_FUNDING_MESH_GATE;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_FUNDING_MESH_GATE;
+    else process.env.SEARCH_FUNDING_MESH_GATE = original;
+  });
+
+  it("defaults to the safe meshDescriptorUi gate when unset", () => {
+    expect(resolveFundingMeshGateField()).toBe("meshDescriptorUi");
+  });
+
+  it("returns fundedPubMeshUi only for exactly 'fundedPubMeshUi'", () => {
+    process.env.SEARCH_FUNDING_MESH_GATE = "fundedPubMeshUi";
+    expect(resolveFundingMeshGateField()).toBe("fundedPubMeshUi");
+  });
+
+  it("falls through to meshDescriptorUi for any unrecognized value", () => {
+    process.env.SEARCH_FUNDING_MESH_GATE = "on";
+    expect(resolveFundingMeshGateField()).toBe("meshDescriptorUi");
+    process.env.SEARCH_FUNDING_MESH_GATE = "FUNDEDPUBMESHUI";
+    expect(resolveFundingMeshGateField()).toBe("meshDescriptorUi");
   });
 });

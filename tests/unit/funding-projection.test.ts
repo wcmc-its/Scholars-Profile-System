@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   groupGrantsByProject,
   projectFromRows,
+  PUB_LIST_CAP,
   type GrantRowForIndex,
 } from "@/lib/funding-projection";
 
@@ -373,6 +374,106 @@ describe("projectFromRows", () => {
       }),
     ])!;
     expect(doc.meshDescriptorUi).toEqual([]);
+  });
+});
+
+describe("projectFromRows — fundedPubMeshUi (funding reindex)", () => {
+  const pub = (
+    pmid: string,
+    meshTerms: unknown,
+    over: { year?: number; citationCount?: number } = {},
+  ): NonNullable<GrantRowForIndex["publications"]>[number] => ({
+    pmid,
+    sourceReporter: true,
+    sourceReciterdb: false,
+    reciterdbFirstSeen: null,
+    publication: {
+      title: `Study ${pmid}`,
+      journal: null,
+      year: over.year ?? 2024,
+      citationCount: over.citationCount ?? 0,
+      meshTerms,
+    },
+  });
+
+  it("derives the distinct UI union across the project's funded pubs, first-seen order", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        publications: [
+          pub("1", [
+            { ui: "D009369", label: "Neoplasms" },
+            { ui: "D015415", label: "Biomarkers" },
+          ]),
+          pub("2", [
+            { ui: "D015415", label: "Biomarkers" },
+            { ui: "D007249", label: "Inflammation" },
+          ]),
+        ],
+      }),
+    ])!;
+    expect(doc.fundedPubMeshUi).toEqual(["D009369", "D015415", "D007249"]);
+  });
+
+  it("is distinct from meshDescriptorUi (funded-pub MeSH vs RePORTER project keywords)", () => {
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        meshDescriptorUis: ["D000001"], // a RePORTER project-keyword UI
+        publications: [pub("1", [{ ui: "D009369", label: "Neoplasms" }])],
+      }),
+    ])!;
+    expect(doc.meshDescriptorUi).toEqual(["D000001"]);
+    expect(doc.fundedPubMeshUi).toEqual(["D009369"]);
+  });
+
+  it("defaults to [] when no funded pub carries MeSH (or there are no pubs)", () => {
+    const none = projectFromRows([
+      makeRow({ cwid: "alice", role: "PI", scholar: SCHOLAR_A }),
+    ])!;
+    expect(none.fundedPubMeshUi).toEqual([]);
+
+    const malformed = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        publications: [pub("1", "not-an-array"), pub("2", null)],
+      }),
+    ])!;
+    expect(malformed.fundedPubMeshUi).toEqual([]);
+  });
+
+  it("unions over the COMPLETE funded-pub set, beyond the PUB_LIST_CAP truncation", () => {
+    // PUB_LIST_CAP recent pubs fill the capped `publications` list; one older
+    // pub is sorted out of that list but its MeSH must still reach
+    // fundedPubMeshUi (the gate must see every funded pub, not just the stored
+    // 250) — the #651 distinct-set discipline.
+    const fillers = Array.from({ length: PUB_LIST_CAP }, (_, i) =>
+      pub(`f${i}`, [{ ui: "D000FILLER", label: "Filler" }], {
+        year: 2024,
+        citationCount: 100,
+      }),
+    );
+    const droppedFromList = pub("old", [{ ui: "D000UNIQUE", label: "OnlyOnTheCappedPub" }], {
+      year: 1990,
+      citationCount: 0,
+    });
+    const doc = projectFromRows([
+      makeRow({
+        cwid: "alice",
+        role: "PI",
+        scholar: SCHOLAR_A,
+        publications: [...fillers, droppedFromList],
+      }),
+    ])!;
+    expect(doc.publications).toHaveLength(PUB_LIST_CAP); // the old pub is capped out of the list
+    expect(doc.pubCount).toBe(PUB_LIST_CAP + 1); // but still counted
+    expect(doc.fundedPubMeshUi).toContain("D000UNIQUE"); // and its MeSH still unioned
   });
 });
 

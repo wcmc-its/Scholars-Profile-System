@@ -33,6 +33,7 @@ import { coreProjectNum } from "@/lib/award-number";
 import {
   resolveFundingConceptEnabled,
   resolveFundingMatchReason,
+  resolveFundingMeshGateField,
   type Scope,
 } from "@/lib/api/search-flags";
 import type { MeshResolution } from "@/lib/api/search-taxonomy";
@@ -325,22 +326,27 @@ export async function searchFunding(opts: {
   // when the concept clause would have applied (flag on + resolved descriptor).
   const scope = opts.scope ?? "expanded";
   const must: Record<string, unknown>[] = [textClause];
-  // The concept evidence set: grants tagged with the resolved descriptor or one
-  // of its tree descendants. TODO(P4): switch to fundedPubMeshUi once funding
-  // reindex lands — `meshDescriptorUi` is RePORTER project keywords, NOT funded-
-  // publication MeSH, so this is a weaker (keyword) admission signal than the
-  // eventual funded-output gate. Until then `concept` shrinks the set by
-  // project-keyword topicality, the only MeSH-shaped field in the funding index.
+  // The concept evidence set: grants whose MeSH ∩ the resolved descriptor's
+  // descendant set is non-empty. Which funding-index field carries that MeSH is
+  // chosen by `SEARCH_FUNDING_MESH_GATE` (resolveFundingMeshGateField):
+  //   - default `meshDescriptorUi` — RePORTER *project* keywords (always
+  //     present; the only MeSH-shaped field pre-reindex).
+  //   - `fundedPubMeshUi` — the MeSH of the grant's *funded publications*,
+  //     matching the "X of Y funded publications" reason. Flip the env var only
+  //     AFTER the funding index is reindexed with that field (funding-projection.ts),
+  //     or concept results go empty (absent field → no doc matches).
   const conceptClauseApplies =
     resolveFundingConceptEnabled() &&
     meshResolution !== null &&
     meshResolution.descendantUis.length > 0;
+  const meshGateField = resolveFundingMeshGateField();
   // PLAN P4 — tag the concept-admission `terms` clause with a query name so the
   // hit map can read `matched_queries` and distinguish a concept hit from a
   // literal-text hit. `_name` is pure metadata: it does NOT change the clause's
-  // score, so the `expanded` body stays byte-identical to the pre-P4 query (the
-  // HARD `expanded` non-regression invariant holds). Only attached when the
-  // reason flag is on, keeping the flag-off body byte-identical to today.
+  // score, so the `expanded` body stays byte-identical to today AT THE DEFAULT
+  // gate field (`meshDescriptorUi`); the `fundedPubMeshUi` opt-in deliberately
+  // changes the admission field. Only attached when the reason flag is on,
+  // keeping the flag-off body byte-identical to today.
   const conceptName = resolveFundingMatchReason() ? { _name: "concept" } : {};
   if (conceptClauseApplies && scope === "concept") {
     // Concept-only admission: drop the literal-text predicate, admit purely by
@@ -348,21 +354,22 @@ export async function searchFunding(opts: {
     // sub-clause `expanded` uses, so the badge/list ride the same evidence set.
     must[0] = {
       terms: {
-        meshDescriptorUi: meshResolution.descendantUis,
+        [meshGateField]: meshResolution.descendantUis,
         ...conceptName,
       },
     };
   } else if (conceptClauseApplies && scope !== "exact") {
     // `expanded` (default) — today's #295 union: text OR descriptor-tagged.
-    // Pinned byte-identical to the pre-gate body. `exact` deliberately skips
-    // this branch and rides the bare `[textClause]` literal-only admission.
+    // Byte-identical to the pre-gate body at the default gate field. `exact`
+    // deliberately skips this branch and rides the bare `[textClause]`
+    // literal-only admission.
     must[0] = {
       bool: {
         should: [
           textClause,
           {
             terms: {
-              meshDescriptorUi: meshResolution.descendantUis,
+              [meshGateField]: meshResolution.descendantUis,
               boost: 4,
               ...conceptName,
             },
