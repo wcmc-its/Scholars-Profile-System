@@ -36,7 +36,7 @@ vi.mock("next/navigation", () => ({
   redirect: mockRedirect,
   notFound: mockNotFound,
 }));
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/publication-takedown-context", () => ({
   loadPublicationTakedownContext: mockLoadCtx,
 }));

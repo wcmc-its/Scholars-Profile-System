@@ -24,7 +24,7 @@ import { notFound, redirect } from "next/navigation";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitEditPage } from "@/components/edit/unit-edit-page";
 import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
 
@@ -44,7 +44,7 @@ export default async function EditDepartmentPage({
 }) {
   const { code } = await params;
 
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) {
     redirect(`/api/auth/saml/login?return=/edit/department/${encodeURIComponent(code)}`);
   }

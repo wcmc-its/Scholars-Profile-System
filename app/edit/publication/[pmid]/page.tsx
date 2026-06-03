@@ -20,7 +20,7 @@ import { notFound, redirect } from "next/navigation";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { PublicationTakedownPage } from "@/components/edit/publication-takedown-page";
 import { loadPublicationTakedownContext } from "@/lib/api/publication-takedown-context";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 
@@ -38,7 +38,7 @@ export default async function EditPublicationPage({
 }) {
   const { pmid } = await params;
 
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) {
     redirect(`/api/auth/saml/login?return=/edit/publication/${encodeURIComponent(pmid)}`);
   }

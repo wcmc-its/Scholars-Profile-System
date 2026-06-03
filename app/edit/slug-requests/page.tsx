@@ -14,7 +14,7 @@ import { notFound, redirect } from "next/navigation";
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SlugRequestQueue } from "@/components/edit/slug-request-queue";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { isSlugRequestEnabled, loadSlugRequestQueue } from "@/lib/edit/slug-request";
@@ -27,7 +27,7 @@ export const metadata = {
 };
 
 export default async function SlugRequestsPage() {
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/slug-requests");
   }
