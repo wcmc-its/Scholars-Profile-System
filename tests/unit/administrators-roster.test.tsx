@@ -381,4 +381,20 @@ describe("AdministratorsRoster — Phase C write controls", () => {
       action: "revoke",
     });
   });
+
+  it("hoists a single page-level Add administrator trigger (not a per-card form)", () => {
+    stubRouter();
+    render(
+      <AdministratorsRoster
+        entries={[manualRow(), edRow()]}
+        isSuperuser
+        actorCwid="zzz999"
+        nameResolutionDegraded={false}
+      />,
+    );
+    // One trigger total, regardless of how many people are on the roster…
+    expect(screen.getAllByTestId("administrators-add-trigger")).toHaveLength(1);
+    // …and the old per-card add form is gone.
+    expect(screen.queryByTestId("administrators-add-fac001")).toBeNull();
+  });
 });

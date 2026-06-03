@@ -197,7 +197,10 @@ export function RequestNewOrgUnitDialog() {
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="rnou-name" className="text-sm font-medium">
-                  Unit name
+                  Unit name{" "}
+                  <span className="text-destructive" aria-hidden>
+                    *
+                  </span>
                 </label>
                 <Input
                   id="rnou-name"
@@ -205,6 +208,8 @@ export function RequestNewOrgUnitDialog() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Division of Computational Biology"
+                  required
+                  aria-required="true"
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -214,7 +219,7 @@ export function RequestNewOrgUnitDialog() {
                 <select
                   id="rnou-type"
                   data-testid="rnou-type"
-                  className="border-border h-9 rounded-md border bg-transparent px-3 text-sm"
+                  className="border-input bg-background h-9 rounded-md border px-3 text-sm"
                   value={unitType}
                   onChange={(e) =>
                     setUnitType(e.target.value as "department" | "division" | "center")

@@ -23,12 +23,14 @@
 "use client";
 
 import * as React from "react";
+import { Lock } from "lucide-react";
 
-import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import {
-  DirectoryPeopleTypeahead,
-  type DirectoryValue,
-} from "@/components/edit/directory-people-typeahead";
+  AddAdministratorDialog,
+  type AddAdminUnit,
+} from "@/components/edit/add-administrator-dialog";
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import type { DirectoryValue } from "@/components/edit/directory-people-typeahead";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +48,7 @@ function provenanceBadge(source: string): { label: string; className: string } {
     case "ED:DA":
       return {
         label: "ED — Department Administrator",
-        className: "bg-blue-50 text-blue-700 ring-blue-200",
+        className: "bg-blue-50 text-blue-800 ring-blue-200",
       };
     case "ED:DivA":
       return {
@@ -80,8 +82,6 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
 
 const PROVENANCE_BADGE_BASE =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1";
-
-const ROLE_PILL_BASE = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium";
 
 /** The caveat shown beside ED-locked controls (§ 4.4). */
 const ED_LOCKED_NOTE =
@@ -139,10 +139,6 @@ export function AdministratorsRoster({
     cwid: string;
     grant: AdminRosterGrant;
   } | null>(null);
-  // Per-card Add-admin form draft.
-  const [addValue, setAddValue] = React.useState<Map<string, DirectoryValue | null>>(new Map());
-  const [addUnit, setAddUnit] = React.useState<Map<string, string>>(new Map());
-  const [addRole, setAddRole] = React.useState<Map<string, "owner" | "curator">>(new Map());
 
   const cwidKey = React.useMemo(
     () => [...new Set(roster.map((e) => e.cwid))].join(","),
@@ -295,61 +291,52 @@ export function AdministratorsRoster({
     setRevokeTarget(null);
   }
 
-  /** Add a new manual grant on `(addUnit[cwid], addRole[cwid])` for a picked grantee. */
-  async function addAdmin(cwid: string) {
-    const grantee = addValue.get(cwid) ?? null;
-    const unitRef = addUnit.get(cwid) ?? "";
-    if (!grantee || unitRef.length === 0 || busyKey) return;
-    const [entityType, entityId] = parseUnitRef(unitRef);
-    if (!entityType || !entityId) return;
-    const role = addRole.get(cwid) ?? "curator";
-    const key = `add:${cwid}`;
-    setBusyKey(key);
+  /**
+   * Upsert a just-granted admin into the roster (called by the page-level Add
+   * dialog after a successful `POST /api/edit/grant`). Updates the matching unit
+   * grant on an existing person, or adds a new person card whose name the
+   * directory effect then enriches.
+   */
+  function handleGranted(grantee: DirectoryValue, grant: AdminRosterGrant) {
     setError(null);
-    try {
-      const res = await fetch("/api/edit/grant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityType, entityId, cwid: grantee.cwid, role, action: "grant" }),
-      });
-      const data = (await res.json()) as { ok: boolean; error?: string };
-      if (!res.ok || data.ok !== true) {
-        setError(mapErrorToMessage(data.error ?? ""));
-        return;
-      }
-      // Optimistic: attach the new grant to the existing card (the picked
-      // grantee shares this card's CWID), or no-op if the grantee differs — the
-      // authoritative state lands on the next page load.
-      const unitName = roster
-        .flatMap((e) => e.grants)
-        .find((g) => g.entityType === entityType && g.entityId === entityId)?.unitName;
-      setRoster((prev) =>
-        prev.map((e) =>
+    setRoster((prev) => {
+      if (prev.some((e) => e.cwid === grantee.cwid)) {
+        return prev.map((e) =>
           e.cwid === grantee.cwid
             ? {
                 ...e,
                 grants: [
                   ...e.grants.filter(
-                    (g) => !(g.entityType === entityType && g.entityId === entityId),
+                    (g) => !(g.entityType === grant.entityType && g.entityId === grant.entityId),
                   ),
-                  { entityType, entityId, unitName: unitName ?? entityId, role, source: "manual" },
+                  grant,
                 ],
               }
             : e,
-        ),
-      );
-      setAddValue((m) => new Map(m).set(cwid, null));
-      setAddRole((m) => new Map(m).set(cwid, "curator"));
-    } finally {
-      setBusyKey(null);
-    }
+        );
+      }
+      const hasName = Boolean(grantee.name && grantee.name !== grantee.cwid);
+      return [
+        ...prev,
+        {
+          cwid: grantee.cwid,
+          name: hasName ? grantee.name : grantee.cwid,
+          title: grantee.title ?? null,
+          nameResolved: hasName,
+          grants: [grant],
+        },
+      ];
+    });
   }
 
   return (
     <div className="flex flex-col gap-4" data-slot="administrators-roster">
-      <p className="text-muted-foreground text-sm" data-testid="administrators-scope-caption">
-        {scopeCaption}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground text-sm" data-testid="administrators-scope-caption">
+          {scopeCaption}
+        </p>
+        <AddAdministratorDialog units={unitOptions(roster)} onGranted={handleGranted} />
+      </div>
 
       {showDegradedNote && (
         <p className="text-muted-foreground text-sm" data-testid="administrators-name-degraded-note">
@@ -405,9 +392,9 @@ export function AdministratorsRoster({
                   <thead>
                     <tr className="text-muted-foreground border-border border-b text-left">
                       <th className="py-2 font-medium">Org unit</th>
-                      <th className="py-2 font-medium">Role</th>
-                      <th className="py-2 font-medium">Provenance</th>
-                      <th className="py-2 font-medium">Actions</th>
+                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
+                      <th className="py-2 pl-6 font-medium whitespace-nowrap">Provenance</th>
+                      <th className="py-2 pl-6 text-right font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -432,7 +419,7 @@ export function AdministratorsRoster({
                               {KIND_LABEL[grant.entityType]}
                             </Badge>
                           </td>
-                          <td className="py-2">
+                          <td className="py-2 pl-6 align-middle">
                             <RadioGroup
                               value={grant.role}
                               onValueChange={(v) =>
@@ -457,118 +444,49 @@ export function AdministratorsRoster({
                                 Owner
                               </label>
                             </RadioGroup>
-                            <span
-                              className={
-                                grant.role === "owner"
-                                  ? `${ROLE_PILL_BASE} mt-1 bg-apollo-maroon/10 text-apollo-maroon ring-1 ring-apollo-maroon/20`
-                                  : `${ROLE_PILL_BASE} mt-1 bg-slate-100 text-slate-600 ring-1 ring-slate-200`
-                              }
-                            >
-                              {grant.role === "owner" ? "Owner" : "Curator"}
-                            </span>
                           </td>
-                          <td className="py-2">
+                          <td className="py-2 pl-6 align-middle whitespace-nowrap">
                             <span className={`${PROVENANCE_BADGE_BASE} ${prov.className}`}>
                               {prov.label}
                             </span>
                           </td>
-                          <td className="py-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              disabled={revokeDisabled}
-                              title={
-                                isSelf
-                                  ? "You can't remove your own access."
-                                  : controlsDisabled
-                                    ? ED_LOCKED_NOTE
-                                    : undefined
-                              }
-                              onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
-                              data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
-                            >
-                              Revoke
-                            </Button>
-                            {edLocked && (
-                              <p
-                                className="text-muted-foreground mt-1 max-w-[16rem] text-xs"
-                                data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+                          <td className="py-2 pl-6 text-right">
+                            <div className="flex flex-col items-end gap-1">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                disabled={revokeDisabled}
+                                title={
+                                  isSelf
+                                    ? "You can't remove your own access."
+                                    : controlsDisabled
+                                      ? ED_LOCKED_NOTE
+                                      : undefined
+                                }
+                                onClick={() => setRevokeTarget({ cwid: entry.cwid, grant })}
+                                data-testid={`administrators-revoke-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                               >
-                                {ED_LOCKED_NOTE}
-                              </p>
-                            )}
+                                Revoke
+                              </Button>
+                              {edLocked && (
+                                <span
+                                  className="text-muted-foreground inline-flex items-center gap-1 text-xs"
+                                  title={ED_LOCKED_NOTE}
+                                  data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
+                                >
+                                  <Lock className="size-3" aria-hidden />
+                                  ED-managed
+                                  <span className="sr-only"> — {ED_LOCKED_NOTE}</span>
+                                </span>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
-
-                <div
-                  className="border-border flex flex-col gap-3 rounded-md border p-4"
-                  data-slot="administrators-add"
-                  data-testid={`administrators-add-${entry.cwid}`}
-                >
-                  <p className="text-sm font-medium">Add admin</p>
-                  <DirectoryPeopleTypeahead
-                    idPrefix={`add-${entry.cwid}`}
-                    value={addValue.get(entry.cwid) ?? null}
-                    onChange={(v) => setAddValue((m) => new Map(m).set(entry.cwid, v))}
-                  />
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="text-muted-foreground text-xs">Org unit</span>
-                    <select
-                      className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                      value={addUnit.get(entry.cwid) ?? ""}
-                      onChange={(e) => setAddUnit((m) => new Map(m).set(entry.cwid, e.target.value))}
-                      data-testid={`administrators-add-unit-${entry.cwid}`}
-                    >
-                      <option value="">Select a unit…</option>
-                      {unitOptions(roster).map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <RadioGroup
-                    value={addRole.get(entry.cwid) ?? "curator"}
-                    onValueChange={(v) =>
-                      setAddRole((m) => new Map(m).set(entry.cwid, v as "owner" | "curator"))
-                    }
-                    className="flex gap-4"
-                  >
-                    <label className="flex items-center gap-2 text-sm">
-                      <RadioGroupItem
-                        value="curator"
-                        data-testid={`administrators-add-role-curator-${entry.cwid}`}
-                      />{" "}
-                      Curator
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <RadioGroupItem
-                        value="owner"
-                        data-testid={`administrators-add-role-owner-${entry.cwid}`}
-                      />{" "}
-                      Owner
-                    </label>
-                  </RadioGroup>
-                  <div>
-                    <Button
-                      type="button"
-                      onClick={() => addAdmin(entry.cwid)}
-                      disabled={
-                        !addValue.get(entry.cwid) ||
-                        !(addUnit.get(entry.cwid) ?? "") ||
-                        busyKey === `add:${entry.cwid}`
-                      }
-                      data-testid={`administrators-add-submit-${entry.cwid}`}
-                    >
-                      {busyKey === `add:${entry.cwid}` ? "Granting…" : "Grant access"}
-                    </Button>
-                  </div>
-                </div>
               </CardContent>
             </Card>
           );
@@ -591,30 +509,24 @@ export function AdministratorsRoster({
   );
 }
 
-/** Distinct `(unitName → "entityType:entityId")` options, drawn from the roster's grants. */
-function unitOptions(
-  roster: ReadonlyArray<AdminRosterEntry>,
-): Array<{ value: string; label: string }> {
-  const seen = new Map<string, string>();
+/** Distinct units across the roster's grants, as Add-dialog options. */
+function unitOptions(roster: ReadonlyArray<AdminRosterEntry>): AddAdminUnit[] {
+  const seen = new Map<string, AddAdminUnit>();
   for (const e of roster) {
     for (const g of e.grants) {
       const value = `${g.entityType}:${g.entityId}`;
-      if (!seen.has(value)) seen.set(value, `${g.unitName} · ${KIND_LABEL[g.entityType]}`);
+      if (!seen.has(value)) {
+        seen.set(value, {
+          value,
+          entityType: g.entityType,
+          entityId: g.entityId,
+          unitName: g.unitName,
+          label: `${g.unitName} · ${KIND_LABEL[g.entityType]}`,
+        });
+      }
     }
   }
-  return [...seen.entries()].map(([value, label]) => ({ value, label }));
-}
-
-/** Split a `"entityType:entityId"` option value into its parts. */
-function parseUnitRef(
-  ref: string,
-): [AdminRosterGrant["entityType"] | null, string] {
-  const idx = ref.indexOf(":");
-  if (idx <= 0) return [null, ""];
-  const kind = ref.slice(0, idx);
-  const id = ref.slice(idx + 1);
-  if (kind !== "department" && kind !== "division" && kind !== "center") return [null, ""];
-  return [kind, id];
+  return [...seen.values()];
 }
 
 function mapErrorToMessage(code: string): string {
