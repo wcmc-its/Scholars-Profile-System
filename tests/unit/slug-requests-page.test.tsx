@@ -28,7 +28,7 @@ const {
 }));
 
 vi.mock("next/navigation", () => ({ redirect: mockRedirect, notFound: mockNotFound }));
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/db", () => ({
   db: { read: { scholar: { findUnique: vi.fn().mockResolvedValue(null) } }, write: {} },
 }));

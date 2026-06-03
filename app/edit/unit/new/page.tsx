@@ -27,7 +27,7 @@ import { redirect } from "next/navigation";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { UnitCreateForm } from "@/components/edit/unit-create-form";
 import type { DepartmentOption } from "@/components/edit/department-picker";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import {
   canManageAccess,
@@ -50,7 +50,7 @@ export default async function NewUnitPage({
 }) {
   const { type, dept } = (await searchParams) ?? {};
 
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) {
     const qs = new URLSearchParams();
     if (type) qs.set("type", type);

@@ -20,7 +20,7 @@ import {
   type EditRosterStatusFilter,
   type EditRosterUnitFilter,
 } from "@/lib/api/edit-roster";
-import { getEditSession } from "@/lib/auth/superuser";
+import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { requireSuperuserGet } from "@/lib/edit/authz";
 import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
@@ -64,7 +64,7 @@ export default async function EditScholarsPage({
     type?: string;
   }>;
 }) {
-  const session = await getEditSession();
+  const session = await getEffectiveEditSession();
   if (!session) {
     redirect("/api/auth/saml/login?return=/edit/scholars");
   }
