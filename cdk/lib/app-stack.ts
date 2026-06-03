@@ -846,6 +846,23 @@ export class AppStack extends Stack {
         // Surfaced here as an explicit, tunable knob: ratchet from the 429 logs
         // rather than redeploy code to change a number.
         SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT: "20",
+        // #728 -- ED admin-role org-unit managers (the /edit/administrators
+        // tab). All three read `=== "on"` exactly.
+        //   SELF_EDIT_ADMINISTRATORS_TAB -> the tab (superuser + unit Owners).
+        //     ON in both envs: surfaces the existing manual owner/curator grants
+        //     plus the audited add/edit-role/revoke controls. The `ed_locked`
+        //     read-only gate is unconditional (not flag-gated).
+        //   SELF_EDIT_ED_ADMINS_IMPORT -> the Web-Directory importer writes.
+        //     OFF: the LDAP pull is blocked by #443 (fail-closed empty -- zero
+        //     rows, zero deletes) and it is not in a scheduled Step Function
+        //     yet, so the tab shows only manual grants until that lands.
+        //   SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY -> narrows informal-center
+        //     creation to superusers. OFF: it REMOVES a parent-dept Owner's
+        //     create path, a behaviour change gated on the OQ-8a stakeholder
+        //     sign-off; ships dark until then.
+        SELF_EDIT_ADMINISTRATORS_TAB: "on",
+        SELF_EDIT_ED_ADMINS_IMPORT: "off",
+        SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "off",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
