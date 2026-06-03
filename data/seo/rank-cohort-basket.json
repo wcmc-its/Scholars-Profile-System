@@ -1,0 +1,340 @@
+{
+  "generatedAt": "2026-06-03T21:43:44.487Z",
+  "source": "rank-stratified name cohort (#684) — 32 branded across 4 tiers (8 Instructor, 8 Assistant Professor, 8 Associate Professor, 8 Professor (full)); inclusion: active scholar with ≥1 publication_topic",
+  "targets": [
+    {
+      "key": "new",
+      "label": "Scholars (new)",
+      "hosts": [
+        "scholars.weill.cornell.edu"
+      ],
+      "institution": "WCM",
+      "surfaceType": "research-profiles"
+    },
+    {
+      "key": "vivo",
+      "label": "VIVO (legacy)",
+      "hosts": [
+        "vivo.weill.cornell.edu",
+        "vivo.med.cornell.edu"
+      ],
+      "institution": "WCM",
+      "surfaceType": "research-profiles"
+    },
+    {
+      "key": "wcm-clinical",
+      "label": "WCM clinical",
+      "hosts": [
+        "weillcornell.org"
+      ],
+      "institution": "WCM",
+      "surfaceType": "clinical"
+    },
+    {
+      "key": "wcm-any",
+      "label": "Any WCM page",
+      "hosts": [
+        "weill.cornell.edu",
+        "med.cornell.edu",
+        "weillcornell.org"
+      ],
+      "institution": "WCM"
+    }
+  ],
+  "searchDefaults": {
+    "country": "us",
+    "language": "en",
+    "googleDomain": "google.com",
+    "num": 20
+  },
+  "queries": [
+    {
+      "id": "cohort:aad4005",
+      "query": "Anna Dattoli weill cornell",
+      "type": "branded",
+      "cwid": "aad4005",
+      "slug": "anna-dattoli",
+      "rankTier": "Instructor",
+      "label": "Anna Dattoli"
+    },
+    {
+      "id": "cohort:alg4055",
+      "query": "Alan Ge weill cornell",
+      "type": "branded",
+      "cwid": "alg4055",
+      "slug": "alan-ge",
+      "rankTier": "Instructor",
+      "label": "Alan Ge"
+    },
+    {
+      "id": "cohort:alm2069",
+      "query": "Alexander Martinez Fundichely weill cornell",
+      "type": "branded",
+      "cwid": "alm2069",
+      "slug": "alexander-martinez-fundichely",
+      "rankTier": "Instructor",
+      "label": "Alexander Martinez Fundichely"
+    },
+    {
+      "id": "cohort:alm2806",
+      "query": "Alexia Martinez de Paz weill cornell",
+      "type": "branded",
+      "cwid": "alm2806",
+      "slug": "alexia-martinez-de-paz",
+      "rankTier": "Instructor",
+      "label": "Alexia Martinez de Paz"
+    },
+    {
+      "id": "cohort:amr9094",
+      "query": "Amanda Rosen weill cornell",
+      "type": "branded",
+      "cwid": "amr9094",
+      "slug": "amanda-rosen",
+      "rankTier": "Instructor",
+      "label": "Amanda Rosen"
+    },
+    {
+      "id": "cohort:ana4036",
+      "query": "Anna Apostolopoulou weill cornell",
+      "type": "branded",
+      "cwid": "ana4036",
+      "slug": "anna-apostolopoulou",
+      "rankTier": "Instructor",
+      "label": "Anna Apostolopoulou"
+    },
+    {
+      "id": "cohort:anl9101",
+      "query": "Angela De Cordova weill cornell",
+      "type": "branded",
+      "cwid": "anl9101",
+      "slug": "angela-de-cordova",
+      "rankTier": "Instructor",
+      "label": "Angela De Cordova"
+    },
+    {
+      "id": "cohort:ann4025",
+      "query": "Anna Najor weill cornell",
+      "type": "branded",
+      "cwid": "ann4025",
+      "slug": "anna-najor",
+      "rankTier": "Instructor",
+      "label": "Anna Najor"
+    },
+    {
+      "id": "cohort:aaa4027",
+      "query": "Alaa Ali Abd-Alrazaq weill cornell",
+      "type": "branded",
+      "cwid": "aaa4027",
+      "slug": "alaa-ali-abd-alrazaq",
+      "rankTier": "Assistant Professor",
+      "label": "Alaa Ali Abd-Alrazaq"
+    },
+    {
+      "id": "cohort:aab9028",
+      "query": "Ariel Ann Blanchard weill cornell",
+      "type": "branded",
+      "cwid": "aab9028",
+      "slug": "ariel-ann-blanchard",
+      "rankTier": "Assistant Professor",
+      "label": "Ariel Ann Blanchard"
+    },
+    {
+      "id": "cohort:aaj4006",
+      "query": "Aaron Jen weill cornell",
+      "type": "branded",
+      "cwid": "aaj4006",
+      "slug": "aaron-jen",
+      "rankTier": "Assistant Professor",
+      "label": "Aaron Jen"
+    },
+    {
+      "id": "cohort:aak4012",
+      "query": "Aarani Kandeepan weill cornell",
+      "type": "branded",
+      "cwid": "aak4012",
+      "slug": "aarani-kandeepan",
+      "rankTier": "Assistant Professor",
+      "label": "Aarani Kandeepan"
+    },
+    {
+      "id": "cohort:aam9008",
+      "query": "Alison M. Maresh weill cornell",
+      "type": "branded",
+      "cwid": "aam9008",
+      "slug": "alison-m-maresh",
+      "rankTier": "Assistant Professor",
+      "label": "Alison M. Maresh"
+    },
+    {
+      "id": "cohort:abb2013",
+      "query": "Abdelaziz Belkadi weill cornell",
+      "type": "branded",
+      "cwid": "abb2013",
+      "slug": "abdelaziz-belkadi",
+      "rankTier": "Assistant Professor",
+      "label": "Abdelaziz Belkadi"
+    },
+    {
+      "id": "cohort:abd4001",
+      "query": "Ali Danesh weill cornell",
+      "type": "branded",
+      "cwid": "abd4001",
+      "slug": "ali-danesh",
+      "rankTier": "Assistant Professor",
+      "label": "Ali Danesh"
+    },
+    {
+      "id": "cohort:abj2006",
+      "query": "Abhi Jaywant weill cornell",
+      "type": "branded",
+      "cwid": "abj2006",
+      "slug": "abhi-jaywant",
+      "rankTier": "Assistant Professor",
+      "label": "Abhi Jaywant"
+    },
+    {
+      "id": "cohort:abg9017",
+      "query": "Abha Goyal weill cornell",
+      "type": "branded",
+      "cwid": "abg9017",
+      "slug": "abha-goyal",
+      "rankTier": "Associate Professor",
+      "label": "Abha Goyal"
+    },
+    {
+      "id": "cohort:acr2213",
+      "query": "Catherine Riffin weill cornell",
+      "type": "branded",
+      "cwid": "acr2213",
+      "slug": "catherine-riffin",
+      "rankTier": "Associate Professor",
+      "label": "Catherine Riffin"
+    },
+    {
+      "id": "cohort:adn9018",
+      "query": "Adin Nelson weill cornell",
+      "type": "branded",
+      "cwid": "adn9018",
+      "slug": "adin-nelson",
+      "rankTier": "Associate Professor",
+      "label": "Adin Nelson"
+    },
+    {
+      "id": "cohort:adt9010",
+      "query": "Adam D. Talenfeld weill cornell",
+      "type": "branded",
+      "cwid": "adt9010",
+      "slug": "adam-d-talenfeld",
+      "rankTier": "Associate Professor",
+      "label": "Adam D. Talenfeld"
+    },
+    {
+      "id": "cohort:aer2006",
+      "query": "Tony Rosen weill cornell",
+      "type": "branded",
+      "cwid": "aer2006",
+      "slug": "tony-rosen",
+      "rankTier": "Associate Professor",
+      "label": "Tony Rosen"
+    },
+    {
+      "id": "cohort:ago2002",
+      "query": "Anna G Orr weill cornell",
+      "type": "branded",
+      "cwid": "ago2002",
+      "slug": "anna-g-orr",
+      "rankTier": "Associate Professor",
+      "label": "Anna G Orr"
+    },
+    {
+      "id": "cohort:ahs9018",
+      "query": "Ashish Saxena weill cornell",
+      "type": "branded",
+      "cwid": "ahs9018",
+      "slug": "ashish-saxena",
+      "rankTier": "Associate Professor",
+      "label": "Ashish Saxena"
+    },
+    {
+      "id": "cohort:ajp9012",
+      "query": "Anna Podolanczuk weill cornell",
+      "type": "branded",
+      "cwid": "ajp9012",
+      "slug": "anna-podolanczuk",
+      "rankTier": "Associate Professor",
+      "label": "Anna Podolanczuk"
+    },
+    {
+      "id": "cohort:abj9004",
+      "query": "Arun B. Jesudian weill cornell",
+      "type": "branded",
+      "cwid": "abj9004",
+      "slug": "arun-b-jesudian",
+      "rankTier": "Professor (full)",
+      "label": "Arun B. Jesudian"
+    },
+    {
+      "id": "cohort:achadbur",
+      "query": "Amy Chadburn weill cornell",
+      "type": "branded",
+      "cwid": "achadbur",
+      "slug": "amy-chadburn",
+      "rankTier": "Professor (full)",
+      "label": "Amy Chadburn"
+    },
+    {
+      "id": "cohort:ack2003",
+      "query": "Ana C. Krieger weill cornell",
+      "type": "branded",
+      "cwid": "ack2003",
+      "slug": "ana-c-krieger",
+      "rankTier": "Professor (full)",
+      "label": "Ana C. Krieger"
+    },
+    {
+      "id": "cohort:acp9008",
+      "query": "Anna C Pavlick weill cornell",
+      "type": "branded",
+      "cwid": "acp9008",
+      "slug": "anna-c-pavlick",
+      "rankTier": "Professor (full)",
+      "label": "Anna C Pavlick"
+    },
+    {
+      "id": "cohort:ajo9001",
+      "query": "Allyson J Ocean weill cornell",
+      "type": "branded",
+      "cwid": "ajo9001",
+      "slug": "allyson-j-ocean",
+      "rankTier": "Professor (full)",
+      "label": "Allyson J Ocean"
+    },
+    {
+      "id": "cohort:akm2003",
+      "query": "Anant K Menon weill cornell",
+      "type": "branded",
+      "cwid": "akm2003",
+      "slug": "anant-k-menon",
+      "rankTier": "Professor (full)",
+      "label": "Anant K Menon"
+    },
+    {
+      "id": "cohort:ala2022",
+      "query": "Alessio Accardi weill cornell",
+      "type": "branded",
+      "cwid": "ala2022",
+      "slug": "alessio-accardi",
+      "rankTier": "Professor (full)",
+      "label": "Alessio Accardi"
+    },
+    {
+      "id": "cohort:ala9124",
+      "query": "Alan Astrow weill cornell",
+      "type": "branded",
+      "cwid": "ala9124",
+      "slug": "alan-astrow",
+      "rankTier": "Professor (full)",
+      "label": "Alan Astrow"
+    }
+  ]
+}

@@ -127,7 +127,9 @@ before/after program (~3 snapshots ≈ 500 searches).
 | `scripts/seo/build-basket.ts`    | Generate the basket from the DB (`seo:basket`)    | yes                                          |
 | `scripts/seo/track-rank.ts`      | Run SerpAPI, write a snapshot (`seo:track`)       | yes                                          |
 | `scripts/seo/diff-rank.ts`       | Before/after report (`seo:diff`)                  | yes                                          |
+| `scripts/seo/cohort-report.ts`   | Rank-stratified name-search report (`seo:cohort`) | yes                                          |
 | `data/seo/rank-basket.json`      | The query basket (the fixed instrument)           | **yes** (gitignore allowlist)                |
+| `data/seo/rank-cohort-basket.json` | Rank-stratified name cohort (#684)              | **yes** (gitignore allowlist)                |
 | `data/seo/snapshots/rank-*.json` | SerpAPI output                                    | no (gitignored — re-derivable, can be large) |
 
 ## Cost model
@@ -148,6 +150,40 @@ Defined in `scripts/seo/build-basket.ts`:
 **Confirm** `vivo.weill.cornell.edu` is the canonical legacy host for your
 baseline window before trusting the VIVO column. Edit `TARGETS` if WCM points a
 different host at VIVO.
+
+---
+
+# Rank-stratified name cohort (#684)
+
+The default branded set is the **top-30 scholars by publication count** — senior-skewed,
+so it over-states a "buried profile" problem. The `cohort` basket instead samples evenly
+across academic rank (Instructor / Assistant / Associate / full Professor, parsed from
+`scholar.primary_title`; inclusion = active + ≥1 publication_topic), so "does the profile
+win the name search?" gets a fair, institution-wide answer.
+
+```bash
+# 1. Build (deterministic, committed). --per-rank N scholars per tier (default 8).
+npm run seo:basket -- --mode cohort --per-rank 8     # → data/seo/rank-cohort-basket.json
+
+# 2. Capture. --capture-top N stores the top-N organic results per row (same SERP call,
+#    no extra searches) so the report can show WHICH page wins and classify no-result rows.
+npm run seo:track -- --basket data/seo/rank-cohort-basket.json --capture-top 5
+
+# 3. Report — per-tier "profile wins / buried / no WCM result" + who-outranks-whom.
+npm run seo:cohort                                   # newest snapshot
+npm run seo:cohort -- --snapshot data/seo/snapshots/rank-<ts>.json --out docs/seo-cohort-<date>.md
+```
+
+**Extra target — `wcm-any`.** Beyond `new`/`vivo`/`wcm-clinical`, the cohort basket adds an
+umbrella target whose hosts (`weill.cornell.edu`, `med.cornell.edu`, `weillcornell.org`)
+suffix-match **every** WCM property. A branded row with no `wcm-any` placement is genuinely
+"no WCM result at all" — an indexing gap or name-ambiguity case the report lists by name,
+distinct from a profile that merely lost to one of the scholar's own pages.
+
+The verdict taxonomy is mutually exclusive: **profile wins** (the top WCM result is the
+profile), **profile buried** (a WCM page ranks but it's not the profile — typically the
+person's `weillcornell.org` clinical bio or a lab/department page), **no WCM result**. See
+#684 for the captured 2026-06-03 run and findings.
 
 ---
 

@@ -34,6 +34,14 @@ export interface BasketQuery {
   /** Scholar cwid/slug for branded queries (lets us sanity-check the expected target URL). */
   cwid?: string;
   slug?: string;
+  /**
+   * Academic-rank tier for the rank-stratified cohort basket
+   * ("Instructor" | "Assistant Professor" | "Associate Professor" |
+   * "Professor (full)"), parsed from `scholar.primary_title`. Lets the cohort
+   * report segment name-query rank by seniority (the #684 "rank-dependent"
+   * finding). Absent on cutover/rival baskets.
+   */
+  rankTier?: string;
   /** True for the curated flagship expert queries (segments the flagship leaderboard). */
   flagship?: boolean;
   /** Matched-cohort id (e.g. a flagship topic) grouping one researcher per institution. */
@@ -100,7 +108,20 @@ export interface SnapshotRow {
   matchGroup?: string;
   hIndex?: number;
   academicAge?: number;
+  /** Carried through for the cohort report (segments name-query rank by seniority). */
+  rankTier?: string;
+  /** Scholar slug for branded cohort rows — lets the report verify the ranking URL is the expected profile. */
+  slug?: string;
   placements: SnapshotPlacement[];
+  /**
+   * Top organic results for this query (position, title, link), captured from
+   * the SAME SerpAPI response when `seo:track --capture-top N` is set. Off by
+   * default → absent on normal runs. Used by the cohort report to show WHICH
+   * page wins a name search (e.g. lab/dept/clinical page) and to classify a
+   * "no WCM result at all" row as an indexing gap vs name ambiguity. Additive —
+   * diffSnapshots/standings read named fields and ignore this.
+   */
+  topResults?: { position: number; title?: string; link?: string }[];
   /**
    * Google AI Overview citation placement, captured from the SAME SerpAPI
    * response as the organic results (zero extra search; #594 §2). Additive —
