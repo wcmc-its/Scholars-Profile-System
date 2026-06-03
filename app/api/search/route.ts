@@ -15,7 +15,9 @@ import {
 import { matchQueryToTaxonomy } from "@/lib/api/search-taxonomy";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import {
-  parseMeshParam,
+  parseScopeParam,
+  scopeToMeshParams,
+  type Scope,
   resolveConceptMode,
   resolveFundingConceptEnabled,
   resolveDeptLeadershipBoost,
@@ -80,18 +82,31 @@ export async function GET(request: NextRequest) {
     }
   }
   const taxonomyMatchMs = Date.now() - taxonomyStart;
-  // Issue #259 §6.2 — `?mesh=off` wins over `?mesh=strict` regardless of
-  // URL ordering. `parseMeshParam` uses `getAll + includes` so the rule
-  // holds for `?mesh=strict&mesh=off`, which the raw `params.get` shape
-  // got wrong (it returns the first value only). Single source of truth
-  // shared with the SSR page so route handler and page agree on a URL.
-  const { meshOff, meshStrict } = parseMeshParam(params);
+  // PLAN R2/R6 — one user-facing `?match=exact|expanded|concept` scope (default
+  // `expanded`) replaces the split `?mesh=` surface. `parseScopeParam` validates
+  // the value (anything unrecognized → `expanded`) and folds the legacy
+  // `?mesh=off|strict` back-compat alias with off-wins precedence, then
+  // `scopeToMeshParams` bridges it onto the existing `meshOff` / `meshStrict`
+  // levers — so the precedence below (and the SSR page, which parses the same
+  // way) stays byte-identical. `expanded` is byte-identical to pre-scope.
+  const scope = parseScopeParam(params);
+  const { meshOff, meshStrict } = scopeToMeshParams(scope);
   const effectiveMeshResolution = meshOff ? null : taxonomyMatch.meshResolution;
   const conceptMode = resolveConceptMode();
   const meshResolutionDescriptorUi =
     taxonomyMatch.meshResolution?.descriptorUi ?? null;
   const meshResolutionConfidence =
     taxonomyMatch.meshResolution?.confidence ?? null;
+
+  // PLAN R3 — search interpretation, returned on every branch (people /
+  // publications / funding) so a programmatic/JSON consumer of this route
+  // knows the active scope and the resolved concept without re-running the
+  // taxonomy resolver. `conceptLabel` mirrors the SSR page (`MeshResolution.name`
+  // or null when no mapping); `meshMapped` is the boolean the page derives from
+  // it. Spread into the response body by `jsonWithTiming`.
+  const conceptLabel = taxonomyMatch.meshResolution?.name ?? null;
+  const meshMapped = taxonomyMatch.meshResolution !== null;
+  const searchInterpretation = { scope, conceptLabel, meshMapped };
 
   // Issue #78 — Funding tab. Multi-select facets are repeated params,
   // OR within group, AND across groups. Mirrors the people/publications
@@ -159,7 +174,13 @@ export async function GET(request: NextRequest) {
         ts: new Date().toISOString(),
       }),
     );
-    return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchFunding");
+    return jsonWithTiming(
+      result,
+      searchInterpretation,
+      taxonomyMatchMs,
+      searchLatencyMs,
+      "searchFunding",
+    );
   }
 
   if (type === "publications") {
@@ -266,7 +287,13 @@ export async function GET(request: NextRequest) {
         ts: new Date().toISOString(),
       }),
     );
-    return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchPublications");
+    return jsonWithTiming(
+      result,
+      searchInterpretation,
+      taxonomyMatchMs,
+      searchLatencyMs,
+      "searchPublications",
+    );
   }
 
   const sort = (params.get("sort") ?? "relevance") as PeopleSort;
@@ -390,7 +417,13 @@ export async function GET(request: NextRequest) {
       ts: new Date().toISOString(),
     }),
   );
-  return jsonWithTiming(result, taxonomyMatchMs, searchLatencyMs, "searchPeople");
+  return jsonWithTiming(
+    result,
+    searchInterpretation,
+    taxonomyMatchMs,
+    searchLatencyMs,
+    "searchPeople",
+  );
 }
 
 function orUndefined<T>(arr: T[]): T[] | undefined {
@@ -401,18 +434,33 @@ function orUndefined<T>(arr: T[]): T[] | undefined {
 // resolver and search latencies show per-request in browser DevTools. The
 // same split-scope numbers as the `search_query` log above (`taxonomyMatchMs`
 // / `searchLatencyMs`), in the form DevTools and RUM tools parse natively.
-function jsonWithTiming<T>(
+//
+// PLAN R3 — the result object is spread alongside `searchInterpretation`
+// ({ scope, conceptLabel, meshMapped }) so all three branches return the same
+// shape uniformly without each search result type having to carry the field.
+function jsonWithTiming<T extends object>(
   body: T,
+  searchInterpretation: SearchInterpretation,
   taxonomyMatchMs: number,
   searchLatencyMs: number,
   searchLabel: string,
 ) {
-  return NextResponse.json(body, {
-    headers: {
-      "Server-Timing": serverTimingHeader([
-        { name: "taxonomy", ms: taxonomyMatchMs, desc: "matchQueryToTaxonomy" },
-        { name: "search", ms: searchLatencyMs, desc: searchLabel },
-      ]),
+  return NextResponse.json(
+    { ...body, searchInterpretation },
+    {
+      headers: {
+        "Server-Timing": serverTimingHeader([
+          { name: "taxonomy", ms: taxonomyMatchMs, desc: "matchQueryToTaxonomy" },
+          { name: "search", ms: searchLatencyMs, desc: searchLabel },
+        ]),
+      },
     },
-  });
+  );
 }
+
+// PLAN R3 — the interpretation block returned on every branch.
+type SearchInterpretation = {
+  scope: Scope;
+  conceptLabel: string | null;
+  meshMapped: boolean;
+};

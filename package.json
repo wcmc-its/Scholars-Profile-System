@@ -30,7 +30,6 @@
     "search:index:publications": "tsx etl/search-index/index.ts --publications-only",
     "search:index:funding": "tsx etl/search-index/index.ts --funding-only",
     "search:reconcile": "tsx etl/search-reconcile/index.ts",
-    "eval:people-match-explain": "tsx scripts/people-match-explain-dryrun.ts",
     "etl:ed": "tsx etl/ed/index.ts",
     "etl:ed:student-programs": "tsx etl/ed/student-programs.ts",
     "etl:ed:probe-chiefs": "tsx etl/ed/probe-chiefs.ts",
