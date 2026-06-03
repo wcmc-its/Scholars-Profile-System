@@ -60,6 +60,41 @@ const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
   superuser: "visibility",
 };
 
+/**
+ * Self-mode rail grouping + editability tier (vision-round T2.2). Leads with
+ * what the scholar can actually change, then groups the rest under their system
+ * of record so "what can I edit?" is answerable without clicking all nine items.
+ * Superuser mode keeps a flat rail — its editability differs (Overview is
+ * read-only, Profile URL is direct-set), so these self labels would mislead.
+ */
+const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
+  "overview",
+  "visibility",
+  "profile-url",
+  "publications",
+  "funding",
+  "appointments",
+  "education",
+  "name-title",
+  "photo",
+];
+const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
+  overview: "owned",
+  visibility: "owned",
+  "profile-url": "owned",
+  publications: "sourced",
+  funding: "sourced",
+  appointments: "sourced",
+  education: "sourced",
+  "name-title": "readonly",
+  photo: "readonly",
+};
+const SELF_RAIL_GROUP = {
+  owned: "Yours to edit",
+  sourced: "From WCM systems",
+  readonly: "From WCM systems",
+} as const;
+
 export type EditPageProps = {
   ctx: EditContext;
   mode?: "self" | "superuser";
@@ -96,11 +131,15 @@ export function EditPage({
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
     visible[0];
 
-  const railItems: RailItem[] = visible.map((a) => ({
-    key: a.key,
-    label: a.label,
-    readonly: a.readonly,
-  }));
+  const railItems: RailItem[] =
+    mode === "self"
+      ? SELF_RAIL_ORDER.flatMap((k) => {
+          const a = visible.find((v) => v.key === k);
+          if (!a) return [];
+          const kind = SELF_RAIL_KIND[k];
+          return [{ key: a.key, label: a.label, readonly: a.readonly, kind, group: SELF_RAIL_GROUP[kind] }];
+        })
+      : visible.map((a) => ({ key: a.key, label: a.label, readonly: a.readonly }));
   const basePath = mode === "superuser" ? `/edit/scholar/${ctx.scholar.cwid}` : "/edit";
   const scholarName = ctx.scholar.preferredName;
 
