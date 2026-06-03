@@ -1,6 +1,23 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { ExternalLink, Search, Sparkles } from "lucide-react";
 import type { Scope } from "@/lib/api/search-flags";
+
+/**
+ * The resolved MeSH concept behind the R3 explanation line, surfaced in the
+ * enriched hover/focus card on the concept term. Derived once per request from
+ * `MeshResolution` in the search page and threaded to all three tabs.
+ */
+export type ConceptInfo = {
+  /** The descriptor's preferred term (e.g. "Clustered Regularly Interspaced
+   *  Short Palindromic Repeats"). */
+  label: string;
+  /** The NLM descriptor UI (e.g. "D064112") — shown in the footer and used to
+   *  deep-link the MeSH browser record. */
+  descriptorUi: string;
+  /** The MeSH scope note (the descriptor's definition). Null for the ~0.5% of
+   *  descriptors with no scope note; the card then omits the definition line. */
+  definition: string | null;
+};
 
 /**
  * PLAN R2/R3 — the unified match-scope affordance shared by all three search
@@ -64,42 +81,91 @@ export function ScopeControl({
 export function ScopeNote({
   scope,
   query,
-  conceptLabel,
+  concept,
 }: {
   scope: Scope;
   query: string;
-  conceptLabel: string;
+  concept: ConceptInfo;
 }) {
-  const definition =
-    `MeSH (Medical Subject Headings) is the U.S. National Library of Medicine’s ` +
-    `controlled vocabulary for biomedical literature. ${conceptLabel} is its preferred ` +
-    `term for “${query}”.`;
-  const definitionId = `mesh-def-${conceptLabel
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")}`;
+  const cardId = `mesh-card-${concept.descriptorUi}`;
+  const recordUrl = `https://meshb.nlm.nih.gov/record/ui?ui=${encodeURIComponent(
+    concept.descriptorUi,
+  )}`;
 
-  // The MeSH concept name carries its own definition on hover + keyboard focus
+  // The concept term reveals an enriched MeSH card on hover AND keyboard focus
   // (pure CSS group-hover / group-focus-within — no JS, so this stays a server
-  // component), replacing the old standalone ⓘ. The tooltip is anchored to the
-  // note row (which holds `relative`), not the term, so a long concept label is
-  // free to wrap on narrow viewports. Exact-word scope names the typed query,
-  // not a MeSH concept, so it renders plain with no term affordance.
+  // component). Unlike the old definition-only tooltip the card is interactive
+  // (a "View record" link), so it is NOT pointer-events-none; a transparent
+  // `before:` strip bridges the 10px gap to the anchor row so the pointer can
+  // travel from the term into the card without the hover dropping. The card is
+  // anchored to the note row (which holds `relative`), not the term, so a long
+  // label is free to wrap. Exact-word scope names the typed query, not a MeSH
+  // concept, so it renders plain with no card.
   const term = (
     <span className="group inline">
       <button
         type="button"
-        aria-describedby={definitionId}
+        aria-describedby={cardId}
         className="inline whitespace-normal rounded-sm text-left font-semibold text-foreground underline decoration-muted-foreground decoration-dotted decoration-1 underline-offset-2 hover:decoration-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
       >
-        {conceptLabel}
+        {concept.label}
       </button>
       <span
-        id={definitionId}
+        id={cardId}
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-[300px] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-2.5 text-left text-[12.5px] font-normal leading-[1.5] text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="invisible absolute left-0 top-full z-[60] mt-2.5 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover text-left opacity-0 shadow-lg transition-opacity before:absolute before:-top-2.5 before:left-0 before:h-2.5 before:w-full before:content-[''] group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
       >
-        {definition}
+        {/* Header — the MeSH concept identity */}
+        <span className="block rounded-t-xl bg-[#eeedfe] px-[15px] pb-[13px] pt-[11px]">
+          <span className="flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-[#4a40a8]">
+            <Sparkles aria-hidden className="size-[13px]" strokeWidth={2} />
+            MeSH concept
+          </span>
+          <span className="mt-[5px] block text-[15px] font-semibold leading-[1.35] text-[#26215c]">
+            {concept.label}
+          </span>
+        </span>
+        {/* Body — the matched query + the descriptor's definition */}
+        <span className="block px-[15px] py-[13px]">
+          <span className="flex items-center gap-[7px] text-[12.5px] text-muted-foreground">
+            <Search
+              aria-hidden
+              className="size-3.5 shrink-0 opacity-70"
+              strokeWidth={2}
+            />
+            <span>
+              Matches your search{" "}
+              <span className="rounded-[5px] bg-secondary px-1.5 py-px font-mono text-[12px] text-foreground">
+                {query}
+              </span>
+            </span>
+          </span>
+          {concept.definition ? (
+            <span className="mt-2.5 block text-[13px] leading-[1.5] text-muted-foreground">
+              {concept.definition}
+            </span>
+          ) : null}
+        </span>
+        {/* Footer — provenance badge + outbound record link */}
+        <span className="flex items-center justify-between border-t border-border px-[15px] py-[9px]">
+          <span className="inline-flex items-center">
+            <span className="rounded-[5px] bg-[#eeedfe] px-[7px] py-0.5 text-[11px] font-medium tracking-wide text-[#4a40a8]">
+              MeSH
+            </span>
+            <span className="ml-2 font-mono text-[12px] text-muted-foreground">
+              {concept.descriptorUi}
+            </span>
+          </span>
+          <a
+            href={recordUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[12.5px] text-[#2c4f6e] hover:underline"
+          >
+            View record
+            <ExternalLink aria-hidden className="size-[13px]" strokeWidth={2} />
+          </a>
+        </span>
       </span>
     </span>
   );
