@@ -328,6 +328,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "20",
               },
               {
+                "Name": "SELF_EDIT_ADMINISTRATORS_TAB",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "off",
+              },
+              {
+                "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
+                "Value": "off",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -3232,6 +3244,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT",
                 "Value": "20",
+              },
+              {
+                "Name": "SELF_EDIT_ADMINISTRATORS_TAB",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_ED_ADMINS_IMPORT",
+                "Value": "off",
+              },
+              {
+                "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
+                "Value": "off",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
