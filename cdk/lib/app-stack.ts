@@ -858,14 +858,23 @@ export class AppStack extends Stack {
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
         FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
-        // #688 / #692 -- search query-interpretation flags. Staged rollout:
-        // ON in staging for UAT (the #692 generic-term de-highlight + the #688
-        // "Why this match" MeSH-provenance note); prod stays default-off until
-        // the SPEC §8 eval signs off. `env === "staging"` keeps the prod task
-        // def explicitly "off". resolveGenericTermMode reads off|resolve|on;
+        // #688 / #692 -- search query-interpretation flags. Graduated to prod
+        // parity after the staging UAT + SPEC §8 eval: the #692 generic-term
+        // de-highlight and the #688 "Why this match" MeSH-provenance note now
+        // run in BOTH envs. resolveGenericTermMode reads off|resolve|on;
         // resolvePeopleMatchProvenance reads on|off (lib/api/search-flags.ts).
-        SEARCH_GENERIC_TERM_DEMOTE: env === "staging" ? "on" : "off",
-        SEARCH_PEOPLE_MATCH_PROVENANCE: env === "staging" ? "on" : "off",
+        SEARCH_GENERIC_TERM_DEMOTE: "on",
+        SEARCH_PEOPLE_MATCH_PROVENANCE: "on",
+        // #295 / #723 -- funding-tab concept clause + result-SET gate field.
+        // Enabled in both envs now that the funding index carries the descriptor
+        // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)
+        // and is safe ONLY after the funding index is reindexed with that field
+        // (lib/funding-projection.ts), so `cdk deploy Sps-App-prod` MUST follow
+        // the prod `search:index` reindex -- otherwise prod funding-concept
+        // results empty out. resolveFundingConceptEnabled reads === "on";
+        // resolveFundingMeshGateField reads === "fundedPubMeshUi".
+        SEARCH_FUNDING_TAB_CONCEPT: "on",
+        SEARCH_FUNDING_MESH_GATE: "fundedPubMeshUi",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

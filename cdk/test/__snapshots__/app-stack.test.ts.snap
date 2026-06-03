@@ -337,11 +337,19 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_GENERIC_TERM_DEMOTE",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
-                "Value": "off",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_TAB_CONCEPT",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_MESH_GATE",
+                "Value": "fundedPubMeshUi",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -3228,6 +3236,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_PEOPLE_MATCH_PROVENANCE",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_TAB_CONCEPT",
+                "Value": "on",
+              },
+              {
+                "Name": "SEARCH_FUNDING_MESH_GATE",
+                "Value": "fundedPubMeshUi",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
