@@ -5,14 +5,14 @@
  * selection — no client-only routing. The active item is a maroon fill +
  * chevron + `aria-current="page"`.
  *
- * Editability is legible at a glance via two mechanisms:
- *   - optional GROUP headers ("Yours to edit" / "From WCM systems") so the
- *     scholar-editable surface is separated from the sourced one; when no item
- *     carries a `group` the rail falls back to one flat list (back-compat for
- *     the unit / sibling-division rails that reuse `RailItem`);
- *   - a per-item `kind` cue — a lock glyph for read-only fields, an sr-only
- *     "(sourced…)" note for hide-only-sourced ones — never glyph-only and never
- *     a disabled control (a keyboard/SR user must still reach the panel).
+ * Editability is legible at a glance via GROUP headers ("Yours to edit" /
+ * "From WCM systems") that separate the scholar-editable surface from the
+ * sourced one; when no item carries a `group` the rail falls back to one flat
+ * list (back-compat for the unit / sibling-division rails that reuse
+ * `RailItem`). Beyond the headers the links are NOT visually differentiated by
+ * tier — every item reads the same so the rail stays simple — but read-only and
+ * hide-only-sourced items each carry an sr-only note, and no item is ever a
+ * disabled control (a keyboard / screen-reader user must still reach the panel).
  *
  * Focus is contrast-correct on both backgrounds: a white ring on the maroon
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
@@ -28,7 +28,7 @@ export type RailItem = {
   /** The `?attr=` value (e.g. "appointments"). */
   key: string;
   label: string;
-  /** Read-only (SOR) attribute — lock glyph, muted. */
+  /** Read-only (SOR) attribute — view-only on Scholars (sr-only note only). */
   readonly?: boolean;
   /** Optional group header. When no item has one, the rail renders flat. */
   group?: string;
@@ -118,7 +118,6 @@ function RailLink({
           isActive
             ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
             : "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
-          !isActive && kind === "readonly" && "text-muted-foreground",
         )}
       >
         <span className="flex items-center gap-2">

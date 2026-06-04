@@ -111,6 +111,33 @@ const superuserCtx: EditContext = {
   publications: [],
 };
 
+/**
+ * Stub the global `Image` so both the HomePanel headshot probe (onload/onerror)
+ * and Radix's AvatarImage (addEventListener) resolve deterministically off one
+ * fake — jsdom fires neither, so the present/missing branches are otherwise
+ * unreachable. Caller restores via `vi.unstubAllGlobals()`.
+ */
+function stubImage(outcome: "load" | "error") {
+  class FakeImage {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    listeners: Record<string, Array<() => void>> = {};
+    addEventListener(type: string, cb: () => void) {
+      (this.listeners[type] ||= []).push(cb);
+    }
+    removeEventListener(type: string, cb: () => void) {
+      this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== cb);
+    }
+    set src(value: string) {
+      if (!value) return;
+      if (outcome === "load") this.onload?.();
+      else this.onerror?.();
+      for (const cb of this.listeners[outcome] || []) cb();
+    }
+  }
+  vi.stubGlobal("Image", FakeImage);
+}
+
 describe("EditPage router — the Apollo shell + rail", () => {
   it("renders the rail with the self attribute set (Publications yes, Profile URL locked when flag off)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
@@ -131,6 +158,88 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={ctx} mode="self" />);
     expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
     expect(screen.getByTestId("home-card-overview")).toBeTruthy();
+  });
+
+  it("Home: a written bio shows the overview checklist item as done", () => {
+    // ctx.scholar.overview = "<p>Hi.</p>" → hasBio.
+    render(<EditPage ctx={ctx} mode="self" />);
+    const overview = screen.getByTestId("home-item-overview");
+    expect(overview.textContent).toContain("Overview written");
+    const link = screen.getByTestId("home-card-overview");
+    expect(link.getAttribute("href")).toBe("/edit?attr=overview");
+    expect(link.textContent).toContain("Edit");
+  });
+
+  it("Home: no bio shows 'Write your overview' as the actionable task", () => {
+    const noBio: EditContext = { ...ctx, scholar: { ...ctx.scholar, overview: "   " } };
+    render(<EditPage ctx={noBio} mode="self" />);
+    const overview = screen.getByTestId("home-item-overview");
+    expect(overview.textContent).toContain("Write your overview");
+    const cta = screen.getByTestId("home-card-overview");
+    expect(cta.getAttribute("href")).toBe("/edit?attr=overview");
+    expect(cta.textContent).toContain("Write");
+  });
+
+  it("Home: pins the completeness numerator, never a percentage", () => {
+    // bio ✓ + 1 pub ✓ + visibility ✓; the headshot probe stays "loading" in
+    // jsdom (no Image load) so it doesn't count → exactly 3 of 4.
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.getByText("3 of 4 done")).toBeTruthy();
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it("Home: each essential is load-bearing — no bio + no pubs counts only visibility (1 of 4)", () => {
+    const sparse: EditContext = {
+      ...ctx,
+      scholar: { ...ctx.scholar, overview: "" },
+      publications: [],
+    };
+    render(<EditPage ctx={sparse} mode="self" />);
+    expect(screen.getByText("1 of 4 done")).toBeTruthy();
+    // Publications-empty row state.
+    expect(screen.getByTestId("home-item-publications").textContent).toContain("None shown yet");
+  });
+
+  it("Home: the headshot item hands off to the Web Directory in a new tab", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    const link = screen.getByTestId("home-card-headshot");
+    expect(link.getAttribute("href")).toContain("directory.weill.cornell.edu");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("Home: a hidden profile renders the visibility row as 'Profile hidden'", () => {
+    const hidden: EditContext = {
+      ...ctx,
+      scholar: {
+        ...ctx.scholar,
+        suppression: { ownRow: { id: "s1", reason: "test" }, adminRow: null },
+      },
+    };
+    render(<EditPage ctx={hidden} mode="self" />);
+    expect(screen.getByTestId("home-item-visibility").textContent).toContain("Profile hidden");
+  });
+
+  // The headshot's presence is a client-side image probe (no server signal); the
+  // present branch also mounts Radix AvatarImage — stubImage drives both.
+  it("Home: a loadable headshot resolves to 'Headshot added' and completes the profile (4 of 4)", async () => {
+    stubImage("load");
+    try {
+      render(<EditPage ctx={ctx} mode="self" />);
+      expect(await screen.findByText("Headshot added")).toBeTruthy();
+      expect(screen.getByText("4 of 4 done")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("Home: a 404 headshot resolves to the 'Add a headshot' to-do", async () => {
+    stubImage("error");
+    try {
+      render(<EditPage ctx={ctx} mode="self" />);
+      expect(await screen.findByText("Add a headshot")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("an unknown ?attr falls back to the default (Home)", () => {

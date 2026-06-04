@@ -144,6 +144,15 @@ describe("operator routing decisions", () => {
     }
   });
 
+  it("COI 'no longer current' routes to ITS support (a mirror/sync gap, not a WRG self-edit)", () => {
+    const a = issue("coi", "coi-not-current").action;
+    expect(a.kind).toBe("route");
+    if (a.kind === "route") {
+      expect(a.email).toBe("support@med.cornell.edu");
+      expect(a.office).toBe("ITS Support");
+    }
+  });
+
   it("mentee corrections route to ITS support, sourced from Jenzabar or Employee Central", () => {
     for (const id of ["mentee-not-mine", "mentee-missing", "mentee-details-wrong"]) {
       const a = issue("mentees", id).action;

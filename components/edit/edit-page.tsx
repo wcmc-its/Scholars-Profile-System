@@ -220,6 +220,8 @@ function renderPanel(
       return (
         <HomePanel
           basePath="/edit"
+          preferredName={scholarName}
+          identityImageEndpoint={identityImageEndpoint(cwid)}
           hasBio={ctx.scholar.overview.trim().length > 0}
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
