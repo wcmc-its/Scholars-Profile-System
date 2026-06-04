@@ -257,6 +257,13 @@ export function RequestAChangeDialog({
           <DialogHeader className="gap-1 text-left">
             <DialogTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               Request a change
+              {/* Visible label stays the eyebrow; the accessible name gains the
+                  attribute + item so SR users don't hear an identical title for
+                  every panel (vision-round T1.8). Radix wires aria-labelledby to
+                  this node, so an aria-label on DialogContent would be a no-op. */}
+              <span className="sr-only">
+                {` to ${attributeLabel}${itemLabel ? `: ${itemLabel}` : ""}`}
+              </span>
             </DialogTitle>
             {itemLabel && (
               <p className="flex items-baseline gap-2 text-sm">
@@ -282,19 +289,21 @@ export function RequestAChangeDialog({
                 </>
               ) : (
                 <>
-                  <p className="text-base font-medium">Thanks — here&apos;s what happens next.</p>
+                  {/* Not a success claim: the mailer is dark, so nothing was sent
+                      server-side — the request only completes once the user sends
+                      from their own client (vision-round T1.9). */}
+                  <p className="text-base font-medium">Almost there — finish in your email app.</p>
                   <p className="text-muted-foreground text-sm">
-                    Your email client should have opened a pre-filled message
-                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing
-                    opened, email{" "}
-                    <a
-                      className="text-[var(--apollo-maroon)] underline"
-                      href={`mailto:${submitTarget.email}`}
-                    >
-                      {submitTarget.email}
-                    </a>{" "}
-                    directly.
+                    We opened a pre-filled message
+                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing opened,
+                    copy this address into your email and send it from there:
                   </p>
+                  <a
+                    className="text-apollo-maroon w-fit font-medium underline"
+                    href={`mailto:${submitTarget.email}`}
+                  >
+                    {submitTarget.email}
+                  </a>
                 </>
               )}
             </div>
@@ -334,7 +343,7 @@ export function RequestAChangeDialog({
                       className={cn(
                         "overflow-hidden rounded-md border transition-colors",
                         selected
-                          ? "border-[var(--apollo-maroon)] bg-[var(--apollo-maroon)]/[0.04]"
+                          ? "border-apollo-maroon bg-apollo-maroon/[0.04]"
                           : "border-border",
                       )}
                     >
@@ -342,7 +351,7 @@ export function RequestAChangeDialog({
                         htmlFor={`rac-${i.id}`}
                         className="flex cursor-pointer items-center gap-2.5 px-3 py-2.5"
                       >
-                        <RadioGroupItem id={`rac-${i.id}`} value={i.id} />
+                        <RadioGroupItem id={`rac-${i.id}`} value={i.id} className="border-foreground/50" />
                         <span className="flex-1 text-sm">{i.label}</span>
                         {!selected && hint && (
                           <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
@@ -369,7 +378,7 @@ export function RequestAChangeDialog({
                               {a.fallbackEmail && !revealFallback && (
                                 <button
                                   type="button"
-                                  className="text-[var(--apollo-maroon)] w-fit text-sm hover:underline"
+                                  className="text-apollo-maroon w-fit text-sm hover:underline"
                                   onClick={() => setRevealFallback(true)}
                                 >
                                   Still wrong? Email us
@@ -416,7 +425,7 @@ export function RequestAChangeDialog({
 
           <DialogFooter>
             {submitted ? (
-              <Button type="button" onClick={() => setOpen(false)}>
+              <Button type="button" variant="apollo" onClick={() => setOpen(false)}>
                 Done
               </Button>
             ) : confirmDiscard ? (
@@ -446,7 +455,7 @@ export function RequestAChangeDialog({
                   {action ? "Cancel" : "Close"}
                 </Button>
                 {action?.kind === "self-service" && (
-                  <Button asChild data-testid="request-a-change-open">
+                  <Button asChild variant="apollo" data-testid="request-a-change-open">
                     <a
                       href={resolveSelfServiceHref(action.href, cwid)}
                       target="_blank"
@@ -460,6 +469,7 @@ export function RequestAChangeDialog({
                 {showRouteBox && (
                   <Button
                     type="button"
+                    variant="apollo"
                     data-testid="request-a-change-submit"
                     disabled={sending}
                     onClick={handleRouteSubmit}
@@ -470,6 +480,7 @@ export function RequestAChangeDialog({
                 {isAck && (
                   <Button
                     type="button"
+                    variant="apollo"
                     data-testid="request-a-change-ack"
                     onClick={() => setOpen(false)}
                   >

@@ -150,7 +150,7 @@ describe("RequestAChangeDialog", () => {
     pickIssue("education-wrong");
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
 
-    expect(await screen.findByText(/email client should have opened/i)).toBeTruthy();
+    expect(await screen.findByText(/finish in your email app/i)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("facultyaffairs@med.cornell.edu");
     expect(window.location.href.startsWith("mailto:facultyaffairs@med.cornell.edu")).toBe(true);
   });
