@@ -863,14 +863,14 @@ export class AppStack extends Stack {
         SELF_EDIT_ADMINISTRATORS_TAB: "on",
         SELF_EDIT_ED_ADMINS_IMPORT: "off",
         SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "off",
-        // #746 — self-edit "Not mine" → ReCiter gold-standard reject. OFF in
-        // both envs: ships dark until the ReCiter engine is reachable from the
-        // SPS VPC (the #443/#483 CIDR-overlap routing gap) AND the reciter-api
-        // secret (RECITER_API_BASE_URL + RECITER_API_KEY) is provisioned. While
-        // off, "Not mine?" keeps the Publication-Manager off-ramp; while on but
-        // unconfigured, the reject records locally and the goldstandard POST is
-        // deferred to the etl:reciter-refresh scanner (dormant-safe).
-        RECITER_REJECT_SEND: "off",
+        // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
+        // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
+        // soak completes (prod flips in a follow-up). While off, "Not mine?"
+        // keeps the Publication-Manager off-ramp. The ReCiter admin key lives
+        // ONLY in the ETL task, so the app just records the reject locally and
+        // the etl:reciter-refresh scanner propagates it to the gold standard +
+        // fires the delayed re-score.
+        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts

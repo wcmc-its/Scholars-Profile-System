@@ -4271,7 +4271,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "RECITER_REJECT_SEND",
-                "Value": "off",
+                "Value": "on",
               },
             ],
             "Essential": true,
