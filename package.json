@@ -39,6 +39,7 @@
     "etl:reciter:probe": "tsx etl/reciter/probe.ts",
     "etl:reciter": "tsx etl/reciter/index.ts",
     "etl:reciter-refresh": "tsx etl/reciter-refresh/index.ts",
+    "etl:reciter:coi-statements": "tsx etl/reciter/backfill-coi-statements.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",

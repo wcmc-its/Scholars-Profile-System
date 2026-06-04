@@ -497,11 +497,33 @@ model Publication {
   publicationScores PublicationScore[]
   publicationTopics PublicationTopic[]
   grants            GrantPublication[]
+  conflictStatement PublicationConflictStatement?
 
   @@index([year])
   @@index([dateAddedToEntrez])
   @@index([topTopicId])
   @@map("publication")
+}
+
+/// Per-PMID PubMed competing-interest ("Competing interests:") statement text,
+/// backfilled from `reciterdb.reporting_conflicts.conflictsVarchar` by
+/// `etl/reciter/backfill-coi-statements.ts`. One row per publication that
+/// carries a non-empty COI statement (sparse — a separate table avoids widening
+/// the hot `publication` row and keeps this sensitive text isolated).
+///
+/// The statement is PAPER-LEVEL (shared by all co-authors of the PMID); the
+/// per-author attribution that decides whether a named relationship belongs to a
+/// given scholar is computed at request time by `lib/coi-gap`, never persisted
+/// as a verdict (see docs/coi-pubmed-unmatched-feasibility.md). Consumed only by
+/// the self-only /edit "relationships in your publications" surface.
+model PublicationConflictStatement {
+  pmid            String      @id @db.VarChar(32)
+  publication     Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  statementText   String      @map("statement_text") @db.Text
+  source          String      @default("PubMed") @db.VarChar(32)
+  lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
+
+  @@map("publication_conflict_statement")
 }
 
 /// Issue #85/#86 — materialized join between Grant and Publication.
