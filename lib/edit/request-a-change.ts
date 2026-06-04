@@ -34,7 +34,11 @@
  * admins can perform these fixes for scholars in their purview.
  */
 
-const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
+/** The Web Directory self-service profile editor — the owning tool for name,
+ *  email, and headshot. Updates are immediate (no sync lag), so a missing
+ *  headshot can be fixed by the scholar right here. Reused by the Home
+ *  checklist's headshot handoff (not only the Request-a-change picker). */
+export const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
 /** Weill Research Gateway (WRG) — the system of record for conflict-of-interest
  *  disclosures. A scholar manages their own disclosures there; Scholars only
  *  mirrors them read-only, so the "Request a change" path is a self-service
@@ -488,6 +492,19 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           cta: "Review in Weill Research Gateway",
           instruction:
             "Review your disclosures in the Weill Research Gateway and correct them at the source. Scholars mirrors WRG and can't edit the record directly.",
+        }),
+      },
+      {
+        // Distinct from "wrong/missing" (a WRG self-edit): a still-displayed
+        // disclosure that has ended or been updated in WRG is a mirror/sync
+        // gap, which ITS reconciles — not something the scholar fixes in WRG.
+        id: "coi-not-current",
+        label: "A disclosure here is no longer current",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Weill Research Gateway",
+          note: "Scholars mirrors your disclosures from the Weill Research Gateway. If one has ended or been updated there but still appears here, support will reconcile what Scholars displays.",
         }),
       },
     ],
