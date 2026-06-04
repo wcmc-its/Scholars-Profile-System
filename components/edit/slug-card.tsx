@@ -27,16 +27,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
@@ -56,19 +50,13 @@ export type SlugCardProps = {
    * active. Server-fetched at page load (`loadEditContext` § Phase 7 §2).
    */
   initialOverride: string | null;
-  /**
-   * Drives the unsaved-changes guard. Fires `true` when the input diverges
-   * from `initialOverride`, `false` after a successful save / clear or a
-   * re-edit back to the saved value.
-   */
-  onDirtyChange?: (dirty: boolean) => void;
 };
 
 type FormatError = "format" | "too_long" | "reserved";
 type SaveError = "collision" | "unknown";
 type SaveSuccess = "set" | "cleared";
 
-export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: SlugCardProps) {
+export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
   const router = useRouter();
   const [override, setOverride] = React.useState<string | null>(initialOverride);
   const [inputValue, setInputValue] = React.useState<string>(initialOverride ?? "");
@@ -86,10 +74,6 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
   const formatError: FormatError | null = formatResult && !formatResult.ok ? formatResult.error : null;
 
   const dirty = inputValue !== (override ?? "");
-
-  React.useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
 
   // Saving is enabled iff there's a non-empty validly-formatted slug different
   // from the active override. (Use the validated/normalized value when sending.)
@@ -174,16 +158,13 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
   }
 
   return (
-    <Card data-slot="slug-card">
+    <EditPanel
+      slot="slug-card"
+      heading="Profile URL"
+      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically. The short form scholars.weill.cornell.edu/<segment> and the longer /scholars/<segment> both lead to the same page."
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle>Profile URL</CardTitle>
-        <CardDescription>
-          Override the directory-derived URL segment. The change takes effect
-          immediately; the old URL redirects to the new one automatically.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <p className="text-sm">
           <span className="text-muted-foreground">Current URL: </span>
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
@@ -230,6 +211,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
           <div className="flex items-center gap-2">
             <Button
               type="button"
+              variant="apollo"
               onClick={handleSave}
               disabled={!canSave}
               data-testid="slug-card-save"
@@ -278,7 +260,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
             </AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={clearConfirmOpen}
@@ -290,7 +272,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
         confirmVariant="default"
         onConfirm={handleClear}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

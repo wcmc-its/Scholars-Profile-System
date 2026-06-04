@@ -9,6 +9,7 @@
  * the takedown surface — and never the actor's CWID (the actor is already in
  * the header's account menu).
  */
+import type { ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -21,9 +22,15 @@ export type SuperuserBannerProps = {
    * copy "<Name>'s profile"; `'publication'` yields the publication copy.
    */
   targetKind?: "profile" | "publication";
+  /**
+   * Optional trailing sentence appended after the main line — e.g. the
+   * load-bearing "A reason is required for every change." note the shell used
+   * to carry inline (vision-round T2.4).
+   */
+  note?: ReactNode;
 };
 
-export function SuperuserBanner({ targetLabel, targetKind = "profile" }: SuperuserBannerProps) {
+export function SuperuserBanner({ targetLabel, targetKind = "profile", note }: SuperuserBannerProps) {
   return (
     <Alert variant="info" className="mb-6" data-slot="superuser-banner">
       <ShieldAlert className="size-4" />
@@ -37,6 +44,7 @@ export function SuperuserBanner({ targetLabel, targetKind = "profile" }: Superus
             You are managing the publication <strong>{targetLabel}</strong> as an administrator.
           </>
         )}
+        {note ? <> {note}</> : null}
       </AlertDescription>
     </Alert>
   );

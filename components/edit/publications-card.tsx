@@ -15,23 +15,15 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
-import { FieldSourceLine } from "@/components/edit/field-source-line";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
@@ -88,7 +80,6 @@ function applyOptimistic(state: Pub[], update: OptimisticUpdate): Pub[] {
 }
 
 export function PublicationsCard({ cwid, publications }: PublicationsCardProps) {
-  const router = useRouter();
   const [list, setList] = React.useState<Pub[]>([...publications]);
   const [, startTransition] = React.useTransition();
   const [optimistic, addOptimistic] = React.useOptimistic(list, applyOptimistic);
@@ -180,7 +171,8 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
               : p,
           ),
         );
-        router.refresh();
+        // No router.refresh(): the optimistic→committed local list is
+        // authoritative for this panel on a never-cached page (T3.7).
       } catch {
         setError(pmid, "We couldn't hide this publication. Please try again.");
       }
@@ -213,7 +205,6 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
               : pub,
           ),
         );
-        router.refresh();
       } catch {
         setError(p.pmid, "We couldn't restore this publication. Please try again.");
       }
@@ -226,28 +217,23 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
     noticePmid !== null ? list.find((p) => p.pmid === noticePmid) ?? null : null;
 
   return (
-    <Card data-slot="publications-card">
-      <CardHeader>
-        <CardTitle>My publications</CardTitle>
-        <FieldSourceLine attribute="publications" />
-        <CardDescription>
-          Hide a publication to remove yourself from it on this site. Hiding
-          affects this profile only. A paper that isn&apos;t yours keeps
-          appearing on internal reports and the Faculty Review Tool until
-          it&apos;s corrected in{" "}
-          <a
-            href={PUBLICATION_MANAGER_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
+    <EditPanel
+      slot="publications-card"
+      attribute="publications"
+      heading="My publications"
+      description={
+        <>
+          Hide a publication to remove yourself from it on this site. Hiding affects this profile
+          only. A paper that isn&apos;t yours keeps appearing on internal reports and the Faculty
+          Review Tool until it&apos;s corrected in{" "}
+          <a href={PUBLICATION_MANAGER_URL} target="_blank" rel="noreferrer" className="underline">
             Publication Manager
           </a>
           .
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground" aria-live="polite">
             <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>
             {" publications"}
@@ -281,7 +267,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             No publications match &ldquo;{filter}&rdquo;.
           </p>
         ) : (
-          <ScrollArea className="h-[60vh] rounded-md border border-border">
+          <ScrollArea className="rounded-md border border-border md:h-[60vh]">
             <ul className="divide-y divide-border">
               {grouped.map(({ key, label, items }) => (
                 <li key={key}>
@@ -308,7 +294,6 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             </ul>
           </ScrollArea>
         )}
-      </CardContent>
 
       <FirstHideNoticeDialog
         open={noticePmid !== null}
@@ -351,7 +336,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
           hide(confirmingPub.pmid);
         }}
       />
-    </Card>
+    </EditPanel>
   );
 }
 
@@ -396,6 +381,7 @@ function PublicationRow({
               type="button"
               variant="ghost"
               size="sm"
+              className="min-h-11 md:min-h-8"
               onClick={onHide}
               data-testid={`pub-hide-${pub.pmid}`}
             >
@@ -408,6 +394,7 @@ function PublicationRow({
               type="button"
               variant="ghost"
               size="sm"
+              className="min-h-11 md:min-h-8"
               onClick={onShow}
               data-testid={`pub-show-${pub.pmid}`}
             >
@@ -423,6 +410,31 @@ function PublicationRow({
                 showing it here has no effect.
               </span>
             </div>
+          )}
+          {pub.state !== "removed_by_admin" && (
+            // A quiet, standing "Not mine?" affordance — a low-emphasis link, not
+            // a third equal-weight button (vision-round finding 4.9). Opens the
+            // Request-a-change router pre-selected to the "not mine" route so the
+            // scholar lands straight on the correct-at-source guidance without
+            // waiting for the once-per-session first-hide notice.
+            <RequestAChangeDialog
+              attribute="publications"
+              cwid={cwid}
+              itemLabel={pub.title}
+              initialIssueId="publication-not-mine"
+              trigger={(open) => (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-auto px-0"
+                  onClick={open}
+                  data-testid={`pub-not-mine-${pub.pmid}`}
+                >
+                  Not mine?
+                </Button>
+              )}
+            />
           )}
           <RequestAChangeDialog attribute="publications" cwid={cwid} itemLabel={pub.title} />
         </div>

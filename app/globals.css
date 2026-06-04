@@ -65,13 +65,17 @@
   --color-primary-cornell-red: #B31B1B;
   --color-accent-slate: #2c4f6e;
   /* Apollo Management Console chrome — #160 self-edit launch. Editor-only
-     (/edit/*); the public site keeps --color-primary-cornell-red. The maroon
-     is a PLACEHOLDER pending the real Apollo token (D5) — swap here only. */
+     (/edit/*); the public site keeps --color-primary-cornell-red. #7d1c1c is
+     the intentional WCM maroon for the editor chrome — swap here only.
+     --apollo-ring is the keyboard-focus indicator for rail items on the pale
+     rail (maroon clears 3:1 on #f6f4f3); the active maroon-filled item uses a
+     white ring instead, so the indicator is visible on either background. */
   --apollo-bar: #1a1a1a;
   --apollo-maroon: #7d1c1c;
   --apollo-maroon-foreground: #ffffff;
   --apollo-rail: #f6f4f3;
   --apollo-rail-border: #e4dedc;
+  --apollo-ring: #7d1c1c;
   /* Layout */
   --max-content: 1100px;
   --max-narrow: 720px;
@@ -126,6 +130,7 @@
   --color-apollo-maroon-foreground: var(--apollo-maroon-foreground);
   --color-apollo-rail: var(--apollo-rail);
   --color-apollo-rail-border: var(--apollo-rail-border);
+  --color-apollo-ring: var(--apollo-ring);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

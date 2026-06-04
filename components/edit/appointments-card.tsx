@@ -50,7 +50,7 @@ export function AppointmentsCard({ cwid, mode, scholarName, appointments }: Appo
       )}
       copy={{
         heading: "Appointments",
-        description: `Hide an appointment to remove it from ${possessive} public profile. A department chair role can't be hidden here.`,
+        description: `Hide an appointment to remove it from ${possessive} public profile. A department chair role can't be hidden here. Hiding is display-only — it doesn't correct the record, which stays in WCM systems and on internal reports.`,
         empty: mode === "superuser" ? "This scholar has no appointments on file." : "You have no appointments on file.",
         one: "appointment",
         other: "appointments",

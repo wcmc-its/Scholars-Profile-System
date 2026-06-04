@@ -4,6 +4,14 @@
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
+// `loadEditContext`'s default mentee-loader calls `getMenteesForMentor`, which
+// opens a live reporting-DB connection. Mock it to an empty list so the suite
+// needs no reporting DB; the mentee-specific tests below inject their own loader
+// via the 4th `loadEditContext` arg, bypassing this default entirely.
+vi.mock("@/lib/api/mentoring", () => ({
+  getMenteesForMentor: vi.fn(async () => []),
+}));
+
 import { loadEditContext } from "@/lib/api/edit-context";
 
 type AnyMock = ReturnType<typeof vi.fn>;
@@ -16,6 +24,7 @@ type FakeClient = {
   education: { findMany: AnyMock };
   grant: { findMany: AnyMock };
   department: { findFirst: AnyMock };
+  coiActivity: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -39,6 +48,8 @@ function fakeClient(): FakeClient {
     education: { findMany: vi.fn().mockResolvedValue([]) },
     grant: { findMany: vi.fn().mockResolvedValue([]) },
     department: { findFirst: vi.fn().mockResolvedValue(null) },
+    // COI — read-only; default to "no disclosures".
+    coiActivity: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -608,5 +619,141 @@ describe("loadEditContext — entity attributes (#160 appointments / education /
     expect(ctx!.appointments).toEqual([]);
     expect(ctx!.educations).toEqual([]);
     expect(ctx!.grants).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #160 follow-up — COI disclosures (read-only) + mentees (suppressible).
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — COI disclosures (read-only)", () => {
+  it("loads disclosures in the same select/order shape the profile uses", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiActivity.findMany.mockResolvedValue([
+      { entity: "Acme Therapeutics", activityGroup: "Ownership" },
+      { entity: "Globex Pharma", activityGroup: "Leadership Roles" },
+    ]);
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.coiDisclosures).toEqual([
+      { entity: "Acme Therapeutics", activityGroup: "Ownership" },
+      { entity: "Globex Pharma", activityGroup: "Leadership Roles" },
+    ]);
+    // Same query shape as lib/api/profile.ts (scoped to cwid, ordered group→entity).
+    expect(c.coiActivity.findMany).toHaveBeenCalledWith({
+      where: { cwid: SELF },
+      select: { entity: true, activityGroup: true },
+      orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+    });
+  });
+
+  it("returns an empty array when the scholar has no disclosures", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.coiDisclosures).toEqual([]);
+  });
+});
+
+describe("loadEditContext — mentees (suppressible)", () => {
+  const mentee = (over: Partial<{
+    cwid: string;
+    fullName: string;
+    programName: string | null;
+    programType: string | null;
+  }> = {}) => ({
+    cwid: over.cwid ?? "mentee9",
+    fullName: over.fullName ?? "Jordan Mentee",
+    programName: over.programName ?? null,
+    programType: over.programType ?? null,
+  });
+
+  it("annotates a shown mentee with the {cwid}:{menteeCwid} externalId", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [
+      mentee({ cwid: "m1", fullName: "Jordan Mentee", programName: "Immunology" }),
+    ]);
+    expect(ctx!.mentees).toHaveLength(1);
+    expect(ctx!.mentees[0]).toMatchObject({
+      externalId: "self01:m1",
+      name: "Jordan Mentee",
+      subtitle: "Immunology",
+      state: "shown",
+      suppressionId: null,
+    });
+  });
+
+  it("derives the subtitle from programType when programName is absent", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [
+      mentee({ cwid: "m2", programName: null, programType: "PhD" }),
+    ]);
+    // formatProgramLabel("PhD") → a non-null bucket label (the chip's fallback).
+    expect(ctx!.mentees[0].subtitle).not.toBeNull();
+  });
+
+  it("distinguishes hidden_by_self from hidden_by_admin, carrying suppressionId for both", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // Two suppression.findMany calls: scholar-level then mentee-level.
+    c.suppression.findMany
+      .mockResolvedValueOnce([]) // scholar-level
+      .mockResolvedValueOnce([
+        { id: "sup-self", entityId: "self01:m-self", createdBy: SELF },
+        { id: "sup-adm", entityId: "self01:m-adm", createdBy: "admin99" },
+      ]);
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [
+      mentee({ cwid: "m-self" }),
+      mentee({ cwid: "m-adm" }),
+    ]);
+    const bySelf = ctx!.mentees.find((m) => m.externalId === "self01:m-self")!;
+    const byAdmin = ctx!.mentees.find((m) => m.externalId === "self01:m-adm")!;
+    expect(bySelf).toMatchObject({ state: "hidden_by_self", suppressionId: "sup-self" });
+    expect(byAdmin).toMatchObject({ state: "hidden_by_admin", suppressionId: "sup-adm" });
+  });
+
+  it("queries mentee suppressions with the right entityType + entityId set", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    await loadEditContext(SELF, asClient(c), undefined, async () => [
+      mentee({ cwid: "m1" }),
+      mentee({ cwid: "m2" }),
+    ]);
+    const menteeCall = c.suppression.findMany.mock.calls.find(
+      (args) => args[0].where.entityType === "mentee",
+    );
+    expect(menteeCall).toBeDefined();
+    expect(menteeCall![0].where).toMatchObject({
+      entityType: "mentee",
+      entityId: { in: ["self01:m1", "self01:m2"] },
+      contributorCwid: null,
+      revokedAt: null,
+    });
+  });
+
+  it("returns an empty mentee list (never throws) when the reporting source is unavailable", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => {
+      throw new Error("reporting DB unreachable");
+    });
+    expect(ctx).not.toBeNull();
+    expect(ctx!.mentees).toEqual([]);
+    // No mentee-suppression query runs when there are no mentees.
+    const menteeCall = c.suppression.findMany.mock.calls.find(
+      (args) => args[0].where.entityType === "mentee",
+    );
+    expect(menteeCall).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it("returns an empty mentee list when the scholar has no mentees", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
+    expect(ctx!.mentees).toEqual([]);
   });
 });

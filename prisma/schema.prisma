@@ -1130,6 +1130,11 @@ enum EntityType {
   department
   division
   center
+  // + #160 follow-up: a derived mentor↔mentee relationship the mentor may
+  // hide from their profile. `entityId` is `"{mentorCwid}:{menteeCwid}"`; the
+  // mentor (before the colon) is the owner. Suppression-only — mentees are
+  // never field_override or unit_admin targets.
+  mentee
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row

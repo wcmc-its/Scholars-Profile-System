@@ -51,14 +51,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import type { EditContextScholar } from "@/lib/api/edit-context";
 
 type SuppressionRow = { id: string; reason: string };
@@ -181,34 +177,45 @@ export function VisibilityCard({
 
   // ---- render --------------------------------------------------------------
 
-  return (
-    <Card data-slot="visibility-card" data-mode={mode}>
-      <CardHeader>
-        <CardTitle>Profile visibility</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {mode === "self"
-          ? renderSelfBody({
-              ownRow,
-              adminRow,
-              pending,
-              onHide: () => setConfirmOpen(true),
-              onRevokeOwn: () => ownRow && revokeTarget(ownRow.id, "own"),
-            })
-          : renderSuperuserBody({
-              ownRow,
-              adminRow,
-              pending,
-              onHide: () => setConfirmOpen(true),
-              onRevokeAdmin: () => adminRow && revokeTarget(adminRow.id, "admin"),
-            })}
+  const isHidden = ownRow !== null || adminRow !== null;
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
+  return (
+    <>
+      <EditPanel
+        slot="visibility-card"
+        data-mode={mode}
+        heading="Profile visibility"
+        owned={mode === "self"}
+        headerAction={
+          <Badge variant={isHidden ? "destructive" : "secondary"}>
+            {isHidden ? "Hidden" : "Public"}
+          </Badge>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          {mode === "self"
+            ? renderSelfBody({
+                ownRow,
+                adminRow,
+                pending,
+                onHide: () => setConfirmOpen(true),
+                onRevokeOwn: () => ownRow && revokeTarget(ownRow.id, "own"),
+              })
+            : renderSuperuserBody({
+                ownRow,
+                adminRow,
+                pending,
+                onHide: () => setConfirmOpen(true),
+                onRevokeAdmin: () => adminRow && revokeTarget(adminRow.id, "admin"),
+              })}
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+      </EditPanel>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -228,7 +235,7 @@ export function VisibilityCard({
         confirmVariant="destructive"
         onConfirm={suppressTarget}
       />
-    </Card>
+    </>
   );
 }
 
@@ -249,6 +256,11 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
     return (
       <>
         <p className="text-sm">Your profile is visible to the public.</p>
+        <p className="text-muted-foreground text-sm">
+          Hiding removes your whole profile from the public site and from search. Your name may still
+          appear in the WCM directory and on co-authors&apos; pages. You can make it visible again at
+          any time.
+        </p>
         <div>
           <Button
             type="button"

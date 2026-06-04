@@ -9,6 +9,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+// The card mounts UnsavedChangesGuard, which now calls useRouter() (the guard
+// routes confirmed navigations via router.push). Stub next/navigation so the
+// guard mounts under jsdom.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+}));
+
 // Mock the editor BEFORE importing the card.
 vi.mock("@/components/edit/overview-editor", () => ({
   OverviewEditor: ({
@@ -110,7 +117,7 @@ describe("OverviewCard — successful save", () => {
       target: { value: "<p>edited</p>" },
     });
     fireEvent.click(screen.getByTestId("overview-save"));
-    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Saved — live/)).toBeTruthy());
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
   });
 
@@ -124,7 +131,7 @@ describe("OverviewCard — successful save", () => {
       target: { value: "<p>edited</p>" },
     });
     fireEvent.click(screen.getByTestId("overview-save"));
-    await waitFor(() => expect(screen.getByText("Saved")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Saved — live/)).toBeTruthy());
     // Now if the editor emits the server-normalized value, the card should be pristine again.
     fireEvent.change(screen.getByTestId("mock-editor"), {
       target: { value: "<p>normalized</p>" },
@@ -194,19 +201,33 @@ describe("OverviewCard — error handling", () => {
   });
 });
 
-describe("OverviewCard — onDirtyChange propagation", () => {
-  it("fires onDirtyChange(true) after the first edit and (false) on successful save", async () => {
-    const onDirty = vi.fn();
-    stubFetchOk("<p>edited</p>");
-    render(<OverviewCard cwid={CWID} initialHtml="<p>seed</p>" onDirtyChange={onDirty} />);
-    // Initial render: dirty=false propagates once.
-    expect(onDirty).toHaveBeenLastCalledWith(false);
+describe("OverviewCard — Discard", () => {
+  it("Discard appears once dirty and reverts to the saved value (pristine again)", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>seed</p>" />);
+    expect(screen.queryByTestId("overview-discard")).toBeNull();
     fireEvent.change(screen.getByTestId("mock-editor"), {
       target: { value: "<p>edited</p>" },
     });
-    expect(onDirty).toHaveBeenLastCalledWith(true);
+    expect(screen.getByTestId("overview-discard")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("overview-discard"));
+    // currentHtml is back to the saved baseline → Save re-disables, Discard hides.
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId("overview-discard")).toBeNull();
+  });
+});
+
+describe("OverviewCard — live preview link", () => {
+  it("renders a same-tab 'View it' link in the success confirmation when previewHref is set", async () => {
+    stubFetchOk("<p>edited</p>");
+    render(
+      <OverviewCard cwid={CWID} initialHtml="<p>seed</p>" previewHref="/scholars/jane-doe" />,
+    );
+    fireEvent.change(screen.getByTestId("mock-editor"), {
+      target: { value: "<p>edited</p>" },
+    });
     fireEvent.click(screen.getByTestId("overview-save"));
-    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+    const link = await screen.findByRole("link", { name: /view it/i });
+    expect(link.getAttribute("href")).toBe("/scholars/jane-doe");
   });
 });
 

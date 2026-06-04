@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -168,9 +168,11 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 -- target_entity_type history:
 --   #102/#354: scholar · publication · grant · education · appointment
 --   #540 Phase 1: + department · division · center
+--   #160 follow-up: + mentee  (derived mentor↔mentee relationship hide;
+--                    target_entity_id is `{mentorCwid}:{menteeCwid}`)
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for

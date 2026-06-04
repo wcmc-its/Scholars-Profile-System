@@ -24,19 +24,14 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { Check } from "lucide-react";
 
+import { EditPanel } from "@/components/edit/edit-panel";
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 /** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview). */
@@ -46,12 +41,11 @@ export type OverviewCardProps = {
   cwid: string;
   initialHtml: string;
   /**
-   * Fires after every state transition that flips the dirty bit:
-   * `true` after the first edit, `false` on a successful save or a re-edit
-   * back to the saved value. Drives the unsaved-changes guard (C9). Ignored
-   * when `readOnly` is true — the read-only arm has no dirty notion.
+   * The public profile URL (by slug). When set, a successful save shows a
+   * persistent "Saved — live. View it →" confirmation that links here in the
+   * same tab, closing the edit → preview → live loop (vision-round T3.1).
    */
-  onDirtyChange?: (dirty: boolean) => void;
+  previewHref?: string;
   /**
    * The superuser-mode read-only render (#356 Phase 7 C3, UI-SPEC § Card 1
    * superuser arm). When true, the card displays the merged sanitized bio
@@ -64,13 +58,11 @@ export type OverviewCardProps = {
 export function OverviewCard({
   cwid,
   initialHtml,
-  onDirtyChange,
+  previewHref,
   readOnly = false,
 }: OverviewCardProps) {
   if (readOnly) return <OverviewReadOnlyCard initialHtml={initialHtml} />;
-  return (
-    <OverviewEditorCard cwid={cwid} initialHtml={initialHtml} onDirtyChange={onDirtyChange} />
-  );
+  return <OverviewEditorCard cwid={cwid} initialHtml={initialHtml} previewHref={previewHref} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,25 +76,23 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
   // dangerouslySetInnerHTML below is the documented trust boundary.
   const hasBio = initialHtml.trim().length > 0;
   return (
-    <Card data-slot="overview-card">
-      <CardHeader>
-        <CardTitle>Overview</CardTitle>
-        <CardDescription>Only the profile owner can edit the bio.</CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {hasBio ? (
-          <div
-            className="prose prose-sm max-w-none rounded-md border border-border bg-background px-4 py-3"
-            dangerouslySetInnerHTML={{ __html: initialHtml }}
-            data-slot="overview-readonly"
-          />
-        ) : (
-          <p className="text-muted-foreground text-sm" data-slot="overview-readonly-empty">
-            No bio yet.
-          </p>
-        )}
-      </CardContent>
-    </Card>
+    <EditPanel
+      slot="overview-card"
+      heading="Overview"
+      description="Only the profile owner can edit the bio."
+    >
+      {hasBio ? (
+        <div
+          className="prose prose-sm rounded-md border border-border bg-background px-4 py-3"
+          dangerouslySetInnerHTML={{ __html: initialHtml }}
+          data-slot="overview-readonly"
+        />
+      ) : (
+        <p className="text-muted-foreground text-sm" data-slot="overview-readonly-empty">
+          No bio yet.
+        </p>
+      )}
+    </EditPanel>
   );
 }
 
@@ -110,25 +100,32 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
 // Editor arm — self mode (the Phase 6 surface, unchanged behavior).
 // ---------------------------------------------------------------------------
 
-type OverviewEditorCardProps = Pick<OverviewCardProps, "cwid" | "initialHtml" | "onDirtyChange">;
+type OverviewEditorCardProps = Pick<OverviewCardProps, "cwid" | "initialHtml" | "previewHref">;
 
-function OverviewEditorCard({ cwid, initialHtml, onDirtyChange }: OverviewEditorCardProps) {
+function OverviewEditorCard({ cwid, initialHtml, previewHref }: OverviewEditorCardProps) {
   const [currentHtml, setCurrentHtml] = React.useState(initialHtml);
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [justSaved, setJustSaved] = React.useState(false);
+  // Bumping this remounts OverviewEditor, re-seeding it from savedHtml — the
+  // mechanism behind Discard (Tiptap has no controlled-value prop).
+  const [editorKey, setEditorKey] = React.useState(0);
 
   const dirty = currentHtml !== savedHtml;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
 
-  React.useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
-
   function handleEditorChange(html: string) {
     setCurrentHtml(html);
-    if (justSaved) setJustSaved(false);
+    // The "Saved — live" confirmation persists across keystrokes and clears
+    // only on the next save (vision-round T3.1) — re-editing doesn't un-publish
+    // the last-saved bio.
+    if (error) setError(null);
+  }
+
+  function discard() {
+    setCurrentHtml(savedHtml);
+    setEditorKey((k) => k + 1);
     if (error) setError(null);
   }
 
@@ -170,54 +167,73 @@ function OverviewEditorCard({ cwid, initialHtml, onDirtyChange }: OverviewEditor
   }
 
   return (
-    <Card data-slot="overview-card">
+    <EditPanel
+      slot="overview-card"
+      heading="Overview"
+      owned
+      description="A short bio shown at the top of your public profile."
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle>Overview</CardTitle>
-        <CardDescription>
-          A short bio shown at the top of your public profile.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <OverviewEditor initialHtml={initialHtml} onChange={handleEditorChange} />
-        <div className="flex items-center justify-between gap-3">
-          <span
-            aria-live="polite"
-            className={cn(
-              "text-sm tabular-nums",
-              overLimit ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {currentHtml.length.toLocaleString()}/{OVERVIEW_MAX_CHARS.toLocaleString()}
-          </span>
-          <div className="flex items-center gap-3">
-            {justSaved && (
-              <span
-                role="status"
-                aria-live="polite"
-                className="inline-flex items-center gap-1 text-sm text-primary"
-              >
-                <Check className="size-4" />
-                Saved
-              </span>
-            )}
+      <div className="max-w-prose">
+        <OverviewEditor key={editorKey} initialHtml={savedHtml} onChange={handleEditorChange} />
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span
+          aria-live="polite"
+          className={cn(
+            "text-sm tabular-nums",
+            overLimit ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {currentHtml.length.toLocaleString()}/{OVERVIEW_MAX_CHARS.toLocaleString()}
+        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          {justSaved && (
+            <span
+              role="status"
+              aria-live="polite"
+              className="text-primary inline-flex items-center gap-1.5 text-sm"
+            >
+              <Check className="size-4" />
+              Saved — live.
+              {previewHref && (
+                <Link
+                  href={previewHref}
+                  className="text-apollo-maroon font-medium underline underline-offset-2"
+                >
+                  View it →
+                </Link>
+              )}
+            </span>
+          )}
+          {dirty && (
             <Button
               type="button"
-              onClick={save}
-              disabled={!dirty || overLimit || isSaving}
-              data-testid="overview-save"
+              variant="outline"
+              onClick={discard}
+              disabled={isSaving}
+              data-testid="overview-discard"
             >
-              {isSaving ? "Saving…" : "Save bio"}
+              Discard
             </Button>
-          </div>
+          )}
+          <Button
+            type="button"
+            variant="apollo"
+            onClick={save}
+            disabled={!dirty || overLimit || isSaving}
+            data-testid="overview-save"
+          >
+            {isSaving ? "Saving…" : "Save bio"}
+          </Button>
         </div>
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+    </EditPanel>
   );
 }
 

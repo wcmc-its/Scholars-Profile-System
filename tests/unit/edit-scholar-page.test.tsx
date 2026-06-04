@@ -59,7 +59,15 @@ vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
 vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
-vi.mock("@/components/edit/edit-page", () => ({ EditPage: mockEditPage }));
+vi.mock("@/components/edit/edit-page", () => ({
+  EditPage: mockEditPage,
+  // The route canonicalizes an invalid `?attr` against this set (T1.13). Mirror
+  // the real per-mode visible keys; the flag arg doesn't change membership.
+  visibleAttrKeys: (mode: "self" | "superuser") =>
+    mode === "superuser"
+      ? ["name-title", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
+      : ["home", "name-title", "photo", "overview", "visibility", "publications", "funding", "appointments", "education", "profile-url"],
+}));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({
   ForbiddenEditPage: mockForbiddenEditPage,
 }));
@@ -76,6 +84,10 @@ const fakeCtx = (cwid: string) => ({
 
 function params(cwid: string): Promise<{ cwid: string }> {
   return Promise.resolve({ cwid });
+}
+
+function searchParams(attr?: string): Promise<{ attr?: string }> {
+  return Promise.resolve(attr === undefined ? {} : { attr });
 }
 
 beforeEach(() => {
@@ -161,6 +173,34 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     await expect(EditScholarPage({ params: params("missing") })).rejects.toThrow(
       "__NOT_FOUND__",
     );
+  });
+
+  it("present-but-invalid ?attr → server redirect to the bare route (T1.13)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    await expect(
+      EditScholarPage({ params: params("other7"), searchParams: searchParams("bogus") }),
+    ).rejects.toThrow("__REDIRECT__:/edit/scholar/other7");
+    expect(mockEditPage).not.toHaveBeenCalled();
+  });
+
+  it("a valid ?attr renders normally (no redirect)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    const result = asElement(
+      await EditScholarPage({ params: params("other7"), searchParams: searchParams("funding") }),
+    );
+    expect(result.type).toBe(mockEditPage);
+    expect(result.props.attr).toBe("funding");
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("a self-only ?attr (publications) on the superuser surface redirects (mode-aware valid set)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockLoadEditContext.mockResolvedValue(fakeCtx("other7"));
+    await expect(
+      EditScholarPage({ params: params("other7"), searchParams: searchParams("publications") }),
+    ).rejects.toThrow("__REDIRECT__:/edit/scholar/other7");
   });
 
   it("mid-session deauth (SPEC edge 15) — superuser→non-superuser on subsequent GET → ForbiddenEditPage", async () => {

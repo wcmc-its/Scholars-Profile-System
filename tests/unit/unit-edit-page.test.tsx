@@ -6,6 +6,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
+// The shell's mobile RailSelect calls useRouter; stub the app-router context.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 vi.mock("@/components/edit/unit-description-card", () => ({
   UnitDescriptionCard: () => <div data-testid="panel-description" />,
 }));

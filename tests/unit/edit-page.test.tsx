@@ -26,6 +26,11 @@ const ctx: EditContext = {
     slug: "self-slug",
     preferredName: "Alex Self",
     fullName: "Alex Self, MD",
+    primaryTitle: "Professor of Medicine",
+    postnominal: "MD, MPH",
+    primaryDepartment: "Medicine",
+    email: "self01@med.cornell.edu",
+    orcid: null,
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
     slugOverride: null,
@@ -78,6 +83,19 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  coiDisclosures: [
+    { entity: "Acme Therapeutics", activityGroup: "Ownership" },
+    { entity: "Globex Pharma", activityGroup: "Leadership Roles" },
+  ],
+  mentees: [
+    {
+      externalId: "self01:mentee9",
+      name: "Jordan Mentee",
+      subtitle: "Immunology (PhD)",
+      state: "shown",
+      suppressionId: null,
+    },
+  ],
 };
 
 const superuserCtx: EditContext = {
@@ -94,12 +112,14 @@ const superuserCtx: EditContext = {
 };
 
 describe("EditPage router — the Apollo shell + rail", () => {
-  it("renders the rail with the self attribute set (Publications yes, Profile URL no)", () => {
+  it("renders the rail with the self attribute set (Publications yes, Profile URL locked when flag off)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
     expect(screen.getByTestId("rail-overview")).toBeTruthy();
     expect(screen.getByTestId("rail-appointments")).toBeTruthy();
     expect(screen.getByTestId("rail-publications")).toBeTruthy();
-    expect(screen.queryByTestId("rail-profile-url")).toBeNull();
+    // Profile URL is now present-but-locked when the flag is off (T3.6), not dropped.
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl.textContent).toMatch(/read-only, from WCM systems/i);
   });
 
   it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
@@ -107,14 +127,15 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Scholars Profile Console");
   });
 
-  it("defaults to the Overview panel for self", () => {
+  it("defaults to the task-first Home panel for self", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("home-card-overview")).toBeTruthy();
   });
 
-  it("an unknown ?attr falls back to the default (Overview)", () => {
+  it("an unknown ?attr falls back to the default (Home)", () => {
     render(<EditPage ctx={ctx} mode="self" attr="does-not-exist" />);
-    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
   });
 
   it("?attr=appointments renders the Appointments panel + a row", () => {
@@ -142,17 +163,60 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
   });
+
+  it("shows the Mentees and Conflicts of Interest rail items in self mode", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.getByTestId("rail-mentees")).toBeTruthy();
+    const coi = screen.getByTestId("rail-coi");
+    expect(coi).toBeTruthy();
+    // COI is read-only → its rail item carries the read-only / sourced cue.
+    expect(coi.textContent).toMatch(/read-only, from WCM systems/i);
+  });
+
+  it("?attr=mentees renders the suppressible Mentees panel with a row", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="mentees" />);
+    expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("mentee-row-self01:mentee9")).toBeTruthy();
+    expect(screen.getByText("Jordan Mentee")).toBeTruthy();
+    // Suppressible → a Hide control is present (not a read-only panel).
+    expect(screen.getByTestId("mentee-row-self01:mentee9-hide")).toBeTruthy();
+  });
+
+  it("?attr=coi renders the read-only Conflicts of Interest panel, grouped + not editable", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="coi" />);
+    expect(document.querySelector('[data-slot="coi-panel"]')).not.toBeNull();
+    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    // Disclosures render grouped by activityGroup.
+    expect(screen.getByText("Acme Therapeutics")).toBeTruthy();
+    expect(screen.getByText("Globex Pharma")).toBeTruthy();
+  });
 });
 
 describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gated)", () => {
-  it("omits the Profile URL rail item when the slug-request flag is off (default)", () => {
+  it("shows a locked Profile URL rail item when the slug-request flag is off (default)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.queryByTestId("rail-profile-url")).toBeNull();
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl).toBeTruthy();
+    expect(profileUrl.textContent).toMatch(/read-only, from WCM systems/i);
   });
 
-  it("shows the Profile URL rail item when slugRequestEnabled", () => {
+  it("renders the read-only Profile URL panel (current URL, no request form) when the flag is off", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="profile-url" />);
+    expect(document.querySelector('[data-slot="profile-url-readonly"]')).not.toBeNull();
+    // Shows the scholar's current URL, no input / request form.
+    expect(screen.getByTestId("profile-url-readonly-value").textContent).toContain(
+      "scholars.weill.cornell.edu/self-slug",
+    );
+    expect(screen.queryByTestId("slug-request-input")).toBeNull();
+    expect(screen.queryByTestId("slug-card-input")).toBeNull();
+  });
+
+  it("shows the Profile URL rail item (owned, not locked) when slugRequestEnabled", () => {
     render(<EditPage ctx={ctx} mode="self" slugRequestEnabled />);
-    expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl).toBeTruthy();
+    expect(profileUrl.textContent).not.toMatch(/read-only, from WCM systems/i);
   });
 
   it("?attr=profile-url renders the scholar request card (not the superuser direct-set card)", () => {

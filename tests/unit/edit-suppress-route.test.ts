@@ -261,4 +261,48 @@ describe("POST /api/edit/suppress", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  // --- mentee (#160 follow-up): derived relationship, no DB owner lookup ---
+  // entityId is `{mentorCwid}:{menteeCwid}`; owner = the mentor segment, with
+  // NO db.read access (mentees have no FK / no row to look up).
+
+  it("self-suppresses a mentee (200, no Scholar.status projection, no DB owner lookup)", async () => {
+    const res = await POST(post({ entityType: "mentee", entityId: "self01:mentee9" }));
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    expect(mockScholarUpdateMany).not.toHaveBeenCalled();
+    // The mentee owner is resolved from the string, not the grant/edu/appt tables.
+    expect(mockGrantFindUnique).not.toHaveBeenCalled();
+    expect(mockEducationFindUnique).not.toHaveBeenCalled();
+    expect(mockAppointmentFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects hiding a mentee on ANOTHER mentor's profile with 403 (owner is the mentor segment)", async () => {
+    // session is self01; the entityId's mentor segment is other9 → not_self.
+    const res = await POST(post({ entityType: "mentee", entityId: "other9:mentee9" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed mentee entityId (no mentee segment) with 400 (entity_not_found)", async () => {
+    const res = await POST(post({ entityType: "mentee", entityId: "self01" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "entity_not_found" });
+  });
+
+  it("rejects a mentee suppression carrying a contributorCwid with 400 (whole-entity only)", async () => {
+    const res = await POST(
+      post({ entityType: "mentee", entityId: "self01:mentee9", contributorCwid: "mentee9" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("lets a superuser hide a mentee on another scholar's profile (200)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "mentee", entityId: "other9:mentee9", reason: "duplicate" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+  });
 });

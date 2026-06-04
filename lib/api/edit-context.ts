@@ -29,9 +29,11 @@
  * so the module loads under vitest without a stub, matching `manual-layer.ts`.
  */
 import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
+import { formatProgramLabel } from "@/lib/mentoring-labels";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -45,6 +47,7 @@ type EditContextReadClient = Pick<
   | "education"
   | "grant"
   | "department"
+  | "coiActivity"
 >;
 
 export type EditContextScholar = {
@@ -52,6 +55,15 @@ export type EditContextScholar = {
   slug: string;
   preferredName: string;
   fullName: string;
+  /** Sourced read-only identity fields echoed in the Name & Title panel
+   *  (vision-round T3.5). `primaryTitle` is the job title — the title of the
+   *  primary appointment, e.g. "Director of …" — while `postnominal` is the
+   *  degree / post-nominal string ("MD, MPH"). All nullable. */
+  primaryTitle: string | null;
+  postnominal: string | null;
+  primaryDepartment: string | null;
+  email: string | null;
+  orcid: string | null;
   /** #536 — drives the edit-route guard: a hidden identity class (doctoral
    *  student) has no public profile, so only a superuser may reach its edit
    *  surface; a non-superuser (incl. the scholar themselves) 404s. */
@@ -147,12 +159,76 @@ export type EditContextGrant = {
   suppressionId: string | null;
 };
 
+/**
+ * One conflict-of-interest disclosure, narrowed to what the read-only COI panel
+ * renders (it groups by `activityGroup` and shows the `entity` names). COI is
+ * read-only — managed in the Weill Research Gateway, never suppressible here —
+ * so this carries no `state` / `suppressionId` like the whole-entity rows do.
+ */
+export type EditContextCoiDisclosure = {
+  entity: string | null;
+  activityGroup: string | null;
+};
+
+/**
+ * One mentee on the suppressible Mentees panel. Mentees are derived (no FK; the
+ * reporting DB is truncate-rebuilt nightly), so they have no #352 stable DB key
+ * — instead `externalId` is the composite `"{mentorCwid}:{menteeCwid}"`, which
+ * is what the suppress `entityId` carries (owner = the mentor before the colon).
+ * The four-state row model is shared with the other whole-entity panels (minus
+ * `locked`, which is appointment-only).
+ */
+export type EditContextMentee = {
+  externalId: string; // `{mentorCwid}:{menteeCwid}` — the suppress entityId
+  name: string;
+  /** Program / degree-bucket subtitle (e.g. "Immunology (PhD)"), or null. */
+  subtitle: string | null;
+  state: Exclude<EditEntityState, "locked">;
+  suppressionId: string | null;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
   educations: ReadonlyArray<EditContextEducation>;
   grants: ReadonlyArray<EditContextGrant>;
+  /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
+  coiDisclosures: ReadonlyArray<EditContextCoiDisclosure>;
+  /** Suppressible mentees (derived from training records; mentor may hide). */
+  mentees: ReadonlyArray<EditContextMentee>;
+};
+
+/**
+ * The mentee-loader seam. `loadEditContext` calls this to get the mentor's raw
+ * mentees from the REPORTING DB (`getMenteesForMentor`), which is a different
+ * data source than the Prisma `client` argument. It is injected (and defaulted)
+ * so tests need no live reporting DB, and so the page load can guard it:
+ * `loadEditContext` wraps the call in try/catch and treats any failure as "no
+ * mentees" rather than letting an unreachable reporting DB 500 the whole /edit
+ * page. The shape returned is narrowed to what the panel needs.
+ */
+export type EditContextMenteeSource = {
+  cwid: string;
+  fullName: string;
+  programName: string | null;
+  programType: string | null;
+};
+export type LoadMentees = (mentorCwid: string) => Promise<EditContextMenteeSource[]>;
+
+/**
+ * The default mentee-loader: adapts `getMenteesForMentor` (reporting DB) to the
+ * narrowed `EditContextMenteeSource` shape. Injected so tests don't need a live
+ * reporting connection; `loadEditContext` still wraps the call in try/catch.
+ */
+const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
+  const mentees = await getMenteesForMentor(mentorCwid);
+  return mentees.map((m) => ({
+    cwid: m.cwid,
+    fullName: m.fullName,
+    programName: m.programName,
+    programType: m.programType,
+  }));
 };
 
 /**
@@ -161,11 +237,17 @@ export type EditContext = {
  * Returns `null` when no scholar row exists for `cwid`, or when the row is
  * soft-deleted (`deletedAt` set). A suppressed scholar (self or admin) returns
  * normally — the page reads suppression-OFF.
+ *
+ * `loadMentees` is the reporting-DB seam (default `getMenteesForMentor`). It is
+ * called best-effort: a thrown error (reporting DB unreachable) yields an empty
+ * mentee list rather than failing the whole page — /edit must never 500 because
+ * the mentee source is down.
  */
 export async function loadEditContext(
   cwid: string,
   client: EditContextReadClient,
   now: Date = new Date(),
+  loadMentees: LoadMentees = defaultLoadMentees,
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -174,6 +256,11 @@ export async function loadEditContext(
       slug: true,
       preferredName: true,
       fullName: true,
+      primaryTitle: true,
+      postnominal: true,
+      primaryDepartment: true,
+      email: true,
+      orcid: true,
       overview: true,
       deletedAt: true,
       roleCategory: true,
@@ -252,6 +339,79 @@ export async function loadEditContext(
       endDate: true,
     },
     orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+  });
+
+  // Conflicts of interest — read-only (the Weill Research Gateway is the SOR).
+  // Same select shape + ordering the public profile uses (`lib/api/profile.ts`
+  // `coiActivities`) so the /edit panel groups identically.
+  const coiRows = await client.coiActivity.findMany({
+    where: { cwid },
+    select: { entity: true, activityGroup: true },
+    orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+  });
+  const coiDisclosures: EditContextCoiDisclosure[] = coiRows.map((c) => ({
+    entity: c.entity,
+    activityGroup: c.activityGroup,
+  }));
+
+  // Mentees — suppressible, derived from training records (reporting DB). The
+  // source is queried through the injected `loadMentees` seam and is BEST-
+  // EFFORT: if the reporting DB is unreachable we render zero mentees rather
+  // than 500 the page. Each mentee's `externalId` is `{cwid}:{menteeCwid}`,
+  // which is also the suppress entityId (owner = this mentor). The four-state
+  // annotation reuses the same per-request suppression lookup pattern the
+  // whole-entity panels use (`contributorCwid IS NULL`, `revokedAt IS NULL`).
+  let menteeRows: EditContextMenteeSource[] = [];
+  try {
+    menteeRows = await loadMentees(cwid);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "edit_context_mentees_unavailable",
+        cwid,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    menteeRows = [];
+  }
+  const menteeExternalIds = menteeRows.map((m) => `${cwid}:${m.cwid}`);
+  // `{cwid}:{menteeCwid}` → the active mentee hide. Absent key = "shown".
+  const menteeHide = new Map<
+    string,
+    { state: "hidden_by_self" | "hidden_by_admin"; suppressionId: string }
+  >();
+  if (menteeExternalIds.length > 0) {
+    const menteeSuppressions = await client.suppression.findMany({
+      where: {
+        entityType: "mentee",
+        entityId: { in: menteeExternalIds },
+        contributorCwid: null,
+        revokedAt: null,
+      },
+      select: { id: true, entityId: true, createdBy: true },
+    });
+    for (const row of menteeSuppressions) {
+      menteeHide.set(row.entityId, {
+        // The owner is the mentor (== `cwid` here); a self-hide is one this
+        // scholar created, an admin-hide is anyone else's (the superuser
+        // surface revokes either).
+        state: row.createdBy === cwid ? "hidden_by_self" : "hidden_by_admin",
+        suppressionId: row.id,
+      });
+    }
+  }
+  const mentees: EditContextMentee[] = menteeRows.map((m) => {
+    const externalId = `${cwid}:${m.cwid}`;
+    const hide = menteeHide.get(externalId);
+    return {
+      externalId,
+      name: m.fullName,
+      // Mirror the public chip's subtitle: program name first, then the
+      // degree-bucket label derived from programType.
+      subtitle: m.programName ?? formatProgramLabel(m.programType),
+      state: hide ? hide.state : "shown",
+      suppressionId: hide ? hide.suppressionId : null,
+    };
   });
 
   // One bounded suppression query across all three entity types, keyed on the
@@ -363,6 +523,11 @@ export async function loadEditContext(
         slug: scholar.slug,
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
+        primaryTitle: scholar.primaryTitle,
+        postnominal: scholar.postnominal,
+        primaryDepartment: scholar.primaryDepartment,
+        email: scholar.email,
+        orcid: scholar.orcid,
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
@@ -377,6 +542,8 @@ export async function loadEditContext(
       appointments,
       educations,
       grants,
+      coiDisclosures,
+      mentees,
     };
   }
 
@@ -475,6 +642,11 @@ export async function loadEditContext(
       slug: scholar.slug,
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
+      primaryTitle: scholar.primaryTitle,
+      postnominal: scholar.postnominal,
+      primaryDepartment: scholar.primaryDepartment,
+      email: scholar.email,
+      orcid: scholar.orcid,
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
@@ -489,5 +661,7 @@ export async function loadEditContext(
     appointments,
     educations,
     grants,
+    coiDisclosures,
+    mentees,
   };
 }
