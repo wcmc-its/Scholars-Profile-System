@@ -1,6 +1,7 @@
 # Overview-statement generator — SPEC (option 4)
 
 **Status:** Draft — **build is gated on a [validation run](#validation-run-build-gate--do-this-first)** (generate 3–5 overviews from ReciterAI data and judge them before building).
+**Tracking issue:** [#742](https://github.com/wcmc-its/Scholars-Profile-System/issues/742) — implementation tracker (validation run, ratification of the decisions below, then build).
 **Date:** 2026-06-01
 **Authors:** Scholars Profile System development team
 **Builds on:** [self-edit-launch-spec.md](./self-edit-launch-spec.md) (the `/edit` Overview attribute + the Tiptap `OverviewEditor` this feature feeds) · [ADR-005](./ADR-005-manual-override-layer.md) (the `field_override` write path + read-merge a generated draft is saved through) · [overview-coverage-scope.md](./overview-coverage-scope.md) (why this exists: 2,051 full-time faculty have no overview and a one-time seed can't keep them fresh).
