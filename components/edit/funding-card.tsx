@@ -21,7 +21,6 @@ export type FundingCardProps = {
 };
 
 export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProps) {
-  const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
   return (
     <EntityPanel
       slot="funding-panel"
