@@ -13,6 +13,7 @@ vi.mock("@/lib/api/mentoring", () => ({
 }));
 
 import { loadEditContext } from "@/lib/api/edit-context";
+import { REJECT_REASON } from "@/lib/edit/reject-reason";
 
 type AnyMock = ReturnType<typeof vi.fn>;
 type FakeClient = {
@@ -294,6 +295,58 @@ describe("loadEditContext — publication state annotation", () => {
     );
     const ctx = await loadEditContext(SELF, asClient(c));
     expect(ctx!.publications[0].state).toBe("shown");
+    expect(ctx!.publications[0].suppressionId).toBeNull();
+  });
+
+  // #750 — a reject and a Hide are both per-author rows with
+  // `contributorCwid === cwid`; only `suppression.reason` tells them apart.
+  it("state='rejected' when the self per-author suppression carries the reject reason; no Show id", async () => {
+    const c = withOnePub(
+      "pmid-6",
+      [{ id: "sup-rej", entityId: "pmid-6", contributorCwid: SELF, reason: REJECT_REASON }],
+      [{ pmid: "pmid-6", cwid: SELF }],
+    );
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.publications[0]).toMatchObject({
+      state: "rejected",
+      // No Show control for a reject — un-hiding locally would diverge from
+      // ReCiter's gold standard, so suppressionId is withheld.
+      suppressionId: null,
+      isSoleDisplayedAuthor: false,
+    });
+  });
+
+  it("state='hidden_by_self' (not 'rejected') when the self row carries a non-reject Hide reason", async () => {
+    const c = withOnePub(
+      "pmid-7",
+      [
+        {
+          id: "sup-hide",
+          entityId: "pmid-7",
+          contributorCwid: SELF,
+          reason: "Hidden by the author via /edit",
+        },
+      ],
+      [{ pmid: "pmid-7", cwid: SELF }],
+    );
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.publications[0]).toMatchObject({
+      state: "hidden_by_self",
+      suppressionId: "sup-hide",
+    });
+  });
+
+  it("an admin whole-pub takedown still outranks a self reject on the same pmid", async () => {
+    const c = withOnePub(
+      "pmid-8",
+      [
+        { id: "sup-rej", entityId: "pmid-8", contributorCwid: SELF, reason: REJECT_REASON },
+        { id: "sup-adm", entityId: "pmid-8", contributorCwid: null, reason: "compliance" },
+      ],
+      [{ pmid: "pmid-8", cwid: SELF }],
+    );
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.publications[0].state).toBe("removed_by_admin");
     expect(ctx!.publications[0].suppressionId).toBeNull();
   });
 });

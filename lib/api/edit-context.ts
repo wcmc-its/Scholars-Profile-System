@@ -34,6 +34,7 @@ import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
 import { formatProgramLabel } from "@/lib/mentoring-labels";
+import { isRejectReason } from "@/lib/edit/reject-reason";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -91,9 +92,19 @@ export type EditContextPublication = {
   title: string;
   journal: string | null;
   year: number | null;
-  /** UI-SPEC § Card 3 row-state table. */
-  state: "shown" | "hidden_by_self" | "removed_by_admin";
-  /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. Wires the "Show" button. */
+  /**
+   * UI-SPEC § Card 3 row-state table, plus `rejected` (#750).
+   *
+   * `rejected` is a per-author suppression written by the "Not mine" reject
+   * (#746) rather than a Hide — the two are otherwise identical rows
+   * (`contributorCwid === cwid`), distinguished only by `suppression.reason`
+   * (`isRejectReason`). It renders as "Rejected — correction pending" with no
+   * Show control: revoking locally would leave ReCiter's `rejectedPmids` entry
+   * in place, so local and upstream would silently diverge (#750). A reject is
+   * undone at the source, not here.
+   */
+  state: "shown" | "hidden_by_self" | "removed_by_admin" | "rejected";
+  /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. Wires the "Show" button. (`null` for `rejected` — no Show control.) */
   suppressionId: string | null;
   /**
    * True when this scholar is the only currently-displayed confirmed WCM author
@@ -548,21 +559,26 @@ export async function loadEditContext(
   }
 
   // Active publication suppressions for the bounded pmid set — one query
-  // covering whole-pub takedowns and per-author hides (own + others').
+  // covering whole-pub takedowns and per-author hides (own + others'). `reason`
+  // is selected to tell a "Not mine" reject apart from a Hide (#750) — both are
+  // per-author rows with `contributorCwid === cwid`, distinguished only by it.
   const pubSuppressions = await client.suppression.findMany({
     where: {
       entityType: "publication",
       entityId: { in: pmids },
       revokedAt: null,
     },
-    select: { id: true, entityId: true, contributorCwid: true },
+    select: { id: true, entityId: true, contributorCwid: true, reason: true },
   });
   const darkPmids = new Set<string>();
-  // pmid → suppressionId for THIS scholar's per-author hide on it. The "Show"
-  // button on a hidden_by_self row revokes by id.
-  const selfHideIdByPmid = new Map<string, string>();
-  // pmid → set of cwids with an active per-author hide on it. Used to compute
-  // the displayed-author set for `isSoleDisplayedAuthor`.
+  // pmid → THIS scholar's active per-author suppression on it. `isReject`
+  // discriminates a reject (#746) from a Hide so the row derives as `rejected`
+  // vs `hidden_by_self`; `id` wires the "Show" button (hide only — a reject has
+  // no Show control, #750).
+  const selfSuppressionByPmid = new Map<string, { id: string; isReject: boolean }>();
+  // pmid → set of cwids with an active per-author suppression on it (hide OR
+  // reject — both drop the author from display). Used to compute the
+  // displayed-author set for `isSoleDisplayedAuthor`.
   const hiddenAuthorsByPmid = new Map<string, Set<string>>();
   for (const row of pubSuppressions) {
     if (row.contributorCwid === null) {
@@ -575,7 +591,16 @@ export async function loadEditContext(
       }
       hidden.add(row.contributorCwid);
       if (row.contributorCwid === cwid) {
-        selfHideIdByPmid.set(row.entityId, row.id);
+        // The reject route's idempotency guard means at most one un-revoked
+        // self row per pmid, so a plain set is safe; if both ever coexisted,
+        // a reject wins (the stronger "not mine" assertion).
+        const existing = selfSuppressionByPmid.get(row.entityId);
+        if (!existing?.isReject) {
+          selfSuppressionByPmid.set(row.entityId, {
+            id: row.id,
+            isReject: isRejectReason(row.reason),
+          });
+        }
       }
     }
   }
@@ -613,15 +638,23 @@ export async function loadEditContext(
       // "Removed by an administrator" message is what the user sees, even
       // when the scholar also has a per-author hide on the same pmid).
       state = "removed_by_admin";
-    } else if (selfHideIdByPmid.has(pmid)) {
-      state = "hidden_by_self";
-      suppressionId = selfHideIdByPmid.get(pmid) ?? null;
+    } else if (selfSuppressionByPmid.has(pmid)) {
+      const self = selfSuppressionByPmid.get(pmid)!;
+      if (self.isReject) {
+        // A "Not mine" reject (#746/#750). No Show control — revoking locally
+        // would diverge from ReCiter's gold standard — so suppressionId stays
+        // null; the row renders "Rejected — correction pending" read-only.
+        state = "rejected";
+      } else {
+        state = "hidden_by_self";
+        suppressionId = self.id;
+      }
     } else {
       state = "shown";
     }
     // Sole-displayed-author check is only meaningful when the row is shown —
-    // it gates the confirm dialog before a hide. For a hidden_by_self or
-    // removed_by_admin row, no Hide click is reachable, so always false.
+    // it gates the confirm dialog before a hide. For a hidden_by_self,
+    // rejected, or removed_by_admin row, no Hide click is reachable, so false.
     const displayed = displayedByPmid.get(pmid);
     const isSoleDisplayedAuthor =
       state === "shown" && displayed !== undefined && displayed.size === 1 && displayed.has(cwid);

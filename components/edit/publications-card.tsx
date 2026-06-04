@@ -429,7 +429,7 @@ function PublicationRow({
           <p
             className={cn(
               "text-foreground font-medium",
-              pub.state === "hidden_by_self" &&
+              (pub.state === "hidden_by_self" || pub.state === "rejected") &&
                 "decoration-muted-foreground text-muted-foreground line-through",
             )}
           >
@@ -445,6 +445,18 @@ function PublicationRow({
                   className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
                 >
                   Hidden
+                </Badge>
+              </>
+            )}
+            {pub.state === "rejected" && (
+              <>
+                {" · "}
+                <Badge
+                  variant="outline"
+                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                  data-testid={`pub-rejected-badge-${pub.pmid}`}
+                >
+                  Rejected — correction pending
                 </Badge>
               </>
             )}
@@ -486,7 +498,23 @@ function PublicationRow({
               </span>
             </div>
           )}
+          {pub.state === "rejected" && (
+            // A reject was recorded as a misattribution and sent to ReCiter's
+            // gold standard (#746). There is deliberately no Show control —
+            // un-hiding locally would leave the upstream reject in place and the
+            // two would silently diverge (#750). It is undone at the source.
+            <div
+              className="flex flex-col items-end gap-1"
+              data-testid={`pub-rejected-note-${pub.pmid}`}
+            >
+              <span className="text-muted-foreground max-w-xs text-right text-sm">
+                You reported this paper as not yours. We&apos;re correcting it at
+                the source; this can&apos;t be undone here.
+              </span>
+            </div>
+          )}
           {pub.state !== "removed_by_admin" &&
+            pub.state !== "rejected" &&
             // A quiet, standing "Not mine?" affordance — a low-emphasis link, not
             // a third equal-weight button (vision-round finding 4.9).
             (rejectEnabled ? (

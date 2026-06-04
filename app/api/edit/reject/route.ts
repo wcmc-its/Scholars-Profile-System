@@ -31,6 +31,10 @@ import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/r
 import { reflectVisibilityChange, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import { reflectSearchSuppression } from "@/lib/edit/search-suppression";
 import { publicationAuthorshipExists } from "@/lib/edit/validators";
+// The `suppression.reason` written here is the discriminator the `/edit` read
+// uses to derive a `rejected` row-state (#750); it lives in a shared module so
+// the write and the read can never drift. The value written is unchanged.
+import { REJECT_REASON } from "@/lib/edit/reject-reason";
 import {
   isReciterApiConfigured,
   isReciterRejectEnabled,
@@ -38,9 +42,6 @@ import {
 } from "@/lib/reciter/client";
 
 const PATH = "/api/edit/reject";
-
-/** The `suppression.reason` recorded for a "Not mine" reject (distinct from a Hide). */
-const REJECT_REASON = "Rejected as not the author's via /edit (#746)";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const req = await readEditRequest(request);
