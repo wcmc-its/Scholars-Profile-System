@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { Lock } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
@@ -23,6 +23,8 @@ export type ReadonlyAttributePanelProps = {
   description: string;
   /** Optional read-only values to echo (e.g. the current name). */
   fields?: ReadonlyArray<{ label: string; value: string | null }>;
+  /** Optional media rendered above the values (e.g. the Photo panel's headshot). */
+  media?: ReactNode;
 };
 
 export function ReadonlyAttributePanel({
@@ -31,6 +33,7 @@ export function ReadonlyAttributePanel({
   heading,
   description,
   fields,
+  media,
 }: ReadonlyAttributePanelProps) {
   return (
     <EditPanel
@@ -40,10 +43,7 @@ export function ReadonlyAttributePanel({
       heading={heading}
       description={description}
     >
-      <span className="bg-apollo-lock-bg border-apollo-border text-muted-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium">
-        <Lock className="size-3" aria-hidden />
-        Locked — managed at its source
-      </span>
+      {media}
 
       {fields && fields.length > 0 && (
         // Read-only display, not a form: a 2-col label/value def-list with row

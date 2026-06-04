@@ -18,7 +18,7 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -122,7 +122,6 @@ function RailLink({
         )}
       >
         <span className="flex items-center gap-2">
-          {kind === "readonly" && <Lock className="size-3.5 shrink-0" aria-hidden />}
           {item.label}
           {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
           {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}

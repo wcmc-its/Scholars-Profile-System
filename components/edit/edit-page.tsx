@@ -22,8 +22,10 @@ import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-pan
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
 import { VisibilityCard } from "@/components/edit/visibility-card";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
+import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 
 type AttrKey =
@@ -244,6 +246,14 @@ function renderPanel(
           cwid={cwid}
           heading="Photo"
           description="Your profile photo comes from the WCM directory."
+          media={
+            <HeadshotAvatar
+              cwid={cwid}
+              preferredName={scholarName}
+              identityImageEndpoint={identityImageEndpoint(cwid)}
+              size="lg"
+            />
+          }
         />
       );
     case "overview":
@@ -321,21 +331,33 @@ function renderPanel(
  *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
 function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
+  const currentUrl = `${publicProfileHost()}/${slug}`;
+  const requestHref =
+    `mailto:scholars@weill.cornell.edu` +
+    `?subject=${encodeURIComponent("Profile URL request")}` +
+    `&body=${encodeURIComponent(`I'd like to request a custom profile URL.\n\nMy current address: ${currentUrl}`)}`;
   return (
     <EditPanel
       slot="profile-url-readonly"
       heading="Profile URL"
-      description="The web address for your public profile. Custom URLs aren't available yet — your old address keeps working if it ever changes."
+      description="The web address for your public profile. Custom URLs aren't self-service yet — request one and a Scholars administrator will set it up. Your current address keeps working."
     >
       <p className="text-sm">
         <span className="text-muted-foreground">Your current URL: </span>
         <code
-          className="rounded bg-muted px-1.5 py-0.5 text-xs"
+          className="bg-apollo-surface-2 border-apollo-border rounded border px-1.5 py-0.5 font-mono text-xs"
           data-testid="profile-url-readonly-value"
         >
-          {publicProfileHost()}/{slug}
+          {currentUrl}
         </code>
       </p>
+      <a
+        href={requestHref}
+        data-testid="profile-url-request-change"
+        className="border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2 inline-flex w-fit items-center gap-2 rounded-md border px-3.5 py-2 text-sm font-medium transition-colors"
+      >
+        Request a change
+      </a>
     </EditPanel>
   );
 }
