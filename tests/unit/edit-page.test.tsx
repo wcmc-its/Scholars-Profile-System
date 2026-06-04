@@ -83,6 +83,19 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  coiDisclosures: [
+    { entity: "Acme Therapeutics", activityGroup: "Ownership" },
+    { entity: "Globex Pharma", activityGroup: "Leadership Roles" },
+  ],
+  mentees: [
+    {
+      externalId: "self01:mentee9",
+      name: "Jordan Mentee",
+      subtitle: "Immunology (PhD)",
+      state: "shown",
+      suppressionId: null,
+    },
+  ],
 };
 
 const superuserCtx: EditContext = {
@@ -149,6 +162,34 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+  });
+
+  it("shows the Mentees and Conflicts of Interest rail items in self mode", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.getByTestId("rail-mentees")).toBeTruthy();
+    const coi = screen.getByTestId("rail-coi");
+    expect(coi).toBeTruthy();
+    // COI is read-only → its rail item carries the read-only / sourced cue.
+    expect(coi.textContent).toMatch(/read-only, from WCM systems/i);
+  });
+
+  it("?attr=mentees renders the suppressible Mentees panel with a row", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="mentees" />);
+    expect(document.querySelector('[data-slot="mentees-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("mentee-row-self01:mentee9")).toBeTruthy();
+    expect(screen.getByText("Jordan Mentee")).toBeTruthy();
+    // Suppressible → a Hide control is present (not a read-only panel).
+    expect(screen.getByTestId("mentee-row-self01:mentee9-hide")).toBeTruthy();
+  });
+
+  it("?attr=coi renders the read-only Conflicts of Interest panel, grouped + not editable", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="coi" />);
+    expect(document.querySelector('[data-slot="coi-panel"]')).not.toBeNull();
+    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    // Disclosures render grouped by activityGroup.
+    expect(screen.getByText("Acme Therapeutics")).toBeTruthy();
+    expect(screen.getByText("Globex Pharma")).toBeTruthy();
   });
 });
 
