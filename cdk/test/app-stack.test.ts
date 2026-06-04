@@ -1438,6 +1438,13 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
+      it("the app ships the ReCiter 'Not mine' reject OFF until connectivity + key land (#746)", () => {
+        // Ships dark: the route 503s and "Not mine?" keeps the Publication-
+        // Manager off-ramp until ops flip the flag and provision the reciter-api
+        // secret (RECITER_API_BASE_URL + RECITER_API_KEY).
+        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
+      });
+
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
         // Both envs are cut over to root; the flag stays set explicitly as the
         // soak rollback lever (set back to "scholars" + redeploy to revert).

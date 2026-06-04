@@ -28,6 +28,7 @@ import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
+import { isReciterRejectEnabled } from "@/lib/reciter/client";
 
 type AttrKey =
   | "home"
@@ -279,7 +280,13 @@ function renderPanel(
         />
       );
     case "publications":
-      return <PublicationsCard cwid={cwid} publications={ctx.publications} />;
+      return (
+        <PublicationsCard
+          cwid={cwid}
+          publications={ctx.publications}
+          rejectEnabled={isReciterRejectEnabled()}
+        />
+      );
     case "funding":
       return <FundingCard cwid={cwid} mode={mode} scholarName={scholarName} grants={ctx.grants} />;
     case "appointments":

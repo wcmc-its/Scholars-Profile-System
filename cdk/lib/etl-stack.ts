@@ -425,6 +425,12 @@ export class EtlStack extends Stack {
         SCHOLARS_BASE_URL: `http://${Fn.importValue(
           `Sps-App-${env}-InternalAlbDns`,
         )}`,
+        // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
+        // this to deliver any deferred ReCiter rejects and fire the delayed,
+        // per-uid feature-generator re-score. OFF (and the reciter-api secret
+        // unprovisioned) ⇒ a no-op; the EventBridge → Step Function schedule is
+        // a follow-up.
+        RECITER_REJECT_SEND: "off",
       },
       secrets: containerSecrets,
     });

@@ -562,6 +562,10 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
+              },
             ],
             "Essential": true,
             "Image": {
@@ -4203,6 +4207,10 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                     ],
                   ],
                 },
+              },
+              {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
               },
             ],
             "Essential": true,
