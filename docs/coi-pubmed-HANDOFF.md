@@ -131,16 +131,20 @@ coi_gap_candidate   (cwid,pmid,entity, tier, source sentence, status, first/last
    the one-shot `prisma migrate deploy` task on `cdk deploy Sps-Data-<env>` (ADR-009 Phase 2) —
    App-before-Data ordering and the migrate DSN apply.
 
-### C. Hard gates (do NOT flip `SELF_EDIT_COI_GAP_HINT` on without these)
-The code is built and merged dormant; these gate **enabling** it, not building it.
-1. **Faculty Affairs / Compliance / General Counsel sign-off** on the concept AND the exact
-   copy. This is a legal-review gate, not engineering. The copy shipped in `coi-gap-card.tsx`
-   is a best-effort suggestion-framed draft, NOT yet legal-reviewed.
-2. **Precision number** — run the Track A human-labeling pass on `candidates.csv` (rubric in
-   the Phase 0 plan) to get a measured High-tier precision; ratify a threshold with Compliance.
-   Track B (live data + ReCiter `targetAuthor`) sharpens attribution further.
+### C. Enablement status + the outstanding precision follow-up
+> **DECISION (2026-06-04, operator):** productionize as a regular source —
+> `etl:coi-gap` wired into the nightly cadence (both envs) and `SELF_EDIT_COI_GAP_HINT`
+> set **`on`** in both envs in `cdk/lib/app-stack.ts`. The concept/copy gate is signed
+> off. Staging takes effect on merge; prod on an approval-gated `cdk deploy Sps-App-prod`.
+> The panel stays invisible until the nightly source seeds candidates in that env.
 
-**Pre-enable runbook** (do these, in order, before the flag flip):
+Still recommended (now a follow-up, not a blocker):
+1. **Precision number** — run the Track A human-labeling pass on `candidates.csv` (rubric in
+   the Phase 0 plan) to get a measured High-tier precision; ratify a threshold with Compliance.
+   The v0 rules extractor carries a known ~1/196-High residual co-author-name leak. Track B
+   (live data + ReCiter `targetAuthor`) sharpens attribution further.
+
+**Enablement runbook** (do these, in order, when deploying the enabled flag):
 - Apply the two Prisma migrations + the audit-ENUM ALTER. The dismiss route writes a
   `scholars_audit` row with `action='coi_gap_dismiss'` / `targetEntityType='coi_gap_candidate'`;
   both are NEW values added to `scripts/sql/audit-log.sql` (the audit table is not a Prisma

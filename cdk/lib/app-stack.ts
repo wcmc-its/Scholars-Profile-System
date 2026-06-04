@@ -874,15 +874,15 @@ export class AppStack extends Stack {
         // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
         // (relationships named in a scholar's own PubMed competing-interest
         // statements that aren't in their current WRG disclosures) + its disavow
-        // endpoint. Ships DORMANT in BOTH envs and stays off until TWO gates
-        // clear (docs/coi-pubmed-HANDOFF.md § C): (1) Faculty Affairs /
-        // Compliance / General Counsel sign-off on the concept AND exact copy,
-        // and (2) a measured High-tier precision number ratified with
-        // Compliance. The copy gate is approvable; the precision gate is NOT, so
-        // this is deliberately NOT a staging-first rollout — "off" both envs.
-        // While off, the loader returns an empty candidate array (so the rail
-        // item never appears) and the dismiss route 503s.
-        SELF_EDIT_COI_GAP_HINT: "off",
+        // endpoint. ENABLED in both envs by operator decision (the source is
+        // productionized like any other — see docs/coi-pubmed-suggestion-approach.md):
+        // the concept/copy gate is signed off; the High-tier precision-labeling
+        // pass (docs/coi-pubmed-HANDOFF.md § C.2) is an accepted-residual follow-up,
+        // not a blocker. The panel only renders when candidates exist for a
+        // genuine (non-impersonating) self viewer, so it stays invisible until the
+        // nightly etl:coi-gap source has seeded data in that env. Prod takes
+        // effect only on an approval-gated `cdk deploy Sps-App-prod`.
+        SELF_EDIT_COI_GAP_HINT: "on",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
