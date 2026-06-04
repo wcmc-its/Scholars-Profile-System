@@ -174,8 +174,14 @@ function renderPanel(
           attribute="name-title"
           cwid={cwid}
           heading="Name & Title"
-          description="Name, title, department, email, and ORCID come from the WCM directory and faculty records."
-          fields={[{ label: "Name", value: ctx.scholar.fullName }]}
+          description="Name, degrees, department, email, and ORCID come from the WCM directory and faculty records."
+          fields={[
+            { label: "Name", value: ctx.scholar.fullName },
+            { label: "Degrees", value: ctx.scholar.primaryTitle },
+            { label: "Department", value: ctx.scholar.primaryDepartment },
+            { label: "Email", value: ctx.scholar.email },
+            { label: "ORCID", value: ctx.scholar.orcid },
+          ]}
         />
       );
     case "photo":

@@ -52,6 +52,13 @@ export type EditContextScholar = {
   slug: string;
   preferredName: string;
   fullName: string;
+  /** Sourced read-only identity fields echoed in the Name & Title panel
+   *  (vision-round T3.5). `primaryTitle` is a concatenated degree string
+   *  ("MD, MPH"), labelled "Degrees" in the UI — not a job title. All nullable. */
+  primaryTitle: string | null;
+  primaryDepartment: string | null;
+  email: string | null;
+  orcid: string | null;
   /** #536 — drives the edit-route guard: a hidden identity class (doctoral
    *  student) has no public profile, so only a superuser may reach its edit
    *  surface; a non-superuser (incl. the scholar themselves) 404s. */
@@ -174,6 +181,10 @@ export async function loadEditContext(
       slug: true,
       preferredName: true,
       fullName: true,
+      primaryTitle: true,
+      primaryDepartment: true,
+      email: true,
+      orcid: true,
       overview: true,
       deletedAt: true,
       roleCategory: true,
@@ -363,6 +374,10 @@ export async function loadEditContext(
         slug: scholar.slug,
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
+        primaryTitle: scholar.primaryTitle,
+        primaryDepartment: scholar.primaryDepartment,
+        email: scholar.email,
+        orcid: scholar.orcid,
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
@@ -475,6 +490,10 @@ export async function loadEditContext(
       slug: scholar.slug,
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
+      primaryTitle: scholar.primaryTitle,
+      primaryDepartment: scholar.primaryDepartment,
+      email: scholar.email,
+      orcid: scholar.orcid,
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
