@@ -439,10 +439,10 @@ export class EtlStack extends Stack {
         )}`,
         // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
         // this to deliver any deferred ReCiter rejects and fire the delayed,
-        // per-uid feature-generator re-score. OFF (and the reciter-api secret
-        // unprovisioned) ⇒ a no-op; the EventBridge → Step Function schedule is
-        // a follow-up.
-        RECITER_REJECT_SEND: "off",
+        // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
+        // in prod until the staging soak completes; the EventBridge → Step
+        // Function schedule is a follow-up.
+        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
       },
       secrets: containerSecrets,
     });

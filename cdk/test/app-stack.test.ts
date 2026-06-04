@@ -1438,10 +1438,10 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
-      it("the app ships the ReCiter 'Not mine' reject OFF until connectivity + key land (#746)", () => {
-        // Ships dark: the route 503s and "Not mine?" keeps the Publication-
-        // Manager off-ramp until ops flip the flag and provision the reciter-api
-        // secret (RECITER_API_BASE_URL + RECITER_API_KEY).
+      it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
+        // Env-gated: ON in staging, OFF in prod until the staging soak
+        // completes. In prod the route 503s and "Not mine?" keeps the
+        // Publication-Manager off-ramp.
         expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
       });
 
@@ -1788,6 +1788,25 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
+    });
+
+    it("activates the ReCiter 'Not mine' reject in staging first (RECITER_REJECT_SEND=on, #746)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("RECITER_REJECT_SEND")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {
