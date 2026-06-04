@@ -10,7 +10,7 @@
  */
 import { redirect, notFound } from "next/navigation";
 
-import { EditPage } from "@/components/edit/edit-page";
+import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
@@ -62,6 +62,16 @@ export default async function EditSelfPage({
   // with the scholar's latest request so the card opens in the right state
   // (Pending / Rejected / Just-approved) without a client round-trip.
   const slugRequestEnabled = isSlugRequestEnabled();
+
+  // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
+  // `/edit` rather than silently rendering the default panel behind a stale URL.
+  // Absent/valid `attr` falls through; the redirect target carries no `?attr`,
+  // so the re-load sees `attr === undefined` and never loops.
+  const validAttrs: readonly string[] = visibleAttrKeys("self", slugRequestEnabled);
+  if (attr !== undefined && !validAttrs.includes(attr)) {
+    redirect("/edit");
+  }
+
   const latestSlugRequest = slugRequestEnabled
     ? await loadLatestSlugRequest(editCwid, db.read)
     : null;
