@@ -150,6 +150,23 @@ describe("PublicationsCard — row states", () => {
     expect(screen.queryByTestId("pub-hide-a")).toBeNull();
     expect(screen.queryByTestId("pub-show-a")).toBeNull();
   });
+
+  it("a 'rejected' row shows the correction-pending badge + read-only note and NO Show/Hide/Not-mine control (#750)", () => {
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "rejected" })]} />,
+    );
+    // "Rejected — correction pending" badge replaces "Hidden".
+    expect(screen.getByTestId("pub-rejected-badge-a")).toBeTruthy();
+    expect(screen.getByText("Rejected — correction pending")).toBeTruthy();
+    expect(screen.queryByText("Hidden")).toBeNull();
+    // A read-only note, not a "Show" button — un-hiding locally would diverge
+    // from ReCiter's gold standard, so revoke is disallowed here.
+    expect(screen.getByTestId("pub-rejected-note-a")).toBeTruthy();
+    expect(screen.queryByTestId("pub-show-a")).toBeNull();
+    expect(screen.queryByTestId("pub-hide-a")).toBeNull();
+    // No standing "Not mine?" affordance — it's already been rejected.
+    expect(screen.queryByTestId("pub-not-mine-a")).toBeNull();
+  });
 });
 
 describe("PublicationsCard — optimistic hide", () => {
