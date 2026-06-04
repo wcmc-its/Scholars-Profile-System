@@ -96,6 +96,10 @@ const ctx: EditContext = {
       suppressionId: null,
     },
   ],
+  // SELF_EDIT_COI_GAP_HINT — empty by default (loader returns [] unless the
+  // flag is on AND the viewer is genuine self); a dedicated describe block below
+  // exercises the populated case.
+  unmatchedPubmedCoi: [],
 };
 
 const superuserCtx: EditContext = {
@@ -299,6 +303,55 @@ describe("EditPage router — the Apollo shell + rail", () => {
     // Disclosures render grouped by activityGroup.
     expect(screen.getByText("Acme Therapeutics")).toBeTruthy();
     expect(screen.getByText("Globex Pharma")).toBeTruthy();
+  });
+});
+
+describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)", () => {
+  const gapCtx: EditContext = {
+    ...ctx,
+    unmatchedPubmedCoi: [
+      {
+        id: "gap-1",
+        pmid: "31508198",
+        entity: "Procept BioRobotics",
+        tier: "High",
+        sourceSentence:
+          "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+      },
+    ],
+  };
+
+  it("does NOT show the coi-gap rail item when there are no candidates (default)", () => {
+    render(<EditPage ctx={ctx} mode="self" />);
+    expect(screen.queryByTestId("rail-coi-gap")).toBeNull();
+  });
+
+  it("an ?attr=coi-gap with zero candidates canonicalizes away (no panel rendered)", () => {
+    // With no candidates the key is not in the visible set, so EditPage falls
+    // back to the default (Home) panel rather than rendering an empty surface.
+    render(<EditPage ctx={ctx} mode="self" attr="coi-gap" />);
+    expect(document.querySelector('[data-slot="coi-gap-panel"]')).toBeNull();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+  });
+
+  it("shows the coi-gap rail item ONLY when there are candidates", () => {
+    render(<EditPage ctx={gapCtx} mode="self" />);
+    expect(screen.getByTestId("rail-coi-gap")).toBeTruthy();
+  });
+
+  it("?attr=coi-gap renders the panel with the verbatim source sentence + tier chip", () => {
+    render(<EditPage ctx={gapCtx} mode="self" attr="coi-gap" />);
+    expect(document.querySelector('[data-slot="coi-gap-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("coi-gap-source-gap-1").textContent).toContain(
+      "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+    );
+    expect(screen.getByTestId("coi-gap-tier-High")).toBeTruthy();
+  });
+
+  it("never surfaces coi-gap in superuser mode, even with candidates present", () => {
+    const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
+    render(<EditPage ctx={suCtx} mode="superuser" />);
+    expect(screen.queryByTestId("rail-coi-gap")).toBeNull();
   });
 });
 

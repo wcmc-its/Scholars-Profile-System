@@ -871,6 +871,18 @@ export class AppStack extends Stack {
         // the etl:reciter-refresh scanner propagates it to the gold standard +
         // fires the delayed re-score.
         RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
+        // (relationships named in a scholar's own PubMed competing-interest
+        // statements that aren't in their current WRG disclosures) + its disavow
+        // endpoint. Ships DORMANT in BOTH envs and stays off until TWO gates
+        // clear (docs/coi-pubmed-HANDOFF.md § C): (1) Faculty Affairs /
+        // Compliance / General Counsel sign-off on the concept AND exact copy,
+        // and (2) a measured High-tier precision number ratified with
+        // Compliance. The copy gate is approvable; the precision gate is NOT, so
+        // this is deliberately NOT a staging-first rollout — "off" both envs.
+        // While off, the loader returns an empty candidate array (so the rail
+        // item never appears) and the dismiss route 503s.
+        SELF_EDIT_COI_GAP_HINT: "off",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts

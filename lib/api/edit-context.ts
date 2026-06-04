@@ -48,6 +48,7 @@ type EditContextReadClient = Pick<
   | "grant"
   | "department"
   | "coiActivity"
+  | "coiGapCandidate"
 >;
 
 export type EditContextScholar = {
@@ -171,6 +172,31 @@ export type EditContextCoiDisclosure = {
 };
 
 /**
+ * One publication-derived COI-gap candidate, narrowed to ONLY what the self-only
+ * `coi-gap` panel renders. This is the deliberately starved client projection of
+ * `CoiGapCandidate`: the persisted row carries `normalizedEntity` (the dedupe
+ * key), `attribution`, `entityScore`, `category`, and `status`, NONE of which
+ * reach the client — exposing the numeric score or status would re-introduce the
+ * "verdict"/false-precision shapes the governance review forbade. Confidence is
+ * the qualitative `tier` only (High | Medium), never a percentage; the verbatim
+ * `sourceSentence` is always carried so the human, not the score, adjudicates.
+ *
+ * This array is populated ONLY when `loadEditContext` is called with
+ * `opts.includeCoiGap === true`, which the self page sets exclusively for a
+ * genuine (non-impersonating) self viewer behind `SELF_EDIT_COI_GAP_HINT`. Every
+ * other caller (the superuser-viewing-other path, public, search) leaves the opt
+ * absent, so this loader is the authoritative self-only enforcement point — the
+ * candidates are never even read for a non-self viewer, not merely UI-hidden.
+ */
+export type EditContextCoiGapCandidate = {
+  id: string;
+  pmid: string;
+  entity: string;
+  tier: "High" | "Medium";
+  sourceSentence: string;
+};
+
+/**
  * One mentee on the suppressible Mentees panel. Mentees are derived (no FK; the
  * reporting DB is truncate-rebuilt nightly), so they have no #352 stable DB key
  * — instead `externalId` is the composite `"{mentorCwid}:{menteeCwid}"`, which
@@ -197,6 +223,14 @@ export type EditContext = {
   coiDisclosures: ReadonlyArray<EditContextCoiDisclosure>;
   /** Suppressible mentees (derived from training records; mentor may hide). */
   mentees: ReadonlyArray<EditContextMentee>;
+  /**
+   * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
+   * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
+   * `loadEditContext` is called with `opts.includeCoiGap === true`; an empty
+   * array for every other caller (and when the scholar has no candidates). This
+   * is a suggestion surface, never a verdict — see `EditContextCoiGapCandidate`.
+   */
+  unmatchedPubmedCoi: ReadonlyArray<EditContextCoiGapCandidate>;
 };
 
 /**
@@ -242,12 +276,23 @@ const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
  * called best-effort: a thrown error (reporting DB unreachable) yields an empty
  * mentee list rather than failing the whole page — /edit must never 500 because
  * the mentee source is down.
+ *
+ * `opts.includeCoiGap` is the AUTHORITATIVE self-only gate for the
+ * publication-derived COI-gap candidates (`unmatchedPubmedCoi`). It defaults to
+ * `false`, so a caller that does not explicitly opt in NEVER loads the
+ * candidates — the superuser-viewing-other path (`/edit/scholar/[cwid]`), public,
+ * and search all leave it unset and get an empty array. Only the self page
+ * passes `true`, and only when `SELF_EDIT_COI_GAP_HINT` is on AND the viewer is
+ * genuinely self (not impersonating). Enforcing self-only here, at the data
+ * layer, means the rows are never read for an unauthorized viewer rather than
+ * read-then-hidden.
  */
 export async function loadEditContext(
   cwid: string,
   client: EditContextReadClient,
   now: Date = new Date(),
   loadMentees: LoadMentees = defaultLoadMentees,
+  opts?: { includeCoiGap?: boolean },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -353,6 +398,35 @@ export async function loadEditContext(
     entity: c.entity,
     activityGroup: c.activityGroup,
   }));
+
+  // Publication-derived COI-gap candidates (`SELF_EDIT_COI_GAP_HINT`) — SELF-
+  // ONLY, and the opt-in IS the self guard: only the self page passes
+  // `includeCoiGap: true`, and only for a genuine (non-impersonating) self
+  // viewer with the flag on. Every other caller leaves `opts` unset, so the
+  // query never runs and the array is empty — the candidates are never read for
+  // a non-self viewer. Surface only actionable lifecycle states (`new` +
+  // `acknowledged`); `dismissed`/`resolved` are intentionally excluded so a
+  // disavowed nudge never reappears. Ordered tier (High first) then entity, and
+  // mapped to the STARVED client shape — `normalizedEntity`, `attribution`,
+  // `entityScore`, `category`, and `status` never cross to the client.
+  let unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
+  if (opts?.includeCoiGap === true) {
+    const gapRows = await client.coiGapCandidate.findMany({
+      where: { cwid, status: { in: ["new", "acknowledged"] } },
+      select: { id: true, pmid: true, entity: true, tier: true, sourceSentence: true },
+      // High before Medium ("High" < "Medium" lexically, asc), then entity.
+      orderBy: [{ tier: "asc" }, { entity: "asc" }],
+    });
+    unmatchedPubmedCoi = gapRows.map((g) => ({
+      id: g.id,
+      pmid: g.pmid,
+      entity: g.entity,
+      // The DB column is a free `VarChar(16)`; narrow to the rendered union and
+      // treat any unexpected value as the more conservative "Medium" tier.
+      tier: g.tier === "High" ? "High" : "Medium",
+      sourceSentence: g.sourceSentence,
+    }));
+  }
 
   // Mentees — suppressible, derived from training records (reporting DB). The
   // source is queried through the injected `loadMentees` seam and is BEST-
@@ -544,6 +618,7 @@ export async function loadEditContext(
       grants,
       coiDisclosures,
       mentees,
+      unmatchedPubmedCoi,
     };
   }
 
@@ -663,5 +738,6 @@ export async function loadEditContext(
     grants,
     coiDisclosures,
     mentees,
+    unmatchedPubmedCoi,
   };
 }

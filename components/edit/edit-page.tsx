@@ -10,6 +10,7 @@
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { CoiCard } from "@/components/edit/coi-card";
+import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
@@ -41,6 +42,7 @@ type AttrKey =
   | "appointments"
   | "education"
   | "coi"
+  | "coi-gap"
   | "mentees"
   | "profile-url";
 
@@ -67,6 +69,12 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
   { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
+  // From your publications (#SELF_EDIT_COI_GAP_HINT) — self-only, read-only.
+  // A suggestion surface: relationships named in the scholar's own PubMed
+  // competing-interest statements, shown only to them, never a compliance
+  // verdict. The rail item appears only when there are candidates AND the flag
+  // is on (the loader returns an empty array otherwise).
+  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
@@ -101,6 +109,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "funding",
   "mentees",
   "coi",
+  "coi-gap",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   home: "owned",
@@ -115,6 +124,7 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   "name-title": "readonly",
   photo: "readonly",
   coi: "readonly",
+  "coi-gap": "readonly",
 };
 const SELF_RAIL_GROUP = {
   owned: "Yours to edit",
@@ -151,9 +161,16 @@ export type EditPageProps = {
 export function visibleAttrKeys(
   mode: "self" | "superuser",
   slugRequestEnabled: boolean,
+  hasCoiGap = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
-  return ATTRIBUTES.filter((a) => a.modes.includes(mode)).map((a) => a.key);
+  return ATTRIBUTES.filter((a) => a.modes.includes(mode))
+    // The "From your publications" item only exists when there are candidates to
+    // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
+    // candidates canonicalizes away (the page redirects to bare /edit) rather
+    // than rendering an empty panel or 404-looping.
+    .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+    .map((a) => a.key);
 }
 
 export function EditPage({
@@ -164,7 +181,15 @@ export function EditPage({
   latestSlugRequest = null,
   canBrowseProfiles = false,
 }: EditPageProps) {
-  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode));
+  // "From your publications" is conditionally present: only in self mode and
+  // only when the loader returned candidates (the loader itself enforces the
+  // self-only + flag gate, so a non-empty array here already implies both). Drop
+  // it from the visible set otherwise so it appears in neither the rail nor the
+  // valid-attr set — an empty panel is never surfaced.
+  const hasCoiGap = mode === "self" && ctx.unmatchedPubmedCoi.length > 0;
+  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode)).filter(
+    (a) => a.key !== "coi-gap" || hasCoiGap,
+  );
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
@@ -317,6 +342,12 @@ function renderPanel(
           disclosures={ctx.coiDisclosures}
         />
       );
+    case "coi-gap":
+      // Self-only by construction — the loader only populates
+      // `unmatchedPubmedCoi` for a genuine self viewer behind the flag, and the
+      // rail item is dropped when the array is empty. No `mode` prop: there is
+      // no superuser variant of this surface.
+      return <CoiGapCard cwid={cwid} candidates={ctx.unmatchedPubmedCoi} />;
     case "profile-url":
       // Superuser sets a slug directly; a scholar requests one for approval —
       // but only when the request flag is on. With it off, the scholar still

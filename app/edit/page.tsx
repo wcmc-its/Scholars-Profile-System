@@ -16,6 +16,7 @@ import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
+import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
@@ -43,7 +44,19 @@ export default async function EditSelfPage({
   // byte-identically; while impersonating target T it returns T, so /edit loads
   // T's context and renders the self-edit surface for them (#637).
   const editCwid = getEffectiveCwid(session);
-  const ctx = await loadEditContext(editCwid, db.read);
+
+  // Genuine-self gate for the publication-derived COI-gap candidates
+  // (`SELF_EDIT_COI_GAP_HINT`). These are surfaced ONLY when the viewer is the
+  // real scholar — never a superuser impersonating them via "View as" (#637).
+  // When impersonating, `getEffectiveCwid` returns the target T while the real
+  // signed-in CWID is the superuser, so `editCwid !== session.cwid` ⇒ NOT
+  // genuine self ⇒ candidates suppressed. `loadEditContext` only loads them when
+  // `includeCoiGap` is true, so a false here means they are never even read.
+  const genuineSelf = editCwid === session.cwid;
+  const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
+  const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
+    includeCoiGap,
+  });
   if (!ctx) {
     // A signed-in user whose scholar row was hard-archived (deletedAt set)
     // has nothing to edit. This is rare — the ED ETL would have to have
@@ -67,7 +80,11 @@ export default async function EditSelfPage({
   // `/edit` rather than silently rendering the default panel behind a stale URL.
   // Absent/valid `attr` falls through; the redirect target carries no `?attr`,
   // so the re-load sees `attr === undefined` and never loops.
-  const validAttrs: readonly string[] = visibleAttrKeys("self", slugRequestEnabled);
+  const validAttrs: readonly string[] = visibleAttrKeys(
+    "self",
+    slugRequestEnabled,
+    ctx.unmatchedPubmedCoi.length > 0,
+  );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
   }
