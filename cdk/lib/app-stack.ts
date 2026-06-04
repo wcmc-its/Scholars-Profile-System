@@ -871,15 +871,15 @@ export class AppStack extends Stack {
         // endpoints 404. The risky half -- override->routing reconcile -- already
         // ships and runs on the live superuser direct-edit path
         // (reconcileScholarSlug, lib/slug.ts), so a flip changes only who can
-        // initiate a slug change, not the routing mechanics. Staging soaks first
-        // ("on"); prod stays "off" until the #506 sign-off. Takes effect ONLY on
+        // initiate a slug change, not the routing mechanics. Enabled in BOTH
+        // envs (product decision 2026-06-03; no staging-only soak). Takes effect ONLY on
         // a manual `cdk deploy --exclusively Sps-App-<env>` -- the CD pipeline
         // re-rolls the image and never deploys CDK. The in-app "you'll get an
         // email when it's decided" line additionally needs the request-change
         // mailer (SELF_EDIT_REQUEST_CHANGE_SEND above) + a verified
         // SCHOLARS_MAIL_FROM; until that flips the requester is notified in-app
         // only, and the decision never fails for a missing email.
-        SELF_EDIT_SLUG_REQUEST: env === "prod" ? "off" : "on",
+        SELF_EDIT_SLUG_REQUEST: "on",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts

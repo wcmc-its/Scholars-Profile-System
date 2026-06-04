@@ -1444,10 +1444,10 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
       });
 
-      it("ships the slug-request lifecycle OFF in prod (#497, staging soaks first)", () => {
-        // The request card / approve queue / requester notification graduate to
-        // prod only after the staging soak + #506 sign-off; prod stays dark.
-        expect(appContainerEnv().get("SELF_EDIT_SLUG_REQUEST")).toBe("off");
+      it("enables the slug-request lifecycle in prod (#497, on in both envs)", () => {
+        // Per the 2026-06-03 product decision the lifecycle is enabled in both
+        // envs (no staging-only soak); activation is the manual cdk deploy.
+        expect(appContainerEnv().get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
       });
 
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
@@ -1789,7 +1789,7 @@ describe("AppStack", () => {
       expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
     });
 
-    it("enables the slug-request lifecycle in staging for the soak (#497)", () => {
+    it("enables the slug-request lifecycle in staging (#497, on in both envs)", () => {
       const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
       const appContainer = (
         Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")

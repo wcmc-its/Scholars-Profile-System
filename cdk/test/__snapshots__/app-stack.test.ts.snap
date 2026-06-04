@@ -341,7 +341,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
