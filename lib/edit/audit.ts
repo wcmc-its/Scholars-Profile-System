@@ -48,7 +48,11 @@ export type AuditAction =
   /** a superuser began a "View as" impersonation session (#637 R5 — enter) */
   | "impersonation_start"
   /** a superuser ended (or expired out of) a "View as" session (#637 R5 — exit) */
-  | "impersonation_end";
+  | "impersonation_end"
+  /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
+   *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
+   *  suppression + pending-refresh ids and the rejected contributor cwid */
+  | "publication_reject";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

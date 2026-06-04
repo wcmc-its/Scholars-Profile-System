@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- session events: `impersonation_start` / `impersonation_end` (R5 -- audit
   -- enter AND exit; `target_entity_type='scholar'`, `target_entity_id` the
   -- impersonated CWID).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -158,11 +158,15 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                        (View-as impersonation; also adds the
 --                         `impersonated_cwid` attribution column -- the
 --                         ADD COLUMN below)
+--   #746:              + publication_reject  (self-edit "Not mine" reject routed
+--                         to ReCiter's gold standard; target_entity_id is the
+--                         pmid, target_entity_type='publication'). Appended LAST
+--                         to preserve existing ENUM ordinals.
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject')
     NOT NULL;
 
 -- target_entity_type history:

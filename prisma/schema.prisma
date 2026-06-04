@@ -1203,6 +1203,32 @@ model Suppression {
   @@map("suppression")
 }
 
+/// Durable intent for the self-edit "Not mine" reject → ReCiter flow (#746).
+/// One row per rejected (uid, pmid), written in the reject route's transaction
+/// alongside the local suppression + B03 audit row. `goldstandard_sent_at` NULL
+/// means the reject hasn't reached ReCiter's gold standard yet; the route fires
+/// it best-effort inline and `etl/reciter-refresh` retries the stragglers.
+/// `feature_generator_sent_at` NULL means the uid still needs the delayed,
+/// coalesced engine re-score (`analysisRefreshFlag=true`). Mirrors the ADR-005
+/// layer-3 sentinel/reconciler pattern (#393): a NULL timestamp is "not yet
+/// delivered" and the scanner converges it. Lives in the main schema so the app
+/// role's DML grant already covers it (no separate-schema GRANT, cf. #493).
+model ReciterPendingRefresh {
+  id                     String    @id @default(uuid()) @db.VarChar(64)
+  uid                    String    @db.VarChar(32) // ReCiter uid == scholar CWID being rejected-as
+  pmid                   String    @db.VarChar(32)
+  rejectedBy             String    @map("rejected_by") @db.VarChar(32) // the real human actor (#637)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  goldstandardSentAt     DateTime? @map("goldstandard_sent_at")
+  featureGeneratorSentAt DateTime? @map("feature_generator_sent_at")
+  attempts               Int       @default(0)
+  lastError              String?   @map("last_error") @db.Text
+
+  @@index([goldstandardSentAt])
+  @@index([uid, featureGeneratorSentAt])
+  @@map("reciter_pending_refresh")
+}
+
 /// Per-cwid fixed-window rate limit for the "Request a change" server send
 /// (#160 Phase 2, docs/self-edit-request-change-modal.md § 5 abuse controls).
 /// One row per (actor cwid, UTC hour-window); the hot-path increment is a raw
