@@ -1,21 +1,31 @@
 # Handoff — Unmatched PubMed COI on /edit
 
-Pick-up doc for the next stage. Written 2026-06-04. Read this first, then
+Pick-up doc. Written 2026-06-04. Read this first, then
 `coi-pubmed-unmatched-feasibility.md` (design + verdict) and
 `coi-pubmed-phase0-precision-study.md` (validation plan).
 
+> **Status update (2026-06-04, this PR).** §A below — the self-only `/edit` panel
+> + disavow API — is now **BUILT and ships DORMANT** behind `SELF_EDIT_COI_GAP_HINT`
+> (`off` in both envs). The feature is fully integrated with master's #748 `/edit`
+> console polish (clean rebase; `tsc` 0 errors · full `vitest` 3093/3093). It does
+> **nothing** until the §C gates clear and the flag is flipped — see the
+> pre-enable runbook added to §C. The original "UI is not built" wording below is
+> superseded; everything else (constraints, blockers, open questions) still holds.
+
 ## TL;DR
 
-The **backend data pipeline is built, typechecked, and tested end-to-end**; the
-**scholar-facing UI is not built and is intentionally gated**. The idea: surface
-relationships named in a scholar's own PubMed competing-interest statements that
-aren't in their official WCM disclosure, on the self-only `/edit` surface, with a
-match-confidence tier and a durable disavow.
+The **backend data pipeline AND the self-only scholar UI are built, typechecked,
+and tested end-to-end**; the feature is **intentionally gated** (flag `off`,
+ETL unscheduled) until §C clears. The idea: surface relationships named in a
+scholar's own PubMed competing-interest statements that aren't in their official
+WCM disclosure, on the self-only `/edit` surface, with a match-confidence tier
+and a durable disavow.
 
-- Verdict: **BUILD-GATED**. Feasible; the gating risk is institutional, not technical.
+- Verdict: **BUILD-GATED**. Built; the remaining gating risk is institutional, not technical.
 - Everything lives on branch **`explore/coi-pubmed-unmatched`** in worktree
-  `~/worktrees/sps-coi-pubmed` — **UNPUSHED, no PR yet**.
-- Verified: `tsc --noEmit` 0 errors · `vitest` 34/34 · `prisma validate`/`generate` clean.
+  `~/worktrees/sps-coi-pubmed`.
+- Verified: `tsc --noEmit` 0 errors · full `vitest` 3093/3093 · `prisma validate`/`generate`
+  clean. (`next build` + `cdk synth` are verified by CI on the PR, not locally.)
 
 ## Non-negotiable constraints (carry these forward)
 
@@ -121,19 +131,33 @@ coi_gap_candidate   (cwid,pmid,entity, tier, source sentence, status, first/last
    the one-shot `prisma migrate deploy` task on `cdk deploy Sps-Data-<env>` (ADR-009 Phase 2) —
    App-before-Data ordering and the migrate DSN apply.
 
-### C. Hard gates (do NOT ship the panel without these)
+### C. Hard gates (do NOT flip `SELF_EDIT_COI_GAP_HINT` on without these)
+The code is built and merged dormant; these gate **enabling** it, not building it.
 1. **Faculty Affairs / Compliance / General Counsel sign-off** on the concept AND the exact
-   copy. This is a legal-review gate, not engineering. Everything in §A is downstream of it.
+   copy. This is a legal-review gate, not engineering. The copy shipped in `coi-gap-card.tsx`
+   is a best-effort suggestion-framed draft, NOT yet legal-reviewed.
 2. **Precision number** — run the Track A human-labeling pass on `candidates.csv` (rubric in
    the Phase 0 plan) to get a measured High-tier precision; ratify a threshold with Compliance.
    Track B (live data + ReCiter `targetAuthor`) sharpens attribution further.
 
+**Pre-enable runbook** (do these, in order, before the flag flip):
+- Apply the two Prisma migrations + the audit-ENUM ALTER. The dismiss route writes a
+  `scholars_audit` row with `action='coi_gap_dismiss'` / `targetEntityType='coi_gap_candidate'`;
+  both are NEW values added to `scripts/sql/audit-log.sql` (the audit table is not a Prisma
+  model). Until `db-bootstrap` runs the ALTER, the dismiss INSERT 500s. Harmless while the flag
+  is off (the route 503s before any write), but a hard prerequisite once enabled. Order:
+  `cdk deploy Sps-App-<env>` then `cdk deploy Sps-Data-<env>` (App-before-Data, ADR-009).
+- Wire `etl:reciter:coi-statements` + `etl:coi-gap` into `etl/orchestrate.ts` and the nightly
+  Step Function (§B) — they are deliberately unscheduled today, so no candidates are produced.
+- Flip `SELF_EDIT_COI_GAP_HINT` to `"on"` per env in `cdk/lib/app-stack.ts` and
+  `cdk deploy Sps-App-<env>` (CD re-rolls the image; the flag needs the explicit cdk deploy).
+
 ## Blockers & open questions
 
-- **Branch is behind `origin/master`** by 2 commits (`f1329c1`, `bbcf9ea` — #746/#747
-  reciter-reject, landed after I branched at `1b7d57a`). My commits are additive on new
-  `coi-*` paths and touch none of those files, so **rebase onto fresh `origin/master` is
-  expected to be clean** before opening a PR.
+- **Rebased onto current `origin/master`** (through #746/#747 reciter-reject and #748 `/edit`
+  console polish). #748 rewrote the same `/edit` files §A touches; the rebase was clean (only
+  `edit-page.tsx` + `edit-page.test.tsx` auto-merged) and the panel was re-verified green
+  against the #748 base. Keep rebasing before each push — `/edit` is an active area.
 - **ReciterDB VPC** (#443) blocks statement ingestion (Track B). The gap ETL itself is not blocked.
 - **Open questions** (from feasibility doc §Open questions): does ReciterDB expose a numeric
   ReCiter article score (sharpens `paperMatch` beyond the boolean `targetAuthor`)? extraction
