@@ -111,14 +111,15 @@ describe("EditPage router — the Apollo shell + rail", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Scholars Profile Console");
   });
 
-  it("defaults to the Overview panel for self", () => {
+  it("defaults to the task-first Home panel for self", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
+    expect(screen.getByTestId("home-card-overview")).toBeTruthy();
   });
 
-  it("an unknown ?attr falls back to the default (Overview)", () => {
+  it("an unknown ?attr falls back to the default (Home)", () => {
     render(<EditPage ctx={ctx} mode="self" attr="does-not-exist" />);
-    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
   });
 
   it("?attr=appointments renders the Appointments panel + a row", () => {

@@ -12,6 +12,7 @@ import { AppointmentsCard } from "@/components/edit/appointments-card";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
 import { FundingCard } from "@/components/edit/funding-card";
+import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
@@ -23,6 +24,7 @@ import type { EditContext } from "@/lib/api/edit-context";
 import { profilePath } from "@/lib/profile-url";
 
 type AttrKey =
+  | "home"
   | "name-title"
   | "photo"
   | "overview"
@@ -42,6 +44,8 @@ type AttrDef = {
 
 /** The full attribute set; the rail filters to the actor's visible subset. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
+  // Self-only task-first landing (vision-round T3.4).
+  { key: "home", label: "Home", modes: ["self"] },
   { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
@@ -56,7 +60,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
 ];
 
 const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
-  self: "overview",
+  self: "home",
   superuser: "visibility",
 };
 
@@ -68,6 +72,7 @@ const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
  * read-only, Profile URL is direct-set), so these self labels would mislead.
  */
 const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
+  "home",
   "overview",
   "visibility",
   "profile-url",
@@ -79,6 +84,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
+  home: "owned",
   overview: "owned",
   visibility: "owned",
   "profile-url": "owned",
@@ -168,6 +174,21 @@ function renderPanel(
 ) {
   const cwid = ctx.scholar.cwid;
   switch (key) {
+    case "home": {
+      const hiddenPublications = ctx.publications.filter((p) => p.state !== "shown").length;
+      const isHidden =
+        ctx.scholar.suppression.ownRow !== null || ctx.scholar.suppression.adminRow !== null;
+      return (
+        <HomePanel
+          basePath="/edit"
+          hasBio={ctx.scholar.overview.trim().length > 0}
+          isHidden={isHidden}
+          totalPublications={ctx.publications.length}
+          hiddenPublications={hiddenPublications}
+          previewHref={profilePath(ctx.scholar.slug)}
+        />
+      );
+    }
     case "name-title":
       return (
         <ReadonlyAttributePanel
