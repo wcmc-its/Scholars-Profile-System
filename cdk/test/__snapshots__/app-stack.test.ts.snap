@@ -344,6 +344,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "off",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -3264,6 +3268,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "off",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",
