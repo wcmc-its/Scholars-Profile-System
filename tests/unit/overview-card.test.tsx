@@ -9,6 +9,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
+// The card mounts UnsavedChangesGuard, which now calls useRouter() (the guard
+// routes confirmed navigations via router.push). Stub next/navigation so the
+// guard mounts under jsdom.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+}));
+
 // Mock the editor BEFORE importing the card.
 vi.mock("@/components/edit/overview-editor", () => ({
   OverviewEditor: ({

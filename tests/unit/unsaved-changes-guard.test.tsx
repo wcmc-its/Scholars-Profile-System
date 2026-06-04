@@ -1,29 +1,39 @@
 /**
  * `components/edit/unsaved-changes-guard.tsx` — beforeunload + in-subtree
- * <a href> click capture (#356 Phase 6 C9).
+ * <a href> click capture + Back/Forward sentinel interception, all routed
+ * through the branded ConfirmDialog (#356 Phase 6 C9 / vision-round T3.2).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mockPush, replace: vi.fn(), refresh: vi.fn(), back: vi.fn() }),
+}));
 
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  mockPush.mockReset();
 });
 
+/** The branded leave-confirmation is open iff its confirm button is in the DOM. */
+function dialogIsOpen() {
+  return screen.queryByRole("button", { name: "Leave anyway" }) !== null;
+}
+
 describe("UnsavedChangesGuard — dirty=false", () => {
-  it("attaches no listeners", () => {
+  it("attaches no beforeunload / click / popstate listeners", () => {
     const addWindow = vi.spyOn(window, "addEventListener");
     const addDoc = vi.spyOn(document, "addEventListener");
     render(<UnsavedChangesGuard dirty={false} />);
-    expect(
-      addWindow.mock.calls.some((c) => c[0] === "beforeunload"),
-    ).toBe(false);
+    expect(addWindow.mock.calls.some((c) => c[0] === "beforeunload")).toBe(false);
+    expect(addWindow.mock.calls.some((c) => c[0] === "popstate")).toBe(false);
     expect(addDoc.mock.calls.some((c) => c[0] === "click")).toBe(false);
   });
 
-  it("a click on an external link does not prompt", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("a click on an internal link does not open the dialog", () => {
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={false} />
@@ -31,8 +41,11 @@ describe("UnsavedChangesGuard — dirty=false", () => {
       </>,
     );
     const a = container.querySelector("a")!;
-    a.click();
-    expect(confirmSpy).not.toHaveBeenCalled();
+    const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => {
+      a.dispatchEvent(evt);
+    });
+    expect(dialogIsOpen()).toBe(false);
   });
 });
 
@@ -42,19 +55,16 @@ describe("UnsavedChangesGuard — dirty=true, beforeunload", () => {
     const event = new Event("beforeunload") as BeforeUnloadEvent;
     // jsdom doesn't synthesize a fresh BeforeUnloadEvent, so we dispatch a
     // bare Event and check that the listener set returnValue on it.
-    Object.defineProperty(event, "returnValue", {
-      value: "",
-      writable: true,
-    });
+    Object.defineProperty(event, "returnValue", { value: "", writable: true });
     window.dispatchEvent(event);
-    // The handler runs; the event default is "prevented" (no observable
-    // effect in jsdom beyond no throw). Test passes by absence of error.
+    // The handler runs; the event default is "prevented" (no observable effect
+    // in jsdom beyond no throw). Test passes by absence of error.
   });
 });
 
-describe("UnsavedChangesGuard — dirty=true, click capture", () => {
-  it("on Cancel of the confirm dialog, preventDefault is called", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+describe("UnsavedChangesGuard — dirty=true, in-subtree <a> click", () => {
+  it("an eligible link click is blocked and opens the branded dialog (no native confirm)", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={true} />
@@ -63,13 +73,16 @@ describe("UnsavedChangesGuard — dirty=true, click capture", () => {
     );
     const a = container.querySelector("a")!;
     const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
-    a.dispatchEvent(evt);
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    act(() => {
+      a.dispatchEvent(evt);
+    });
+    // The native default is prevented and the styled dialog is shown instead.
     expect(evt.defaultPrevented).toBe(true);
+    expect(confirmSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(dialogIsOpen()).toBe(true));
   });
 
-  it("on Confirm of the confirm dialog, preventDefault is NOT called", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("confirming the dialog routes via router.push(href)", async () => {
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={true} />
@@ -77,13 +90,30 @@ describe("UnsavedChangesGuard — dirty=true, click capture", () => {
       </>,
     );
     const a = container.querySelector("a")!;
-    const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
-    a.dispatchEvent(evt);
-    expect(evt.defaultPrevented).toBe(false);
+    act(() => {
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Leave anyway" }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/somewhere"));
   });
 
-  it("an in-page anchor href='#section' is allowed without a prompt", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("cancelling the dialog stays put — no router.push", async () => {
+    const { container } = render(
+      <>
+        <UnsavedChangesGuard dirty={true} />
+        <a href="/somewhere">Go</a>
+      </>,
+    );
+    const a = container.querySelector("a")!;
+    act(() => {
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(dialogIsOpen()).toBe(false));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("an in-page anchor href='#section' is allowed without a dialog", () => {
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={true} />
@@ -93,11 +123,11 @@ describe("UnsavedChangesGuard — dirty=true, click capture", () => {
     const a = container.querySelector("a")!;
     const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
     a.dispatchEvent(evt);
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(evt.defaultPrevented).toBe(false);
+    expect(dialogIsOpen()).toBe(false);
   });
 
   it("a Cmd/Ctrl click (new tab) is not intercepted", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={true} />
@@ -105,17 +135,13 @@ describe("UnsavedChangesGuard — dirty=true, click capture", () => {
       </>,
     );
     const a = container.querySelector("a")!;
-    const evt = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      metaKey: true,
-    });
+    const evt = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
     a.dispatchEvent(evt);
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(evt.defaultPrevented).toBe(false);
+    expect(dialogIsOpen()).toBe(false);
   });
 
   it("a click on non-anchor content is not intercepted", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     const { container } = render(
       <>
         <UnsavedChangesGuard dirty={true} />
@@ -125,6 +151,46 @@ describe("UnsavedChangesGuard — dirty=true, click capture", () => {
     const btn = container.querySelector("button")!;
     const evt = new MouseEvent("click", { bubbles: true, cancelable: true });
     btn.dispatchEvent(evt);
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(dialogIsOpen()).toBe(false);
+  });
+});
+
+describe("UnsavedChangesGuard — dirty=true, Back/Forward (popstate)", () => {
+  it("pushes a sentinel history entry when it arms", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    render(<UnsavedChangesGuard dirty={true} />);
+    expect(pushState).toHaveBeenCalled();
+  });
+
+  it("a popstate (Back) re-pushes the sentinel and opens the dialog", async () => {
+    render(<UnsavedChangesGuard dirty={true} />);
+    const pushState = vi.spyOn(window.history, "pushState");
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    // Re-pushes the sentinel to keep the user on the page.
+    await waitFor(() => expect(pushState).toHaveBeenCalled());
+    await waitFor(() => expect(dialogIsOpen()).toBe(true));
+  });
+
+  it("confirming a Back exit steps back through the sentinel", async () => {
+    render(<UnsavedChangesGuard dirty={true} />);
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+    fireEvent.click(await screen.findByRole("button", { name: "Leave anyway" }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith(-2));
+  });
+
+  it("cancelling a Back exit keeps the user on the page (no history.go)", async () => {
+    render(<UnsavedChangesGuard dirty={true} />);
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(dialogIsOpen()).toBe(false));
+    expect(go).not.toHaveBeenCalled();
   });
 });
