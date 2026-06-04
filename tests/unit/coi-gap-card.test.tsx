@@ -1,15 +1,16 @@
 /**
  * `components/edit/coi-gap-card.tsx` — the self-only "From your publications"
- * panel (`SELF_EDIT_COI_GAP_HINT`).
+ * advisory sub-view (`SELF_EDIT_COI_GAP_HINT`).
  *
  * Governance assertions (the adversarial review WILL grep for these): the
  * verbatim `sourceSentence` is always rendered, confidence is a qualitative
- * High/Medium chip (never a percentage or numeric score), the forbidden
- * accusatory vocabulary appears NOWHERE in the rendered output, and an empty
- * candidate list renders nothing scary.
+ * tier chip (never a percentage or numeric score), the forbidden accusatory
+ * vocabulary appears NOWHERE, the surface is framed as advisory (back-link +
+ * reassurance chips, NOT the authoritative "Locked" chip), and "Not relevant"
+ * is a reversible personal hide (undo), never a silent destructive action.
  */
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -49,10 +50,10 @@ describe("CoiGapCard", () => {
     );
   });
 
-  it("renders a High and a Medium qualitative tier chip — no percentages", () => {
+  it("renders qualitative tier chips — amber 'Worth reviewing' / green 'Likely covered', no percentages", () => {
     render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-    expect(screen.getByTestId("coi-gap-tier-High")).toBeTruthy();
-    expect(screen.getByTestId("coi-gap-tier-Medium")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-tier-High").textContent).toBe("Worth reviewing");
+    expect(screen.getByTestId("coi-gap-tier-Medium").textContent).toBe("Likely covered");
     // No percentage / numeric score anywhere.
     const root = document.body.textContent ?? "";
     expect(root).not.toMatch(/%/);
@@ -65,12 +66,29 @@ describe("CoiGapCard", () => {
     expect(link?.getAttribute("href")).toBe("https://pubmed.ncbi.nlm.nih.gov/31508198/");
   });
 
-  it("offers a Weill Research Gateway review affordance and a dismiss control per row", () => {
+  it("frames the surface as advisory: back-link to COI, three reassurance chips, NO Locked chip", () => {
     render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
-    // One WRG review affordance per candidate.
-    expect(
-      screen.getAllByText("Review in the Weill Research Gateway", { selector: "button" }),
-    ).toHaveLength(2);
+    // Nested under Conflicts of Interest — the back-link returns to the parent.
+    expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe("/edit?attr=coi");
+    const chips = screen.getByTestId("coi-gap-reassure").textContent ?? "";
+    expect(chips).toContain("Visible only to you");
+    expect(chips).toContain("Not a compliance judgement");
+    expect(chips).toContain("Managed in the Gateway, never here");
+    // A derived SUGGESTION must NOT wear the authoritative "Locked — managed at
+    // its source" chip — that would imply the list is ground truth.
+    expect(document.body.textContent ?? "").not.toContain("Locked — managed at its source");
+  });
+
+  it("summarizes the active set by qualitative tier", () => {
+    render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+    expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
+      "1 worth reviewing · 1 likely already covered",
+    );
+  });
+
+  it("offers a Gateway review affordance and a dismiss control per row", () => {
+    render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+    expect(screen.getAllByRole("button", { name: /review in gateway/i })).toHaveLength(2);
     expect(screen.getByTestId("coi-gap-dismiss-gap-1")).toBeTruthy();
     expect(screen.getByTestId("coi-gap-dismiss-gap-2")).toBeTruthy();
   });
@@ -83,12 +101,48 @@ describe("CoiGapCard", () => {
     }
   });
 
-  it("renders a calm empty state and no scary copy when there are no candidates", () => {
+  it("renders a calm summary and no scary copy when there are no candidates", () => {
     render(<CoiGapCard cwid="self01" candidates={[]} />);
-    expect(screen.getByTestId("coi-gap-empty")).toBeTruthy();
+    expect(screen.getByTestId("coi-gap-summary").textContent).toBe("Nothing left to review");
     const text = document.body.textContent ?? "";
     for (const re of FORBIDDEN) {
       expect(text).not.toMatch(re);
     }
+  });
+
+  describe('"Not relevant" is a reversible personal hide', () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("dismiss → inline 'marked not relevant' + undo, with the summary updating live, then undo restores", async () => {
+      render(<CoiGapCard cwid="self01" candidates={CANDIDATES} />);
+      // gap-1 is the only High; dismissing it drops the "worth reviewing" count.
+      fireEvent.click(screen.getByTestId("coi-gap-dismiss-gap-1"));
+
+      await screen.findByTestId("coi-gap-undo-gap-1");
+      expect(screen.getByText(/marked not relevant/i)).toBeTruthy();
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/gap-1/dismiss",
+        expect.objectContaining({ method: "POST" }),
+      );
+      // Summary recomputed: the High row is gone → only the Medium remains.
+      expect(screen.getByTestId("coi-gap-summary").textContent).toBe("1 likely already covered");
+
+      // Undo restores the row + calls the restore endpoint.
+      fireEvent.click(screen.getByTestId("coi-gap-undo-gap-1"));
+      await screen.findByTestId("coi-gap-dismiss-gap-1");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/gap-1/restore",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
+        "1 worth reviewing · 1 likely already covered",
+      );
+    });
   });
 });

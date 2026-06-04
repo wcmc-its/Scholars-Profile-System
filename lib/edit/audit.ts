@@ -58,7 +58,11 @@ export type AuditAction =
    *  (`SELF_EDIT_COI_GAP_HINT`); `targetEntityId` is the candidate id,
    *  before/after carry the status transition. Self-scoped, never a
    *  compliance trail — the only thing logged is the scholar's own action. */
-  | "coi_gap_dismiss";
+  | "coi_gap_dismiss"
+  /** a scholar UNDID a COI-gap dismissal ("Undo") — the inverse of
+   *  `coi_gap_dismiss`, restoring the suggestion to their advisory view. Same
+   *  self-scoped, non-compliance posture. */
+  | "coi_gap_restore";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

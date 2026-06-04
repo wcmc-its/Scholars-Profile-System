@@ -52,4 +52,43 @@ describe("CoiCard — read-only conflicts of interest", () => {
     render(<CoiCard cwid="other7" mode="superuser" scholarName="Alex Other" disclosures={[]} />);
     expect(screen.getByTestId("coi-empty").textContent).toMatch(/this scholar has no/i);
   });
+
+  it("bridges to the publications sub-view when there are suggestions (so a dead empty state is discoverable)", () => {
+    render(
+      <CoiCard
+        cwid="self01"
+        mode="self"
+        scholarName="Alex Self"
+        disclosures={[]}
+        suggestionCount={3}
+        suggestionsHref="/edit?attr=coi-gap"
+      />,
+    );
+    const bridge = screen.getByTestId("coi-suggestions-bridge");
+    expect(bridge.textContent).toContain("3 relationships from your publications worth a look");
+    expect(screen.getByTestId("coi-suggestions-bridge-link").getAttribute("href")).toBe(
+      "/edit?attr=coi-gap",
+    );
+  });
+
+  it("singularizes the bridge for one suggestion", () => {
+    render(
+      <CoiCard
+        cwid="self01"
+        mode="self"
+        scholarName="Alex Self"
+        disclosures={DISCLOSURES}
+        suggestionCount={1}
+        suggestionsHref="/edit?attr=coi-gap"
+      />,
+    );
+    expect(screen.getByTestId("coi-suggestions-bridge").textContent).toContain(
+      "1 relationship from your publications worth a look",
+    );
+  });
+
+  it("shows NO bridge when there are no suggestions (e.g. the superuser/impersonation path)", () => {
+    render(<CoiCard cwid="self01" mode="self" scholarName="Alex Self" disclosures={DISCLOSURES} />);
+    expect(screen.queryByTestId("coi-suggestions-bridge")).toBeNull();
+  });
 });

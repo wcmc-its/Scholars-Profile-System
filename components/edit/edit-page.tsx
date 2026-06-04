@@ -206,7 +206,19 @@ export function EditPage({
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
           const kind = railKindFor(k);
-          return [{ key: a.key, label: a.label, readonly: a.readonly, kind, group: SELF_RAIL_GROUP[kind] }];
+          return [
+            {
+              key: a.key,
+              label: a.label,
+              readonly: a.readonly,
+              kind,
+              group: SELF_RAIL_GROUP[kind],
+              // "From your publications" nests under Conflicts of Interest (it
+              // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
+              // as a flat sibling — it is a sub-view of COI, not its own SOR.
+              child: a.key === "coi-gap",
+            },
+          ];
         })
       : visible.map((a) => ({ key: a.key, label: a.label, readonly: a.readonly }));
   const basePath = mode === "superuser" ? `/edit/scholar/${ctx.scholar.cwid}` : "/edit";
@@ -340,6 +352,11 @@ function renderPanel(
           mode={mode}
           scholarName={scholarName}
           disclosures={ctx.coiDisclosures}
+          // The bridge to "From your publications" only appears for a genuine
+          // self viewer with suggestions — `unmatchedPubmedCoi` is [] for the
+          // superuser/impersonation paths, so the count is naturally 0 there.
+          suggestionCount={ctx.unmatchedPubmedCoi.length}
+          suggestionsHref="/edit?attr=coi-gap"
         />
       );
     case "coi-gap":

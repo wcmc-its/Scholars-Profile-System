@@ -34,6 +34,13 @@ export type RailItem = {
   group?: string;
   /** Editability tier; defaults from `readonly` when omitted. */
   kind?: RailKind;
+  /**
+   * A nested sub-item rendered indented beneath the preceding non-child item
+   * (its parent). Used for "From your publications", which is a sub-view of
+   * Conflicts of Interest, not a flat sibling. When a child is active the parent
+   * stays highlighted so the scholar keeps their place in the tree.
+   */
+  child?: boolean;
 };
 
 export type AttributeRailProps = {
@@ -46,6 +53,9 @@ export type AttributeRailProps = {
 
 export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
   const grouped = items.some((i) => i.group);
+  // When the active item is a nested child, its parent (the nearest preceding
+  // non-child item) stays highlighted so the tree position reads clearly.
+  const activeParentKey = parentKeyOf(items, active);
   return (
     <nav
       aria-label="Profile attributes"
@@ -59,7 +69,13 @@ export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
             </p>
             <ul className="flex flex-col gap-0.5">
               {g.items.map((item) => (
-                <RailLink key={item.key} item={item} active={active} basePath={basePath} />
+                <RailLink
+                  key={item.key}
+                  item={item}
+                  active={active}
+                  parentActive={item.key === activeParentKey}
+                  basePath={basePath}
+                />
               ))}
             </ul>
           </div>
@@ -71,13 +87,36 @@ export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
           </p>
           <ul className="flex flex-col gap-0.5">
             {items.map((item) => (
-              <RailLink key={item.key} item={item} active={active} basePath={basePath} />
+              <RailLink
+                key={item.key}
+                item={item}
+                active={active}
+                parentActive={item.key === activeParentKey}
+                basePath={basePath}
+              />
             ))}
           </ul>
         </>
       )}
     </nav>
   );
+}
+
+/**
+ * If `active` is a nested child, return its parent key (the nearest preceding
+ * non-child item); otherwise `null`. Lets the parent render highlighted while a
+ * child is selected.
+ */
+function parentKeyOf(items: ReadonlyArray<RailItem>, active: string): string | null {
+  let lastParent: string | null = null;
+  for (const item of items) {
+    if (item.child) {
+      if (item.key === active) return lastParent;
+    } else {
+      lastParent = item.key;
+    }
+  }
+  return null;
 }
 
 /** Bucket items by `group`, preserving first-appearance group order. */
@@ -98,10 +137,13 @@ function groupItems(items: ReadonlyArray<RailItem>): Array<{ label: string; item
 function RailLink({
   item,
   active,
+  parentActive,
   basePath,
 }: {
   item: RailItem;
   active: string;
+  /** This item is the parent of the currently-active child — stays highlighted. */
+  parentActive?: boolean;
   basePath: string;
 }) {
   const isActive = item.key === active;
@@ -115,9 +157,21 @@ function RailLink({
         className={cn(
           "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent px-3 py-2 text-sm transition-colors md:min-h-9",
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+          // Nested child ("From your publications"): indented, with a short
+          // connector elbow to its parent, and a touch smaller/quieter.
+          item.child &&
+            "relative pl-9 text-[0.9rem] before:absolute before:top-1/2 before:left-[1.15rem] before:h-px before:w-2 before:-translate-y-1/2 before:content-['']",
           isActive
-            ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
-            : "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
+            ? cn(
+                "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white",
+                item.child && "before:bg-white/50",
+              )
+            : cn(
+                "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
+                // Parent of the active child: subtle persistent highlight.
+                parentActive && "bg-apollo-rail-hover",
+                item.child && "before:bg-apollo-border-strong",
+              ),
         )}
       >
         <span className="flex items-center gap-2">

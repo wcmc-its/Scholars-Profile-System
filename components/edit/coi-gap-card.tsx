@@ -1,43 +1,43 @@
 /**
- * "From your publications" — the self-only, read-only panel that surfaces
- * relationships named in a scholar's OWN PubMed competing-interest statements
- * that we did not find among their current Weill Research Gateway disclosures
- * (`SELF_EDIT_COI_GAP_HINT`, dormant). It mirrors `coi-card.tsx` (the
- * `EditPanel` + `LockedBadge` shell) because this is a SIBLING of the disclosed
- * COI panel, not a new chrome.
+ * "From your publications" — the self-only advisory SUB-VIEW of Conflicts of
+ * Interest (`SELF_EDIT_COI_GAP_HINT`, dormant). It surfaces relationships named
+ * in a scholar's OWN PubMed competing-interest statements that we could not
+ * match to a current Weill Research Gateway disclosure.
  *
- * Governance posture (non-negotiable — `docs/coi-pubmed-unmatched-feasibility.md`
- * § /edit UX + § Governance):
+ * It is deliberately NOT styled like the read-only SOR panels: this is a
+ * DERIVED SUGGESTION, not authoritative data on file, so it carries no "Locked —
+ * managed at its source" chip (which would imply the list is ground truth).
+ * Instead three reassurance chips state the posture up front, and color tracks
+ * REASSURANCE not alarm — amber "Worth reviewing" (look when you get a chance),
+ * green "Likely covered" (probably already disclosed). Never red.
+ *
+ * Governance posture (non-negotiable — `docs/coi-pubmed-unmatched-feasibility.md`):
  *   - SUGGEST, never accuse. The forbidden vocabulary (undisclosed / failed to
- *     disclose / missing / violation / gap) appears nowhere in this surface. The
- *     framing is "we noticed … you may want to review", a candidate, not a
- *     verdict.
+ *     disclose / missing / violation / gap) appears nowhere on this surface.
  *   - The verbatim `sourceSentence` is ALWAYS rendered so the human, not a
- *     score, adjudicates.
- *   - Confidence is a qualitative tier chip (High / Medium) only — never a
+ *     score, adjudicates. Confidence is a qualitative tier only — never a
  *     percentage, never the numeric score (which never crosses to the client).
- *   - SPS is NOT the COI system of record: there is no in-app COI editing. The
- *     "review this" action routes to the Weill Research Gateway via the existing
- *     `coi` Request-a-Change flow. Nothing here notifies anyone.
- *   - The scholar can DISMISS a candidate they consider not relevant; the daily
- *     `etl:coi-gap` job respects a dismissal durably and never re-nags. The
- *     dismiss is optimistic (the row clears immediately), mirroring the
- *     publications / mentees hide pattern.
+ *   - SPS is NOT the COI system of record: no in-app COI editing. "Review in
+ *     Gateway" routes to WRG via the existing `coi` Request-a-Change flow.
+ *   - "Not relevant" is the scholar's PRIVATE hide of a suggestion, with undo —
+ *     never a compliance decision, and it reads back to no one. It persists
+ *     durably (the daily `etl:coi-gap` respects it and never re-nags); Undo
+ *     restores it.
  *
  * Self-only is enforced upstream at the data layer (`loadEditContext` only
  * populates `unmatchedPubmedCoi` for a genuine, non-impersonating self viewer
- * behind the flag) and again at the dismiss API; this component renders only
- * what it is handed.
+ * behind the flag) and again at the dismiss/restore APIs; this component renders
+ * only what it is handed.
  */
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { ArrowUpRight, ChevronLeft, EyeOff, Info, Lock } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
-import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { EditContextCoiGapCandidate } from "@/lib/api/edit-context";
@@ -50,11 +50,11 @@ export type CoiGapCardProps = {
 const PUBMED_URL = (pmid: string) => `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
 
 export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
-  // Local list seeds from the server array; a dismissed candidate is removed
-  // from it optimistically and the removal is confirmed by the API. On failure
-  // the row is restored with an inline error (no whole-page refresh — this page
-  // is force-dynamic and the local state is authoritative once committed).
-  const [list, setList] = React.useState<EditContextCoiGapCandidate[]>([...candidates]);
+  // The full set always renders; a "Not relevant" row flips IN PLACE to a
+  // "marked not relevant — Undo" line (the `dismissed` set is this session's
+  // view of which rows the scholar hid). The DB is the source of truth on
+  // reload — a committed dismissal is filtered out by the loader next time.
+  const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
 
@@ -66,40 +66,37 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
       return next;
     });
   }
+  function setDismissedFlag(id: string, on: boolean) {
+    setDismissed((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
 
-  function dismiss(candidate: EditContextCoiGapCandidate) {
-    const id = candidate.id;
+  // `dismiss` and its inverse `restore` (Undo) are the same optimistic shape: flip
+  // the local flag, POST, and roll back on failure. Both are durable + genuine-
+  // self-guarded server-side.
+  function mutate(id: string, action: "dismiss" | "restore") {
+    const dismiss = action === "dismiss";
     setError(id, null);
     setPending((prev) => new Set(prev).add(id));
-    // Optimistic remove — keep the snapshot so we can restore on failure.
-    setList((prev) => prev.filter((c) => c.id !== id));
+    setDismissedFlag(id, dismiss); // optimistic
     void (async () => {
       try {
-        const res = await fetch(`/api/edit/coi-gap/${encodeURIComponent(id)}/dismiss`, {
+        const res = await fetch(`/api/edit/coi-gap/${encodeURIComponent(id)}/${action}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: "{}",
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
         if (!res.ok || data.ok !== true) {
-          // Restore the row in its original order and surface a quiet error.
-          setList((prev) =>
-            [...prev, candidate].sort(
-              (a, b) =>
-                candidates.findIndex((c) => c.id === a.id) -
-                candidates.findIndex((c) => c.id === b.id),
-            ),
-          );
+          setDismissedFlag(id, !dismiss); // roll back
           setError(id, "We couldn't update this just now. Please try again.");
         }
       } catch {
-        setList((prev) =>
-          [...prev, candidate].sort(
-            (a, b) =>
-              candidates.findIndex((c) => c.id === a.id) -
-              candidates.findIndex((c) => c.id === b.id),
-          ),
-        );
+        setDismissedFlag(id, !dismiss);
         setError(id, "We couldn't update this just now. Please try again.");
       } finally {
         setPending((prev) => {
@@ -111,121 +108,175 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
     })();
   }
 
+  const active = candidates.filter((c) => !dismissed.has(c.id));
+  const reviewing = active.filter((c) => c.tier === "High").length;
+  const covered = active.filter((c) => c.tier === "Medium").length;
+  const summaryParts: string[] = [];
+  if (reviewing) summaryParts.push(`${reviewing} worth reviewing`);
+  if (covered) summaryParts.push(`${covered} likely already covered`);
+  const summary = summaryParts.length > 0 ? summaryParts.join(" · ") : "Nothing left to review";
+
   return (
-    <EditPanel
-      slot="coi-gap-panel"
-      heading="From your publications"
-      description={
-        <>
-          These relationships were named in the &ldquo;Competing interests&rdquo; statements of your
-          own PubMed-indexed publications, and we did not find a matching entry among your current
-          Weill Research Gateway disclosures. This is a suggestion to help you keep your disclosures
-          current &mdash; it is shown only to you, it is not a compliance judgement, and disclosures
-          are always managed in the Weill Research Gateway, never here. When in doubt, it&rsquo;s
-          worth a look.
-        </>
-      }
-    >
-      <LockedBadge />
+    <>
+      <Link
+        href="/edit?attr=coi"
+        data-testid="coi-gap-back"
+        className="text-apollo-slate -mb-1 inline-flex w-fit items-center gap-1 text-sm font-medium hover:underline"
+      >
+        <ChevronLeft className="size-4" aria-hidden />
+        Conflicts of Interest
+      </Link>
 
-      <ul className="divide-apollo-border divide-y" data-slot="coi-gap-panel-list">
-        {list.map((c) => {
-          const isPending = pending.has(c.id);
-          const error = errors.get(c.id) ?? null;
-          return (
-            <li
-              key={c.id}
-              className="flex flex-col gap-2.5 py-4"
-              data-testid={`coi-gap-row-${c.id}`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <TierChip tier={c.tier} />
-                    <span className="text-foreground text-base font-medium">{c.entity}</span>
-                  </div>
-                  <blockquote
-                    className="border-apollo-border text-foreground border-l-2 pl-3 text-sm leading-snug italic"
-                    data-testid={`coi-gap-source-${c.id}`}
-                  >
-                    &ldquo;{c.sourceSentence}&rdquo;
-                  </blockquote>
-                  <p className="text-muted-foreground mt-1.5 text-sm">
-                    Mentioned in{" "}
-                    <a
-                      href={PUBMED_URL(c.pmid)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-apollo-maroon underline underline-offset-2"
-                    >
-                      PMID {c.pmid}
-                    </a>
-                    . You may want to review this relationship in the Weill Research Gateway.
-                  </p>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
-                  <RequestAChangeDialog
-                    attribute="coi"
-                    cwid={cwid}
-                    itemLabel={c.entity}
-                    triggerTestId={`coi-gap-review-${c.id}`}
-                    trigger={(open) => (
-                      <Button type="button" variant="outline" size="sm" onClick={open}>
-                        Review in the Weill Research Gateway
-                      </Button>
-                    )}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={isPending}
-                    onClick={() => dismiss(c)}
-                    data-testid={`coi-gap-dismiss-${c.id}`}
-                  >
-                    Not relevant
-                  </Button>
-                </div>
-              </div>
-              {error && (
-                <Alert variant="destructive">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      <EditPanel
+        slot="coi-gap-panel"
+        heading="From your publications"
+        description="Relationships named in the “Competing interests” statements of your own PubMed-indexed papers that we couldn’t match to a current Weill Research Gateway disclosure."
+      >
+        <ul className="flex flex-wrap gap-2" data-testid="coi-gap-reassure">
+          <ReassureChip icon={EyeOff} label="Visible only to you" />
+          <ReassureChip icon={Info} label="Not a compliance judgement" />
+          <ReassureChip icon={Lock} label="Managed in the Gateway, never here" />
+        </ul>
 
-      {list.length === 0 && (
-        <p className="text-muted-foreground text-sm" data-testid="coi-gap-empty">
-          Nothing here right now.
+        <p
+          className="border-apollo-border text-muted-foreground border-t pt-3 text-sm"
+          data-testid="coi-gap-summary"
+        >
+          {summary}
         </p>
-      )}
-    </EditPanel>
+
+        <ul data-slot="coi-gap-panel-list">
+          {candidates.map((c) => {
+            const isDismissed = dismissed.has(c.id);
+            const isPending = pending.has(c.id);
+            const error = errors.get(c.id) ?? null;
+            return (
+              <li
+                key={c.id}
+                className="border-apollo-border border-t py-4 first:border-t-0"
+                data-testid={`coi-gap-row-${c.id}`}
+              >
+                {isDismissed ? (
+                  <div className="flex items-center justify-between gap-3 opacity-80">
+                    <span className="text-muted-foreground text-sm">
+                      <span className="text-foreground font-semibold">{c.entity}</span> — marked not
+                      relevant
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() => mutate(c.id, "restore")}
+                      data-testid={`coi-gap-undo-${c.id}`}
+                    >
+                      Undo
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-5">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-2 flex items-center gap-2.5">
+                        <TierChip tier={c.tier} />
+                        <span className="text-foreground text-base font-semibold">{c.entity}</span>
+                      </div>
+                      <blockquote
+                        className="border-apollo-slate-tint-border text-foreground border-l-2 pl-3 text-sm leading-snug italic"
+                        data-testid={`coi-gap-source-${c.id}`}
+                      >
+                        “{c.sourceSentence}”
+                      </blockquote>
+                      <p className="text-muted-foreground mt-2 text-[0.8rem]">
+                        From{" "}
+                        <a
+                          href={PUBMED_URL(c.pmid)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-apollo-slate font-medium underline-offset-2 hover:underline"
+                        >
+                          PMID {c.pmid}
+                        </a>
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-2.5">
+                      <RequestAChangeDialog
+                        attribute="coi"
+                        cwid={cwid}
+                        itemLabel={c.entity}
+                        triggerTestId={`coi-gap-review-${c.id}`}
+                        trigger={(open) => (
+                          <button
+                            type="button"
+                            onClick={open}
+                            className="text-apollo-slate inline-flex items-center gap-1 text-[0.85rem] font-medium hover:underline"
+                          >
+                            Review in Gateway
+                            <ArrowUpRight className="size-3.5" aria-hidden />
+                          </button>
+                        )}
+                      />
+                      <button
+                        type="button"
+                        disabled={isPending}
+                        onClick={() => mutate(c.id, "dismiss")}
+                        className="text-muted-foreground hover:text-foreground text-[0.8rem] disabled:opacity-50"
+                        data-testid={`coi-gap-dismiss-${c.id}`}
+                      >
+                        Not relevant
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {error && (
+                  <Alert variant="destructive" className="mt-2">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </EditPanel>
+    </>
+  );
+}
+
+/** A slate "posture" pill — states the self-only / not-a-judgement framing up
+ *  front instead of burying it in prose. */
+function ReassureChip({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  label: string;
+}) {
+  return (
+    <li className="border-apollo-slate-tint-border bg-apollo-slate-tint text-apollo-slate inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium">
+      <Icon className="size-3.5" aria-hidden />
+      {label}
+    </li>
   );
 }
 
 /**
- * The qualitative confidence chip. High = the relationship cleanly bound to this
- * scholar; Medium = a softer match worth a glance. Never a percentage, never the
- * numeric score. Wording is neutral ("Worth reviewing" / "Possible match") — it
- * describes the suggestion's strength, not a finding.
+ * Qualitative confidence chip — color tracks reassurance, never alarm. High =
+ * amber "Worth reviewing" (look when you get a chance); Medium = green "Likely
+ * covered" (probably already disclosed). Never a percentage, never the numeric
+ * score (which never crosses to the client).
  */
 function TierChip({ tier }: { tier: "High" | "Medium" }) {
-  const label = tier === "High" ? "Worth reviewing" : "Possible match";
+  const review = tier === "High";
   return (
-    <Badge
-      variant="outline"
+    <span
       data-testid={`coi-gap-tier-${tier}`}
       className={cn(
-        "rounded-full",
-        tier === "High"
-          ? "bg-apollo-maroon/10 text-apollo-maroon border-apollo-maroon/20"
-          : "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border",
+        "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+        review
+          ? "text-apollo-amber bg-apollo-amber-tint border-apollo-amber-tint-border"
+          : "text-apollo-green bg-apollo-green-tint border-apollo-green-tint-border",
       )}
     >
-      {label}
-    </Badge>
+      {review ? "Worth reviewing" : "Likely covered"}
+    </span>
   );
 }

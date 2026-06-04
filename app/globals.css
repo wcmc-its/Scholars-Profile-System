@@ -97,8 +97,11 @@
   --apollo-green-foreground: #1f5c42;
   /* Semantic amber — "incomplete / needs you". The completeness checklist's
      to-do marker, progress fill, and missing-headshot badge: an invitation,
-     never a danger-red alarm. */
+     never a danger-red alarm. The tint pair backs the "worth reviewing"
+     advisory badge + the COI → publications bridge callout. */
   --apollo-amber: #8a5a06;
+  --apollo-amber-tint: #fbf1dc;
+  --apollo-amber-tint-border: #efdbaf;
   /* Maroon tint — selected option in Request-a-change. */
   --apollo-red-tint: #f8ecee;
   --apollo-red-tint-border: #e4c9ce;
@@ -176,6 +179,8 @@
   --color-apollo-green-tint-border: var(--apollo-green-tint-border);
   --color-apollo-green-foreground: var(--apollo-green-foreground);
   --color-apollo-amber: var(--apollo-amber);
+  --color-apollo-amber-tint: var(--apollo-amber-tint);
+  --color-apollo-amber-tint-border: var(--apollo-amber-tint-border);
   --color-apollo-red-tint: var(--apollo-red-tint);
   --color-apollo-red-tint-border: var(--apollo-red-tint-border);
   --radius-lg: var(--radius);

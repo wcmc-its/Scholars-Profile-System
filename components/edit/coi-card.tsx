@@ -12,10 +12,14 @@
  */
 "use client";
 
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
+import { Button } from "@/components/ui/button";
 import { groupCoiDisclosures } from "@/lib/coi-groups";
 import type { EditContextCoiDisclosure } from "@/lib/api/edit-context";
 
@@ -24,11 +28,30 @@ export type CoiCardProps = {
   mode: "self" | "superuser";
   scholarName: string;
   disclosures: ReadonlyArray<EditContextCoiDisclosure>;
+  /**
+   * Count of publication-derived suggestions on the nested "From your
+   * publications" sub-view. When > 0, an amber bridge invites the scholar over
+   * so the suggestions are discoverable from the COI page (otherwise a scholar
+   * with no disclosures lands on a dead "nothing on file" and never finds them).
+   * Always 0 for the superuser/impersonation paths (the loader returns no
+   * candidates there), so the bridge is inherently self-only.
+   */
+  suggestionCount?: number;
+  /** Href of the nested suggestions sub-view (self mode). */
+  suggestionsHref?: string;
 };
 
-export function CoiCard({ cwid, mode, scholarName, disclosures }: CoiCardProps) {
+export function CoiCard({
+  cwid,
+  mode,
+  scholarName,
+  disclosures,
+  suggestionCount = 0,
+  suggestionsHref,
+}: CoiCardProps) {
   const possessive = mode === "superuser" ? `${scholarName}'s` : "your";
   const groups = groupCoiDisclosures(disclosures);
+  const showBridge = suggestionCount > 0 && Boolean(suggestionsHref);
 
   return (
     <EditPanel
@@ -56,6 +79,31 @@ export function CoiCard({ cwid, mode, scholarName, disclosures }: CoiCardProps) 
               <p className="text-foreground text-base leading-snug">{entities.join("; ")}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {showBridge && (
+        <div
+          className="border-apollo-amber-tint-border bg-apollo-amber-tint flex flex-wrap items-center justify-between gap-4 rounded-md border px-4 py-3.5"
+          data-testid="coi-suggestions-bridge"
+        >
+          <div className="min-w-0">
+            <p className="text-foreground flex items-center gap-2 text-sm font-semibold">
+              <span className="bg-apollo-amber size-[7px] shrink-0 rounded-full" aria-hidden />
+              {suggestionCount} {suggestionCount === 1 ? "relationship" : "relationships"} from your
+              publications worth a look
+            </p>
+            <p className="text-muted-foreground mt-1 max-w-prose text-[0.8rem] leading-relaxed">
+              Some papers you authored name relationships in their competing-interests statements that
+              don&rsquo;t match a current Gateway disclosure. Visible only to you.
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href={suggestionsHref!} data-testid="coi-suggestions-bridge-link">
+              Review suggestions
+              <ArrowRight className="size-4" aria-hidden />
+            </Link>
+          </Button>
         </div>
       )}
 
