@@ -174,27 +174,6 @@ describe("SlugCard — Clear override", () => {
   });
 });
 
-describe("SlugCard — dirty propagation", () => {
-  it("fires onDirtyChange(true) after the first edit and (false) on a successful save", async () => {
-    const onDirty = vi.fn();
-    stubFetch({ body: { ok: true, fieldName: "slug", value: "new-handle" } });
-    render(
-      <SlugCard
-        cwid={CWID}
-        liveSlug="alex"
-        initialOverride={null}
-        onDirtyChange={onDirty}
-      />,
-    );
-    // Initial dirty=false propagates once.
-    expect(onDirty).toHaveBeenLastCalledWith(false);
-    typeInto("new-handle");
-    expect(onDirty).toHaveBeenLastCalledWith(true);
-    fireEvent.click(screen.getByTestId("slug-card-save"));
-    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
-  });
-});
-
 describe("SlugCard — initial-override rendering", () => {
   it("displays the override in the URL preview when initialOverride is set", () => {
     render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride="custom" />);

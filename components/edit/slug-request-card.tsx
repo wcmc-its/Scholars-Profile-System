@@ -31,17 +31,12 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
+import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { type SlugRequestSummary } from "@/lib/edit/slug-request";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
@@ -59,9 +54,6 @@ export type SlugRequestCardProps = {
   currentSlug: string;
   /** The scholar's latest request, or `null` if they have never filed one. */
   latestRequest: SlugRequestSummary | null;
-  /** Fires when the unsaved-input guard arms/disarms; optional (the card mounts
-   *  its own `UnsavedChangesGuard` regardless). */
-  onDirtyChange?: (dirty: boolean) => void;
 };
 
 type Phase = "idle" | "pending" | "rejected" | "approved";
@@ -85,7 +77,6 @@ export function SlugRequestCard({
   cwid,
   currentSlug,
   latestRequest,
-  onDirtyChange,
 }: SlugRequestCardProps) {
   const router = useRouter();
   const [phase, setPhase] = React.useState<Phase>(() => initialPhase(latestRequest));
@@ -111,9 +102,6 @@ export function SlugRequestCard({
   // The input only exists in Idle / Rejected / Just-approved; in Pending it is
   // absent so `dirty` is always false there (inputValue stays "").
   const dirty = inputValue !== "";
-  React.useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
 
   // A just-approved banner is transient: show it, then collapse to Idle.
   React.useEffect(() => {
@@ -212,19 +200,15 @@ export function SlugRequestCard({
   const showInput = phase === "idle" || phase === "rejected" || phase === "approved";
 
   return (
-    <Card data-slot="slug-request-card">
+    <EditPanel
+      slot="slug-request-card"
+      heading="Profile URL"
+      owned
+      description="Request a personalized web address for your public profile. A Scholars administrator reviews every request."
+      headerAction={phase !== "idle" ? <StatusTag phase={phase} /> : undefined}
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2">
-          Profile URL
-          {phase !== "idle" && <StatusTag phase={phase} />}
-        </CardTitle>
-        <CardDescription>
-          Request a personalized web address for your public profile. A Scholars
-          administrator reviews every request.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <p className="text-sm">
           <span className="text-muted-foreground">Your current URL: </span>
           <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
@@ -343,11 +327,11 @@ export function SlugRequestCard({
                 Add a note for the reviewer (optional)
               </button>
               {reasonOpen && (
-                <textarea
-                  className="border-input bg-transparent placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
+                <Textarea
                   value={reasonValue}
                   onChange={(e) => setReasonValue(e.target.value)}
                   maxLength={1000}
+                  rows={3}
                   placeholder="Why you'd like this address (optional)"
                   data-testid="slug-request-reason"
                 />
@@ -357,6 +341,7 @@ export function SlugRequestCard({
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
+                variant="apollo"
                 onClick={handleSubmit}
                 disabled={!canSubmit}
                 data-testid="slug-request-submit"
@@ -375,8 +360,8 @@ export function SlugRequestCard({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </EditPanel>
   );
 }
 

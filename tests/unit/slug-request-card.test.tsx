@@ -244,19 +244,3 @@ describe("SlugRequestCard — withdrawn/superseded render as Idle", () => {
   });
 });
 
-describe("SlugRequestCard — dirty propagation", () => {
-  it("fires onDirtyChange(true) once the scholar types in Idle", () => {
-    const onDirty = vi.fn();
-    render(
-      <SlugRequestCard
-        cwid={CWID}
-        currentSlug="jane"
-        latestRequest={null}
-        onDirtyChange={onDirty}
-      />,
-    );
-    expect(onDirty).toHaveBeenLastCalledWith(false);
-    typeInto("jane-smith");
-    expect(onDirty).toHaveBeenLastCalledWith(true);
-  });
-});
