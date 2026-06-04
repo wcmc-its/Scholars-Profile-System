@@ -339,7 +339,7 @@ export function RequestAChangeDialog({
             /* ---- the router ---- */
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
-                <p id={`rac-q-${attribute}`} className="text-base font-medium">
+                <p id={`rac-q-${attribute}`} className="text-lg font-semibold">
                   {config.heading}
                 </p>
                 <DialogDescription>
@@ -352,7 +352,7 @@ export function RequestAChangeDialog({
                 aria-labelledby={`rac-q-${attribute}`}
                 value={issueId ?? ""}
                 onValueChange={selectIssue}
-                className="gap-1.5"
+                className="gap-2.5"
               >
                 {config.issues.map((i) => {
                   const selected = i.id === issueId;
@@ -366,12 +366,12 @@ export function RequestAChangeDialog({
                         "overflow-hidden rounded-md border transition-colors",
                         selected
                           ? "bg-apollo-red-tint border-apollo-red-tint-border"
-                          : "border-apollo-border",
+                          : "border-apollo-border hover:border-apollo-border-strong hover:bg-apollo-surface-2",
                       )}
                     >
                       <label
                         htmlFor={`rac-${i.id}`}
-                        className="flex cursor-pointer items-center gap-2.5 px-3 py-2.5"
+                        className="flex cursor-pointer items-center gap-3 px-4 py-3.5"
                       >
                         <RadioGroupItem
                           id={`rac-${i.id}`}
@@ -382,11 +382,13 @@ export function RequestAChangeDialog({
                               "border-apollo-maroon text-apollo-maroon [&_svg]:fill-apollo-maroon",
                           )}
                         />
-                        <span className="flex-1 text-sm">{i.label}</span>
+                        <span className={cn("flex-1 text-base", selected && "font-semibold")}>
+                          {i.label}
+                        </span>
                         {!selected && hint && (
-                          <span className="text-apollo-slate flex shrink-0 items-center gap-1 text-xs">
+                          <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
                             {hint}
-                            <ArrowRight className="size-3" />
+                            <ArrowRight className="size-3.5" />
                           </span>
                         )}
                       </label>

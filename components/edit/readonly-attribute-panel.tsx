@@ -9,6 +9,8 @@
 
 import type { ReactNode } from "react";
 
+import { Lock } from "lucide-react";
+
 import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
@@ -43,6 +45,11 @@ export function ReadonlyAttributePanel({
       heading={heading}
       description={description}
     >
+      <span className="bg-apollo-lock-bg border-apollo-border text-muted-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium">
+        <Lock className="size-3" aria-hidden />
+        Locked — managed at its source
+      </span>
+
       {media}
 
       {fields && fields.length > 0 && (

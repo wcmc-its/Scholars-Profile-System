@@ -545,7 +545,7 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           office: "ITS Support",
           email: SUPPORT_EMAIL,
           sourceSystem: "Scholars",
-          note: "Personalized URLs aren't self-service yet. Tell us the name-based address you'd like — a variation of your own first and last name, using lowercase letters, numbers, and hyphens — and we'll set it up. Your current address keeps working.",
+          note: "Personalized URLs aren't self-service. Tell us the name-based address you'd like — a variation of your own first and last name, using lowercase letters, numbers, and hyphens — and we'll set it up. Your current address keeps working.",
           cta: "Request a personalized URL",
         }),
       },

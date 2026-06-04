@@ -350,7 +350,7 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
       </p>
       <div className="text-muted-foreground flex flex-col gap-2 text-sm">
         <p>
-          Personalized URLs aren&rsquo;t self-service yet, but you can request one &mdash; a Scholars
+          Personalized URLs aren&rsquo;t self-service, but you can request one &mdash; a Scholars
           administrator reviews every request.
         </p>
         <p>
