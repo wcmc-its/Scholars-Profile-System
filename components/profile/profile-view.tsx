@@ -96,15 +96,21 @@ export async function ProfileView({ slug }: { slug: string }) {
   // `"{cwid}:"`. Drop hidden mentees BEFORE computing the count / distribution
   // so the header reflects only what's shown. `mentoring.ts` stays reporting-
   // only / pure; the suppression read lives here, where db access already is.
-  const menteeSuppressions = await db.read.suppression.findMany({
-    where: {
-      entityType: "mentee",
-      entityId: { startsWith: `${profile.cwid}:` },
-      contributorCwid: null,
-      revokedAt: null,
-    },
-    select: { entityId: true },
-  });
+  // Skip the suppression read entirely when the scholar mentors no one (the
+  // common case): no point querying for an empty filter, and it keeps a
+  // no-mentee render from ever touching the pool (e.g. CI / a degraded DB).
+  const menteeSuppressions =
+    menteesAll.length > 0
+      ? await db.read.suppression.findMany({
+          where: {
+            entityType: "mentee",
+            entityId: { startsWith: `${profile.cwid}:` },
+            contributorCwid: null,
+            revokedAt: null,
+          },
+          select: { entityId: true },
+        })
+      : [];
   const mentees = filterHiddenMentees(
     menteesAll,
     hiddenMenteeCwids(profile.cwid, menteeSuppressions),
