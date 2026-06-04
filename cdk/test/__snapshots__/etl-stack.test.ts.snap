@@ -1073,6 +1073,36 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api:RECITER_API_KEY::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
@@ -1246,6 +1276,18 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/jenzabar",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api",
                     ],
                   ],
                 },
@@ -1460,6 +1502,25 @@ exports[`EtlStack prod matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/jenzabar-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/reciter-api-??????",
                   ],
                 ],
               },
@@ -4719,6 +4780,36 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                   ],
                 },
               },
+              {
+                "Name": "RECITER_API_BASE_URL",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_BASE_URL::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "RECITER_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api:RECITER_API_KEY::",
+                    ],
+                  ],
+                },
+              },
             ],
           },
         ],
@@ -4892,6 +4983,18 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/jenzabar",
+                    ],
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api",
                     ],
                   ],
                 },
@@ -5106,6 +5209,25 @@ exports[`EtlStack staging matches the snapshot 1`] = `
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/jenzabar-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/reciter-api-??????",
                   ],
                 ],
               },

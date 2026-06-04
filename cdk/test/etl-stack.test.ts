@@ -85,6 +85,10 @@ const EXPECTED_SECRET_ENV_VARS = [
   "SCHOLARS_JENZABAR_DATABASE",
   "SCHOLARS_JENZABAR_USERNAME",
   "SCHOLARS_JENZABAR_PASSWORD",
+  // reciter REST API (#746 -- the "Not mine" reject scanner; ADMIN api-key kept
+  // out of the public web app, injected ONLY into this ETL task)
+  "RECITER_API_BASE_URL",
+  "RECITER_API_KEY",
 ] as const;
 
 // IAM-based sources read these as plaintext config from the environment
@@ -622,7 +626,7 @@ describe("EtlStack", () => {
     });
 
     describe("IAM least-privilege guards", () => {
-      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 9 consumer ARNs (no *)", () => {
+      it("the task-execution role's secretsmanager:GetSecretValue lists exactly the 10 consumer ARNs (no *)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const execPolicy = Object.values(policies).find((p) => {
           const roles = p.Properties?.Roles as
@@ -647,10 +651,11 @@ describe("EtlStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        // 6 credentialed sources + db/etl + opensearch/etl + revalidate-token
-        // = 9. The dynamodb/spotlight/hierarchy sources are IAM-based (task
-        // role) and read no injected secret, so they are absent (#442).
-        expect(resourceList).toHaveLength(9);
+        // 7 credentialed sources (incl. reciter-api, #746) + db/etl +
+        // opensearch/etl + revalidate-token = 10. The dynamodb/spotlight/
+        // hierarchy sources are IAM-based (task role) and read no injected
+        // secret, so they are absent (#442).
+        expect(resourceList).toHaveLength(10);
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
         }

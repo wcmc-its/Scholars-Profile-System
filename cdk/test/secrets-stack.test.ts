@@ -43,6 +43,9 @@ function expectedSecrets(env: "staging" | "prod"): string[] {
     `scholars/${env}/saml/idp-cert`,
     `scholars/${env}/newrelic-license-key`,
     ...PER_SOURCE_ETL_NAMES.map((s) => `scholars/${env}/etl/${s}`),
+    // #746 — ReCiter engine REST API (ETL-task only); distinct from the
+    // etl/reciter ReciterDB DSN above.
+    `scholars/${env}/reciter-api`,
     `scholars/${env}/edge/origin-shared-secret`,
     `scholars/${env}/oncall/teams-webhook-url`,
   ];
@@ -60,7 +63,7 @@ describe("SecretsStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("creates the expected set of secrets by name (fourteen core incl. opensearch/master + session-cookie-key + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + nine per-source ETL stubs + EdgeStack origin shared secret + on-call Teams webhook)", () => {
+    it("creates the expected set of secrets by name (fourteen core incl. opensearch/master + session-cookie-key + saml/idp-cert + saml-sp/cert + db/bootstrap + db/migrate (ADR-009) + newrelic-license-key + nine per-source ETL stubs + reciter-api (#746) + EdgeStack origin shared secret + on-call Teams webhook)", () => {
       template.resourceCountIs(
         "AWS::SecretsManager::Secret",
         EXPECTED_SECRET_COUNT,
