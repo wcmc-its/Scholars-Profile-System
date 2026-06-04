@@ -29,6 +29,10 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   // panel renders a source line for it); the entry exists only because the map
   // is a total Record over the shared `RequestAttribute` union.
   "org-unit": "Enterprise Directory / Scholars",
+  // Conflicts of interest are read-only here; the scholar manages them in WRG.
+  coi: "Weill Research Gateway",
+  // Mentee relationships are derived from training records (Jenzabar / EC).
+  mentees: "Jenzabar or Employee Central",
 };
 
 /** The system-of-record label for a sourced `/edit` attribute. */

@@ -60,7 +60,10 @@ export type AuditEntityType =
   /** org-unit targets (#540 Phase 1); `targetEntityId` is the unit `code` */
   | "department"
   | "division"
-  | "center";
+  | "center"
+  /** a derived mentee a mentor hid (#160 follow-up); `targetEntityId` is
+   *  `"{mentorCwid}:{menteeCwid}"` */
+  | "mentee";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

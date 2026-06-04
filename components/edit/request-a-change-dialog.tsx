@@ -52,6 +52,8 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   funding: "Funding",
   publications: "Publications",
   "org-unit": "Org Unit",
+  coi: "Conflicts of Interest",
+  mentees: "Mentees",
 };
 
 /** The footer verb for an action (its config `cta`, else a sensible default). */

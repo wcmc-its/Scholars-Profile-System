@@ -9,10 +9,12 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { CoiCard } from "@/components/edit/coi-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
 import { FundingCard } from "@/components/edit/funding-card";
+import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
@@ -34,6 +36,8 @@ type AttrKey =
   | "funding"
   | "appointments"
   | "education"
+  | "coi"
+  | "mentees"
   | "profile-url";
 
 type AttrDef = {
@@ -55,6 +59,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
+  // Mentees — suppressible (hide/show); corrections route to ITS Support.
+  { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
+  // Conflicts of interest — read-only; managed in the Weill Research Gateway.
+  { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
@@ -81,8 +89,10 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "funding",
   "appointments",
   "education",
+  "mentees",
   "name-title",
   "photo",
+  "coi",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   home: "owned",
@@ -93,8 +103,10 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   funding: "sourced",
   appointments: "sourced",
   education: "sourced",
+  mentees: "sourced",
   "name-title": "readonly",
   photo: "readonly",
+  coi: "readonly",
 };
 const SELF_RAIL_GROUP = {
   owned: "Yours to edit",
@@ -268,6 +280,19 @@ function renderPanel(
     case "education":
       return (
         <EducationCard cwid={cwid} mode={mode} scholarName={scholarName} educations={ctx.educations} />
+      );
+    case "mentees":
+      return (
+        <MenteesCard cwid={cwid} mode={mode} scholarName={scholarName} mentees={ctx.mentees} />
+      );
+    case "coi":
+      return (
+        <CoiCard
+          cwid={cwid}
+          mode={mode}
+          scholarName={scholarName}
+          disclosures={ctx.coiDisclosures}
+        />
       );
     case "profile-url":
       // Superuser sets a slug directly; a scholar requests one for approval —

@@ -324,15 +324,29 @@ export type SuppressibleEntityOwner = { ownerCwid: string; title: string | null 
 
 /**
  * Resolve the owning scholar (and, for an appointment, its title) of a
- * grant / education / appointment by stable `externalId` (#352). The suppress
- * endpoint uses this as the 400 existence gate AND to feed the pure
+ * grant / education / appointment / mentee by stable `externalId` (#352). The
+ * suppress endpoint uses this as the 400 existence gate AND to feed the pure
  * `authorizeSuppress` owner check (#160). No matching row → `null` → 400.
+ *
+ * A `mentee` is the special case: the relationship is derived (no FK; the
+ * reporting DB is truncate-rebuilt nightly), so there is no DB row to look up.
+ * Its `externalId` is `"{mentorCwid}:{menteeCwid}"` and the OWNER is the mentor
+ * (the substring before the colon) — "this mentor hides this mentee from their
+ * profile." A malformed id with no mentor segment returns `null` → 400.
  */
 export async function findSuppressibleEntityOwner(
-  entityType: "grant" | "education" | "appointment",
+  entityType: "grant" | "education" | "appointment" | "mentee",
   externalId: string,
   client: EntityOwnerClient,
 ): Promise<SuppressibleEntityOwner | null> {
+  if (entityType === "mentee") {
+    // No DB lookup — mentees are derived. Owner = the mentor segment of
+    // `{mentorCwid}:{menteeCwid}`. Require BOTH segments non-empty so a bare
+    // `"aog2001"` or `"aog2001:"` (no mentee) is rejected.
+    const [mentorCwid, menteeCwid] = externalId.split(":");
+    if (!mentorCwid || !menteeCwid) return null;
+    return { ownerCwid: mentorCwid, title: null };
+  }
   if (entityType === "grant") {
     const r = await client.grant.findUnique({
       where: { externalId },

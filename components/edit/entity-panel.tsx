@@ -35,13 +35,14 @@ import { cn } from "@/lib/utils";
 import type { EditEntityState } from "@/lib/api/edit-context";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
-type EntityType = "appointment" | "education" | "grant";
+type EntityType = "appointment" | "education" | "grant" | "mentee";
 
 /** Map the entity type to its "Request a change" attribute key. */
 const REQUEST_ATTR: Record<EntityType, RequestAttribute> = {
   appointment: "appointments",
   education: "education",
   grant: "funding",
+  mentee: "mentees",
 };
 
 /** The minimum shape every entity row carries. */
@@ -93,6 +94,7 @@ const HIDE_NOUN: Record<EntityType, string> = {
   appointment: "appointment",
   education: "entry",
   grant: "grant",
+  mentee: "mentee",
 };
 
 export function EntityPanel<T extends EntityRow>({

@@ -206,6 +206,18 @@ export async function resolveAffectedProfiles(
     });
     return row?.scholar ? [{ slug: row.scholar.slug, cwid: row.scholar.cwid }] : [];
   }
+  if (entityType === "mentee") {
+    // A mentee hide/show touches the MENTOR's profile (where the mentee chip
+    // renders). `entityId` is `{mentorCwid}:{menteeCwid}`; the owner is the
+    // mentor segment. Resolve their slug for the ISR bust + CDN invalidation.
+    const mentorCwid = entityId.split(":")[0];
+    if (!mentorCwid) return [];
+    const scholar = await db.read.scholar.findUnique({
+      where: { cwid: mentorCwid },
+      select: { slug: true, cwid: true },
+    });
+    return scholar ? [{ slug: scholar.slug, cwid: scholar.cwid }] : [];
+  }
   if (contributorCwid) {
     const scholar = await db.read.scholar.findUnique({
       where: { cwid: contributorCwid },
