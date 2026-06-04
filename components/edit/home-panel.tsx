@@ -38,6 +38,11 @@ import { cn, initials } from "@/lib/utils";
 const PANEL_HEADING_ID = "panel-heading";
 
 export type HomePanelProps = {
+  /** Whose board this is. `"self"` (default) is the scholar's own task board;
+   *  `"superuser"` reframes it as a read-only completeness overview of another
+   *  scholar — third-person copy, an Overview "View" (not edit) CTA, and the
+   *  Publications row's CTA dropped (superusers have no per-scholar pubs tab). */
+  mode?: "self" | "superuser";
   basePath: string;
   preferredName: string;
   /** The WCM directory headshot URL for this scholar (404s when none exists). */
@@ -58,6 +63,7 @@ export type HomePanelProps = {
 type HeadshotState = "loading" | "present" | "missing";
 
 export function HomePanel({
+  mode = "self",
   basePath,
   preferredName,
   identityImageEndpoint,
@@ -69,6 +75,7 @@ export function HomePanel({
   isSuperuser = false,
 }: HomePanelProps) {
   const headshot = useHeadshotProbe(identityImageEndpoint);
+  const isAdmin = mode === "superuser";
 
   // A real count over four essentials — not a percentage. An item counts only
   // when it is genuinely satisfied; while the headshot is still probing it does
@@ -86,20 +93,26 @@ export function HomePanel({
         <ProfileAvatar state={headshot} preferredName={preferredName} src={identityImageEndpoint} />
         <div className="min-w-0 flex-1">
           <h2 id={PANEL_HEADING_ID} className="text-lg font-semibold">
-            Complete your profile
+            {isAdmin ? "Profile completeness" : "Complete your profile"}
           </h2>
           <ProgressMeter done={done} total={total} />
         </div>
       </header>
 
-      <ChecklistGroup label="Yours to edit">
-        <OverviewItem basePath={basePath} hasBio={hasBio} />
-        <VisibilityItem basePath={basePath} isHidden={isHidden} />
+      <ChecklistGroup label={isAdmin ? "Profile content" : "Yours to edit"}>
+        <OverviewItem basePath={basePath} hasBio={hasBio} isAdmin={isAdmin} name={preferredName} />
+        <VisibilityItem basePath={basePath} isHidden={isHidden} isAdmin={isAdmin} />
       </ChecklistGroup>
 
       <ChecklistGroup label="From WCM systems">
-        <HeadshotItem state={headshot} />
-        <PublicationsItem basePath={basePath} total={totalPublications} hidden={hiddenPublications} />
+        <HeadshotItem state={headshot} isAdmin={isAdmin} name={preferredName} />
+        <PublicationsItem
+          basePath={basePath}
+          total={totalPublications}
+          hidden={hiddenPublications}
+          isAdmin={isAdmin}
+          name={preferredName}
+        />
       </ChecklistGroup>
 
       {(manageableUnits.length > 0 || isSuperuser) && (
@@ -365,7 +378,17 @@ function RowLink({
   );
 }
 
-function OverviewItem({ basePath, hasBio }: { basePath: string; hasBio: boolean }) {
+function OverviewItem({
+  basePath,
+  hasBio,
+  isAdmin,
+  name,
+}: {
+  basePath: string;
+  hasBio: boolean;
+  isAdmin: boolean;
+  name: string;
+}) {
   const href = `${basePath}?attr=overview`;
   if (hasBio) {
     return (
@@ -373,10 +396,31 @@ function OverviewItem({ basePath, hasBio }: { basePath: string; hasBio: boolean 
         testId="home-item-overview"
         marker="done"
         title="Overview written"
-        subtitle="Showing at the top of your public profile."
+        subtitle={
+          isAdmin
+            ? `Showing at the top of ${name}'s public profile.`
+            : "Showing at the top of your public profile."
+        }
         action={
           <RowLink href={href} testId="home-card-overview">
-            Edit
+            {isAdmin ? "View" : "Edit"}
+          </RowLink>
+        }
+      />
+    );
+  }
+  // Admin: overview is read-only for superusers, so the gap is a signal (amber
+  // to-do) but the CTA only views it — only the scholar can write the section.
+  if (isAdmin) {
+    return (
+      <ChecklistRow
+        testId="home-item-overview"
+        marker="todo"
+        title="No overview yet"
+        subtitle="Only the scholar can write this section."
+        action={
+          <RowLink href={href} testId="home-card-overview">
+            View
           </RowLink>
         }
       />
@@ -399,7 +443,15 @@ function OverviewItem({ basePath, hasBio }: { basePath: string; hasBio: boolean 
   );
 }
 
-function VisibilityItem({ basePath, isHidden }: { basePath: string; isHidden: boolean }) {
+function VisibilityItem({
+  basePath,
+  isHidden,
+  isAdmin,
+}: {
+  basePath: string;
+  isHidden: boolean;
+  isAdmin: boolean;
+}) {
   return (
     <ChecklistRow
       testId="home-item-visibility"
@@ -407,7 +459,9 @@ function VisibilityItem({ basePath, isHidden }: { basePath: string; isHidden: bo
       title={isHidden ? "Profile hidden" : "Visible in Scholars"}
       subtitle={
         isHidden
-          ? "Hidden from public search — visible only to you. Change it anytime."
+          ? isAdmin
+            ? "Hidden from public search and the public profile. Change it anytime."
+            : "Hidden from public search — visible only to you. Change it anytime."
           : "Listed in public Scholars search."
       }
       action={
@@ -419,7 +473,15 @@ function VisibilityItem({ basePath, isHidden }: { basePath: string; isHidden: bo
   );
 }
 
-function HeadshotItem({ state }: { state: HeadshotState }) {
+function HeadshotItem({
+  state,
+  isAdmin,
+  name,
+}: {
+  state: HeadshotState;
+  isAdmin: boolean;
+  name: string;
+}) {
   const action = (
     <a
       href={WEB_DIRECTORY_URL}
@@ -438,7 +500,7 @@ function HeadshotItem({ state }: { state: HeadshotState }) {
         testId="home-item-headshot"
         marker="done"
         title="Headshot added"
-        subtitle="Showing on your public profile."
+        subtitle={isAdmin ? `Showing on ${name}'s public profile.` : "Showing on your public profile."}
         action={action}
       />
     );
@@ -469,27 +531,37 @@ function PublicationsItem({
   basePath,
   total,
   hidden,
+  isAdmin,
+  name,
 }: {
   basePath: string;
   total: number;
   hidden: number;
+  isAdmin: boolean;
+  name: string;
 }) {
   const subtitle =
     total === 0
       ? "None shown yet."
       : hidden > 0
         ? `${total} shown · ${hidden} hidden`
-        : `${total} shown on your profile`;
+        : isAdmin
+          ? `${total} shown on ${name}'s profile`
+          : `${total} shown on your profile`;
   return (
     <ChecklistRow
       testId="home-item-publications"
       marker={total > 0 ? "done" : "info"}
       title="Publications"
       subtitle={subtitle}
+      // Superusers have no per-scholar Publications tab to deep-link into, so the
+      // row is informational only (count, no CTA). Self keeps the "Review" link.
       action={
-        <RowLink href={`${basePath}?attr=publications`} testId="home-card-publications">
-          Review
-        </RowLink>
+        isAdmin ? null : (
+          <RowLink href={`${basePath}?attr=publications`} testId="home-card-publications">
+            Review
+          </RowLink>
+        )
       }
     />
   );

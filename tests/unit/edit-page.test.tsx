@@ -412,12 +412,38 @@ describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gat
 });
 
 describe("EditPage router — superuser mode", () => {
-  it("defaults to Visibility, shows the admin banner, and the superuser rail (Profile URL yes, Publications no)", () => {
+  it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications no)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
-    expect(screen.getByText("Profile visibility")).toBeTruthy();
+    expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
     expect(document.querySelector('[data-slot="superuser-banner"]')).not.toBeNull();
+    expect(screen.getByTestId("rail-home")).toBeTruthy();
     expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
     expect(screen.queryByTestId("rail-publications")).toBeNull();
+    // Home leads as the landing; Profile URL sits at the top of the attributes
+    // (just under Home), ahead of the WCM-sourced ones.
+    const home = screen.getByTestId("rail-home");
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    const nameTitle = screen.getByTestId("rail-name-title");
+    expect(home.compareDocumentPosition(profileUrl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      profileUrl.compareDocumentPosition(nameTitle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("Home (superuser): third-person header, Overview is View-only, Publications has no CTA, no units section", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" attr="home" />);
+    // Reframed, third-person heading.
+    expect(screen.getByText("Profile completeness")).toBeTruthy();
+    // Overview is read-only for superusers → a "View" CTA (not Edit/Write) that
+    // hangs off the superuser base path.
+    const overviewCta = screen.getByTestId("home-card-overview");
+    expect(overviewCta.textContent).toContain("View");
+    expect(overviewCta.getAttribute("href")).toBe("/edit/scholar/other7?attr=overview");
+    // Publications row is informational only — no deep link (no superuser pubs tab).
+    expect(screen.getByTestId("home-item-publications")).toBeTruthy();
+    expect(screen.queryByTestId("home-card-publications")).toBeNull();
+    // "Units you manage" is the viewer's, omitted when editing someone else.
+    expect(screen.queryByTestId("home-units")).toBeNull();
   });
 
   it("?attr=overview renders Overview read-only (no editor)", () => {
