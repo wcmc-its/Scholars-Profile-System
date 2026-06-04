@@ -340,6 +340,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SELF_EDIT_SLUG_REQUEST",
+                "Value": "off",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -3256,6 +3260,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY",
                 "Value": "off",
+              },
+              {
+                "Name": "SELF_EDIT_SLUG_REQUEST",
+                "Value": "on",
               },
               {
                 "Name": "FEEDBACK_BADGE_ENABLED",

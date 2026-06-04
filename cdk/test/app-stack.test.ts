@@ -1444,6 +1444,12 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("PROFILE_CANONICAL")).toBe("root");
       });
 
+      it("ships the slug-request lifecycle OFF in prod (#497, staging soaks first)", () => {
+        // The request card / approve queue / requester notification graduate to
+        // prod only after the staging soak + #506 sign-off; prod stays dark.
+        expect(appContainerEnv().get("SELF_EDIT_SLUG_REQUEST")).toBe("off");
+      });
+
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
         // The live LDAP superuser check can't reach the WCM directory yet, so
         // the allowlist confers the tier without LDAP and the group CN stays
@@ -1781,6 +1787,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
+    });
+
+    it("enables the slug-request lifecycle in staging for the soak (#497)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {
