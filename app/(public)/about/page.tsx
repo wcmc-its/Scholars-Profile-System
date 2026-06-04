@@ -965,9 +965,9 @@ export default function DocsPage() {
         <p>
           <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve &mdash;
           email the Scholars team (or open a Service Desk ticket) and say what you&apos;d like.
-          Addresses stay name-based, so ask for a variant of your own name: a middle initial or a
-          fuller form (for example <code>jane-q-smith</code>) works well when a namesake already has
-          the plain form. They aren&apos;t free-choice handles &mdash; you can&apos;t claim a word
+          Addresses stay name-based, so ask for a variation of your first and last name &mdash; you
+          can add a middle initial or a fuller form (for example <code>jane-q-smith</code>) when a
+          namesake already has the plain form. They aren&apos;t free-choice handles &mdash; you can&apos;t claim a word
           like a research area or a department. An administrator reviews the request, sets your new
           address, and replies to your ticket when it&apos;s done, usually within a few business days;
           your old address keeps working and permanently redirects.
