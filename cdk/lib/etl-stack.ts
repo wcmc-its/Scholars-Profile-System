@@ -603,9 +603,17 @@ export class EtlStack extends Stack {
     const nightlySteps: ReadonlyArray<StepSpec> = [
       { id: "Ed", npmScript: "etl:ed", external: true },
       { id: "Reciter", npmScript: "etl:reciter", external: true },
+      // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
+      // (reads reporting_conflicts), so external:true and placed right after it.
+      // Seeds publication_conflict_statement for the COI-gap source below.
+      { id: "ReciterCoiStatements", npmScript: "etl:reciter:coi-statements", external: true },
       { id: "Asms", npmScript: "etl:asms", external: true },
       { id: "Infoed", npmScript: "etl:infoed", external: true },
       { id: "Coi", npmScript: "etl:coi", external: true },
+      // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
+      // step + the PubMed statements above), so external:false. Computes whatever
+      // its inputs hold; zero candidates until the WCM statement path is flowing.
+      { id: "CoiGap", npmScript: "etl:coi-gap", external: false },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
