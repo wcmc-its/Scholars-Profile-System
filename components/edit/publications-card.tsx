@@ -253,7 +253,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             placeholder="Filter by title…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="max-w-xs"
+            className="border-apollo-border-strong max-w-xs"
             data-testid="publications-filter"
           />
         </div>
@@ -267,17 +267,17 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             No publications match &ldquo;{filter}&rdquo;.
           </p>
         ) : (
-          <ScrollArea className="rounded-md border border-border md:h-[60vh]">
-            <ul className="divide-y divide-border">
+          <ScrollArea className="md:h-[60vh]">
+            <ul>
               {grouped.map(({ key, label, items }) => (
                 <li key={key}>
                   <h3
-                    className="bg-background text-muted-foreground sticky top-0 z-10 px-3 py-2 text-sm font-semibold"
+                    className="bg-background text-apollo-slate sticky top-0 z-10 px-1 py-2 text-xs font-semibold tracking-wide uppercase"
                     data-slot="year-header"
                   >
                     {label}
                   </h3>
-                  <ul className="divide-y divide-border">
+                  <ul className="divide-apollo-border divide-y">
                     {items.map((p) => (
                       <PublicationRow
                         key={p.pmid}
@@ -354,13 +354,14 @@ function PublicationRow({
   onShow: () => void;
 }) {
   return (
-    <li className="flex flex-col gap-2 px-3 py-3" data-testid={`pub-row-${pub.pmid}`}>
+    <li className="flex flex-col gap-2 px-1 py-4" data-testid={`pub-row-${pub.pmid}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-base",
-              pub.state === "hidden_by_self" && "text-muted-foreground",
+              "text-foreground font-medium",
+              pub.state === "hidden_by_self" &&
+                "decoration-muted-foreground text-muted-foreground line-through",
             )}
           >
             {pub.title}
@@ -370,7 +371,12 @@ function PublicationRow({
             {pub.state === "hidden_by_self" && (
               <>
                 {" · "}
-                <Badge>Hidden</Badge>
+                <Badge
+                  variant="outline"
+                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                >
+                  Hidden
+                </Badge>
               </>
             )}
           </p>

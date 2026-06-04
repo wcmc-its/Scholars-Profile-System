@@ -33,7 +33,7 @@ export function RailSelect({
         value={active}
         onChange={(e) => router.push(`${basePath}?attr=${e.target.value}`)}
         data-testid="rail-select"
-        className="border-input bg-background focus-visible:ring-apollo-ring h-11 rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
+        className="border-apollo-border-strong bg-background focus-visible:ring-apollo-ring h-11 rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
       >
         {groups.flat ? (
           items.map((it) => (

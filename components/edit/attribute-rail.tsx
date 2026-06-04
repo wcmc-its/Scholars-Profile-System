@@ -117,7 +117,7 @@ function RailLink({
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
           isActive
             ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
-            : "text-foreground hover:bg-apollo-rail-border hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
+            : "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
           !isActive && kind === "readonly" && "text-muted-foreground",
         )}
       >

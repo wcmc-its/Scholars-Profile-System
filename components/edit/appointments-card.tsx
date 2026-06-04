@@ -40,7 +40,12 @@ export function AppointmentsCard({ cwid, mode, scholarName, appointments }: Appo
         <>
           {a.isPrimary && (
             <>
-              <Badge variant="secondary">Primary</Badge>
+              <Badge
+                variant="outline"
+                className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-md"
+              >
+                Primary
+              </Badge>
               {" · "}
             </>
           )}

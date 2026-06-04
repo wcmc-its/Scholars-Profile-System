@@ -40,33 +40,24 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import type { AdminRosterEntry, AdminRosterGrant } from "@/lib/api/administrators-roster";
 import type { DirectoryPerson } from "@/lib/sources/ldap";
 
-/** The provenance badge color treatment, keyed on `UnitAdmin.source`. The label
- *  is the human-readable string; `className` is the per-source palette. */
-function provenanceBadge(source: string): { label: string; className: string } {
+/** The provenance badge for a `UnitAdmin.source`. The mockup renders all small
+ *  inline pills with a single slate tint, so only the human-readable label
+ *  varies per source; the palette is uniform. */
+function provenanceBadge(source: string): { label: string } {
   switch (source) {
     case "manual":
-      return { label: "Manual", className: "bg-slate-100 text-slate-700 ring-slate-200" };
+      return { label: "Manual" };
     case "ED:DA":
-      return {
-        label: "Department Administrator",
-        className: "bg-blue-50 text-blue-800 ring-blue-200",
-      };
+      return { label: "Department Administrator" };
     case "ED:DivA":
-      return {
-        label: "Division Administrator",
-        className: "bg-teal-50 text-teal-700 ring-teal-200",
-      };
+      return { label: "Division Administrator" };
     case "ED:IAMDELA":
-      return { label: "IAMDELA", className: "bg-amber-50 text-amber-800 ring-amber-200" };
+      return { label: "IAMDELA" };
     case "ED:DivA-IAMDELA":
-      return {
-        label: "DivA-IAMDELA",
-        className: "bg-violet-50 text-violet-700 ring-violet-200",
-      };
+      return { label: "DivA-IAMDELA" };
     default:
-      // Unknown future source: show it verbatim in a neutral badge rather than
-      // swallow it.
-      return { label: source, className: "bg-slate-100 text-slate-700 ring-slate-200" };
+      // Unknown future source: show it verbatim rather than swallow it.
+      return { label: source };
   }
 }
 
@@ -82,7 +73,7 @@ const KIND_LABEL: Record<AdminRosterGrant["entityType"], string> = {
 };
 
 const PROVENANCE_BADGE_BASE =
-  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1";
+  "bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium";
 
 /** The caveat shown beside ED-locked controls (§ 4.4). */
 const ED_LOCKED_NOTE =
@@ -402,7 +393,7 @@ export function AdministratorsRoster({
                   data-testid={`administrators-grants-${entry.cwid}`}
                 >
                   <thead>
-                    <tr className="text-muted-foreground border-border border-b text-left">
+                    <tr className="text-muted-foreground border-apollo-border border-b text-left">
                       <th className="py-2 font-medium">Org unit</th>
                       <th className="py-2 pl-6 font-medium whitespace-nowrap">Role</th>
                       <th className="py-2 pl-6 font-medium whitespace-nowrap">Source</th>
@@ -423,12 +414,15 @@ export function AdministratorsRoster({
                       return (
                         <tr
                           key={rowKey}
-                          className="border-border border-b align-top"
+                          className="border-apollo-border border-b align-top"
                           data-testid={`administrators-grant-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                         >
                           <td className="py-2">
                             <span className="font-medium">{grant.unitName}</span>
-                            <Badge variant="secondary" className="ml-2">
+                            <Badge
+                              variant="outline"
+                              className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border ml-2 rounded-full"
+                            >
                               {KIND_LABEL[grant.entityType]}
                             </Badge>
                           </td>
@@ -459,9 +453,7 @@ export function AdministratorsRoster({
                             </RadioGroup>
                           </td>
                           <td className="py-2 pl-6 whitespace-nowrap">
-                            <span className={`${PROVENANCE_BADGE_BASE} ${prov.className}`}>
-                              {prov.label}
-                            </span>
+                            <span className={PROVENANCE_BADGE_BASE}>{prov.label}</span>
                           </td>
                           <td className="py-2 pl-6 text-right">
                             <div className="flex flex-col items-end gap-1">
@@ -487,7 +479,7 @@ export function AdministratorsRoster({
                                   href="https://directory.weill.cornell.edu/"
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-muted-foreground hover:text-[var(--apollo-maroon)] inline-flex items-center gap-1 text-xs whitespace-nowrap hover:underline"
+                                  className="text-muted-foreground hover:text-apollo-slate inline-flex items-center gap-1 text-xs whitespace-nowrap hover:underline"
                                   title={ED_LOCKED_NOTE}
                                   data-testid={`administrators-ed-locked-note-${entry.cwid}-${grant.entityType}-${grant.entityId}`}
                                 >

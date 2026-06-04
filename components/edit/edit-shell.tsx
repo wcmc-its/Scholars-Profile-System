@@ -63,7 +63,7 @@ export function EditShell({
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="edit-shell" data-mode={mode}>
+    <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
       <a
         href="#edit-detail"
@@ -77,7 +77,7 @@ export function EditShell({
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center justify-between px-6">
           <div className="flex items-center gap-3">
             <span
-              className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
+              className="bg-apollo-maroon text-apollo-maroon-foreground flex size-9 items-center justify-center rounded-md text-xs font-bold tracking-wide"
               aria-hidden
             >
               WCM
@@ -184,7 +184,7 @@ export function EditShell({
             />
           )}
 
-          {children}
+          <div className="apollo-card">{children}</div>
         </main>
       </div>
     </div>

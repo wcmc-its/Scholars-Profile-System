@@ -93,11 +93,11 @@ export function ProfilesRoster({
   const hasNext = (page + 1) * pageSize < total;
 
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="profiles-roster">
+    <div className="bg-apollo-page min-h-screen" data-slot="profiles-roster">
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
           <span
-            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
+            className="bg-apollo-maroon text-apollo-maroon-foreground flex size-7 items-center justify-center rounded-md text-xs font-bold"
             aria-hidden
           >
             WCM
@@ -138,7 +138,7 @@ export function ProfilesRoster({
               id="roster-unit"
               name="unit"
               defaultValue={unit}
-              className="border-input h-9 max-w-[16rem] rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 max-w-[16rem] rounded-md border bg-transparent px-3 text-sm"
             >
               <option value="">All units</option>
               <optgroup label="Departments">
@@ -172,7 +172,7 @@ export function ProfilesRoster({
               id="roster-type"
               name="type"
               defaultValue={roleCategory}
-              className="border-input h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 rounded-md border bg-transparent px-3 text-sm"
             >
               <option value="">All</option>
               {facets.roleCategories.map((r) => (
@@ -190,7 +190,7 @@ export function ProfilesRoster({
               id="roster-status"
               name="status"
               defaultValue={status}
-              className="border-input h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="border-apollo-border-strong h-9 rounded-md border bg-transparent px-3 text-sm"
             >
               <option value="all">All</option>
               <option value="visible">Visible</option>
@@ -206,9 +206,9 @@ export function ProfilesRoster({
           {total === 0 ? "No matching profiles." : `Showing ${start}–${end} of ${total.toLocaleString()}`}
         </p>
 
-        <div className="border-border overflow-hidden rounded-md border">
+        <div className="border-apollo-border overflow-hidden rounded-md border">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-muted-foreground text-left">
+            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Title</th>
@@ -220,7 +220,7 @@ export function ProfilesRoster({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-border divide-y">
+            <tbody className="divide-apollo-border divide-y">
               {entries.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-muted-foreground px-3 py-6 text-center">
@@ -240,7 +240,10 @@ export function ProfilesRoster({
                       {formatRoleCategory(e.roleCategory) ?? "—"}
                     </td>
                     <td className="px-3 py-2">
-                      <Badge variant={e.isVisible ? "secondary" : "outline"}>
+                      <Badge
+                        variant="outline"
+                        className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                      >
                         {e.isVisible ? "Visible" : "Hidden"}
                       </Badge>
                     </td>
@@ -251,7 +254,7 @@ export function ProfilesRoster({
                         )}
                         <Link
                           href={`/edit/scholar/${e.cwid}`}
-                          className="text-[var(--apollo-maroon)] underline"
+                          className="text-apollo-maroon hover:underline"
                           data-testid={`roster-edit-${e.cwid}`}
                         >
                           Edit
@@ -268,14 +271,14 @@ export function ProfilesRoster({
         {(hasPrev || hasNext) && (
           <div className="mt-4 flex items-center justify-between">
             {hasPrev ? (
-              <Link href={pageHref({ page: page - 1, query, status, unit, roleCategory })} className="text-sm underline" data-testid="roster-prev">
+              <Link href={pageHref({ page: page - 1, query, status, unit, roleCategory })} className="text-apollo-slate text-sm hover:underline" data-testid="roster-prev">
                 ← Previous
               </Link>
             ) : (
               <span />
             )}
             {hasNext ? (
-              <Link href={pageHref({ page: page + 1, query, status, unit, roleCategory })} className="text-sm underline" data-testid="roster-next">
+              <Link href={pageHref({ page: page + 1, query, status, unit, roleCategory })} className="text-apollo-slate text-sm hover:underline" data-testid="roster-next">
                 Next →
               </Link>
             ) : (

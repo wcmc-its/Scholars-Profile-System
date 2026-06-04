@@ -32,8 +32,12 @@ export type SuperuserBannerProps = {
 
 export function SuperuserBanner({ targetLabel, targetKind = "profile", note }: SuperuserBannerProps) {
   return (
-    <Alert variant="info" className="mb-6" data-slot="superuser-banner">
-      <ShieldAlert className="size-4" />
+    <Alert
+      variant="info"
+      className="border-apollo-maroon/30 bg-apollo-surface-2 mb-6"
+      data-slot="superuser-banner"
+    >
+      <ShieldAlert className="text-apollo-maroon size-4" />
       <AlertDescription>
         {targetKind === "profile" ? (
           <>

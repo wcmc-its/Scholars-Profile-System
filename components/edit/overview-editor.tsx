@@ -108,11 +108,11 @@ export function OverviewEditor({ initialHtml, onChange }: OverviewEditorProps) {
   });
 
   return (
-    <div className="rounded-md border border-border bg-background">
+    <div className="bg-apollo-surface border-apollo-border-strong rounded-md border">
       <Toolbar editor={editor} />
       <Separator />
       <EditorContent editor={editor} data-slot="overview-editor" />
-      <p className="px-4 pb-3 pt-2 text-sm text-muted-foreground">
+      <p className="text-muted-foreground px-4 pb-3 pt-2 text-sm">
         Formatting is limited to bold, italics, lists, and links.
       </p>
     </div>

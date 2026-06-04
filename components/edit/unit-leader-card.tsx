@@ -28,16 +28,10 @@ import {
   DirectoryPeopleTypeahead,
   type DirectoryValue,
 } from "@/components/edit/directory-people-typeahead";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 
 type LeaderMode = "curated" | "vacant" | "detect";
@@ -185,16 +179,16 @@ export function UnitLeaderCard({
   }
 
   return (
-    <Card data-slot="unit-leader-card">
-      <CardHeader>
-        <CardTitle>Leadership</CardTitle>
-        <CardDescription>
-          {isCenter
-            ? `Set the ${noun} for this ${entityType}, or mark the role vacant.`
-            : `Set the ${noun} for this ${entityType}, mark the role vacant, or clear the override to let the directory decide.`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="unit-leader-card"
+      heading="Leadership"
+      description={
+        isCenter
+          ? `Set the ${noun} for this ${entityType}, or mark the role vacant.`
+          : `Set the ${noun} for this ${entityType}, mark the role vacant, or clear the override to let the directory decide.`
+      }
+    >
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
           <label className="text-sm font-medium">{capitalize(noun)}</label>
           <DirectoryPeopleTypeahead
@@ -221,7 +215,11 @@ export function UnitLeaderCard({
               Mark vacant
             </Button>
             {mode === "vacant" && (
-              <Badge variant="secondary" data-testid="unit-leader-vacant-pill">
+              <Badge
+                variant="outline"
+                className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                data-testid="unit-leader-vacant-pill"
+              >
                 {isCenter ? `No ${noun} set` : "Vacant (explicit)"}
               </Badge>
             )}
@@ -243,7 +241,7 @@ export function UnitLeaderCard({
 
         <div className="flex items-center justify-end gap-3">
           {justSaved && (
-            <span role="status" aria-live="polite" className="text-primary inline-flex items-center gap-1 text-sm">
+            <span role="status" aria-live="polite" className="text-apollo-green inline-flex items-center gap-1 text-sm">
               <Check className="size-4" />
               Saved
             </span>
@@ -259,7 +257,7 @@ export function UnitLeaderCard({
               Clear override
             </Button>
           )}
-          <Button type="button" onClick={save} disabled={!dirty || isSaving} data-testid="unit-leader-save">
+          <Button type="button" variant="apollo" onClick={save} disabled={!dirty || isSaving} data-testid="unit-leader-save">
             {isSaving ? "Saving…" : "Save"}
           </Button>
         </div>
@@ -269,7 +267,7 @@ export function UnitLeaderCard({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -281,7 +279,7 @@ export function UnitLeaderCard({
         confirmVariant="default"
         onConfirm={clearOverride}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

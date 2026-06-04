@@ -20,15 +20,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -125,16 +119,16 @@ export function UnitRetireCard({ entityType, entityId, unitName, suppression }: 
   }
 
   return (
-    <Card data-slot="unit-retire-card">
-      <CardHeader>
-        <CardTitle>Retire {entityType}</CardTitle>
-        <CardDescription>
-          {mode === "retired"
-            ? "This unit is retired. Its public page returns 404."
-            : `Retiring this ${entityType} is reversible.`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="unit-retire-card"
+      heading={`Retire ${entityType}`}
+      description={
+        mode === "retired"
+          ? "This unit is retired. Its public page returns 404."
+          : `Retiring this ${entityType} is reversible.`
+      }
+    >
+      <div className="flex flex-col gap-4">
         {mode === "idle" && (
           <>
             <p className="text-muted-foreground text-sm">
@@ -212,6 +206,7 @@ export function UnitRetireCard({ entityType, entityId, unitName, suppression }: 
             <div className="flex justify-end">
               <Button
                 type="button"
+                variant="apollo"
                 onClick={restore}
                 disabled={busy}
                 data-testid="unit-retire-restore"
@@ -227,8 +222,8 @@ export function UnitRetireCard({ entityType, entityId, unitName, suppression }: 
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </EditPanel>
   );
 }
 

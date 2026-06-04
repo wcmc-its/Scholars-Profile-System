@@ -91,13 +91,18 @@ export function HomePanel({
               <Link
                 href={`${basePath}?attr=${c.key}`}
                 data-testid={`home-card-${c.key}`}
-                className="border-border hover:border-apollo-maroon focus-visible:ring-apollo-ring flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                className="border-apollo-border hover:border-apollo-maroon focus-visible:ring-apollo-ring flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="bg-apollo-maroon/10 text-apollo-maroon flex size-8 items-center justify-center rounded-md">
                     <Icon className="size-4" aria-hidden />
                   </span>
-                  <Badge variant={c.statusVariant}>{c.status}</Badge>
+                  <Badge
+                    variant="outline"
+                    className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                  >
+                    {c.status}
+                  </Badge>
                 </div>
                 <span className="font-medium">{c.title}</span>
                 <span className="text-muted-foreground text-sm">{c.body}</span>

@@ -16,15 +16,9 @@ import * as React from "react";
 import { Check } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -129,14 +123,12 @@ export function UnitDescriptionCard({
   }
 
   return (
-    <Card data-slot="unit-description-card">
-      <CardHeader>
-        <CardTitle>Description</CardTitle>
-        <CardDescription>
-          A short blurb shown on the public {entityType} page.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <EditPanel
+      slot="unit-description-card"
+      heading="Description"
+      description={`A short blurb shown on the public ${entityType} page.`}
+    >
+      <div className="flex flex-col gap-3">
         <Textarea
           aria-label="Description"
           value={value}
@@ -163,7 +155,7 @@ export function UnitDescriptionCard({
               <span
                 role="status"
                 aria-live="polite"
-                className="text-primary inline-flex items-center gap-1 text-sm"
+                className="text-apollo-green inline-flex items-center gap-1 text-sm"
               >
                 <Check className="size-4" />
                 Saved
@@ -182,6 +174,7 @@ export function UnitDescriptionCard({
             )}
             <Button
               type="button"
+              variant="apollo"
               onClick={save}
               disabled={!dirty || overLimit || isSaving}
               data-testid="unit-description-save"
@@ -195,7 +188,7 @@ export function UnitDescriptionCard({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}
@@ -207,7 +200,7 @@ export function UnitDescriptionCard({
         confirmVariant="default"
         onConfirm={clearOverride}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

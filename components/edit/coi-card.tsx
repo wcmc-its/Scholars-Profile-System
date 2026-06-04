@@ -43,7 +43,7 @@ export function CoiCard({ cwid, mode, scholarName, disclosures }: CoiCardProps) 
             : "You have no conflict-of-interest disclosures on file."}
         </p>
       ) : (
-        <div className="border-border flex flex-col gap-5 rounded-md border px-4 py-4" data-slot="coi-panel-list">
+        <div className="border-apollo-border flex flex-col gap-5 rounded-md border px-4 py-4" data-slot="coi-panel-list">
           {groups.map(({ group, entities }) => (
             <div key={group} data-testid={`coi-group-${group}`}>
               <h3 className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider">
@@ -56,7 +56,7 @@ export function CoiCard({ cwid, mode, scholarName, disclosures }: CoiCardProps) 
         </div>
       )}
 
-      <div className="border-border flex flex-col items-start gap-2 border-t pt-3">
+      <div className="border-apollo-border flex flex-col items-start gap-2 border-t pt-3">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
           Disclosures are managed in the Weill Research Gateway. Use Request a Change to correct one at

@@ -25,16 +25,10 @@ import {
   DirectoryPeopleTypeahead,
   type DirectoryValue,
 } from "@/components/edit/directory-people-typeahead";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 
@@ -165,14 +159,12 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
   const colCount = hasPrograms ? 6 : 4;
 
   return (
-    <Card data-slot="center-roster-card">
-      <CardHeader>
-        <CardTitle>Members</CardTitle>
-        <CardDescription>
-          The people listed on this center. Listing a member does not grant them edit access.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="center-roster-card"
+      heading="Members"
+      description="The people listed on this center. Listing a member does not grant them edit access."
+    >
+      <div className="flex flex-col gap-4">
         <label className="flex items-center gap-2 self-end text-sm">
           <Checkbox
             checked={showActiveOnly}
@@ -188,21 +180,21 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
           </p>
         ) : (
           <table className="w-full text-sm" data-testid="center-roster-table">
-            <thead className="text-muted-foreground text-left">
-              <tr className="border-border border-b">
-                <th className="py-2 font-medium">Member</th>
-                {hasPrograms && <th className="py-2 font-medium">Type</th>}
-                {hasPrograms && <th className="py-2 font-medium">Program</th>}
-                <th className="py-2 font-medium">Start</th>
-                <th className="py-2 font-medium">End</th>
-                <th className="py-2 font-medium">Status</th>
-                <th className="py-2" />
+            <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
+              <tr className="border-apollo-border border-b">
+                <th className="px-3 py-2 font-medium">Member</th>
+                {hasPrograms && <th className="px-3 py-2 font-medium">Type</th>}
+                {hasPrograms && <th className="px-3 py-2 font-medium">Program</th>}
+                <th className="px-3 py-2 font-medium">Start</th>
+                <th className="px-3 py-2 font-medium">End</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody>
               {visible.length === 0 ? (
                 <tr>
-                  <td colSpan={colCount + 1} className="text-muted-foreground py-3">
+                  <td colSpan={colCount + 1} className="text-muted-foreground px-3 py-3">
                     No active members. Turn off &ldquo;Show active only&rdquo; to see pending and
                     inactive members.
                   </td>
@@ -213,17 +205,17 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
                   return (
                     <tr
                       key={m.cwid}
-                      className={`border-border border-b ${status === "inactive" ? "opacity-50" : ""}`}
+                      className={`border-apollo-border border-b ${status === "inactive" ? "opacity-50" : ""}`}
                       data-testid={`center-roster-row-${m.cwid}`}
                     >
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         <span className="font-medium">{m.name}</span>
                         {m.title && <span className="text-muted-foreground"> · {m.title}</span>}
                       </td>
                       {hasPrograms && (
-                        <td className="py-2">
+                        <td className="px-3 py-2">
                           <select
-                            className="border-input h-8 rounded-md border bg-transparent px-2 text-sm"
+                            className="border-apollo-border-strong h-8 rounded-md border bg-transparent px-2 text-sm"
                             value={m.membershipType ?? ""}
                             onChange={(e) =>
                               patch(m.cwid, {
@@ -239,9 +231,9 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
                         </td>
                       )}
                       {hasPrograms && (
-                        <td className="py-2">
+                        <td className="px-3 py-2">
                           <select
-                            className="border-input h-8 rounded-md border bg-transparent px-2 text-sm"
+                            className="border-apollo-border-strong h-8 rounded-md border bg-transparent px-2 text-sm"
                             value={m.programCode ?? ""}
                             onChange={(e) => patch(m.cwid, { programCode: e.target.value || null })}
                             data-testid={`roster-program-${m.cwid}`}
@@ -255,7 +247,7 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
                           </select>
                         </td>
                       )}
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         <Input
                           type="date"
                           className="h-8 w-36"
@@ -264,7 +256,7 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
                           data-testid={`roster-start-${m.cwid}`}
                         />
                       </td>
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         <Input
                           type="date"
                           className="h-8 w-36"
@@ -273,15 +265,16 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
                           data-testid={`roster-end-${m.cwid}`}
                         />
                       </td>
-                      <td className="py-2">
+                      <td className="px-3 py-2">
                         <Badge
-                          variant={status === "active" ? "default" : "secondary"}
+                          variant="outline"
+                          className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
                           data-testid={`roster-status-${m.cwid}`}
                         >
                           {status === "active" ? "Active" : status === "pending" ? "Pending" : "Inactive"}
                         </Badge>
                       </td>
-                      <td className="py-2 text-right">
+                      <td className="px-3 py-2 text-right">
                         <Button
                           type="button"
                           variant="ghost"
@@ -300,11 +293,11 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
           </table>
         )}
 
-        <div className="border-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
+        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
           <p className="text-sm font-medium">Add member</p>
           <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
           <div className="flex justify-end">
-            <Button type="button" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
+            <Button type="button" variant="apollo" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
               {adding ? "Adding…" : "Add"}
             </Button>
           </div>
@@ -315,7 +308,7 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={removeTarget !== null}
@@ -329,7 +322,7 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
         confirmVariant="destructive"
         onConfirm={confirmRemove}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

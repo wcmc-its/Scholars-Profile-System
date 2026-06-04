@@ -7,6 +7,8 @@
  */
 "use client";
 
+import { Lock } from "lucide-react";
+
 import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
@@ -38,13 +40,18 @@ export function ReadonlyAttributePanel({
       heading={heading}
       description={description}
     >
+      <span className="bg-apollo-lock-bg border-apollo-border text-muted-foreground inline-flex w-fit items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium">
+        <Lock className="size-3" aria-hidden />
+        Locked — managed at its source
+      </span>
+
       {fields && fields.length > 0 && (
-        // Read-only display, not a form: a muted, borderless key/value grid with
-        // both columns left-aligned (was a bordered `justify-between` table that
-        // read as editable rows and pushed values to the right edge).
-        <dl className="bg-muted/40 grid grid-cols-[max-content_1fr] gap-x-8 gap-y-2 rounded-md px-4 py-3 text-sm">
+        // Read-only display, not a form: a 2-col label/value def-list with row
+        // hairlines (was a muted borderless grid). Label left, value emphasized —
+        // matches the console mockup's locked-attribute treatment.
+        <dl className="border-apollo-border grid grid-cols-[max-content_1fr] gap-x-8 border-t text-sm">
           {fields.map((f) => (
-            <div key={f.label} className="contents">
+            <div key={f.label} className="border-apollo-border contents [&>*]:border-b [&>*]:py-3.5">
               <dt className="text-muted-foreground">{f.label}</dt>
               <dd className="text-foreground font-medium">{f.value ?? "—"}</dd>
             </div>
@@ -54,7 +61,7 @@ export function ReadonlyAttributePanel({
 
       {/* Lighter than the former filled callout so the sourced values above carry
           more visual weight than the disclaimer (vision-round finding 4.7). */}
-      <div className="border-border flex flex-col items-start gap-2 border-t pt-3">
+      <div className="border-apollo-border flex flex-col items-start gap-2 border-t pt-3">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
           These fields come from WCM systems of record. Use Request a Change to fix one at its source.

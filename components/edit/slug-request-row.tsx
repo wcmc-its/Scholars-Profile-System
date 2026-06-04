@@ -94,7 +94,11 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
   }
 
   return (
-    <Card data-slot="slug-request-row" data-testid={`slug-request-row-${request.id}`}>
+    <Card
+      data-slot="slug-request-row"
+      data-testid={`slug-request-row-${request.id}`}
+      className="border-apollo-border gap-0 rounded-md py-0 shadow-none"
+    >
       <CardContent className="flex flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -105,16 +109,23 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
                 <span className="text-muted-foreground"> · {request.department}</span>
               )}
             </p>
-            <p className="text-sm" data-testid="slug-request-change-line">
-              <span className="text-muted-foreground line-through">
+            <p
+              className="flex flex-wrap items-center gap-2 text-sm"
+              data-testid="slug-request-change-line"
+            >
+              <code className="bg-apollo-surface-2 border-apollo-border text-muted-foreground rounded border px-2 py-0.5 font-mono text-xs line-through">
                 {request.currentSlug ?? "—"}
-              </span>{" "}
-              → <span className="font-semibold">{request.requestedSlug}</span>
+              </code>
+              <span className="text-muted-foreground">→</span>
+              <code className="bg-apollo-surface-2 border-apollo-border text-foreground rounded border px-2 py-0.5 font-mono text-xs font-semibold">
+                {request.requestedSlug}
+              </code>
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
             <Button
               type="button"
+              variant="apollo"
               onClick={handleApprove}
               disabled={approveDisabled}
               data-testid="slug-request-approve"
@@ -134,7 +145,7 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
         </div>
 
         <p
-          className="bg-muted/50 text-muted-foreground rounded px-3 py-2 text-sm"
+          className="bg-apollo-surface-2 border-apollo-border text-muted-foreground rounded-md border px-3 py-2 text-sm"
           data-testid="slug-request-reason"
         >
           {request.reason && request.reason.trim().length > 0 ? (
@@ -167,7 +178,7 @@ export function SlugRequestRow({ request, onDecided }: SlugRequestRowProps) {
             </label>
             <textarea
               id={`slug-decline-${request.id}`}
-              className="border-input bg-transparent placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
+              className="border-apollo-border-strong bg-transparent placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
               value={declineNote}
               onChange={(e) => setDeclineNote(e.target.value)}
               maxLength={1000}

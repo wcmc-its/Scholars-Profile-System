@@ -30,6 +30,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
@@ -208,9 +209,9 @@ export function SlugRequestCard({
     >
       <UnsavedChangesGuard dirty={dirty} />
       <div className="flex flex-col gap-3">
-        <p className="text-sm">
+        <p className="flex flex-wrap items-center gap-2.5 text-sm">
           <span className="text-muted-foreground">Your current URL: </span>
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+          <code className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs">
             {SITE_HOST}/{currentSlug}
           </code>
         </p>
@@ -232,8 +233,13 @@ export function SlugRequestCard({
         )}
 
         {phase === "approved" && (
-          <Alert variant="info" data-testid="slug-request-approved">
-            <AlertDescription>
+          <Alert
+            variant="info"
+            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground"
+            data-testid="slug-request-approved"
+          >
+            <Check className="text-apollo-green" />
+            <AlertDescription className="text-apollo-green-foreground">
               Your URL is now{" "}
               <code>
                 {SITE_HOST}/{currentSlug}
@@ -276,9 +282,9 @@ export function SlugRequestCard({
               <label htmlFor="slug-request-input" className="text-sm font-medium">
                 Requested address
               </label>
-              <div className="flex items-center gap-2">
+              <div className="border-apollo-border-strong focus-within:ring-ring flex max-w-[640px] items-stretch overflow-hidden rounded-md border focus-within:ring-2">
                 <span
-                  className="text-muted-foreground select-none whitespace-nowrap text-sm"
+                  className="bg-apollo-surface-2 border-apollo-border text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
                   data-slot="slug-request-prefix"
                 >
                   {SITE_HOST}/
@@ -295,6 +301,7 @@ export function SlugRequestCard({
                   autoComplete="off"
                   spellCheck={false}
                   data-testid="slug-request-input"
+                  className="rounded-none border-0 font-mono shadow-none focus-visible:ring-0"
                 />
               </div>
               {formatError ? (
@@ -321,7 +328,7 @@ export function SlugRequestCard({
             <div className="flex flex-col gap-1">
               <button
                 type="button"
-                className="text-muted-foreground hover:text-foreground self-start text-sm underline-offset-2 hover:underline"
+                className="text-apollo-slate self-start text-sm underline-offset-2 hover:underline"
                 aria-expanded={reasonOpen}
                 onClick={() => setReasonOpen((o) => !o)}
                 data-testid="slug-request-reason-toggle"
@@ -336,6 +343,7 @@ export function SlugRequestCard({
                   rows={3}
                   placeholder="Why you'd like this address (optional)"
                   data-testid="slug-request-reason"
+                  className="border-apollo-border-strong max-w-[640px]"
                 />
               )}
             </div>
@@ -376,7 +384,7 @@ function StatusTag({ phase }: { phase: Exclude<Phase, "idle"> }) {
         : "Approved";
   return (
     <span
-      className="text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-normal"
+      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full border px-2.5 py-0.5 text-xs font-normal"
       data-testid="slug-request-status-tag"
     >
       {label}

@@ -39,7 +39,7 @@ export function SiblingDivisionsRail({
             <Link
               href={`/edit/division/${division.code}`}
               data-testid={`sibling-division-${division.code}`}
-              className="hover:bg-apollo-rail-border/60 focus-visible:ring-ring text-foreground block rounded-md px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              className="hover:bg-apollo-rail-hover focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail text-foreground block rounded-md px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
             >
               {division.name}
             </Link>
