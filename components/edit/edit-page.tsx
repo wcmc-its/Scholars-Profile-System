@@ -151,6 +151,7 @@ export function EditPage({
       activeAttr={active.key}
       basePath={basePath}
       previewHref={profilePath(ctx.scholar.slug)}
+      account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
     >
       {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest)}
@@ -188,7 +189,12 @@ function renderPanel(
       );
     case "overview":
       return (
-        <OverviewCard cwid={cwid} initialHtml={ctx.scholar.overview} readOnly={mode === "superuser"} />
+        <OverviewCard
+          cwid={cwid}
+          initialHtml={ctx.scholar.overview}
+          previewHref={mode === "self" ? profilePath(ctx.scholar.slug) : undefined}
+          readOnly={mode === "superuser"}
+        />
       );
     case "visibility":
       return (

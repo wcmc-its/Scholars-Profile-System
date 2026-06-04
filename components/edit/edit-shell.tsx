@@ -1,18 +1,25 @@
 /**
- * The Apollo master-detail shell (#160 UI follow-up,
- * `self-edit-launch-spec.md` § Layout). The editor chrome only: a black top
- * bar, a sub-nav, and a two-region body (the ATTRIBUTES rail + the detail
- * panel). We MIRROR the Apollo Management Console design language (a real WCM
- * tool we can't integrate); the public Scholars site keeps its Cornell-red
- * header — these are deliberately distinct surfaces.
+ * The Apollo master-detail shell (#160 UI follow-up, `self-edit-launch-spec.md`
+ * § Layout). The editor chrome only: a black top bar with a real account menu,
+ * a sub-nav / breadcrumb, and a two-region body (the ATTRIBUTES rail + the
+ * detail panel). We MIRROR the Apollo Management Console design language (a real
+ * WCM tool we can't integrate); the public Scholars site keeps its Cornell-red
+ * header — these are deliberately distinct surfaces. #7d1c1c is the intentional
+ * editor maroon (`globals.css` `--apollo-maroon`).
  *
- * The maroon is a placeholder pending the real Apollo token (D5, `globals.css`
- * `--apollo-maroon`). Layout-independent of the data contract.
+ * Vision-round shell work: the top-right is now a real account/exit menu (was
+ * inert aria-hidden text — finding 4.4), a self orientation line frames what is
+ * editable vs sourced, a skip link + named `<main>` land a11y basics, and the
+ * full vertical rail collapses to a `<select>` below `md` so the editor is not
+ * buried under nine links on phones (finding 4.5).
  */
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
+import { RailSelect } from "@/components/edit/rail-select";
+import { SuperuserBanner } from "@/components/edit/superuser-banner";
+import { AccountMenu } from "@/components/site/account-menu";
 
 export type EditShellProps = {
   mode: "self" | "superuser";
@@ -25,6 +32,12 @@ export type EditShellProps = {
   basePath: string;
   /** "Preview Profile" target (the public profile by slug). */
   previewHref?: string;
+  /**
+   * The signed-in (actor) scholar's identity for the header account menu. In
+   * self mode this is the scholar themselves; omit it for surfaces that don't
+   * have the actor's scholar row (the account menu then degrades to Sign out).
+   */
+  account?: { slug: string; preferredName: string } | null;
   /** Self mode only: the viewer is a superuser, so the sub-nav adds a link
    *  across to the Profiles roster (`/edit/scholars`). Ignored in superuser
    *  mode, where the "Profiles" tab is always a link back to that roster. */
@@ -43,6 +56,7 @@ export function EditShell({
   activeAttr,
   basePath,
   previewHref,
+  account,
   canBrowseProfiles = false,
   subRail,
   children,
@@ -50,7 +64,15 @@ export function EditShell({
   const isSuperuser = mode === "superuser";
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="edit-shell" data-mode={mode}>
-      {/* Top bar (black) — Apollo chrome. */}
+      {/* Skip link — first focusable element, jumps past the rail to the editor. */}
+      <a
+        href="#edit-detail"
+        className="bg-apollo-maroon text-apollo-maroon-foreground sr-only z-50 rounded-md px-3 py-2 text-sm focus:not-sr-only focus:absolute focus:top-2 focus:left-2"
+      >
+        Skip to editor
+      </a>
+
+      {/* Top bar (black) — Apollo chrome with a real account/exit menu. */}
       <header className="bg-apollo-bar text-white">
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center justify-between px-6">
           <div className="flex items-center gap-3">
@@ -62,28 +84,46 @@ export function EditShell({
             </span>
             <h1 className="text-base font-semibold">Scholars Profile Console</h1>
           </div>
-          <span className="text-sm text-white/70" aria-hidden>
-            {scholarName}
-          </span>
+          {account ? (
+            <AccountMenu scholar={account} />
+          ) : (
+            <form action="/api/auth/logout" method="POST">
+              <button
+                type="submit"
+                className="text-sm text-white/85 transition-colors hover:text-white focus:text-white focus:outline-none"
+                data-testid="edit-signout"
+              >
+                Sign out
+              </button>
+            </form>
+          )}
         </div>
       </header>
 
-      {/* Sub-nav — maroon underline on the active tab. From a superuser detail
-          edit the "Profiles" tab links back up to the roster; a superuser on
-          their own /edit gets a "Profiles" link across to it. */}
+      {/* Sub-nav — maroon underline on the active tab. A superuser editing a
+          scholar gets a "Profiles / <name>" breadcrumb back to the roster; a
+          superuser on their own /edit gets an "All profiles" link across. */}
       <div className="border-border border-b">
-        <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
+        <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-2 px-6">
           {isSuperuser ? (
-            <Link
-              href="/edit/scholars"
-              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 border-b-2 border-transparent py-3 text-sm"
-              data-testid="edit-subnav-profiles"
-            >
-              <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
-              Profiles
-            </Link>
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+              <Link
+                href="/edit/scholars"
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                data-testid="edit-subnav-profiles"
+              >
+                <ChevronLeftIcon className="size-3.5" aria-hidden="true" />
+                Profiles
+              </Link>
+              <span className="text-muted-foreground" aria-hidden>
+                /
+              </span>
+              <span className="font-medium" aria-current="page">
+                {scholarName}
+              </span>
+            </nav>
           ) : (
-            <>
+            <div className="flex items-center gap-6">
               <span
                 className="border-apollo-maroon inline-block border-b-2 py-3 text-sm font-medium"
                 aria-current="page"
@@ -99,24 +139,36 @@ export function EditShell({
                   All profiles
                 </Link>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Body — rail + detail. */}
+      {/* Body — rail + detail. The rail column is desktop-only; on phones a
+          compact <select> at the top of the detail column replaces it. */}
       <div className="mx-auto grid max-w-[var(--max-content)] grid-cols-1 gap-6 px-6 py-8 md:grid-cols-[16rem_1fr]">
-        <div className="flex flex-col gap-3">
+        <div className="hidden flex-col gap-3 md:flex">
           <AttributeRail items={railItems} active={activeAttr} basePath={basePath} />
           {subRail}
         </div>
 
-        <main className="min-w-0">
-          {previewHref && (
+        <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
+          <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
+
+          {!isSuperuser && (
+            <p className="text-muted-foreground mt-4 mb-4 text-sm md:mt-0">
+              Changes here appear on your public profile. Most fields come from WCM systems — use{" "}
+              <span className="font-medium">Request a change</span> to fix those.
+            </p>
+          )}
+
+          {/* Standalone preview link only when there's no account menu (the menu
+              already offers "View my profile"). */}
+          {previewHref && !account && (
             <div className="mb-4 flex justify-end">
               <Link
                 href={previewHref}
-                className="text-[var(--apollo-maroon)] text-sm underline"
+                className="text-apollo-maroon text-sm underline"
                 target="_blank"
                 rel="noreferrer"
               >
@@ -126,13 +178,10 @@ export function EditShell({
           )}
 
           {isSuperuser && (
-            <div
-              data-slot="superuser-banner"
-              className="border-apollo-maroon/40 bg-apollo-maroon/5 mb-4 rounded-md border px-4 py-3 text-sm"
-            >
-              You are editing {scholarName}&apos;s profile as an administrator. A reason is required for
-              every change.
-            </div>
+            <SuperuserBanner
+              targetLabel={scholarName}
+              note="A reason is required for every change."
+            />
           )}
 
           {children}
