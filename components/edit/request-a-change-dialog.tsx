@@ -13,10 +13,13 @@
  *     auto-pickup if later indexed), the verb is "Got it" (no request is filed).
  *     If it carries a fallback, "Still wrong?" reveals a route box.
  *
- * The guidance for the selected issue renders in a callout directly under its
- * row, so it reads as a response to the choice. Link/mailto only — no write
- * path, no new authorization; CRLF is stripped from every interpolated value
- * before composition (header-injection guard).
+ * The dialog is a FIXED SHELL: the header (kicker + close X) and footer (one
+ * destination-labelled action) are pinned and only the option list scrolls, so
+ * an expanded row can never push them out of the viewport. The guidance for the
+ * selected issue renders in a callout under its row, so it reads as a response
+ * to the choice. Link/mailto only — no write path, no new authorization; CRLF is
+ * stripped from every interpolated value before composition (header-injection
+ * guard).
  */
 "use client";
 
@@ -60,8 +63,18 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
 /** The footer verb for an action (its config `cta`, else a sensible default). */
 function ctaFor(action: ChangeAction, fallbackRevealed: boolean): string {
   if (action.kind === "self-service") return action.cta ?? `Open ${action.tool}`;
-  if (action.kind === "route") return action.cta ?? `Email ${action.office}`;
+  if (action.kind === "route") return action.cta ?? `Send to ${action.office}`;
   return fallbackRevealed ? "Email us" : (action.cta ?? "Got it");
+}
+
+/**
+ * The quiet caption on the SELECTED row — demotes "where this goes" to a label
+ * so it never competes with the footer's single action (the mixed-signal fix).
+ */
+function captionFor(action: ChangeAction): string | null {
+  if (action.kind === "self-service") return `Managed in ${action.tool}`;
+  if (action.kind === "route") return `Routes to ${action.office}`;
+  return null; // explain — the body carries the explanation; no destination caption
 }
 
 /** Strip CR/LF so a value can't break out of its field (header-injection guard). */
@@ -141,6 +154,9 @@ export function RequestAChangeDialog({
   const [sentVia, setSentVia] = React.useState<"server" | "mailto" | null>(null);
   /** Opt-out of the courtesy email receipt (default = receipt sent). */
   const [noReceipt, setNoReceipt] = React.useState(false);
+  /** The selected row — scrolled into view when it expands, so a row low in the
+   *  list doesn't hide its textarea below the fold of the scrolling body. */
+  const selectedRowRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -155,6 +171,11 @@ export function RequestAChangeDialog({
     }
   }, [open, initialIssueId]);
 
+  // Keep the just-expanded row visible inside the scrolling list.
+  React.useEffect(() => {
+    selectedRowRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [issueId, revealFallback]);
+
   const issue = config.issues.find((i) => i.id === issueId) ?? null;
   const action = issue?.action ?? null;
 
@@ -163,6 +184,11 @@ export function RequestAChangeDialog({
   const hasUnsavedText = showRouteBox && detail.trim().length > 0 && !submitted;
 
   function selectIssue(id: string) {
+    // Don't switch issues while a route submit is in flight: the resolving POST
+    // flips `submitted` against the current selection, so a mid-flight switch
+    // would render a stale / wrong-office confirmation. The list re-enables
+    // once `sending` clears.
+    if (sending) return;
     // Switching issues discards any typed detail (edge case 2).
     setIssueId(id);
     setDetail("");
@@ -256,6 +282,17 @@ export function RequestAChangeDialog({
 
   const cta = action ? ctaFor(action, revealFallback) : null;
   const isAck = action?.kind === "explain" && !revealFallback; // dead-end "Got it"
+  const inRouter = !(submitted && submitTarget) && !confirmDiscard;
+  // The footer caption matches the single action the footer offers, so the
+  // bottom of the dialog never tells a second story.
+  const footerHint =
+    inRouter && action
+      ? showRouteBox
+        ? "We’ll route this to the right team."
+        : action.kind === "self-service"
+          ? "Opens in a new tab."
+          : null
+      : null;
 
   return (
     <>
@@ -275,8 +312,13 @@ export function RequestAChangeDialog({
       )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent data-testid="request-a-change-dialog">
-          <DialogHeader className="gap-1 text-left">
+        <DialogContent
+          data-testid="request-a-change-dialog"
+          className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl data-[state=open]:slide-in-from-bottom-2"
+        >
+          {/* Pinned header — kicker + close X stay put, so an expanded row can
+              never clip them off the top. */}
+          <DialogHeader className="border-apollo-border flex-none gap-1 border-b px-6 pt-6 pb-4 text-left">
             <DialogTitle className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
               Request a change
               {/* Visible label stays the eyebrow; the accessible name gains the
@@ -295,50 +337,8 @@ export function RequestAChangeDialog({
                 </span>
               </p>
             )}
-          </DialogHeader>
-
-          {submitted && submitTarget ? (
-            /* ---- post-submit confirmation (route) ---- */
-            <div className="flex flex-col gap-2" role="status" aria-live="polite">
-              {sentVia === "server" ? (
-                <>
-                  <p className="text-base font-medium">Request sent.</p>
-                  <p className="text-muted-foreground text-sm">
-                    We&apos;ve routed your request
-                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. They&apos;ll
-                    follow up if they need more detail.
-                  </p>
-                </>
-              ) : (
-                <>
-                  {/* Not a success claim: the mailer is dark, so nothing was sent
-                      server-side — the request only completes once the user sends
-                      from their own client (vision-round T1.9). */}
-                  <p className="text-base font-medium">Almost there — finish in your email app.</p>
-                  <p className="text-muted-foreground text-sm">
-                    We opened a pre-filled message
-                    {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing opened,
-                    copy this address into your email and send it from there:
-                  </p>
-                  <a
-                    className="text-apollo-slate w-fit font-medium underline"
-                    href={`mailto:${submitTarget.email}`}
-                  >
-                    {submitTarget.email}
-                  </a>
-                </>
-              )}
-            </div>
-          ) : confirmDiscard ? (
-            /* ---- unsaved-text discard guard (edge case 3) ---- */
-            <div className="flex flex-col gap-2">
-              <p className="text-base font-medium">Discard your request?</p>
-              <p className="text-muted-foreground text-sm">The detail you typed will be lost.</p>
-            </div>
-          ) : (
-            /* ---- the router ---- */
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1">
+            {inRouter && (
+              <div className="mt-1 flex flex-col gap-1">
                 <p id={`rac-q-${attribute}`} className="text-lg font-semibold">
                   {config.heading}
                 </p>
@@ -347,7 +347,51 @@ export function RequestAChangeDialog({
                   owns it.
                 </DialogDescription>
               </div>
+            )}
+          </DialogHeader>
 
+          {/* Scrollable middle — only the option list scrolls. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+            {submitted && submitTarget ? (
+              /* ---- post-submit confirmation (route) ---- */
+              <div className="flex flex-col gap-2" role="status" aria-live="polite">
+                {sentVia === "server" ? (
+                  <>
+                    <p className="text-base font-medium">Request sent.</p>
+                    <p className="text-muted-foreground text-sm">
+                      We&apos;ve routed your request
+                      {submitTarget.office ? ` to ${submitTarget.office}` : ""}. They&apos;ll follow
+                      up if they need more detail.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    {/* Not a success claim: the mailer is dark, so nothing was sent
+                        server-side — the request only completes once the user sends
+                        from their own client (vision-round T1.9). */}
+                    <p className="text-base font-medium">Almost there — finish in your email app.</p>
+                    <p className="text-muted-foreground text-sm">
+                      We opened a pre-filled message
+                      {submitTarget.office ? ` to ${submitTarget.office}` : ""}. If nothing opened,
+                      copy this address into your email and send it from there:
+                    </p>
+                    <a
+                      className="text-apollo-slate w-fit font-medium underline"
+                      href={`mailto:${submitTarget.email}`}
+                    >
+                      {submitTarget.email}
+                    </a>
+                  </>
+                )}
+              </div>
+            ) : confirmDiscard ? (
+              /* ---- unsaved-text discard guard (edge case 3) ---- */
+              <div className="flex flex-col gap-2">
+                <p className="text-base font-medium">Discard your request?</p>
+                <p className="text-muted-foreground text-sm">The detail you typed will be lost.</p>
+              </div>
+            ) : (
+              /* ---- the router: the option list scrolls under the pinned header ---- */
               <RadioGroup
                 aria-labelledby={`rac-q-${attribute}`}
                 value={issueId ?? ""}
@@ -358,9 +402,11 @@ export function RequestAChangeDialog({
                   const selected = i.id === issueId;
                   const a = i.action;
                   const hint = a.kind === "explain" ? null : ctaFor(a, false);
+                  const caption = captionFor(a);
                   return (
                     <div
                       key={i.id}
+                      ref={selected ? selectedRowRef : undefined}
                       data-testid={`rac-issue-${i.id}`}
                       className={cn(
                         "overflow-hidden rounded-md border transition-colors",
@@ -385,21 +431,29 @@ export function RequestAChangeDialog({
                         <span className={cn("flex-1 text-base", selected && "font-semibold")}>
                           {i.label}
                         </span>
-                        {!selected && hint && (
-                          <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
-                            {hint}
-                            <ArrowRight className="size-3.5" />
-                          </span>
-                        )}
+                        {selected
+                          ? caption && (
+                              <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
+                                {caption}
+                              </span>
+                            )
+                          : hint && (
+                              <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
+                                {hint}
+                                <ArrowRight className="size-3.5" />
+                              </span>
+                            )}
                       </label>
 
                       {selected && (
-                        <div className="border-apollo-red-tint-border flex flex-col gap-2 border-t px-3 py-3">
+                        <div className="border-apollo-red-tint-border flex flex-col gap-2.5 border-t px-4 pt-3 pb-4">
                           {a.kind === "self-service" && (
-                            <p className="text-muted-foreground text-sm">{a.instruction}</p>
+                            <p className="text-apollo-slate text-[13px] leading-relaxed">
+                              {a.instruction}
+                            </p>
                           )}
                           {a.kind === "route" && a.note && (
-                            <p className="text-muted-foreground text-sm">{a.note}</p>
+                            <p className="text-apollo-slate text-[13px] leading-relaxed">{a.note}</p>
                           )}
                           {a.kind === "explain" && (
                             <>
@@ -419,8 +473,8 @@ export function RequestAChangeDialog({
                             </>
                           )}
 
-                          {selected && showRouteBox && (
-                            <div className="flex flex-col gap-2.5">
+                          {showRouteBox && (
+                            <div className="flex flex-col gap-3">
                               <div className="flex flex-col gap-1.5">
                                 <label htmlFor="rac-detail" className="text-sm font-medium">
                                   Add any detail (optional)
@@ -431,16 +485,18 @@ export function RequestAChangeDialog({
                                   onChange={(e) => setDetail(e.target.value)}
                                   placeholder="What should change, and to what?"
                                   rows={3}
+                                  className="bg-apollo-surface border-apollo-border-strong"
                                 />
                               </div>
                               <label
                                 htmlFor="rac-no-receipt"
-                                className="text-muted-foreground flex items-center gap-2 text-sm"
+                                className="text-muted-foreground flex items-center gap-2.5 text-sm"
                               >
                                 <Checkbox
                                   id="rac-no-receipt"
                                   checked={noReceipt}
                                   onCheckedChange={(v) => setNoReceipt(v === true)}
+                                  className="bg-apollo-surface"
                                 />
                                 Don&apos;t email me a copy
                               </label>
@@ -452,75 +508,86 @@ export function RequestAChangeDialog({
                   );
                 })}
               </RadioGroup>
-            </div>
-          )}
+            )}
+          </div>
 
-          <DialogFooter>
-            {submitted ? (
-              <Button type="button" variant="apollo" onClick={() => setOpen(false)}>
-                Done
-              </Button>
-            ) : confirmDiscard ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  autoFocus
-                  onClick={() => setConfirmDiscard(false)}
-                >
-                  Keep editing
+          {/* Pinned footer — one destination-labelled action, always reachable. */}
+          <DialogFooter
+            className={cn(
+              "border-apollo-border flex-none border-t px-6 py-4 sm:items-center",
+              footerHint ? "sm:justify-between" : "sm:justify-end",
+            )}
+          >
+            {footerHint && (
+              <span className="text-muted-foreground hidden text-xs sm:block">{footerHint}</span>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              {submitted ? (
+                <Button type="button" variant="apollo" onClick={() => setOpen(false)}>
+                  Done
                 </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => {
-                    setConfirmDiscard(false);
-                    setOpen(false);
-                  }}
-                >
-                  Discard
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-                  {action ? "Cancel" : "Close"}
-                </Button>
-                {action?.kind === "self-service" && (
-                  <Button asChild variant="apollo" data-testid="request-a-change-open">
-                    <a
-                      href={resolveSelfServiceHref(action.href, cwid)}
-                      target="_blank"
-                      rel="noopener noreferrer"
+              ) : confirmDiscard ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    autoFocus
+                    onClick={() => setConfirmDiscard(false)}
+                  >
+                    Keep editing
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => {
+                      setConfirmDiscard(false);
+                      setOpen(false);
+                    }}
+                  >
+                    Discard
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+                    {action ? "Cancel" : "Close"}
+                  </Button>
+                  {action?.kind === "self-service" && (
+                    <Button asChild variant="apollo" data-testid="request-a-change-open">
+                      <a
+                        href={resolveSelfServiceHref(action.href, cwid)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setOpen(false)}
+                      >
+                        {cta}
+                      </a>
+                    </Button>
+                  )}
+                  {showRouteBox && (
+                    <Button
+                      type="button"
+                      variant="apollo"
+                      data-testid="request-a-change-submit"
+                      disabled={sending}
+                      onClick={handleRouteSubmit}
+                    >
+                      {sending ? "Sending…" : cta}
+                    </Button>
+                  )}
+                  {isAck && (
+                    <Button
+                      type="button"
+                      variant="apollo"
+                      data-testid="request-a-change-ack"
                       onClick={() => setOpen(false)}
                     >
                       {cta}
-                    </a>
-                  </Button>
-                )}
-                {showRouteBox && (
-                  <Button
-                    type="button"
-                    variant="apollo"
-                    data-testid="request-a-change-submit"
-                    disabled={sending}
-                    onClick={handleRouteSubmit}
-                  >
-                    {sending ? "Sending…" : cta}
-                  </Button>
-                )}
-                {isAck && (
-                  <Button
-                    type="button"
-                    variant="apollo"
-                    data-testid="request-a-change-ack"
-                    onClick={() => setOpen(false)}
-                  >
-                    {cta}
-                  </Button>
-                )}
-              </>
-            )}
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
