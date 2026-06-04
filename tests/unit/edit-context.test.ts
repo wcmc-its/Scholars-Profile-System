@@ -26,6 +26,7 @@ type FakeClient = {
   grant: { findMany: AnyMock };
   department: { findFirst: AnyMock };
   coiActivity: { findMany: AnyMock };
+  coiGapCandidate: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -51,6 +52,9 @@ function fakeClient(): FakeClient {
     department: { findFirst: vi.fn().mockResolvedValue(null) },
     // COI — read-only; default to "no disclosures".
     coiActivity: { findMany: vi.fn().mockResolvedValue([]) },
+    // COI-gap candidates — default to "none". Only queried when the loader is
+    // called with `{ includeCoiGap: true }` (the self-only gate).
+    coiGapCandidate: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -808,5 +812,105 @@ describe("loadEditContext — mentees (suppressible)", () => {
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => []);
     expect(ctx!.mentees).toEqual([]);
+  });
+});
+
+describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
+  const GAP_ROWS = [
+    {
+      id: "gap-1",
+      pmid: "31508198",
+      entity: "Procept BioRobotics",
+      tier: "High",
+      sourceSentence: "Clinical Research investigator for Procept Aquablation.",
+      // Fields that must NEVER leak to the client shape:
+      normalizedEntity: "procept biorobotics",
+      attribution: "scholar",
+      entityScore: 0.94,
+      category: "personal",
+      status: "new",
+    },
+    {
+      id: "gap-2",
+      pmid: "30000001",
+      entity: "Neotract",
+      tier: "Medium",
+      sourceSentence: "Consultant for Neotract Urolift.",
+      normalizedEntity: "neotract",
+      attribution: "unattributed",
+      entityScore: 0.61,
+      category: "personal",
+      status: "acknowledged",
+    },
+  ];
+
+  it("does NOT query coi_gap_candidate and returns [] when opts is absent", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c));
+    expect(ctx!.unmatchedPubmedCoi).toEqual([]);
+    expect(c.coiGapCandidate.findMany).not.toHaveBeenCalled();
+  });
+
+  it("does NOT query coi_gap_candidate and returns [] when includeCoiGap is false", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
+      includeCoiGap: false,
+    });
+    expect(ctx!.unmatchedPubmedCoi).toEqual([]);
+    expect(c.coiGapCandidate.findMany).not.toHaveBeenCalled();
+  });
+
+  it("queries only new+acknowledged and maps to the narrow client shape when includeCoiGap is true", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiGapCandidate.findMany.mockResolvedValue(GAP_ROWS);
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
+      includeCoiGap: true,
+    });
+
+    // Only new + acknowledged are requested.
+    const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
+    expect(whereArg).toEqual({ cwid: SELF, status: { in: ["new", "acknowledged"] } });
+
+    // The mapped shape carries ONLY id/pmid/entity/tier/sourceSentence — no
+    // normalizedEntity, attribution, entityScore, category, or status.
+    expect(ctx!.unmatchedPubmedCoi).toEqual([
+      {
+        id: "gap-1",
+        pmid: "31508198",
+        entity: "Procept BioRobotics",
+        tier: "High",
+        sourceSentence: "Clinical Research investigator for Procept Aquablation.",
+      },
+      {
+        id: "gap-2",
+        pmid: "30000001",
+        entity: "Neotract",
+        tier: "Medium",
+        sourceSentence: "Consultant for Neotract Urolift.",
+      },
+    ]);
+    // Belt-and-braces: the forbidden internals are absent from every row.
+    for (const row of ctx!.unmatchedPubmedCoi) {
+      expect(row).not.toHaveProperty("normalizedEntity");
+      expect(row).not.toHaveProperty("attribution");
+      expect(row).not.toHaveProperty("entityScore");
+      expect(row).not.toHaveProperty("category");
+      expect(row).not.toHaveProperty("status");
+    }
+  });
+
+  it("narrows an unexpected tier value to the conservative Medium", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiGapCandidate.findMany.mockResolvedValue([
+      { ...GAP_ROWS[0], tier: "Low" }, // anything not "High" → "Medium"
+    ]);
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
+      includeCoiGap: true,
+    });
+    expect(ctx!.unmatchedPubmedCoi[0].tier).toBe("Medium");
   });
 });

@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- session events: `impersonation_start` / `impersonation_end` (R5 -- audit
   -- enter AND exit; `target_entity_type='scholar'`, `target_entity_id` the
   -- impersonated CWID).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -162,11 +162,17 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         to ReCiter's gold standard; target_entity_id is the
 --                         pmid, target_entity_type='publication'). Appended LAST
 --                         to preserve existing ENUM ordinals.
+--   SELF_EDIT_COI_GAP_HINT: + coi_gap_dismiss  (scholar dismissed a
+--                         publication-derived COI-gap candidate on the self-only
+--                         "From your publications" panel; target_entity_id is the
+--                         `coi_gap_candidate.id`, target_entity_type=
+--                         'coi_gap_candidate'). Appended LAST to preserve
+--                         existing ENUM ordinals.
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore')
     NOT NULL;
 
 -- target_entity_type history:
@@ -174,9 +180,12 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   #540 Phase 1: + department · division · center
 --   #160 follow-up: + mentee  (derived mentor↔mentee relationship hide;
 --                    target_entity_id is `{mentorCwid}:{menteeCwid}`)
+--   SELF_EDIT_COI_GAP_HINT: + coi_gap_candidate  (dismissed publication-derived
+--                    COI-gap candidate; target_entity_id is the candidate id).
+--                    Appended LAST to preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for

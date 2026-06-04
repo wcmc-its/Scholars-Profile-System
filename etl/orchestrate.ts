@@ -62,6 +62,12 @@ async function main() {
   //    output legible during prototype runs.)
   for (const [source, file] of [
     ["ReCiter", "etl/reciter/index.ts"],
+    // PubMed competing-interest statements (#`SELF_EDIT_COI_GAP_HINT` source).
+    // Same WCM-ReciterDB path as ReCiter (reads reporting_conflicts), so it runs
+    // right after it; no-op-safe — the backfill warns loudly on 0 rows rather
+    // than failing, so it is safe in the chain on the same footing as ReCiter
+    // even before #443 lands.
+    ["ReCiter-COI-Statements", "etl/reciter/backfill-coi-statements.ts"],
     ["ASMS", "etl/asms/index.ts"],
     ["InfoEd", "etl/infoed/index.ts"],
     ["Jenzabar", "etl/jenzabar/index.ts"],
@@ -77,6 +83,11 @@ async function main() {
     ["Gates", "etl/gates/index.ts"],
     ["NIH-Profile", "etl/nih-profile/index.ts"],
     ["COI", "etl/coi/index.ts"],
+    // COI-gap recommendations. Runs after both its inputs: the disclosed COI
+    // (etl:coi, just above) and the PubMed statements (etl:reciter:coi-statements).
+    // Reads SPS-DB only — not WCM-network-blocked — so it computes whatever its
+    // inputs hold (zero candidates when statements haven't been ingested yet).
+    ["COI-Gap", "etl/coi-gap/index.ts"],
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],

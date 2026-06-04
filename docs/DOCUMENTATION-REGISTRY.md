@@ -126,6 +126,7 @@ in **§10**.
 | [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md) | The Jenzabar Graduate-School faculty appointments source — what the view exposes (#193). |
 | [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. |
 | [`spotlight-integration-plan.md`](./spotlight-integration-plan.md) | How ReciterAI spotlight data integrates into the home page. |
+| [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the self-only "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, the funnel (why ~10.7k co-author matches get suppressed), worked examples, and the v0 quality limits. |
 
 ## 7. Architecture Decision Records — why it's built this way
 

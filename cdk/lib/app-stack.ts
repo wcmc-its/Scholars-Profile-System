@@ -871,6 +871,18 @@ export class AppStack extends Stack {
         // the etl:reciter-refresh scanner propagates it to the gold standard +
         // fires the delayed re-score.
         RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
+        // (relationships named in a scholar's own PubMed competing-interest
+        // statements that aren't in their current WRG disclosures) + its disavow
+        // endpoint. ENABLED in both envs by operator decision (the source is
+        // productionized like any other — see docs/coi-pubmed-suggestion-approach.md):
+        // the concept/copy gate is signed off; the High-tier precision-labeling
+        // pass (docs/coi-pubmed-HANDOFF.md § C.2) is an accepted-residual follow-up,
+        // not a blocker. The panel only renders when candidates exist for a
+        // genuine (non-impersonating) self viewer, so it stays invisible until the
+        // nightly etl:coi-gap source has seeded data in that env. Prod takes
+        // effect only on an approval-gated `cdk deploy Sps-App-prod`.
+        SELF_EDIT_COI_GAP_HINT: "on",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
