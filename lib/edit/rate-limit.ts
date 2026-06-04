@@ -32,11 +32,24 @@ const WINDOW_MS = 60 * 60 * 1000; // one hour
  *  upstream (route). Ratchet from the 429 logs, not from a guess. */
 const DEFAULT_LIMIT = 20;
 
+/** Default per-cwid hourly cap for an overview-generate (#742). Lower than the
+ *  request-change default: a generation is an LLM call (cost), and a scholar
+ *  rarely needs to redraft their bio a dozen times an hour. Env-tunable. */
+const DEFAULT_OVERVIEW_GENERATE_LIMIT = 10;
+
 /** The per-cwid hourly cap. Reads `SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT`; falls
  *  back to {@link DEFAULT_LIMIT} when unset or not a positive integer. */
 export function requestChangeRateLimit(): number {
   const raw = Number(process.env.SELF_EDIT_REQUEST_CHANGE_RATE_LIMIT);
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_LIMIT;
+}
+
+/** The per-cwid hourly overview-generate cap (#742). Reads
+ *  `SELF_EDIT_OVERVIEW_GENERATE_RATE_LIMIT`; falls back to
+ *  {@link DEFAULT_OVERVIEW_GENERATE_LIMIT} when unset or not a positive integer. */
+export function overviewGenerateRateLimit(): number {
+  const raw = Number(process.env.SELF_EDIT_OVERVIEW_GENERATE_RATE_LIMIT);
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_OVERVIEW_GENERATE_LIMIT;
 }
 
 /** Start of the UTC hour-window containing `now` (epoch-floored, so the boundary
@@ -50,26 +63,24 @@ export type RateLimitResult =
   | { allowed: false; count: number; limit: number; retryAfterSeconds: number };
 
 /**
- * Atomically count this cwid's attempt in the current window and report whether
- * it is within the limit. Called once per send attempt, before the send, so the
- * count gates the send. A blocked request still consumed its increment (the
- * window is fixed by start, so this does not extend the lockout).
+ * The shared atomic increment-and-check, keyed on `(key, window_start)`. Both
+ * the request-change and overview-generate limiters route through this so the
+ * one genuinely-atomic `INSERT ... ON DUPLICATE KEY UPDATE` lives in exactly
+ * one place. `key` is the `cwid` column value (VarChar(32)); callers namespace
+ * it (e.g. `ovgen:${cwid}`) to keep the two limiters' buckets disjoint while
+ * sharing the table.
  */
-export async function recordRequestChangeAttempt(
-  cwid: string,
-  now: Date = new Date(),
-): Promise<RateLimitResult> {
-  const limit = requestChangeRateLimit();
+async function recordAttempt(key: string, limit: number, now: Date): Promise<RateLimitResult> {
   const windowStart = windowStartFor(now);
 
   await db.write.$executeRaw`
     INSERT INTO \`request_change_rate_limit\` (\`cwid\`, \`window_start\`, \`count\`)
-    VALUES (${cwid}, ${windowStart}, 1)
+    VALUES (${key}, ${windowStart}, 1)
     ON DUPLICATE KEY UPDATE \`count\` = \`count\` + 1`;
 
   const rows = await db.write.$queryRaw<{ count: number | bigint }[]>`
     SELECT \`count\` FROM \`request_change_rate_limit\`
-    WHERE \`cwid\` = ${cwid} AND \`window_start\` = ${windowStart}`;
+    WHERE \`cwid\` = ${key} AND \`window_start\` = ${windowStart}`;
   const count = Number(rows[0]?.count ?? 1);
 
   if (count > limit) {
@@ -80,4 +91,30 @@ export async function recordRequestChangeAttempt(
     return { allowed: false, count, limit, retryAfterSeconds };
   }
   return { allowed: true, count, limit };
+}
+
+/**
+ * Atomically count this cwid's attempt in the current window and report whether
+ * it is within the limit. Called once per send attempt, before the send, so the
+ * count gates the send. A blocked request still consumed its increment (the
+ * window is fixed by start, so this does not extend the lockout).
+ */
+export async function recordRequestChangeAttempt(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<RateLimitResult> {
+  return recordAttempt(cwid, requestChangeRateLimit(), now);
+}
+
+/**
+ * Per-cwid hourly rate limit for the overview-generate gateway call (#742). The
+ * same fixed-window mechanism, in its own bucket — the key is namespaced
+ * `ovgen:${cwid}` so generations never share a counter with request-change
+ * sends. The namespaced key fits the `cwid` VarChar(32) column.
+ */
+export async function recordOverviewGenerateAttempt(
+  cwid: string,
+  now: Date = new Date(),
+): Promise<RateLimitResult> {
+  return recordAttempt(`ovgen:${cwid}`, overviewGenerateRateLimit(), now);
 }

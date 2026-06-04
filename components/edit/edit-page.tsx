@@ -30,6 +30,7 @@ import type { EditContext } from "@/lib/api/edit-context";
 import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
+import { isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
 
 type AttrKey =
@@ -325,6 +326,10 @@ function renderPanel(
           initialHtml={ctx.scholar.overview}
           previewHref={mode === "self" ? profilePath(ctx.scholar.slug) : undefined}
           readOnly={mode === "superuser"}
+          // The generator is an owner-self affordance only — a superuser viewing
+          // another scholar's bio gets the read-only arm with no Generate button
+          // (#742, spec § Authorization resolution A: admins stage, not edit here).
+          generateEnabled={mode === "self" && isOverviewGenerateEnabled()}
         />
       );
     case "visibility":
