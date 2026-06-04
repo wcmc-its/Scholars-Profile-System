@@ -25,6 +25,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -262,6 +263,8 @@ export function EntityPanel<T extends EntityRow>({
       heading={copy.heading}
       description={copy.description}
     >
+      <LockedBadge />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm" aria-live="polite">
           <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>{" "}
