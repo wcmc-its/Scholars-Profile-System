@@ -12,9 +12,12 @@
  *      links, sidebar links) — a capture-phase document `click` handler
  *      `preventDefault()`s + `stopPropagation()`s synchronously (so Next's
  *      `Link` handler never runs), stashes the href, and opens the branded
- *      `ConfirmDialog`. Navigation happens via `router.push(href)` only on
- *      confirm. Cmd/Ctrl/Shift/aux-click (new tab/window) and in-page `#`
- *      anchors bypass the guard — those don't unload the current document.
+ *      `ConfirmDialog`. On confirm we first pop the Back/Forward sentinel
+ *      (route 3) off the history stack, then `router.push(href)` from the
+ *      resulting (bypassed) `popstate` — so no phantom same-URL entry is left
+ *      behind and Back from the destination reaches the edit page exactly once.
+ *      Cmd/Ctrl/Shift/aux-click (new tab/window) and in-page `#` anchors bypass
+ *      the guard — those don't unload the current document.
  *   3. **Browser Back / Forward** — `popstate` fires *after* the history
  *      pointer has already moved, so we cannot cancel it. Instead, while dirty,
  *      we push a sentinel history entry; a Back press then pops onto the
@@ -47,8 +50,18 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const pendingRef = React.useRef<PendingTarget | null>(null);
   // When true, the next `popstate` is one we triggered ourselves (a confirmed
-  // back-navigation or the disarm cleanup) and must NOT re-open the dialog.
+  // back-navigation, a confirmed href pop, or the disarm cleanup) and must NOT
+  // re-open the dialog.
   const bypassRef = React.useRef(false);
+  // Set when an href navigation has been confirmed: we pop the sentinel first
+  // (history.back), then perform this push from the resulting bypassed popstate
+  // so no phantom same-URL entry lingers above the destination. Held in a ref so
+  // the popstate handler (registered once per arm) always sees the latest href.
+  const pendingPushRef = React.useRef<string | null>(null);
+  // `router.push` read through a ref so the popstate handler — closed over at
+  // arm time — never calls a stale router.
+  const routerRef = React.useRef(router);
+  routerRef.current = router;
 
   // (1) beforeunload — reload / tab close / cross-origin nav (stays native).
   React.useEffect(() => {
@@ -96,9 +109,17 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
 
     function handler() {
       if (bypassRef.current) {
-        // A popstate we initiated (confirmed back-nav / disarm cleanup); let it
-        // pass without re-trapping.
+        // A popstate we initiated (confirmed back-nav / confirmed href pop /
+        // disarm cleanup); let it pass without re-trapping.
         bypassRef.current = false;
+        // If this pop was the sentinel-removal for a confirmed href navigation,
+        // the stack is now [...prev, editPage]; push the destination once so the
+        // final stack is [...prev, editPage, href] — no phantom entry.
+        const pendingPush = pendingPushRef.current;
+        if (pendingPush !== null) {
+          pendingPushRef.current = null;
+          routerRef.current.push(pendingPush);
+        }
         return;
       }
       // The user pressed Back/Forward off our sentinel. Re-push the sentinel to
@@ -127,7 +148,27 @@ export function UnsavedChangesGuard({ dirty }: { dirty: boolean }) {
     setDialogOpen(false);
     if (!pending) return;
     if (pending.kind === "href") {
-      router.push(pending.href);
+      // While dirty, route (3) has pushed a sentinel (same URL as the edit page)
+      // on top of the stack: [...prev, editPage, sentinel]. Pushing the href now
+      // would leave [...prev, editPage, sentinel, href] — Back from the
+      // destination would then land on the sentinel (a same-URL no-op) once
+      // "for free" before reaching the edit page: one dead Back press.
+      //
+      // Instead pop the sentinel first (history.back), then perform the push
+      // from the resulting bypassed popstate (see the route-3 handler). The
+      // final stack is [...prev, editPage, href] — Back reaches the edit page
+      // exactly once. If route (3) isn't armed (sentinel never pushed) there is
+      // no popstate to drive the push, so fall back to pushing immediately.
+      const sentinelArmed =
+        typeof window !== "undefined" &&
+        (window.history.state as Record<string, unknown> | null)?.[SENTINEL_KEY] === true;
+      if (sentinelArmed) {
+        pendingPushRef.current = pending.href;
+        bypassRef.current = true;
+        window.history.back();
+      } else {
+        router.push(pending.href);
+      }
     } else {
       // Confirmed a Back/Forward exit. The stack is [...prev, sentinel] after
       // our re-push; bypass the next popstate (our own) and step back twice —

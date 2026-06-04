@@ -97,6 +97,69 @@ describe("UnsavedChangesGuard — dirty=true, in-subtree <a> click", () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/somewhere"));
   });
 
+  it("confirming pops the Back/Forward sentinel BEFORE pushing, leaving no phantom entry", async () => {
+    // While dirty, route (3) pushes a same-URL sentinel; a naive push would
+    // leave [...prev, editPage, sentinel, href] — one dead Back press. The guard
+    // must pop the sentinel (history.back) and only then push, so the order of
+    // operations is back() → push(href), each exactly once.
+    const order: string[] = [];
+    // Drive the deferred push deterministically: our back() spy synchronously
+    // dispatches the bypassed popstate the guard listens for (no reliance on
+    // real jsdom navigation timing).
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {
+      order.push("back");
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+    mockPush.mockImplementation(() => {
+      order.push("push");
+    });
+
+    const { container } = render(
+      <>
+        <UnsavedChangesGuard dirty={true} />
+        <a href="/somewhere">Go</a>
+      </>,
+    );
+    const a = container.querySelector("a")!;
+    act(() => {
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
+    });
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/somewhere"));
+    // Exactly one navigation, and the sentinel was popped first.
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["back", "push"]);
+  });
+
+  it("confirming an href does not push twice even if a stray popstate follows", async () => {
+    // The deferred push is consumed once (pendingPushRef is cleared); a second
+    // bypassed popstate (e.g. the disarm cleanup) must not re-trigger it.
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    });
+
+    const { container } = render(
+      <>
+        <UnsavedChangesGuard dirty={true} />
+        <a href="/elsewhere">Go</a>
+      </>,
+    );
+    const a = container.querySelector("a")!;
+    act(() => {
+      a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Leave anyway" }));
+    });
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith("/elsewhere"));
+    expect(backSpy).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledTimes(1);
+  });
+
   it("cancelling the dialog stays put — no router.push", async () => {
     const { container } = render(
       <>
