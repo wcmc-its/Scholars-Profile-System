@@ -149,6 +149,7 @@ export function RequestNewOrgUnitDialog() {
     <>
       <Button
         type="button"
+        variant="apollo"
         data-testid="request-new-org-unit-trigger"
         onClick={() => setOpen(true)}
       >
@@ -183,7 +184,7 @@ export function RequestNewOrgUnitDialog() {
                     Your email client should have opened a pre-filled message to {route.office}. If
                     nothing opened, email{" "}
                     <a
-                      className="text-[var(--apollo-maroon)] underline"
+                      className="text-apollo-slate underline"
                       href={`mailto:${route.email}`}
                     >
                       {route.email}
@@ -219,7 +220,7 @@ export function RequestNewOrgUnitDialog() {
                 <select
                   id="rnou-type"
                   data-testid="rnou-type"
-                  className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                  className="border-apollo-border-strong bg-background h-9 rounded-md border px-3 text-sm"
                   value={unitType}
                   onChange={(e) =>
                     setUnitType(e.target.value as "department" | "division" | "center")
@@ -260,7 +261,7 @@ export function RequestNewOrgUnitDialog() {
 
           <DialogFooter>
             {submitted ? (
-              <Button type="button" onClick={() => setOpen(false)}>
+              <Button type="button" variant="apollo" onClick={() => setOpen(false)}>
                 Done
               </Button>
             ) : (
@@ -270,6 +271,7 @@ export function RequestNewOrgUnitDialog() {
                 </Button>
                 <Button
                   type="button"
+                  variant="apollo"
                   data-testid="rnou-submit"
                   disabled={sending || !canSubmit}
                   onClick={handleSubmit}

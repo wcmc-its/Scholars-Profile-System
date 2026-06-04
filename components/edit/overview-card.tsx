@@ -83,7 +83,7 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
     >
       {hasBio ? (
         <div
-          className="prose prose-sm rounded-md border border-border bg-background px-4 py-3"
+          className="prose prose-sm border-apollo-border bg-apollo-surface-2 rounded-md border px-4 py-3"
           dangerouslySetInnerHTML={{ __html: initialHtml }}
           data-slot="overview-readonly"
         />
@@ -192,7 +192,7 @@ function OverviewEditorCard({ cwid, initialHtml, previewHref }: OverviewEditorCa
             <span
               role="status"
               aria-live="polite"
-              className="text-primary inline-flex items-center gap-1.5 text-sm"
+              className="text-apollo-green inline-flex items-center gap-1.5 text-sm"
             >
               <Check className="size-4" />
               Saved — live.
@@ -226,6 +226,9 @@ function OverviewEditorCard({ cwid, initialHtml, previewHref }: OverviewEditorCa
           >
             {isSaving ? "Saving…" : "Save bio"}
           </Button>
+          <span className="text-muted-foreground text-sm">
+            Changes publish to your public profile immediately.
+          </span>
         </div>
       </div>
       {error && (

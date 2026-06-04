@@ -16,22 +16,24 @@ export type PublicationTakedownPageProps = {
 
 export function PublicationTakedownPage({ ctx }: PublicationTakedownPageProps) {
   return (
-    <main className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-10 md:py-12">
-      <header className="mb-6">
-        <h1 className="page-title">Manage publication</h1>
-        <p className="text-muted-foreground text-sm">
-          Hide or restore this publication across the site.
-        </p>
-      </header>
-      <SuperuserBanner targetLabel={ctx.publication.title} targetKind="publication" />
-      <div className="flex flex-col gap-6">
-        <PublicationSummaryCard publication={ctx.publication} authors={ctx.authors} />
-        <PublicationTakedownCard
-          pmid={ctx.publication.pmid}
-          takedown={ctx.takedown}
-          derivedDark={ctx.derivedDark}
-        />
-      </div>
-    </main>
+    <div className="bg-apollo-page min-h-screen">
+      <main className="mx-auto w-full max-w-[var(--max-narrow)] px-6 py-10 md:py-12">
+        <header className="mb-6">
+          <h1 className="page-title">Manage publication</h1>
+          <p className="text-muted-foreground text-sm">
+            Hide or restore this publication across the site.
+          </p>
+        </header>
+        <SuperuserBanner targetLabel={ctx.publication.title} targetKind="publication" />
+        <div className="flex flex-col gap-6">
+          <PublicationSummaryCard publication={ctx.publication} authors={ctx.authors} />
+          <PublicationTakedownCard
+            pmid={ctx.publication.pmid}
+            takedown={ctx.takedown}
+            derivedDark={ctx.derivedDark}
+          />
+        </div>
+      </main>
+    </div>
   );
 }

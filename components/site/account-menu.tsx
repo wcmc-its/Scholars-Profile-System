@@ -40,9 +40,15 @@ export type AccountMenuProps = {
    * `Scholar` row exists for the session's cwid (a staff superuser case).
    */
   scholar: { slug: string; preferredName: string } | null;
+  /**
+   * Show the "View my profile" row. Default true (public header). The /edit
+   * console passes false: its standalone "Preview Profile" link already covers
+   * it, so the menu item would be redundant.
+   */
+  showViewProfile?: boolean;
 };
 
-export function AccountMenu({ scholar }: AccountMenuProps) {
+export function AccountMenu({ scholar, showViewProfile = true }: AccountMenuProps) {
   const label = scholar?.preferredName ?? "Account";
   // In-place sub-view of the popover: the menu rows, or the "View as" switcher.
   const [view, setView] = useState<"menu" | "switcher">("menu");
@@ -97,13 +103,15 @@ export function AccountMenu({ scholar }: AccountMenuProps) {
                 <Link href="/edit" className={ROW_CLASS} data-testid="account-menu-edit">
                   Edit my profile
                 </Link>
-                <Link
-                  href={profilePath(scholar.slug)}
-                  className={ROW_CLASS}
-                  data-testid="account-menu-view"
-                >
-                  View my profile
-                </Link>
+                {showViewProfile && (
+                  <Link
+                    href={profilePath(scholar.slug)}
+                    className={ROW_CLASS}
+                    data-testid="account-menu-view"
+                  >
+                    View my profile
+                  </Link>
+                )}
                 <Separator className="my-1" />
               </>
             ) : null}

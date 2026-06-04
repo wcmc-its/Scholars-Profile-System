@@ -49,7 +49,7 @@ export function ForbiddenEditPage({
           Only an Owner, Curator, or administrator can edit this unit.
         </p>
         <p className="mt-8">
-          <Link href="/" className="underline">
+          <Link href="/" className="text-apollo-slate hover:underline">
             Return to Scholars
           </Link>
         </p>
@@ -68,7 +68,7 @@ export function ForbiddenEditPage({
         Only an administrator can edit another scholar&apos;s profile.
       </p>
       <p className="mt-8">
-        <Link href="/edit" className="underline">
+        <Link href="/edit" className="text-apollo-slate hover:underline">
           Go to my own profile editor
         </Link>
       </p>

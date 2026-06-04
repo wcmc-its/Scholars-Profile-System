@@ -140,7 +140,7 @@ export function DirectoryPeopleTypeahead({
   if (value) {
     return (
       <div
-        className="border-input flex items-center justify-between gap-2 rounded-md border px-3 py-2"
+        className="border-apollo-border-strong flex items-center justify-between gap-2 rounded-md border px-3 py-2"
         data-slot="directory-typeahead-selected"
       >
         <span className="min-w-0 truncate text-sm">
@@ -185,7 +185,7 @@ export function DirectoryPeopleTypeahead({
         <ul
           id={listboxId}
           role="listbox"
-          className="border-input bg-popover absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border shadow-md"
+          className="border-apollo-border bg-apollo-surface absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-md border shadow-md"
           data-testid={`${idPrefix}-listbox`}
         >
           {loading && (
@@ -213,7 +213,7 @@ export function DirectoryPeopleTypeahead({
                 data-testid={`${idPrefix}-option-${result.cwid}`}
                 className={cn(
                   "cursor-pointer px-3 py-2 text-sm",
-                  i === activeIndex ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                  i === activeIndex ? "bg-apollo-surface-2 text-foreground" : "hover:bg-apollo-surface-2",
                 )}
               >
                 <span className="font-medium">{result.name}</span>

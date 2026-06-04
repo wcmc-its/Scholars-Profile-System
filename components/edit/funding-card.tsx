@@ -39,7 +39,12 @@ export function FundingCard({ cwid, mode, scholarName, grants }: FundingCardProp
           {" · "}
           {g.startYear}–{g.endYear}
           {" · "}
-          <Badge variant={g.isActive ? "secondary" : "outline"}>{g.isActive ? "Active" : "Past"}</Badge>
+          <Badge
+            variant="outline"
+            className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+          >
+            {g.isActive ? "Active" : "Past"}
+          </Badge>
         </>
       )}
       copy={{

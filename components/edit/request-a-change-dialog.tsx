@@ -54,6 +54,7 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   "org-unit": "Org Unit",
   coi: "Conflicts of Interest",
   mentees: "Mentees",
+  "profile-url": "Profile URL",
 };
 
 /** The footer verb for an action (its config `cta`, else a sensible default). */
@@ -320,7 +321,7 @@ export function RequestAChangeDialog({
                     copy this address into your email and send it from there:
                   </p>
                   <a
-                    className="text-apollo-maroon w-fit font-medium underline"
+                    className="text-apollo-slate w-fit font-medium underline"
                     href={`mailto:${submitTarget.email}`}
                   >
                     {submitTarget.email}
@@ -338,7 +339,7 @@ export function RequestAChangeDialog({
             /* ---- the router ---- */
             <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1">
-                <p id={`rac-q-${attribute}`} className="text-base font-medium">
+                <p id={`rac-q-${attribute}`} className="text-lg font-semibold">
                   {config.heading}
                 </p>
                 <DialogDescription>
@@ -351,7 +352,7 @@ export function RequestAChangeDialog({
                 aria-labelledby={`rac-q-${attribute}`}
                 value={issueId ?? ""}
                 onValueChange={selectIssue}
-                className="gap-1.5"
+                className="gap-2.5"
               >
                 {config.issues.map((i) => {
                   const selected = i.id === issueId;
@@ -364,26 +365,36 @@ export function RequestAChangeDialog({
                       className={cn(
                         "overflow-hidden rounded-md border transition-colors",
                         selected
-                          ? "border-apollo-maroon bg-apollo-maroon/[0.04]"
-                          : "border-border",
+                          ? "bg-apollo-red-tint border-apollo-red-tint-border"
+                          : "border-apollo-border hover:border-apollo-border-strong hover:bg-apollo-surface-2",
                       )}
                     >
                       <label
                         htmlFor={`rac-${i.id}`}
-                        className="flex cursor-pointer items-center gap-2.5 px-3 py-2.5"
+                        className="flex cursor-pointer items-center gap-3 px-4 py-3.5"
                       >
-                        <RadioGroupItem id={`rac-${i.id}`} value={i.id} className="border-foreground/50" />
-                        <span className="flex-1 text-sm">{i.label}</span>
+                        <RadioGroupItem
+                          id={`rac-${i.id}`}
+                          value={i.id}
+                          className={cn(
+                            "border-apollo-border-strong",
+                            selected &&
+                              "border-apollo-maroon text-apollo-maroon [&_svg]:fill-apollo-maroon",
+                          )}
+                        />
+                        <span className={cn("flex-1 text-base", selected && "font-semibold")}>
+                          {i.label}
+                        </span>
                         {!selected && hint && (
-                          <span className="text-muted-foreground flex shrink-0 items-center gap-1 text-xs">
+                          <span className="text-apollo-slate flex shrink-0 items-center gap-1.5 text-sm">
                             {hint}
-                            <ArrowRight className="size-3" />
+                            <ArrowRight className="size-3.5" />
                           </span>
                         )}
                       </label>
 
                       {selected && (
-                        <div className="border-border flex flex-col gap-2 border-t px-3 py-3">
+                        <div className="border-apollo-red-tint-border flex flex-col gap-2 border-t px-3 py-3">
                           {a.kind === "self-service" && (
                             <p className="text-muted-foreground text-sm">{a.instruction}</p>
                           )}
@@ -399,7 +410,7 @@ export function RequestAChangeDialog({
                               {a.fallbackEmail && !revealFallback && (
                                 <button
                                   type="button"
-                                  className="text-apollo-maroon w-fit text-sm hover:underline"
+                                  className="text-apollo-slate w-fit text-sm hover:underline"
                                   onClick={() => setRevealFallback(true)}
                                 >
                                   Still wrong? Email us

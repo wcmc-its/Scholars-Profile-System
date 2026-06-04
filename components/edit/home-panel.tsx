@@ -6,7 +6,7 @@
  * Server component: links to the same `?attr=` panels, no client state.
  */
 import Link from "next/link";
-import { ExternalLink, Eye, FileText, ListChecks, MessageSquareWarning } from "lucide-react";
+import { Eye, FileText, ListChecks, MessageSquareWarning } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,6 @@ export type HomePanelProps = {
   isHidden: boolean;
   totalPublications: number;
   hiddenPublications: number;
-  previewHref: string;
 };
 
 export function HomePanel({
@@ -26,7 +25,6 @@ export function HomePanel({
   isHidden,
   totalPublications,
   hiddenPublications,
-  previewHref,
 }: HomePanelProps) {
   const cards = [
     {
@@ -71,17 +69,6 @@ export function HomePanel({
       slot="home-panel"
       heading="Your profile"
       description="Changes here appear on your public profile. Here's what you can do."
-      headerAction={
-        <Link
-          href={previewHref}
-          className="text-apollo-maroon inline-flex items-center gap-1 text-sm font-medium underline-offset-2 hover:underline"
-          target="_blank"
-          rel="noreferrer"
-        >
-          View my profile
-          <ExternalLink className="size-3.5" aria-hidden />
-        </Link>
-      }
     >
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => {
@@ -91,13 +78,18 @@ export function HomePanel({
               <Link
                 href={`${basePath}?attr=${c.key}`}
                 data-testid={`home-card-${c.key}`}
-                className="border-border hover:border-apollo-maroon focus-visible:ring-apollo-ring flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                className="border-apollo-border hover:border-apollo-maroon focus-visible:ring-apollo-ring flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="bg-apollo-maroon/10 text-apollo-maroon flex size-8 items-center justify-center rounded-md">
                     <Icon className="size-4" aria-hidden />
                   </span>
-                  <Badge variant={c.statusVariant}>{c.status}</Badge>
+                  <Badge
+                    variant="outline"
+                    className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                  >
+                    {c.status}
+                  </Badge>
                 </div>
                 <span className="font-medium">{c.title}</span>
                 <span className="text-muted-foreground text-sm">{c.body}</span>

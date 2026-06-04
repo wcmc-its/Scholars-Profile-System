@@ -26,16 +26,10 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
@@ -181,17 +175,17 @@ export function UnitSlugCard({ entityType, entityId, liveSlug, initialOverride }
   const prefix = URL_PREFIX[entityType];
 
   return (
-    <Card data-slot="unit-slug-card">
+    <EditPanel
+      slot="unit-slug-card"
+      heading="Profile URL"
+      description={
+        isCenter
+          ? "Set the URL segment for this center. The change takes effect immediately; the old URL redirects to the new one."
+          : "Override the directory-derived URL segment. The change applies on the next nightly ETL run."
+      }
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle>Profile URL</CardTitle>
-        <CardDescription>
-          {isCenter
-            ? "Set the URL segment for this center. The change takes effect immediately; the old URL redirects to the new one."
-            : "Override the directory-derived URL segment. The change applies on the next nightly ETL run."}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
         <p className="text-sm">
           <span className="text-muted-foreground">Current URL: </span>
           <code className="bg-muted rounded px-1.5 py-0.5 text-xs">
@@ -239,6 +233,7 @@ export function UnitSlugCard({ entityType, entityId, liveSlug, initialOverride }
           <div className="flex items-center gap-2">
             <Button
               type="button"
+              variant="apollo"
               onClick={handleSave}
               disabled={!canSave}
               data-testid="unit-slug-card-save"
@@ -291,7 +286,7 @@ export function UnitSlugCard({ entityType, entityId, liveSlug, initialOverride }
             </AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={clearConfirmOpen}
@@ -303,7 +298,7 @@ export function UnitSlugCard({ entityType, entityId, liveSlug, initialOverride }
         confirmVariant="default"
         onConfirm={handleClear}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

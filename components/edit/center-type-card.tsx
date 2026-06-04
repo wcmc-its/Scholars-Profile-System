@@ -15,15 +15,9 @@
 import * as React from "react";
 import { Check } from "lucide-react";
 
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 type CenterType = "center" | "institute";
@@ -76,14 +70,12 @@ export function CenterTypeCard({ entityId, centerType }: CenterTypeCardProps) {
   }
 
   return (
-    <Card data-slot="center-type-card">
-      <CardHeader>
-        <CardTitle>Center type</CardTitle>
-        <CardDescription>
-          Whether this unit is presented as a center or an institute.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="center-type-card"
+      heading="Center type"
+      description="Whether this unit is presented as a center or an institute."
+    >
+      <div className="flex flex-col gap-4">
         <RadioGroup
           value={value}
           onValueChange={(v) => {
@@ -106,7 +98,7 @@ export function CenterTypeCard({ entityId, centerType }: CenterTypeCardProps) {
             <span
               role="status"
               aria-live="polite"
-              className="text-primary inline-flex items-center gap-1 text-sm"
+              className="text-apollo-green inline-flex items-center gap-1 text-sm"
             >
               <Check className="size-4" />
               Saved
@@ -114,6 +106,7 @@ export function CenterTypeCard({ entityId, centerType }: CenterTypeCardProps) {
           )}
           <Button
             type="button"
+            variant="apollo"
             onClick={save}
             disabled={!dirty || isSaving}
             data-testid="center-type-save"
@@ -127,8 +120,8 @@ export function CenterTypeCard({ entityId, centerType }: CenterTypeCardProps) {
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </EditPanel>
   );
 }
 

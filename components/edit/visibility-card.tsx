@@ -187,7 +187,10 @@ export function VisibilityCard({
         heading="Profile visibility"
         owned={mode === "self"}
         headerAction={
-          <Badge variant={isHidden ? "destructive" : "secondary"}>
+          <Badge
+            variant="outline"
+            className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+          >
             {isHidden ? "Hidden" : "Public"}
           </Badge>
         }
@@ -285,6 +288,7 @@ function renderSelfBody({ ownRow, adminRow, pending, onHide, onRevokeOwn }: Self
         <div>
           <Button
             type="button"
+            variant="apollo"
             onClick={onRevokeOwn}
             disabled={pending}
             data-testid="visibility-revoke-self"
@@ -397,6 +401,7 @@ function renderSuperuserBody({
       <div>
         <Button
           type="button"
+          variant="apollo"
           onClick={onRevokeAdmin}
           disabled={pending}
           data-testid="visibility-revoke-admin"

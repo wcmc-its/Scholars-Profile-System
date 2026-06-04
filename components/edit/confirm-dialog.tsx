@@ -190,7 +190,7 @@ export function ConfirmDialog({
           </Button>
           <Button
             type="button"
-            variant={confirmVariant}
+            variant={confirmVariant === "destructive" ? "destructive" : "apollo"}
             onClick={handleConfirm}
             disabled={confirmDisabled}
           >

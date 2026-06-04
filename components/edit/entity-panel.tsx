@@ -25,6 +25,7 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -78,7 +79,7 @@ export type EntityPanelProps<T extends EntityRow> = {
   entityType: EntityType;
   entities: ReadonlyArray<T>;
   copy: EntityPanelCopy;
-  /** Row title — rendered maroon + semibold. */
+  /** Row title — rendered as primary ink + medium weight. */
   getTitle: (e: T) => string;
   /** Row metadata line under the title. */
   renderMeta: (e: T) => React.ReactNode;
@@ -230,7 +231,7 @@ export function EntityPanel<T extends EntityRow>({
   const targetById = (id: string | null) => (id === null ? null : list.find((e) => e.externalId === id) ?? null);
 
   const listBody = (
-    <ul className="divide-border divide-y" data-slot={`${slot}-list`}>
+    <ul className="divide-apollo-border divide-y" data-slot={`${slot}-list`}>
       {rows.map((e) => (
         <EntityRowView
           key={e.externalId}
@@ -262,6 +263,8 @@ export function EntityPanel<T extends EntityRow>({
       heading={copy.heading}
       description={copy.description}
     >
+      <LockedBadge />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-muted-foreground text-sm" aria-live="polite">
           <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>{" "}
@@ -293,9 +296,9 @@ export function EntityPanel<T extends EntityRow>({
       ) : filterable ? (
         // Bounded inner scroll on desktop only; on phones an unbounded height
         // lets the page scroll naturally instead of trapping it (T2.5 / 4.5).
-        <ScrollArea className="border-border rounded-md border md:h-[60vh]">{listBody}</ScrollArea>
+        <ScrollArea className="md:h-[60vh]">{listBody}</ScrollArea>
       ) : (
-        <div className="border-border rounded-md border">{listBody}</div>
+        <div>{listBody}</div>
       )}
 
       <ConfirmDialog
@@ -371,14 +374,13 @@ function EntityRowView({
         : null;
 
   return (
-    <li className="flex flex-col gap-2 px-3 py-3" data-testid={testId}>
+    <li className="flex flex-col gap-2 py-4" data-testid={testId}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-apollo-maroon font-semibold",
-              isHidden && "text-muted-foreground font-normal",
-              state === "locked" && "text-foreground",
+              "text-foreground font-medium",
+              isHidden && "text-muted-foreground line-through decoration-muted-foreground",
             )}
           >
             {title}
@@ -388,7 +390,12 @@ function EntityRowView({
             {badgeText && (
               <>
                 {" · "}
-                <Badge variant={state === "hidden_by_admin" ? "destructive" : "secondary"}>{badgeText}</Badge>
+                <Badge
+                  variant="outline"
+                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                >
+                  {badgeText}
+                </Badge>
               </>
             )}
           </div>

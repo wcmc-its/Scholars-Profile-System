@@ -14,7 +14,7 @@
  * buried under nine links on phones (finding 4.5).
  */
 import Link from "next/link";
-import { ChevronLeftIcon } from "lucide-react";
+import { ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSelect } from "@/components/edit/rail-select";
@@ -63,7 +63,7 @@ export function EditShell({
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
   return (
-    <div className="min-h-screen bg-[var(--background)]" data-slot="edit-shell" data-mode={mode}>
+    <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
       <a
         href="#edit-detail"
@@ -77,7 +77,7 @@ export function EditShell({
         <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center justify-between px-6">
           <div className="flex items-center gap-3">
             <span
-              className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
+              className="bg-apollo-maroon text-apollo-maroon-foreground flex size-9 items-center justify-center rounded-md text-xs font-bold tracking-wide"
               aria-hidden
             >
               WCM
@@ -85,7 +85,7 @@ export function EditShell({
             <h1 className="text-base font-semibold">Scholars Profile Console</h1>
           </div>
           {account ? (
-            <AccountMenu scholar={account} />
+            <AccountMenu scholar={account} showViewProfile={false} />
           ) : (
             <form action="/api/auth/logout" method="POST">
               <button
@@ -162,17 +162,19 @@ export function EditShell({
             </p>
           )}
 
-          {/* Standalone preview link only when there's no account menu (the menu
-              already offers "View my profile"). */}
-          {previewHref && !account && (
+          {/* Standalone "Preview Profile" link (mockup parity) — slate text + an
+              external ↗ arrow. Shown alongside the account menu's "View my
+              profile". */}
+          {previewHref && (
             <div className="mb-4 flex justify-end">
               <Link
                 href={previewHref}
-                className="text-apollo-maroon text-sm underline"
+                className="text-apollo-slate inline-flex items-center gap-1.5 text-sm font-medium hover:underline"
                 target="_blank"
                 rel="noreferrer"
               >
                 Preview Profile
+                <ArrowUpRight className="size-4" aria-hidden />
               </Link>
             </div>
           )}
@@ -184,7 +186,7 @@ export function EditShell({
             />
           )}
 
-          {children}
+          <div className="apollo-card">{children}</div>
         </main>
       </div>
     </div>

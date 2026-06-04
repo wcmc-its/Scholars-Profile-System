@@ -245,7 +245,7 @@ export function UnitCreateForm({
           />
         ) : (
           <div
-            className="border-input text-muted-foreground rounded-md border px-3 py-2 text-sm"
+            className="border-apollo-border-strong text-muted-foreground rounded-md border px-3 py-2 text-sm"
             data-testid="create-dept-fixed"
           >
             {fixedDept ? (
@@ -297,7 +297,7 @@ export function UnitCreateForm({
       )}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={!canSubmit} data-testid="create-submit">
+        <Button type="submit" variant="apollo" disabled={!canSubmit} data-testid="create-submit">
           {submitting ? "Creating…" : "Create"}
         </Button>
         <Link

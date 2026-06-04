@@ -78,7 +78,7 @@ export function FirstHideNoticeDialog({
               target="_blank"
               rel="noreferrer"
               onClick={onNotMine}
-              className="text-foreground underline"
+              className="text-apollo-slate hover:underline"
             >
               reject it in Publication Manager
             </a>{" "}

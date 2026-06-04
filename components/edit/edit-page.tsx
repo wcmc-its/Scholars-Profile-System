@@ -19,11 +19,14 @@ import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
+import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
 import { VisibilityCard } from "@/components/edit/visibility-card";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
+import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 
 type AttrKey =
@@ -81,17 +84,21 @@ const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
  * read-only, Profile URL is direct-set), so these self labels would mislead.
  */
 const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
+  // "Yours to edit" group (owned).
   "home",
   "overview",
   "visibility",
+  // "From WCM systems" group — ordered per operator request. (Profile URL is
+  // owned ⇒ joins "Yours to edit" only when the slug-request flag is on;
+  // gated/read-only it leads the WCM group.)
   "profile-url",
-  "publications",
-  "funding",
-  "appointments",
-  "education",
-  "mentees",
   "name-title",
   "photo",
+  "appointments",
+  "education",
+  "publications",
+  "funding",
+  "mentees",
   "coi",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
@@ -216,7 +223,6 @@ function renderPanel(
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
           hiddenPublications={hiddenPublications}
-          previewHref={profilePath(ctx.scholar.slug)}
         />
       );
     }
@@ -244,6 +250,14 @@ function renderPanel(
           cwid={cwid}
           heading="Photo"
           description="Your profile photo comes from the WCM directory."
+          media={
+            <HeadshotAvatar
+              cwid={cwid}
+              preferredName={scholarName}
+              identityImageEndpoint={identityImageEndpoint(cwid)}
+              size="lg"
+            />
+          }
         />
       );
     case "overview":
@@ -309,7 +323,7 @@ function renderPanel(
         );
       }
       if (!slugRequestEnabled) {
-        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} />;
+        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} />;
       }
       return (
         <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
@@ -320,22 +334,40 @@ function renderPanel(
 /** The read-only Profile URL panel shown to scholars while `SELF_EDIT_SLUG_REQUEST`
  *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
-function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
+function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string }) {
+  const currentUrl = `${publicProfileHost()}/${slug}`;
   return (
     <EditPanel
       slot="profile-url-readonly"
       heading="Profile URL"
-      description="The web address for your public profile. Custom URLs aren't available yet — your old address keeps working if it ever changes."
+      description="The web address for your public profile."
     >
-      <p className="text-sm">
+      <p className="flex flex-wrap items-center gap-2.5 text-sm">
         <span className="text-muted-foreground">Your current URL: </span>
         <code
-          className="rounded bg-muted px-1.5 py-0.5 text-xs"
+          className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs"
           data-testid="profile-url-readonly-value"
         >
-          {publicProfileHost()}/{slug}
+          {currentUrl}
         </code>
       </p>
+      <div className="text-muted-foreground flex flex-col gap-2 text-sm">
+        <p>
+          Personalized URLs aren&rsquo;t self-service, but you can request one &mdash; a Scholars
+          administrator reviews every request.
+        </p>
+        <p>
+          A personalized URL must be a variation of your own first and last name &mdash; optionally
+          with a middle initial or fuller form &mdash; not a research area or other handle, using
+          lowercase letters, numbers, and hyphens only. Your current address (
+          <code className="font-mono">/scholars/{slug}</code>) keeps working either way.
+        </p>
+      </div>
+      <RequestAChangeDialog
+        attribute="profile-url"
+        cwid={cwid}
+        triggerTestId="profile-url-request-change"
+      />
     </EditPanel>
   );
 }

@@ -20,15 +20,9 @@ import {
   DirectoryPeopleTypeahead,
   type DirectoryValue,
 } from "@/components/edit/directory-people-typeahead";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 type Member = { cwid: string; name: string; title: string | null };
 
@@ -94,20 +88,18 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
   const noun = entityType;
 
   return (
-    <Card data-slot="unit-roster-card">
-      <CardHeader>
-        <CardTitle>Members</CardTitle>
-        <CardDescription>
-          The people listed on this {noun}. Listing a member does not grant them edit access.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="unit-roster-card"
+      heading="Members"
+      description={`The people listed on this ${noun}. Listing a member does not grant them edit access.`}
+    >
+      <div className="flex flex-col gap-4">
         {members.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="unit-roster-empty">
             This roster is empty. Add the first member to populate this {noun}.
           </p>
         ) : (
-          <ul className="flex flex-col divide-y divide-border" data-testid="unit-roster-list">
+          <ul className="flex flex-col divide-y divide-apollo-border" data-testid="unit-roster-list">
             {members.map((m) => (
               <li
                 key={m.cwid}
@@ -132,12 +124,13 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
           </ul>
         )}
 
-        <div className="border-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-roster-add">
+        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-roster-add">
           <p className="text-sm font-medium">Add member</p>
           <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
           <div className="flex justify-end">
             <Button
               type="button"
+              variant="apollo"
               onClick={add}
               disabled={!addValue || adding}
               data-testid="unit-roster-add"
@@ -152,7 +145,7 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={removeTarget !== null}
@@ -166,7 +159,7 @@ export function UnitRosterCard({ entityType, unitCode, members: initial }: UnitR
         confirmVariant="destructive"
         onConfirm={confirmRemove}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

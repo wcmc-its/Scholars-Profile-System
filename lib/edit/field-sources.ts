@@ -13,8 +13,8 @@
  * UI), condensed to one user-facing system name per panel.
  *
  * Attributes the user manages here have NO entry and render no source line:
- * Overview, Visibility (publication visibility), Profile URL, and Center
- * membership — Scholars is their system of record.
+ * Overview, Visibility (publication visibility), and Center membership —
+ * Scholars is their system of record.
  */
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
@@ -33,6 +33,10 @@ export const FIELD_SOURCE: Record<RequestAttribute, string> = {
   coi: "Weill Research Gateway",
   // Mentee relationships are derived from training records (Jenzabar / EC).
   mentees: "Jenzabar or Employee Central",
+  // `profile-url` is OWNED by Scholars but, like `org-unit`, is a request-only
+  // pseudo-attribute — the read-only Profile URL panel renders "Request a change"
+  // but no source line, so this entry exists only for Record totality.
+  "profile-url": "Scholars",
 };
 
 /** The system-of-record label for a sourced `/edit` attribute. */

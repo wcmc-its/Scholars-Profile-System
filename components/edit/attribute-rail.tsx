@@ -18,7 +18,7 @@
  * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -117,12 +117,11 @@ function RailLink({
           "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
           isActive
             ? "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white"
-            : "text-foreground hover:bg-apollo-rail-border hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
+            : "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
           !isActive && kind === "readonly" && "text-muted-foreground",
         )}
       >
         <span className="flex items-center gap-2">
-          {kind === "readonly" && <Lock className="size-3.5 shrink-0" aria-hidden />}
           {item.label}
           {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
           {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}
