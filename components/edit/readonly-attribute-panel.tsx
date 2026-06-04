@@ -39,11 +39,14 @@ export function ReadonlyAttributePanel({
       description={description}
     >
       {fields && fields.length > 0 && (
-        <dl className="border-border divide-border divide-y rounded-md border">
+        // Read-only display, not a form: a muted, borderless key/value grid with
+        // both columns left-aligned (was a bordered `justify-between` table that
+        // read as editable rows and pushed values to the right edge).
+        <dl className="bg-muted/40 grid grid-cols-[max-content_1fr] gap-x-8 gap-y-2 rounded-md px-4 py-3 text-sm">
           {fields.map((f) => (
-            <div key={f.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
-              <dt className="text-muted-foreground text-sm">{f.label}</dt>
-              <dd className="text-sm font-medium">{f.value ?? "—"}</dd>
+            <div key={f.label} className="contents">
+              <dt className="text-muted-foreground">{f.label}</dt>
+              <dd className="text-foreground font-medium">{f.value ?? "—"}</dd>
             </div>
           ))}
         </dl>
