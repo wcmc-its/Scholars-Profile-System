@@ -161,7 +161,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
     <EditPanel
       slot="slug-card"
       heading="Profile URL"
-      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically."
+      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically. The short form scholars.weill.cornell.edu/<segment> and the longer /scholars/<segment> both lead to the same page."
     >
       <UnsavedChangesGuard dirty={dirty} />
       <div className="flex flex-col gap-3">

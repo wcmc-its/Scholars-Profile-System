@@ -174,6 +174,16 @@ describe("SlugCard — Clear override", () => {
   });
 });
 
+describe("SlugCard — panel copy", () => {
+  it("notes both the short root form and the /scholars/ form lead to the same page", () => {
+    render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride={null} />);
+    const desc = screen.getByText(/Override the directory-derived URL segment/);
+    expect(desc.textContent).toMatch(/scholars\.weill\.cornell\.edu\/<segment>/);
+    expect(desc.textContent).toMatch(/\/scholars\/<segment>/);
+    expect(desc.textContent).toMatch(/same page/i);
+  });
+});
+
 describe("SlugCard — initial-override rendering", () => {
   it("displays the override in the URL preview when initialOverride is set", () => {
     render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride="custom" />);

@@ -4,7 +4,7 @@
  * test matrix).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const { mockRefresh } = vi.hoisted(() => ({ mockRefresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -82,6 +82,14 @@ describe("SlugRequestCard — Idle / live validation", () => {
     render(<SlugRequestCard cwid={CWID} currentSlug="jane" latestRequest={null} />);
     expect(screen.queryByTestId("slug-request-status-tag")).toBeNull();
     expect(screen.getByTestId("slug-request-input")).toBeTruthy();
+  });
+
+  it("the format hint tells scholars the address must be name-based, not a free handle", () => {
+    render(<SlugRequestCard cwid={CWID} currentSlug="jane" latestRequest={null} />);
+    const hint = document.getElementById("slug-request-hint");
+    expect(hint).toBeTruthy();
+    expect(hint!.textContent).toMatch(/your own name/i);
+    expect(hint!.textContent).toMatch(/name-based/i);
   });
 });
 
@@ -227,6 +235,30 @@ describe("SlugRequestCard — Just-approved", () => {
     );
     expect(screen.getByTestId("slug-request-status-tag").textContent).toMatch(/approved/i);
     expect(screen.getByTestId("slug-request-input")).toBeTruthy();
+  });
+
+  it("the approved confirmation persists — it does NOT auto-collapse after a delay", () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <SlugRequestCard
+          cwid={CWID}
+          currentSlug="jane-new"
+          latestRequest={{ ...pendingRequest(), status: "approved", requestedSlug: "jane-new" }}
+        />,
+      );
+      expect(screen.getByTestId("slug-request-approved")).toBeTruthy();
+      expect(screen.getByTestId("slug-request-status-tag").textContent).toMatch(/approved/i);
+      // Previously a setTimeout collapsed the banner to Idle after ~8s. Advance
+      // well past any such timer; the positive confirmation must remain.
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(screen.getByTestId("slug-request-approved")).toBeTruthy();
+      expect(screen.getByTestId("slug-request-status-tag").textContent).toMatch(/approved/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

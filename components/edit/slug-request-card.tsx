@@ -103,12 +103,11 @@ export function SlugRequestCard({
   // absent so `dirty` is always false there (inputValue stays "").
   const dirty = inputValue !== "";
 
-  // A just-approved banner is transient: show it, then collapse to Idle.
-  React.useEffect(() => {
-    if (phase !== "approved") return;
-    const t = setTimeout(() => setPhase("idle"), 8000);
-    return () => clearTimeout(t);
-  }, [phase]);
+  // The just-approved banner persists: it is the only positive confirmation the
+  // scholar gets that their requested URL went live, so we keep it visible (it
+  // clears on the next page load, once `latestRequest` is no longer `approved`,
+  // or as soon as the scholar files a new request). The Idle request input is
+  // shown alongside it (see `showInput`), so the card stays fully usable.
 
   // "Request this URL" is enabled iff non-empty, format-valid, and different
   // from the current slug (requesting your own live slug is a no-op).
@@ -309,7 +308,10 @@ export function SlugRequestCard({
                 </p>
               ) : (
                 <p id="slug-request-hint" className="text-muted-foreground text-xs">
-                  Lowercase letters, numbers, and hyphens only.{" "}
+                  Lowercase letters, numbers, and hyphens only. Use your own name
+                  — optionally with a middle initial or fuller form — not a
+                  research area or other handle; requests that aren&apos;t
+                  name-based are declined.{" "}
                   <code>/scholars/{formatResult?.ok ? formatResult.value : currentSlug}</code>{" "}
                   will keep working too.
                 </p>
