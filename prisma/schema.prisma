@@ -82,6 +82,7 @@ model Scholar {
   cwidAliasesAsCurrent CwidAlias[]         @relation("AliasCurrent")
   slugHistoryAsCurrent SlugHistory[]       @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
+  coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
   department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
@@ -1019,6 +1020,48 @@ model CoiActivity {
   @@index([cwid])
   @@index([cwid, activityGroup])
   @@map("coi_activity")
+}
+
+/// Persisted COI-gap candidates produced by the daily `etl:coi-gap` job: a
+/// relationship named in the scholar's own PubMed COI statement that was NOT
+/// found in their disclosed set (`coi_activity`, Self). Persisted — rather than
+/// computed ephemerally — so the daily job is incremental (only re-process
+/// scholars whose statements/disclosures changed), the same nudge isn't shown
+/// twice, and the scholar can DISAVOW a bad match (status='dismissed') durably.
+///
+/// GOVERNANCE (see docs/coi-pubmed-unmatched-feasibility.md): this is a
+/// candidate + the scholar's own review status, NOT a verdict. There is no
+/// "undisclosed" boolean, no ranking, and it is surfaced ONLY to the scholar
+/// themselves on /edit (self-only) — never to curators, superusers, the public,
+/// or any compliance feed. `status` is the scholar's lifecycle, not an
+/// accusation. The match confidence is the qualitative `tier` (never a %).
+model CoiGapCandidate {
+  id               String    @id @default(uuid()) @db.VarChar(64)
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  pmid             String    @db.VarChar(32)
+  /// Raw extracted relationship entity, shown verbatim to the scholar.
+  entity           String    @db.VarChar(512)
+  /// Normalized form — the dedupe key within (cwid, pmid).
+  normalizedEntity String    @map("normalized_entity") @db.VarChar(512)
+  tier             String    @db.VarChar(16) // High | Medium
+  attribution      String    @db.VarChar(32) // scholar | unattributed
+  entityScore      Decimal?  @map("entity_score") @db.Decimal(4, 3)
+  category         String    @db.VarChar(16) // personal
+  /// Verbatim source sentence — always shown so the human, not the score,
+  /// adjudicates (the non-negotiable rendering rule from the risk review).
+  sourceSentence   String    @map("source_sentence") @db.Text
+  /// Scholar's lifecycle: new (surfaced) | acknowledged (will add) |
+  /// dismissed (disavowed — never re-nag) | resolved (now disclosed / gone).
+  status           String    @default("new") @db.VarChar(16)
+  firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
+  /// When the scholar acted (dismissed/acknowledged). Null until reviewed.
+  reviewedAt       DateTime? @map("reviewed_at")
+
+  @@unique([cwid, pmid, normalizedEntity], name: "cwid_pmid_entity")
+  @@index([cwid, status])
+  @@map("coi_gap_candidate")
 }
 
 /// CWID aliases for redirects (Q2'). Auto-populated from ED replacement_cwid.
