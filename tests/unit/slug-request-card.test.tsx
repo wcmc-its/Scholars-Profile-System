@@ -88,7 +88,7 @@ describe("SlugRequestCard — Idle / live validation", () => {
     render(<SlugRequestCard cwid={CWID} currentSlug="jane" latestRequest={null} />);
     const hint = document.getElementById("slug-request-hint");
     expect(hint).toBeTruthy();
-    expect(hint!.textContent).toMatch(/your own name/i);
+    expect(hint!.textContent).toMatch(/first and last name/i);
     expect(hint!.textContent).toMatch(/name-based/i);
   });
 });

@@ -308,10 +308,10 @@ export function SlugRequestCard({
                 </p>
               ) : (
                 <p id="slug-request-hint" className="text-muted-foreground text-xs">
-                  Lowercase letters, numbers, and hyphens only. Use your own name
-                  — optionally with a middle initial or fuller form — not a
-                  research area or other handle; requests that aren&apos;t
-                  name-based are declined.{" "}
+                  Lowercase letters, numbers, and hyphens only. Use a variation of
+                  your own first and last name — optionally with a middle initial
+                  or fuller form — not a research area or other handle; requests
+                  that aren&apos;t name-based are declined.{" "}
                   <code>/scholars/{formatResult?.ok ? formatResult.value : currentSlug}</code>{" "}
                   will keep working too.
                 </p>
