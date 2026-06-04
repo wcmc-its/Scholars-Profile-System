@@ -4,8 +4,10 @@
  *
  * Presentational contract only (the once-per-session bookkeeping lives in
  * `publications-card.tsx`, covered in publications-card.test.tsx): copy biased
- * toward Hide, a primary "Hide it", a secondary "it's not mine" reject
- * affordance that opens Publication Manager in a new tab, and a Cancel.
+ * toward Hide, a primary "Hide it", the educational inline "it's not mine"
+ * reject link that opens Publication Manager in a new tab, and a Cancel. The
+ * footer no longer carries a duplicate reject button — the standing per-row
+ * "Not mine?" affordance covers the repeat case (vision-round finding 4.9).
  */
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -46,13 +48,13 @@ describe("FirstHideNoticeDialog — copy + structure", () => {
     ).toBeTruthy();
   });
 
-  it("the primary action is Hide it (default variant), not Reject", () => {
+  it("the primary action is Hide it (default variant); the footer carries no duplicate reject button", () => {
     render(<FirstHideNoticeDialog {...defaults()} />);
     const hide = screen.getByTestId("first-hide-confirm");
     expect(hide.getAttribute("data-variant")).toBe("default");
-    // The reject affordance is a secondary outline button, never the loud default.
-    const notMine = screen.getByTestId("first-hide-not-mine");
-    expect(notMine.getAttribute("data-variant")).toBe("outline");
+    // The duplicate footer reject affordance was removed (#570 / finding 4.9):
+    // the not-mine path lives only in the educational inline link above.
+    expect(screen.queryByTestId("first-hide-not-mine")).toBeNull();
   });
 
   it("autofocuses Hide it — the action the scholar already initiated", () => {
@@ -70,25 +72,7 @@ describe("FirstHideNoticeDialog — actions", () => {
     expect(d.onNotMine).not.toHaveBeenCalled();
   });
 
-  it("the not-mine button is an anchor to Publication Manager opening a new tab", () => {
-    render(<FirstHideNoticeDialog {...defaults()} />);
-    const notMine = screen.getByTestId("first-hide-not-mine");
-    expect(notMine.tagName).toBe("A");
-    expect(notMine.getAttribute("href")).toBe(PUBLICATION_MANAGER_URL);
-    expect(notMine.getAttribute("target")).toBe("_blank");
-    expect(notMine.getAttribute("rel")).toContain("noreferrer");
-  });
-
-  it("clicking the not-mine button calls onNotMine, not onHide", () => {
-    const d = defaults();
-    vi.spyOn(window, "open").mockReturnValue(null);
-    render(<FirstHideNoticeDialog {...d} />);
-    fireEvent.click(screen.getByTestId("first-hide-not-mine"));
-    expect(d.onNotMine).toHaveBeenCalledTimes(1);
-    expect(d.onHide).not.toHaveBeenCalled();
-  });
-
-  it("the inline body reject link also routes to Publication Manager and signals not-mine", () => {
+  it("the inline body reject link routes to Publication Manager and signals not-mine", () => {
     const d = defaults();
     vi.spyOn(window, "open").mockReturnValue(null);
     render(<FirstHideNoticeDialog {...d} />);

@@ -101,6 +101,19 @@ export type RequestAChangeDialogProps = {
   itemLabel?: string;
   /** Trigger `data-testid` (default `request-a-change-trigger`). */
   triggerTestId?: string;
+  /**
+   * Pre-select this issue when the dialog opens (e.g. a per-row "Not mine?"
+   * affordance opening straight onto `publication-not-mine`). Defaults to no
+   * selection (the scholar picks). The issue must belong to `attribute`'s config.
+   */
+  initialIssueId?: string;
+  /**
+   * Render a custom trigger instead of the default "Request a change" outline
+   * button. Receives an `open` callback to wire to the element's click. Used for
+   * the quiet per-row "Not mine?" affordance (vision-round finding 4.9 — not a
+   * third equal-weight button).
+   */
+  trigger?: (open: () => void) => React.ReactNode;
 };
 
 export function RequestAChangeDialog({
@@ -108,6 +121,8 @@ export function RequestAChangeDialog({
   cwid,
   itemLabel,
   triggerTestId,
+  initialIssueId,
+  trigger,
 }: RequestAChangeDialogProps) {
   const config = getChangeConfig(attribute);
   const attributeLabel = ATTRIBUTE_LABEL[attribute];
@@ -126,7 +141,7 @@ export function RequestAChangeDialog({
 
   React.useEffect(() => {
     if (open) {
-      setIssueId(null);
+      setIssueId(initialIssueId ?? null);
       setDetail("");
       setRevealFallback(false);
       setSubmitted(false);
@@ -135,7 +150,7 @@ export function RequestAChangeDialog({
       setSentVia(null);
       setNoReceipt(false);
     }
-  }, [open]);
+  }, [open, initialIssueId]);
 
   const issue = config.issues.find((i) => i.id === issueId) ?? null;
   const action = issue?.action ?? null;
@@ -241,16 +256,20 @@ export function RequestAChangeDialog({
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        data-testid={triggerTestId ?? "request-a-change-trigger"}
-        onClick={() => setOpen(true)}
-      >
-        <Flag />
-        Request a change
-      </Button>
+      {trigger ? (
+        trigger(() => setOpen(true))
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid={triggerTestId ?? "request-a-change-trigger"}
+          onClick={() => setOpen(true)}
+        >
+          <Flag />
+          Request a change
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent data-testid="request-a-change-dialog">

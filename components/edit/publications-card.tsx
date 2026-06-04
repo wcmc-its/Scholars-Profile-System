@@ -411,6 +411,31 @@ function PublicationRow({
               </span>
             </div>
           )}
+          {pub.state !== "removed_by_admin" && (
+            // A quiet, standing "Not mine?" affordance — a low-emphasis link, not
+            // a third equal-weight button (vision-round finding 4.9). Opens the
+            // Request-a-change router pre-selected to the "not mine" route so the
+            // scholar lands straight on the correct-at-source guidance without
+            // waiting for the once-per-session first-hide notice.
+            <RequestAChangeDialog
+              attribute="publications"
+              cwid={cwid}
+              itemLabel={pub.title}
+              initialIssueId="publication-not-mine"
+              trigger={(open) => (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground h-auto px-0"
+                  onClick={open}
+                  data-testid={`pub-not-mine-${pub.pmid}`}
+                >
+                  Not mine?
+                </Button>
+              )}
+            />
+          )}
           <RequestAChangeDialog attribute="publications" cwid={cwid} itemLabel={pub.title} />
         </div>
       </div>
