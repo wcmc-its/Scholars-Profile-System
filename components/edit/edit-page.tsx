@@ -219,7 +219,6 @@ function renderPanel(
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
           hiddenPublications={hiddenPublications}
-          previewHref={profilePath(ctx.scholar.slug)}
         />
       );
     }

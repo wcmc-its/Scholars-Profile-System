@@ -85,7 +85,7 @@ export function EditShell({
             <h1 className="text-base font-semibold">Scholars Profile Console</h1>
           </div>
           {account ? (
-            <AccountMenu scholar={account} />
+            <AccountMenu scholar={account} showViewProfile={false} />
           ) : (
             <form action="/api/auth/logout" method="POST">
               <button

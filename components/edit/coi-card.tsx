@@ -14,6 +14,7 @@
 
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
 import { EditPanel } from "@/components/edit/edit-panel";
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { groupCoiDisclosures } from "@/lib/coi-groups";
 import type { EditContextCoiDisclosure } from "@/lib/api/edit-context";
@@ -36,6 +37,8 @@ export function CoiCard({ cwid, mode, scholarName, disclosures }: CoiCardProps) 
       heading="Conflicts of Interest"
       description={`External relationships and financial interests ${possessive === "your" ? "you" : scholarName} disclosed in the Weill Research Gateway. These are shown on the public profile and aren't editable here.`}
     >
+      <LockedBadge />
+
       {groups.length === 0 ? (
         <p className="text-muted-foreground text-sm" data-testid="coi-empty">
           {mode === "superuser"
