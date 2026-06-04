@@ -332,32 +332,33 @@ function renderPanel(
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
 function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
   const currentUrl = `${publicProfileHost()}/${slug}`;
-  const requestHref =
-    `mailto:scholars@weill.cornell.edu` +
-    `?subject=${encodeURIComponent("Profile URL request")}` +
-    `&body=${encodeURIComponent(`I'd like to request a custom profile URL.\n\nMy current address: ${currentUrl}`)}`;
   return (
     <EditPanel
       slot="profile-url-readonly"
       heading="Profile URL"
-      description="The web address for your public profile. Custom URLs aren't self-service yet — request one and a Scholars administrator will set it up. Your current address keeps working."
+      description="The web address for your public profile."
     >
-      <p className="text-sm">
+      <p className="flex flex-wrap items-center gap-2.5 text-sm">
         <span className="text-muted-foreground">Your current URL: </span>
         <code
-          className="bg-apollo-surface-2 border-apollo-border rounded border px-1.5 py-0.5 font-mono text-xs"
+          className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs"
           data-testid="profile-url-readonly-value"
         >
           {currentUrl}
         </code>
       </p>
-      <a
-        href={requestHref}
-        data-testid="profile-url-request-change"
-        className="border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2 inline-flex w-fit items-center gap-2 rounded-md border px-3.5 py-2 text-sm font-medium transition-colors"
-      >
-        Request a change
-      </a>
+      <div className="text-muted-foreground flex flex-col gap-2 text-sm">
+        <p>
+          Personalized URLs aren&rsquo;t self-service yet. When they open, you&rsquo;ll be able to
+          request one here, and a Scholars administrator reviews every request.
+        </p>
+        <p>
+          A personalized URL must be a variation of your own first and last name &mdash; optionally
+          with a middle initial or fuller form &mdash; not a research area or other handle, using
+          lowercase letters, numbers, and hyphens only. Your current address (
+          <code className="font-mono">/scholars/{slug}</code>) keeps working either way.
+        </p>
+      </div>
     </EditPanel>
   );
 }
