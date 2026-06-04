@@ -9,6 +9,7 @@
  * by actor; the data contract and write calls are layout-independent.
  */
 import { AppointmentsCard } from "@/components/edit/appointments-card";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
 import { FundingCard } from "@/components/edit/funding-card";
@@ -19,7 +20,7 @@ import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-pan
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
 import { VisibilityCard } from "@/components/edit/visibility-card";
-import type { RailItem } from "@/components/edit/attribute-rail";
+import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
 import { profilePath } from "@/lib/profile-url";
 
@@ -54,8 +55,8 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
-  // Superuser direct-set is always available; the self request card is flag-gated
-  // (`slugRequestEnabled`) — see the rail filter below.
+  // Superuser direct-set is always available; the self surface is the request
+  // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
 ];
 
@@ -107,8 +108,10 @@ export type EditPageProps = {
   /** The selected attribute from `?attr=`; falls back to the mode's default. */
   attr?: string;
   /** Whether the self "Profile URL" request card is enabled (#497 PR-3,
-   *  `SELF_EDIT_SLUG_REQUEST`). Off ⇒ the self rail omits Profile URL. The
-   *  superuser direct-set card is unaffected. */
+   *  `SELF_EDIT_SLUG_REQUEST`). Off ⇒ the self Profile URL panel is read-only
+   *  (current URL + "custom URLs aren't available yet", T3.6) and its rail item
+   *  is locked; on ⇒ the request form. The superuser direct-set card is
+   *  unaffected. */
   slugRequestEnabled?: boolean;
   /** The scholar's latest `SlugRequest` (self mode only), seeding the request
    *  card's state machine. `null` when they have never filed one. */
@@ -118,6 +121,21 @@ export type EditPageProps = {
   canBrowseProfiles?: boolean;
 };
 
+/**
+ * Which attributes the rail shows for an actor + flag state. Self mode keeps
+ * Profile URL in the rail even when the slug-request flag is off — it just
+ * becomes a read-only panel (current URL + "custom URLs aren't available yet",
+ * vision-round T3.6) instead of being dropped. Exported so the server pages can
+ * canonicalize an invalid `?attr` without re-deriving this list (T1.13).
+ */
+export function visibleAttrKeys(
+  mode: "self" | "superuser",
+  slugRequestEnabled: boolean,
+): AttrKey[] {
+  void slugRequestEnabled; // Profile URL is always present now (read-only when off).
+  return ATTRIBUTES.filter((a) => a.modes.includes(mode)).map((a) => a.key);
+}
+
 export function EditPage({
   ctx,
   mode = "self",
@@ -126,23 +144,23 @@ export function EditPage({
   latestSlugRequest = null,
   canBrowseProfiles = false,
 }: EditPageProps) {
-  const visible = ATTRIBUTES.filter((a) => {
-    if (!a.modes.includes(mode)) return false;
-    // The self request card is flag-gated; the superuser direct-set card is not.
-    if (a.key === "profile-url" && mode === "self" && !slugRequestEnabled) return false;
-    return true;
-  });
+  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode));
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
     visible[0];
+
+  // Profile URL is "owned" when the scholar can request a slug, "readonly" when
+  // the flag is off (the panel shows their current URL but no request form).
+  const railKindFor = (k: AttrKey): RailKind =>
+    k === "profile-url" && mode === "self" && !slugRequestEnabled ? "readonly" : SELF_RAIL_KIND[k];
 
   const railItems: RailItem[] =
     mode === "self"
       ? SELF_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
-          const kind = SELF_RAIL_KIND[k];
+          const kind = railKindFor(k);
           return [{ key: a.key, label: a.label, readonly: a.readonly, kind, group: SELF_RAIL_GROUP[kind] }];
         })
       : visible.map((a) => ({ key: a.key, label: a.label, readonly: a.readonly }));
@@ -160,7 +178,7 @@ export function EditPage({
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
     >
-      {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest)}
+      {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest, slugRequestEnabled)}
     </EditShell>
   );
 }
@@ -171,6 +189,7 @@ function renderPanel(
   mode: "self" | "superuser",
   scholarName: string,
   latestSlugRequest: SlugRequestSummary | null,
+  slugRequestEnabled: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   switch (key) {
@@ -250,11 +269,53 @@ function renderPanel(
         <EducationCard cwid={cwid} mode={mode} scholarName={scholarName} educations={ctx.educations} />
       );
     case "profile-url":
-      // Superuser sets a slug directly; a scholar requests one for approval.
-      return mode === "superuser" ? (
-        <SlugCard cwid={cwid} liveSlug={ctx.scholar.slug} initialOverride={ctx.scholar.slugOverride} />
-      ) : (
+      // Superuser sets a slug directly; a scholar requests one for approval —
+      // but only when the request flag is on. With it off, the scholar still
+      // sees their Profile URL, now read-only (vision-round T3.6) rather than
+      // having the rail item disappear.
+      if (mode === "superuser") {
+        return (
+          <SlugCard
+            cwid={cwid}
+            liveSlug={ctx.scholar.slug}
+            initialOverride={ctx.scholar.slugOverride}
+          />
+        );
+      }
+      if (!slugRequestEnabled) {
+        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} />;
+      }
+      return (
         <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
       );
   }
+}
+
+/** The read-only Profile URL panel shown to scholars while `SELF_EDIT_SLUG_REQUEST`
+ *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
+ *  self-serve yet. No input, no request form, no unsaved-changes guard. */
+function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
+  return (
+    <EditPanel
+      slot="profile-url-readonly"
+      heading="Profile URL"
+      description="The web address for your public profile. Custom URLs aren't available yet — your old address keeps working if it ever changes."
+    >
+      <p className="text-sm">
+        <span className="text-muted-foreground">Your current URL: </span>
+        <code
+          className="rounded bg-muted px-1.5 py-0.5 text-xs"
+          data-testid="profile-url-readonly-value"
+        >
+          {publicProfileHost()}/{slug}
+        </code>
+      </p>
+    </EditPanel>
+  );
+}
+
+/** The public host the personalized URL hangs off (root-alias form). Mirrors the
+ *  request card's `SITE_HOST` so both surfaces show the same address. */
+function publicProfileHost(): string {
+  return "scholars.weill.cornell.edu";
 }

@@ -98,12 +98,14 @@ const superuserCtx: EditContext = {
 };
 
 describe("EditPage router — the Apollo shell + rail", () => {
-  it("renders the rail with the self attribute set (Publications yes, Profile URL no)", () => {
+  it("renders the rail with the self attribute set (Publications yes, Profile URL locked when flag off)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
     expect(screen.getByTestId("rail-overview")).toBeTruthy();
     expect(screen.getByTestId("rail-appointments")).toBeTruthy();
     expect(screen.getByTestId("rail-publications")).toBeTruthy();
-    expect(screen.queryByTestId("rail-profile-url")).toBeNull();
+    // Profile URL is now present-but-locked when the flag is off (T3.6), not dropped.
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl.textContent).toMatch(/read-only, from WCM systems/i);
   });
 
   it("uses a single app-level h1 (no repeated '{Attribute} for {Name}' heading)", () => {
@@ -150,14 +152,29 @@ describe("EditPage router — the Apollo shell + rail", () => {
 });
 
 describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gated)", () => {
-  it("omits the Profile URL rail item when the slug-request flag is off (default)", () => {
+  it("shows a locked Profile URL rail item when the slug-request flag is off (default)", () => {
     render(<EditPage ctx={ctx} mode="self" />);
-    expect(screen.queryByTestId("rail-profile-url")).toBeNull();
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl).toBeTruthy();
+    expect(profileUrl.textContent).toMatch(/read-only, from WCM systems/i);
   });
 
-  it("shows the Profile URL rail item when slugRequestEnabled", () => {
+  it("renders the read-only Profile URL panel (current URL, no request form) when the flag is off", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="profile-url" />);
+    expect(document.querySelector('[data-slot="profile-url-readonly"]')).not.toBeNull();
+    // Shows the scholar's current URL, no input / request form.
+    expect(screen.getByTestId("profile-url-readonly-value").textContent).toContain(
+      "scholars.weill.cornell.edu/self-slug",
+    );
+    expect(screen.queryByTestId("slug-request-input")).toBeNull();
+    expect(screen.queryByTestId("slug-card-input")).toBeNull();
+  });
+
+  it("shows the Profile URL rail item (owned, not locked) when slugRequestEnabled", () => {
     render(<EditPage ctx={ctx} mode="self" slugRequestEnabled />);
-    expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
+    const profileUrl = screen.getByTestId("rail-profile-url");
+    expect(profileUrl).toBeTruthy();
+    expect(profileUrl.textContent).not.toMatch(/read-only, from WCM systems/i);
   });
 
   it("?attr=profile-url renders the scholar request card (not the superuser direct-set card)", () => {
