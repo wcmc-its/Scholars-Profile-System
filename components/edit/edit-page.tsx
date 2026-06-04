@@ -84,17 +84,21 @@ const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
  * read-only, Profile URL is direct-set), so these self labels would mislead.
  */
 const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
+  // "Yours to edit" group (owned).
   "home",
   "overview",
   "visibility",
+  // "From WCM systems" group — ordered per operator request. (Profile URL is
+  // owned ⇒ joins "Yours to edit" only when the slug-request flag is on;
+  // gated/read-only it leads the WCM group.)
   "profile-url",
-  "publications",
-  "funding",
-  "appointments",
-  "education",
-  "mentees",
   "name-title",
   "photo",
+  "appointments",
+  "education",
+  "publications",
+  "funding",
+  "mentees",
   "coi",
 ];
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
