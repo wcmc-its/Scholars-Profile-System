@@ -26,6 +26,7 @@ import { VisibilityCard } from "@/components/edit/visibility-card";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import type { RailItem, RailKind } from "@/components/edit/attribute-rail";
 import type { EditContext } from "@/lib/api/edit-context";
+import type { ManageableUnit } from "@/lib/edit/manageable-units";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { profilePath } from "@/lib/profile-url";
 import { isReciterRejectEnabled } from "@/lib/reciter/client";
@@ -139,6 +140,9 @@ export type EditPageProps = {
   /** Self mode only: the viewer is a superuser, so the shell shows a link
    *  across to the Profiles roster. Forwarded to `EditShell`. */
   canBrowseProfiles?: boolean;
+  /** Self mode only: org units the viewer may also curate (#753), surfaced on
+   *  the Home panel. Empty for most scholars. */
+  manageableUnits?: ManageableUnit[];
 };
 
 /**
@@ -163,6 +167,7 @@ export function EditPage({
   slugRequestEnabled = false,
   latestSlugRequest = null,
   canBrowseProfiles = false,
+  manageableUnits = [],
 }: EditPageProps) {
   const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode));
   const active: AttrDef =
@@ -198,7 +203,16 @@ export function EditPage({
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
     >
-      {renderPanel(active.key, ctx, mode, scholarName, latestSlugRequest, slugRequestEnabled)}
+      {renderPanel(
+        active.key,
+        ctx,
+        mode,
+        scholarName,
+        latestSlugRequest,
+        slugRequestEnabled,
+        manageableUnits,
+        canBrowseProfiles,
+      )}
     </EditShell>
   );
 }
@@ -210,6 +224,8 @@ function renderPanel(
   scholarName: string,
   latestSlugRequest: SlugRequestSummary | null,
   slugRequestEnabled: boolean,
+  manageableUnits: ManageableUnit[],
+  isSuperuser: boolean,
 ) {
   const cwid = ctx.scholar.cwid;
   switch (key) {
@@ -226,6 +242,8 @@ function renderPanel(
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
           hiddenPublications={hiddenPublications}
+          manageableUnits={manageableUnits}
+          isSuperuser={isSuperuser}
         />
       );
     }

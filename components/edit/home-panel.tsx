@@ -24,11 +24,12 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, Check, Plus } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Check, Plus } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { WEB_DIRECTORY_URL } from "@/lib/edit/request-a-change";
+import { unitKindLabel, type ManageableUnit } from "@/lib/edit/manageable-units";
 import { cn, initials } from "@/lib/utils";
 
 // Must match EditShell's `<main aria-labelledby="panel-heading">` and
@@ -45,6 +46,13 @@ export type HomePanelProps = {
   isHidden: boolean;
   totalPublications: number;
   hiddenPublications: number;
+  /** Org units this scholar may also curate (#753); empty for most scholars,
+   *  in which case the section is omitted entirely. */
+  manageableUnits?: ManageableUnit[];
+  /** Whether the viewer is a superuser (#753). A superuser can edit every unit
+   *  yet usually holds no `unit_admin` grant, so the section still shows them a
+   *  way through to the `/edit/units` finder even when `manageableUnits` is empty. */
+  isSuperuser?: boolean;
 };
 
 type HeadshotState = "loading" | "present" | "missing";
@@ -57,6 +65,8 @@ export function HomePanel({
   isHidden,
   totalPublications,
   hiddenPublications,
+  manageableUnits = [],
+  isSuperuser = false,
 }: HomePanelProps) {
   const headshot = useHeadshotProbe(identityImageEndpoint);
 
@@ -91,7 +101,70 @@ export function HomePanel({
         <HeadshotItem state={headshot} />
         <PublicationsItem basePath={basePath} total={totalPublications} hidden={hiddenPublications} />
       </ChecklistGroup>
+
+      {(manageableUnits.length > 0 || isSuperuser) && (
+        <ManageableUnitsSection units={manageableUnits} isSuperuser={isSuperuser} />
+      )}
     </section>
+  );
+}
+
+/**
+ * "Units you manage" — shown to scholars who hold a unit-admin grant, and to
+ * superusers regardless (#753). A compact list (capped) into each unit's
+ * editor, with a link through to the full `/edit/units` index. A superuser with
+ * no explicit grants still gets the link (they can edit any unit via the index
+ * finder). Reuses the checklist row styling so it reads as another board
+ * section, not a bolt-on.
+ */
+const UNITS_CARD_CAP = 6;
+
+function ManageableUnitsSection({
+  units,
+  isSuperuser,
+}: {
+  units: ManageableUnit[];
+  isSuperuser: boolean;
+}) {
+  const shown = units.slice(0, UNITS_CARD_CAP);
+  const remaining = units.length - shown.length;
+  const hasUnits = units.length > 0;
+  return (
+    <div className="flex flex-col gap-2" data-testid="home-units">
+      <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+        Units you manage
+      </p>
+      {hasUnits ? (
+        <ul className="flex flex-col gap-2">
+          {shown.map((unit) => (
+            <ChecklistRow
+              key={`${unit.kind}:${unit.code}`}
+              testId={`home-unit-${unit.kind}-${unit.code}`}
+              marker="info"
+              title={unit.name}
+              subtitle={unitKindLabel(unit.kind)}
+              action={
+                <RowLink href={unit.href} testId={`home-unit-edit-${unit.kind}-${unit.code}`}>
+                  Edit
+                </RowLink>
+              }
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground text-sm" data-testid="home-units-superuser-hint">
+          As a superuser you can edit any department, division, or center.
+        </p>
+      )}
+      <Link
+        href="/edit/units"
+        data-testid="home-units-manage"
+        className="text-apollo-slate inline-flex items-center gap-1 self-start text-sm font-medium"
+      >
+        {hasUnits && remaining > 0 ? `View all ${units.length} units` : "Manage units"}
+        <ArrowRight className="size-3.5" aria-hidden />
+      </Link>
+    </div>
   );
 }
 

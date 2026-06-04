@@ -17,6 +17,7 @@ import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
+import { loadManageableUnits } from "@/lib/edit/manageable-units";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -76,6 +77,12 @@ export default async function EditSelfPage({
     ? await loadLatestSlugRequest(editCwid, db.read)
     : null;
 
+  // Org units this scholar may also curate (#753). One indexed `unit_admin`
+  // lookup keyed by cwid; empty for the vast majority, so the Home-panel section
+  // self-hides. Flattened (departments → divisions → centers) for the summary.
+  const units = await loadManageableUnits(editCwid, db.read);
+  const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
+
   return (
     <EditPage
       ctx={ctx}
@@ -84,6 +91,7 @@ export default async function EditSelfPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
+      manageableUnits={manageableUnits}
     />
   );
 }
