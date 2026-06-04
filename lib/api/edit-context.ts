@@ -53,9 +53,11 @@ export type EditContextScholar = {
   preferredName: string;
   fullName: string;
   /** Sourced read-only identity fields echoed in the Name & Title panel
-   *  (vision-round T3.5). `primaryTitle` is a concatenated degree string
-   *  ("MD, MPH"), labelled "Degrees" in the UI — not a job title. All nullable. */
+   *  (vision-round T3.5). `primaryTitle` is the job title — the title of the
+   *  primary appointment, e.g. "Director of …" — while `postnominal` is the
+   *  degree / post-nominal string ("MD, MPH"). All nullable. */
   primaryTitle: string | null;
+  postnominal: string | null;
   primaryDepartment: string | null;
   email: string | null;
   orcid: string | null;
@@ -182,6 +184,7 @@ export async function loadEditContext(
       preferredName: true,
       fullName: true,
       primaryTitle: true,
+      postnominal: true,
       primaryDepartment: true,
       email: true,
       orcid: true,
@@ -375,6 +378,7 @@ export async function loadEditContext(
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
         primaryTitle: scholar.primaryTitle,
+        postnominal: scholar.postnominal,
         primaryDepartment: scholar.primaryDepartment,
         email: scholar.email,
         orcid: scholar.orcid,
@@ -491,6 +495,7 @@ export async function loadEditContext(
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
       primaryTitle: scholar.primaryTitle,
+      postnominal: scholar.postnominal,
       primaryDepartment: scholar.primaryDepartment,
       email: scholar.email,
       orcid: scholar.orcid,

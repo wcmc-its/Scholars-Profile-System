@@ -214,10 +214,11 @@ function renderPanel(
           attribute="name-title"
           cwid={cwid}
           heading="Name & Title"
-          description="Name, degrees, department, email, and ORCID come from the WCM directory and faculty records."
+          description="Name, title, degrees, department, email, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
-            { label: "Degrees", value: ctx.scholar.primaryTitle },
+            { label: "Title", value: ctx.scholar.primaryTitle },
+            { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
             { label: "Email", value: ctx.scholar.email },
             { label: "ORCID", value: ctx.scholar.orcid },
