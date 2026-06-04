@@ -20,6 +20,25 @@ export interface CloudWatchAlarmPayload {
   readonly AWSAccountId?: string;
 }
 
+/**
+ * Schema of the custom JSON the EtlStack Step Functions publish to the
+ * `etl-failures-<env>` topic — the per-step failure Catch (`NotifyEd` etc.)
+ * and the annual approval gate. Distinct from {@link CloudWatchAlarmPayload}:
+ * the ETL status/cadence CloudWatch alarms ALSO publish to that topic via an
+ * SnsAction, but those carry the alarm shape and still flow through
+ * {@link buildAdaptiveCard}. The handler discriminates on the presence of
+ * `AlarmName` ({@link isCloudWatchAlarmPayload}).
+ */
+export interface EtlEventPayload {
+  readonly env?: string;
+  readonly step?: string;
+  readonly action?: string;
+  readonly stateMachine?: string;
+  readonly execution?: string;
+  readonly error?: unknown;
+  readonly runbook?: string;
+}
+
 /** Adaptive Card envelope shape accepted by the Teams Workflows webhook. */
 export interface AdaptiveCardEnvelope {
   readonly type: "message";
@@ -101,6 +120,96 @@ export function buildAdaptiveCard(
               type: "Action.OpenUrl",
               title: "View in CloudWatch",
               url: cloudwatchConsoleUrl(alarm.AlarmName, region),
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Discriminator for the two payload shapes the relay receives on the
+ * etl-failures topic. CloudWatch alarms always carry a string `AlarmName`;
+ * the ETL Step Functions custom payloads never do.
+ */
+export function isCloudWatchAlarmPayload(
+  p: unknown,
+): p is CloudWatchAlarmPayload {
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    typeof (p as Record<string, unknown>).AlarmName === "string"
+  );
+}
+
+/** Render `error` (a States error object or a string) as one safe fact line. */
+function errorFact(error: unknown): string {
+  if (error === undefined || error === null) return "(none)";
+  if (typeof error === "string") {
+    return error.length === 0 ? "(empty)" : truncate(error, REASON_MAX_CHARS);
+  }
+  try {
+    return truncate(JSON.stringify(error), REASON_MAX_CHARS);
+  } catch {
+    return "(unserializable)";
+  }
+}
+
+function stepFunctionsConsoleUrl(region: string): string {
+  return `https://${region}.console.aws.amazon.com/states/home?region=${region}#/statemachines`;
+}
+
+/**
+ * Card for an ETL Step Functions event (per-step failure or approval gate).
+ * Same no-markdown, truncated, injection-safe posture as the alarm card. Only
+ * the fields present on the payload are rendered, so it degrades cleanly as
+ * the publisher's message shape evolves.
+ */
+export function buildEtlCard(payload: EtlEventPayload): AdaptiveCardEnvelope {
+  const region = "us-east-1";
+  const what = payload.step ?? payload.action ?? "event";
+  const env = payload.env ?? "(unknown)";
+
+  const facts: Array<{ title: string; value: string }> = [
+    { title: "Env", value: env },
+    { title: "Step", value: what },
+  ];
+  if (payload.stateMachine !== undefined) {
+    facts.push({ title: "State machine", value: payload.stateMachine });
+  }
+  if (payload.execution !== undefined) {
+    facts.push({ title: "Execution", value: payload.execution });
+  }
+  facts.push({ title: "Error", value: errorFact(payload.error) });
+  if (payload.runbook !== undefined) {
+    facts.push({ title: "Runbook", value: truncate(payload.runbook, REASON_MAX_CHARS) });
+  }
+
+  return {
+    type: "message",
+    attachments: [
+      {
+        contentType: "application/vnd.microsoft.card.adaptive",
+        content: {
+          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+          type: "AdaptiveCard",
+          version: ADAPTIVE_CARD_VERSION,
+          body: [
+            {
+              type: "TextBlock",
+              text: `\u{1F6A8} SPS ETL ${env} \u{2014} ${what}`,
+              weight: "Bolder",
+              size: "Medium",
+              wrap: true,
+            },
+            { type: "FactSet", facts },
+          ],
+          actions: [
+            {
+              type: "Action.OpenUrl",
+              title: "View in Step Functions",
+              url: stepFunctionsConsoleUrl(region),
             },
           ],
         },

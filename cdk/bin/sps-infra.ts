@@ -86,7 +86,7 @@ const appStack = new AppStack(app, `Sps-App-${envConfig.envName}`, {
 // The internal ALB SG id
 // is consumed via Fn::ImportValue of AppStack's `InternalAlbSecurityGroupId`
 // export (one additive output — see plan resolved item #3).
-new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
+const etlStack = new EtlStack(app, `Sps-Etl-${envConfig.envName}`, {
   env,
   envConfig,
   vpc: networkStack.vpc,
@@ -113,6 +113,7 @@ new SpsObservabilityStack(
     envConfig,
     appStack,
     dataStack,
+    etlStack,
     description: `SPS observability — alarms, SNS, dashboard, ${envConfig.envName === "prod" ? "and account budget + cost-anomaly monitor, " : ""}${envConfig.envName} (ADR-008 B22).`,
   },
 );

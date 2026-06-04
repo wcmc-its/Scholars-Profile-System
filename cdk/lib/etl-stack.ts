@@ -100,6 +100,8 @@ export class EtlStack extends Stack {
   public readonly nightlyStateMachine: sfn.StateMachine;
   public readonly weeklyStateMachine: sfn.StateMachine;
   public readonly annualStateMachine: sfn.StateMachine;
+  /** #595 data-freshness heartbeat — daily etl_run staleness check. */
+  public readonly heartbeatStateMachine: sfn.StateMachine;
   /** #393 suppression search-index reconciler (ADR-005 layer 3), ~5 min cadence. */
   public readonly reconcileStateMachine: sfn.StateMachine;
 
@@ -682,6 +684,26 @@ export class EtlStack extends Stack {
       approvalGate,
     );
 
+    // #595 — data-freshness heartbeat. A single step (`etl:freshness`) reads
+    // the `etl_run` audit table and exits non-zero when any tracked source's
+    // last SUCCESS is older than its cadence SLA. Runs on its OWN schedule
+    // (independent of the cadence machines) so it detects "green-but-stale":
+    // an execution that reported success while a source's data did not refresh,
+    // or a source quietly dropped from the cadence — neither of which the
+    // ExecutionsFailed/ExecutionsStarted alarms below can see. A non-zero exit
+    // surfaces via the existing per-machine status alarm (added to `cadences`
+    // below) -> failureTopic -> on-call relay. external: false — it reads only
+    // the in-VPC Aurora (DATABASE_URL), no WCM source, so it stays green even
+    // when the WCM-dependent cadence steps cannot reach their sources.
+    const freshnessSteps: ReadonlyArray<StepSpec> = [
+      { id: "Freshness", npmScript: "etl:freshness", external: false },
+    ];
+    this.heartbeatStateMachine = buildStateMachine(
+      "HeartbeatStateMachine",
+      "heartbeat",
+      freshnessSteps,
+    );
+
     // ------------------------------------------------------------------
     // EventBridge schedules (D7). Per-env `etlSchedulesEnabled` flips the
     // rule's `Enabled` flag at deploy time -- staging ships enabled, prod
@@ -729,11 +751,24 @@ export class EtlStack extends Stack {
       events.Schedule.expression("cron(0 9 1 7 ? *)"),
       this.annualStateMachine,
     );
+    // #595 — heartbeat runs daily at 13:00 UTC, ~6h after the nightly window
+    // (07:00) and after the Sunday weekly (08:00), so a failed or missed
+    // overnight cadence shows up as staleness the same day. Gated on the same
+    // `etlSchedulesEnabled` flag as the cadences: where cadences are disabled
+    // (prod pre-launch) there is no fresh data to expect, so the heartbeat
+    // would only false-alarm; it activates with the cadences at launch.
+    buildSchedule(
+      "HeartbeatScheduleRule",
+      "heartbeat",
+      events.Schedule.expression("cron(0 13 * * ? *)"),
+      this.heartbeatStateMachine,
+    );
 
     // ------------------------------------------------------------------
-    // CloudWatch alarms (D4). One status alarm per state machine (3) plus
-    // a cadence alarm for the sub-weekly machines (nightly + weekly = 2),
-    // five total.
+    // CloudWatch alarms (D4). One status alarm per state machine (4: nightly,
+    // weekly, annual, heartbeat) plus a cadence alarm for the sub-weekly
+    // machines (nightly + weekly + heartbeat = 3), seven total. (#595 added the
+    // heartbeat machine + its two alarms.)
     //
     // - **Status alarm** -- ExecutionsFailed sum > 0 over one period at
     //   the cadence interval. Catches every failed execution including
@@ -790,6 +825,17 @@ export class EtlStack extends Stack {
         cadenceLabel: "annual",
         // No cadence alarm -- see the deploy-only-constraint note above.
         stateMachine: this.annualStateMachine,
+      },
+      {
+        // #595 heartbeat. Status alarm: a non-zero `etl:freshness` exit
+        // (>=1 stale source) trips it -> failureTopic -> relay -> Teams.
+        // Cadence alarm: 30h window (daily + 25% grace, 108000s <= 604800s)
+        // catches the heartbeat itself going dark so the monitor can't fail
+        // silently.
+        id: "Heartbeat",
+        cadenceLabel: "heartbeat",
+        cadenceWindow: Duration.hours(30),
+        stateMachine: this.heartbeatStateMachine,
       },
     ];
     for (const c of cadences) {
@@ -1145,6 +1191,10 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "AnnualStateMachineArn", {
       value: this.annualStateMachine.stateMachineArn,
       description: "SPS annual ETL state machine ARN.",
+    });
+    new CfnOutput(this, "HeartbeatStateMachineArn", {
+      value: this.heartbeatStateMachine.stateMachineArn,
+      description: "SPS data-freshness heartbeat state machine ARN (#595).",
     });
     new CfnOutput(this, "ReconcileStateMachineArn", {
       value: this.reconcileStateMachine.stateMachineArn,

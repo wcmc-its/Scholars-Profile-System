@@ -129,17 +129,18 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates four state machines (3 cadence + #393 reconciler), four EventBridge rules, one SNS topic", () => {
-        // 3 cadence machines + the #393 reconciler (PR-2).
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 4);
-        template.resourceCountIs("AWS::Events::Rule", 4);
-        // The reconciler reuses the cadence failure topic -- still one.
+      it("creates five state machines (3 cadence + #595 heartbeat + #393 reconciler), five EventBridge rules, one SNS topic", () => {
+        // 3 cadence machines + the #595 heartbeat + the #393 reconciler (PR-2).
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 5);
+        template.resourceCountIs("AWS::Events::Rule", 5);
+        // The heartbeat + reconciler reuse the cadence failure topic -- still one.
         template.resourceCountIs("AWS::SNS::Topic", 1);
       });
 
-      it("creates seven CloudWatch alarms (3 cadence status + nightly/weekly cadence + reconciler status/cadence)", () => {
-        // 5 cadence alarms (3 status + 2 cadence) + 2 reconciler alarms (#393).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 7);
+      it("creates nine CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence)", () => {
+        // 7 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat)
+        // + 2 reconciler alarms (#393).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
       });
 
       it("creates two ECS task definitions (ETL + lean reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
@@ -370,12 +371,13 @@ describe("EtlStack", () => {
       it("prod CADENCE schedules ship disabled (etlSchedulesEnabled=false)", () => {
         const rules = template.findResources("AWS::Events::Rule");
         // The #393 reconciler runs on its own flag (reconcileScheduleEnabled),
-        // enabled in prod -- so scope this to the three cadence rules.
+        // enabled in prod -- so scope this to the four sps-etl-* rules
+        // (3 cadence + the #595 heartbeat), all gated on etlSchedulesEnabled.
         const cadenceRules = Object.entries(rules).filter(([, rule]) => {
           const name = rule.Properties?.Name as string | undefined;
           return typeof name === "string" && name.startsWith("sps-etl-");
         });
-        expect(cadenceRules).toHaveLength(3);
+        expect(cadenceRules).toHaveLength(4);
         for (const [id, rule] of cadenceRules) {
           const state = rule.Properties?.State as string | undefined;
           // CDK serializes enabled=false as State=DISABLED.
@@ -395,8 +397,9 @@ describe("EtlStack", () => {
     describe("Alarms (D4 -- ExecutionsFailed sum>0 + ExecutionsStarted sum<1)", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
-        // 5 cadence alarms + 2 reconciler alarms (#393); all share the topic.
-        expect(Object.keys(alarms)).toHaveLength(7);
+        // 7 cadence-machine alarms (4 status + 3 cadence) + 2 reconciler alarms
+        // (#393); all share the topic.
+        expect(Object.keys(alarms)).toHaveLength(9);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -418,7 +421,7 @@ describe("EtlStack", () => {
             name.includes("-status-")
           );
         });
-        expect(statusAlarms).toHaveLength(3);
+        expect(statusAlarms).toHaveLength(4);
         for (const a of statusAlarms) {
           expect(a.Properties?.MetricName).toBe("ExecutionsFailed");
           expect(a.Properties?.Statistic).toBe("Sum");
@@ -429,7 +432,7 @@ describe("EtlStack", () => {
         }
       });
 
-      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly only)", () => {
+      it("cadence alarms watch ExecutionsStarted sum < 1 with treatMissingData=breaching (nightly + weekly + heartbeat)", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // Scope to the cadence machines (sps-etl-*); the #393 reconciler's
         // cadence alarm has its own focused test below.
@@ -443,11 +446,13 @@ describe("EtlStack", () => {
         });
         // Annual has no cadence alarm -- CloudWatch can't express a yearly
         // no-execution window (see EtlStack alarm note + the guard below).
-        expect(cadenceAlarms).toHaveLength(2);
+        // Nightly + weekly + the #595 daily heartbeat each get one.
+        expect(cadenceAlarms).toHaveLength(3);
         const labels = cadenceAlarms
           .map(([, a]) => a.Properties?.AlarmName as string)
           .sort();
         expect(labels).toEqual([
+          "sps-etl-heartbeat-cadence-prod",
           "sps-etl-nightly-cadence-prod",
           "sps-etl-weekly-cadence-prod",
         ]);
@@ -892,8 +897,9 @@ describe("EtlStack", () => {
 
     it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled both true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
-      // 3 cadence rules + the #393 reconciler rule; all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(4);
+      // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule;
+      // all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(5);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });

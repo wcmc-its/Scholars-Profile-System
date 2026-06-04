@@ -93,6 +93,38 @@ describe("oncall-relay handler", () => {
     expect(body.attachments).toHaveLength(1);
   });
 
+  it("ETL custom payload (no AlarmName) routes through the ETL card and logs the step as label", async () => {
+    sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
+    fetchMock.mockResolvedValueOnce(new Response("ok", { status: 202 }));
+
+    // AlarmName: undefined drops the key from the JSON, so the handler takes
+    // the ETL branch. Real publisher: EtlStack NotifyEd SnsPublish.
+    await handler(
+      snsEvent({
+        AlarmName: undefined,
+        NewStateValue: undefined,
+        NewStateReason: undefined,
+        env: "staging",
+        step: "Ed",
+        stateMachine: "scholars-nightly-staging",
+        error: "Connection timeout",
+      }),
+      {} as never,
+      () => undefined,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]![1] as { body: string }).body,
+    ) as { attachments: Array<{ content: { body: Array<{ text?: string }> } }> };
+    expect(body.attachments[0]!.content.body[0]!.text).toBe(
+      "\u{1F6A8} SPS ETL staging \u{2014} Ed",
+    );
+    const logs = consoleLogSpy.mock.calls.map((c) => String(c[0]));
+    const delivered = logs.find((l) => l.includes('"outcome":"delivered"'));
+    expect(delivered).toContain('"alarm":"Ed"');
+  });
+
   it("warm invocation reuses cached URL: zero Secrets Manager calls on second hit", async () => {
     sendMock.mockResolvedValueOnce({ SecretString: WEBHOOK_URL });
     fetchMock.mockResolvedValue(new Response("ok", { status: 202 }));

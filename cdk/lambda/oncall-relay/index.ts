@@ -5,7 +5,9 @@ import {
 import type { SNSEvent, SNSHandler } from "aws-lambda";
 import {
   buildAdaptiveCard,
-  type CloudWatchAlarmPayload,
+  buildEtlCard,
+  isCloudWatchAlarmPayload,
+  type EtlEventPayload,
 } from "./adaptive-card.js";
 
 // Module-scope cache: warm container reuses one Secrets Manager fetch and
@@ -64,9 +66,9 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
 
   for (const record of event.Records) {
     const raw = record.Sns.Message;
-    let alarm: CloudWatchAlarmPayload;
+    let parsed: unknown;
     try {
-      alarm = JSON.parse(raw) as CloudWatchAlarmPayload;
+      parsed = JSON.parse(raw);
     } catch (err) {
       logOutcome("(unparseable)", "parse_error", {
         error: (err as Error).message,
@@ -74,7 +76,21 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
       throw err;
     }
 
-    const card = buildAdaptiveCard(alarm);
+    // Two payload shapes land on the topics this Lambda subscribes to:
+    // CloudWatch alarm JSON (sps-alarms + the ETL status/cadence alarms) and
+    // the EtlStack Step Functions custom payload (per-step failure / approval
+    // gate on etl-failures). Discriminate on `AlarmName`.
+    let card: ReturnType<typeof buildAdaptiveCard>;
+    let label: string;
+    if (isCloudWatchAlarmPayload(parsed)) {
+      card = buildAdaptiveCard(parsed);
+      label = parsed.AlarmName;
+    } else {
+      const evt = parsed as EtlEventPayload;
+      card = buildEtlCard(evt);
+      label = evt.step ?? evt.action ?? "etl-event";
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -82,11 +98,11 @@ export const handler: SNSHandler = async (event: SNSEvent): Promise<void> => {
     });
 
     if (response.status >= 200 && response.status < 300) {
-      logOutcome(alarm.AlarmName, "delivered", { status: response.status });
+      logOutcome(label, "delivered", { status: response.status });
       continue;
     }
 
-    logOutcome(alarm.AlarmName, "upstream_error", { status: response.status });
+    logOutcome(label, "upstream_error", { status: response.status });
     // Throw so SNS retries the invocation and the Errors metric ticks.
     throw new Error(`upstream_error_${response.status}`);
   }
