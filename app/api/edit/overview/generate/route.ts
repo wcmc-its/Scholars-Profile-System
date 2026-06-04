@@ -60,26 +60,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(403, authz.reason);
   }
 
-  // --- per-cwid rate limit. The actor is always the target here (owner-only),
-  //     so the bucket key is the actor's cwid. Before the gateway call so a
-  //     burst can't run up cost. ---
-  const rate = await recordOverviewGenerateAttempt(entityId);
-  if (!rate.allowed) {
-    console.warn(
-      JSON.stringify({
-        event: "overview_generate_rate_limited",
-        path: PATH,
-        request_id: requestId,
-        actor_cwid: session.cwid,
-        count: rate.count,
-        limit: rate.limit,
-      }),
-    );
-    return editRateLimited(rate.retryAfterSeconds);
+  // --- per-cwid rate limit (DB write) + facts assembly (DB read). Both touch
+  //     the database, so a DB error is a clean 500 here rather than an unhandled
+  //     throw — matching /api/edit/field. The rate limit runs first (before the
+  //     gateway call) so a burst can't run up cost; the actor is always the
+  //     target (owner-only), so the bucket key is the actor's cwid. ---
+  let facts: Awaited<ReturnType<typeof assembleOverviewFacts>>;
+  try {
+    const rate = await recordOverviewGenerateAttempt(entityId);
+    if (!rate.allowed) {
+      console.warn(
+        JSON.stringify({
+          event: "overview_generate_rate_limited",
+          path: PATH,
+          request_id: requestId,
+          actor_cwid: session.cwid,
+          count: rate.count,
+          limit: rate.limit,
+        }),
+      );
+      return editRateLimited(rate.retryAfterSeconds);
+    }
+    facts = await assembleOverviewFacts(entityId);
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
   }
 
-  // --- assemble facts (read-only). A missing scholar row is a 404. ---
-  const facts = await assembleOverviewFacts(entityId);
+  // A missing scholar row is a 404.
   if (!facts) return editError(404, "scholar_not_found", "entityId");
 
   // --- sparse-data gate (SPEC G2): too little signal to draft without padding. ---

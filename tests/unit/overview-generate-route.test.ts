@@ -135,6 +135,22 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).not.toHaveBeenCalled();
   });
 
+  it("500 write_failed when the rate-limit DB call throws (no generate)", async () => {
+    mockRecordAttempt.mockRejectedValue(new Error("Table 'request_change_rate_limit' doesn't exist"));
+    const res = await POST(post({ entityId: "self01" }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "write_failed" });
+    expect(mockGenerateDraft).not.toHaveBeenCalled();
+  });
+
+  it("500 write_failed when facts assembly throws (no generate)", async () => {
+    mockAssembleFacts.mockRejectedValue(new Error("db read failed"));
+    const res = await POST(post({ entityId: "self01" }));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "write_failed" });
+    expect(mockGenerateDraft).not.toHaveBeenCalled();
+  });
+
   it("200 with the sanitized draft on success", async () => {
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(200);
