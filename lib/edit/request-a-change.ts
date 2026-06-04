@@ -108,7 +108,8 @@ export type RequestAttribute =
   | "publications"
   | "org-unit"
   | "coi"
-  | "mentees";
+  | "mentees"
+  | "profile-url";
 
 export type AttributeChangeConfig = {
   heading: string;
@@ -526,6 +527,36 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           email: SUPPORT_EMAIL,
           sourceSystem: "Jenzabar or Employee Central",
           note: "These details come from Jenzabar or Employee Central and are corrected at the source.",
+        }),
+      },
+    ],
+  },
+  // Profile URL is OWNED by Scholars (not a sourced field). Personalized-URL
+  // requests funnel to ITS Support — the Scholars support catch-all, one of the
+  // three approved mailboxes — while the self-service slug-request flow is gated
+  // (`SELF_EDIT_SLUG_REQUEST`). A request-only pseudo-attribute like `org-unit`.
+  "profile-url": {
+    heading: "Request a personalized URL",
+    issues: [
+      {
+        id: "profile-url-personalize",
+        label: "I'd like a personalized profile URL",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Scholars",
+          note: "Personalized URLs aren't self-service yet. Tell us the name-based address you'd like — a variation of your own first and last name, using lowercase letters, numbers, and hyphens — and we'll set it up. Your current address keeps working.",
+          cta: "Request a personalized URL",
+        }),
+      },
+      {
+        id: "profile-url-incorrect",
+        label: "My current URL is wrong or broken",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Scholars",
+          note: "Tell us what's wrong with your current address and we'll look into it.",
         }),
       },
     ],

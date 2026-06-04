@@ -19,6 +19,7 @@ import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
+import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { SlugCard } from "@/components/edit/slug-card";
 import { SlugRequestCard, type SlugRequestSummary } from "@/components/edit/slug-request-card";
 import { VisibilityCard } from "@/components/edit/visibility-card";
@@ -319,7 +320,7 @@ function renderPanel(
         );
       }
       if (!slugRequestEnabled) {
-        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} />;
+        return <ProfileUrlReadonlyPanel slug={ctx.scholar.slug} cwid={cwid} />;
       }
       return (
         <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
@@ -330,7 +331,7 @@ function renderPanel(
 /** The read-only Profile URL panel shown to scholars while `SELF_EDIT_SLUG_REQUEST`
  *  is off (T3.6): their live URL, plus an honest note that custom URLs aren't
  *  self-serve yet. No input, no request form, no unsaved-changes guard. */
-function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
+function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string }) {
   const currentUrl = `${publicProfileHost()}/${slug}`;
   return (
     <EditPanel
@@ -349,8 +350,8 @@ function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
       </p>
       <div className="text-muted-foreground flex flex-col gap-2 text-sm">
         <p>
-          Personalized URLs aren&rsquo;t self-service yet. When they open, you&rsquo;ll be able to
-          request one here, and a Scholars administrator reviews every request.
+          Personalized URLs aren&rsquo;t self-service yet, but you can request one &mdash; a Scholars
+          administrator reviews every request.
         </p>
         <p>
           A personalized URL must be a variation of your own first and last name &mdash; optionally
@@ -359,6 +360,11 @@ function ProfileUrlReadonlyPanel({ slug }: { slug: string }) {
           <code className="font-mono">/scholars/{slug}</code>) keeps working either way.
         </p>
       </div>
+      <RequestAChangeDialog
+        attribute="profile-url"
+        cwid={cwid}
+        triggerTestId="profile-url-request-change"
+      />
     </EditPanel>
   );
 }

@@ -26,6 +26,7 @@ describe("REQUEST_A_CHANGE — structure", () => {
         "name-title",
         "org-unit",
         "photo",
+        "profile-url",
         "publications",
       ].sort(),
     );
