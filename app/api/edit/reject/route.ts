@@ -66,14 +66,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     contributorCwid: uid,
   });
   if (!authz.ok) {
-    logEditDenial({
-      actorCwid: session.cwid,
-      targetCwid: uid,
-      path: PATH,
-      reason: authz.reason,
-      targetEntityType: "publication",
-      targetEntityId: pmid,
-    });
+    // `logEditDenial`'s optional targetEntityType is UnitKind-only (#540 unit
+    // denials); the general per-author denial passes just actor/target/reason,
+    // exactly like the suppress route.
+    logEditDenial({ actorCwid: session.cwid, targetCwid: uid, path: PATH, reason: authz.reason });
     return editError(403, authz.reason);
   }
 
