@@ -38,6 +38,21 @@ describe("AdminSubnav", () => {
     expect(screen.queryByTestId("admin-tab-slug-requests")).toBeNull();
   });
 
+  it("always shows the Slug-registry tab — even when the URL-requests tab is hidden", () => {
+    render(<AdminSubnav active="profiles" pendingSlugRequests={null} />);
+    const tab = screen.getByTestId("admin-tab-slugs");
+    expect(tab).toBeTruthy();
+    expect(tab.getAttribute("href")).toBe("/edit/slugs");
+    // it stays visible even when the slug-request feature is on too
+    render(<AdminSubnav active="profiles" pendingSlugRequests={3} />);
+    expect(screen.getAllByTestId("admin-tab-slugs").length).toBeGreaterThan(0);
+  });
+
+  it("marks the Slug-registry tab active with aria-current", () => {
+    render(<AdminSubnav active="slugs" pendingSlugRequests={null} />);
+    expect(screen.getByTestId("admin-tab-slugs").getAttribute("aria-current")).toBe("page");
+  });
+
   it("omits the count pill when zero pending", () => {
     render(<AdminSubnav active="slug-requests" pendingSlugRequests={0} />);
     expect(screen.getByTestId("admin-tab-slug-requests").getAttribute("aria-current")).toBe("page");
