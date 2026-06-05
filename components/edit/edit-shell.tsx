@@ -179,12 +179,7 @@ export function EditShell({
             </div>
           )}
 
-          {isSuperuser && (
-            <SuperuserBanner
-              targetLabel={scholarName}
-              note="A reason is required for every change."
-            />
-          )}
+          {isSuperuser && <SuperuserBanner targetLabel={scholarName} />}
 
           <div className="apollo-card">{children}</div>
         </main>

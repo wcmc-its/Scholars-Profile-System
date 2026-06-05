@@ -106,7 +106,7 @@ export default async function EditScholarPage({
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set
-  // depends on `mode` (superuser has no Home/Publications), so derive it here.
+  // depends on `mode` (superuser has no Publications), so derive it here.
   // The redirect target carries no `?attr`, so the re-load never loops.
   const basePath = `/edit/scholar/${targetCwid}`;
   const validAttrs: readonly string[] = visibleAttrKeys(mode, slugRequestEnabled);

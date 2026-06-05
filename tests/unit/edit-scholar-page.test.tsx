@@ -65,7 +65,7 @@ vi.mock("@/components/edit/edit-page", () => ({
   // the real per-mode visible keys; the flag arg doesn't change membership.
   visibleAttrKeys: (mode: "self" | "superuser") =>
     mode === "superuser"
-      ? ["name-title", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
+      ? ["home", "name-title", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
       : ["home", "name-title", "photo", "overview", "visibility", "publications", "funding", "appointments", "education", "profile-url"],
 }));
 vi.mock("@/components/edit/forbidden-edit-page", () => ({
