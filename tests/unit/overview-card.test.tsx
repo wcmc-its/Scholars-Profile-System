@@ -280,7 +280,7 @@ describe("OverviewCard — generator affordance", () => {
     expect(screen.getByTestId("overview-regenerate")).toBeTruthy();
   });
 
-  it("POSTs to /api/edit/overview/generate with { entityId }", async () => {
+  it("POSTs to /api/edit/overview/generate with { entityId, params }", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     fireEvent.click(screen.getByTestId("overview-generate"));
@@ -288,7 +288,13 @@ describe("OverviewCard — generator affordance", () => {
     const [url, opts] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/edit/overview/generate");
     expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body as string)).toEqual({ entityId: CWID });
+    const body = JSON.parse(opts.body as string) as {
+      entityId: string;
+      params: { voice: string };
+    };
+    expect(body.entityId).toBe(CWID);
+    // The default params ride along unless the scholar changed them.
+    expect(body.params.voice).toBe("third");
   });
 
   it("on 200 injects the draft, marks the card dirty (Save enabled), and shows the banner", async () => {
@@ -343,6 +349,45 @@ describe("OverviewCard — generator affordance", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly generateEnabled />);
     expect(screen.queryByTestId("overview-generate")).toBeNull();
     expect(screen.queryByTestId("overview-regenerate")).toBeNull();
+  });
+});
+
+describe("OverviewCard — generation options (params)", () => {
+  it("renders the controls with defaults when generateEnabled", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expect(screen.getByTestId("overview-generate-options")).toBeTruthy();
+    // Default voice is third person; the radio reflects the default value.
+    expect(screen.getByTestId("overview-voice-third").getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("overview-voice-first").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("does NOT render the controls when generateEnabled is false", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" />);
+    expect(screen.queryByTestId("overview-generate-options")).toBeNull();
+  });
+
+  it("after changing voice to First, Generate sends params.voice === 'first'", async () => {
+    const f = stubGenerateOk("<p>A drafted overview.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-voice-first"));
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [, opts] = f.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(opts.body as string) as { params: { voice: string } };
+    expect(body.params.voice).toBe("first");
+  });
+
+  it("typing instructions is reflected in the sent params", async () => {
+    const f = stubGenerateOk("<p>A drafted overview.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.change(screen.getByTestId("overview-instructions"), {
+      target: { value: "keep it accessible" },
+    });
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [, opts] = f.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(opts.body as string) as { params: { instructions: string } };
+    expect(body.params.instructions).toBe("keep it accessible");
   });
 });
 

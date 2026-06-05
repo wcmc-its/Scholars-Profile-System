@@ -72,9 +72,21 @@ beforeEach(() => {
   mockGetEditSession.mockResolvedValue(SELF);
   mockAssembleFacts.mockResolvedValue(FACTS);
   mockHasSufficient.mockReturnValue(true);
-  mockGenerateDraft.mockResolvedValue("<p>Draft.</p>");
+  mockGenerateDraft.mockResolvedValue({ draft: "<p>Draft.</p>", model: "anthropic/claude-sonnet-4.5" });
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
 });
+
+// The shape normalizeOverviewParams produces for a MISSING/garbage `params`:
+// enums fall back to the defaults, but a missing element array normalizes to []
+// (the DEFAULT_OVERVIEW_PARAMS element trio is the UI starting point, not a
+// normalization fallback). #742 Phase A.
+const NORMALIZED_EMPTY = {
+  voice: "third",
+  tone: "formal",
+  length: "standard",
+  elements: [],
+  instructions: "",
+};
 
 describe("POST /api/edit/overview/generate", () => {
   it("404 when the feature flag is off (no work done)", async () => {
@@ -151,11 +163,47 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).not.toHaveBeenCalled();
   });
 
-  it("200 with the sanitized draft on success", async () => {
+  it("200 with the sanitized draft + model on success", async () => {
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, draft: "<p>Draft.</p>" });
-    expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      draft: "<p>Draft.</p>",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+  });
+
+  it("passes the normalized default-enum params to the generator when params is absent", async () => {
+    await POST(post({ entityId: "self01" }));
+    expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS, NORMALIZED_EMPTY);
+  });
+
+  it("passes through valid caller params, normalized (2nd arg)", async () => {
+    await POST(
+      post({
+        entityId: "self01",
+        params: {
+          voice: "first",
+          tone: "conversational",
+          length: "extended",
+          elements: ["methods", "methods", "not_a_theme"],
+          instructions: "  keep it brief  ",
+        },
+      }),
+    );
+    expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS, {
+      voice: "first",
+      tone: "conversational",
+      length: "extended",
+      elements: ["methods"], // de-duped + unknown key filtered
+      instructions: "keep it brief", // trimmed
+    });
+  });
+
+  it("normalizes a garbage params value to the defaults (200, not 400)", async () => {
+    const res = await POST(post({ entityId: "self01", params: "not-an-object" }));
+    expect(res.status).toBe(200);
+    expect(mockGenerateDraft).toHaveBeenCalledWith(FACTS, NORMALIZED_EMPTY);
   });
 
   it("502 generation_failed when the gateway throws (no DB write)", async () => {

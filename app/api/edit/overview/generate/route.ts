@@ -21,6 +21,7 @@ import {
   generateOverviewDraft,
   isOverviewGenerateEnabled,
 } from "@/lib/edit/overview-generator";
+import { normalizeOverviewParams } from "@/lib/edit/overview-params";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
 import {
   editError,
@@ -46,6 +47,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof entityId !== "string" || entityId.length === 0) {
     return editError(400, "invalid_entity_id", "entityId");
   }
+  // Steering params are NEVER trusted — normalize defensively (unknown enums →
+  // defaults, elements filtered, instructions trimmed/clamped). A garbage value
+  // yields a usable shape, so there is no 400-on-bad-params; only entityId is
+  // validated (#742 Phase A).
+  const params = normalizeOverviewParams(req.ctx.body.params);
 
   // --- authorization: owner-only (overview is self-only — a superuser does not
   //     inherit it, matching authorizeFieldEdit). ---
@@ -95,13 +101,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // --- generate. A gateway throw / timeout is a 502 and NEVER writes the DB
   //     (SPEC G8). ---
-  let draft: string;
+  let result: Awaited<ReturnType<typeof generateOverviewDraft>>;
   try {
-    draft = await generateOverviewDraft(facts);
+    result = await generateOverviewDraft(facts, params);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(502, "generation_failed");
   }
 
-  return editOk({ draft });
+  return editOk({ draft: result.draft, model: result.model });
 }
