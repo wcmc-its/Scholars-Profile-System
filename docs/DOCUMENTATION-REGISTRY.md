@@ -34,6 +34,7 @@ in **§10**.
 | What is this system, end to end? | [`architecture-overview.md`](./architecture-overview.md) → [`PRODUCTION.md`](./PRODUCTION.md) → [`PRODUCTION_ADDENDUM.md`](./PRODUCTION_ADDENDUM.md) |
 | Why is a page slow? / What's cached where? | [`performance-baseline.md`](./performance-baseline.md), [`cloudfront-cache-spec.md`](./cloudfront-cache-spec.md), [`ADR-001`](./ADR-001-runtime-dal-vs-etl-transform.md) |
 | Is it healthy? What are the SLOs/alarms? | [`SLOs.md`](./SLOs.md), [`oncall.md`](./oncall.md) |
+| Did the data refresh? How would I know if an ETL broke or went stale? | [`etl-monitoring.md`](./etl-monitoring.md) |
 | How do I trace one slow request? | [`tracing.md`](./tracing.md) |
 | Where are the logs / how do I search them? | [`logging-reference.md`](./logging-reference.md) |
 | How is it deployed / how do I roll back? | [`DEPLOY-RUNBOOK.md`](./DEPLOY-RUNBOOK.md), [`rollback-runbook.md`](./rollback-runbook.md), [`ADR-004`](./ADR-004-deploy-strategy.md) |
@@ -86,6 +87,7 @@ in **§10**.
 | [`oncall.md`](./oncall.md) | The alerting path and on-call routing. Companion to `SLOs.md` and the addendum's Observability section. |
 | [`tracing.md`](./tracing.md) | Distributed tracing (CloudFront → ALB → ECS). How to follow a single request through the stack. |
 | [`logging-reference.md`](./logging-reference.md) | Where the logs live (log groups + retention), the structured event vocabulary, and Logs Insights recipes. |
+| [`etl-monitoring.md`](./etl-monitoring.md) | **How ETL failures and stale data reach you** (#595) — the four signals (per-step failure, status alarm, cadence alarm, freshness heartbeat), all converging on `etl-failures-<env>` → the on-call relay → Teams, plus the "an alert fired, now what?" SOP. The ETL/data-plane counterpart to `SLOs.md`/`oncall.md`. |
 
 ## 4. Operations & runbooks — "how do I…?"
 
@@ -232,7 +234,10 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-03 — §0/§8 added [`search-recall.md`](./search-recall.md): why `covid19`/`tylenol`
+*Last updated: 2026-06-03 — §0/§3 added [`etl-monitoring.md`](./etl-monitoring.md) (#595):
+how ETL failures and stale data surface to Teams (per-step failure + status/cadence alarms +
+the new daily freshness heartbeat, all via `etl-failures-<env>` → on-call relay), prompted by
+an 8-night-silent nightly-cadence failure whose alarm topic had no subscriber. Earlier 2026-06-03 — §0/§8 added [`search-recall.md`](./search-recall.md): why `covid19`/`tylenol`
 return too few people — the alphanumeric-tokenization gap (#725/PR #727) and the MeSH concept-resolution-is-ranking-only
 gap (#726), with root causes, fixes, validation, deploy sequencing, and limits. Earlier 2026-06-03 — §8 added [`suggested-search-chips.md`](./suggested-search-chips.md):
 the homepage "Try:" chips were swapped from generic department/topic names to a curated 169-term

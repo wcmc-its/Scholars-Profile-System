@@ -1,0 +1,169 @@
+/**
+ * ETL data-freshness heartbeat — #595.
+ *
+ * Run via `npm run etl:freshness`. Reads the `etl_run` audit table and asserts
+ * that every tracked source has a SUCCESSFUL run within its cadence SLA. Exit 0
+ * when all tracked sources are fresh; exit 1 (with a per-source report on
+ * stderr) when one or more are stale, or when the check itself errors.
+ *
+ * Why this exists alongside the Step Functions alarms (EtlStack D4):
+ *   - `sps-etl-<cadence>-status`  (ExecutionsFailed > 0) catches a step that
+ *     THROWS.
+ *   - `sps-etl-<cadence>-cadence` (ExecutionsStarted < 1, treatMissingData
+ *     BREACHING) catches a schedule that never FIRES.
+ *   Neither sees **green-but-stale**: an execution that reports success while a
+ *   source's data did not actually refresh (an empty upstream fetch that does
+ *   not error, a source quietly dropped from the cadence, a partial run whose
+ *   `etl_run` success row is now old). This check closes that gap by alarming
+ *   on the SEMANTIC outcome — "is each source's data actually fresh?" — rather
+ *   than on whether a job process exited 0.
+ *
+ * Delivery path (no new alarm/IAM): this runs as the single step of the
+ * `scholars-heartbeat-<env>` state machine. A non-zero exit surfaces as
+ * States.TaskFailed -> the existing `sps-etl-heartbeat-status-<env>` alarm ->
+ * `etl-failures-<env>` -> on-call relay -> Teams. The detailed per-source
+ * breakdown below lands in the heartbeat's CloudWatch log
+ * (`/aws/ecs/sps-etl-<env>`), which the operator opens from the alert.
+ *
+ * Tracked sources + SLAs are derived from the cadence definitions in
+ * cdk/lib/etl-stack.ts. Only sources that WRITE an `etl_run` row are tracked
+ * (revalidate / reporter / nsf / gates / nih-profile / search:index do not, so
+ * they cannot be freshness-checked here — noted as a follow-up in
+ * docs/etl-monitoring.md). Sources seen in `etl_run` but absent from the table
+ * below are reported as "untracked" and never alarm (manual/on-demand runs).
+ */
+import { db } from "@/lib/db";
+
+type Cadence = "nightly" | "weekly" | "annual";
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Per-cadence freshness SLA in hours. Set slightly above the cadence interval
+ * so a single late/slow run does not flap: nightly gets a 30h ceiling (24h +
+ * 25% grace, matching the EtlStack nightly cadence-alarm window); weekly gets
+ * 8 days (7d + 1d grace); annual gets ~13 months (operator-triggered behind a
+ * manual approval gate, so this is a backstop, not a tight SLA).
+ */
+const SLA_HOURS: Readonly<Record<Cadence, number>> = {
+  nightly: 30,
+  weekly: 8 * 24,
+  annual: 400 * 24,
+};
+
+/**
+ * `etl_run.source` string -> cadence. The source strings are the exact values
+ * the ETLs write (verified against the per-source `etlRun.create` calls under
+ * etl/), NOT the StepSpec ids in etl-stack.ts (e.g. step "Ed" writes source
+ * "ED", step "Dynamodb" writes "ReCiterAI-projection").
+ */
+const TRACKED: Readonly<Record<string, Cadence>> = {
+  // Nightly cadence (cron 0 7 * * ? *)
+  ED: "nightly",
+  ReCiter: "nightly",
+  ASMS: "nightly",
+  InfoEd: "nightly",
+  COI: "nightly",
+  "ReCiterAI-projection": "nightly",
+  MeshCoverage: "nightly",
+  // Weekly cadence (cron 0 8 ? * SUN *)
+  Spotlight: "weekly",
+  Jenzabar: "weekly",
+  // Annual cadence (cron 0 9 1 7 ? *)
+  Hierarchy: "annual",
+};
+
+interface SourceStatus {
+  readonly source: string;
+  readonly cadence: Cadence;
+  readonly lastSuccessAt: Date | null;
+  readonly ageHours: number | null;
+  readonly slaHours: number;
+  readonly stale: boolean;
+}
+
+async function evaluate(now: number): Promise<SourceStatus[]> {
+  const out: SourceStatus[] = [];
+  for (const [source, cadence] of Object.entries(TRACKED)) {
+    // Most recent SUCCESSFUL run for this source. `completedAt` is the
+    // freshness anchor (a 'running'/'failed' row does not advance freshness).
+    const last = await db.read.etlRun.findFirst({
+      where: { source, status: "success", completedAt: { not: null } },
+      orderBy: { completedAt: "desc" },
+      select: { completedAt: true },
+    });
+    const lastSuccessAt = last?.completedAt ?? null;
+    const ageHours =
+      lastSuccessAt === null
+        ? null
+        : (now - lastSuccessAt.getTime()) / HOUR_MS;
+    const slaHours = SLA_HOURS[cadence];
+    // No success on record OR older than the SLA => stale.
+    const stale = ageHours === null || ageHours > slaHours;
+    out.push({ source, cadence, lastSuccessAt, ageHours, slaHours, stale });
+  }
+  return out;
+}
+
+function fmtAge(ageHours: number | null): string {
+  if (ageHours === null) return "never";
+  if (ageHours < 48) return `${ageHours.toFixed(1)}h`;
+  return `${(ageHours / 24).toFixed(1)}d`;
+}
+
+async function main(): Promise<void> {
+  // A single timestamp for the whole pass so all ages are comparable.
+  const now = Date.now();
+  const statuses = await evaluate(now);
+
+  // Report every tracked source, freshest-relevant first (stale on top).
+  const ordered = [...statuses].sort((a, b) => {
+    if (a.stale !== b.stale) return a.stale ? -1 : 1;
+    return (b.ageHours ?? Infinity) - (a.ageHours ?? Infinity);
+  });
+  console.log(`[freshness] checked ${statuses.length} tracked sources @ ${new Date(now).toISOString()}`);
+  for (const s of ordered) {
+    const mark = s.stale ? "STALE" : "ok";
+    console.log(
+      `[freshness] ${mark.padEnd(5)} ${s.source.padEnd(22)} cadence=${s.cadence.padEnd(7)} ` +
+        `last_success=${fmtAge(s.ageHours)} sla=${(s.slaHours / 24).toFixed(0)}d ` +
+        `(${s.lastSuccessAt?.toISOString() ?? "none"})`,
+    );
+  }
+
+  // Surface sources present in etl_run but not in the SLA table, so a new
+  // cadence source is not silently unmonitored. Informational only.
+  const distinct = await db.read.etlRun.findMany({
+    distinct: ["source"],
+    select: { source: true },
+  });
+  const untracked = distinct
+    .map((r) => r.source)
+    .filter((s) => !(s in TRACKED))
+    .sort();
+  if (untracked.length > 0) {
+    console.log(`[freshness] untracked sources (not alarmed): ${untracked.join(", ")}`);
+  }
+
+  const stale = statuses.filter((s) => s.stale);
+  if (stale.length > 0) {
+    const summary = stale
+      .map((s) => `${s.source} (${fmtAge(s.ageHours)} > ${s.slaHours / 24}d)`)
+      .join(", ");
+    // stderr so it stands out in the log; the non-zero exit drives the alarm.
+    console.error(`[freshness] FAIL — ${stale.length} stale source(s): ${summary}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log("[freshness] OK — all tracked sources within SLA");
+}
+
+main()
+  .catch((err) => {
+    console.error("[freshness] ERROR —", err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    void db.write.$disconnect();
+    void db.read.$disconnect();
+  });

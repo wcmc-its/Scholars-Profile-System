@@ -17,6 +17,7 @@ import { type Construct } from "constructs";
 import { type AppStack } from "./app-stack";
 import { type SpsEnvConfig } from "./config";
 import { type DataStack } from "./data-stack";
+import { type EtlStack } from "./etl-stack";
 
 /**
  * The email subscribed to the **notify** topic (cost guardrails + low-urgency
@@ -82,6 +83,14 @@ export interface ObservabilityStackProps extends StackProps {
   readonly appStack: AppStack;
   /** DataStack instance — read Aurora cluster / OpenSearch domain references. */
   readonly dataStack: DataStack;
+  /**
+   * EtlStack instance — its `etl-failures-{env}` topic is subscribed to the
+   * on-call relay here so ETL step failures, the status/cadence CloudWatch
+   * alarms, and the freshness heartbeat all reach Teams (#595). The topic
+   * itself is owned by EtlStack; this stack only adds the relay subscription,
+   * matching the appStack/dataStack "read the other stack's resources" pattern.
+   */
+  readonly etlStack: EtlStack;
 }
 
 /**
@@ -481,6 +490,31 @@ export class SpsObservabilityStack extends Stack {
 
     teamsWebhookSecret.grantRead(relay);
     relay.addEventSource(new SnsEventSource(this.alarmTopic));
+
+    // #595 — also relay ETL failures to Teams. EtlStack publishes three signal
+    // types to `etl-failures-{env}`: per-step Catch SnsPublish, the
+    // status/cadence CloudWatch alarms (SnsAction), and the freshness-heartbeat
+    // status alarm. The topic shipped with NO subscriber (B23's PagerDuty
+    // wiring never landed), so 8+ nights of nightly-cadence failures went unseen.
+    //
+    // The subscription is declared HERE (not via topic.addSubscription, which
+    // places the AWS::SNS::Subscription in the topic's owning stack = EtlStack)
+    // to avoid a stack dependency cycle: ObservabilityStack already depends on
+    // EtlStack via `failureTopic`, so an EtlStack->ObservabilityStack edge (the
+    // subscription referencing this relay) would cycle. Constructing the
+    // Subscription + invoke permission in this stack's scope keeps both
+    // resources on the existing ObservabilityStack->EtlStack edge. The relay
+    // handles both payload shapes (adaptive-card.ts isCloudWatchAlarmPayload).
+    new sns.Subscription(this, "EtlFailuresRelaySubscription", {
+      topic: props.etlStack.failureTopic,
+      protocol: sns.SubscriptionProtocol.LAMBDA,
+      endpoint: relay.functionArn,
+    });
+    relay.addPermission("AllowEtlFailuresTopicInvoke", {
+      principal: new iam.ServicePrincipal("sns.amazonaws.com"),
+      sourceArn: props.etlStack.failureTopic.topicArn,
+      action: "lambda:InvokeFunction",
+    });
 
     // Failure-mode design (SPEC § Failure-mode design): if this Lambda
     // errors, route to the NOTIFY topic (email) -- not the page topic --
