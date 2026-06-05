@@ -82,7 +82,10 @@ model Scholar {
   cwidAliasesAsCurrent CwidAlias[]         @relation("AliasCurrent")
   slugHistoryAsCurrent SlugHistory[]       @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
+  coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  overviewGenerations  OverviewGeneration[]
+  overviewProvenance   OverviewProvenance?
   department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?            @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -497,11 +500,33 @@ model Publication {
   publicationScores PublicationScore[]
   publicationTopics PublicationTopic[]
   grants            GrantPublication[]
+  conflictStatement PublicationConflictStatement?
 
   @@index([year])
   @@index([dateAddedToEntrez])
   @@index([topTopicId])
   @@map("publication")
+}
+
+/// Per-PMID PubMed competing-interest ("Competing interests:") statement text,
+/// backfilled from `reciterdb.reporting_conflicts.conflictsVarchar` by
+/// `etl/reciter/backfill-coi-statements.ts`. One row per publication that
+/// carries a non-empty COI statement (sparse — a separate table avoids widening
+/// the hot `publication` row and keeps this sensitive text isolated).
+///
+/// The statement is PAPER-LEVEL (shared by all co-authors of the PMID); the
+/// per-author attribution that decides whether a named relationship belongs to a
+/// given scholar is computed at request time by `lib/coi-gap`, never persisted
+/// as a verdict (see docs/coi-pubmed-unmatched-feasibility.md). Consumed only by
+/// the self-only /edit "relationships in your publications" surface.
+model PublicationConflictStatement {
+  pmid            String      @id @db.VarChar(32)
+  publication     Publication @relation(fields: [pmid], references: [pmid], onDelete: Cascade)
+  statementText   String      @map("statement_text") @db.Text
+  source          String      @default("PubMed") @db.VarChar(32)
+  lastRefreshedAt DateTime    @default(now()) @map("last_refreshed_at")
+
+  @@map("publication_conflict_statement")
 }
 
 /// Issue #85/#86 — materialized join between Grant and Publication.
@@ -999,6 +1024,48 @@ model CoiActivity {
   @@map("coi_activity")
 }
 
+/// Persisted COI-gap candidates produced by the daily `etl:coi-gap` job: a
+/// relationship named in the scholar's own PubMed COI statement that was NOT
+/// found in their disclosed set (`coi_activity`, Self). Persisted — rather than
+/// computed ephemerally — so the daily job is incremental (only re-process
+/// scholars whose statements/disclosures changed), the same nudge isn't shown
+/// twice, and the scholar can DISAVOW a bad match (status='dismissed') durably.
+///
+/// GOVERNANCE (see docs/coi-pubmed-unmatched-feasibility.md): this is a
+/// candidate + the scholar's own review status, NOT a verdict. There is no
+/// "undisclosed" boolean, no ranking, and it is surfaced ONLY to the scholar
+/// themselves on /edit (self-only) — never to curators, superusers, the public,
+/// or any compliance feed. `status` is the scholar's lifecycle, not an
+/// accusation. The match confidence is the qualitative `tier` (never a %).
+model CoiGapCandidate {
+  id               String    @id @default(uuid()) @db.VarChar(64)
+  cwid             String    @db.VarChar(32)
+  scholar          Scholar   @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+  pmid             String    @db.VarChar(32)
+  /// Raw extracted relationship entity, shown verbatim to the scholar.
+  entity           String    @db.VarChar(512)
+  /// Normalized form — the dedupe key within (cwid, pmid).
+  normalizedEntity String    @map("normalized_entity") @db.VarChar(512)
+  tier             String    @db.VarChar(16) // High | Medium
+  attribution      String    @db.VarChar(32) // scholar | unattributed
+  entityScore      Decimal?  @map("entity_score") @db.Decimal(4, 3)
+  category         String    @db.VarChar(16) // personal
+  /// Verbatim source sentence — always shown so the human, not the score,
+  /// adjudicates (the non-negotiable rendering rule from the risk review).
+  sourceSentence   String    @map("source_sentence") @db.Text
+  /// Scholar's lifecycle: new (surfaced) | acknowledged (will add) |
+  /// dismissed (disavowed — never re-nag) | resolved (now disclosed / gone).
+  status           String    @default("new") @db.VarChar(16)
+  firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
+  /// When the scholar acted (dismissed/acknowledged). Null until reviewed.
+  reviewedAt       DateTime? @map("reviewed_at")
+
+  @@unique([cwid, pmid, normalizedEntity], name: "cwid_pmid_entity")
+  @@index([cwid, status])
+  @@map("coi_gap_candidate")
+}
+
 /// CWID aliases for redirects (Q2'). Auto-populated from ED replacement_cwid.
 /// On detection: FKs migrate to current_cwid, old scholar row drops, alias row inserted.
 model CwidAlias {
@@ -1130,6 +1197,11 @@ enum EntityType {
   department
   division
   center
+  // + #160 follow-up: a derived mentor↔mentee relationship the mentor may
+  // hide from their profile. `entityId` is `"{mentorCwid}:{menteeCwid}"`; the
+  // mentor (before the colon) is the owner. Suppression-only — mentees are
+  // never field_override or unit_admin targets.
+  mentee
 }
 
 /// Per-unit administrator role (ADR-005 Amendment 1 § A1.2 / #540). One row
@@ -1198,6 +1270,32 @@ model Suppression {
   @@map("suppression")
 }
 
+/// Durable intent for the self-edit "Not mine" reject → ReCiter flow (#746).
+/// One row per rejected (uid, pmid), written in the reject route's transaction
+/// alongside the local suppression + B03 audit row. `goldstandard_sent_at` NULL
+/// means the reject hasn't reached ReCiter's gold standard yet; the route fires
+/// it best-effort inline and `etl/reciter-refresh` retries the stragglers.
+/// `feature_generator_sent_at` NULL means the uid still needs the delayed,
+/// coalesced engine re-score (`analysisRefreshFlag=true`). Mirrors the ADR-005
+/// layer-3 sentinel/reconciler pattern (#393): a NULL timestamp is "not yet
+/// delivered" and the scanner converges it. Lives in the main schema so the app
+/// role's DML grant already covers it (no separate-schema GRANT, cf. #493).
+model ReciterPendingRefresh {
+  id                     String    @id @default(uuid()) @db.VarChar(64)
+  uid                    String    @db.VarChar(32) // ReCiter uid == scholar CWID being rejected-as
+  pmid                   String    @db.VarChar(32)
+  rejectedBy             String    @map("rejected_by") @db.VarChar(32) // the real human actor (#637)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  goldstandardSentAt     DateTime? @map("goldstandard_sent_at")
+  featureGeneratorSentAt DateTime? @map("feature_generator_sent_at")
+  attempts               Int       @default(0)
+  lastError              String?   @map("last_error") @db.Text
+
+  @@index([goldstandardSentAt])
+  @@index([uid, featureGeneratorSentAt])
+  @@map("reciter_pending_refresh")
+}
+
 /// Per-cwid fixed-window rate limit for the "Request a change" server send
 /// (#160 Phase 2, docs/self-edit-request-change-modal.md § 5 abuse controls).
 /// One row per (actor cwid, UTC hour-window); the hot-path increment is a raw
@@ -1217,6 +1315,48 @@ model RequestChangeRateLimit {
 
   @@id([cwid, windowStart])
   @@map("request_change_rate_limit")
+}
+
+/// One generated overview candidate (#742 v2, overview-statement-generator-spec.md).
+/// Written on EVERY Generate; it is never the published value (that stays in
+/// FieldOverride(overview)) — this is the version HISTORY the scholar browses,
+/// loads, and regenerates from. `model` + `params` record exactly which model and
+/// which controls produced the draft. In the main schema so the app role's existing
+/// DML covers it, with no separate-schema GRANT to forget at deploy (cf. the #493
+/// audit-grant gap).
+model OverviewGeneration {
+  id            String   @id @default(uuid()) @db.VarChar(64)
+  cwid          String   @db.VarChar(32)
+  text          String   @db.Text // sanitized HTML draft
+  model         String   @db.VarChar(64) // gateway model string used
+  params        Json // { voice, tone, length, elements[], instructions }
+  createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self today)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@index([cwid, createdAt(sort: Desc)]) // the scholar's drafts, newest first
+  @@map("overview_generation")
+}
+
+/// Provenance of the CURRENTLY PUBLISHED overview (#742 v2). One row per scholar,
+/// upserted whenever the overview is saved. Answers "is the live bio authored,
+/// generated, or generated-then-edited, and by which model / which generation?"
+/// Surfaced in /edit only (never public). `sourceGenerationId` is a SOFT pointer to
+/// the OverviewGeneration the saved text derived from (no FK — a draft may be pruned
+/// later; null for a hand-authored save). In the main schema so the app role's
+/// existing DML covers it (cf. the #493 audit-grant gap).
+model OverviewProvenance {
+  cwid               String   @id @db.VarChar(32)
+  origin             String   @db.VarChar(24) // 'authored' | 'generated' | 'generated_edited'
+  model              String?  @db.VarChar(64) // null when authored
+  sourceGenerationId String?  @map("source_generation_id") @db.VarChar(64)
+  updatedByCwid      String   @map("updated_by_cwid") @db.VarChar(32)
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@map("overview_provenance")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,

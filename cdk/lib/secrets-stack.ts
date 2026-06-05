@@ -269,6 +269,18 @@ export class SecretsStack extends Stack {
         description:
           "SPS ETL credentials — annual hierarchy import (Jenzabar / org chart source).",
       },
+      // #746 — ReCiter engine REST API for the self-edit "Not mine" reject.
+      // JSON keys RECITER_API_BASE_URL + RECITER_API_KEY (the ADMIN api-key) for
+      // POST /reciter/goldstandard + feature-generator. Consumed ONLY by the ETL
+      // scanner task (etl:reciter-refresh) — never the internet-facing web app —
+      // so the admin credential stays out of the public tier. Seed out-of-band
+      // before EtlStack deploys; dormant until RECITER_REJECT_SEND=on.
+      {
+        constructId: "ReciterApi",
+        name: `scholars/${env}/reciter-api`,
+        description:
+          "SPS ReCiter engine REST API — RECITER_API_BASE_URL + RECITER_API_KEY (ADMIN key) for the #746 'Not mine' reject (goldstandard + feature-generator). ETL-task only; seed out-of-band; dormant until RECITER_REJECT_SEND=on.",
+      },
       // EdgeStack (B07) — shared secret CloudFront includes on every
       // forwarded request via X-Origin-Verify; the public ALB listener
       // rejects requests missing the matching value. Without this entry

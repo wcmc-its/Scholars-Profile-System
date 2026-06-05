@@ -34,7 +34,16 @@
  * admins can perform these fixes for scholars in their purview.
  */
 
-const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
+/** The Web Directory self-service profile editor — the owning tool for name,
+ *  email, and headshot. Updates are immediate (no sync lag), so a missing
+ *  headshot can be fixed by the scholar right here. Reused by the Home
+ *  checklist's headshot handoff (not only the Request-a-change picker). */
+export const WEB_DIRECTORY_URL = "https://directory.weill.cornell.edu/update/profile/index";
+/** Weill Research Gateway (WRG) — the system of record for conflict-of-interest
+ *  disclosures. A scholar manages their own disclosures there; Scholars only
+ *  mirrors them read-only, so the "Request a change" path is a self-service
+ *  external link, never a mailto / ticket (same shape as ORCID→ReCiter). */
+const WEILL_RESEARCH_GATEWAY_URL = "https://wrg.weill.cornell.edu";
 /** Publication Manager (ReCiter) front door — the single source of truth for
  *  the "reject a misattributed paper at the source" link, reused by the
  *  publications "Request a change" path and the first-hide notice (#570). */
@@ -101,7 +110,10 @@ export type RequestAttribute =
   | "education"
   | "funding"
   | "publications"
-  | "org-unit";
+  | "org-unit"
+  | "coi"
+  | "mentees"
+  | "profile-url";
 
 export type AttributeChangeConfig = {
   heading: string;
@@ -450,6 +462,118 @@ export const REQUEST_A_CHANGE: Record<RequestAttribute, AttributeChangeConfig> =
           sourceSystem: "Enterprise Directory / Scholars",
           cta: "Request a new org unit",
           note: "New org units are created by Scholars superusers. Describe the unit (name, type, parent department) and we'll route it.",
+        }),
+      },
+    ],
+  },
+  // Conflicts of interest are read-only here — they're managed by the scholar in
+  // the Weill Research Gateway (WRG), the system of record. So every "issue" is
+  // a self-service link back to WRG (no mailto / ticket; mirrors ORCID→ReCiter).
+  coi: {
+    heading: "What needs to change?",
+    issues: [
+      {
+        id: "coi-wrong",
+        label: "A disclosure is wrong, outdated, or missing",
+        action: selfService({
+          tool: "Weill Research Gateway",
+          href: WEILL_RESEARCH_GATEWAY_URL,
+          cta: "Manage in Weill Research Gateway",
+          instruction:
+            "Conflict-of-interest disclosures are managed in the Weill Research Gateway. Update or add a disclosure there; the change reaches Scholars on the next refresh.",
+        }),
+      },
+      {
+        id: "coi-not-mine",
+        label: "A disclosure listed here isn't mine",
+        action: selfService({
+          tool: "Weill Research Gateway",
+          href: WEILL_RESEARCH_GATEWAY_URL,
+          cta: "Review in Weill Research Gateway",
+          instruction:
+            "Review your disclosures in the Weill Research Gateway and correct them at the source. Scholars mirrors WRG and can't edit the record directly.",
+        }),
+      },
+      {
+        // Distinct from "wrong/missing" (a WRG self-edit): a still-displayed
+        // disclosure that has ended or been updated in WRG is a mirror/sync
+        // gap, which ITS reconciles — not something the scholar fixes in WRG.
+        id: "coi-not-current",
+        label: "A disclosure here is no longer current",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Weill Research Gateway",
+          note: "Scholars mirrors your disclosures from the Weill Research Gateway. If one has ended or been updated there but still appears here, support will reconcile what Scholars displays.",
+        }),
+      },
+    ],
+  },
+  // Mentees are derived from MD/PhD/postdoc training records. There's no
+  // deep-linkable owning tool, so corrections route to ITS Support, which fixes
+  // the source (Jenzabar or Employee Central). Hiding a mentee is the SEPARATE
+  // per-row control on the panel — not an issue type here.
+  mentees: {
+    heading: "What needs to change?",
+    issues: [
+      {
+        id: "mentee-not-mine",
+        label: "Someone listed isn't my mentee",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Jenzabar or Employee Central",
+          note: "Mentee relationships come from Jenzabar or Employee Central. Hiding the entry here won't correct the source — support will fix the record. (You can Hide it here in the meantime.)",
+        }),
+      },
+      {
+        id: "mentee-missing",
+        label: "A mentee of mine is missing",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Jenzabar or Employee Central",
+          note: "Mentee relationships come from Jenzabar (MD/PhD trainees) or Employee Central (postdocs). Support can check why a relationship isn't appearing.",
+        }),
+      },
+      {
+        id: "mentee-details-wrong",
+        label: "A mentee's program, year, or details are wrong",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Jenzabar or Employee Central",
+          note: "These details come from Jenzabar or Employee Central and are corrected at the source.",
+        }),
+      },
+    ],
+  },
+  // Profile URL is OWNED by Scholars (not a sourced field). Personalized-URL
+  // requests funnel to ITS Support — the Scholars support catch-all, one of the
+  // three approved mailboxes — while the self-service slug-request flow is gated
+  // (`SELF_EDIT_SLUG_REQUEST`). A request-only pseudo-attribute like `org-unit`.
+  "profile-url": {
+    heading: "Request a personalized URL",
+    issues: [
+      {
+        id: "profile-url-personalize",
+        label: "I'd like a personalized profile URL",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Scholars",
+          note: "Personalized URLs aren't self-service. Tell us the name-based address you'd like — a variation of your own first and last name, using lowercase letters, numbers, and hyphens — and we'll set it up. Your current address keeps working.",
+          cta: "Request a personalized URL",
+        }),
+      },
+      {
+        id: "profile-url-incorrect",
+        label: "My current URL is wrong or broken",
+        action: route({
+          office: "ITS Support",
+          email: SUPPORT_EMAIL,
+          sourceSystem: "Scholars",
+          note: "Tell us what's wrong with your current address and we'll look into it.",
         }),
       },
     ],

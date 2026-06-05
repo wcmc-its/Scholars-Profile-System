@@ -7,7 +7,10 @@
  */
 "use client";
 
-import { FieldSourceLine } from "@/components/edit/field-source-line";
+import type { ReactNode } from "react";
+
+import { EditPanel } from "@/components/edit/edit-panel";
+import { LockedBadge } from "@/components/edit/locked-badge";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import type { RequestAttribute } from "@/lib/edit/request-a-change";
 
@@ -21,6 +24,8 @@ export type ReadonlyAttributePanelProps = {
   description: string;
   /** Optional read-only values to echo (e.g. the current name). */
   fields?: ReadonlyArray<{ label: string; value: string | null }>;
+  /** Optional media rendered above the values (e.g. the Photo panel's headshot). */
+  media?: ReactNode;
 };
 
 export function ReadonlyAttributePanel({
@@ -29,39 +34,47 @@ export function ReadonlyAttributePanel({
   heading,
   description,
   fields,
+  media,
 }: ReadonlyAttributePanelProps) {
   return (
-    <section data-slot="readonly-attribute-panel" data-attribute={attribute} className="flex flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{heading}</h2>
-        <FieldSourceLine attribute={attribute} />
-        <p className="text-muted-foreground text-sm">{description}</p>
-      </header>
+    <EditPanel
+      slot="readonly-attribute-panel"
+      data-attribute={attribute}
+      attribute={attribute}
+      heading={heading}
+      description={description}
+    >
+      <LockedBadge />
+
+      {media}
 
       {fields && fields.length > 0 && (
-        <dl className="border-border divide-border divide-y rounded-md border">
+        // Read-only display, not a form: a 2-col label/value def-list with row
+        // hairlines (was a muted borderless grid). Label left, value emphasized —
+        // matches the console mockup's locked-attribute treatment.
+        <dl className="border-apollo-border grid grid-cols-[max-content_1fr] gap-x-8 border-t text-sm">
           {fields.map((f) => (
-            <div key={f.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
-              <dt className="text-muted-foreground text-sm">{f.label}</dt>
-              <dd className="text-sm font-medium">{f.value ?? "—"}</dd>
+            <div key={f.label} className="border-apollo-border contents [&>*]:border-b [&>*]:py-3.5">
+              <dt className="text-muted-foreground">{f.label}</dt>
+              <dd className="text-foreground font-medium">{f.value ?? "—"}</dd>
             </div>
           ))}
         </dl>
       )}
 
-      <div className="bg-muted/40 border-border flex flex-col gap-3 rounded-md border p-4">
+      {/* Lighter than the former filled callout so the sourced values above carry
+          more visual weight than the disclaimer (vision-round finding 4.7). */}
+      <div className="border-apollo-border flex flex-col items-start gap-2 border-t pt-3">
         <p className="text-sm font-medium">This section is not editable.</p>
         <p className="text-muted-foreground text-sm">
           These fields come from WCM systems of record. Use Request a Change to fix one at its source.
         </p>
-        <div>
-          <RequestAChangeDialog
-            attribute={attribute}
-            cwid={cwid}
-            triggerTestId="request-a-change-toggle"
-          />
-        </div>
+        <RequestAChangeDialog
+          attribute={attribute}
+          cwid={cwid}
+          triggerTestId="request-a-change-toggle"
+        />
       </div>
-    </section>
+    </EditPanel>
   );
 }

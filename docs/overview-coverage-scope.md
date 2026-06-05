@@ -1,6 +1,7 @@
 # Overview-statement coverage — scope & strategy
 
 **Status:** Draft for stakeholder review
+**Tracking issue:** [#742](https://github.com/wcmc-its/Scholars-Profile-System/issues/742) — implementation tracker. This doc is the analysis (shipped as docs-only PR #681); #742 tracks building the generator and seeding the gap. Prod coverage parity confirmed 2026-06-03 (matches every count below).
 **Date:** 2026-06-01
 **Authors:** Scholars Profile System development team
 **Question this answers:** *How many faculty have an overview statement, who is missing one, and how should we close the gap so the prominent full-time faculty profiles "look good and rank highly"?*

@@ -36,7 +36,7 @@ export function EducationCard({ cwid, mode, scholarName, educations }: Education
       )}
       copy={{
         heading: "Education",
-        description: `Hide an education or training entry to remove it from ${possessive} public profile.`,
+        description: `Hide an education or training entry to remove it from ${possessive} public profile. Hiding is display-only — it doesn't correct the record, which stays in WCM systems and on internal reports.`,
         empty:
           mode === "superuser"
             ? "This scholar has no education or training entries on file."

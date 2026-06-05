@@ -63,7 +63,10 @@ export function PublicationSummaryCard({ publication, authors }: PublicationSumm
                   {a.name}
                 </span>
                 {a.isWcm && (
-                  <Badge variant="outline" className="text-[10px]">
+                  <Badge
+                    variant="outline"
+                    className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full text-[10px]"
+                  >
                     WCM
                   </Badge>
                 )}

@@ -144,4 +144,37 @@ describe("POST /api/edit/revoke", () => {
     const res = await POST(post({}));
     expect(res.status).toBe(400);
   });
+
+  // --- mentee (#160 follow-up): a whole-entity suppression with no
+  //     Scholar.status projection (revoke is keyed on the row's createdBy). ---
+
+  it("revokes a self-created mentee hide (200, no Scholar.status projection)", async () => {
+    mockSuppressionFindUnique.mockResolvedValue({
+      id: "sup-m",
+      entityType: "mentee",
+      entityId: "self01:mentee9",
+      contributorCwid: null,
+      createdBy: "self01",
+      revokedAt: null,
+    });
+    const res = await POST(post({ suppressionId: "sup-m" }));
+    expect(res.status).toBe(200);
+    expect(mockSuppressionUpdate).toHaveBeenCalledTimes(1);
+    // Only scholar suppressions touch Scholar.status; a mentee revoke must not.
+    expect(mockScholarUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects revoking a mentee hide the actor did not create with 403", async () => {
+    mockSuppressionFindUnique.mockResolvedValue({
+      id: "sup-m",
+      entityType: "mentee",
+      entityId: "self01:mentee9",
+      contributorCwid: null,
+      createdBy: "adm001",
+      revokedAt: null,
+    });
+    const res = await POST(post({ suppressionId: "sup-m" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
 });

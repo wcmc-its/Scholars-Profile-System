@@ -29,9 +29,12 @@
  * so the module loads under vitest without a stub, matching `manual-layer.ts`.
  */
 import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
+import { formatProgramLabel } from "@/lib/mentoring-labels";
+import { isRejectReason } from "@/lib/edit/reject-reason";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 /** The Prisma surface `loadEditContext` needs — a client or tx satisfies it. */
@@ -45,6 +48,8 @@ type EditContextReadClient = Pick<
   | "education"
   | "grant"
   | "department"
+  | "coiActivity"
+  | "coiGapCandidate"
 >;
 
 export type EditContextScholar = {
@@ -52,6 +57,15 @@ export type EditContextScholar = {
   slug: string;
   preferredName: string;
   fullName: string;
+  /** Sourced read-only identity fields echoed in the Name & Title panel
+   *  (vision-round T3.5). `primaryTitle` is the job title — the title of the
+   *  primary appointment, e.g. "Director of …" — while `postnominal` is the
+   *  degree / post-nominal string ("MD, MPH"). All nullable. */
+  primaryTitle: string | null;
+  postnominal: string | null;
+  primaryDepartment: string | null;
+  email: string | null;
+  orcid: string | null;
   /** #536 — drives the edit-route guard: a hidden identity class (doctoral
    *  student) has no public profile, so only a superuser may reach its edit
    *  surface; a non-superuser (incl. the scholar themselves) 404s. */
@@ -79,9 +93,19 @@ export type EditContextPublication = {
   title: string;
   journal: string | null;
   year: number | null;
-  /** UI-SPEC § Card 3 row-state table. */
-  state: "shown" | "hidden_by_self" | "removed_by_admin";
-  /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. Wires the "Show" button. */
+  /**
+   * UI-SPEC § Card 3 row-state table, plus `rejected` (#750).
+   *
+   * `rejected` is a per-author suppression written by the "Not mine" reject
+   * (#746) rather than a Hide — the two are otherwise identical rows
+   * (`contributorCwid === cwid`), distinguished only by `suppression.reason`
+   * (`isRejectReason`). It renders as "Rejected — correction pending" with no
+   * Show control: revoking locally would leave ReCiter's `rejectedPmids` entry
+   * in place, so local and upstream would silently diverge (#750). A reject is
+   * undone at the source, not here.
+   */
+  state: "shown" | "hidden_by_self" | "removed_by_admin" | "rejected";
+  /** The active self-applied suppression's id when `state === 'hidden_by_self'`, else null. Wires the "Show" button. (`null` for `rejected` — no Show control.) */
   suppressionId: string | null;
   /**
    * True when this scholar is the only currently-displayed confirmed WCM author
@@ -147,12 +171,109 @@ export type EditContextGrant = {
   suppressionId: string | null;
 };
 
+/**
+ * One conflict-of-interest disclosure, narrowed to what the read-only COI panel
+ * renders (it groups by `activityGroup` and shows the `entity` names). COI is
+ * read-only — managed in the Weill Research Gateway, never suppressible here —
+ * so this carries no `state` / `suppressionId` like the whole-entity rows do.
+ */
+export type EditContextCoiDisclosure = {
+  entity: string | null;
+  activityGroup: string | null;
+};
+
+/**
+ * One publication-derived COI-gap candidate, narrowed to ONLY what the self-only
+ * `coi-gap` panel renders. This is the deliberately starved client projection of
+ * `CoiGapCandidate`: the persisted row carries `normalizedEntity` (the dedupe
+ * key), `attribution`, `entityScore`, `category`, and `status`, NONE of which
+ * reach the client — exposing the numeric score or status would re-introduce the
+ * "verdict"/false-precision shapes the governance review forbade. Confidence is
+ * the qualitative `tier` only (High | Medium), never a percentage; the verbatim
+ * `sourceSentence` is always carried so the human, not the score, adjudicates.
+ *
+ * This array is populated ONLY when `loadEditContext` is called with
+ * `opts.includeCoiGap === true`, which the self page sets exclusively for a
+ * genuine (non-impersonating) self viewer behind `SELF_EDIT_COI_GAP_HINT`. Every
+ * other caller (the superuser-viewing-other path, public, search) leaves the opt
+ * absent, so this loader is the authoritative self-only enforcement point — the
+ * candidates are never even read for a non-self viewer, not merely UI-hidden.
+ */
+export type EditContextCoiGapCandidate = {
+  id: string;
+  pmid: string;
+  entity: string;
+  tier: "High" | "Medium";
+  sourceSentence: string;
+};
+
+/**
+ * One mentee on the suppressible Mentees panel. Mentees are derived (no FK; the
+ * reporting DB is truncate-rebuilt nightly), so they have no #352 stable DB key
+ * — instead `externalId` is the composite `"{mentorCwid}:{menteeCwid}"`, which
+ * is what the suppress `entityId` carries (owner = the mentor before the colon).
+ * The four-state row model is shared with the other whole-entity panels (minus
+ * `locked`, which is appointment-only).
+ */
+export type EditContextMentee = {
+  externalId: string; // `{mentorCwid}:{menteeCwid}` — the suppress entityId
+  name: string;
+  /** Program / degree-bucket subtitle (e.g. "Immunology (PhD)"), or null. */
+  subtitle: string | null;
+  state: Exclude<EditEntityState, "locked">;
+  suppressionId: string | null;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
   appointments: ReadonlyArray<EditContextAppointment>;
   educations: ReadonlyArray<EditContextEducation>;
   grants: ReadonlyArray<EditContextGrant>;
+  /** Read-only COI disclosures (the Weill Research Gateway is the SOR). */
+  coiDisclosures: ReadonlyArray<EditContextCoiDisclosure>;
+  /** Suppressible mentees (derived from training records; mentor may hide). */
+  mentees: ReadonlyArray<EditContextMentee>;
+  /**
+   * Publication-derived COI-gap candidates surfaced ONLY to the genuine self
+   * viewer behind `SELF_EDIT_COI_GAP_HINT`. Populated only when
+   * `loadEditContext` is called with `opts.includeCoiGap === true`; an empty
+   * array for every other caller (and when the scholar has no candidates). This
+   * is a suggestion surface, never a verdict — see `EditContextCoiGapCandidate`.
+   */
+  unmatchedPubmedCoi: ReadonlyArray<EditContextCoiGapCandidate>;
+};
+
+/**
+ * The mentee-loader seam. `loadEditContext` calls this to get the mentor's raw
+ * mentees from the REPORTING DB (`getMenteesForMentor`), which is a different
+ * data source than the Prisma `client` argument. It is injected (and defaulted)
+ * so tests need no live reporting DB, and so the page load can guard it:
+ * `loadEditContext` wraps the call in try/catch and treats any failure as "no
+ * mentees" rather than letting an unreachable reporting DB 500 the whole /edit
+ * page. The shape returned is narrowed to what the panel needs.
+ */
+export type EditContextMenteeSource = {
+  cwid: string;
+  fullName: string;
+  programName: string | null;
+  programType: string | null;
+};
+export type LoadMentees = (mentorCwid: string) => Promise<EditContextMenteeSource[]>;
+
+/**
+ * The default mentee-loader: adapts `getMenteesForMentor` (reporting DB) to the
+ * narrowed `EditContextMenteeSource` shape. Injected so tests don't need a live
+ * reporting connection; `loadEditContext` still wraps the call in try/catch.
+ */
+const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
+  const mentees = await getMenteesForMentor(mentorCwid);
+  return mentees.map((m) => ({
+    cwid: m.cwid,
+    fullName: m.fullName,
+    programName: m.programName,
+    programType: m.programType,
+  }));
 };
 
 /**
@@ -161,11 +282,28 @@ export type EditContext = {
  * Returns `null` when no scholar row exists for `cwid`, or when the row is
  * soft-deleted (`deletedAt` set). A suppressed scholar (self or admin) returns
  * normally — the page reads suppression-OFF.
+ *
+ * `loadMentees` is the reporting-DB seam (default `getMenteesForMentor`). It is
+ * called best-effort: a thrown error (reporting DB unreachable) yields an empty
+ * mentee list rather than failing the whole page — /edit must never 500 because
+ * the mentee source is down.
+ *
+ * `opts.includeCoiGap` is the AUTHORITATIVE self-only gate for the
+ * publication-derived COI-gap candidates (`unmatchedPubmedCoi`). It defaults to
+ * `false`, so a caller that does not explicitly opt in NEVER loads the
+ * candidates — the superuser-viewing-other path (`/edit/scholar/[cwid]`), public,
+ * and search all leave it unset and get an empty array. Only the self page
+ * passes `true`, and only when `SELF_EDIT_COI_GAP_HINT` is on AND the viewer is
+ * genuinely self (not impersonating). Enforcing self-only here, at the data
+ * layer, means the rows are never read for an unauthorized viewer rather than
+ * read-then-hidden.
  */
 export async function loadEditContext(
   cwid: string,
   client: EditContextReadClient,
   now: Date = new Date(),
+  loadMentees: LoadMentees = defaultLoadMentees,
+  opts?: { includeCoiGap?: boolean },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -174,6 +312,11 @@ export async function loadEditContext(
       slug: true,
       preferredName: true,
       fullName: true,
+      primaryTitle: true,
+      postnominal: true,
+      primaryDepartment: true,
+      email: true,
+      orcid: true,
       overview: true,
       deletedAt: true,
       roleCategory: true,
@@ -252,6 +395,108 @@ export async function loadEditContext(
       endDate: true,
     },
     orderBy: [{ endDate: "desc" }, { startDate: "desc" }],
+  });
+
+  // Conflicts of interest — read-only (the Weill Research Gateway is the SOR).
+  // Same select shape + ordering the public profile uses (`lib/api/profile.ts`
+  // `coiActivities`) so the /edit panel groups identically.
+  const coiRows = await client.coiActivity.findMany({
+    where: { cwid },
+    select: { entity: true, activityGroup: true },
+    orderBy: [{ activityGroup: "asc" }, { entity: "asc" }],
+  });
+  const coiDisclosures: EditContextCoiDisclosure[] = coiRows.map((c) => ({
+    entity: c.entity,
+    activityGroup: c.activityGroup,
+  }));
+
+  // Publication-derived COI-gap candidates (`SELF_EDIT_COI_GAP_HINT`) — SELF-
+  // ONLY, and the opt-in IS the self guard: only the self page passes
+  // `includeCoiGap: true`, and only for a genuine (non-impersonating) self
+  // viewer with the flag on. Every other caller leaves `opts` unset, so the
+  // query never runs and the array is empty — the candidates are never read for
+  // a non-self viewer. Surface only actionable lifecycle states (`new` +
+  // `acknowledged`); `dismissed`/`resolved` are intentionally excluded so a
+  // disavowed nudge never reappears. Ordered tier (High first) then entity, and
+  // mapped to the STARVED client shape — `normalizedEntity`, `attribution`,
+  // `entityScore`, `category`, and `status` never cross to the client.
+  let unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
+  if (opts?.includeCoiGap === true) {
+    const gapRows = await client.coiGapCandidate.findMany({
+      where: { cwid, status: { in: ["new", "acknowledged"] } },
+      select: { id: true, pmid: true, entity: true, tier: true, sourceSentence: true },
+      // High before Medium ("High" < "Medium" lexically, asc), then entity.
+      orderBy: [{ tier: "asc" }, { entity: "asc" }],
+    });
+    unmatchedPubmedCoi = gapRows.map((g) => ({
+      id: g.id,
+      pmid: g.pmid,
+      entity: g.entity,
+      // The DB column is a free `VarChar(16)`; narrow to the rendered union and
+      // treat any unexpected value as the more conservative "Medium" tier.
+      tier: g.tier === "High" ? "High" : "Medium",
+      sourceSentence: g.sourceSentence,
+    }));
+  }
+
+  // Mentees — suppressible, derived from training records (reporting DB). The
+  // source is queried through the injected `loadMentees` seam and is BEST-
+  // EFFORT: if the reporting DB is unreachable we render zero mentees rather
+  // than 500 the page. Each mentee's `externalId` is `{cwid}:{menteeCwid}`,
+  // which is also the suppress entityId (owner = this mentor). The four-state
+  // annotation reuses the same per-request suppression lookup pattern the
+  // whole-entity panels use (`contributorCwid IS NULL`, `revokedAt IS NULL`).
+  let menteeRows: EditContextMenteeSource[] = [];
+  try {
+    menteeRows = await loadMentees(cwid);
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "edit_context_mentees_unavailable",
+        cwid,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    menteeRows = [];
+  }
+  const menteeExternalIds = menteeRows.map((m) => `${cwid}:${m.cwid}`);
+  // `{cwid}:{menteeCwid}` → the active mentee hide. Absent key = "shown".
+  const menteeHide = new Map<
+    string,
+    { state: "hidden_by_self" | "hidden_by_admin"; suppressionId: string }
+  >();
+  if (menteeExternalIds.length > 0) {
+    const menteeSuppressions = await client.suppression.findMany({
+      where: {
+        entityType: "mentee",
+        entityId: { in: menteeExternalIds },
+        contributorCwid: null,
+        revokedAt: null,
+      },
+      select: { id: true, entityId: true, createdBy: true },
+    });
+    for (const row of menteeSuppressions) {
+      menteeHide.set(row.entityId, {
+        // The owner is the mentor (== `cwid` here); a self-hide is one this
+        // scholar created, an admin-hide is anyone else's (the superuser
+        // surface revokes either).
+        state: row.createdBy === cwid ? "hidden_by_self" : "hidden_by_admin",
+        suppressionId: row.id,
+      });
+    }
+  }
+  const mentees: EditContextMentee[] = menteeRows.map((m) => {
+    const externalId = `${cwid}:${m.cwid}`;
+    const hide = menteeHide.get(externalId);
+    return {
+      externalId,
+      name: m.fullName,
+      // Mirror the public chip's subtitle: program name first, then the
+      // degree-bucket label derived from programType.
+      subtitle: m.programName ?? formatProgramLabel(m.programType),
+      state: hide ? hide.state : "shown",
+      suppressionId: hide ? hide.suppressionId : null,
+    };
   });
 
   // One bounded suppression query across all three entity types, keyed on the
@@ -363,6 +608,11 @@ export async function loadEditContext(
         slug: scholar.slug,
         preferredName: scholar.preferredName,
         fullName: scholar.fullName,
+        primaryTitle: scholar.primaryTitle,
+        postnominal: scholar.postnominal,
+        primaryDepartment: scholar.primaryDepartment,
+        email: scholar.email,
+        orcid: scholar.orcid,
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
         slugOverride,
@@ -377,25 +627,33 @@ export async function loadEditContext(
       appointments,
       educations,
       grants,
+      coiDisclosures,
+      mentees,
+      unmatchedPubmedCoi,
     };
   }
 
   // Active publication suppressions for the bounded pmid set — one query
-  // covering whole-pub takedowns and per-author hides (own + others').
+  // covering whole-pub takedowns and per-author hides (own + others'). `reason`
+  // is selected to tell a "Not mine" reject apart from a Hide (#750) — both are
+  // per-author rows with `contributorCwid === cwid`, distinguished only by it.
   const pubSuppressions = await client.suppression.findMany({
     where: {
       entityType: "publication",
       entityId: { in: pmids },
       revokedAt: null,
     },
-    select: { id: true, entityId: true, contributorCwid: true },
+    select: { id: true, entityId: true, contributorCwid: true, reason: true },
   });
   const darkPmids = new Set<string>();
-  // pmid → suppressionId for THIS scholar's per-author hide on it. The "Show"
-  // button on a hidden_by_self row revokes by id.
-  const selfHideIdByPmid = new Map<string, string>();
-  // pmid → set of cwids with an active per-author hide on it. Used to compute
-  // the displayed-author set for `isSoleDisplayedAuthor`.
+  // pmid → THIS scholar's active per-author suppression on it. `isReject`
+  // discriminates a reject (#746) from a Hide so the row derives as `rejected`
+  // vs `hidden_by_self`; `id` wires the "Show" button (hide only — a reject has
+  // no Show control, #750).
+  const selfSuppressionByPmid = new Map<string, { id: string; isReject: boolean }>();
+  // pmid → set of cwids with an active per-author suppression on it (hide OR
+  // reject — both drop the author from display). Used to compute the
+  // displayed-author set for `isSoleDisplayedAuthor`.
   const hiddenAuthorsByPmid = new Map<string, Set<string>>();
   for (const row of pubSuppressions) {
     if (row.contributorCwid === null) {
@@ -408,7 +666,16 @@ export async function loadEditContext(
       }
       hidden.add(row.contributorCwid);
       if (row.contributorCwid === cwid) {
-        selfHideIdByPmid.set(row.entityId, row.id);
+        // The reject route's idempotency guard means at most one un-revoked
+        // self row per pmid, so a plain set is safe; if both ever coexisted,
+        // a reject wins (the stronger "not mine" assertion).
+        const existing = selfSuppressionByPmid.get(row.entityId);
+        if (!existing?.isReject) {
+          selfSuppressionByPmid.set(row.entityId, {
+            id: row.id,
+            isReject: isRejectReason(row.reason),
+          });
+        }
       }
     }
   }
@@ -446,15 +713,23 @@ export async function loadEditContext(
       // "Removed by an administrator" message is what the user sees, even
       // when the scholar also has a per-author hide on the same pmid).
       state = "removed_by_admin";
-    } else if (selfHideIdByPmid.has(pmid)) {
-      state = "hidden_by_self";
-      suppressionId = selfHideIdByPmid.get(pmid) ?? null;
+    } else if (selfSuppressionByPmid.has(pmid)) {
+      const self = selfSuppressionByPmid.get(pmid)!;
+      if (self.isReject) {
+        // A "Not mine" reject (#746/#750). No Show control — revoking locally
+        // would diverge from ReCiter's gold standard — so suppressionId stays
+        // null; the row renders "Rejected — correction pending" read-only.
+        state = "rejected";
+      } else {
+        state = "hidden_by_self";
+        suppressionId = self.id;
+      }
     } else {
       state = "shown";
     }
     // Sole-displayed-author check is only meaningful when the row is shown —
-    // it gates the confirm dialog before a hide. For a hidden_by_self or
-    // removed_by_admin row, no Hide click is reachable, so always false.
+    // it gates the confirm dialog before a hide. For a hidden_by_self,
+    // rejected, or removed_by_admin row, no Hide click is reachable, so false.
     const displayed = displayedByPmid.get(pmid);
     const isSoleDisplayedAuthor =
       state === "shown" && displayed !== undefined && displayed.size === 1 && displayed.has(cwid);
@@ -475,6 +750,11 @@ export async function loadEditContext(
       slug: scholar.slug,
       preferredName: scholar.preferredName,
       fullName: scholar.fullName,
+      primaryTitle: scholar.primaryTitle,
+      postnominal: scholar.postnominal,
+      primaryDepartment: scholar.primaryDepartment,
+      email: scholar.email,
+      orcid: scholar.orcid,
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
       slugOverride,
@@ -489,5 +769,8 @@ export async function loadEditContext(
     appointments,
     educations,
     grants,
+    coiDisclosures,
+    mentees,
+    unmatchedPubmedCoi,
   };
 }

@@ -244,6 +244,21 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::MetricFilter",
     },
+    "EtlFailuresRelaySubscriptionD17272A2": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Fn::ImportValue": "Sps-Etl-prod:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
     "MonthlyBudget": {
       "Properties": {
         "Budget": {
@@ -399,7 +414,7 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "fae4b883d0df861466b986cdf05b14f04a1ab2828112857470e1add2710c1e27.zip",
+          "S3Key": "d75879b698788b251a8ef78982b96e776a1c4052184904d756fb30440b123012.zip",
         },
         "Environment": {
           "Variables": {
@@ -450,6 +465,22 @@ exports[`SpsObservabilityStack prod matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::SNS::Subscription",
+    },
+    "OncallRelayFunctionAllowEtlFailuresTopicInvokeB671B872": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Fn::ImportValue": "Sps-Etl-prod:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
     },
     "OncallRelayFunctionAllowInvokeSpsObservabilityprodAlarmTopic4D01AF6E49B56A35": {
       "Properties": {
@@ -1153,6 +1184,21 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       },
       "Type": "AWS::Logs::MetricFilter",
     },
+    "EtlFailuresRelaySubscriptionD17272A2": {
+      "Properties": {
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Protocol": "lambda",
+        "TopicArn": {
+          "Fn::ImportValue": "Sps-Etl-staging:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::SNS::Subscription",
+    },
     "NotifyTopic5FFA0016": {
       "Properties": {
         "DisplayName": "SPS staging notifications (notify)",
@@ -1207,7 +1253,7 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
       "Properties": {
         "Code": {
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
-          "S3Key": "fae4b883d0df861466b986cdf05b14f04a1ab2828112857470e1add2710c1e27.zip",
+          "S3Key": "d75879b698788b251a8ef78982b96e776a1c4052184904d756fb30440b123012.zip",
         },
         "Environment": {
           "Variables": {
@@ -1258,6 +1304,22 @@ exports[`SpsObservabilityStack staging matches the snapshot 1`] = `
         },
       },
       "Type": "AWS::SNS::Subscription",
+    },
+    "OncallRelayFunctionAllowEtlFailuresTopicInvokeB671B872": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "OncallRelayFunction9974C7E1",
+            "Arn",
+          ],
+        },
+        "Principal": "sns.amazonaws.com",
+        "SourceArn": {
+          "Fn::ImportValue": "Sps-Etl-staging:ExportsOutputRefEtlFailureTopic8361D0D072A9D80D",
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
     },
     "OncallRelayFunctionAllowInvokeSpsObservabilitystagingAlarmTopicB2A49C20BFB9DD1C": {
       "Properties": {

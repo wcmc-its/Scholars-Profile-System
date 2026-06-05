@@ -20,7 +20,7 @@
  */
 import { notFound, redirect } from "next/navigation";
 
-import { EditPage } from "@/components/edit/edit-page";
+import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
@@ -102,6 +102,18 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
+  const mode = isSelf ? "self" : "superuser";
+
+  // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
+  // route rather than render the default panel behind a stale URL. The valid set
+  // depends on `mode` (superuser has no Publications), so derive it here.
+  // The redirect target carries no `?attr`, so the re-load never loops.
+  const basePath = `/edit/scholar/${targetCwid}`;
+  const validAttrs: readonly string[] = visibleAttrKeys(mode, slugRequestEnabled);
+  if (attr !== undefined && !validAttrs.includes(attr)) {
+    redirect(basePath);
+  }
+
   const latestSlugRequest = slugRequestEnabled
     ? await loadLatestSlugRequest(session.cwid, db.read)
     : null;
@@ -109,7 +121,7 @@ export default async function EditScholarPage({
   return (
     <EditPage
       ctx={ctx}
-      mode={isSelf ? "self" : "superuser"}
+      mode={mode}
       attr={attr}
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}

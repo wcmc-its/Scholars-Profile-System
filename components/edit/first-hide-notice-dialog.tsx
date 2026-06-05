@@ -78,7 +78,7 @@ export function FirstHideNoticeDialog({
               target="_blank"
               rel="noreferrer"
               onClick={onNotMine}
-              className="text-foreground underline"
+              className="text-apollo-slate hover:underline"
             >
               reject it in Publication Manager
             </a>{" "}
@@ -94,11 +94,12 @@ export function FirstHideNoticeDialog({
         </div>
 
         <DialogFooter>
-          {/* DOM order Cancel -> not-mine -> Hide it puts the primary "Hide it"
-              rightmost on desktop (footer is sm:flex-row justify-end) and on top
-              on mobile (flex-col-reverse). "Hide it" is autofocused because it IS
-              the action the scholar already initiated; the genuinely destructive
-              sole-author path stays gated by its own Cancel-focused confirm. */}
+          {/* The "not mine" path lives only as the educational inline link above
+              (vision-round finding 4.9 + #570) — the standing per-row "Not mine?"
+              affordance handles the repeat case, so the footer no longer
+              duplicates it. DOM order Cancel -> Hide it keeps the primary
+              "Hide it" rightmost on desktop and on top on mobile; it's autofocused
+              because it IS the action the scholar already initiated. */}
           <Button
             type="button"
             variant="ghost"
@@ -106,16 +107,6 @@ export function FirstHideNoticeDialog({
             data-testid="first-hide-cancel"
           >
             Cancel
-          </Button>
-          <Button asChild variant="outline" data-testid="first-hide-not-mine">
-            <a
-              href={PUBLICATION_MANAGER_URL}
-              target="_blank"
-              rel="noreferrer"
-              onClick={onNotMine}
-            >
-              It&apos;s not mine — go to Publication Manager
-            </a>
           </Button>
           <Button
             type="button"

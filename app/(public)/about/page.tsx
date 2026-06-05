@@ -963,14 +963,14 @@ export default function DocsPage() {
           don&apos;t break.
         </p>
         <p>
-          <strong>Want a different address?</strong> Ask through{" "}
-          <Link href="#requests" className={LINK}>
-            Request a change
-          </Link>
-          ; a Scholars administrator reviews the request and sets your new address in the app.
-          Custom addresses are still based on your name &mdash; your first and last name, optionally
-          with a middle initial or a fuller form to tell you apart from a namesake. They aren&apos;t
-          free-choice handles: you can&apos;t claim a word like a research area or a department.
+          <strong>Want a different address?</strong> Custom addresses aren&apos;t self-serve &mdash;
+          email the Scholars team (or open a Service Desk ticket) and say what you&apos;d like.
+          Addresses stay name-based, so ask for a variation of your first and last name &mdash; you
+          can add a middle initial or a fuller form (for example <code>jane-q-smith</code>) when a
+          namesake already has the plain form. They aren&apos;t free-choice handles &mdash; you can&apos;t claim a word
+          like a research area or a department. An administrator reviews the request, sets your new
+          address, and replies to your ticket when it&apos;s done, usually within a few business days;
+          your old address keeps working and permanently redirects.
         </p>
         <Callout variant="note" heading="A number in your address isn’t a ranking">
           <p>

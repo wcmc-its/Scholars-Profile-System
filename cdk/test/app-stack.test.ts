@@ -1438,6 +1438,13 @@ describe("AppStack", () => {
         expect(env.get("SCHOLARS_MAIL_FROM")).toBe("no-reply-scholars@weill.cornell.edu");
       });
 
+      it("keeps the ReCiter 'Not mine' reject OFF in prod during the staging-first rollout (#746)", () => {
+        // Env-gated: ON in staging, OFF in prod until the staging soak
+        // completes. In prod the route 503s and "Not mine?" keeps the
+        // Publication-Manager off-ramp.
+        expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
+      });
+
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
         // Both envs are cut over to root; the flag stays set explicitly as the
         // soak rollback lever (set back to "scholars" + redeploy to revert).
@@ -1787,6 +1794,25 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("PROFILE_CANONICAL")).toBe("root");
+    });
+
+    it("activates the ReCiter 'Not mine' reject in staging first (RECITER_REJECT_SEND=on, #746)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("RECITER_REJECT_SEND")).toBe("on");
     });
 
     it("enables the slug-request lifecycle in staging (#497, on in both envs)", () => {

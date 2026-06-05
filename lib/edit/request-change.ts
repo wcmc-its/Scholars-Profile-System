@@ -20,6 +20,9 @@ const ATTRIBUTE_LABEL: Record<RequestAttribute, string> = {
   funding: "Funding",
   publications: "Publications",
   "org-unit": "Org Unit",
+  coi: "Conflicts of Interest",
+  mentees: "Mentees",
+  "profile-url": "Profile URL",
 };
 
 /** Type guard — is this client-supplied value a known attribute? */

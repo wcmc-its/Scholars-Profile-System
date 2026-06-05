@@ -30,18 +30,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 
+import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { type SlugRequestSummary } from "@/lib/edit/slug-request";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
@@ -59,9 +55,6 @@ export type SlugRequestCardProps = {
   currentSlug: string;
   /** The scholar's latest request, or `null` if they have never filed one. */
   latestRequest: SlugRequestSummary | null;
-  /** Fires when the unsaved-input guard arms/disarms; optional (the card mounts
-   *  its own `UnsavedChangesGuard` regardless). */
-  onDirtyChange?: (dirty: boolean) => void;
 };
 
 type Phase = "idle" | "pending" | "rejected" | "approved";
@@ -85,7 +78,6 @@ export function SlugRequestCard({
   cwid,
   currentSlug,
   latestRequest,
-  onDirtyChange,
 }: SlugRequestCardProps) {
   const router = useRouter();
   const [phase, setPhase] = React.useState<Phase>(() => initialPhase(latestRequest));
@@ -111,16 +103,12 @@ export function SlugRequestCard({
   // The input only exists in Idle / Rejected / Just-approved; in Pending it is
   // absent so `dirty` is always false there (inputValue stays "").
   const dirty = inputValue !== "";
-  React.useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
 
-  // A just-approved banner is transient: show it, then collapse to Idle.
-  React.useEffect(() => {
-    if (phase !== "approved") return;
-    const t = setTimeout(() => setPhase("idle"), 8000);
-    return () => clearTimeout(t);
-  }, [phase]);
+  // The just-approved banner persists: it is the only positive confirmation the
+  // scholar gets that their requested URL went live, so we keep it visible (it
+  // clears on the next page load, once `latestRequest` is no longer `approved`,
+  // or as soon as the scholar files a new request). The Idle request input is
+  // shown alongside it (see `showInput`), so the card stays fully usable.
 
   // "Request this URL" is enabled iff non-empty, format-valid, and different
   // from the current slug (requesting your own live slug is a no-op).
@@ -212,22 +200,18 @@ export function SlugRequestCard({
   const showInput = phase === "idle" || phase === "rejected" || phase === "approved";
 
   return (
-    <Card data-slot="slug-request-card">
+    <EditPanel
+      slot="slug-request-card"
+      heading="Profile URL"
+      owned
+      description="Request a personalized web address for your public profile. A Scholars administrator reviews every request."
+      headerAction={phase !== "idle" ? <StatusTag phase={phase} /> : undefined}
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2">
-          Profile URL
-          {phase !== "idle" && <StatusTag phase={phase} />}
-        </CardTitle>
-        <CardDescription>
-          Request a personalized web address for your public profile. A Scholars
-          administrator reviews every request.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <p className="text-sm">
+      <div className="flex flex-col gap-3">
+        <p className="flex flex-wrap items-center gap-2.5 text-sm">
           <span className="text-muted-foreground">Your current URL: </span>
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+          <code className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs">
             {SITE_HOST}/{currentSlug}
           </code>
         </p>
@@ -249,8 +233,13 @@ export function SlugRequestCard({
         )}
 
         {phase === "approved" && (
-          <Alert variant="info" data-testid="slug-request-approved">
-            <AlertDescription>
+          <Alert
+            variant="info"
+            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground"
+            data-testid="slug-request-approved"
+          >
+            <Check className="text-apollo-green" />
+            <AlertDescription className="text-apollo-green-foreground">
               Your URL is now{" "}
               <code>
                 {SITE_HOST}/{currentSlug}
@@ -293,9 +282,9 @@ export function SlugRequestCard({
               <label htmlFor="slug-request-input" className="text-sm font-medium">
                 Requested address
               </label>
-              <div className="flex items-center gap-2">
+              <div className="border-apollo-border-strong focus-within:ring-ring flex max-w-[640px] items-stretch overflow-hidden rounded-md border focus-within:ring-2">
                 <span
-                  className="text-muted-foreground select-none whitespace-nowrap text-sm"
+                  className="bg-apollo-surface-2 border-apollo-border text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
                   data-slot="slug-request-prefix"
                 >
                   {SITE_HOST}/
@@ -312,6 +301,7 @@ export function SlugRequestCard({
                   autoComplete="off"
                   spellCheck={false}
                   data-testid="slug-request-input"
+                  className="rounded-none border-0 font-mono shadow-none focus-visible:ring-0"
                 />
               </div>
               {formatError ? (
@@ -325,7 +315,10 @@ export function SlugRequestCard({
                 </p>
               ) : (
                 <p id="slug-request-hint" className="text-muted-foreground text-xs">
-                  Lowercase letters, numbers, and hyphens only.{" "}
+                  Lowercase letters, numbers, and hyphens only. Use a variation of
+                  your own first and last name — optionally with a middle initial
+                  or fuller form — not a research area or other handle; requests
+                  that aren&apos;t name-based are declined.{" "}
                   <code>/scholars/{formatResult?.ok ? formatResult.value : currentSlug}</code>{" "}
                   will keep working too.
                 </p>
@@ -335,7 +328,7 @@ export function SlugRequestCard({
             <div className="flex flex-col gap-1">
               <button
                 type="button"
-                className="text-muted-foreground hover:text-foreground self-start text-sm underline-offset-2 hover:underline"
+                className="text-apollo-slate self-start text-sm underline-offset-2 hover:underline"
                 aria-expanded={reasonOpen}
                 onClick={() => setReasonOpen((o) => !o)}
                 data-testid="slug-request-reason-toggle"
@@ -343,13 +336,14 @@ export function SlugRequestCard({
                 Add a note for the reviewer (optional)
               </button>
               {reasonOpen && (
-                <textarea
-                  className="border-input bg-transparent placeholder:text-muted-foreground focus-visible:ring-ring min-h-16 rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-1 focus-visible:outline-none"
+                <Textarea
                   value={reasonValue}
                   onChange={(e) => setReasonValue(e.target.value)}
                   maxLength={1000}
+                  rows={3}
                   placeholder="Why you'd like this address (optional)"
                   data-testid="slug-request-reason"
+                  className="border-apollo-border-strong max-w-[640px]"
                 />
               )}
             </div>
@@ -357,6 +351,7 @@ export function SlugRequestCard({
             <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
+                variant="apollo"
                 onClick={handleSubmit}
                 disabled={!canSubmit}
                 data-testid="slug-request-submit"
@@ -375,8 +370,8 @@ export function SlugRequestCard({
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </EditPanel>
   );
 }
 
@@ -389,7 +384,7 @@ function StatusTag({ phase }: { phase: Exclude<Phase, "idle"> }) {
         : "Approved";
   return (
     <span
-      className="text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-normal"
+      className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full border px-2.5 py-0.5 text-xs font-normal"
       data-testid="slug-request-status-tag"
     >
       {label}

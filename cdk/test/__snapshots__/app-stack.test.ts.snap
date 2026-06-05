@@ -340,6 +340,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "off",
+              },
+              {
+                "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -1555,6 +1563,7 @@ service:
         "DesiredCount": 2,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
+        "HealthCheckGracePeriodSeconds": 120,
         "LaunchType": "FARGATE",
         "LoadBalancers": [
           {
@@ -3262,6 +3271,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "RECITER_REJECT_SEND",
+                "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -4544,6 +4561,7 @@ service:
         "DesiredCount": 1,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
+        "HealthCheckGracePeriodSeconds": 120,
         "LaunchType": "FARGATE",
         "LoadBalancers": [
           {

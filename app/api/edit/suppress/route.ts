@@ -41,16 +41,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // --- body shape ---
   const { entityType, entityId, contributorCwid, reason } = body;
   // #160 — scholar + publication (PR #356), education + appointment (PR-A),
-  // grant (PR-B). #540 Phase 5 — department + division + center (whole-unit
-  // retire, Superuser only). A grant row is per-(award, investigator), so
-  // suppressing it hides that one investigator's role; a funding project
-  // goes dark only when all its rows are suppressed.
+  // grant (PR-B), mentee (#160 follow-up). #540 Phase 5 — department +
+  // division + center (whole-unit retire, Superuser only). A grant row is
+  // per-(award, investigator), so suppressing it hides that one investigator's
+  // role; a funding project goes dark only when all its rows are suppressed. A
+  // mentee suppression hides one derived mentor↔mentee relationship from the
+  // mentor's profile.
   if (
     entityType !== "scholar" &&
     entityType !== "publication" &&
     entityType !== "education" &&
     entityType !== "appointment" &&
     entityType !== "grant" &&
+    entityType !== "mentee" &&
     entityType !== "department" &&
     entityType !== "division" &&
     entityType !== "center"
@@ -114,9 +117,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   //     externalId. This is both the 400 existence gate and the source of the
   //     pure-authz owner check. For an appointment, refuse to hide a current
   //     chair role (409, D-leader) so the profile can't contradict the
-  //     column-driven dept-page leader card. ---
+  //     column-driven dept-page leader card. For a mentee, the owner is the
+  //     mentor segment of `{mentorCwid}:{menteeCwid}` — resolved with no DB
+  //     lookup (mentees are derived). ---
   const isWholeEntity =
-    entityType === "education" || entityType === "appointment" || entityType === "grant";
+    entityType === "education" ||
+    entityType === "appointment" ||
+    entityType === "grant" ||
+    entityType === "mentee";
   let ownerCwid: string | null = null;
   if (isWholeEntity) {
     const owner = await findSuppressibleEntityOwner(entityType, entityId, db.read);

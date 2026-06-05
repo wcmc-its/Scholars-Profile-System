@@ -159,17 +159,17 @@ describe("resolvePeopleMatchProvenance (#688)", () => {
     else process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = original;
   });
 
-  it("defaults to off when the env is unset", () => {
-    expect(resolvePeopleMatchProvenance()).toBe(false);
+  it("defaults to on when the env is unset", () => {
+    expect(resolvePeopleMatchProvenance()).toBe(true);
   });
 
-  it("is on only for the exact value 'on'", () => {
+  it("is off only for the exact value 'off'", () => {
+    process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "off";
+    expect(resolvePeopleMatchProvenance()).toBe(false);
     process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "on";
     expect(resolvePeopleMatchProvenance()).toBe(true);
     process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "true";
-    expect(resolvePeopleMatchProvenance()).toBe(false);
-    process.env.SEARCH_PEOPLE_MATCH_PROVENANCE = "ON";
-    expect(resolvePeopleMatchProvenance()).toBe(false);
+    expect(resolvePeopleMatchProvenance()).toBe(true);
   });
 });
 
@@ -183,16 +183,16 @@ describe("resolvePeopleMatchExplain (#702)", () => {
     else process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = original;
   });
 
-  it("defaults to off when the env is unset", () => {
-    expect(resolvePeopleMatchExplain()).toBe(false);
+  it("defaults to on when the env is unset", () => {
+    expect(resolvePeopleMatchExplain()).toBe(true);
   });
 
-  it("is on only for the exact value 'on'", () => {
+  it("is off only for the exact value 'off'", () => {
+    process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "off";
+    expect(resolvePeopleMatchExplain()).toBe(false);
     process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "on";
     expect(resolvePeopleMatchExplain()).toBe(true);
     process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "true";
-    expect(resolvePeopleMatchExplain()).toBe(false);
-    process.env.SEARCH_PEOPLE_MATCH_EXPLAIN = "ON";
-    expect(resolvePeopleMatchExplain()).toBe(false);
+    expect(resolvePeopleMatchExplain()).toBe(true);
   });
 });

@@ -150,6 +150,23 @@ describe("PublicationsCard — row states", () => {
     expect(screen.queryByTestId("pub-hide-a")).toBeNull();
     expect(screen.queryByTestId("pub-show-a")).toBeNull();
   });
+
+  it("a 'rejected' row shows the correction-pending badge + read-only note and NO Show/Hide/Not-mine control (#750)", () => {
+    render(
+      <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "rejected" })]} />,
+    );
+    // "Rejected — correction pending" badge replaces "Hidden".
+    expect(screen.getByTestId("pub-rejected-badge-a")).toBeTruthy();
+    expect(screen.getByText("Rejected — correction pending")).toBeTruthy();
+    expect(screen.queryByText("Hidden")).toBeNull();
+    // A read-only note, not a "Show" button — un-hiding locally would diverge
+    // from ReCiter's gold standard, so revoke is disallowed here.
+    expect(screen.getByTestId("pub-rejected-note-a")).toBeTruthy();
+    expect(screen.queryByTestId("pub-show-a")).toBeNull();
+    expect(screen.queryByTestId("pub-hide-a")).toBeNull();
+    // No standing "Not mine?" affordance — it's already been rejected.
+    expect(screen.queryByTestId("pub-not-mine-a")).toBeNull();
+  });
 });
 
 describe("PublicationsCard — optimistic hide", () => {
@@ -160,8 +177,8 @@ describe("PublicationsCard — optimistic hide", () => {
     );
     fireEvent.click(screen.getByTestId("pub-hide-a"));
     // After click the optimistic state already flipped — the Show button appears.
+    // No router.refresh(): the committed local list is authoritative (T3.7).
     await waitFor(() => expect(screen.getByTestId("pub-show-a")).toBeTruthy());
-    expect(mockRefresh).toHaveBeenCalled();
   });
 
   it("hide POSTs to /api/edit/suppress with the per-author body", async () => {
@@ -333,14 +350,17 @@ describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
     expect(JSON.parse(opts.body as string).entityId).toBe("b");
   });
 
-  it("'It's not mine' opens Publication Manager in a new tab and does not hide", async () => {
+  it("the notice's inline reject link opens Publication Manager in a new tab and does not hide", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
     const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
     render(
       <PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />,
     );
     fireEvent.click(screen.getByTestId("pub-hide-a"));
-    const notMine = await screen.findByTestId("first-hide-not-mine");
+    await screen.findByText(NOTICE_TITLE);
+    // The footer duplicate is gone; the educational inline body link is the
+    // not-mine path inside the notice.
+    const notMine = screen.getByRole("link", { name: /reject it in Publication Manager/i });
     expect(notMine.getAttribute("href")).toBe("https://reciter.weill.cornell.edu/");
     expect(notMine.getAttribute("target")).toBe("_blank");
     fireEvent.click(notMine);
@@ -366,7 +386,7 @@ describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
     expect(f).not.toHaveBeenCalled();
   });
 
-  it("'It's not mine' acknowledges — a later hide skips the notice", async () => {
+  it("the notice's inline reject link acknowledges — a later hide skips the notice", async () => {
     vi.spyOn(window, "open").mockReturnValue(null);
     const f = stubFetch({ ok: true, suppressionId: "sup-fresh" });
     render(
@@ -379,13 +399,38 @@ describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
       />,
     );
     fireEvent.click(screen.getByTestId("pub-hide-a"));
-    fireEvent.click(await screen.findByTestId("first-hide-not-mine"));
+    await screen.findByText(NOTICE_TITLE);
+    fireEvent.click(screen.getByRole("link", { name: /reject it in Publication Manager/i }));
     await waitFor(() => expect(screen.queryByText(NOTICE_TITLE)).toBeNull());
     expect(f).not.toHaveBeenCalled();
     // Acknowledged — hiding another paper proceeds straight to the write.
     fireEvent.click(screen.getByTestId("pub-hide-b"));
     expect(screen.queryByText(NOTICE_TITLE)).toBeNull();
     await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+  });
+
+  it("each shown/hidden row carries a standing 'Not mine?' affordance pre-selected to the not-mine route", async () => {
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[
+          pub({ pmid: "a", state: "shown" }),
+          pub({ pmid: "b", state: "hidden_by_self", suppressionId: "sup-b" }),
+          pub({ pmid: "c", state: "removed_by_admin" }),
+        ]}
+      />,
+    );
+    // Shown + hidden rows get the quiet per-row trigger; the admin-removed row
+    // (gone site-wide) does not.
+    expect(screen.getByTestId("pub-not-mine-a")).toBeTruthy();
+    expect(screen.getByTestId("pub-not-mine-b")).toBeTruthy();
+    expect(screen.queryByTestId("pub-not-mine-c")).toBeNull();
+    // Opening it lands straight on the not-mine route (no once-per-session
+    // notice, nothing to pick) — its self-service verb is already shown.
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    expect(
+      (await screen.findByTestId("request-a-change-open")).textContent,
+    ).toContain("Flag as not mine");
   });
 
   it("composes with the sole-author confirm — notice first, then the site-wide warning, no double-prompt", async () => {
@@ -424,5 +469,90 @@ describe("PublicationsCard — first-hide-of-session notice (#570)", () => {
     const [url] = f.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/edit/revoke");
     expect(screen.queryByText(NOTICE_TITLE)).toBeNull();
+  });
+});
+
+describe("PublicationsCard — in-app reject (#746)", () => {
+  const REJECT_TITLE = "Is this paper not yours?";
+
+  it("rejectEnabled OFF (default): 'Not mine?' keeps the Publication-Manager off-ramp", async () => {
+    render(<PublicationsCard cwid={CWID} publications={[pub({ pmid: "a", state: "shown" })]} />);
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    // The off-ramp (Request-a-change) opens, NOT the in-app reject interstitial.
+    expect(await screen.findByTestId("request-a-change-open")).toBeTruthy();
+    expect(screen.queryByTestId("reject-confirm")).toBeNull();
+  });
+
+  it("rejectEnabled ON: 'Not mine?' opens the soft-warning interstitial", async () => {
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", state: "shown" })]}
+        rejectEnabled
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    expect(await screen.findByText(REJECT_TITLE)).toBeTruthy();
+    expect(screen.getByTestId("reject-confirm")).toBeTruthy();
+    // Cancel is the autofocused default — never the destructive action (#570).
+    expect(screen.getByTestId("reject-cancel")).toBeTruthy();
+  });
+
+  it("confirming the reject POSTs /api/edit/reject and removes the row from view", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "supp-1" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", title: "Mistaken paper", state: "shown" })]}
+        rejectEnabled
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    fireEvent.click(await screen.findByTestId("reject-confirm"));
+    // Optimistic remove on success — the row is gone.
+    await waitFor(() => expect(screen.queryByTestId("pub-row-a")).toBeNull());
+    const [url, init] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/reject");
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      entityId: "a",
+      contributorCwid: CWID,
+    });
+  });
+
+  it("a failed reject keeps the interstitial open with an inline error (row stays)", async () => {
+    stubFetch({ ok: false, error: "write_failed" }, 500);
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", state: "shown" })]}
+        rejectEnabled
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    fireEvent.click(await screen.findByTestId("reject-confirm"));
+    expect(
+      await screen.findByText("We couldn't reject this publication. Please try again."),
+    ).toBeTruthy();
+    // Not removed; the interstitial is still open.
+    expect(screen.getByTestId("pub-row-a")).toBeTruthy();
+    expect(screen.getByTestId("reject-confirm")).toBeTruthy();
+  });
+
+  it("'Hide it instead' closes the interstitial and routes to the reversible hide", async () => {
+    const f = stubFetch({ ok: true, suppressionId: "supp-hide" });
+    render(
+      <PublicationsCard
+        cwid={CWID}
+        publications={[pub({ pmid: "a", state: "shown" })]}
+        rejectEnabled
+      />,
+    );
+    fireEvent.click(screen.getByTestId("pub-not-mine-a"));
+    fireEvent.click(await screen.findByTestId("reject-hide-instead"));
+    // The reject interstitial closes…
+    await waitFor(() => expect(screen.queryByTestId("reject-confirm")).toBeNull());
+    // …and the hide write fires (first-hide notice already acknowledged this session).
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    expect((f.mock.calls[0] as [string, RequestInit])[0]).toBe("/api/edit/suppress");
   });
 });

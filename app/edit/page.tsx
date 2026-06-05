@@ -10,13 +10,15 @@
  */
 import { redirect, notFound } from "next/navigation";
 
-import { EditPage } from "@/components/edit/edit-page";
+import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
+import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
+import { loadManageableUnits } from "@/lib/edit/manageable-units";
 
 // /edit reads suppression-OFF + writes via /api/edit/*; the page must never
 // be cached (CloudFront also marks it CachingDisabled per cloudfront-cache-spec.md).
@@ -43,7 +45,19 @@ export default async function EditSelfPage({
   // byte-identically; while impersonating target T it returns T, so /edit loads
   // T's context and renders the self-edit surface for them (#637).
   const editCwid = getEffectiveCwid(session);
-  const ctx = await loadEditContext(editCwid, db.read);
+
+  // Genuine-self gate for the publication-derived COI-gap candidates
+  // (`SELF_EDIT_COI_GAP_HINT`). These are surfaced ONLY when the viewer is the
+  // real scholar — never a superuser impersonating them via "View as" (#637).
+  // When impersonating, `getEffectiveCwid` returns the target T while the real
+  // signed-in CWID is the superuser, so `editCwid !== session.cwid` ⇒ NOT
+  // genuine self ⇒ candidates suppressed. `loadEditContext` only loads them when
+  // `includeCoiGap` is true, so a false here means they are never even read.
+  const genuineSelf = editCwid === session.cwid;
+  const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
+  const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
+    includeCoiGap,
+  });
   if (!ctx) {
     // A signed-in user whose scholar row was hard-archived (deletedAt set)
     // has nothing to edit. This is rare — the ED ETL would have to have
@@ -62,9 +76,29 @@ export default async function EditSelfPage({
   // with the scholar's latest request so the card opens in the right state
   // (Pending / Rejected / Just-approved) without a client round-trip.
   const slugRequestEnabled = isSlugRequestEnabled();
+
+  // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
+  // `/edit` rather than silently rendering the default panel behind a stale URL.
+  // Absent/valid `attr` falls through; the redirect target carries no `?attr`,
+  // so the re-load sees `attr === undefined` and never loops.
+  const validAttrs: readonly string[] = visibleAttrKeys(
+    "self",
+    slugRequestEnabled,
+    ctx.unmatchedPubmedCoi.length > 0,
+  );
+  if (attr !== undefined && !validAttrs.includes(attr)) {
+    redirect("/edit");
+  }
+
   const latestSlugRequest = slugRequestEnabled
     ? await loadLatestSlugRequest(editCwid, db.read)
     : null;
+
+  // Org units this scholar may also curate (#753). One indexed `unit_admin`
+  // lookup keyed by cwid; empty for the vast majority, so the Home-panel section
+  // self-hides. Flattened (departments → divisions → centers) for the summary.
+  const units = await loadManageableUnits(editCwid, db.read);
+  const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
 
   return (
     <EditPage
@@ -74,6 +108,7 @@ export default async function EditSelfPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
+      manageableUnits={manageableUnits}
     />
   );
 }

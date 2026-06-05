@@ -32,7 +32,7 @@ export function SlugRequestQueue({
   if (rows.length === 0) {
     return (
       <div
-        className="border-border text-muted-foreground rounded-md border border-dashed px-4 py-12 text-center text-sm"
+        className="border-apollo-border text-muted-foreground rounded-md border border-dashed px-4 py-12 text-center text-sm"
         data-testid="slug-request-queue-empty"
       >
         No pending URL requests.

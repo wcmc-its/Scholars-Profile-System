@@ -5,7 +5,7 @@
  * superuser reason-gating.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -90,6 +90,8 @@ describe("EntityPanel — optimistic hide/show", () => {
     renderPanel([{ externalId: "a1", title: "Shown", state: "shown", suppressionId: null }]);
 
     fireEvent.click(screen.getByTestId("appointment-row-a1-hide"));
+    // Self-mode hide routes through a lightweight no-reason confirm dialog (T2.6).
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Hide" }));
 
     await waitFor(() => expect(screen.getByTestId("appointment-row-a1-show")).toBeTruthy());
     const [url, init] = fetchMock.mock.calls[0];
@@ -118,6 +120,7 @@ describe("EntityPanel — optimistic hide/show", () => {
     renderPanel([{ externalId: "a1", title: "Shown", state: "shown", suppressionId: null }]);
 
     fireEvent.click(screen.getByTestId("appointment-row-a1-hide"));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Hide" }));
 
     // The inline error AND the completed optimistic revert must both be observed
     // in the same poll. React 19's useOptimistic revert flushes on the

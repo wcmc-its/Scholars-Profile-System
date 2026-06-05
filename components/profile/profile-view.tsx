@@ -7,6 +7,9 @@ import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-grou
 import { MentoringSection } from "@/components/scholar/mentoring-section";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
 import { formatMentoringDistribution } from "@/lib/mentoring-labels";
+import { groupCoiDisclosures } from "@/lib/coi-groups";
+import { filterHiddenMentees, hiddenMenteeCwids } from "@/lib/mentee-suppression";
+import { db } from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollFade } from "@/components/ui/scroll-fade";
@@ -85,7 +88,33 @@ export async function ProfileView({ slug }: { slug: string }) {
   // word — the component does no global re-sort, only within-bucket
   // re-sort at the grouped tier when `menteeSort === "copubs"` (URL
   // can't request class-year at that tier because no selector renders).
-  const mentees = await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+  const menteesAll = await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+
+  // #160 follow-up — a mentor may HIDE a mentee from their public profile. The
+  // suppression layer is the SOR for that choice (ADR-005 immediacy: per-
+  // request, never cached), keyed `entityType="mentee"`, `entityId` prefixed
+  // `"{cwid}:"`. Drop hidden mentees BEFORE computing the count / distribution
+  // so the header reflects only what's shown. `mentoring.ts` stays reporting-
+  // only / pure; the suppression read lives here, where db access already is.
+  // Skip the suppression read entirely when the scholar mentors no one (the
+  // common case): no point querying for an empty filter, and it keeps a
+  // no-mentee render from ever touching the pool (e.g. CI / a degraded DB).
+  const menteeSuppressions =
+    menteesAll.length > 0
+      ? await db.read.suppression.findMany({
+          where: {
+            entityType: "mentee",
+            entityId: { startsWith: `${profile.cwid}:` },
+            contributorCwid: null,
+            revokedAt: null,
+          },
+          select: { entityId: true },
+        })
+      : [];
+  const mentees = filterHiddenMentees(
+    menteesAll,
+    hiddenMenteeCwids(profile.cwid, menteeSuppressions),
+  );
 
   const pubGroups = groupPublicationsByYear(profile.publications);
   const pubMinYear = pubGroups
@@ -428,52 +457,21 @@ export async function ProfileView({ slug }: { slug: string }) {
               headingLg
             >
               {(() => {
-                const grouped = new Map<string, Set<string>>();
-                for (const d of profile.disclosures) {
-                  if (!d.entity) continue;
-                  const key = d.activityGroup ?? "Other";
-                  const set = grouped.get(key) ?? new Set<string>();
-                  set.add(d.entity);
-                  grouped.set(key, set);
-                }
-                // Stable ordering: known groups first in mockup order, then any others alpha,
-                // "Other" last.
-                const KNOWN_ORDER = [
-                  "Leadership Roles",
-                  "Ownership",
-                  "Advisory/Scientific Board Member",
-                  "Professional Services",
-                  "Speaker/Lecturer",
-                  "Proprietary Interest",
-                  "Other Interest",
-                ];
-                const keys = [...grouped.keys()];
-                keys.sort((a, b) => {
-                  if (a === "Other") return 1;
-                  if (b === "Other") return -1;
-                  const ia = KNOWN_ORDER.indexOf(a);
-                  const ib = KNOWN_ORDER.indexOf(b);
-                  if (ia === -1 && ib === -1) return a.localeCompare(b);
-                  if (ia === -1) return 1;
-                  if (ib === -1) return -1;
-                  return ia - ib;
-                });
+                // Grouping + ordering is shared with the /edit Conflicts of
+                // Interest panel via `groupCoiDisclosures` so the two surfaces
+                // can't drift on group order.
+                const groups = groupCoiDisclosures(profile.disclosures);
                 return (
                   <div className="flex flex-col gap-5">
-                    {keys.map((group) => {
-                      const entities = [...grouped.get(group)!].sort((a, b) =>
-                        a.localeCompare(b),
-                      );
-                      return (
-                        <div key={group}>
-                          <h3 className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider">
-                            {group}
-                            <DisclosureGroupInfoTooltip group={group} />
-                          </h3>
-                          <p className="text-base leading-snug">{entities.join("; ")}</p>
-                        </div>
-                      );
-                    })}
+                    {groups.map(({ group, entities }) => (
+                      <div key={group}>
+                        <h3 className="text-muted-foreground mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider">
+                          {group}
+                          <DisclosureGroupInfoTooltip group={group} />
+                        </h3>
+                        <p className="text-base leading-snug">{entities.join("; ")}</p>
+                      </div>
+                    ))}
                   </div>
                 );
               })()}

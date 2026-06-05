@@ -118,7 +118,7 @@ export function PublicationTakedownCard({
   }
 
   return (
-    <Card data-slot="publication-takedown-card">
+    <Card data-slot="publication-takedown-card" className="border-apollo-border">
       <CardHeader>
         <CardTitle>Publication visibility</CardTitle>
       </CardHeader>
@@ -139,6 +139,7 @@ export function PublicationTakedownCard({
             <div>
               <Button
                 type="button"
+                variant="apollo"
                 onClick={restoreToSite}
                 disabled={pending}
                 data-testid="publication-takedown-restore"

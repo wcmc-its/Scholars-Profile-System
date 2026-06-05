@@ -64,14 +64,50 @@
   /* Color (locked by design spec v1.7.1) */
   --color-primary-cornell-red: #B31B1B;
   --color-accent-slate: #2c4f6e;
-  /* Apollo Management Console chrome — #160 self-edit launch. Editor-only
-     (/edit/*); the public site keeps --color-primary-cornell-red. The maroon
-     is a PLACEHOLDER pending the real Apollo token (D5) — swap here only. */
-  --apollo-bar: #1a1a1a;
-  --apollo-maroon: #7d1c1c;
+  /* Apollo Management Console chrome — #160 self-edit launch, refreshed to the
+     Scholars Profile Console mockup (warm-neutral palette). Editor-only
+     (/edit/*); the public site keeps --color-primary-cornell-red. The warm
+     maroon is the intentional WCM editor accent — swap here only.
+     --apollo-ring is the keyboard-focus indicator for rail items on the pale
+     rail (maroon clears 3:1 on the warm rail tint); the active maroon-filled
+     item uses a white ring instead, so the indicator is visible on either
+     background. */
+  --apollo-bar: #2a2421; /* warm near-black header */
+  --apollo-maroon: #8a1f2b; /* WCM editor maroon */
+  --apollo-maroon-press: #6e1620; /* hover / active maroon */
   --apollo-maroon-foreground: #ffffff;
-  --apollo-rail: #f6f4f3;
-  --apollo-rail-border: #e4dedc;
+  --apollo-page: #faf8f6; /* warm page behind the detail card */
+  --apollo-surface: #ffffff; /* card / panel surface */
+  --apollo-surface-2: #f4f1ed; /* chips, url-prefix, ghost-hover */
+  --apollo-border: #e9e3df; /* warm hairline */
+  --apollo-border-strong: #dbd3cd; /* input / control borders */
+  --apollo-rail: #f4f1ed;
+  --apollo-rail-border: #e9e3df;
+  --apollo-rail-hover: #ece7e1; /* nav-item hover fill */
+  --apollo-ring: #8a1f2b;
+  --apollo-lock-bg: #f2efeb; /* locked chip / locked actions */
+  /* Secondary slate accent — badges, topic pills, links. */
+  --apollo-slate: #34506e;
+  --apollo-slate-tint: #ecf1f6;
+  --apollo-slate-tint-border: #d5e0ec;
+  /* Semantic green — success banners. */
+  --apollo-green: #2e7d5b;
+  --apollo-green-tint: #e7f3ee;
+  --apollo-green-tint-border: #cbe5d8;
+  --apollo-green-foreground: #1f5c42;
+  /* Semantic amber — "incomplete / needs you". The completeness checklist's
+     to-do marker, progress fill, and missing-headshot badge: an invitation,
+     never a danger-red alarm. The tint pair backs the "worth reviewing"
+     advisory badge + the COI → publications bridge callout. */
+  --apollo-amber: #8a5a06;
+  --apollo-amber-tint: #fbf1dc;
+  --apollo-amber-tint-border: #efdbaf;
+  /* Maroon tint — selected option in Request-a-change. */
+  --apollo-red-tint: #f8ecee;
+  --apollo-red-tint-border: #e4c9ce;
+  /* Detail-card radius + elevation. */
+  --apollo-radius-card: 13px;
+  --apollo-shadow-card: 0 1px 2px rgba(34, 30, 28, 0.04), 0 1px 3px rgba(34, 30, 28, 0.05);
   /* Layout */
   --max-content: 1100px;
   --max-narrow: 720px;
@@ -123,9 +159,30 @@
   /* Apollo chrome utilities (bg-apollo-bar, text-apollo-maroon, …). */
   --color-apollo-bar: var(--apollo-bar);
   --color-apollo-maroon: var(--apollo-maroon);
+  --color-apollo-maroon-press: var(--apollo-maroon-press);
   --color-apollo-maroon-foreground: var(--apollo-maroon-foreground);
+  --color-apollo-page: var(--apollo-page);
+  --color-apollo-surface: var(--apollo-surface);
+  --color-apollo-surface-2: var(--apollo-surface-2);
+  --color-apollo-border: var(--apollo-border);
+  --color-apollo-border-strong: var(--apollo-border-strong);
   --color-apollo-rail: var(--apollo-rail);
   --color-apollo-rail-border: var(--apollo-rail-border);
+  --color-apollo-rail-hover: var(--apollo-rail-hover);
+  --color-apollo-ring: var(--apollo-ring);
+  --color-apollo-lock-bg: var(--apollo-lock-bg);
+  --color-apollo-slate: var(--apollo-slate);
+  --color-apollo-slate-tint: var(--apollo-slate-tint);
+  --color-apollo-slate-tint-border: var(--apollo-slate-tint-border);
+  --color-apollo-green: var(--apollo-green);
+  --color-apollo-green-tint: var(--apollo-green-tint);
+  --color-apollo-green-tint-border: var(--apollo-green-tint-border);
+  --color-apollo-green-foreground: var(--apollo-green-foreground);
+  --color-apollo-amber: var(--apollo-amber);
+  --color-apollo-amber-tint: var(--apollo-amber-tint);
+  --color-apollo-amber-tint-border: var(--apollo-amber-tint-border);
+  --color-apollo-red-tint: var(--apollo-red-tint);
+  --color-apollo-red-tint-border: var(--apollo-red-tint-border);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -158,6 +215,24 @@
    for its layout (sidebar names need different scale from a homepage hero). */
 .page-title {
   font-family: var(--font-serif);
+}
+
+/* The single white detail-panel card for /edit surfaces (Scholars Profile
+   Console mockup). Exactly one per surface: EditShell wraps the active panel
+   in this card; the panel itself stays flat (see edit-panel.tsx) so there is
+   never a card-in-card. Scoped to /edit chrome — never used on the public
+   site. */
+.apollo-card {
+  background: var(--apollo-surface);
+  border: 1px solid var(--apollo-border);
+  border-radius: var(--apollo-radius-card);
+  box-shadow: var(--apollo-shadow-card);
+  padding: 28px 32px 32px;
+}
+@media (max-width: 640px) {
+  .apollo-card {
+    padding: 20px 18px 24px;
+  }
 }
 
 /* Entity-type badges per design spec §17 (issue #71). Pinned to a dedicated

@@ -48,7 +48,21 @@ export type AuditAction =
   /** a superuser began a "View as" impersonation session (#637 R5 — enter) */
   | "impersonation_start"
   /** a superuser ended (or expired out of) a "View as" session (#637 R5 — exit) */
-  | "impersonation_end";
+  | "impersonation_end"
+  /** a scholar rejected a publication as not theirs via /edit → ReCiter gold
+   *  standard (#746); `targetEntityId` is the pmid, `afterValues` carries the
+   *  suppression + pending-refresh ids and the rejected contributor cwid */
+  | "publication_reject"
+  /** a scholar dismissed ("Not relevant") a publication-derived COI-gap
+   *  candidate on the self-only "From your publications" panel
+   *  (`SELF_EDIT_COI_GAP_HINT`); `targetEntityId` is the candidate id,
+   *  before/after carry the status transition. Self-scoped, never a
+   *  compliance trail — the only thing logged is the scholar's own action. */
+  | "coi_gap_dismiss"
+  /** a scholar UNDID a COI-gap dismissal ("Undo") — the inverse of
+   *  `coi_gap_dismiss`, restoring the suggestion to their advisory view. Same
+   *  self-scoped, non-compliance posture. */
+  | "coi_gap_restore";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -60,7 +74,13 @@ export type AuditEntityType =
   /** org-unit targets (#540 Phase 1); `targetEntityId` is the unit `code` */
   | "department"
   | "division"
-  | "center";
+  | "center"
+  /** a derived mentee a mentor hid (#160 follow-up); `targetEntityId` is
+   *  `"{mentorCwid}:{menteeCwid}"` */
+  | "mentee"
+  /** a publication-derived COI-gap candidate the scholar dismissed
+   *  (`SELF_EDIT_COI_GAP_HINT`); `targetEntityId` is the `coi_gap_candidate.id` */
+  | "coi_gap_candidate";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

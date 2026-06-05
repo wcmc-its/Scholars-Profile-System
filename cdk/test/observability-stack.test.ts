@@ -2,6 +2,7 @@ import { Match, Template } from "aws-cdk-lib/assertions";
 import { AppStack } from "../lib/app-stack";
 import { DataStack } from "../lib/data-stack";
 import { DrBackupVaultStack } from "../lib/dr-backup-vault-stack";
+import { EtlStack } from "../lib/etl-stack";
 import { NetworkStack } from "../lib/network-stack";
 import { SpsObservabilityStack } from "../lib/observability-stack";
 import { makeFixture } from "./test-utils";
@@ -42,6 +43,14 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
     etlSecurityGroup: network.etlSecurityGroup,
     albSecurityGroup: network.albSecurityGroup,
   });
+  const etl = new EtlStack(fixture.app, `Sps-Etl-${envName}`, {
+    env: fixture.env,
+    envConfig: fixture.envConfig,
+    vpc: network.vpc,
+    etlSecurityGroup: network.etlSecurityGroup,
+    ecsCluster: app.ecsCluster,
+    etlEcrRepository: app.etlEcrRepository,
+  });
   const stack = new SpsObservabilityStack(
     fixture.app,
     `Sps-Observability-${envName}`,
@@ -50,6 +59,7 @@ function buildObservabilityStack(envName: "staging" | "prod"): {
       envConfig: fixture.envConfig,
       appStack: app,
       dataStack: data,
+      etlStack: etl,
     },
   );
   return {
@@ -184,9 +194,10 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("notify topic has exactly one email subscription to the operator", () => {
-      // Two AWS::SNS::Subscription resources total post-B27: email on notify
-      // topic, Lambda on page topic (the B27 relay).
-      template.resourceCountIs("AWS::SNS::Subscription", 2);
+      // Three AWS::SNS::Subscription resources total: email on notify topic,
+      // Lambda on page topic (the B27 relay), and (#595) Lambda on the
+      // cross-stack etl-failures topic (also the relay).
+      template.resourceCountIs("AWS::SNS::Subscription", 3);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",
@@ -582,8 +593,17 @@ describe("SpsObservabilityStack", () => {
       const subs = template.findResources("AWS::SNS::Subscription", {
         Properties: { Protocol: "lambda" },
       });
-      expect(Object.keys(subs)).toHaveLength(1);
-      const sub = Object.values(subs)[0]?.Properties as
+      // Scope to the PAGE topic. The relay also subscribes to the cross-stack
+      // etl-failures topic (#595), whose TopicArn is an Fn::ImportValue (no
+      // `.Ref`), so it is excluded by the page-topic-ref filter -- the relay is
+      // still the SOLE subscriber on the page topic itself.
+      const pageSubs = Object.values(subs).filter(
+        (s) =>
+          ((s.Properties as { TopicArn?: { Ref?: string } } | undefined)
+            ?.TopicArn?.Ref ?? "") === pageLogicalId,
+      );
+      expect(pageSubs).toHaveLength(1);
+      const sub = pageSubs[0]?.Properties as
         | { TopicArn?: { Ref?: string }; Endpoint?: { "Fn::GetAtt"?: string[] } }
         | undefined;
       expect(sub?.TopicArn?.Ref).toBe(pageLogicalId);
@@ -735,8 +755,9 @@ describe("SpsObservabilityStack", () => {
     });
 
     it("page topic carries the B27 Lambda subscription; notify topic has the operator email", () => {
-      // Two AWS::SNS::Subscription resources: email on notify, lambda on page.
-      template.resourceCountIs("AWS::SNS::Subscription", 2);
+      // Three AWS::SNS::Subscription resources: email on notify, lambda on
+      // page, and (#595) lambda on the cross-stack etl-failures topic.
+      template.resourceCountIs("AWS::SNS::Subscription", 3);
       template.hasResourceProperties("AWS::SNS::Subscription", {
         Protocol: "email",
         Endpoint: "paa2013@med.cornell.edu",

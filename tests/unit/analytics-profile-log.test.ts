@@ -70,6 +70,14 @@ vi.mock("@/lib/api/mentoring", () => ({
   getMenteesForMentor: vi.fn(async () => []),
 }));
 
+// Mock @/lib/db — <ProfileView> reads the suppression layer directly to drop a
+// mentor's hidden mentees (#160 follow-up) BEFORE counting. Without this the
+// real Prisma pool is consulted and, with no reachable DB in CI, hangs until a
+// 10s pool timeout. Return no hidden mentees (the fixture has none anyway).
+vi.mock("@/lib/db", () => ({
+  db: { read: { suppression: { findMany: vi.fn(async () => []) } } },
+}));
+
 // Mock next/headers (used by not-found.tsx — not by profile page, but avoids
 // module resolution errors if transitively imported).
 vi.mock("next/headers", () => ({

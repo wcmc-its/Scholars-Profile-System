@@ -25,18 +25,28 @@ export type SuperuserBannerProps = {
 
 export function SuperuserBanner({ targetLabel, targetKind = "profile" }: SuperuserBannerProps) {
   return (
-    <Alert variant="info" className="mb-6" data-slot="superuser-banner">
-      <ShieldAlert className="size-4" />
+    <Alert
+      variant="info"
+      className="border-apollo-maroon/30 bg-apollo-surface-2 mb-6"
+      data-slot="superuser-banner"
+    >
+      <ShieldAlert className="text-apollo-maroon size-4" />
       <AlertDescription>
-        {targetKind === "profile" ? (
-          <>
-            You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
-          </>
-        ) : (
-          <>
-            You are managing the publication <strong>{targetLabel}</strong> as an administrator.
-          </>
-        )}
+        {/* One <p> so the sentence is a single grid item. AlertDescription is a
+            CSS grid; without this wrapper the leading text, the <strong> name,
+            and the trailing "'s profile…" each become their own grid row, which
+            is what dropped the possessive onto its own line. */}
+        <p>
+          {targetKind === "profile" ? (
+            <>
+              You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
+            </>
+          ) : (
+            <>
+              You are managing the publication <strong>{targetLabel}</strong> as an administrator.
+            </>
+          )}
+        </p>
       </AlertDescription>
     </Alert>
   );

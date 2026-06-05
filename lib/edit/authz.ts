@@ -68,25 +68,26 @@ export function authorizeFieldEdit(
 /**
  * `POST /api/edit/suppress`:
  *   - scholar, whole-entity                    → the scholar themselves, or a superuser
- *   - grant / education / appointment          → the owning scholar, or a superuser (#160)
+ *   - grant / education / appointment / mentee → the owning scholar, or a superuser (#160)
  *   - publication, per-author                  → the actor suppressing *themselves* as a
  *                                                contributor, or a superuser
  *   - publication, whole-entity                → superuser only (retraction / takedown)
  *
- * Scholar and grant/education/appointment suppressions never carry a
+ * Scholar and grant/education/appointment/mentee suppressions never carry a
  * `contributorCwid`. For the whole-entity types the owning scholar's cwid
  * (`ownerCwid`) is resolved upstream (`findSuppressibleEntityOwner`) and passed
- * in so this predicate stays pure. The per-author authorship-existence check
- * and the whole-entity existence check are separate `400` validations, not part
- * of this `403` predicate.
+ * in so this predicate stays pure (the mentee owner = the mentor segment of the
+ * `{mentorCwid}:{menteeCwid}` externalId). The per-author authorship-existence
+ * check and the whole-entity existence check are separate `400` validations,
+ * not part of this `403` predicate.
  */
 export function authorizeSuppress(
   session: EditSession,
   target: {
-    entityType: "scholar" | "publication" | "grant" | "education" | "appointment";
+    entityType: "scholar" | "publication" | "grant" | "education" | "appointment" | "mentee";
     entityId: string;
     contributorCwid?: string | null;
-    /** Owner cwid of a whole-entity grant/education/appointment target. */
+    /** Owner cwid of a whole-entity grant/education/appointment/mentee target. */
     ownerCwid?: string | null;
   },
 ): AuthzResult {
@@ -99,10 +100,13 @@ export function authorizeSuppress(
   if (
     target.entityType === "grant" ||
     target.entityType === "education" ||
-    target.entityType === "appointment"
+    target.entityType === "appointment" ||
+    target.entityType === "mentee"
   ) {
     // Whole-entity self-suppression: a scholar may hide only their own
-    // grant / education / appointment. `ownerCwid` is resolved upstream (#160).
+    // grant / education / appointment, or (mentee) a mentee on THEIR OWN
+    // profile — for a mentee the owner is the mentor, resolved upstream from
+    // the `{mentorCwid}:{menteeCwid}` externalId (#160).
     return session.cwid === (target.ownerCwid ?? null)
       ? ALLOW
       : { ok: false, reason: "not_self" };

@@ -15,15 +15,18 @@ import {
 const ATTRS = Object.keys(REQUEST_A_CHANGE) as RequestAttribute[];
 
 describe("REQUEST_A_CHANGE — structure", () => {
-  it("covers the seven attributes, each with a heading and ≥1 issue", () => {
+  it("covers every request attribute, each with a heading and ≥1 issue", () => {
     expect(ATTRS.sort()).toEqual(
       [
         "appointments",
+        "coi",
         "education",
         "funding",
+        "mentees",
         "name-title",
         "org-unit",
         "photo",
+        "profile-url",
         "publications",
       ].sort(),
     );
@@ -127,6 +130,37 @@ describe("operator routing decisions", () => {
       expect(a.email).toBe("support@med.cornell.edu");
       expect(a.office).toBe("ITS Support");
       expect(a.sourceSystem).toBe("Enterprise Directory / Scholars");
+    }
+  });
+
+  it("COI corrections are self-service into the Weill Research Gateway (read-only here)", () => {
+    for (const id of ["coi-wrong", "coi-not-mine"]) {
+      const a = issue("coi", id).action;
+      expect(a.kind).toBe("self-service");
+      if (a.kind === "self-service") {
+        expect(a.href).toBe("https://wrg.weill.cornell.edu");
+        expect(a.tool).toBe("Weill Research Gateway");
+      }
+    }
+  });
+
+  it("COI 'no longer current' routes to ITS support (a mirror/sync gap, not a WRG self-edit)", () => {
+    const a = issue("coi", "coi-not-current").action;
+    expect(a.kind).toBe("route");
+    if (a.kind === "route") {
+      expect(a.email).toBe("support@med.cornell.edu");
+      expect(a.office).toBe("ITS Support");
+    }
+  });
+
+  it("mentee corrections route to ITS support, sourced from Jenzabar or Employee Central", () => {
+    for (const id of ["mentee-not-mine", "mentee-missing", "mentee-details-wrong"]) {
+      const a = issue("mentees", id).action;
+      expect(a.kind).toBe("route");
+      if (a.kind === "route") {
+        expect(a.email).toBe("support@med.cornell.edu");
+        expect(a.sourceSystem).toBe("Jenzabar or Employee Central");
+      }
     }
   });
 

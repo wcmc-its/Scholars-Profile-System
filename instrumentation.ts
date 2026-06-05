@@ -11,9 +11,26 @@
  * Next.js for server-only instrumentation.
  */
 export async function register(): Promise<void> {
-  if (process.env.NEXT_RUNTIME !== "nodejs") {
-    return;
+  // Positive `=== "nodejs"` block (NOT an early return): in the edge compile
+  // Next replaces process.env.NEXT_RUNTIME with the literal "edge", so this
+  // whole block becomes `if (false)` and is dead-code-eliminated. That keeps
+  // the Node-only import graph — OTel, and lib/warmup → lib/search →
+  // @opensearch-project/opensearch, which require()s node core `stream` /
+  // `querystring` — OUT of the edge instrumentation bundle. An early `return`
+  // does NOT get the same DCE for the trailing dynamic imports, so opensearch
+  // leaked into the edge build ("Module not found: Can't resolve 'stream'").
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { initTracing } = await import("./lib/tracing/init");
+    initTracing();
+
+    // Startup cache + connection-pool warm-up (see lib/warmup.ts). Skip the
+    // production BUILD phase — register() can fire there, and there are no live
+    // dependencies to warm. Fire-and-forget: warmUp() self-bounds and always
+    // flips the readiness latch, so boot is never blocked on it and a rejection
+    // can't escape (the trailing .catch is belt-and-suspenders).
+    if (process.env.NEXT_PHASE !== "phase-production-build") {
+      const { warmUp } = await import("./lib/warmup");
+      void warmUp().catch(() => {});
+    }
   }
-  const { initTracing } = await import("./lib/tracing/init");
-  initTracing();
 }

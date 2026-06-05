@@ -22,15 +22,9 @@ import {
   DirectoryPeopleTypeahead,
   type DirectoryValue,
 } from "@/components/edit/directory-people-typeahead";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 type AccessRow = {
@@ -170,14 +164,12 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
   const hint = CASCADE_HINT[entityType];
 
   return (
-    <Card data-slot="unit-access-card">
-      <CardHeader>
-        <CardTitle>Access</CardTitle>
-        <CardDescription>
-          Owners and Curators can edit this {entityType}. Only Owners can manage access.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <EditPanel
+      slot="unit-access-card"
+      heading="Access"
+      description={`Owners and Curators can edit this ${entityType}. Only Owners can manage access.`}
+    >
+      <div className="flex flex-col gap-4">
         {hint && <p className="text-muted-foreground text-sm">{hint}</p>}
 
         {rows.length === 0 ? (
@@ -187,7 +179,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
         ) : (
           <table className="w-full text-sm" data-testid="unit-access-table">
             <thead>
-              <tr className="text-muted-foreground border-border border-b text-left">
+              <tr className="text-muted-foreground border-apollo-border border-b text-left">
                 <th className="py-2 font-medium">Person</th>
                 <th className="py-2 font-medium">Role</th>
                 <th className="py-2 font-medium">Granted by</th>
@@ -200,7 +192,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
                 const isSelf = row.cwid === actorCwid;
                 const shown = displayName(row);
                 return (
-                  <tr key={row.cwid} className="border-border border-b" data-testid={`unit-access-row-${row.cwid}`}>
+                  <tr key={row.cwid} className="border-apollo-border border-b" data-testid={`unit-access-row-${row.cwid}`}>
                     <td className="py-2">
                       <span className="font-medium">{shown.name}</span>
                       {shown.title && <span className="text-muted-foreground"> · {shown.title}</span>}
@@ -228,7 +220,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
           </table>
         )}
 
-        <div className="border-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-access-add">
+        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="unit-access-add">
           <p className="text-sm font-medium">Add admin</p>
           <DirectoryPeopleTypeahead idPrefix="grant" value={addValue} onChange={setAddValue} />
           <RadioGroup
@@ -244,7 +236,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
             </label>
           </RadioGroup>
           <div>
-            <Button type="button" onClick={grant} disabled={!addValue || busy} data-testid="unit-access-grant">
+            <Button type="button" variant="apollo" onClick={grant} disabled={!addValue || busy} data-testid="unit-access-grant">
               {busy ? "Granting…" : "Grant access"}
             </Button>
           </div>
@@ -255,7 +247,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={revokeTarget !== null}
@@ -267,7 +259,7 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
         confirmVariant="destructive"
         onConfirm={() => (revokeTarget ? revoke(revokeTarget) : Promise.resolve())}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

@@ -100,6 +100,8 @@ export class EtlStack extends Stack {
   public readonly nightlyStateMachine: sfn.StateMachine;
   public readonly weeklyStateMachine: sfn.StateMachine;
   public readonly annualStateMachine: sfn.StateMachine;
+  /** #595 data-freshness heartbeat — daily etl_run staleness check. */
+  public readonly heartbeatStateMachine: sfn.StateMachine;
   /** #393 suppression search-index reconciler (ADR-005 layer 3), ~5 min cadence. */
   public readonly reconcileStateMachine: sfn.StateMachine;
 
@@ -250,6 +252,18 @@ export class EtlStack extends Stack {
           "SCHOLARS_JENZABAR_USERNAME",
           "SCHOLARS_JENZABAR_PASSWORD",
         ],
+      },
+      {
+        // #746 — the etl:reciter-refresh scanner delivers self-edit "Not mine"
+        // rejects to ReCiter's gold standard and fires the delayed, per-uid
+        // re-score (analysisRefreshFlag=true). Holds the ReCiter ADMIN api-key,
+        // so it lives ONLY in the ETL task — never the public web app — keeping
+        // the admin credential out of the internet-facing tier. The base URL is
+        // not secret but travels with the key so the two can't drift. Dormant
+        // until RECITER_REJECT_SEND=on (env below) + the secret is seeded.
+        constructId: "EtlSecretReciterApi",
+        secretName: `scholars/${env}/reciter-api`,
+        keys: ["RECITER_API_BASE_URL", "RECITER_API_KEY"],
       },
     ];
     const perSourceSecrets = credentialedSources.map((src) =>
@@ -425,6 +439,12 @@ export class EtlStack extends Stack {
         SCHOLARS_BASE_URL: `http://${Fn.importValue(
           `Sps-App-${env}-InternalAlbDns`,
         )}`,
+        // #746 — the etl:reciter-refresh scanner (operator-run for now) reads
+        // this to deliver any deferred ReCiter rejects and fire the delayed,
+        // per-uid feature-generator re-score. STAGING-FIRST: ON in staging, OFF
+        // in prod until the staging soak completes; the EventBridge → Step
+        // Function schedule is a follow-up.
+        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
       },
       secrets: containerSecrets,
     });
@@ -585,9 +605,17 @@ export class EtlStack extends Stack {
     const nightlySteps: ReadonlyArray<StepSpec> = [
       { id: "Ed", npmScript: "etl:ed", external: true },
       { id: "Reciter", npmScript: "etl:reciter", external: true },
+      // PubMed competing-interest statements — same WCM-ReciterDB path as Reciter
+      // (reads reporting_conflicts), so external:true and placed right after it.
+      // Seeds publication_conflict_statement for the COI-gap source below.
+      { id: "ReciterCoiStatements", npmScript: "etl:reciter:coi-statements", external: true },
       { id: "Asms", npmScript: "etl:asms", external: true },
       { id: "Infoed", npmScript: "etl:infoed", external: true },
       { id: "Coi", npmScript: "etl:coi", external: true },
+      // COI-gap recommendations — reads SPS-DB only (disclosed COI from the Coi
+      // step + the PubMed statements above), so external:false. Computes whatever
+      // its inputs hold; zero candidates until the WCM statement path is flowing.
+      { id: "CoiGap", npmScript: "etl:coi-gap", external: false },
       // After the source ETLs (so a freshly matched publication is enriched the
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
@@ -682,6 +710,26 @@ export class EtlStack extends Stack {
       approvalGate,
     );
 
+    // #595 — data-freshness heartbeat. A single step (`etl:freshness`) reads
+    // the `etl_run` audit table and exits non-zero when any tracked source's
+    // last SUCCESS is older than its cadence SLA. Runs on its OWN schedule
+    // (independent of the cadence machines) so it detects "green-but-stale":
+    // an execution that reported success while a source's data did not refresh,
+    // or a source quietly dropped from the cadence — neither of which the
+    // ExecutionsFailed/ExecutionsStarted alarms below can see. A non-zero exit
+    // surfaces via the existing per-machine status alarm (added to `cadences`
+    // below) -> failureTopic -> on-call relay. external: false — it reads only
+    // the in-VPC Aurora (DATABASE_URL), no WCM source, so it stays green even
+    // when the WCM-dependent cadence steps cannot reach their sources.
+    const freshnessSteps: ReadonlyArray<StepSpec> = [
+      { id: "Freshness", npmScript: "etl:freshness", external: false },
+    ];
+    this.heartbeatStateMachine = buildStateMachine(
+      "HeartbeatStateMachine",
+      "heartbeat",
+      freshnessSteps,
+    );
+
     // ------------------------------------------------------------------
     // EventBridge schedules (D7). Per-env `etlSchedulesEnabled` flips the
     // rule's `Enabled` flag at deploy time -- staging ships enabled, prod
@@ -729,11 +777,24 @@ export class EtlStack extends Stack {
       events.Schedule.expression("cron(0 9 1 7 ? *)"),
       this.annualStateMachine,
     );
+    // #595 — heartbeat runs daily at 13:00 UTC, ~6h after the nightly window
+    // (07:00) and after the Sunday weekly (08:00), so a failed or missed
+    // overnight cadence shows up as staleness the same day. Gated on the same
+    // `etlSchedulesEnabled` flag as the cadences: where cadences are disabled
+    // (prod pre-launch) there is no fresh data to expect, so the heartbeat
+    // would only false-alarm; it activates with the cadences at launch.
+    buildSchedule(
+      "HeartbeatScheduleRule",
+      "heartbeat",
+      events.Schedule.expression("cron(0 13 * * ? *)"),
+      this.heartbeatStateMachine,
+    );
 
     // ------------------------------------------------------------------
-    // CloudWatch alarms (D4). One status alarm per state machine (3) plus
-    // a cadence alarm for the sub-weekly machines (nightly + weekly = 2),
-    // five total.
+    // CloudWatch alarms (D4). One status alarm per state machine (4: nightly,
+    // weekly, annual, heartbeat) plus a cadence alarm for the sub-weekly
+    // machines (nightly + weekly + heartbeat = 3), seven total. (#595 added the
+    // heartbeat machine + its two alarms.)
     //
     // - **Status alarm** -- ExecutionsFailed sum > 0 over one period at
     //   the cadence interval. Catches every failed execution including
@@ -790,6 +851,17 @@ export class EtlStack extends Stack {
         cadenceLabel: "annual",
         // No cadence alarm -- see the deploy-only-constraint note above.
         stateMachine: this.annualStateMachine,
+      },
+      {
+        // #595 heartbeat. Status alarm: a non-zero `etl:freshness` exit
+        // (>=1 stale source) trips it -> failureTopic -> relay -> Teams.
+        // Cadence alarm: 30h window (daily + 25% grace, 108000s <= 604800s)
+        // catches the heartbeat itself going dark so the monitor can't fail
+        // silently.
+        id: "Heartbeat",
+        cadenceLabel: "heartbeat",
+        cadenceWindow: Duration.hours(30),
+        stateMachine: this.heartbeatStateMachine,
       },
     ];
     for (const c of cadences) {
@@ -1145,6 +1217,10 @@ export class EtlStack extends Stack {
     new CfnOutput(this, "AnnualStateMachineArn", {
       value: this.annualStateMachine.stateMachineArn,
       description: "SPS annual ETL state machine ARN.",
+    });
+    new CfnOutput(this, "HeartbeatStateMachineArn", {
+      value: this.heartbeatStateMachine.stateMachineArn,
+      description: "SPS data-freshness heartbeat state machine ARN (#595).",
     });
     new CfnOutput(this, "ReconcileStateMachineArn", {
       value: this.reconcileStateMachine.stateMachineArn,

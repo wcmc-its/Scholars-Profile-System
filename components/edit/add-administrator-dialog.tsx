@@ -125,7 +125,12 @@ export function AddAdministratorDialog({ units, onGranted }: AddAdministratorDia
 
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)} data-testid="administrators-add-trigger">
+      <Button
+        type="button"
+        variant="apollo"
+        onClick={() => setOpen(true)}
+        data-testid="administrators-add-trigger"
+      >
         <UserPlus />
         Add administrator
       </Button>
@@ -162,7 +167,7 @@ export function AddAdministratorDialog({ units, onGranted }: AddAdministratorDia
               <label className="flex flex-col gap-1.5 text-sm">
                 <span className="font-medium">Org unit</span>
                 <select
-                  className="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                  className="border-apollo-border-strong bg-background h-9 rounded-md border px-3 text-sm"
                   value={unitValue}
                   onChange={(e) => setUnitValue(e.target.value)}
                   data-testid="administrators-add-unit"
@@ -199,6 +204,7 @@ export function AddAdministratorDialog({ units, onGranted }: AddAdministratorDia
             </Button>
             <Button
               type="button"
+              variant="apollo"
               onClick={handleSubmit}
               disabled={!canSubmit}
               data-testid="administrators-add-submit"

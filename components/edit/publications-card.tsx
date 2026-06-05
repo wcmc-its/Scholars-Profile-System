@@ -15,23 +15,16 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
-import { FieldSourceLine } from "@/components/edit/field-source-line";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { FirstHideNoticeDialog } from "@/components/edit/first-hide-notice-dialog";
+import { RejectNoticeDialog } from "@/components/edit/reject-notice-dialog";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PUBLICATION_MANAGER_URL } from "@/lib/edit/request-a-change";
@@ -41,6 +34,13 @@ import type { EditContextPublication } from "@/lib/api/edit-context";
 export type PublicationsCardProps = {
   cwid: string;
   publications: ReadonlyArray<EditContextPublication>;
+  /**
+   * Whether the in-app "Not mine" reject is enabled (`RECITER_REJECT_SEND`,
+   * #746). Off (default) ⇒ "Not mine?" keeps the Publication-Manager off-ramp.
+   * On ⇒ it opens the soft-warning interstitial that commits a reject + ReCiter
+   * gold-standard write.
+   */
+  rejectEnabled?: boolean;
 };
 
 /**
@@ -87,8 +87,11 @@ function applyOptimistic(state: Pub[], update: OptimisticUpdate): Pub[] {
   });
 }
 
-export function PublicationsCard({ cwid, publications }: PublicationsCardProps) {
-  const router = useRouter();
+export function PublicationsCard({
+  cwid,
+  publications,
+  rejectEnabled = false,
+}: PublicationsCardProps) {
   const [list, setList] = React.useState<Pub[]>([...publications]);
   const [, startTransition] = React.useTransition();
   const [optimistic, addOptimistic] = React.useOptimistic(list, applyOptimistic);
@@ -99,6 +102,9 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
   // The first-hide-of-a-session notice (#570), keyed by the pmid that triggered
   // it — null when closed.
   const [noticePmid, setNoticePmid] = React.useState<string | null>(null);
+  // The "Not mine" reject interstitial (#746), keyed by the pmid being rejected
+  // — null when closed.
+  const [rejectPmid, setRejectPmid] = React.useState<string | null>(null);
 
   const totalCount = list.length;
   const hiddenCount = list.filter((p) => p.state !== "shown").length;
@@ -180,7 +186,8 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
               : p,
           ),
         );
-        router.refresh();
+        // No router.refresh(): the optimistic→committed local list is
+        // authoritative for this panel on a never-cached page (T3.7).
       } catch {
         setError(pmid, "We couldn't hide this publication. Please try again.");
       }
@@ -213,41 +220,60 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
               : pub,
           ),
         );
-        router.refresh();
       } catch {
         setError(p.pmid, "We couldn't restore this publication. Please try again.");
       }
     });
   }
 
+  // The in-app "Not mine" reject (#746, #570), gated behind `rejectEnabled`
+  // (RECITER_REJECT_SEND). POSTs the rejection — which records it locally AND
+  // propagates it to ReCiter's gold standard so the misattribution is corrected
+  // at the source — then, on success, optimistically REMOVES the row from view
+  // (a reject means the paper isn't theirs, so it drops off the profile rather
+  // than greying out like a hide). Throws on failure so the interstitial keeps
+  // itself open with an inline error — no optimistic-then-revert race.
+  async function rejectPub(pmid: string): Promise<void> {
+    setError(pmid, null);
+    const res = await fetch("/api/edit/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entityId: pmid, contributorCwid: cwid }),
+    });
+    const data = (await res.json()) as
+      | { ok: true; suppressionId: string }
+      | { ok: false; error: string };
+    if (!res.ok || data.ok !== true) {
+      throw new Error("reject_failed");
+    }
+    commitLocal((state) => state.filter((p) => p.pmid !== pmid));
+  }
+
   const confirmingPub =
     confirmPmid !== null ? list.find((p) => p.pmid === confirmPmid) ?? null : null;
   const noticePub =
     noticePmid !== null ? list.find((p) => p.pmid === noticePmid) ?? null : null;
+  const rejectingPub =
+    rejectPmid !== null ? list.find((p) => p.pmid === rejectPmid) ?? null : null;
 
   return (
-    <Card data-slot="publications-card">
-      <CardHeader>
-        <CardTitle>My publications</CardTitle>
-        <FieldSourceLine attribute="publications" />
-        <CardDescription>
-          Hide a publication to remove yourself from it on this site. Hiding
-          affects this profile only. A paper that isn&apos;t yours keeps
-          appearing on internal reports and the Faculty Review Tool until
-          it&apos;s corrected in{" "}
-          <a
-            href={PUBLICATION_MANAGER_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
+    <EditPanel
+      slot="publications-card"
+      attribute="publications"
+      heading="My publications"
+      description={
+        <>
+          Hide a publication to remove yourself from it on this site. Hiding affects this profile
+          only. A paper that isn&apos;t yours keeps appearing on internal reports and the Faculty
+          Review Tool until it&apos;s corrected in{" "}
+          <a href={PUBLICATION_MANAGER_URL} target="_blank" rel="noreferrer" className="underline">
             Publication Manager
           </a>
           .
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground" aria-live="polite">
             <span className="text-foreground font-medium">{totalCount.toLocaleString()}</span>
             {" publications"}
@@ -267,7 +293,7 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             placeholder="Filter by title…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="max-w-xs"
+            className="border-apollo-border-strong max-w-xs"
             data-testid="publications-filter"
           />
         </div>
@@ -281,17 +307,17 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             No publications match &ldquo;{filter}&rdquo;.
           </p>
         ) : (
-          <ScrollArea className="h-[60vh] rounded-md border border-border">
-            <ul className="divide-y divide-border">
+          <ScrollArea className="md:h-[60vh]">
+            <ul>
               {grouped.map(({ key, label, items }) => (
                 <li key={key}>
                   <h3
-                    className="bg-background text-muted-foreground sticky top-0 z-10 px-3 py-2 text-sm font-semibold"
+                    className="bg-background text-apollo-slate sticky top-0 z-10 px-1 py-2 text-xs font-semibold tracking-wide uppercase"
                     data-slot="year-header"
                   >
                     {label}
                   </h3>
-                  <ul className="divide-y divide-border">
+                  <ul className="divide-apollo-border divide-y">
                     {items.map((p) => (
                       <PublicationRow
                         key={p.pmid}
@@ -300,6 +326,8 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
                         error={errors.get(p.pmid) ?? null}
                         onHide={() => startHide(p)}
                         onShow={() => show(p)}
+                        rejectEnabled={rejectEnabled}
+                        onNotMine={() => setRejectPmid(p.pmid)}
                       />
                     ))}
                   </ul>
@@ -308,7 +336,6 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
             </ul>
           </ScrollArea>
         )}
-      </CardContent>
 
       <FirstHideNoticeDialog
         open={noticePmid !== null}
@@ -351,7 +378,29 @@ export function PublicationsCard({ cwid, publications }: PublicationsCardProps) 
           hide(confirmingPub.pmid);
         }}
       />
-    </Card>
+
+      <RejectNoticeDialog
+        open={rejectPmid !== null}
+        onOpenChange={(open) => {
+          if (!open) setRejectPmid(null);
+        }}
+        pubTitle={rejectingPub?.title ?? ""}
+        onReject={async () => {
+          if (!rejectingPub) return;
+          // Throws on failure → the interstitial keeps itself open with an
+          // inline error. On success the row is already gone; close the dialog.
+          await rejectPub(rejectingPub.pmid);
+          setRejectPmid(null);
+        }}
+        onHideInstead={() => {
+          // "This IS mine, just hide it" — steer to the reversible hide path
+          // (which itself shows the first-hide notice the once per session).
+          const p = rejectingPub;
+          setRejectPmid(null);
+          if (p) startHide(p);
+        }}
+      />
+    </EditPanel>
   );
 }
 
@@ -361,21 +410,27 @@ function PublicationRow({
   error,
   onHide,
   onShow,
+  rejectEnabled,
+  onNotMine,
 }: {
   cwid: string;
   pub: Pub;
   error: string | null;
   onHide: () => void;
   onShow: () => void;
+  rejectEnabled: boolean;
+  /** Open the "Not mine" reject interstitial (#746). */
+  onNotMine: () => void;
 }) {
   return (
-    <li className="flex flex-col gap-2 px-3 py-3" data-testid={`pub-row-${pub.pmid}`}>
+    <li className="flex flex-col gap-2 px-1 py-4" data-testid={`pub-row-${pub.pmid}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p
             className={cn(
-              "text-base",
-              pub.state === "hidden_by_self" && "text-muted-foreground",
+              "text-foreground font-medium",
+              (pub.state === "hidden_by_self" || pub.state === "rejected") &&
+                "decoration-muted-foreground text-muted-foreground line-through",
             )}
           >
             {pub.title}
@@ -385,7 +440,24 @@ function PublicationRow({
             {pub.state === "hidden_by_self" && (
               <>
                 {" · "}
-                <Badge>Hidden</Badge>
+                <Badge
+                  variant="outline"
+                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                >
+                  Hidden
+                </Badge>
+              </>
+            )}
+            {pub.state === "rejected" && (
+              <>
+                {" · "}
+                <Badge
+                  variant="outline"
+                  className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border rounded-full"
+                  data-testid={`pub-rejected-badge-${pub.pmid}`}
+                >
+                  Rejected — correction pending
+                </Badge>
               </>
             )}
           </p>
@@ -396,6 +468,7 @@ function PublicationRow({
               type="button"
               variant="ghost"
               size="sm"
+              className="min-h-11 md:min-h-8"
               onClick={onHide}
               data-testid={`pub-hide-${pub.pmid}`}
             >
@@ -408,6 +481,7 @@ function PublicationRow({
               type="button"
               variant="ghost"
               size="sm"
+              className="min-h-11 md:min-h-8"
               onClick={onShow}
               data-testid={`pub-show-${pub.pmid}`}
             >
@@ -424,6 +498,61 @@ function PublicationRow({
               </span>
             </div>
           )}
+          {pub.state === "rejected" && (
+            // A reject was recorded as a misattribution and sent to ReCiter's
+            // gold standard (#746). There is deliberately no Show control —
+            // un-hiding locally would leave the upstream reject in place and the
+            // two would silently diverge (#750). It is undone at the source.
+            <div
+              className="flex flex-col items-end gap-1"
+              data-testid={`pub-rejected-note-${pub.pmid}`}
+            >
+              <span className="text-muted-foreground max-w-xs text-right text-sm">
+                You reported this paper as not yours. We&apos;re correcting it at
+                the source; this can&apos;t be undone here.
+              </span>
+            </div>
+          )}
+          {pub.state !== "removed_by_admin" &&
+            pub.state !== "rejected" &&
+            // A quiet, standing "Not mine?" affordance — a low-emphasis link, not
+            // a third equal-weight button (vision-round finding 4.9).
+            (rejectEnabled ? (
+              // In-app reject (#746): open the soft-warning interstitial that
+              // commits the reject + the ReCiter gold-standard write.
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="text-muted-foreground hover:text-foreground h-auto px-0"
+                onClick={onNotMine}
+                data-testid={`pub-not-mine-${pub.pmid}`}
+              >
+                Not mine?
+              </Button>
+            ) : (
+              // Off-ramp (default): the Request-a-change router pre-selected to
+              // the "not mine" route lands the scholar on the correct-at-source
+              // guidance in Publication Manager.
+              <RequestAChangeDialog
+                attribute="publications"
+                cwid={cwid}
+                itemLabel={pub.title}
+                initialIssueId="publication-not-mine"
+                trigger={(open) => (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground h-auto px-0"
+                    onClick={open}
+                    data-testid={`pub-not-mine-${pub.pmid}`}
+                  >
+                    Not mine?
+                  </Button>
+                )}
+              />
+            ))}
           <RequestAChangeDialog attribute="publications" cwid={cwid} itemLabel={pub.title} />
         </div>
       </div>

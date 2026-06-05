@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAdaptiveCard,
+  buildEtlCard,
+  isCloudWatchAlarmPayload,
   type CloudWatchAlarmPayload,
 } from "../adaptive-card.js";
 
@@ -124,5 +126,69 @@ describe("buildAdaptiveCard", () => {
     const c = content(buildAdaptiveCard(alarm));
     expect(fact(c, "Reason")).toBe("(no reason provided)");
     expect(header(c)).toBe("\u{1F6A8} sps-alb-5xx-rate-staging");
+  });
+});
+
+describe("isCloudWatchAlarmPayload", () => {
+  it("true only when a string AlarmName is present", () => {
+    expect(isCloudWatchAlarmPayload({ AlarmName: "x", NewStateValue: "ALARM" })).toBe(true);
+    expect(isCloudWatchAlarmPayload({ env: "staging", step: "Ed" })).toBe(false);
+    expect(isCloudWatchAlarmPayload({ AlarmName: 7 })).toBe(false);
+    expect(isCloudWatchAlarmPayload(null)).toBe(false);
+    expect(isCloudWatchAlarmPayload("AlarmName")).toBe(false);
+  });
+});
+
+describe("buildEtlCard", () => {
+  it("per-step failure payload renders env + step + state machine + execution + error", () => {
+    const c = content(
+      buildEtlCard({
+        env: "staging",
+        step: "Ed",
+        stateMachine: "scholars-nightly-staging",
+        execution: "abc-123",
+        error: { Error: "States.TaskFailed", Cause: "exit 1" },
+      }),
+    );
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL staging \u{2014} Ed");
+    expect(fact(c, "Env")).toBe("staging");
+    expect(fact(c, "Step")).toBe("Ed");
+    expect(fact(c, "State machine")).toBe("scholars-nightly-staging");
+    expect(fact(c, "Execution")).toBe("abc-123");
+    expect(fact(c, "Error")).toContain("States.TaskFailed");
+    expect(c.actions[0]!.url).toContain("states/home");
+  });
+
+  it("string error renders verbatim; missing optional fields are omitted", () => {
+    const c = content(buildEtlCard({ env: "prod", step: "Reciter", error: "boom" }));
+    expect(fact(c, "Error")).toBe("boom");
+    expect(fact(c, "State machine")).toBeUndefined();
+    expect(fact(c, "Execution")).toBeUndefined();
+  });
+
+  it("approval-gate payload (action, runbook, no error) renders the action as the step", () => {
+    const c = content(
+      buildEtlCard({
+        env: "prod",
+        action: "approve-annual-hierarchy",
+        runbook: "docs/PRODUCTION_ADDENDUM.md",
+      }),
+    );
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL prod \u{2014} approve-annual-hierarchy");
+    expect(fact(c, "Error")).toBe("(none)");
+    expect(fact(c, "Runbook")).toBe("docs/PRODUCTION_ADDENDUM.md");
+  });
+
+  it("missing env/step fall back to placeholders", () => {
+    const c = content(buildEtlCard({}));
+    expect(header(c)).toBe("\u{1F6A8} SPS ETL (unknown) \u{2014} event");
+    expect(fact(c, "Step")).toBe("event");
+  });
+
+  it("oversized error is truncated to 1024 chars with an ellipsis", () => {
+    const c = content(buildEtlCard({ env: "staging", step: "Ed", error: "Y".repeat(2048) }));
+    const err = fact(c, "Error")!;
+    expect(err.length).toBe(1024);
+    expect(err.endsWith("\u{2026}")).toBe(true);
   });
 });

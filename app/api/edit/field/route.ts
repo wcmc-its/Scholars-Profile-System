@@ -38,6 +38,7 @@ import {
   type UnitKind,
   type UnitRef,
 } from "@/lib/edit/authz";
+import { computeOverviewOrigin } from "@/lib/edit/overview-provenance";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   reflectOverviewEdit,
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { session, realCwid, impersonatedCwid, body, requestId } = req.ctx;
 
   // --- body shape (entityType discriminator) ---
-  const { entityType, entityId, fieldName, value, op } = body;
+  const { entityType, entityId, fieldName, value, op, sourceGenerationId } = body;
   if (typeof entityId !== "string" || entityId.length === 0) {
     return editError(400, "invalid_entity_id", "entityId");
   }
@@ -97,6 +98,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       fieldName,
       value,
       op: effectiveOp,
+      // #742 Phase B — provenance pointer for an `overview` save: the generation
+      // the saved text derived from (or null/absent for a hand-authored save).
+      sourceGenerationId,
     });
   }
   if (isUnitEntityType(entityType)) {
@@ -128,9 +132,21 @@ async function handleScholarFieldEdit(params: {
   fieldName: string;
   value: unknown;
   op: "set" | "clear";
+  /** #742 Phase B — the OverviewGeneration the saved overview derived from, when
+   *  the save came from a generated draft. Absent/non-string/foreign ⇒ authored. */
+  sourceGenerationId: unknown;
 }): Promise<NextResponse> {
-  const { session, realCwid, impersonatedCwid, requestId, entityId, fieldName, value, op } =
-    params;
+  const {
+    session,
+    realCwid,
+    impersonatedCwid,
+    requestId,
+    entityId,
+    fieldName,
+    value,
+    op,
+    sourceGenerationId,
+  } = params;
   // SPEC § Interfaces — scholar contract is unchanged. `op` is not part of
   // self-edit-spec's /api/edit/field; reject "clear" here to keep the existing
   // semantics (clearing rides /api/edit/clear-field).
@@ -190,6 +206,45 @@ async function handleScholarFieldEdit(params: {
         },
         update: { value: storedValue, actorCwid: session.cwid },
       });
+      if (fieldName === "overview") {
+        // #742 Phase B — record the provenance of the saved overview in the SAME
+        // transaction. A save derived from a generation (`sourceGenerationId`
+        // pointing at one of THIS scholar's generations) is "generated" when
+        // saved verbatim, else "generated_edited"; a hand-authored save (no/empty
+        // pointer) — or a pointer that is foreign or missing — is "authored".
+        // The generation lookup is read-only and self-scoped; it never fails the
+        // save (a missing generation just downgrades to "authored").
+        let origin: "authored" | "generated" | "generated_edited" = "authored";
+        let provenanceModel: string | null = null;
+        let provenanceSource: string | null = null;
+        if (typeof sourceGenerationId === "string" && sourceGenerationId.length > 0) {
+          const generation = await tx.overviewGeneration.findUnique({
+            where: { id: sourceGenerationId },
+            select: { cwid: true, text: true, model: true },
+          });
+          if (generation && generation.cwid === entityId) {
+            origin = computeOverviewOrigin(storedValue, generation.text);
+            provenanceModel = generation.model;
+            provenanceSource = sourceGenerationId;
+          }
+        }
+        await tx.overviewProvenance.upsert({
+          where: { cwid: entityId },
+          create: {
+            cwid: entityId,
+            origin,
+            model: provenanceModel,
+            sourceGenerationId: provenanceSource,
+            updatedByCwid: session.cwid,
+          },
+          update: {
+            origin,
+            model: provenanceModel,
+            sourceGenerationId: provenanceSource,
+            updatedByCwid: session.cwid,
+          },
+        });
+      }
       if (fieldName === "slug") {
         await reconcileScholarSlug(tx, entityId, storedValue);
       }

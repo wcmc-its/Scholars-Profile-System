@@ -25,18 +25,13 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { Check } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
+import { EditPanel } from "@/components/edit/edit-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
@@ -56,19 +51,13 @@ export type SlugCardProps = {
    * active. Server-fetched at page load (`loadEditContext` § Phase 7 §2).
    */
   initialOverride: string | null;
-  /**
-   * Drives the unsaved-changes guard. Fires `true` when the input diverges
-   * from `initialOverride`, `false` after a successful save / clear or a
-   * re-edit back to the saved value.
-   */
-  onDirtyChange?: (dirty: boolean) => void;
 };
 
 type FormatError = "format" | "too_long" | "reserved";
 type SaveError = "collision" | "unknown";
 type SaveSuccess = "set" | "cleared";
 
-export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: SlugCardProps) {
+export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
   const router = useRouter();
   const [override, setOverride] = React.useState<string | null>(initialOverride);
   const [inputValue, setInputValue] = React.useState<string>(initialOverride ?? "");
@@ -86,10 +75,6 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
   const formatError: FormatError | null = formatResult && !formatResult.ok ? formatResult.error : null;
 
   const dirty = inputValue !== (override ?? "");
-
-  React.useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
 
   // Saving is enabled iff there's a non-empty validly-formatted slug different
   // from the active override. (Use the validated/normalized value when sending.)
@@ -174,19 +159,16 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
   }
 
   return (
-    <Card data-slot="slug-card">
+    <EditPanel
+      slot="slug-card"
+      heading="Profile URL"
+      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically. The short form scholars.weill.cornell.edu/<segment> and the longer /scholars/<segment> both lead to the same page."
+    >
       <UnsavedChangesGuard dirty={dirty} />
-      <CardHeader>
-        <CardTitle>Profile URL</CardTitle>
-        <CardDescription>
-          Override the directory-derived URL segment. The change takes effect
-          immediately; the old URL redirects to the new one automatically.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <p className="text-sm">
+      <div className="flex flex-col gap-3">
+        <p className="flex flex-wrap items-center gap-2.5 text-sm">
           <span className="text-muted-foreground">Current URL: </span>
-          <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+          <code className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs">
             /scholars/{override ?? liveSlug}
           </code>
         </p>
@@ -195,9 +177,9 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
           <label htmlFor="slug-card-input" className="text-sm font-medium">
             URL segment
           </label>
-          <div className="flex items-center gap-2">
+          <div className="border-apollo-border-strong focus-within:ring-ring flex max-w-[640px] items-stretch overflow-hidden rounded-md border focus-within:ring-2">
             <span
-              className="text-muted-foreground select-none whitespace-nowrap text-sm"
+              className="bg-apollo-surface-2 border-apollo-border text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
               data-slot="slug-prefix"
             >
               /scholars/
@@ -212,6 +194,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
               autoComplete="off"
               spellCheck={false}
               data-testid="slug-card-input"
+              className="rounded-none border-0 font-mono shadow-none focus-visible:ring-0"
             />
           </div>
           {formatError && (
@@ -230,6 +213,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
           <div className="flex items-center gap-2">
             <Button
               type="button"
+              variant="apollo"
               onClick={handleSave}
               disabled={!canSave}
               data-testid="slug-card-save"
@@ -263,22 +247,32 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
           </Alert>
         )}
         {saveSuccess === "set" && override !== null && (
-          <Alert variant="info" data-testid="slug-card-set-success">
-            <AlertDescription>
+          <Alert
+            variant="info"
+            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground"
+            data-testid="slug-card-set-success"
+          >
+            <Check className="text-apollo-green" />
+            <AlertDescription className="text-apollo-green-foreground">
               Override saved: <code>/scholars/{override}</code> is now live — the
               old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
         )}
         {saveSuccess === "cleared" && (
-          <Alert variant="info" data-testid="slug-card-cleared-success">
-            <AlertDescription>
+          <Alert
+            variant="info"
+            className="bg-apollo-green-tint border-apollo-green-tint-border text-apollo-green-foreground"
+            data-testid="slug-card-cleared-success"
+          >
+            <Check className="text-apollo-green" />
+            <AlertDescription className="text-apollo-green-foreground">
               Override cleared. The URL is now <code>/scholars/{liveSlug}</code>{" "}
               — the old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
         )}
-      </CardContent>
+      </div>
 
       <ConfirmDialog
         open={clearConfirmOpen}
@@ -290,7 +284,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride, onDirtyChange }: Slu
         confirmVariant="default"
         onConfirm={handleClear}
       />
-    </Card>
+    </EditPanel>
   );
 }
 

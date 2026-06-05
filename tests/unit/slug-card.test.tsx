@@ -174,24 +174,13 @@ describe("SlugCard — Clear override", () => {
   });
 });
 
-describe("SlugCard — dirty propagation", () => {
-  it("fires onDirtyChange(true) after the first edit and (false) on a successful save", async () => {
-    const onDirty = vi.fn();
-    stubFetch({ body: { ok: true, fieldName: "slug", value: "new-handle" } });
-    render(
-      <SlugCard
-        cwid={CWID}
-        liveSlug="alex"
-        initialOverride={null}
-        onDirtyChange={onDirty}
-      />,
-    );
-    // Initial dirty=false propagates once.
-    expect(onDirty).toHaveBeenLastCalledWith(false);
-    typeInto("new-handle");
-    expect(onDirty).toHaveBeenLastCalledWith(true);
-    fireEvent.click(screen.getByTestId("slug-card-save"));
-    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+describe("SlugCard — panel copy", () => {
+  it("notes both the short root form and the /scholars/ form lead to the same page", () => {
+    render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride={null} />);
+    const desc = screen.getByText(/Override the directory-derived URL segment/);
+    expect(desc.textContent).toMatch(/scholars\.weill\.cornell\.edu\/<segment>/);
+    expect(desc.textContent).toMatch(/\/scholars\/<segment>/);
+    expect(desc.textContent).toMatch(/same page/i);
   });
 });
 

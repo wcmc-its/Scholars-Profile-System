@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
-export type AdminSubnavActive = "profiles" | "slug-requests" | "administrators";
+export type AdminSubnavActive = "profiles" | "slug-requests" | "slugs" | "administrators";
 
 export function AdminSubnav({
   active,
@@ -44,6 +44,14 @@ export function AdminSubnav({
             count={pendingSlugRequests}
           />
         )}
+        {/* Always visible to superusers — the slug namespace (active / historical
+            / override / reserved) exists regardless of the slug-request flag. */}
+        <AdminTab
+          href="/edit/slugs"
+          id="slugs"
+          label="Slug registry"
+          active={active === "slugs"}
+        />
         {administratorsTab !== null && administratorsTab !== undefined && (
           <AdminTab
             href="/edit/administrators"

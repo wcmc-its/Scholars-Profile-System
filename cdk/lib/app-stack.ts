@@ -863,6 +863,26 @@ export class AppStack extends Stack {
         SELF_EDIT_ADMINISTRATORS_TAB: "on",
         SELF_EDIT_ED_ADMINS_IMPORT: "off",
         SELF_EDIT_ORG_UNIT_CREATE_SUPERUSER_ONLY: "off",
+        // #746 — self-edit "Not mine" → ReCiter gold-standard reject.
+        // STAGING-FIRST rollout: ON in staging, OFF in prod until the staging
+        // soak completes (prod flips in a follow-up). While off, "Not mine?"
+        // keeps the Publication-Manager off-ramp. The ReCiter admin key lives
+        // ONLY in the ETL task, so the app just records the reject locally and
+        // the etl:reciter-refresh scanner propagates it to the gold standard +
+        // fires the delayed re-score.
+        RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
+        // (relationships named in a scholar's own PubMed competing-interest
+        // statements that aren't in their current WRG disclosures) + its disavow
+        // endpoint. ENABLED in both envs by operator decision (the source is
+        // productionized like any other — see docs/coi-pubmed-suggestion-approach.md):
+        // the concept/copy gate is signed off; the High-tier precision-labeling
+        // pass (docs/coi-pubmed-HANDOFF.md § C.2) is an accepted-residual follow-up,
+        // not a blocker. The panel only renders when candidates exist for a
+        // genuine (non-impersonating) self viewer, so it stays invisible until the
+        // nightly etl:coi-gap source has seeded data in that env. Prod takes
+        // effect only on an approval-gated `cdk deploy Sps-App-prod`.
+        SELF_EDIT_COI_GAP_HINT: "on",
         // #497 -- self-serve slug ("Profile URL") request lifecycle: the scholar
         // request card, the superuser /edit/slug-requests approve/decline queue,
         // and the requester notification (PRs #503/#504/#505). Read via
@@ -1381,6 +1401,14 @@ export class AppStack extends Stack {
       minHealthyPercent: 100,
       maxHealthyPercent: 200,
       circuitBreaker: { rollback: true },
+      // A freshly placed task reports 503 on /api/health until its startup
+      // warm-up pass completes (lib/warmup.ts flips the lib/warmup-state.ts
+      // latch; self-bounded by WARMUP_BUDGET_MS ~15s). Give ECS a grace window
+      // comfortably larger than that budget + the 2x30s ALB healthy threshold
+      // so it never treats a still-warming task as failed and trips the circuit
+      // breaker above into a deploy rollback. Steady-state liveness is
+      // unaffected: the latch is one-way, so once warm the check stays 200.
+      healthCheckGracePeriod: Duration.seconds(120),
       enableExecuteCommand: false,
     });
     // Manual L1 attachment to the target group. Calling

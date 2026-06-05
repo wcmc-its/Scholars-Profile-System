@@ -1,23 +1,46 @@
 /**
- * The Apollo ATTRIBUTES rail (#160 UI follow-up,
- * `self-edit-launch-spec.md` § Layout). A `<nav>` landmark of attribute
- * **links** (`?attr=…`) so each attribute is deep-linkable and server-rendered
- * per selection — no client-only routing. The active item is a maroon fill +
- * chevron + `aria-current="page"`; a read-only attribute carries a lock glyph
- * and is muted (but is still a normal link to its read-only panel — never a
- * disabled control, which a keyboard/SR user couldn't reach).
+ * The Apollo ATTRIBUTES rail (#160 UI follow-up, `self-edit-launch-spec.md`
+ * § Layout; vision-round T2.2). A `<nav>` landmark of attribute **links**
+ * (`?attr=…`) so each attribute is deep-linkable and server-rendered per
+ * selection — no client-only routing. The active item is a maroon fill +
+ * chevron + `aria-current="page"`.
+ *
+ * Editability is legible at a glance via GROUP headers ("Yours to edit" /
+ * "From WCM systems") that separate the scholar-editable surface from the
+ * sourced one; when no item carries a `group` the rail falls back to one flat
+ * list (back-compat for the unit / sibling-division rails that reuse
+ * `RailItem`). Beyond the headers the links are NOT visually differentiated by
+ * tier — every item reads the same so the rail stays simple — but read-only and
+ * hide-only-sourced items each carry an sr-only note, and no item is ever a
+ * disabled control (a keyboard / screen-reader user must still reach the panel).
+ *
+ * Focus is contrast-correct on both backgrounds: a white ring on the maroon
+ * active item, a maroon (`--apollo-ring`) ring on the pale rail.
  */
 import Link from "next/link";
-import { ChevronRight, Lock } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+export type RailKind = "owned" | "sourced" | "readonly";
 
 export type RailItem = {
   /** The `?attr=` value (e.g. "appointments"). */
   key: string;
   label: string;
-  /** Read-only (SOR) attribute — lock glyph, muted. */
+  /** Read-only (SOR) attribute — view-only on Scholars (sr-only note only). */
   readonly?: boolean;
+  /** Optional group header. When no item has one, the rail renders flat. */
+  group?: string;
+  /** Editability tier; defaults from `readonly` when omitted. */
+  kind?: RailKind;
+  /**
+   * A nested sub-item rendered indented beneath the preceding non-child item
+   * (its parent). Used for "From your publications", which is a sub-view of
+   * Conflicts of Interest, not a flat sibling. When a child is active the parent
+   * stays highlighted so the scholar keeps their place in the tree.
+   */
+  child?: boolean;
 };
 
 export type AttributeRailProps = {
@@ -29,38 +52,135 @@ export type AttributeRailProps = {
 };
 
 export function AttributeRail({ items, active, basePath }: AttributeRailProps) {
+  const grouped = items.some((i) => i.group);
+  // When the active item is a nested child, its parent (the nearest preceding
+  // non-child item) stays highlighted so the tree position reads clearly.
+  const activeParentKey = parentKeyOf(items, active);
   return (
-    <nav aria-label="Profile attributes" className="bg-apollo-rail border-apollo-rail-border rounded-md border p-2">
-      <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
-        Attributes
-      </p>
-      <ul className="flex flex-col gap-0.5">
-        {items.map((item) => {
-          const isActive = item.key === active;
-          return (
-            <li key={item.key}>
-              <Link
-                href={`${basePath}?attr=${item.key}`}
-                aria-current={isActive ? "page" : undefined}
-                data-testid={`rail-${item.key}`}
-                className={cn(
-                  "focus-visible:ring-ring flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none",
-                  isActive
-                    ? "bg-apollo-maroon text-apollo-maroon-foreground font-medium"
-                    : "hover:bg-apollo-rail-border/60 text-foreground",
-                  !isActive && item.readonly && "text-muted-foreground",
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  {item.readonly && <Lock className="size-3.5 shrink-0" aria-hidden />}
-                  {item.label}
-                </span>
-                {isActive && <ChevronRight className="size-4 shrink-0" aria-hidden />}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+    <nav
+      aria-label="Profile attributes"
+      className="bg-apollo-rail border-apollo-rail-border rounded-md border p-2"
+    >
+      {grouped ? (
+        groupItems(items).map((g) => (
+          <div key={g.label} className="mb-2 last:mb-0">
+            <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
+              {g.label}
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {g.items.map((item) => (
+                <RailLink
+                  key={item.key}
+                  item={item}
+                  active={active}
+                  parentActive={item.key === activeParentKey}
+                  basePath={basePath}
+                />
+              ))}
+            </ul>
+          </div>
+        ))
+      ) : (
+        <>
+          <p className="text-muted-foreground px-2 py-1 text-xs font-semibold tracking-wide uppercase">
+            Attributes
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {items.map((item) => (
+              <RailLink
+                key={item.key}
+                item={item}
+                active={active}
+                parentActive={item.key === activeParentKey}
+                basePath={basePath}
+              />
+            ))}
+          </ul>
+        </>
+      )}
     </nav>
+  );
+}
+
+/**
+ * If `active` is a nested child, return its parent key (the nearest preceding
+ * non-child item); otherwise `null`. Lets the parent render highlighted while a
+ * child is selected.
+ */
+function parentKeyOf(items: ReadonlyArray<RailItem>, active: string): string | null {
+  let lastParent: string | null = null;
+  for (const item of items) {
+    if (item.child) {
+      if (item.key === active) return lastParent;
+    } else {
+      lastParent = item.key;
+    }
+  }
+  return null;
+}
+
+/** Bucket items by `group`, preserving first-appearance group order. */
+function groupItems(items: ReadonlyArray<RailItem>): Array<{ label: string; items: RailItem[] }> {
+  const order: string[] = [];
+  const map = new Map<string, RailItem[]>();
+  for (const item of items) {
+    const g = item.group ?? "";
+    if (!map.has(g)) {
+      map.set(g, []);
+      order.push(g);
+    }
+    map.get(g)!.push(item);
+  }
+  return order.map((label) => ({ label, items: map.get(label)! }));
+}
+
+function RailLink({
+  item,
+  active,
+  parentActive,
+  basePath,
+}: {
+  item: RailItem;
+  active: string;
+  /** This item is the parent of the currently-active child — stays highlighted. */
+  parentActive?: boolean;
+  basePath: string;
+}) {
+  const isActive = item.key === active;
+  const kind: RailKind = item.kind ?? (item.readonly ? "readonly" : "owned");
+  return (
+    <li>
+      <Link
+        href={`${basePath}?attr=${item.key}`}
+        aria-current={isActive ? "page" : undefined}
+        data-testid={`rail-${item.key}`}
+        className={cn(
+          "flex min-h-11 items-center justify-between gap-2 rounded-md border-l-2 border-transparent px-3 py-2 text-sm transition-colors md:min-h-9",
+          "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none",
+          // Nested child ("From your publications"): indented, with a short
+          // connector elbow to its parent, and a touch smaller/quieter.
+          item.child &&
+            "relative pl-9 text-[0.9rem] before:absolute before:top-1/2 before:left-[1.15rem] before:h-px before:w-2 before:-translate-y-1/2 before:content-['']",
+          isActive
+            ? cn(
+                "bg-apollo-maroon text-apollo-maroon-foreground focus-visible:ring-offset-apollo-maroon font-medium focus-visible:ring-white",
+                item.child && "before:bg-white/50",
+              )
+            : cn(
+                "text-foreground hover:bg-apollo-rail-hover hover:border-apollo-maroon focus-visible:ring-apollo-ring focus-visible:ring-offset-apollo-rail",
+                // Parent of the active child: subtle persistent highlight.
+                parentActive && "bg-apollo-rail-hover",
+                item.child && "before:bg-apollo-border-strong",
+              ),
+        )}
+      >
+        <span className="flex items-center gap-2">
+          {item.label}
+          {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
+          {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}
+        </span>
+        {isActive && <ChevronRight className="size-4 shrink-0" aria-hidden />}
+      </Link>
+    </li>
   );
 }

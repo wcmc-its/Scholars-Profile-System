@@ -80,6 +80,44 @@ describe("RequestAChangeDialog", () => {
     ).toBeTruthy();
   });
 
+  it("pre-selects initialIssueId on open (per-row 'Not mine?' lands on the not-mine route)", () => {
+    render(
+      <RequestAChangeDialog
+        attribute="publications"
+        cwid="abc1001"
+        itemLabel="My Paper"
+        initialIssueId="publication-not-mine"
+        triggerTestId="pub-not-mine"
+      />,
+    );
+    open("pub-not-mine");
+    // The not-mine issue is already selected: its self-service callout + verb
+    // ("Flag as not mine") render without the scholar having to pick anything.
+    const radio = within(screen.getByTestId("rac-issue-publication-not-mine")).getByRole("radio");
+    expect((radio as HTMLInputElement).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("request-a-change-open").textContent).toContain("Flag as not mine");
+  });
+
+  it("renders a custom trigger via the render-prop when provided", () => {
+    render(
+      <RequestAChangeDialog
+        attribute="publications"
+        cwid="abc1001"
+        trigger={(openDialog) => (
+          <button type="button" data-testid="custom-trigger" onClick={openDialog}>
+            Not mine?
+          </button>
+        )}
+      />,
+    );
+    // The default outline trigger is replaced by the custom one.
+    expect(screen.queryByTestId("request-a-change-trigger")).toBeNull();
+    const custom = screen.getByTestId("custom-trigger");
+    expect(custom.textContent).toBe("Not mine?");
+    fireEvent.click(custom);
+    expect(screen.getByRole("dialog", { name: /request a change/i })).toBeTruthy();
+  });
+
   it("self-service → verb-named tool link + callout instruction (ORCID resolves {cwid})", () => {
     render(<RequestAChangeDialog attribute="name-title" cwid="abc1001" />);
     open();
@@ -150,7 +188,7 @@ describe("RequestAChangeDialog", () => {
     pickIssue("education-wrong");
     fireEvent.click(screen.getByTestId("request-a-change-submit"));
 
-    expect(await screen.findByText(/email client should have opened/i)).toBeTruthy();
+    expect(await screen.findByText(/finish in your email app/i)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("facultyaffairs@med.cornell.edu");
     expect(window.location.href.startsWith("mailto:facultyaffairs@med.cornell.edu")).toBe(true);
   });
