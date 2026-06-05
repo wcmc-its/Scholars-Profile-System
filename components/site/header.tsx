@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { ScrollRevealedSearch } from "@/components/site/scroll-revealed-search";
 import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
+import { BetaBadge, isBetaBadgeEnabled } from "@/components/site/beta-badge";
 
 export function SiteHeader({
   showSearch = true,
@@ -24,6 +25,11 @@ export function SiteHeader({
   // generated pages (e.g. /scholars/[slug]) to change "static → dynamic at
   // runtime" and 500s them (#640).
 
+  // #760 — launch-period "Beta" marker. Default ON; gated by SHOW_BETA_BADGE
+  // (process.env only, NOT cookies) so it stays cache-safe like the rest of the
+  // header. Retired at full launch by flipping the flag, not a code change.
+  const showBetaBadge = isBetaBadgeEnabled();
+
   return (
     <header
       className="sticky top-0 z-50 h-[60px] border-b border-black/15"
@@ -33,20 +39,23 @@ export function SiteHeader({
       }}
     >
       <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-6">
-        <Link href="/" className="flex flex-col shrink-0 gap-[4px] no-underline">
-          <span
-            className="font-serif leading-none text-white"
-            style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
-          >
-            Scholars
-          </span>
-          <span
-            className="font-sans uppercase leading-none text-white/82"
-            style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.12em" }}
-          >
-            Weill Cornell Medicine
-          </span>
-        </Link>
+        <div className="flex shrink-0 items-start gap-2.5">
+          <Link href="/" className="flex flex-col gap-[4px] no-underline">
+            <span
+              className="font-serif leading-none text-white"
+              style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
+            >
+              Scholars
+            </span>
+            <span
+              className="font-sans uppercase leading-none text-white/82"
+              style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.12em" }}
+            >
+              Weill Cornell Medicine
+            </span>
+          </Link>
+          {showBetaBadge ? <BetaBadge className="mt-[3px]" /> : null}
+        </div>
 
         {showSearch ? (
           <div className="flex-1">
