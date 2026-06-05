@@ -912,6 +912,14 @@ export class AppStack extends Stack {
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
         FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
+        // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
+        // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
+        // badge shows in both envs while we're in beta. Wired here explicitly so
+        // the off-switch is discoverable and flag parity holds (local == deployed).
+        // Retire at full launch by setting this to "off" and `cdk deploy
+        // Sps-App-<env>` -- no code revert (CD re-rolls the image only, so an
+        // env-flag change requires an explicit cdk deploy).
+        SHOW_BETA_BADGE: "on",
         // #688 / #692 -- search query-interpretation flags. Graduated to prod
         // parity after the staging UAT + SPEC §8 eval: the #692 generic-term
         // de-highlight and the #688 "Why this match" MeSH-provenance note now

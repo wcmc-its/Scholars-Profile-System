@@ -2,6 +2,7 @@ import Link from "next/link";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { ScrollRevealedSearch } from "@/components/site/scroll-revealed-search";
 import { HeaderAuthSlot } from "@/components/site/header-auth-slot";
+import { BetaBadge, isBetaBadgeEnabled } from "@/components/site/beta-badge";
 
 export function SiteHeader({
   showSearch = true,
@@ -24,6 +25,11 @@ export function SiteHeader({
   // generated pages (e.g. /scholars/[slug]) to change "static → dynamic at
   // runtime" and 500s them (#640).
 
+  // #760 — launch-period "Beta" marker. Default ON; gated by SHOW_BETA_BADGE
+  // (process.env only, NOT cookies) so it stays cache-safe like the rest of the
+  // header. Retired at full launch by flipping the flag, not a code change.
+  const showBetaBadge = isBetaBadgeEnabled();
+
   return (
     <header
       className="sticky top-0 z-50 h-[60px] border-b border-black/15"
@@ -33,12 +39,18 @@ export function SiteHeader({
       }}
     >
       <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-6">
-        <Link href="/" className="flex flex-col shrink-0 gap-[4px] no-underline">
-          <span
-            className="font-serif leading-none text-white"
-            style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
-          >
-            Scholars
+        <Link href="/" className="flex shrink-0 flex-col gap-[4px] no-underline">
+          {/* #760 — badge shares the wordmark's top row so it centers on the
+              "Scholars" cap height via items-center (no magic vertical offset);
+              the subtitle drops to the row below. */}
+          <span className="flex items-center gap-2.5">
+            <span
+              className="font-serif leading-none text-white"
+              style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
+            >
+              Scholars
+            </span>
+            {showBetaBadge ? <BetaBadge /> : null}
           </span>
           <span
             className="font-sans uppercase leading-none text-white/82"
