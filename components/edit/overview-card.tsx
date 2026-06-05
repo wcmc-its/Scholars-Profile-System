@@ -84,7 +84,7 @@ function selectionFromOptions(options: OverviewSourceOptions): OverviewSelection
   return {
     pmids: options.publications.filter((p) => p.defaultSelected).map((p) => p.pmid),
     grantIds: options.funding.filter((f) => f.defaultSelected).map((f) => f.id),
-    toolNames: [],
+    toolNames: options.tools.filter((t) => t.defaultSelected).map((t) => t.toolName),
   };
 }
 

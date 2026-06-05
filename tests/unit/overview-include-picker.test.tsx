@@ -189,8 +189,15 @@ describe("OverviewIncludePicker — Methods section (dark until C3)", () => {
               category: "vector platform",
               pmidCount: 28,
               maxConfidence: 0.9,
+              defaultSelected: true,
             },
-            { toolName: "PET imaging", category: "imaging", pmidCount: 12, maxConfidence: 0.8 },
+            {
+              toolName: "PET imaging",
+              category: "imaging",
+              pmidCount: 12,
+              maxConfidence: 0.8,
+              defaultSelected: true,
+            },
           ],
         })}
         selection={sel({ toolNames: ["AAV vectors"] })}
@@ -210,6 +217,7 @@ describe("OverviewIncludePicker — Methods section (dark until C3)", () => {
       category: "method",
       pmidCount: 5,
       maxConfidence: 0.5,
+      defaultSelected: false,
     }));
     render(
       <OverviewIncludePicker
