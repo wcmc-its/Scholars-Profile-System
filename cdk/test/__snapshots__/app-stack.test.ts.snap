@@ -1559,6 +1559,7 @@ service:
         "DesiredCount": 2,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
+        "HealthCheckGracePeriodSeconds": 120,
         "LaunchType": "FARGATE",
         "LoadBalancers": [
           {
@@ -4552,6 +4553,7 @@ service:
         "DesiredCount": 1,
         "EnableECSManagedTags": false,
         "EnableExecuteCommand": false,
+        "HealthCheckGracePeriodSeconds": 120,
         "LaunchType": "FARGATE",
         "LoadBalancers": [
           {
