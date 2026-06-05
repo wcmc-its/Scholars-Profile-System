@@ -232,6 +232,121 @@ describe("OverviewCard — live preview link", () => {
 });
 
 // ---------------------------------------------------------------------------
+// #742 — the overview-statement generator affordance (SELF arm, behind a flag)
+// ---------------------------------------------------------------------------
+
+const GENERATE_BANNER =
+  "Draft generated from your Scholars data. Review and edit it before saving — nothing is published until you save.";
+const GENERATE_SPARSE =
+  "We don't have enough of your work indexed to draft an overview yet. You can write your own, or review My Publications first.";
+const GENERATE_RATE_LIMITED =
+  "You've generated several drafts recently — please try again in a little while.";
+const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again.";
+
+function stubGenerateOk(draft: string) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ ok: true, draft }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+function stubGenerateError(status: number, error: string) {
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ ok: false, error }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+}
+
+describe("OverviewCard — generator affordance", () => {
+  it("hides Generate/Regenerate entirely when generateEnabled is false", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" />);
+    expect(screen.queryByTestId("overview-generate")).toBeNull();
+    expect(screen.queryByTestId("overview-regenerate")).toBeNull();
+  });
+
+  it("shows Generate (not Regenerate) when enabled and the bio is empty", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    expect(screen.getByTestId("overview-generate")).toBeTruthy();
+    expect(screen.queryByTestId("overview-regenerate")).toBeNull();
+  });
+
+  it("shows only Regenerate (G9) when the scholar already has a rich bio", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>An existing bio.</p>" generateEnabled />);
+    expect(screen.queryByTestId("overview-generate")).toBeNull();
+    expect(screen.getByTestId("overview-regenerate")).toBeTruthy();
+  });
+
+  it("POSTs to /api/edit/overview/generate with { entityId }", async () => {
+    const f = stubGenerateOk("<p>A drafted overview.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(1));
+    const [url, opts] = f.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/edit/overview/generate");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body as string)).toEqual({ entityId: CWID });
+  });
+
+  it("on 200 injects the draft, marks the card dirty (Save enabled), and shows the banner", async () => {
+    stubGenerateOk("<p>A drafted overview.</p>");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    // Pristine empty bio → Save disabled before generating.
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
+    // The draft differs from the empty saved value ⇒ dirty ⇒ Save enabled.
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false);
+    // Generate flips to Regenerate after a draft is seeded.
+    expect(screen.getByTestId("overview-regenerate")).toBeTruthy();
+    expect(screen.queryByTestId("overview-generate")).toBeNull();
+  });
+
+  it("on 422 insufficient_facts shows the sparse-data message and leaves the editor unchanged", async () => {
+    stubGenerateError(422, "insufficient_facts");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(screen.getByText(GENERATE_SPARSE)).toBeTruthy());
+    // Editor untouched ⇒ still pristine ⇒ Save disabled, Generate still shown.
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("overview-generate")).toBeTruthy();
+  });
+
+  it("on 429 rate_limited shows the rate-limit message", async () => {
+    stubGenerateError(429, "rate_limited");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(screen.getByText(GENERATE_RATE_LIMITED)).toBeTruthy());
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+  });
+
+  it("on a 502 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
+    stubGenerateError(502, "generation_failed");
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
+    expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("overview-generate")).toBeTruthy();
+  });
+
+  it("on a network failure shows the inline generation error", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    fireEvent.click(screen.getByTestId("overview-generate"));
+    await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
+  });
+
+  it("the read-only (superuser) arm never renders a Generate button", () => {
+    render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly generateEnabled />);
+    expect(screen.queryByTestId("overview-generate")).toBeNull();
+    expect(screen.queryByTestId("overview-regenerate")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Phase 7 — readOnly arm (the superuser surface render of another scholar's bio)
 // ---------------------------------------------------------------------------
 
