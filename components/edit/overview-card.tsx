@@ -16,19 +16,21 @@
  * Phase 7 — the `readOnly` arm. The superuser surface
  * (`/edit/scholar/[other-cwid]`) renders the merged sanitized HTML through a
  * `prose prose-sm` div with no toolbar, no Save, no counter, no unsaved-guard.
- * The read-only branch is a separate sub-component so the editor's hooks /
- * fetch path never initialize on a surface that doesn't use them, keeping the
- * non-editor render clean (a future dynamic-import of `OverviewEditor` would
- * harden the bundle isolation — fast-follow per the Phase 7 plan §12).
  *
- * #742 — the overview-statement generator. Behind `generateEnabled` (the SELF
- * arm only), the editor exposes "Generate a draft" / "Regenerate", which POST
- * `/api/edit/overview/generate` and seed the returned draft into the editor as
- * *unsaved* content (`overview-statement-generator-spec.md` § The generate flow
- * + § States & edge cases G1–G9). The generator never writes the DB; the
- * existing Save path is what publishes the (now-dirty) draft. A new draft
- * re-seeds the editor by bumping `editorKey` against a `seedHtml` distinct from
- * `savedHtml`, so Discard still reverts to the last-saved bio (not the draft).
+ * #742 v3 — two tabs (decision 1, inline publish). When `generateEnabled`, the
+ * Overview surface splits into **Existing** (the plain manual editor — saves as
+ * `authored`) and **Generator** ᴮᴱᵀᴬ (controls + Generate + its OWN editor —
+ * saves as `generated`/`generated_edited`). Both publish through the same
+ * `/api/edit/field`; the shared saved bio + provenance + draft history live in
+ * the parent so each tab keeps an independent unsaved draft and one
+ * `UnsavedChangesGuard` covers either-tab-dirty. When `generateEnabled` is
+ * false (the dark-flag default and every non-self surface), there are NO tabs —
+ * the manual editor renders exactly as the Phase 6 surface did, so that path is
+ * byte-for-byte unchanged.
+ *
+ * The generator never writes the published bio. A draft seeds the Generator's
+ * editor as UNSAVED content; the existing Save path publishes it. `savedHtml`
+ * stays the last-published value, so Discard reverts there (spec G3/G4).
  */
 "use client";
 
@@ -47,6 +49,7 @@ import {
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
@@ -94,15 +97,14 @@ export type OverviewCardProps = {
   /**
    * The superuser-mode read-only render (#356 Phase 7 C3, UI-SPEC § Card 1
    * superuser arm). When true, the card displays the merged sanitized bio
-   * with no editor / toolbar / Save / counter / unsaved-guard, and the
-   * description copy explains why the bio is uneditable here.
+   * with no editor / toolbar / Save / counter / unsaved-guard.
    */
   readOnly?: boolean;
   /**
    * Whether the #742 overview-statement generator is available on this surface
-   * (`SELF_EDIT_OVERVIEW_GENERATE`). Passed true only on the SELF arm — an
-   * owner generating their own draft. Off ⇒ no Generate/Regenerate affordance
-   * and the editor behaves exactly as the Phase 6 surface did.
+   * (`SELF_EDIT_OVERVIEW_GENERATE`). Passed true only on the SELF arm. Off ⇒ no
+   * tabs and no Generate affordance; the editor behaves exactly as the Phase 6
+   * surface did.
    */
   generateEnabled?: boolean;
 };
@@ -157,7 +159,9 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Editor arm — self mode (the Phase 6 surface, unchanged behavior).
+// Editor arm — self mode. One manual surface (Existing); plus, behind the flag,
+// the Generator tab (#742 v3). Shared saved bio + provenance + history live
+// here so both tabs publish to one field and keep independent drafts.
 // ---------------------------------------------------------------------------
 
 type OverviewEditorCardProps = Pick<
@@ -171,52 +175,20 @@ function OverviewEditorCard({
   previewHref,
   generateEnabled = false,
 }: OverviewEditorCardProps) {
-  const [currentHtml, setCurrentHtml] = React.useState(initialHtml);
+  // The currently-published bio — the dirty baseline shared by both tabs. A Save
+  // from either tab updates this (and the other tab's draft is then dirty vs the
+  // new value, which is correct: it's an independent candidate).
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
-  // What the editor seeds from on (re)mount. Defaults to the saved bio; a
-  // generated draft swaps it to the draft so the editor re-seeds with that text
-  // while `savedHtml` stays the last-published value (so Discard reverts there,
-  // not to the draft — spec G3 keeps the saved bio recoverable).
-  const [seedHtml, setSeedHtml] = React.useState(initialHtml);
-  const [isSaving, setIsSaving] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [justSaved, setJustSaved] = React.useState(false);
-  // Bumping this remounts OverviewEditor, re-seeding it from seedHtml — the
-  // mechanism behind Discard and behind injecting a generated draft (Tiptap has
-  // no controlled-value prop).
-  const [editorKey, setEditorKey] = React.useState(0);
 
-  // #742 generator UI state. `generated` tracks whether a draft has been seeded
-  // this session (drives Generate→Regenerate), `lastGeneratedDraft` is the exact
-  // text last seeded (so a regenerate-over-manual-edits confirm can tell a draft
-  // apart from the scholar's own edits, spec G3).
-  const [isGenerating, setIsGenerating] = React.useState(false);
-  const [generated, setGenerated] = React.useState(false);
-  const [lastGeneratedDraft, setLastGeneratedDraft] = React.useState<string | null>(null);
-  const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
-  const [generateError, setGenerateError] = React.useState<string | null>(null);
-  // The steering controls' value (voice/tone/length/elements/instructions). Sent
-  // with each generate request; the server re-normalizes it (never trusted).
-  const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
-
-  // #742 Phase B — draft history + provenance. `generations` is the owner's own
-  // recent OverviewGeneration rows (newest first); `provenance` is the one-line
-  // origin of the *currently saved* bio; `currentGenerationId` ties the in-editor
-  // draft to the generation it came from, so Save can record provenance (it rides
-  // in the field POST as `sourceGenerationId`). All three are owner-only.
+  // #742 Phase B — draft history + provenance, owner-only. `generations` drives
+  // the Versions panel; `provenance` is the one-line origin of the *currently
+  // saved* bio (rendered above the tabs, since it describes the live bio
+  // regardless of which tab you're on).
   const [generations, setGenerations] = React.useState<OverviewGenerationItem[]>([]);
   const [provenance, setProvenance] = React.useState<OverviewProvenanceLine | null>(null);
-  const [currentGenerationId, setCurrentGenerationId] = React.useState<string | null>(null);
 
-  const dirty = currentHtml !== savedHtml;
-  const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
-  // Hide Generate when the scholar already has a non-empty saved bio (spec G9 —
-  // don't invite clobbering good content); only Regenerate, behind a confirm.
-  const hasExistingBio = initialHtml.trim().length > 0;
-
-  // #742 Phase B — re-read the owner's draft history + the saved bio's
-  // provenance. Best-effort: a failed read leaves the panel/line in their last
-  // state (the history is a convenience, never a gate on editing or saving).
+  // Re-read the owner's draft history + the saved bio's provenance. Best-effort:
+  // a failed read leaves the panel/line in their last state.
   const refreshGenerations = React.useCallback(async () => {
     if (!generateEnabled) return;
     try {
@@ -226,61 +198,297 @@ function OverviewEditorCard({
       setGenerations(Array.isArray(data.generations) ? data.generations : []);
       setProvenance(data.provenance ?? null);
     } catch {
-      // Swallow — the history panel is non-essential and must never disrupt the
-      // editor.
+      // Swallow — the history panel is non-essential and must never disrupt the editor.
     }
   }, [generateEnabled]);
 
-  // Load the history + provenance once on mount (SELF arm only).
   React.useEffect(() => {
     void refreshGenerations();
   }, [refreshGenerations]);
 
-  function handleEditorChange(html: string) {
-    setCurrentHtml(html);
-    // The "Saved — live" confirmation persists across keystrokes and clears
-    // only on the next save (vision-round T3.1) — re-editing doesn't un-publish
-    // the last-saved bio.
-    if (error) setError(null);
-    if (generateError) setGenerateError(null);
+  // A Save from either tab publishes and re-reads provenance. `value` is the
+  // server's post-sanitize response, which becomes the new shared baseline.
+  const onSaved = React.useCallback(
+    (value: string) => {
+      setSavedHtml(value);
+      void refreshGenerations();
+    },
+    [refreshGenerations],
+  );
+
+  // Two independent editor states, both rooted on the shared `savedHtml`. The
+  // generator one composes the manual editor + the generate/version machinery.
+  const existing = useOverviewEditor({ cwid, savedHtml, onSaved });
+  const generator = useOverviewGenerator({ cwid, savedHtml, onSaved, refreshGenerations });
+
+  const dirty = existing.dirty || (generateEnabled && generator.editor.dirty);
+
+  // Without the flag: the Phase 6 manual surface, no tabs — unchanged behavior.
+  if (!generateEnabled) {
+    return (
+      <EditPanel
+        slot="overview-card"
+        heading="Overview"
+        owned
+        description="A short bio shown at the top of your public profile."
+      >
+        <UnsavedChangesGuard dirty={dirty} />
+        <OverviewManualSurface editor={existing} previewHref={previewHref} />
+      </EditPanel>
+    );
   }
 
-  // Load a past draft from the Versions panel into the editor — the same
-  // seed-and-remount mechanism as a fresh generate, with the same "review before
-  // saving" banner. `savedHtml` is untouched, so Discard still reverts to the
-  // last-saved bio; the generation link is re-established so Save can record
-  // provenance against this version.
-  function loadVersion(gen: OverviewGenerationItem) {
-    if (isGenerating || isSaving) return;
-    setSeedHtml(gen.text);
-    setCurrentHtml(gen.text);
-    setLastGeneratedDraft(gen.text);
-    setGenerated(true);
-    setCurrentGenerationId(gen.id);
-    setGenerateNotice(GENERATE_BANNER);
-    setGenerateError(null);
+  // With the flag: two tabs. Existing (manual) is the default; Generator is the
+  // opt-in beta. The provenance line sits above the tabs (it's about the live
+  // bio, not a tab). Radix unmounts the inactive tab, so only one editor is in
+  // the DOM at a time and each tab's draft is preserved in the hooks above.
+  return (
+    <EditPanel
+      slot="overview-card"
+      heading="Overview"
+      owned
+      description="A short bio shown at the top of your public profile."
+    >
+      <UnsavedChangesGuard dirty={dirty} />
+      <OverviewProvenanceNote provenance={provenance} />
+      <Tabs defaultValue="existing">
+        <TabsList aria-label="Overview editor mode">
+          <TabsTrigger value="existing" data-testid="overview-tab-existing">
+            Existing
+          </TabsTrigger>
+          <TabsTrigger value="generator" data-testid="overview-tab-generator">
+            Generator
+            <span
+              className="bg-apollo-maroon/10 text-apollo-maroon ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+              data-testid="overview-generator-beta"
+            >
+              Beta
+            </span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="existing" className="flex flex-col gap-4">
+          <OverviewManualSurface editor={existing} previewHref={previewHref} />
+        </TabsContent>
+        <TabsContent value="generator" className="flex flex-col gap-4">
+          <OverviewGeneratorSurface
+            generator={generator}
+            generations={generations}
+            savedHtml={savedHtml}
+            previewHref={previewHref}
+          />
+        </TabsContent>
+      </Tabs>
+    </EditPanel>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Editor state hooks — shared between the manual (Existing) surface and the
+// Generator surface, so the save/dirty/counter mechanics live in one place.
+// ---------------------------------------------------------------------------
+
+type UseOverviewEditor = {
+  /** Live editor HTML (the counter + dirty source). */
+  currentHtml: string;
+  /** Bump-to-remount key — drives a re-seed of the (uncontrolled) Tiptap editor. */
+  editorKey: number;
+  isSaving: boolean;
+  error: string | null;
+  justSaved: boolean;
+  dirty: boolean;
+  overLimit: boolean;
+  handleChange: (html: string) => void;
+  /** Re-seed the editor with `html` (generate / load-version / discard). */
+  reseed: (html: string) => void;
+  discard: () => void;
+  /** Publish the current HTML, tagging provenance with `sourceGenerationId`. */
+  save: (sourceGenerationId: string | null) => Promise<void>;
+};
+
+/**
+ * The shared editor state: live HTML, dirty/over-limit, Save (to the field
+ * route), Discard, and the re-seed mechanism. `savedHtml` is the shared
+ * baseline owned by the parent; `onSaved` hands the server's post-sanitize
+ * value back up. The editor seeds from `currentHtml`, so a tab-switch remount
+ * preserves the in-progress draft (the value isn't lost when Radix unmounts the
+ * inactive tab).
+ */
+function useOverviewEditor({
+  cwid,
+  savedHtml,
+  onSaved,
+  onChangeExtra,
+  onSaveSuccess,
+  onDiscardExtra,
+}: {
+  cwid: string;
+  savedHtml: string;
+  onSaved: (value: string) => void;
+  onChangeExtra?: () => void;
+  onSaveSuccess?: () => void;
+  onDiscardExtra?: () => void;
+}): UseOverviewEditor {
+  const [currentHtml, setCurrentHtml] = React.useState(savedHtml);
+  const [editorKey, setEditorKey] = React.useState(0);
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [justSaved, setJustSaved] = React.useState(false);
+
+  const dirty = currentHtml !== savedHtml;
+  const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
+
+  function handleChange(html: string) {
+    setCurrentHtml(html);
+    // The "Saved — live" confirmation persists across keystrokes and clears only
+    // on the next save (vision-round T3.1) — re-editing doesn't un-publish.
+    if (error) setError(null);
+    onChangeExtra?.();
+  }
+
+  function reseed(html: string) {
+    setCurrentHtml(html);
     setEditorKey((k) => k + 1);
     if (error) setError(null);
   }
 
   function discard() {
-    setCurrentHtml(savedHtml);
-    setSeedHtml(savedHtml);
-    setEditorKey((k) => k + 1);
-    if (error) setError(null);
-    if (generateError) setGenerateError(null);
-    setGenerateNotice(null);
+    reseed(savedHtml);
+    onDiscardExtra?.();
+  }
+
+  async function save(sourceGenerationId: string | null) {
+    if (!dirty || overLimit || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/edit/field", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "scholar",
+          entityId: cwid,
+          fieldName: "overview",
+          value: currentHtml,
+          // The generation this draft came from (or null for hand-written text);
+          // the field route uses it to record provenance after the upsert.
+          sourceGenerationId,
+        }),
+      });
+      const data = (await res.json()) as
+        | { ok: true; fieldName: string; value: string }
+        | { ok: false; error: string; field?: string };
+      if (!res.ok || data.ok !== true) {
+        setError(
+          "error" in data && typeof data.error === "string"
+            ? mapErrorToMessage(data.error)
+            : "Something went wrong — your changes weren't saved. Please try again.",
+        );
+        return;
+      }
+      // Server may have normalized the HTML (sanitize, link rewrite). The new
+      // shared baseline is the server's value; `currentHtml` is left as-is, so a
+      // normalization that differs shows dirty until the editor re-emits it.
+      // Guard against a malformed response without a string value so the shared
+      // baseline (and thus dirty state) can never be corrupted to a non-string.
+      if (typeof data.value === "string") onSaved(data.value);
+      setJustSaved(true);
+      onSaveSuccess?.();
+    } catch {
+      setError("Something went wrong — your changes weren't saved. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return {
+    currentHtml,
+    editorKey,
+    isSaving,
+    error,
+    justSaved,
+    dirty,
+    overLimit,
+    handleChange,
+    reseed,
+    discard,
+    save,
+  };
+}
+
+type UseOverviewGenerator = {
+  editor: UseOverviewEditor;
+  params: OverviewParams;
+  setParams: React.Dispatch<React.SetStateAction<OverviewParams>>;
+  isGenerating: boolean;
+  generated: boolean;
+  generateNotice: string | null;
+  generateError: string | null;
+  currentGenerationId: string | null;
+  generate: () => Promise<void>;
+  loadVersion: (gen: OverviewGenerationItem) => void;
+};
+
+/**
+ * The Generator surface's state: the shared editor (composed) plus the
+ * Generate/Regenerate flow, the steering params, and the draft↔generation link
+ * that lets Save record provenance. A generated draft seeds the editor as
+ * UNSAVED content; `savedHtml` is untouched so Discard reverts to the last bio.
+ */
+function useOverviewGenerator({
+  cwid,
+  savedHtml,
+  onSaved,
+  refreshGenerations,
+}: {
+  cwid: string;
+  savedHtml: string;
+  onSaved: (value: string) => void;
+  refreshGenerations: () => Promise<void>;
+}): UseOverviewGenerator {
+  const [isGenerating, setIsGenerating] = React.useState(false);
+  const [generated, setGenerated] = React.useState(false);
+  const [lastGeneratedDraft, setLastGeneratedDraft] = React.useState<string | null>(null);
+  const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
+  const [generateError, setGenerateError] = React.useState<string | null>(null);
+  const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
+  const [currentGenerationId, setCurrentGenerationId] = React.useState<string | null>(null);
+
+  const editor = useOverviewEditor({
+    cwid,
+    savedHtml,
+    onSaved,
+    // Editing the draft clears a stale generation error too.
+    onChangeExtra: () => setGenerateError(null),
+    // Publishing the draft clears the banner + draft↔generation link, then
+    // re-reads provenance (now authored / generated / generated_edited).
+    onSaveSuccess: () => {
+      setGenerateNotice(null);
+      setLastGeneratedDraft(null);
+      setGenerated(false);
+      setCurrentGenerationId(null);
+    },
+    // Discard drops the draft banner along with the text.
+    onDiscardExtra: () => setGenerateNotice(null),
+  });
+
+  function loadVersion(gen: OverviewGenerationItem) {
+    if (isGenerating || editor.isSaving) return;
+    editor.reseed(gen.text);
+    setLastGeneratedDraft(gen.text);
+    setGenerated(true);
+    setCurrentGenerationId(gen.id);
+    setGenerateNotice(GENERATE_BANNER);
+    setGenerateError(null);
   }
 
   async function generate() {
-    if (isGenerating || isSaving) return;
-    // Regenerating over edits the scholar made (text that matches neither the
-    // saved bio nor the draft we last seeded) prompts a confirm before we
-    // replace it (spec G3).
+    if (isGenerating || editor.isSaving) return;
+    // Regenerating over edits the scholar made (text matching neither the saved
+    // bio nor the last-seeded draft) prompts a confirm before we replace it (G3).
     if (
       generated &&
-      currentHtml !== savedHtml &&
-      currentHtml !== (lastGeneratedDraft ?? "") &&
+      editor.currentHtml !== savedHtml &&
+      editor.currentHtml !== (lastGeneratedDraft ?? "") &&
       !window.confirm(REGENERATE_CONFIRM)
     ) {
       return;
@@ -298,8 +506,7 @@ function OverviewEditorCard({
         | { ok: true; draft: string; model: string; generationId: string | null }
         | { ok: false; error: string };
       if (!res.ok || data.ok !== true) {
-        // Editor is left untouched on any failure (spec G8) — only a notice or
-        // error appears.
+        // Editor untouched on any failure (G8) — only a notice or error appears.
         const code = "error" in data && typeof data.error === "string" ? data.error : "";
         if (code === "insufficient_facts") {
           setGenerateNotice(GENERATE_SPARSE);
@@ -310,21 +517,14 @@ function OverviewEditorCard({
         }
         return;
       }
-      // Seed the draft as UNSAVED content: re-seed the editor from the draft and
-      // mark the card dirty so the existing Save publishes it. `savedHtml` is
-      // untouched, so Discard still reverts to the last-saved bio.
-      setSeedHtml(data.draft);
-      setCurrentHtml(data.draft);
+      // Seed the draft as UNSAVED content; the existing Save publishes it.
+      editor.reseed(data.draft);
       setLastGeneratedDraft(data.draft);
       setGenerated(true);
       setGenerateNotice(GENERATE_BANNER);
-      setEditorKey((k) => k + 1);
       // Tie the in-editor draft to its history row so a subsequent Save records
-      // provenance (origin = generated / generated_edited). `null` (a history
-      // write that hiccuped) saves as authored — see the field route contract.
+      // provenance. `null` (a history write that hiccuped) saves as authored.
       setCurrentGenerationId(data.generationId);
-      if (error) setError(null);
-      // Pick up the new history row + refreshed provenance.
       void refreshGenerations();
     } catch {
       setGenerateError(GENERATE_FAILED);
@@ -333,145 +533,159 @@ function OverviewEditorCard({
     }
   }
 
-  async function save() {
-    if (!dirty || overLimit || isSaving) return;
-    setIsSaving(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/edit/field", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          entityType: "scholar",
-          entityId: cwid,
-          fieldName: "overview",
-          value: currentHtml,
-          // The generation this draft came from (or null for hand-written text);
-          // the field route uses it to record provenance after the upsert.
-          sourceGenerationId: currentGenerationId,
-        }),
-      });
-      const data = (await res.json()) as
-        | { ok: true; fieldName: string; value: string }
-        | { ok: false; error: string; field?: string };
-      if (!res.ok || data.ok !== true) {
-        setError(
-          "error" in data && typeof data.error === "string"
-            ? mapErrorToMessage(data.error)
-            : "Something went wrong — your changes weren't saved. Please try again.",
-        );
-        return;
-      }
-      // Server may have normalized the HTML (sanitize, link rewrite). Track
-      // the post-sanitize value as the dirty baseline — see file doc-comment.
-      setSavedHtml(data.value);
-      // The saved value is now the editor's seed baseline too, so a later
-      // Discard reverts here rather than to a stale draft (spec G4). The draft
-      // origin no longer matters once the scholar has published their text.
-      setSeedHtml(data.value);
-      setJustSaved(true);
-      setGenerateNotice(null);
-      setLastGeneratedDraft(null);
-      setGenerated(false);
-      // The published text is now the baseline; the draft↔generation link no
-      // longer applies (re-loading a version re-establishes it).
-      setCurrentGenerationId(null);
-      // Re-read provenance so the line reflects this save (authored / generated /
-      // generated_edited).
-      void refreshGenerations();
-    } catch {
-      setError("Something went wrong — your changes weren't saved. Please try again.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
+  return {
+    editor,
+    params,
+    setParams,
+    isGenerating,
+    generated,
+    generateNotice,
+    generateError,
+    currentGenerationId,
+    generate,
+    loadVersion,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Presentational surfaces.
+// ---------------------------------------------------------------------------
+
+/** The Existing tab (and the no-flag surface): the plain manual editor. Saves
+ *  as `authored` (no sourceGenerationId). */
+function OverviewManualSurface({
+  editor,
+  previewHref,
+}: {
+  editor: UseOverviewEditor;
+  previewHref?: string;
+}) {
+  return <OverviewEditorBody editor={editor} sourceGenerationId={null} previewHref={previewHref} />;
+}
+
+/** The Generator tab: the steering controls + Generate/Regenerate + Versions +
+ *  notices, above the editor body. Saves as `generated`/`generated_edited`. */
+function OverviewGeneratorSurface({
+  generator,
+  generations,
+  savedHtml,
+  previewHref,
+}: {
+  generator: UseOverviewGenerator;
+  generations: OverviewGenerationItem[];
+  savedHtml: string;
+  previewHref?: string;
+}) {
+  const { editor } = generator;
+  // Hide Generate when the scholar already has a non-empty saved bio (G9 — don't
+  // invite clobbering good content); offer Regenerate (behind a confirm) instead.
+  const hasExistingBio = savedHtml.trim().length > 0;
+  const busy = generator.isGenerating || editor.isSaving;
 
   return (
-    <EditPanel
-      slot="overview-card"
-      heading="Overview"
-      owned
-      description="A short bio shown at the top of your public profile."
-    >
-      <UnsavedChangesGuard dirty={dirty} />
-      {generateEnabled && <OverviewProvenanceNote provenance={provenance} />}
-      {generateEnabled && (
-        <div className="flex flex-wrap items-center gap-3">
-          {hasExistingBio || generated ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={generate}
-              disabled={isGenerating || isSaving}
-              data-testid="overview-regenerate"
-            >
-              <RefreshCw className="size-4" />
-              {isGenerating ? "Generating…" : "Regenerate"}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={generate}
-              disabled={isGenerating || isSaving}
-              data-testid="overview-generate"
-            >
-              <Sparkles className="size-4" />
-              {isGenerating ? "Generating…" : "Generate a draft"}
-            </Button>
-          )}
-          <span className="text-muted-foreground text-sm">
-            Draft from your Scholars publications, topics, and grants — you review and edit it.
-          </span>
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        {hasExistingBio || generator.generated ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={generator.generate}
+            disabled={busy}
+            data-testid="overview-regenerate"
+          >
+            <RefreshCw className="size-4" />
+            {generator.isGenerating ? "Generating…" : "Regenerate"}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={generator.generate}
+            disabled={busy}
+            data-testid="overview-generate"
+          >
+            <Sparkles className="size-4" />
+            {generator.isGenerating ? "Generating…" : "Generate a draft"}
+          </Button>
+        )}
+        <span className="text-muted-foreground text-sm">
+          Draft from your Scholars publications, topics, and grants — you review and edit it.
+        </span>
+      </div>
+
+      <details className="group" data-testid="overview-generate-options">
+        <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
+          Generation options
+        </summary>
+        <div className="mt-3">
+          <OverviewGenerateControls
+            value={generator.params}
+            onChange={generator.setParams}
+            disabled={busy}
+          />
         </div>
-      )}
-      {generateEnabled && (
-        <details className="group" data-testid="overview-generate-options">
-          <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
-            Generation options
-          </summary>
-          <div className="mt-3">
-            <OverviewGenerateControls
-              value={params}
-              onChange={setParams}
-              disabled={isGenerating || isSaving}
-            />
-          </div>
-        </details>
-      )}
-      {generateEnabled && (
-        <OverviewVersionsPanel
-          generations={generations}
-          onLoad={loadVersion}
-          onUseSettings={setParams}
-          disabled={isGenerating || isSaving}
-        />
-      )}
-      {generateNotice && (
+      </details>
+
+      <OverviewVersionsPanel
+        generations={generations}
+        onLoad={generator.loadVersion}
+        onUseSettings={generator.setParams}
+        disabled={busy}
+      />
+
+      {generator.generateNotice && (
         <Alert data-testid="overview-generate-notice">
-          <AlertDescription>{generateNotice}</AlertDescription>
+          <AlertDescription>{generator.generateNotice}</AlertDescription>
         </Alert>
       )}
-      {generateError && (
+      {generator.generateError && (
         <Alert variant="destructive" data-testid="overview-generate-error">
-          <AlertDescription>{generateError}</AlertDescription>
+          <AlertDescription>{generator.generateError}</AlertDescription>
         </Alert>
       )}
+
+      <OverviewEditorBody
+        editor={editor}
+        sourceGenerationId={generator.currentGenerationId}
+        previewHref={previewHref}
+      />
+    </>
+  );
+}
+
+/** The editor + counter + Save/Discard row shared by both surfaces. Only one is
+ *  mounted at a time (Radix unmounts the inactive tab), so the `overview-save` /
+ *  `overview-discard` testids stay unambiguous. */
+function OverviewEditorBody({
+  editor,
+  sourceGenerationId,
+  previewHref,
+}: {
+  editor: UseOverviewEditor;
+  sourceGenerationId: string | null;
+  previewHref?: string;
+}) {
+  return (
+    <>
       <div className="max-w-prose">
-        <OverviewEditor key={editorKey} initialHtml={seedHtml} onChange={handleEditorChange} />
+        <OverviewEditor
+          key={editor.editorKey}
+          initialHtml={editor.currentHtml}
+          onChange={editor.handleChange}
+        />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span
           aria-live="polite"
           className={cn(
             "text-sm tabular-nums",
-            overLimit ? "text-destructive" : "text-muted-foreground",
+            editor.overLimit ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {currentHtml.length.toLocaleString()}/{OVERVIEW_MAX_CHARS.toLocaleString()}
+          {editor.currentHtml.length.toLocaleString()}/{OVERVIEW_MAX_CHARS.toLocaleString()}
         </span>
         <div className="flex flex-wrap items-center gap-3">
-          {justSaved && (
+          {editor.justSaved && (
             <span
               role="status"
               aria-live="polite"
@@ -489,12 +703,12 @@ function OverviewEditorCard({
               )}
             </span>
           )}
-          {dirty && (
+          {editor.dirty && (
             <Button
               type="button"
               variant="outline"
-              onClick={discard}
-              disabled={isSaving}
+              onClick={editor.discard}
+              disabled={editor.isSaving}
               data-testid="overview-discard"
             >
               Discard
@@ -503,23 +717,23 @@ function OverviewEditorCard({
           <Button
             type="button"
             variant="apollo"
-            onClick={save}
-            disabled={!dirty || overLimit || isSaving}
+            onClick={() => editor.save(sourceGenerationId)}
+            disabled={!editor.dirty || editor.overLimit || editor.isSaving}
             data-testid="overview-save"
           >
-            {isSaving ? "Saving…" : "Save bio"}
+            {editor.isSaving ? "Saving…" : "Save bio"}
           </Button>
           <span className="text-muted-foreground text-sm">
             Changes publish to your public profile immediately.
           </span>
         </div>
       </div>
-      {error && (
+      {editor.error && (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>{editor.error}</AlertDescription>
         </Alert>
       )}
-    </EditPanel>
+    </>
   );
 }
 

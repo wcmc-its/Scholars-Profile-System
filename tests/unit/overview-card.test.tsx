@@ -332,6 +332,15 @@ function postCall(f: FetchSpy): [string, RequestInit] {
   return call as unknown as [string, RequestInit];
 }
 
+/** #742 v3 — the generate UI (button, controls, versions, generator editor)
+ *  lives in the Generator tab; the manual editor is the default tab, so tests
+ *  that drive generation must switch to the Generator tab first. */
+function showGenerator() {
+  // Radix Tabs activates a trigger on mousedown (button 0), not the bare click
+  // event fireEvent.click dispatches — so drive the switch with mouseDown.
+  fireEvent.mouseDown(screen.getByTestId("overview-tab-generator"));
+}
+
 describe("OverviewCard — generator affordance", () => {
   it("hides Generate/Regenerate entirely when generateEnabled is false", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" />);
@@ -341,12 +350,14 @@ describe("OverviewCard — generator affordance", () => {
 
   it("shows Generate (not Regenerate) when enabled and the bio is empty", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     expect(screen.getByTestId("overview-generate")).toBeTruthy();
     expect(screen.queryByTestId("overview-regenerate")).toBeNull();
   });
 
   it("shows only Regenerate (G9) when the scholar already has a rich bio", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>An existing bio.</p>" generateEnabled />);
+    showGenerator();
     expect(screen.queryByTestId("overview-generate")).toBeNull();
     expect(screen.getByTestId("overview-regenerate")).toBeTruthy();
   });
@@ -354,6 +365,7 @@ describe("OverviewCard — generator affordance", () => {
   it("POSTs to /api/edit/overview/generate with { entityId, params }", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
     const [url, opts] = postCall(f);
@@ -371,6 +383,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 200 injects the draft, marks the card dirty (Save enabled), and shows the banner", async () => {
     stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     // Pristine empty bio → Save disabled before generating.
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByTestId("overview-generate"));
@@ -385,6 +398,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 422 insufficient_facts shows the sparse-data message and leaves the editor unchanged", async () => {
     stubGenerateError(422, "insufficient_facts");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_SPARSE)).toBeTruthy());
     // Editor untouched ⇒ still pristine ⇒ Save disabled, Generate still shown.
@@ -395,6 +409,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on 429 rate_limited shows the rate-limit message", async () => {
     stubGenerateError(429, "rate_limited");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_RATE_LIMITED)).toBeTruthy());
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
@@ -403,6 +418,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on a 502 shows the inline generation error and leaves the editor unchanged (G8)", async () => {
     stubGenerateError(502, "generation_failed");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
     expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(true);
@@ -412,6 +428,7 @@ describe("OverviewCard — generator affordance", () => {
   it("on a network failure shows the inline generation error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_FAILED)).toBeTruthy());
   });
@@ -426,6 +443,7 @@ describe("OverviewCard — generator affordance", () => {
 describe("OverviewCard — generation options (params)", () => {
   it("renders the controls with defaults when generateEnabled", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     expect(screen.getByTestId("overview-generate-options")).toBeTruthy();
     // Default voice is third person; the radio reflects the default value.
     expect(screen.getByTestId("overview-voice-third").getAttribute("aria-checked")).toBe("true");
@@ -440,6 +458,7 @@ describe("OverviewCard — generation options (params)", () => {
   it("after changing voice to First, Generate sends params.voice === 'first'", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-voice-first"));
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
@@ -451,6 +470,7 @@ describe("OverviewCard — generation options (params)", () => {
   it("typing instructions is reflected in the sent params", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.change(screen.getByTestId("overview-instructions"), {
       target: { value: "keep it accessible" },
     });
@@ -487,6 +507,7 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("fetches GET /api/edit/overview/generations on mount when generateEnabled", async () => {
     const f = stubFetchRouted(() => jsonResponse({ ok: true }), { generations: HISTORY });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     await waitFor(() =>
       expect(
         f.mock.calls.some(
@@ -521,6 +542,7 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("loading a version seeds the editor and shows the review banner", async () => {
     stubFetchRouted(() => jsonResponse({ ok: true }), { generations: HISTORY });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(await screen.findByTestId("overview-version-load-gen-1"));
     // The mock editor re-seeds with the loaded draft's text (defaultValue).
     await waitFor(() =>
@@ -536,6 +558,7 @@ describe("OverviewCard — version history (Phase B)", () => {
   it("Save sends sourceGenerationId from the just-generated draft", async () => {
     const f = stubGenerateOk("<p>A drafted overview.</p>", "gen-new");
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(screen.getByTestId("overview-generate"));
     await waitFor(() => expect(screen.getByText(GENERATE_BANNER)).toBeTruthy());
     fireEvent.click(screen.getByTestId("overview-save"));
@@ -543,6 +566,9 @@ describe("OverviewCard — version history (Phase B)", () => {
       const fieldCall = f.mock.calls.find((c) => c[0] === "/api/edit/field");
       expect(fieldCall).toBeTruthy();
     });
+    // Let the post-save updates (onSaved → refreshGenerations) settle in act()
+    // so the trailing setState doesn't land after the test returns.
+    await screen.findByText(/Saved — live/);
     const fieldCall = f.mock.calls.find((c) => c[0] === "/api/edit/field") as [string, RequestInit];
     const body = JSON.parse(fieldCall[1].body as string) as { sourceGenerationId: string | null };
     expect(body.sourceGenerationId).toBe("gen-new");
@@ -554,6 +580,7 @@ describe("OverviewCard — version history (Phase B)", () => {
       { generations: HISTORY },
     );
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     fireEvent.click(await screen.findByTestId("overview-version-load-gen-1"));
     await waitFor(() =>
       expect(screen.getByTestId("overview-save").hasAttribute("disabled")).toBe(false),
@@ -563,6 +590,9 @@ describe("OverviewCard — version history (Phase B)", () => {
       const fieldCall = f.mock.calls.find((c) => c[0] === "/api/edit/field");
       expect(fieldCall).toBeTruthy();
     });
+    // Let the post-save updates (onSaved → refreshGenerations) settle in act()
+    // so the trailing setState doesn't land after the test returns.
+    await screen.findByText(/Saved — live/);
     const fieldCall = f.mock.calls.find((c) => c[0] === "/api/edit/field") as [string, RequestInit];
     const body = JSON.parse(fieldCall[1].body as string) as { sourceGenerationId: string | null };
     expect(body.sourceGenerationId).toBe("gen-1");
@@ -575,6 +605,7 @@ describe("OverviewCard — version history (Phase B)", () => {
       ],
     });
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
+    showGenerator();
     // Default voice is third; applying the version (voice: first) flips the radio.
     expect(screen.getByTestId("overview-voice-third").getAttribute("aria-checked")).toBe("true");
     fireEvent.click(await screen.findByTestId("overview-version-use-settings-gen-1"));
