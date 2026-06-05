@@ -9,7 +9,6 @@
  * the takedown surface — and never the actor's CWID (the actor is already in
  * the header's account menu).
  */
-import type { ReactNode } from "react";
 import { ShieldAlert } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,15 +21,9 @@ export type SuperuserBannerProps = {
    * copy "<Name>'s profile"; `'publication'` yields the publication copy.
    */
   targetKind?: "profile" | "publication";
-  /**
-   * Optional trailing sentence appended after the main line — e.g. the
-   * load-bearing "A reason is required for every change." note the shell used
-   * to carry inline (vision-round T2.4).
-   */
-  note?: ReactNode;
 };
 
-export function SuperuserBanner({ targetLabel, targetKind = "profile", note }: SuperuserBannerProps) {
+export function SuperuserBanner({ targetLabel, targetKind = "profile" }: SuperuserBannerProps) {
   return (
     <Alert
       variant="info"
@@ -39,16 +32,21 @@ export function SuperuserBanner({ targetLabel, targetKind = "profile", note }: S
     >
       <ShieldAlert className="text-apollo-maroon size-4" />
       <AlertDescription>
-        {targetKind === "profile" ? (
-          <>
-            You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
-          </>
-        ) : (
-          <>
-            You are managing the publication <strong>{targetLabel}</strong> as an administrator.
-          </>
-        )}
-        {note ? <> {note}</> : null}
+        {/* One <p> so the sentence is a single grid item. AlertDescription is a
+            CSS grid; without this wrapper the leading text, the <strong> name,
+            and the trailing "'s profile…" each become their own grid row, which
+            is what dropped the possessive onto its own line. */}
+        <p>
+          {targetKind === "profile" ? (
+            <>
+              You are editing <strong>{targetLabel}</strong>&apos;s profile as an administrator.
+            </>
+          ) : (
+            <>
+              You are managing the publication <strong>{targetLabel}</strong> as an administrator.
+            </>
+          )}
+        </p>
       </AlertDescription>
     </Alert>
   );

@@ -57,8 +57,9 @@ type AttrDef = {
 
 /** The full attribute set; the rail filters to the actor's visible subset. */
 const ATTRIBUTES: ReadonlyArray<AttrDef> = [
-  // Self-only task-first landing (vision-round T3.4).
-  { key: "home", label: "Home", modes: ["self"] },
+  // Task-first landing (vision-round T3.4). Shared with superusers, where it
+  // reads as a read-only profile-completeness overview of the target scholar.
+  { key: "home", label: "Home", modes: ["self", "superuser"] },
   { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
@@ -84,7 +85,7 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
 
 const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
   self: "home",
-  superuser: "visibility",
+  superuser: "home",
 };
 
 /**
@@ -133,6 +134,27 @@ const SELF_RAIL_GROUP = {
   sourced: "From WCM systems",
   readonly: "From WCM systems",
 } as const;
+
+/**
+ * Superuser rail order — kept flat (no "Yours to edit" / "From WCM systems"
+ * grouping: superuser editability differs from self, so those labels would
+ * mislead). Home leads as the completeness landing; Profile URL sits at the top
+ * of the attributes per operator request. Publications and the COI-gap surface
+ * are self-only, so they are absent here.
+ */
+const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
+  "home",
+  "profile-url",
+  "name-title",
+  "photo",
+  "overview",
+  "visibility",
+  "funding",
+  "appointments",
+  "education",
+  "mentees",
+  "coi",
+];
 
 export type EditPageProps = {
   ctx: EditContext;
@@ -226,7 +248,10 @@ export function EditPage({
             },
           ];
         })
-      : visible.map((a) => ({ key: a.key, label: a.label, readonly: a.readonly }));
+      : SUPERUSER_RAIL_ORDER.flatMap((k) => {
+          const a = visible.find((v) => v.key === k);
+          return a ? [{ key: a.key, label: a.label, readonly: a.readonly }] : [];
+        });
   const basePath = mode === "superuser" ? `/edit/scholar/${ctx.scholar.cwid}` : "/edit";
   const scholarName = ctx.scholar.preferredName;
 
@@ -271,17 +296,24 @@ function renderPanel(
       const hiddenPublications = ctx.publications.filter((p) => p.state !== "shown").length;
       const isHidden =
         ctx.scholar.suppression.ownRow !== null || ctx.scholar.suppression.adminRow !== null;
+      // A superuser editing another scholar gets the same board reframed as a
+      // read-only completeness overview: copy shifts from "you" to the scholar's
+      // name, the Overview CTA is View-only (read-only for them), the
+      // Publications row drops its CTA (no superuser pubs tab), and the "Units
+      // you manage" section is omitted — it's the viewer's units, not the
+      // target's. (When a superuser edits their OWN profile this is mode='self'.)
       return (
         <HomePanel
-          basePath="/edit"
+          mode={mode}
+          basePath={mode === "superuser" ? `/edit/scholar/${cwid}` : "/edit"}
           preferredName={scholarName}
           identityImageEndpoint={identityImageEndpoint(cwid)}
           hasBio={ctx.scholar.overview.trim().length > 0}
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
           hiddenPublications={hiddenPublications}
-          manageableUnits={manageableUnits}
-          isSuperuser={isSuperuser}
+          manageableUnits={mode === "superuser" ? [] : manageableUnits}
+          isSuperuser={mode === "superuser" ? false : isSuperuser}
         />
       );
     }
