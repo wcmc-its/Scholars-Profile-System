@@ -15,6 +15,7 @@
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
+import { db } from "@/lib/db";
 import { authorizeFieldEdit, logEditDenial } from "@/lib/edit/authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import {
@@ -109,5 +110,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return editError(502, "generation_failed");
   }
 
-  return editOk({ draft: result.draft, model: result.model });
+  // --- version history (#742 Phase B). Record EVERY successful draft so the
+  //     scholar can browse / reload / regenerate from it. Best-effort: the draft
+  //     is the product, the history row is bookkeeping — a write hiccup must
+  //     never lose the draft, so this is wrapped in its own try/catch and the
+  //     route still returns 200 with generationId=null. ---
+  let generationId: string | null = null;
+  try {
+    const row = await db.write.overviewGeneration.create({
+      data: {
+        cwid: entityId,
+        text: result.draft,
+        model: result.model,
+        params,
+        createdByCwid: session.cwid,
+      },
+      select: { id: true },
+    });
+    generationId = row.id;
+  } catch (err) {
+    logEditFailure(PATH, err);
+  }
+
+  return editOk({ draft: result.draft, model: result.model, generationId });
 }

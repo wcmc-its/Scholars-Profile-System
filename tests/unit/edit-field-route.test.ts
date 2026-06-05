@@ -15,6 +15,8 @@ const {
   mockTxScholarFindUnique,
   mockTxScholarUpdate,
   mockTxSlugHistoryUpsert,
+  mockTxGenerationFindUnique,
+  mockTxProvenanceUpsert,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -29,6 +31,8 @@ const {
   mockTxScholarFindUnique: vi.fn(),
   mockTxScholarUpdate: vi.fn(),
   mockTxSlugHistoryUpsert: vi.fn(),
+  mockTxGenerationFindUnique: vi.fn(),
+  mockTxProvenanceUpsert: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -69,6 +73,9 @@ const fakeTx = {
   fieldOverride: { findUnique: mockFieldOverrideFindUnique, upsert: mockFieldOverrideUpsert },
   scholar: { findUnique: mockTxScholarFindUnique, update: mockTxScholarUpdate },
   slugHistory: { upsert: mockTxSlugHistoryUpsert },
+  // #742 Phase B — provenance is upserted in the same tx on an overview save.
+  overviewGeneration: { findUnique: mockTxGenerationFindUnique },
+  overviewProvenance: { upsert: mockTxProvenanceUpsert },
   $executeRaw: mockExecuteRaw,
 };
 
@@ -98,6 +105,9 @@ beforeEach(() => {
   mockTxScholarFindUnique.mockResolvedValue({ slug: "old-slug" });
   mockTxScholarUpdate.mockResolvedValue({});
   mockTxSlugHistoryUpsert.mockResolvedValue({});
+  // #742 Phase B — no source generation by default; provenance upsert resolves.
+  mockTxGenerationFindUnique.mockResolvedValue(null);
+  mockTxProvenanceUpsert.mockResolvedValue({});
 });
 
 describe("POST /api/edit/field", () => {
@@ -218,5 +228,142 @@ describe("POST /api/edit/field", () => {
     const body = await res.json();
     expect(body.error).toBe("reserved");
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  // ─── #742 Phase B — overview provenance, upserted in the save tx ───
+
+  it("overview save WITH a matching sourceGenerationId saved verbatim -> origin 'generated'", async () => {
+    mockTxGenerationFindUnique.mockResolvedValue({
+      cwid: "self01",
+      text: "<p>Verbatim draft.</p>",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "overview",
+        value: "<p>Verbatim draft.</p>",
+        sourceGenerationId: "gen1",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxGenerationFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "gen1" } }),
+    );
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledTimes(1);
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { cwid: "self01" },
+        create: expect.objectContaining({
+          cwid: "self01",
+          origin: "generated",
+          model: "anthropic/claude-sonnet-4.5",
+          sourceGenerationId: "gen1",
+          updatedByCwid: "self01",
+        }),
+        update: expect.objectContaining({
+          origin: "generated",
+          model: "anthropic/claude-sonnet-4.5",
+          sourceGenerationId: "gen1",
+        }),
+      }),
+    );
+  });
+
+  it("overview save WITH a matching sourceGenerationId but edited text -> origin 'generated_edited'", async () => {
+    mockTxGenerationFindUnique.mockResolvedValue({
+      cwid: "self01",
+      text: "<p>Original draft.</p>",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "overview",
+        value: "<p>Edited afterwards.</p>",
+        sourceGenerationId: "gen1",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          origin: "generated_edited",
+          model: "anthropic/claude-sonnet-4.5",
+          sourceGenerationId: "gen1",
+        }),
+      }),
+    );
+  });
+
+  it("overview save WITHOUT a sourceGenerationId -> origin 'authored' (model/source null)", async () => {
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "overview", value: "<p>Hand-authored.</p>" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxGenerationFindUnique).not.toHaveBeenCalled();
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          origin: "authored",
+          model: null,
+          sourceGenerationId: null,
+        }),
+      }),
+    );
+  });
+
+  it("overview save with a MISSING generation -> origin 'authored' (provenance never fails the save)", async () => {
+    mockTxGenerationFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "overview",
+        value: "<p>x</p>",
+        sourceGenerationId: "ghost",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ origin: "authored", model: null, sourceGenerationId: null }),
+      }),
+    );
+  });
+
+  it("overview save with a FOREIGN generation (other cwid) -> origin 'authored'", async () => {
+    mockTxGenerationFindUnique.mockResolvedValue({
+      cwid: "other9", // belongs to a different scholar
+      text: "<p>x</p>",
+      model: "anthropic/claude-sonnet-4.5",
+    });
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "overview",
+        value: "<p>x</p>",
+        sourceGenerationId: "gen1",
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ origin: "authored", model: null, sourceGenerationId: null }),
+      }),
+    );
+  });
+
+  it("a NON-overview save (slug) does NOT upsert provenance", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch5", fieldName: "slug", value: "new-slug" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockTxProvenanceUpsert).not.toHaveBeenCalled();
+    expect(mockTxGenerationFindUnique).not.toHaveBeenCalled();
   });
 });

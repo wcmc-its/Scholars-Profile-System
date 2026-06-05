@@ -39,10 +39,16 @@ import { Check, RefreshCw, Sparkles } from "lucide-react";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
+import { OverviewProvenanceNote } from "@/components/edit/overview-provenance-note";
+import {
+  OverviewVersionsPanel,
+  type OverviewGenerationItem,
+} from "@/components/edit/overview-versions-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
+import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
 
 /** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview). */
@@ -59,6 +65,22 @@ const GENERATE_RATE_LIMITED =
   "You've generated several drafts recently — please try again in a little while.";
 const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again.";
 const REGENERATE_CONFIRM = "Replace your current text with a new draft? Your edits will be lost.";
+
+/** The provenance line shape the GET /api/edit/overview/generations route
+ *  serializes (`updatedAt` as an ISO string) — drives {@link OverviewProvenanceNote}. */
+type OverviewProvenanceLine = {
+  origin: OverviewOrigin;
+  model: string | null;
+  updatedAt: string;
+};
+
+/** The GET /api/edit/overview/generations response (owner-only history + the
+ *  currently-saved bio's provenance). `provenance` is null until the owner has
+ *  saved at least once with provenance recorded. */
+type OverviewGenerationsResponse = {
+  generations: OverviewGenerationItem[];
+  provenance: OverviewProvenanceLine | null;
+};
 
 export type OverviewCardProps = {
   cwid: string;
@@ -177,11 +199,42 @@ function OverviewEditorCard({
   // with each generate request; the server re-normalizes it (never trusted).
   const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
 
+  // #742 Phase B — draft history + provenance. `generations` is the owner's own
+  // recent OverviewGeneration rows (newest first); `provenance` is the one-line
+  // origin of the *currently saved* bio; `currentGenerationId` ties the in-editor
+  // draft to the generation it came from, so Save can record provenance (it rides
+  // in the field POST as `sourceGenerationId`). All three are owner-only.
+  const [generations, setGenerations] = React.useState<OverviewGenerationItem[]>([]);
+  const [provenance, setProvenance] = React.useState<OverviewProvenanceLine | null>(null);
+  const [currentGenerationId, setCurrentGenerationId] = React.useState<string | null>(null);
+
   const dirty = currentHtml !== savedHtml;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
   // Hide Generate when the scholar already has a non-empty saved bio (spec G9 —
   // don't invite clobbering good content); only Regenerate, behind a confirm.
   const hasExistingBio = initialHtml.trim().length > 0;
+
+  // #742 Phase B — re-read the owner's draft history + the saved bio's
+  // provenance. Best-effort: a failed read leaves the panel/line in their last
+  // state (the history is a convenience, never a gate on editing or saving).
+  const refreshGenerations = React.useCallback(async () => {
+    if (!generateEnabled) return;
+    try {
+      const res = await fetch("/api/edit/overview/generations", { method: "GET" });
+      if (!res.ok) return;
+      const data = (await res.json()) as OverviewGenerationsResponse;
+      setGenerations(Array.isArray(data.generations) ? data.generations : []);
+      setProvenance(data.provenance ?? null);
+    } catch {
+      // Swallow — the history panel is non-essential and must never disrupt the
+      // editor.
+    }
+  }, [generateEnabled]);
+
+  // Load the history + provenance once on mount (SELF arm only).
+  React.useEffect(() => {
+    void refreshGenerations();
+  }, [refreshGenerations]);
 
   function handleEditorChange(html: string) {
     setCurrentHtml(html);
@@ -190,6 +243,24 @@ function OverviewEditorCard({
     // the last-saved bio.
     if (error) setError(null);
     if (generateError) setGenerateError(null);
+  }
+
+  // Load a past draft from the Versions panel into the editor — the same
+  // seed-and-remount mechanism as a fresh generate, with the same "review before
+  // saving" banner. `savedHtml` is untouched, so Discard still reverts to the
+  // last-saved bio; the generation link is re-established so Save can record
+  // provenance against this version.
+  function loadVersion(gen: OverviewGenerationItem) {
+    if (isGenerating || isSaving) return;
+    setSeedHtml(gen.text);
+    setCurrentHtml(gen.text);
+    setLastGeneratedDraft(gen.text);
+    setGenerated(true);
+    setCurrentGenerationId(gen.id);
+    setGenerateNotice(GENERATE_BANNER);
+    setGenerateError(null);
+    setEditorKey((k) => k + 1);
+    if (error) setError(null);
   }
 
   function discard() {
@@ -224,7 +295,7 @@ function OverviewEditorCard({
         body: JSON.stringify({ entityId: cwid, params }),
       });
       const data = (await res.json()) as
-        | { ok: true; draft: string; model: string }
+        | { ok: true; draft: string; model: string; generationId: string | null }
         | { ok: false; error: string };
       if (!res.ok || data.ok !== true) {
         // Editor is left untouched on any failure (spec G8) — only a notice or
@@ -248,7 +319,13 @@ function OverviewEditorCard({
       setGenerated(true);
       setGenerateNotice(GENERATE_BANNER);
       setEditorKey((k) => k + 1);
+      // Tie the in-editor draft to its history row so a subsequent Save records
+      // provenance (origin = generated / generated_edited). `null` (a history
+      // write that hiccuped) saves as authored — see the field route contract.
+      setCurrentGenerationId(data.generationId);
       if (error) setError(null);
+      // Pick up the new history row + refreshed provenance.
+      void refreshGenerations();
     } catch {
       setGenerateError(GENERATE_FAILED);
     } finally {
@@ -269,6 +346,9 @@ function OverviewEditorCard({
           entityId: cwid,
           fieldName: "overview",
           value: currentHtml,
+          // The generation this draft came from (or null for hand-written text);
+          // the field route uses it to record provenance after the upsert.
+          sourceGenerationId: currentGenerationId,
         }),
       });
       const data = (await res.json()) as
@@ -293,6 +373,12 @@ function OverviewEditorCard({
       setGenerateNotice(null);
       setLastGeneratedDraft(null);
       setGenerated(false);
+      // The published text is now the baseline; the draft↔generation link no
+      // longer applies (re-loading a version re-establishes it).
+      setCurrentGenerationId(null);
+      // Re-read provenance so the line reflects this save (authored / generated /
+      // generated_edited).
+      void refreshGenerations();
     } catch {
       setError("Something went wrong — your changes weren't saved. Please try again.");
     } finally {
@@ -308,6 +394,7 @@ function OverviewEditorCard({
       description="A short bio shown at the top of your public profile."
     >
       <UnsavedChangesGuard dirty={dirty} />
+      {generateEnabled && <OverviewProvenanceNote provenance={provenance} />}
       {generateEnabled && (
         <div className="flex flex-wrap items-center gap-3">
           {hasExistingBio || generated ? (
@@ -351,6 +438,14 @@ function OverviewEditorCard({
             />
           </div>
         </details>
+      )}
+      {generateEnabled && (
+        <OverviewVersionsPanel
+          generations={generations}
+          onLoad={loadVersion}
+          onUseSettings={setParams}
+          disabled={isGenerating || isSaving}
+        />
       )}
       {generateNotice && (
         <Alert data-testid="overview-generate-notice">
