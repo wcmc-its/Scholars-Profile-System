@@ -883,6 +883,23 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // #497 -- self-serve slug ("Profile URL") request lifecycle: the scholar
+        // request card, the superuser /edit/slug-requests approve/decline queue,
+        // and the requester notification (PRs #503/#504/#505). Read via
+        // isSlugRequestEnabled() (=== "on"); when off the card is hidden,
+        // /edit/slug-requests 404s, and all three /api/edit/slug-request
+        // endpoints 404. The risky half -- override->routing reconcile -- already
+        // ships and runs on the live superuser direct-edit path
+        // (reconcileScholarSlug, lib/slug.ts), so a flip changes only who can
+        // initiate a slug change, not the routing mechanics. Enabled in BOTH
+        // envs (product decision 2026-06-03; no staging-only soak). Takes effect ONLY on
+        // a manual `cdk deploy --exclusively Sps-App-<env>` -- the CD pipeline
+        // re-rolls the image and never deploys CDK. The in-app "you'll get an
+        // email when it's decided" line additionally needs the request-change
+        // mailer (SELF_EDIT_REQUEST_CHANGE_SEND above) + a verified
+        // SCHOLARS_MAIL_FROM; until that flips the requester is notified in-app
+        // only, and the decision never fails for a missing email.
+        SELF_EDIT_SLUG_REQUEST: "on",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
         // suppressed inside open Radix Dialogs) and the form route accepts
