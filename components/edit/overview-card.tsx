@@ -42,6 +42,7 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
 import { OverviewProvenanceNote } from "@/components/edit/overview-provenance-note";
+import { OverviewSourceDrawer } from "@/components/edit/overview-source-drawer";
 import {
   OverviewVersionsPanel,
   type OverviewGenerationItem,
@@ -50,7 +51,12 @@ import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
+import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
+import {
+  DEFAULT_OVERVIEW_PARAMS,
+  type OverviewParams,
+  type OverviewSelection,
+} from "@/lib/edit/overview-params";
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
 
@@ -68,6 +74,19 @@ const GENERATE_RATE_LIMITED =
   "You've generated several drafts recently — please try again in a little while.";
 const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again.";
 const REGENERATE_CONFIRM = "Replace your current text with a new draft? Your edits will be lost.";
+
+/** A fresh, all-empty source selection (before the source-options load). */
+const EMPTY_SELECTION: OverviewSelection = { pmids: [], grantIds: [], toolNames: [] };
+
+/** The populated default selection from the source-options' `defaultSelected`
+ *  flags (v3.1 — first/last-author scored pubs + PI funding; tools land in C3). */
+function selectionFromOptions(options: OverviewSourceOptions): OverviewSelection {
+  return {
+    pmids: options.publications.filter((p) => p.defaultSelected).map((p) => p.pmid),
+    grantIds: options.funding.filter((f) => f.defaultSelected).map((f) => f.id),
+    toolNames: [],
+  };
+}
 
 /** The provenance line shape the GET /api/edit/overview/generations route
  *  serializes (`updatedAt` as an ISO string) — drives {@link OverviewProvenanceNote}. */
@@ -219,7 +238,13 @@ function OverviewEditorCard({
   // Two independent editor states, both rooted on the shared `savedHtml`. The
   // generator one composes the manual editor + the generate/version machinery.
   const existing = useOverviewEditor({ cwid, savedHtml, onSaved });
-  const generator = useOverviewGenerator({ cwid, savedHtml, onSaved, refreshGenerations });
+  const generator = useOverviewGenerator({
+    cwid,
+    savedHtml,
+    onSaved,
+    refreshGenerations,
+    generateEnabled,
+  });
 
   const dirty = existing.dirty || (generateEnabled && generator.editor.dirty);
 
@@ -424,6 +449,11 @@ type UseOverviewGenerator = {
   generateNotice: string | null;
   generateError: string | null;
   currentGenerationId: string | null;
+  /** The Sources drawer's candidate lists (null until the fetch resolves). */
+  sourceOptions: OverviewSourceOptions | null;
+  /** Which sources ground the next draft (v3.1). */
+  selection: OverviewSelection;
+  setSelection: React.Dispatch<React.SetStateAction<OverviewSelection>>;
   generate: () => Promise<void>;
   loadVersion: (gen: OverviewGenerationItem) => void;
 };
@@ -439,11 +469,13 @@ function useOverviewGenerator({
   savedHtml,
   onSaved,
   refreshGenerations,
+  generateEnabled,
 }: {
   cwid: string;
   savedHtml: string;
   onSaved: (value: string) => void;
   refreshGenerations: () => Promise<void>;
+  generateEnabled: boolean;
 }): UseOverviewGenerator {
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [generated, setGenerated] = React.useState(false);
@@ -452,6 +484,38 @@ function useOverviewGenerator({
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
   const [currentGenerationId, setCurrentGenerationId] = React.useState<string | null>(null);
+
+  // #742 v3.1 — the source picker. Fetch the candidate lists once (SELF arm) and
+  // seed the selection from the populated default (first/last-author scored pubs +
+  // PI funding). Best-effort: a failed fetch leaves the drawer disabled, not the
+  // editor — generation still falls back to the server's default selection.
+  const [sourceOptions, setSourceOptions] = React.useState<OverviewSourceOptions | null>(null);
+  const [selection, setSelection] = React.useState<OverviewSelection>(EMPTY_SELECTION);
+
+  React.useEffect(() => {
+    if (!generateEnabled) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/edit/overview/source-options", { method: "GET" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok: true } & OverviewSourceOptions;
+        if (cancelled) return;
+        const options: OverviewSourceOptions = {
+          publications: Array.isArray(data.publications) ? data.publications : [],
+          funding: Array.isArray(data.funding) ? data.funding : [],
+          tools: Array.isArray(data.tools) ? data.tools : [],
+        };
+        setSourceOptions(options);
+        setSelection(selectionFromOptions(options));
+      } catch {
+        // Swallow — the picker is a convenience; generation defaults server-side.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [generateEnabled]);
 
   const editor = useOverviewEditor({
     cwid,
@@ -500,7 +564,9 @@ function useOverviewGenerator({
       const res = await fetch("/api/edit/overview/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityId: cwid, params }),
+        // The source selection rides along with the steering params (v3.1); the
+        // server re-normalizes / ownership-filters it.
+        body: JSON.stringify({ entityId: cwid, params, selection }),
       });
       const data = (await res.json()) as
         | { ok: true; draft: string; model: string; generationId: string | null }
@@ -542,6 +608,9 @@ function useOverviewGenerator({
     generateNotice,
     generateError,
     currentGenerationId,
+    sourceOptions,
+    selection,
+    setSelection,
     generate,
     loadVersion,
   };
@@ -625,6 +694,13 @@ function OverviewGeneratorSurface({
           />
         </div>
       </details>
+
+      <OverviewSourceDrawer
+        options={generator.sourceOptions}
+        selection={generator.selection}
+        onSelectionChange={generator.setSelection}
+        disabled={busy}
+      />
 
       <OverviewVersionsPanel
         generations={generations}

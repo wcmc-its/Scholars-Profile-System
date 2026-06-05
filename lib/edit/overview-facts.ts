@@ -1,96 +1,135 @@
 /**
  * The facts contract for the overview-statement generator (#742,
- * `docs/overview-statement-generator-spec.md` § The facts contract).
+ * `docs/overview-statement-generator-spec.md` + the v3.1 plan §1/§5).
  *
- * `assembleOverviewFacts(cwid)` reads the scholar's live Scholars data — the
- * SAME data the public profile renders — and shapes it into the ONLY input the
- * model ever sees (`lib/edit/overview-generator.ts` serializes it as a data
- * block, never as instructions). Nothing here is invented: every field maps to
- * a column. A null value is omitted by the prompt, never guessed.
+ * `assembleOverviewFacts(cwid, selection?)` reads the scholar's live Scholars
+ * data and shapes it into the ONLY input the model ever sees
+ * (`lib/edit/overview-generator.ts` serializes it as a data block, never as
+ * instructions). Nothing here is invented: every field maps to a column. A null
+ * value is omitted by the prompt, never guessed.
  *
- * The governing rule (SPEC § Sources & the staleness principle): identity —
- * `title`, `department`, `education` — ALWAYS comes from the structured ED /
- * Scholars columns, never from `existingBio`, because harvested bios drift. An
- * `existingBio` is opportunistic enrichment for career narrative the structured
- * fields lack, and is treated as possibly stale.
+ * **v3.1 grounding shift (decision 4):** the model is grounded on ReciterAI
+ * *distilled* signals — per publication a one-line `synopsis`, an
+ * `impactJustification`, and a `topicRationale` — NOT the raw 400-char abstract,
+ * which is dropped. The candidate pool is the scholar's **scored** publications
+ * (those carrying an impact score / synopsis from ReciterAI), which is exactly
+ * the bio-worthy set; the default selection is their **first/last-author** scored
+ * work (the ReciterAI-POC `pipeline_person_synopsis` quality gate). The scholar
+ * can override the default through the Sources drawer (`selection`).
  *
- * Read-only — this module performs NO write (the draft is saved through the
- * existing owner-gated `/api/edit/field` path, never from here). Node-runtime
- * only (Prisma).
+ * `methods` (tools) and `facultyMetrics` arrive in C3 (the ETL that lands the
+ * DynamoDB `TOOL#` / `FACULTY#` signal); until then they degrade to `[]` / null.
+ *
+ * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
+import { OVERVIEW_SELECTION_MAX_ITEMS, type OverviewSelection } from "@/lib/edit/overview-params";
 
-/** How many parent topics, representative publications, and active grants the
- *  facts payload carries — bounded so the prompt stays small and the cost cap
- *  holds (SPEC § threat model — cost/abuse). */
+/** How many parent topics the facts payload carries. */
 const TOPIC_LIMIT = 4;
-const REPRESENTATIVE_PUBLICATION_LIMIT = 5;
-const ACTIVE_GRANT_LIMIT = 5;
-/** Abstracts are excerpted, not passed whole — enough to ground a specific
- *  claim without bloating the prompt (SPEC § facts contract). */
-const ABSTRACT_EXCERPT_LENGTH = 400;
+/** The combined publications + funding ceiling on what the model sees (decision 3). */
+const REPRESENTATIVE_LIMIT = OVERVIEW_SELECTION_MAX_ITEMS;
+
+/** A publication's author role, derived from `PublicationAuthor.isFirst/isLast`. */
+export type OverviewAuthorPosition = "first" | "last" | "middle";
 
 /**
  * The facts contract — `assembleOverviewFacts`'s output, and the model's only
- * input. Mirrors the SPEC § facts contract.
+ * input.
  *
- * NOTE: there is deliberately NO `methods` field. The SPEC's contract sketch
- * lists a `methods: string[]` sourced from ReciterAI `TOOL#`, but `TOOL#` is
- * NOT ingested into the SPS database (SPEC Open Question #10 — the in-SPS path
- * has no ETL for it). Including the field would mean shipping a value that is
- * always `[]`, so it is omitted until the ingest exists.
+ * NOTE: there is deliberately NO `abstractExcerpt` (v3.1 decision 4 — distilled
+ * signals replace the raw abstract) and NO `methods`-from-`TOOL#` until C3.
  */
 export type OverviewFacts = {
   // --- identity (authoritative, from ED — NEVER taken from a source bio) ---
-  /** scholar.preferred_name */
   name: string;
-  /** scholar.primary_title — CURRENT; overrides any title in `existingBio`. */
   title: string | null;
-  /** scholar.primary_department */
   department: string | null;
 
   // --- research signal (the quality lever) ---
-  /** Top parent topics by distinct-pmid count, each with one representative
-   *  rationale ("why this body of work maps here"). */
-  topics: {
-    label: string;
-    rationale: string | null;
-  }[];
-  /** Top publications by impact score (recent-weighted tiebreak), with the
-   *  grounding fields that let the model name a true specific. */
+  /** Top parent topics by distinct-pmid count, each with one representative rationale. */
+  topics: { label: string; rationale: string | null }[];
+  /** The selected (or default first/last-author scored) publications, impact desc.
+   *  Grounded on ReciterAI distilled signals — no raw abstract. PMID-keyed (v3.1). */
   representativePublications: {
+    pmid: string;
     title: string;
     venue: string | null;
     year: number | null;
     impact: number | null;
-    abstractExcerpt: string | null;
-    impactJustification: string | null;
+    /** One-line plain-language synopsis (ReciterAI `IMPACT#`, SPS-mirrored). */
     synopsis: string | null;
+    /** Natural-language impact justification (ReciterAI `IMPACT#`, SPS-mirrored). */
+    impactJustification: string | null;
+    /** "Why this work maps to topic X" (ReciterAI `TOPIC#.rationale`, SPS-mirrored). */
+    topicRationale: string | null;
+    /** First / last / middle author, from `PublicationAuthor`. */
+    authorPosition: OverviewAuthorPosition | null;
   }[];
-  /** Distinct confirmed-authorship pmid count. */
+  /** Distinct confirmed-authorship pmid count (the whole corpus, not just scored). */
   publicationCount: number;
   /** First / last publication year across the corpus. */
   yearsActive: { first: number | null; last: number | null };
 
   // --- funding / training ---
-  /** Grants whose end date is today or later. */
-  activeGrants: { role: string; funderLabel: string; mechanism: string | null }[];
-  /** Education rows, most-recent first. `field` is frequently null and must
-   *  never be invented (SPEC § facts contract rule 2). */
+  /** The selected (or default PI/Co-PI) active awards. `title` is the project
+   *  title (v3.1); `mechanism` the award mechanism. */
+  activeGrants: {
+    role: string;
+    funderLabel: string;
+    title: string | null;
+    mechanism: string | null;
+  }[];
   education: { degree: string; institution: string; field: string | null; year: number | null }[];
 
-  // --- OPTIONAL enrichment: an existing human-written bio, when one exists ---
-  /** The frozen VIVO-seed overview as plain text, when present — mined for
-   *  narrative the structured fields lack; the structured fields WIN on title,
-   *  current research, and any conflict. `null` when the scholar has none. */
-  existingBio: {
-    text: string;
-    source: string;
+  // --- tools / methods (C3 — `[]` until the TOOL# ETL lands) ---
+  methods: { name: string; category: string | null }[];
+  /** Faculty-scale framing from ReciterAI `FACULTY#` (C3 — null until ingested). */
+  facultyMetrics: {
+    firstAuthorCount: number | null;
+    lastAuthorCount: number | null;
+    scoredPubCount: number | null;
+    hIndex: number | null;
   } | null;
+
+  // --- OPTIONAL enrichment: an existing human-written bio, when one exists ---
+  existingBio: { text: string; source: string } | null;
 };
 
-/** Strip HTML tags + collapse whitespace — `existingBio.text` is plain text,
- *  not the raw `overview` HTML (SPEC § facts contract rule 3). */
+/** A drawer candidate publication (the light shape the Sources picker renders). */
+export type OverviewSourcePublication = {
+  pmid: string;
+  title: string;
+  venue: string | null;
+  year: number | null;
+  impact: number | null;
+  isFirstOrLast: boolean;
+  /** first / last / middle — drives the drawer's author marker. */
+  authorPosition: OverviewAuthorPosition | null;
+  /** Whether this row is pre-checked when the drawer opens (the v3.1 default). */
+  defaultSelected: boolean;
+};
+
+/** A drawer candidate funding award. */
+export type OverviewSourceFunding = {
+  id: string;
+  role: string;
+  funder: string;
+  title: string | null;
+  award: string | null;
+  endYear: number | null;
+  defaultSelected: boolean;
+};
+
+/** The `GET /api/edit/overview/source-options` payload (v3.1 §4). `tools` is
+ *  empty until C3, so the drawer's Methods section stays hidden. */
+export type OverviewSourceOptions = {
+  publications: OverviewSourcePublication[];
+  funding: OverviewSourceFunding[];
+  tools: { toolName: string; category: string | null; pmidCount: number; maxConfidence: number }[];
+};
+
+/** Strip HTML tags + collapse whitespace — `existingBio.text` is plain text. */
 function htmlToPlainText(html: string): string {
   return html
     .replace(/<[^>]*>/g, " ")
@@ -108,45 +147,233 @@ function decimalToNumber(value: { toNumber: () => number } | number | null): num
   return typeof value === "number" ? value : value.toNumber();
 }
 
+/** A funding role that counts as "lead" (PI / PI-Subaward / Co-PI) — the default
+ *  pre-check set (§3.2). `Co-I` / `Key Personnel` are candidates but unchecked. */
+function isLeadRole(role: string): boolean {
+  return /^(pi\b|pi-subaward|co-pi)/i.test(role.trim());
+}
+
 /**
- * Assemble the facts payload for `cwid` from live Scholars data. Returns `null`
- * when no scholar row exists (a soft-deleted / missing cwid) — the route maps
- * that to a 404. Reads only (`db.read`); writes nothing.
- *
- * Every collection is bounded and ordered the way the SPEC's contract specifies
- * so the model gets the scholar's strongest, most-current signal: topics by
- * how much of the corpus maps to them, publications by impact, grants by
- * recency, education most-recent-first.
+ * The default pre-check rule (shared by the assembler's empty-selection path and
+ * the Sources drawer so the UI and the server agree). Lead-role active funding
+ * is small + high-value, so it's kept first; first/last-author scored
+ * publications (impact desc) fill the rest of the combined budget. Pure.
  */
-export async function assembleOverviewFacts(cwid: string): Promise<OverviewFacts | null> {
+function pickDefaultSelection(
+  pubs: { pmid: string; isFirstOrLast: boolean }[],
+  funding: { id: string; isLead: boolean }[],
+  maxItems = REPRESENTATIVE_LIMIT,
+): { pmids: string[]; grantIds: string[] } {
+  const grantIds = funding
+    .filter((f) => f.isLead)
+    .map((f) => f.id)
+    .slice(0, maxItems);
+  const remaining = Math.max(0, maxItems - grantIds.length);
+  const pmids = pubs
+    .filter((p) => p.isFirstOrLast)
+    .map((p) => p.pmid)
+    .slice(0, remaining);
+  return { pmids, grantIds };
+}
+
+/** The scholar's scored confirmed publications (the bio candidate pool), impact
+ *  desc, each tagged with its author position. The single source of truth for
+ *  both the facts assembler and the Sources drawer. */
+async function loadScoredCandidatePublications(cwid: string): Promise<
+  {
+    pmid: string;
+    title: string;
+    venue: string | null;
+    year: number | null;
+    impact: number | null;
+    synopsis: string | null;
+    impactJustification: string | null;
+    authorPosition: OverviewAuthorPosition | null;
+    isFirstOrLast: boolean;
+  }[]
+> {
+  const authorships = await db.read.publicationAuthor.findMany({
+    where: { cwid, isConfirmed: true },
+    select: { pmid: true, isFirst: true, isLast: true },
+  });
+  if (authorships.length === 0) return [];
+  const positionByPmid = new Map<string, OverviewAuthorPosition>();
+  for (const a of authorships) {
+    positionByPmid.set(a.pmid, a.isFirst ? "first" : a.isLast ? "last" : "middle");
+  }
+  const pmids = Array.from(positionByPmid.keys());
+
+  // Scored only: ReciterAI impact-scored pubs are the ones carrying the distilled
+  // grounding (synopsis / justification) and are the bio-worthy subset.
+  const rows = await db.read.publication.findMany({
+    where: { pmid: { in: pmids }, impactScore: { not: null } },
+    orderBy: [{ impactScore: { sort: "desc", nulls: "last" } }, { year: "desc" }],
+    select: {
+      pmid: true,
+      title: true,
+      journal: true,
+      year: true,
+      impactScore: true,
+      synopsis: true,
+      impactJustification: true,
+    },
+  });
+
+  return rows.map((r) => {
+    const position = positionByPmid.get(r.pmid) ?? null;
+    return {
+      pmid: r.pmid,
+      title: r.title,
+      venue: r.journal,
+      year: r.year,
+      impact: decimalToNumber(r.impactScore),
+      synopsis: r.synopsis,
+      impactJustification: r.impactJustification,
+      authorPosition: position,
+      isFirstOrLast: position === "first" || position === "last",
+    };
+  });
+}
+
+/** The scholar's active funding (end date today or later), most-recent-ending first. */
+async function loadActiveFunding(cwid: string): Promise<
+  {
+    id: string;
+    role: string;
+    funder: string;
+    title: string;
+    mechanism: string | null;
+    awardNumber: string | null;
+    endYear: number | null;
+    isLead: boolean;
+  }[]
+> {
+  const today = startOfToday();
+  const rows = await db.read.grant.findMany({
+    where: { cwid, endDate: { gte: today } },
+    orderBy: { endDate: "desc" },
+    select: {
+      id: true,
+      role: true,
+      funder: true,
+      title: true,
+      mechanism: true,
+      awardNumber: true,
+      endDate: true,
+    },
+  });
+  return rows.map((g) => ({
+    id: g.id,
+    role: g.role,
+    funder: g.funder,
+    title: g.title,
+    mechanism: g.mechanism,
+    awardNumber: g.awardNumber,
+    endYear: g.endDate.getUTCFullYear(),
+    isLead: isLeadRole(g.role),
+  }));
+}
+
+/** Highest-score topic rationale per pmid for `cwid` ("why this work maps here"). */
+async function loadTopicRationaleByPmid(
+  cwid: string,
+  pmids: string[],
+): Promise<Map<string, string>> {
+  if (pmids.length === 0) return new Map();
+  const rows = await db.read.publicationTopic.findMany({
+    where: { cwid, pmid: { in: pmids }, rationale: { not: null } },
+    orderBy: { score: "desc" },
+    select: { pmid: true, rationale: true },
+  });
+  const byPmid = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rationale && !byPmid.has(r.pmid)) byPmid.set(r.pmid, r.rationale);
+  }
+  return byPmid;
+}
+
+/**
+ * Assemble the facts payload for `cwid`, grounded on the chosen `selection` (or
+ * the v3.1 default when none is given). Returns `null` when no scholar row
+ * exists. Reads only.
+ *
+ * The effective selection is ownership-filtered against the scholar's own
+ * candidate pools (a forged/foreign pmid or grant id simply matches nothing),
+ * then capped to the combined 25 ceiling.
+ */
+export async function assembleOverviewFacts(
+  cwid: string,
+  selection?: OverviewSelection,
+): Promise<OverviewFacts | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
-    select: {
-      preferredName: true,
-      primaryTitle: true,
-      primaryDepartment: true,
-      overview: true,
-    },
+    select: { preferredName: true, primaryTitle: true, primaryDepartment: true, overview: true },
   });
   if (!scholar) return null;
 
-  // The scholar's confirmed-authorship pmid set — the spine for the pub list,
-  // the distinct-pmid count, and yearsActive.
-  const authorships = await db.read.publicationAuthor.findMany({
-    where: { cwid, isConfirmed: true },
-    select: { pmid: true },
-  });
-  const pmids = Array.from(new Set(authorships.map((a) => a.pmid)));
-  const publicationCount = pmids.length;
-
-  const [representativePublications, yearsActive, topics, activeGrants, education] =
+  const [candidatePubs, funding, publicationCount, yearsActive, topics, education] =
     await Promise.all([
-      assembleRepresentativePublications(pmids),
-      assembleYearsActive(pmids),
+      loadScoredCandidatePublications(cwid),
+      loadActiveFunding(cwid),
+      countConfirmedPublications(cwid),
+      assembleYearsActive(cwid),
       assembleTopics(cwid),
-      assembleActiveGrants(cwid),
       assembleEducation(cwid),
     ]);
+
+  // Resolve the effective selection. Explicit picks are ownership-filtered to the
+  // candidate pools (validity + IDOR safety); an empty selection falls back to the
+  // shared default rule so there is no dead-end empty state.
+  const candidatePmidSet = new Set(candidatePubs.map((p) => p.pmid));
+  const candidateGrantSet = new Set(funding.map((f) => f.id));
+
+  let selectedPmids: string[];
+  let selectedGrantIds: string[];
+  const hasExplicit =
+    selection !== undefined && (selection.pmids.length > 0 || selection.grantIds.length > 0);
+  if (hasExplicit) {
+    selectedPmids = selection!.pmids.filter((p) => candidatePmidSet.has(p));
+    selectedGrantIds = selection!.grantIds.filter((g) => candidateGrantSet.has(g));
+  } else {
+    const def = pickDefaultSelection(candidatePubs, funding);
+    selectedPmids = def.pmids;
+    selectedGrantIds = def.grantIds;
+  }
+  // Defensive combined cap (the route normalizes too): publications first.
+  selectedPmids = selectedPmids.slice(0, REPRESENTATIVE_LIMIT);
+  selectedGrantIds = selectedGrantIds.slice(
+    0,
+    Math.max(0, REPRESENTATIVE_LIMIT - selectedPmids.length),
+  );
+
+  const selectedPmidSet = new Set(selectedPmids);
+  const selectedGrantSet = new Set(selectedGrantIds);
+
+  // Build the representative pubs from the selected candidates (impact-desc order
+  // is preserved from the candidate query), enriched with the topic rationale.
+  const rationaleByPmid = await loadTopicRationaleByPmid(cwid, selectedPmids);
+  const representativePublications = candidatePubs
+    .filter((p) => selectedPmidSet.has(p.pmid))
+    .map((p) => ({
+      pmid: p.pmid,
+      title: p.title,
+      venue: p.venue,
+      year: p.year,
+      impact: p.impact,
+      synopsis: p.synopsis,
+      impactJustification: p.impactJustification,
+      topicRationale: rationaleByPmid.get(p.pmid) ?? null,
+      authorPosition: p.authorPosition,
+    }));
+
+  const activeGrants = funding
+    .filter((f) => selectedGrantSet.has(f.id))
+    .map((f) => ({
+      role: f.role,
+      funderLabel: f.funder,
+      title: f.title,
+      mechanism: f.mechanism,
+    }));
 
   const existingBioText = scholar.overview ? htmlToPlainText(scholar.overview) : "";
 
@@ -160,45 +387,69 @@ export async function assembleOverviewFacts(cwid: string): Promise<OverviewFacts
     yearsActive,
     activeGrants,
     education,
-    // The seed overview is frozen VIVO prose; pass it as stale-aware enrichment.
+    // C3 lands these (the TOOL# / FACULTY# ETL); degrade gracefully until then.
+    methods: [],
+    facultyMetrics: null,
     existingBio: existingBioText ? { text: existingBioText, source: "vivo" } : null,
   };
 }
 
-/** Top publications by impact score (nulls last), tiebreak year desc. */
-async function assembleRepresentativePublications(
-  pmids: string[],
-): Promise<OverviewFacts["representativePublications"]> {
-  if (pmids.length === 0) return [];
-  const rows = await db.read.publication.findMany({
-    where: { pmid: { in: pmids } },
-    orderBy: [{ impactScore: { sort: "desc", nulls: "last" } }, { year: "desc" }],
-    take: REPRESENTATIVE_PUBLICATION_LIMIT,
-    select: {
-      title: true,
-      journal: true,
-      year: true,
-      impactScore: true,
-      abstract: true,
-      impactJustification: true,
-      synopsis: true,
-    },
-  });
-  return rows.map((r) => ({
-    title: r.title,
-    venue: r.journal,
-    year: r.year,
-    impact: decimalToNumber(r.impactScore),
-    abstractExcerpt: r.abstract ? r.abstract.slice(0, ABSTRACT_EXCERPT_LENGTH) : null,
-    impactJustification: r.impactJustification,
-    synopsis: r.synopsis,
-  }));
+/**
+ * The Sources drawer candidate lists for `cwid` (v3.1 §4) — every scored pub +
+ * every active award, each flagged `defaultSelected` per the shared default rule
+ * so the drawer's pre-checks match the server's empty-selection behavior. `tools`
+ * is empty until C3.
+ */
+export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewSourceOptions> {
+  const [candidatePubs, funding] = await Promise.all([
+    loadScoredCandidatePublications(cwid),
+    loadActiveFunding(cwid),
+  ]);
+
+  const def = pickDefaultSelection(candidatePubs, funding);
+  const defaultPmids = new Set(def.pmids);
+  const defaultGrants = new Set(def.grantIds);
+
+  return {
+    publications: candidatePubs.map((p) => ({
+      pmid: p.pmid,
+      title: p.title,
+      venue: p.venue,
+      year: p.year,
+      impact: p.impact,
+      isFirstOrLast: p.isFirstOrLast,
+      authorPosition: p.authorPosition,
+      defaultSelected: defaultPmids.has(p.pmid),
+    })),
+    funding: funding.map((f) => ({
+      id: f.id,
+      role: f.role,
+      funder: f.funder,
+      title: f.title,
+      award: f.awardNumber ?? f.mechanism,
+      endYear: f.endYear,
+      defaultSelected: defaultGrants.has(f.id),
+    })),
+    tools: [],
+  };
 }
 
-/** Min / max publication year across the corpus. */
-async function assembleYearsActive(
-  pmids: string[],
-): Promise<OverviewFacts["yearsActive"]> {
+/** Distinct confirmed-authorship pmid count. */
+async function countConfirmedPublications(cwid: string): Promise<number> {
+  const rows = await db.read.publicationAuthor.findMany({
+    where: { cwid, isConfirmed: true },
+    select: { pmid: true },
+  });
+  return new Set(rows.map((r) => r.pmid)).size;
+}
+
+/** Min / max publication year across the confirmed corpus. */
+async function assembleYearsActive(cwid: string): Promise<OverviewFacts["yearsActive"]> {
+  const authorships = await db.read.publicationAuthor.findMany({
+    where: { cwid, isConfirmed: true },
+    select: { pmid: true },
+  });
+  const pmids = Array.from(new Set(authorships.map((a) => a.pmid)));
   if (pmids.length === 0) return { first: null, last: null };
   const agg = await db.read.publication.aggregate({
     where: { pmid: { in: pmids }, year: { not: null } },
@@ -211,10 +462,6 @@ async function assembleYearsActive(
 /**
  * Top parent topics for the scholar, ranked by distinct-pmid count desc, each
  * resolved to its `Topic.label` and one representative non-null rationale.
- *
- * `_count` over-reports when a (pmid, topic) appears under multiple author
- * positions, so distinct-pmid is counted from the rows rather than via a
- * grouped `_count` (the same DISTINCT-pmid lesson as the topic pub counts).
  */
 async function assembleTopics(cwid: string): Promise<OverviewFacts["topics"]> {
   const rows = await db.read.publicationTopic.findMany({
@@ -223,7 +470,6 @@ async function assembleTopics(cwid: string): Promise<OverviewFacts["topics"]> {
   });
   if (rows.length === 0) return [];
 
-  // Fold rows into per-topic { distinct pmids, a representative rationale }.
   const byTopic = new Map<string, { pmids: Set<string>; rationale: string | null }>();
   for (const row of rows) {
     const entry = byTopic.get(row.parentTopicId) ?? { pmids: new Set<string>(), rationale: null };
@@ -244,21 +490,8 @@ async function assembleTopics(cwid: string): Promise<OverviewFacts["topics"]> {
 
   return ranked.flatMap(([id, entry]) => {
     const label = labelById.get(id);
-    // A topic id with no catalog row is dropped — we never surface a raw slug.
     return label ? [{ label, rationale: entry.rationale }] : [];
   });
-}
-
-/** Active grants (end date today or later), most-recent-ending first. */
-async function assembleActiveGrants(cwid: string): Promise<OverviewFacts["activeGrants"]> {
-  const today = startOfToday();
-  const rows = await db.read.grant.findMany({
-    where: { cwid, endDate: { gte: today } },
-    orderBy: { endDate: "desc" },
-    take: ACTIVE_GRANT_LIMIT,
-    select: { role: true, funder: true, mechanism: true },
-  });
-  return rows.map((g) => ({ role: g.role, funderLabel: g.funder, mechanism: g.mechanism }));
 }
 
 /** Education rows, most-recent first (a null year sorts last). */
@@ -276,7 +509,7 @@ async function assembleEducation(cwid: string): Promise<OverviewFacts["education
   }));
 }
 
-/** UTC midnight today — the active-grant cutoff (`endDate >= today`). */
+/** UTC midnight today — the active-funding cutoff (`endDate >= today`). */
 function startOfToday(): Date {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -284,10 +517,9 @@ function startOfToday(): Date {
 
 /**
  * Whether the facts payload has enough real signal to draft a non-padded
- * overview (SPEC § States & edge cases G2). A scholar with no representative
- * publication, no active grant, and fewer than two topics is too sparse — the
- * route returns 422 rather than ask the model to confabulate generic praise
- * over a thin record.
+ * overview (v3.1 §5). A scholar with no representative (scored) publication, no
+ * active award, and fewer than two topics is too sparse — the route returns 422
+ * rather than ask the model to confabulate over a thin record.
  */
 export function hasSufficientFacts(facts: OverviewFacts): boolean {
   return (
