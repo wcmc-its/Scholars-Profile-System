@@ -18,11 +18,8 @@ import { type NextRequest, type NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { authorizeFieldEdit, logEditDenial } from "@/lib/edit/authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
-import {
-  generateOverviewDraft,
-  isOverviewGenerateEnabled,
-} from "@/lib/edit/overview-generator";
-import { normalizeOverviewParams } from "@/lib/edit/overview-params";
+import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
+import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
 import {
   editError,
@@ -53,6 +50,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // yields a usable shape, so there is no 400-on-bad-params; only entityId is
   // validated (#742 Phase A).
   const params = normalizeOverviewParams(req.ctx.body.params);
+  // The source selection (which pubs / funding / tools ground the draft, v3.1) is
+  // likewise untrusted: clamped to 25 items + 10 tools here, then ownership-filtered
+  // inside the facts queries. An empty selection ⇒ the facts assembler's default.
+  const selection = normalizeOverviewSelection(req.ctx.body.selection);
 
   // --- authorization: owner-only (overview is self-only — a superuser does not
   //     inherit it, matching authorizeFieldEdit). ---
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
       return editRateLimited(rate.retryAfterSeconds);
     }
-    facts = await assembleOverviewFacts(entityId);
+    facts = await assembleOverviewFacts(entityId, selection);
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
@@ -122,7 +123,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         cwid: entityId,
         text: result.draft,
         model: result.model,
-        params,
+        // Persist the steering controls + the source selection (v3.1) in the one
+        // Json column so "Regenerate from these settings" can restore both.
+        params: { ...params, selection },
         createdByCwid: session.cwid,
       },
       select: { id: true },

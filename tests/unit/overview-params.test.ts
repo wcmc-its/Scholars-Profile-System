@@ -9,8 +9,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_OVERVIEW_PARAMS,
+  isOverviewSelectionEmpty,
   OVERVIEW_INSTRUCTIONS_MAX,
+  OVERVIEW_SELECTION_MAX_ITEMS,
+  OVERVIEW_SELECTION_MAX_TOOLS,
   normalizeOverviewParams,
+  normalizeOverviewSelection,
 } from "@/lib/edit/overview-params";
 
 /**
@@ -143,5 +147,100 @@ describe("normalizeOverviewParams — never throws on garbage", () => {
     expect(out.voice).toBe(DEFAULT_OVERVIEW_PARAMS.voice);
     expect(out.elements).toEqual([]); // a non-array object is not iterable as elements
     expect(out.instructions).toBe("coerced");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #742 v3.1 — normalizeOverviewSelection (the source-picker trust boundary).
+// ---------------------------------------------------------------------------
+
+describe("normalizeOverviewSelection — coercion + dedupe", () => {
+  it("returns all-empty buckets for an empty object", () => {
+    expect(normalizeOverviewSelection({})).toEqual({ pmids: [], grantIds: [], toolNames: [] });
+  });
+
+  it("trims, drops empties, and de-dupes within each bucket (first-seen order)", () => {
+    const out = normalizeOverviewSelection({
+      pmids: [" 111 ", "222", "111", "", "  "],
+      grantIds: ["g1", "g1", " g2 "],
+      toolNames: ["AAV vectors", "AAV vectors", "PET imaging"],
+    });
+    expect(out.pmids).toEqual(["111", "222"]);
+    expect(out.grantIds).toEqual(["g1", "g2"]);
+    expect(out.toolNames).toEqual(["AAV vectors", "PET imaging"]);
+  });
+
+  it("drops non-string members from every bucket", () => {
+    const out = normalizeOverviewSelection({
+      pmids: ["111", 222, null, { pmid: "x" }, "333"],
+      grantIds: [true, "g1"],
+      toolNames: [42, "Microscopy"],
+    });
+    expect(out.pmids).toEqual(["111", "333"]);
+    expect(out.grantIds).toEqual(["g1"]);
+    expect(out.toolNames).toEqual(["Microscopy"]);
+  });
+
+  it("treats a non-array bucket as empty", () => {
+    const out = normalizeOverviewSelection({ pmids: "111", grantIds: 7, toolNames: {} });
+    expect(out).toEqual({ pmids: [], grantIds: [], toolNames: [] });
+  });
+});
+
+describe("normalizeOverviewSelection — caps", () => {
+  it("clamps pmids + grantIds to a COMBINED maxItems (pmids keep priority)", () => {
+    const pmids = Array.from({ length: 30 }, (_, i) => `p${i}`);
+    const grantIds = Array.from({ length: 30 }, (_, i) => `g${i}`);
+    const out = normalizeOverviewSelection({ pmids, grantIds });
+    expect(out.pmids).toHaveLength(OVERVIEW_SELECTION_MAX_ITEMS); // 25 — publications fill the budget first
+    expect(out.grantIds).toHaveLength(0); // none left
+    expect(out.pmids.length + out.grantIds.length).toBe(OVERVIEW_SELECTION_MAX_ITEMS);
+  });
+
+  it("lets funding fill the remainder of the combined budget", () => {
+    const pmids = Array.from({ length: 20 }, (_, i) => `p${i}`);
+    const grantIds = Array.from({ length: 20 }, (_, i) => `g${i}`);
+    const out = normalizeOverviewSelection({ pmids, grantIds });
+    expect(out.pmids).toHaveLength(20);
+    expect(out.grantIds).toHaveLength(5); // 25 - 20
+  });
+
+  it("clamps toolNames to its own maxTools, independent of the 25 budget", () => {
+    const pmids = Array.from({ length: 25 }, (_, i) => `p${i}`);
+    const toolNames = Array.from({ length: 20 }, (_, i) => `t${i}`);
+    const out = normalizeOverviewSelection({ pmids, toolNames });
+    expect(out.pmids).toHaveLength(25);
+    expect(out.toolNames).toHaveLength(OVERVIEW_SELECTION_MAX_TOOLS); // 10 — tools never count against the 25
+  });
+
+  it("honours explicit cap overrides", () => {
+    const pmids = Array.from({ length: 10 }, (_, i) => `p${i}`);
+    const toolNames = Array.from({ length: 10 }, (_, i) => `t${i}`);
+    const out = normalizeOverviewSelection({ pmids, toolNames }, { maxItems: 3, maxTools: 2 });
+    expect(out.pmids).toHaveLength(3);
+    expect(out.toolNames).toHaveLength(2);
+  });
+});
+
+describe("normalizeOverviewSelection — never throws on garbage", () => {
+  it.each([null, undefined, 42, "a string", true, [], [1, 2, 3], NaN])(
+    "returns all-empty buckets for top-level garbage: %p",
+    (garbage) => {
+      expect(() => normalizeOverviewSelection(garbage as unknown)).not.toThrow();
+      expect(normalizeOverviewSelection(garbage as unknown)).toEqual({
+        pmids: [],
+        grantIds: [],
+        toolNames: [],
+      });
+    },
+  );
+});
+
+describe("isOverviewSelectionEmpty", () => {
+  it("is true only when every bucket is empty", () => {
+    expect(isOverviewSelectionEmpty({ pmids: [], grantIds: [], toolNames: [] })).toBe(true);
+    expect(isOverviewSelectionEmpty({ pmids: ["1"], grantIds: [], toolNames: [] })).toBe(false);
+    expect(isOverviewSelectionEmpty({ pmids: [], grantIds: ["g"], toolNames: [] })).toBe(false);
+    expect(isOverviewSelectionEmpty({ pmids: [], grantIds: [], toolNames: ["t"] })).toBe(false);
   });
 });

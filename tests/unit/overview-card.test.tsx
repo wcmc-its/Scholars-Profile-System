@@ -276,6 +276,13 @@ function isGenerationsGet(input: RequestInfo | URL, init?: RequestInit): boolean
   return url === "/api/edit/overview/generations" && method === "GET";
 }
 
+/** Is this the #742 v3.1 Sources mount GET (source-options)? */
+function isSourceOptionsGet(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const url = typeof input === "string" ? input : input.toString();
+  const method = (init?.method ?? "GET").toUpperCase();
+  return url === "/api/edit/overview/source-options" && method === "GET";
+}
+
 /**
  * Mock fetch that routes the mount GET (generations) to a history payload and
  * any other call (the generate POST or the field POST) to `other`. Returns the
@@ -300,6 +307,11 @@ function stubFetchRouted(
       if (isGenerationsGet(input, init)) {
         return generationsResponse(history.generations ?? [], history.provenance ?? null);
       }
+      // The Generator tab also fetches its source-options on mount (v3.1); give it
+      // an empty candidate set so tests that don't exercise the picker stay simple.
+      if (isSourceOptionsGet(input, init)) {
+        return jsonResponse({ ok: true, publications: [], funding: [], tools: [] });
+      }
       return other();
     });
 }
@@ -320,13 +332,12 @@ function stubGenerateError(status: number, error: string) {
  *  Avoids the overloaded `vi.spyOn` return type that won't unify across signatures. */
 type FetchSpy = { mock: { calls: unknown[][] } };
 
-/** The first non-history (POST) call recorded on the routed fetch spy — skips the
- *  mount GET so assertions target the generate/field POST regardless of order. */
+/** The first POST call recorded on the routed fetch spy — skips the mount GETs
+ *  (generations + source-options) so assertions target the generate/field POST. */
 function postCall(f: FetchSpy): [string, RequestInit] {
   const call = f.mock.calls.find((c) => {
-    const url = typeof c[0] === "string" ? c[0] : String(c[0]);
     const method = ((c[1] as RequestInit | undefined)?.method ?? "GET").toUpperCase();
-    return !(url === "/api/edit/overview/generations" && method === "GET");
+    return method === "POST";
   });
   if (!call) throw new Error("no POST call recorded on fetch");
   return call as unknown as [string, RequestInit];

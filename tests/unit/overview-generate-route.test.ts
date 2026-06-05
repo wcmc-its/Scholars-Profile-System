@@ -180,13 +180,14 @@ describe("POST /api/edit/overview/generate", () => {
       generationId: "gen123",
     });
     // the history row is written from the actor's cwid with the normalized params
+    // plus the (empty here) normalized source selection (v3.1).
     expect(mockGenerationCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           cwid: "self01",
           text: "<p>Draft.</p>",
           model: "anthropic/claude-sonnet-4.5",
-          params: NORMALIZED_EMPTY,
+          params: { ...NORMALIZED_EMPTY, selection: { pmids: [], grantIds: [], toolNames: [] } },
           createdByCwid: "self01",
         }),
       }),

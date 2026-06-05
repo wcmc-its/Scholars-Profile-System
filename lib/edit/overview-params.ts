@@ -76,9 +76,7 @@ export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
 const VOICES: readonly OverviewVoice[] = ["third", "first"];
 const TONES: readonly OverviewTone[] = ["formal", "neutral", "conversational"];
 const LENGTHS: readonly OverviewLength[] = ["short", "standard", "extended"];
-const ELEMENT_KEYS: ReadonlySet<OverviewElement> = new Set(
-  OVERVIEW_ELEMENTS.map((e) => e.key),
-);
+const ELEMENT_KEYS: ReadonlySet<OverviewElement> = new Set(OVERVIEW_ELEMENTS.map((e) => e.key));
 
 /** Pick `value` from `allowed` when it is a member, else `fallback`. The cast is
  *  safe — membership is checked before it is returned. */
@@ -128,4 +126,84 @@ export function normalizeOverviewParams(raw: unknown): OverviewParams {
     elements,
     instructions,
   };
+}
+
+// ---------------------------------------------------------------------------
+// #742 v3.1 — the source selection (which publications / funding / tools ground
+// the draft). A separate concern from the steering controls above: the controls
+// shape EMPHASIS/TONE, the selection decides WHICH facts the model sees.
+// ---------------------------------------------------------------------------
+
+/** Which sources the scholar picked in the drawer. `pmids` key publications,
+ *  `grantIds` key funding awards, `toolNames` key methods (canonical names —
+ *  the Tools bucket ships dark until C3, so this is normally `[]` in C2). */
+export type OverviewSelection = {
+  pmids: string[];
+  grantIds: string[];
+  toolNames: string[];
+};
+
+/** Publications + funding share this combined budget (decision 3). */
+export const OVERVIEW_SELECTION_MAX_ITEMS = 25;
+/** Tools carry their own smaller ceiling so a dozen tool names can't crowd out
+ *  the papers, which are the heavy grounding (decision 3 / §3.5). */
+export const OVERVIEW_SELECTION_MAX_TOOLS = 10;
+
+/** Coerce an untrusted value to a de-duped, trimmed, non-empty string array.
+ *  A non-array, or any non-string member, yields a clean (possibly empty) list. */
+function toStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const s = v.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+/**
+ * Coerce an untrusted `selection` into a usable {@link OverviewSelection} — the
+ * server trust boundary for the source picker, mirroring
+ * {@link normalizeOverviewParams}'s never-throws contract.
+ *
+ * - Each bucket: a non-array → `[]`; otherwise trimmed, de-duped, non-empty strings.
+ * - **Caps:** `pmids` + `grantIds` are clamped to a COMBINED `maxItems` (pmids
+ *   keep priority, grants fill the remainder — publications are the heavy
+ *   grounding); `toolNames` is clamped to its own `maxTools`.
+ * - Ownership is NOT enforced here — that happens in the facts queries
+ *   (`where: { cwid, … in }`), so a forged/foreign id simply matches no rows.
+ *
+ * Never throws — garbage in yields `{ pmids: [], grantIds: [], toolNames: [] }`.
+ */
+export function normalizeOverviewSelection(
+  raw: unknown,
+  opts: { maxItems?: number; maxTools?: number } = {},
+): OverviewSelection {
+  const maxItems = opts.maxItems ?? OVERVIEW_SELECTION_MAX_ITEMS;
+  const maxTools = opts.maxTools ?? OVERVIEW_SELECTION_MAX_TOOLS;
+  const obj: Record<string, unknown> =
+    typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+
+  const pmids = toStringArray(obj.pmids).slice(0, maxItems);
+  // Funding fills whatever the combined budget has left after publications.
+  const grantIds = toStringArray(obj.grantIds).slice(0, Math.max(0, maxItems - pmids.length));
+  const toolNames = toStringArray(obj.toolNames).slice(0, maxTools);
+
+  return { pmids, grantIds, toolNames };
+}
+
+/** Whether a selection picks at least one source (any bucket). An all-empty
+ *  selection means "use the server-computed default" (§3.4). */
+export function isOverviewSelectionEmpty(selection: OverviewSelection): boolean {
+  return (
+    selection.pmids.length === 0 &&
+    selection.grantIds.length === 0 &&
+    selection.toolNames.length === 0
+  );
 }

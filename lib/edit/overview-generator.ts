@@ -58,10 +58,12 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "  field, date, collaboration, or affiliation that is not present in FACTS.",
   "- If FACTS is sparse, write a SHORTER overview — never pad with generic praise",
   '  such as "world-renowned" or "leading expert".',
-  "- Ground specifics in abstractExcerpt and impactJustification: you may name a",
-  "  flagship dataset, method, or contribution when those support it, but attribute",
-  "  no result not backed by an abstract, justification, synopsis, or title. Prefer",
-  "  one concrete, true specific over three vague topic labels.",
+  "- Ground specifics in synopsis, impactJustification, and topicRationale: you may",
+  "  name a flagship dataset, method, platform, or contribution when those support",
+  "  it, but attribute no result not backed by a synopsis, justification, rationale,",
+  "  or title. Prefer one concrete, true specific over three vague topic labels. You",
+  "  may foreground the scholar's research focus, distinctive methods/platforms, and",
+  "  the scale of their work — but only as the FACTS support it.",
   "- Use title, department, and education verbatim from FACTS. Never reformat a",
   "  degree into a field that is not given (if education has no field, do not invent",
   "  one).",
@@ -186,10 +188,7 @@ function proseToParagraphHtml(prose: string): string {
  *  markup past the paragraph wrap. `sanitizeOverviewHtml` is the real boundary;
  *  this keeps a literal "<" in the prose from being parsed as a tag. */
 function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**

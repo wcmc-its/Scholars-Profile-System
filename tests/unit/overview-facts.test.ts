@@ -1,8 +1,10 @@
 /**
- * `assembleOverviewFacts` + `hasSufficientFacts` (#742). The DB is mocked — no
- * network, no real DB. Asserts the facts payload is assembled and ordered the
- * way the contract specifies (distinct-pmid topic rank, impact-sorted pubs,
- * active-grant mapping, plain-text existingBio, sufficiency threshold).
+ * `assembleOverviewFacts` + `loadOverviewSourceOptions` + `hasSufficientFacts`
+ * (#742 v3.1). The DB is mocked — no network, no real DB. Asserts the facts
+ * payload is assembled distilled-first (synopsis / justification / rationale, NO
+ * raw abstract), grounded on the chosen selection (or the first/last-author
+ * scored default), and that the Sources options carry the matching
+ * `defaultSelected` flags.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -43,12 +45,60 @@ vi.mock("@/lib/db", () => ({
 import {
   assembleOverviewFacts,
   hasSufficientFacts,
+  loadOverviewSourceOptions,
   type OverviewFacts,
 } from "@/lib/edit/overview-facts";
 
 /** A Prisma Decimal-like object (`.toNumber()`), as impactScore arrives. */
 function decimal(n: number) {
   return { toNumber: () => n };
+}
+
+/** A scored publication row as `publication.findMany` returns it. */
+function pubRow(
+  pmid: string,
+  opts: Partial<{
+    title: string;
+    journal: string | null;
+    year: number | null;
+    impact: number;
+    synopsis: string | null;
+    impactJustification: string | null;
+  }> = {},
+) {
+  return {
+    pmid,
+    title: opts.title ?? `Title ${pmid}`,
+    journal: opts.journal ?? "Cell",
+    year: opts.year ?? 2024,
+    impactScore: decimal(opts.impact ?? 80),
+    synopsis: opts.synopsis ?? `synopsis ${pmid}`,
+    impactJustification: opts.impactJustification ?? `justification ${pmid}`,
+  };
+}
+
+/** A grant row as `grant.findMany` returns it. */
+function grantRow(
+  id: string,
+  role: string,
+  opts: Partial<{
+    funder: string;
+    title: string;
+    mechanism: string | null;
+    awardNumber: string | null;
+    endYear: number;
+  }> = {},
+) {
+  return {
+    id,
+    role,
+    funder: opts.funder ?? "NIH/NIGMS",
+    title: opts.title ?? `Project ${id}`,
+    // `=== undefined` (not `??`) so an explicit null passes through as null.
+    mechanism: opts.mechanism === undefined ? "R01" : opts.mechanism,
+    awardNumber: opts.awardNumber === undefined ? `R01 ${id}` : opts.awardNumber,
+    endDate: new Date(Date.UTC(opts.endYear ?? 2027, 0, 1)),
+  };
 }
 
 beforeEach(() => {
@@ -68,7 +118,7 @@ beforeEach(() => {
   mockEducationFindMany.mockResolvedValue([]);
 });
 
-describe("assembleOverviewFacts", () => {
+describe("assembleOverviewFacts — identity & corpus", () => {
   it("returns null when the scholar row is missing", async () => {
     mockScholarFindUnique.mockResolvedValue(null);
     expect(await assembleOverviewFacts("ghost1")).toBeNull();
@@ -76,7 +126,6 @@ describe("assembleOverviewFacts", () => {
 
   it("maps identity fields verbatim from the scholar row", async () => {
     const facts = await assembleOverviewFacts("self01");
-    expect(facts).not.toBeNull();
     expect(facts).toMatchObject({
       name: "Jane Smith",
       title: "Associate Professor of Medicine",
@@ -86,54 +135,137 @@ describe("assembleOverviewFacts", () => {
 
   it("counts DISTINCT confirmed-authorship pmids", async () => {
     mockPubAuthorFindMany.mockResolvedValue([
-      { pmid: "1" },
-      { pmid: "1" }, // duplicate (e.g. two author positions) must not double-count
-      { pmid: "2" },
+      { pmid: "1", isFirst: true, isLast: false },
+      { pmid: "1", isFirst: true, isLast: false }, // duplicate must not double-count
+      { pmid: "2", isFirst: false, isLast: true },
     ]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.publicationCount).toBe(2);
   });
 
-  it("shapes representative publications and excerpts the abstract", async () => {
-    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1" }]);
-    mockPublicationFindMany.mockResolvedValue([
-      {
-        title: "A worldwide atlas of urban metagenomes",
-        journal: "Cell",
-        year: 2021,
-        impactScore: decimal(92.5),
-        abstract: "x".repeat(600),
-        impactJustification: "broad influence",
-        synopsis: "urban microbiome atlas",
-      },
-    ]);
-    const facts = await assembleOverviewFacts("self01");
-    const pub = facts!.representativePublications[0];
-    expect(pub).toMatchObject({
-      title: "A worldwide atlas of urban metagenomes",
-      venue: "Cell",
-      year: 2021,
-      impact: 92.5,
-      impactJustification: "broad influence",
-      synopsis: "urban microbiome atlas",
-    });
-    expect(pub.abstractExcerpt).toHaveLength(400);
-  });
-
   it("computes yearsActive from the publication aggregate", async () => {
-    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1" }]);
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
     mockPublicationAggregate.mockResolvedValue({ _min: { year: 2008 }, _max: { year: 2024 } });
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.yearsActive).toEqual({ first: 2008, last: 2024 });
   });
 
+  it("degrades the C3 fields gracefully (methods [], facultyMetrics null)", async () => {
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([]);
+    expect(facts?.facultyMetrics).toBeNull();
+  });
+});
+
+describe("assembleOverviewFacts — representative publications (distilled, selection-driven)", () => {
+  it("defaults to first/last-author scored pubs with distilled fields (NO abstract) + rationale", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("1", {
+        title: "A worldwide atlas of urban metagenomes",
+        journal: "Cell",
+        year: 2021,
+        impact: 92.5,
+        synopsis: "urban microbiome atlas",
+        impactJustification: "broad influence",
+      }),
+    ]);
+    mockPubTopicFindMany.mockResolvedValue([
+      { parentTopicId: "t1", pmid: "1", rationale: "maps via metagenomic sequencing", score: 0.9 },
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    const pub = facts!.representativePublications[0];
+    expect(pub).toEqual({
+      pmid: "1",
+      title: "A worldwide atlas of urban metagenomes",
+      venue: "Cell",
+      year: 2021,
+      impact: 92.5,
+      synopsis: "urban microbiome atlas",
+      impactJustification: "broad influence",
+      topicRationale: "maps via metagenomic sequencing",
+      authorPosition: "first",
+    });
+    // The raw abstract is gone (decision 4).
+    expect(pub).not.toHaveProperty("abstractExcerpt");
+  });
+
+  it("does NOT default-select a middle-author scored pub", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "9", isFirst: false, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([pubRow("9")]);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.representativePublications).toEqual([]);
+  });
+
+  it("features exactly the explicitly-selected pmids (incl. a middle-author pub)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "1", isFirst: true, isLast: false },
+      { pmid: "9", isFirst: false, isLast: false }, // middle author
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("1", { impact: 90 }),
+      pubRow("9", { impact: 50 }),
+    ]);
+    const facts = await assembleOverviewFacts("self01", {
+      pmids: ["9"],
+      grantIds: [],
+      toolNames: [],
+    });
+    expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["9"]);
+  });
+
+  it("drops a forged/foreign pmid (ownership filter — matches no candidate)", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([{ pmid: "1", isFirst: true, isLast: false }]);
+    mockPublicationFindMany.mockResolvedValue([pubRow("1")]);
+    const facts = await assembleOverviewFacts("self01", {
+      pmids: ["1", "evil999"],
+      grantIds: [],
+      toolNames: [],
+    });
+    expect(facts?.representativePublications.map((p) => p.pmid)).toEqual(["1"]);
+  });
+});
+
+describe("assembleOverviewFacts — funding (selection-driven)", () => {
+  it("defaults to lead-role (PI/Co-PI) active awards, shaped {role,funderLabel,title,mechanism}", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "PI", { funder: "NIH/NIGMS", title: "Gene therapy", mechanism: "R01" }),
+      grantRow("g2", "Co-I", { funder: "NIH/NHGRI", title: "Side project", mechanism: null }),
+    ]);
+    const facts = await assembleOverviewFacts("self01");
+    // Co-I is a candidate but NOT a default pick — only the lead role.
+    expect(facts?.activeGrants).toEqual([
+      { role: "PI", funderLabel: "NIH/NIGMS", title: "Gene therapy", mechanism: "R01" },
+    ]);
+    expect(mockGrantFindMany.mock.calls[0][0].where).toMatchObject({ cwid: "self01" });
+    expect(mockGrantFindMany.mock.calls[0][0].where.endDate).toHaveProperty("gte");
+  });
+
+  it("includes a non-lead award when it is explicitly selected", async () => {
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "PI"),
+      grantRow("g2", "Co-I", { funder: "NSF" }),
+    ]);
+    const facts = await assembleOverviewFacts("self01", {
+      pmids: [],
+      grantIds: ["g2"],
+      toolNames: [],
+    });
+    expect(facts?.activeGrants.map((g) => g.role)).toEqual(["Co-I"]);
+  });
+});
+
+describe("assembleOverviewFacts — topics", () => {
   it("ranks topics by distinct-pmid count and resolves the label + a rationale", async () => {
     mockPubTopicFindMany.mockResolvedValue([
-      // cancer_genomics: 2 distinct pmids
-      { parentTopicId: "cancer_genomics", pmid: "p1", rationale: null },
-      { parentTopicId: "cancer_genomics", pmid: "p2", rationale: "maps via tumor sequencing" },
-      // immunology: 1 distinct pmid
-      { parentTopicId: "immunology", pmid: "p3", rationale: "T-cell work" },
+      { parentTopicId: "cancer_genomics", pmid: "p1", rationale: null, score: 0.5 },
+      {
+        parentTopicId: "cancer_genomics",
+        pmid: "p2",
+        rationale: "maps via tumor sequencing",
+        score: 0.8,
+      },
+      { parentTopicId: "immunology", pmid: "p3", rationale: "T-cell work", score: 0.7 },
     ]);
     mockTopicFindMany.mockResolvedValue([
       { id: "cancer_genomics", label: "Cancer Genomics" },
@@ -148,28 +280,15 @@ describe("assembleOverviewFacts", () => {
 
   it("drops a topic id that has no catalog label (never surfaces a raw slug)", async () => {
     mockPubTopicFindMany.mockResolvedValue([
-      { parentTopicId: "orphan_slug", pmid: "p1", rationale: "x" },
+      { parentTopicId: "orphan_slug", pmid: "p1", rationale: "x", score: 0.5 },
     ]);
-    mockTopicFindMany.mockResolvedValue([]); // no label row
+    mockTopicFindMany.mockResolvedValue([]);
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.topics).toEqual([]);
   });
+});
 
-  it("maps active grants to {role, funderLabel, mechanism}", async () => {
-    mockGrantFindMany.mockResolvedValue([
-      { role: "PI", funder: "NIH/NIGMS", mechanism: "R01" },
-      { role: "Co-I", funder: "NIH/NHGRI", mechanism: null },
-    ]);
-    const facts = await assembleOverviewFacts("self01");
-    expect(facts?.activeGrants).toEqual([
-      { role: "PI", funderLabel: "NIH/NIGMS", mechanism: "R01" },
-      { role: "Co-I", funderLabel: "NIH/NHGRI", mechanism: null },
-    ]);
-    // active = endDate >= today
-    expect(mockGrantFindMany.mock.calls[0][0].where).toMatchObject({ cwid: "self01" });
-    expect(mockGrantFindMany.mock.calls[0][0].where.endDate).toHaveProperty("gte");
-  });
-
+describe("assembleOverviewFacts — education & existingBio", () => {
   it("passes education through, preserving a null field (never invents one)", async () => {
     mockEducationFindMany.mockResolvedValue([
       { degree: "Ph.D.", institution: "Simon Fraser University", field: null, year: 2012 },
@@ -200,6 +319,75 @@ describe("assembleOverviewFacts", () => {
   });
 });
 
+describe("loadOverviewSourceOptions", () => {
+  it("returns candidate pubs + funding with matching defaultSelected flags; tools []", async () => {
+    mockPubAuthorFindMany.mockResolvedValue([
+      { pmid: "1", isFirst: true, isLast: false }, // first author → default
+      { pmid: "2", isFirst: false, isLast: false }, // middle → candidate, not default
+    ]);
+    mockPublicationFindMany.mockResolvedValue([
+      pubRow("1", { title: "P1", journal: "Cell", year: 2024, impact: 90 }),
+      pubRow("2", { title: "P2", journal: "Nature", year: 2022, impact: 70 }),
+    ]);
+    mockGrantFindMany.mockResolvedValue([
+      grantRow("g1", "PI", { funder: "NIH", title: "Proj 1", awardNumber: "R01 X", endYear: 2027 }),
+      grantRow("g2", "Co-I", {
+        funder: "NSF",
+        title: "Proj 2",
+        awardNumber: null,
+        mechanism: null,
+        endYear: 2026,
+      }),
+    ]);
+
+    const opts = await loadOverviewSourceOptions("self01");
+
+    expect(opts.publications).toEqual([
+      {
+        pmid: "1",
+        title: "P1",
+        venue: "Cell",
+        year: 2024,
+        impact: 90,
+        isFirstOrLast: true,
+        authorPosition: "first",
+        defaultSelected: true,
+      },
+      {
+        pmid: "2",
+        title: "P2",
+        venue: "Nature",
+        year: 2022,
+        impact: 70,
+        isFirstOrLast: false,
+        authorPosition: "middle",
+        defaultSelected: false,
+      },
+    ]);
+    expect(opts.funding).toEqual([
+      {
+        id: "g1",
+        role: "PI",
+        funder: "NIH",
+        title: "Proj 1",
+        award: "R01 X",
+        endYear: 2027,
+        defaultSelected: true,
+      },
+      {
+        id: "g2",
+        role: "Co-I",
+        funder: "NSF",
+        title: "Proj 2",
+        award: null,
+        endYear: 2026,
+        defaultSelected: false,
+      },
+    ]);
+    expect(opts.tools).toEqual([]);
+  });
+});
+
 describe("hasSufficientFacts", () => {
   const empty: OverviewFacts = {
     name: "Jane Smith",
@@ -211,6 +399,8 @@ describe("hasSufficientFacts", () => {
     yearsActive: { first: null, last: null },
     activeGrants: [],
     education: [],
+    methods: [],
+    facultyMetrics: null,
     existingBio: null,
   };
 
@@ -227,13 +417,15 @@ describe("hasSufficientFacts", () => {
         ...empty,
         representativePublications: [
           {
+            pmid: "1",
             title: "t",
             venue: null,
             year: null,
             impact: null,
-            abstractExcerpt: null,
-            impactJustification: null,
             synopsis: null,
+            impactJustification: null,
+            topicRationale: null,
+            authorPosition: null,
           },
         ],
       }),
@@ -244,7 +436,7 @@ describe("hasSufficientFacts", () => {
     expect(
       hasSufficientFacts({
         ...empty,
-        activeGrants: [{ role: "PI", funderLabel: "NIH", mechanism: "R01" }],
+        activeGrants: [{ role: "PI", funderLabel: "NIH", title: null, mechanism: "R01" }],
       }),
     ).toBe(true);
   });

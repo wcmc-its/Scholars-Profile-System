@@ -26,6 +26,8 @@ const FACTS: OverviewFacts = {
   yearsActive: { first: 2005, last: 2024 },
   activeGrants: [],
   education: [],
+  methods: [],
+  facultyMetrics: null,
   existingBio: null,
 };
 
