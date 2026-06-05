@@ -23,7 +23,11 @@
  * Read-only — this module performs NO write. Node-runtime only (Prisma).
  */
 import { db } from "@/lib/db";
-import { OVERVIEW_SELECTION_MAX_ITEMS, type OverviewSelection } from "@/lib/edit/overview-params";
+import {
+  OVERVIEW_SELECTION_MAX_ITEMS,
+  OVERVIEW_SELECTION_MAX_TOOLS,
+  type OverviewSelection,
+} from "@/lib/edit/overview-params";
 
 /** How many parent topics the facts payload carries. */
 const TOPIC_LIMIT = 4;
@@ -126,7 +130,14 @@ export type OverviewSourceFunding = {
 export type OverviewSourceOptions = {
   publications: OverviewSourcePublication[];
   funding: OverviewSourceFunding[];
-  tools: { toolName: string; category: string | null; pmidCount: number; maxConfidence: number }[];
+  tools: {
+    toolName: string;
+    category: string | null;
+    pmidCount: number;
+    maxConfidence: number;
+    /** Whether this tool is pre-checked when the drawer opens. */
+    defaultSelected: boolean;
+  }[];
 };
 
 /** Strip HTML tags + collapse whitespace — `existingBio.text` is plain text. */
@@ -157,13 +168,16 @@ function isLeadRole(role: string): boolean {
  * The default pre-check rule (shared by the assembler's empty-selection path and
  * the Sources drawer so the UI and the server agree). Lead-role active funding
  * is small + high-value, so it's kept first; first/last-author scored
- * publications (impact desc) fill the rest of the combined budget. Pure.
+ * publications (impact desc) fill the rest of the combined budget. Tools take
+ * the top of their own separate budget. Pure.
  */
 function pickDefaultSelection(
   pubs: { pmid: string; isFirstOrLast: boolean }[],
   funding: { id: string; isLead: boolean }[],
+  tools: { toolName: string }[] = [],
   maxItems = REPRESENTATIVE_LIMIT,
-): { pmids: string[]; grantIds: string[] } {
+  maxTools = OVERVIEW_SELECTION_MAX_TOOLS,
+): { pmids: string[]; grantIds: string[]; toolNames: string[] } {
   const grantIds = funding
     .filter((f) => f.isLead)
     .map((f) => f.id)
@@ -173,7 +187,9 @@ function pickDefaultSelection(
     .filter((p) => p.isFirstOrLast)
     .map((p) => p.pmid)
     .slice(0, remaining);
-  return { pmids, grantIds };
+  // Tools arrive pre-sorted (pmidCount desc); take the top of their own budget.
+  const toolNames = tools.map((t) => t.toolName).slice(0, maxTools);
+  return { pmids, grantIds, toolNames };
 }
 
 /** The scholar's scored confirmed publications (the bio candidate pool), impact
@@ -274,6 +290,26 @@ async function loadActiveFunding(cwid: string): Promise<
   }));
 }
 
+/** The scholar's tool/method rollup (ReciterAI `TOOL#` → `scholar_tool`),
+ *  most-used first. Empty until C3's ETL has populated the table. */
+async function loadScholarTools(
+  cwid: string,
+): Promise<
+  { toolName: string; category: string | null; pmidCount: number; maxConfidence: number }[]
+> {
+  const rows = await db.read.scholarTool.findMany({
+    where: { cwid },
+    orderBy: [{ pmidCount: "desc" }, { maxConfidence: "desc" }],
+    select: { toolName: true, category: true, pmidCount: true, maxConfidence: true },
+  });
+  return rows.map((r) => ({
+    toolName: r.toolName,
+    category: r.category,
+    pmidCount: r.pmidCount,
+    maxConfidence: decimalToNumber(r.maxConfidence) ?? 0,
+  }));
+}
+
 /** Highest-score topic rationale per pmid for `cwid` ("why this work maps here"). */
 async function loadTopicRationaleByPmid(
   cwid: string,
@@ -307,14 +343,25 @@ export async function assembleOverviewFacts(
 ): Promise<OverviewFacts | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
-    select: { preferredName: true, primaryTitle: true, primaryDepartment: true, overview: true },
+    select: {
+      preferredName: true,
+      primaryTitle: true,
+      primaryDepartment: true,
+      overview: true,
+      // #742 C3 — ReciterAI FACULTY# scale metrics (null until the ETL runs).
+      hIndex: true,
+      firstAuthorCount: true,
+      lastAuthorCount: true,
+      scoredPubCount: true,
+    },
   });
   if (!scholar) return null;
 
-  const [candidatePubs, funding, publicationCount, yearsActive, topics, education] =
+  const [candidatePubs, funding, scholarTools, publicationCount, yearsActive, topics, education] =
     await Promise.all([
       loadScoredCandidatePublications(cwid),
       loadActiveFunding(cwid),
+      loadScholarTools(cwid),
       countConfirmedPublications(cwid),
       assembleYearsActive(cwid),
       assembleTopics(cwid),
@@ -326,28 +373,36 @@ export async function assembleOverviewFacts(
   // shared default rule so there is no dead-end empty state.
   const candidatePmidSet = new Set(candidatePubs.map((p) => p.pmid));
   const candidateGrantSet = new Set(funding.map((f) => f.id));
+  const candidateToolSet = new Set(scholarTools.map((t) => t.toolName));
 
   let selectedPmids: string[];
   let selectedGrantIds: string[];
+  let selectedToolNames: string[];
   const hasExplicit =
-    selection !== undefined && (selection.pmids.length > 0 || selection.grantIds.length > 0);
+    selection !== undefined &&
+    (selection.pmids.length > 0 || selection.grantIds.length > 0 || selection.toolNames.length > 0);
   if (hasExplicit) {
     selectedPmids = selection!.pmids.filter((p) => candidatePmidSet.has(p));
     selectedGrantIds = selection!.grantIds.filter((g) => candidateGrantSet.has(g));
+    selectedToolNames = selection!.toolNames.filter((t) => candidateToolSet.has(t));
   } else {
-    const def = pickDefaultSelection(candidatePubs, funding);
+    const def = pickDefaultSelection(candidatePubs, funding, scholarTools);
     selectedPmids = def.pmids;
     selectedGrantIds = def.grantIds;
+    selectedToolNames = def.toolNames;
   }
-  // Defensive combined cap (the route normalizes too): publications first.
+  // Defensive caps (the route normalizes too): publications first within the
+  // shared 25, tools within their own 10.
   selectedPmids = selectedPmids.slice(0, REPRESENTATIVE_LIMIT);
   selectedGrantIds = selectedGrantIds.slice(
     0,
     Math.max(0, REPRESENTATIVE_LIMIT - selectedPmids.length),
   );
+  selectedToolNames = selectedToolNames.slice(0, OVERVIEW_SELECTION_MAX_TOOLS);
 
   const selectedPmidSet = new Set(selectedPmids);
   const selectedGrantSet = new Set(selectedGrantIds);
+  const selectedToolSet = new Set(selectedToolNames);
 
   // Build the representative pubs from the selected candidates (impact-desc order
   // is preserved from the candidate query), enriched with the topic rationale.
@@ -375,6 +430,26 @@ export async function assembleOverviewFacts(
       mechanism: f.mechanism,
     }));
 
+  // The selected tools (ReciterAI methods/instruments); empty when the ETL hasn't
+  // run or the scholar deselected them all.
+  const methods = scholarTools
+    .filter((t) => selectedToolSet.has(t.toolName))
+    .map((t) => ({ name: t.toolName, category: t.category }));
+
+  const hasMetrics =
+    scholar.hIndex !== null ||
+    scholar.firstAuthorCount !== null ||
+    scholar.lastAuthorCount !== null ||
+    scholar.scoredPubCount !== null;
+  const facultyMetrics = hasMetrics
+    ? {
+        firstAuthorCount: scholar.firstAuthorCount,
+        lastAuthorCount: scholar.lastAuthorCount,
+        scoredPubCount: scholar.scoredPubCount,
+        hIndex: scholar.hIndex,
+      }
+    : null;
+
   const existingBioText = scholar.overview ? htmlToPlainText(scholar.overview) : "";
 
   return {
@@ -387,28 +462,29 @@ export async function assembleOverviewFacts(
     yearsActive,
     activeGrants,
     education,
-    // C3 lands these (the TOOL# / FACULTY# ETL); degrade gracefully until then.
-    methods: [],
-    facultyMetrics: null,
+    methods,
+    facultyMetrics,
     existingBio: existingBioText ? { text: existingBioText, source: "vivo" } : null,
   };
 }
 
 /**
- * The Sources drawer candidate lists for `cwid` (v3.1 §4) — every scored pub +
- * every active award, each flagged `defaultSelected` per the shared default rule
- * so the drawer's pre-checks match the server's empty-selection behavior. `tools`
- * is empty until C3.
+ * The Sources drawer candidate lists for `cwid` (v3.1 §4) — every scored pub,
+ * every active award, and every tool, each flagged `defaultSelected` per the
+ * shared default rule so the drawer's pre-checks match the server's
+ * empty-selection behavior. `tools` is empty until C3's ETL has run.
  */
 export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewSourceOptions> {
-  const [candidatePubs, funding] = await Promise.all([
+  const [candidatePubs, funding, scholarTools] = await Promise.all([
     loadScoredCandidatePublications(cwid),
     loadActiveFunding(cwid),
+    loadScholarTools(cwid),
   ]);
 
-  const def = pickDefaultSelection(candidatePubs, funding);
+  const def = pickDefaultSelection(candidatePubs, funding, scholarTools);
   const defaultPmids = new Set(def.pmids);
   const defaultGrants = new Set(def.grantIds);
+  const defaultTools = new Set(def.toolNames);
 
   return {
     publications: candidatePubs.map((p) => ({
@@ -430,7 +506,13 @@ export async function loadOverviewSourceOptions(cwid: string): Promise<OverviewS
       endYear: f.endYear,
       defaultSelected: defaultGrants.has(f.id),
     })),
-    tools: [],
+    tools: scholarTools.map((t) => ({
+      toolName: t.toolName,
+      category: t.category,
+      pmidCount: t.pmidCount,
+      maxConfidence: t.maxConfidence,
+      defaultSelected: defaultTools.has(t.toolName),
+    })),
   };
 }
 

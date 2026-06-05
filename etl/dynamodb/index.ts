@@ -60,6 +60,7 @@ import { clearTopicRebuildWindow } from "../../lib/etl-state";
 import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
+import { buildScholarToolWrites } from "./scholar-tool-mapper";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -68,6 +69,22 @@ type FacultyRecord = {
   PK: string; // FACULTY#cwid_<cwid>
   SK?: string;
   top_topics?: Array<{ topic_id?: string; topic?: string; score: number }> | unknown;
+  // #742 v3.1 C3 — ReciterAI scale metrics on the FACULTY#…/PROFILE item.
+  h_index?: number;
+  first_author_count?: number;
+  last_author_count?: number;
+  scored_pub_count?: number;
+  [key: string]: unknown;
+};
+
+type ToolRecord = {
+  PK: string; // TOOL#<tool_id>
+  SK?: string;
+  faculty_uid?: string; // "cwid_<cwid>"
+  pmid?: string | number;
+  tool_category?: string;
+  context?: string;
+  score?: number; // normalized confidence [0,1]
   [key: string]: unknown;
 };
 
@@ -447,11 +464,31 @@ async function main() {
 
     type TopicRow = { cwid: string; topic: string; score: number };
     const rows: TopicRow[] = [];
+    // #742 v3.1 C3 — collect ReciterAI FACULTY# scale metrics per scholar (h-index,
+    // first/last-author counts, scored-pub count) for the overview generator's
+    // framing. Collected for every in-scope cwid, even ones with no top_topics.
+    type FacultyMetric = {
+      cwid: string;
+      hIndex: number | null;
+      firstAuthorCount: number | null;
+      lastAuthorCount: number | null;
+      scoredPubCount: number | null;
+    };
+    const num = (v: unknown): number | null =>
+      typeof v === "number" && Number.isFinite(v) ? v : null;
+    const metrics: FacultyMetric[] = [];
     for (const it of items) {
       const m = it.PK.match(/^FACULTY#cwid_(.+)$/);
       if (!m) continue;
       const cwid = m[1];
       if (!ourCwidSet.has(cwid)) continue;
+      metrics.push({
+        cwid,
+        hIndex: num(it.h_index),
+        firstAuthorCount: num(it.first_author_count),
+        lastAuthorCount: num(it.last_author_count),
+        scoredPubCount: num(it.scored_pub_count),
+      });
       const tt = it.top_topics;
       if (!Array.isArray(tt)) continue;
       for (const t of tt as Array<Record<string, unknown>>) {
@@ -487,6 +524,37 @@ async function main() {
         skipDuplicates: true,
       });
     }
+
+    // #742 v3.1 C3 — write the FACULTY# scale metrics onto scholar (update-only;
+    // scholar rows are created by the ED ETL). Skip scholars with no non-null
+    // metric. Promise.all in chunks bounds the open-connection count.
+    const metricWrites = metrics.filter(
+      (mm) =>
+        mm.hIndex !== null ||
+        mm.firstAuthorCount !== null ||
+        mm.lastAuthorCount !== null ||
+        mm.scoredPubCount !== null,
+    );
+    let scholarMetricsUpdated = 0;
+    const METRIC_BATCH = 100;
+    for (let i = 0; i < metricWrites.length; i += METRIC_BATCH) {
+      const chunk = metricWrites.slice(i, i + METRIC_BATCH);
+      await Promise.all(
+        chunk.map((mm) =>
+          db.write.scholar.updateMany({
+            where: { cwid: mm.cwid },
+            data: {
+              hIndex: mm.hIndex,
+              firstAuthorCount: mm.firstAuthorCount,
+              lastAuthorCount: mm.lastAuthorCount,
+              scoredPubCount: mm.scoredPubCount,
+            },
+          }),
+        ),
+      );
+      scholarMetricsUpdated += chunk.length;
+    }
+    console.log(`Scholar FACULTY# metrics updated: ${scholarMetricsUpdated} scholars.`);
 
     // ===================================================================
     // Block 4: IMPACT# → publication  (issue #316)
@@ -600,10 +668,78 @@ async function main() {
     );
 
     // ===================================================================
+    // Block 5: TOOL# → scholar_tool  (#742 v3.1 C3)
+    // ===================================================================
+    // ReciterAI TOOL# items are per (tool × pmid × cwid) method/instrument
+    // observations. Roll them up to one row per (cwid, tool) for the overview
+    // generator's `methods` + a future "Methods & Tools" view. Full rebuild
+    // (deleteMany + createMany), same shape as the topic_assignment block.
+    console.log(`Scanning ${TABLE} for TOOL# records (paginated)...`);
+    const toolItems: ToolRecord[] = [];
+    {
+      let lastKey: Record<string, unknown> | undefined;
+      let pages = 0;
+      do {
+        const resp = await ddb.send(
+          new ScanCommand({
+            TableName: TABLE,
+            FilterExpression: "begins_with(PK, :prefix)",
+            ExpressionAttributeValues: { ":prefix": "TOOL#" },
+            ExclusiveStartKey: lastKey,
+          }),
+        );
+        for (const it of (resp.Items ?? []) as ToolRecord[]) toolItems.push(it);
+        pages += 1;
+        if (pages % 10 === 0) {
+          console.log(`  ...scanned ${toolItems.length} TOOL# items so far (${pages} pages)`);
+        }
+        lastKey = resp.LastEvaluatedKey;
+      } while (lastKey);
+    }
+    console.log(`Found ${toolItems.length} TOOL# records.`);
+
+    // The TOOL# PK carries the (sanitized) tool name and each item its
+    // tool_category, so the rollup needs no TOOL_INDEX# join — keeps the scan
+    // single-prefix. The mapper is pure + unit-tested (./scholar-tool-mapper.ts).
+    const toolResult = buildScholarToolWrites(toolItems, { ourCwidSet });
+    console.log(
+      `scholar_tool candidates: ${toolResult.writes.length} rows ` +
+        `(skipped ${toolResult.skippedMissingCwid} out-of-scope cwid, ` +
+        `${toolResult.skippedMissingFields} missing tool/pmid).`,
+    );
+
+    console.log("Resetting scholar_tool table...");
+    await db.write.scholarTool.deleteMany();
+
+    let scholarToolRowsInserted = 0;
+    const TOOL_BATCH = 500;
+    for (let i = 0; i < toolResult.writes.length; i += TOOL_BATCH) {
+      const chunk = toolResult.writes.slice(i, i + TOOL_BATCH);
+      await db.write.scholarTool.createMany({
+        data: chunk.map((w) => ({
+          cwid: w.cwid,
+          toolName: w.toolName,
+          category: w.category,
+          pmidCount: w.pmidCount,
+          maxConfidence: new Prisma.Decimal(w.maxConfidence),
+          sampleContext: w.sampleContext,
+          pmids: w.pmids,
+        })),
+        skipDuplicates: true,
+      });
+      scholarToolRowsInserted += chunk.length;
+    }
+    console.log(`scholar_tool inserts complete: ${scholarToolRowsInserted} rows.`);
+
+    // ===================================================================
     // Bookkeeping
     // ===================================================================
     const totalRowsProcessed =
-      topicRowsUpserted + pubTopicRowsUpserted + rows.length + impactRowsUpserted;
+      topicRowsUpserted +
+      pubTopicRowsUpserted +
+      rows.length +
+      impactRowsUpserted +
+      scholarToolRowsInserted;
     await db.write.etlRun.update({
       where: { id: run.id },
       data: { status: "success", completedAt: new Date(), rowsProcessed: totalRowsProcessed },

@@ -17,6 +17,7 @@ const {
   mockTopicFindMany,
   mockGrantFindMany,
   mockEducationFindMany,
+  mockScholarToolFindMany,
 } = vi.hoisted(() => ({
   mockScholarFindUnique: vi.fn(),
   mockPubAuthorFindMany: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockTopicFindMany: vi.fn(),
   mockGrantFindMany: vi.fn(),
   mockEducationFindMany: vi.fn(),
+  mockScholarToolFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -38,6 +40,7 @@ vi.mock("@/lib/db", () => ({
       topic: { findMany: mockTopicFindMany },
       grant: { findMany: mockGrantFindMany },
       education: { findMany: mockEducationFindMany },
+      scholarTool: { findMany: mockScholarToolFindMany },
     },
   },
 }));
@@ -101,14 +104,24 @@ function grantRow(
   };
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  mockScholarFindUnique.mockResolvedValue({
+/** The scholar row shape `findUnique` returns (metrics null unless overridden). */
+function scholarRow(over: Record<string, unknown> = {}) {
+  return {
     preferredName: "Jane Smith",
     primaryTitle: "Associate Professor of Medicine",
     primaryDepartment: "Medicine",
     overview: null,
-  });
+    hIndex: null,
+    firstAuthorCount: null,
+    lastAuthorCount: null,
+    scoredPubCount: null,
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockScholarFindUnique.mockResolvedValue(scholarRow());
   mockPubAuthorFindMany.mockResolvedValue([]);
   mockPublicationFindMany.mockResolvedValue([]);
   mockPublicationAggregate.mockResolvedValue({ _min: { year: null }, _max: { year: null } });
@@ -116,6 +129,7 @@ beforeEach(() => {
   mockTopicFindMany.mockResolvedValue([]);
   mockGrantFindMany.mockResolvedValue([]);
   mockEducationFindMany.mockResolvedValue([]);
+  mockScholarToolFindMany.mockResolvedValue([]);
 });
 
 describe("assembleOverviewFacts — identity & corpus", () => {
@@ -300,12 +314,12 @@ describe("assembleOverviewFacts — education & existingBio", () => {
   });
 
   it("derives existingBio as plain text from the overview HTML, source 'vivo'", async () => {
-    mockScholarFindUnique.mockResolvedValue({
-      preferredName: "Jane Smith",
-      primaryTitle: "Professor",
-      primaryDepartment: "Medicine",
-      overview: "<p>Studies <strong>genomics</strong> &amp; precision medicine.</p>",
-    });
+    mockScholarFindUnique.mockResolvedValue(
+      scholarRow({
+        primaryTitle: "Professor",
+        overview: "<p>Studies <strong>genomics</strong> &amp; precision medicine.</p>",
+      }),
+    );
     const facts = await assembleOverviewFacts("self01");
     expect(facts?.existingBio).toEqual({
       text: "Studies genomics & precision medicine.",
@@ -385,6 +399,76 @@ describe("loadOverviewSourceOptions", () => {
       },
     ]);
     expect(opts.tools).toEqual([]);
+  });
+});
+
+describe("assembleOverviewFacts — methods & faculty metrics (C3)", () => {
+  const TOOLS = [
+    {
+      toolName: "AAV vectors",
+      category: "vector platform",
+      pmidCount: 28,
+      maxConfidence: decimal(0.9),
+    },
+    { toolName: "PET imaging", category: "imaging", pmidCount: 12, maxConfidence: decimal(0.8) },
+  ];
+
+  it("defaults to the scholar's top tools, shaped methods as {name, category}", async () => {
+    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([
+      { name: "AAV vectors", category: "vector platform" },
+      { name: "PET imaging", category: "imaging" },
+    ]);
+  });
+
+  it("features only explicitly-selected tools; drops a foreign tool name", async () => {
+    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+    const facts = await assembleOverviewFacts("self01", {
+      pmids: [],
+      grantIds: [],
+      toolNames: ["PET imaging", "evil-tool"],
+    });
+    expect(facts?.methods).toEqual([{ name: "PET imaging", category: "imaging" }]);
+  });
+
+  it("maps facultyMetrics from the scholar row", async () => {
+    mockScholarFindUnique.mockResolvedValue(
+      scholarRow({ hIndex: 92, firstAuthorCount: 40, lastAuthorCount: 300, scoredPubCount: 39 }),
+    );
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.facultyMetrics).toEqual({
+      hIndex: 92,
+      firstAuthorCount: 40,
+      lastAuthorCount: 300,
+      scoredPubCount: 39,
+    });
+  });
+
+  it("facultyMetrics is null when the scholar has no FACULTY# metrics", async () => {
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.facultyMetrics).toBeNull();
+  });
+
+  it("source-options returns tools with defaultSelected (top tools pre-checked)", async () => {
+    mockScholarToolFindMany.mockResolvedValue(TOOLS);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools).toEqual([
+      {
+        toolName: "AAV vectors",
+        category: "vector platform",
+        pmidCount: 28,
+        maxConfidence: 0.9,
+        defaultSelected: true,
+      },
+      {
+        toolName: "PET imaging",
+        category: "imaging",
+        pmidCount: 12,
+        maxConfidence: 0.8,
+        defaultSelected: true,
+      },
+    ]);
   });
 });
 

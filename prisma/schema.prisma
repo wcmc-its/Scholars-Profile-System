@@ -68,6 +68,13 @@ model Scholar {
   /// `lib/seo/jsonld.ts` to append an `https://orcid.org/<id>` URL to the
   /// scholar's Person.sameAs for AI/LLM crawler entity resolution.
   orcid                  String?   @db.VarChar(19)
+  /// Issue #742 v3.1 C3 — ReciterAI FACULTY# rollup metrics (DynamoDB), for the
+  /// overview generator's faculty-scale framing. Nullable so the additive
+  /// migration applies cleanly; backfilled by etl/dynamodb on next run.
+  hIndex                 Int?      @map("h_index")
+  firstAuthorCount       Int?      @map("first_author_count")
+  lastAuthorCount        Int?      @map("last_author_count")
+  scoredPubCount         Int?      @map("scored_pub_count")
   deletedAt              DateTime? @map("deleted_at")
   createdAt              DateTime  @default(now()) @map("created_at")
   updatedAt              DateTime  @updatedAt @map("updated_at")
@@ -79,17 +86,18 @@ model Scholar {
   topicAssignments     TopicAssignment[]
   publicationScores    PublicationScore[]
   publicationTopics    PublicationTopic[]
-  cwidAliasesAsCurrent CwidAlias[]         @relation("AliasCurrent")
-  slugHistoryAsCurrent SlugHistory[]       @relation("SlugHistoryCurrent")
+  cwidAliasesAsCurrent CwidAlias[]          @relation("AliasCurrent")
+  slugHistoryAsCurrent SlugHistory[]        @relation("SlugHistoryCurrent")
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
   overviewGenerations  OverviewGeneration[]
   overviewProvenance   OverviewProvenance?
-  department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
-  division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
-  postdoctoralMentor   Scholar?            @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
-  postdocMentees       Scholar[]           @relation("PostdocMentor")
+  scholarTools         ScholarTool[]
+  department           Department?          @relation(fields: [deptCode], references: [code], onDelete: SetNull)
+  division             Division?            @relation(fields: [divCode], references: [code], onDelete: SetNull)
+  postdoctoralMentor   Scholar?             @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
+  postdocMentees       Scholar[]            @relation("PostdocMentor")
 
   @@index([deletedAt])
   @@index([status])
@@ -1246,15 +1254,15 @@ model FieldOverride {
 /// the table carries no uniqueness constraint. No FK, so a suppression row can
 /// outlive a hard-deleted target.
 model Suppression {
-  id              String     @id @default(uuid()) @db.VarChar(64)
-  entityType      EntityType @map("entity_type")
-  entityId        String     @map("entity_id") @db.VarChar(64) // stable identifier — see ADR-005 § Keying
-  contributorCwid String?    @map("contributor_cwid") @db.VarChar(32) // NULL = whole entity; CWID = one contributor
-  reason          String     @db.Text
-  createdBy       String     @map("created_by") @db.VarChar(32)
-  createdAt       DateTime   @default(now()) @map("created_at")
-  revokedBy       String?    @map("revoked_by") @db.VarChar(32)
-  revokedAt       DateTime?  @map("revoked_at")
+  id                String     @id @default(uuid()) @db.VarChar(64)
+  entityType        EntityType @map("entity_type")
+  entityId          String     @map("entity_id") @db.VarChar(64) // stable identifier — see ADR-005 § Keying
+  contributorCwid   String?    @map("contributor_cwid") @db.VarChar(32) // NULL = whole entity; CWID = one contributor
+  reason            String     @db.Text
+  createdBy         String     @map("created_by") @db.VarChar(32)
+  createdAt         DateTime   @default(now()) @map("created_at")
+  revokedBy         String?    @map("revoked_by") @db.VarChar(32)
+  revokedAt         DateTime?  @map("revoked_at")
   /// ADR-005 failure-model layer 3 reconciler sentinel (#393). A freshness
   /// flag, not a timestamp of record: NULL means "this row's latest state
   /// transition has not been reflected into the OpenSearch index." It defaults
@@ -1264,7 +1272,7 @@ model Suppression {
   /// re-reflects it. Scoped to scholar/publication — other entity types have no
   /// OpenSearch fast-path, so this stays NULL for them and the reconciler
   /// excludes them by entity type.
-  searchReflectedAt DateTime? @map("search_reflected_at")
+  searchReflectedAt DateTime?  @map("search_reflected_at")
 
   @@index([entityType, entityId])
   @@map("suppression")
@@ -1357,6 +1365,37 @@ model OverviewProvenance {
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
 
   @@map("overview_provenance")
+}
+
+/// Per-(scholar, tool) rollup of ReciterAI `TOOL#` method/instrument extractions
+/// (#742 v3.1 C3). Written by etl/dynamodb (Block 5) from the DynamoDB TOOL#
+/// items (one item per tool×pmid×cwid), aggregated to one row per (cwid, tool).
+/// Grounds the overview generator's `methods` and powers a future public
+/// "Methods & Tools" view. `pmids` retains the publication linkage (which papers
+/// the tool appears in) so the view can show usage; the bio reads name/category.
+/// Main-schema table — the app role's existing DML grant covers it (cf. #493).
+model ScholarTool {
+  id            String   @id @default(uuid()) @db.VarChar(64)
+  cwid          String   @db.VarChar(32)
+  /// Canonical tool / method / instrument name (from the TOOL# PK).
+  toolName      String   @map("tool_name") @db.VarChar(255)
+  /// Functional category (e.g. "imaging", "vector platform"); null when absent.
+  category      String?  @db.VarChar(128)
+  /// Distinct publications the tool was observed in (drives "used in N papers").
+  pmidCount     Int      @map("pmid_count")
+  /// Max extraction confidence across the tool's activities, in [0,1].
+  maxConfidence Decimal  @map("max_confidence") @db.Decimal(5, 4)
+  /// A representative context snippet from one extraction (nullable).
+  sampleContext String?  @map("sample_context") @db.Text
+  /// The contributing PMIDs — publication linkage for the future view.
+  pmids         Json
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@unique([cwid, toolName])
+  @@index([cwid, pmidCount(sort: Desc)])
+  @@map("scholar_tool")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,
