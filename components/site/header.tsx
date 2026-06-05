@@ -39,23 +39,26 @@ export function SiteHeader({
       }}
     >
       <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-6">
-        <div className="flex shrink-0 items-start gap-2.5">
-          <Link href="/" className="flex flex-col gap-[4px] no-underline">
+        <Link href="/" className="flex shrink-0 flex-col gap-[4px] no-underline">
+          {/* #760 — badge shares the wordmark's top row so it centers on the
+              "Scholars" cap height via items-center (no magic vertical offset);
+              the subtitle drops to the row below. */}
+          <span className="flex items-center gap-2.5">
             <span
               className="font-serif leading-none text-white"
               style={{ fontSize: "20px", fontWeight: 600, letterSpacing: "-0.005em" }}
             >
               Scholars
             </span>
-            <span
-              className="font-sans uppercase leading-none text-white/82"
-              style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.12em" }}
-            >
-              Weill Cornell Medicine
-            </span>
-          </Link>
-          {showBetaBadge ? <BetaBadge className="mt-[3px]" /> : null}
-        </div>
+            {showBetaBadge ? <BetaBadge /> : null}
+          </span>
+          <span
+            className="font-sans uppercase leading-none text-white/82"
+            style={{ fontSize: "10px", fontWeight: 600, letterSpacing: "0.12em" }}
+          >
+            Weill Cornell Medicine
+          </span>
+        </Link>
 
         {showSearch ? (
           <div className="flex-1">

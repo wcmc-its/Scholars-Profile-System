@@ -34,24 +34,33 @@ describe("isBetaBadgeEnabled — default-on gate (#760)", () => {
 });
 
 describe("BetaBadge — presentation", () => {
-  it('renders the visible "Beta" text (screen-reader meaning) + a tooltip title', () => {
+  it('renders the visible "Beta" text as the full accessible meaning', () => {
     render(<BetaBadge />);
-    const pill = screen.getByText("Beta");
-    expect(pill).toBeTruthy();
-    expect(pill.getAttribute("title")).toBe("Scholars is in beta");
+    const tag = screen.getByText("Beta");
+    expect(tag).toBeTruthy();
+    expect(tag.tagName).toBe("SPAN");
   });
 
-  it("is a translucent white outline pill (white text, white border)", () => {
+  it("is non-interactive: a plain span, not focusable, no title/role", () => {
     render(<BetaBadge />);
-    const pill = screen.getByText("Beta");
-    expect(pill.className).toContain("border-white/40");
-    expect(pill.className).toContain("text-white/90");
-    expect(pill.className).toContain("rounded-full");
-    expect(pill.className).toContain("uppercase");
+    const tag = screen.getByText("Beta");
+    expect(tag.getAttribute("tabindex")).toBeNull();
+    expect(tag.getAttribute("role")).toBeNull();
+    expect(tag.getAttribute("title")).toBeNull();
   });
 
-  it("merges a caller className (used by the header for vertical nudge)", () => {
-    render(<BetaBadge className="mt-[3px]" />);
-    expect(screen.getByText("Beta").className).toContain("mt-[3px]");
+  it("is a solid light chip with carnelian text (dark-on-light, inverting the header)", () => {
+    render(<BetaBadge />);
+    const tag = screen.getByText("Beta");
+    expect(tag.className).toContain("bg-[#FBF1EE]"); // warm off-white fill
+    expect(tag.className).toContain("text-[#A32D2D]"); // WCM carnelian text
+    expect(tag.className).toContain("rounded-full");
+    expect(tag.className).toContain("text-[11px]"); // 11px hard floor
+    expect(tag.className).toContain("uppercase");
+  });
+
+  it("merges a caller className", () => {
+    render(<BetaBadge className="ml-2.5" />);
+    expect(screen.getByText("Beta").className).toContain("ml-2.5");
   });
 });

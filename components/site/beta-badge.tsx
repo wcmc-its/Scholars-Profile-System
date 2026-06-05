@@ -18,23 +18,22 @@ export function isBetaBadgeEnabled(
 }
 
 /**
- * Small "Beta" pill shown beside the Scholars wordmark during the launch /
+ * Small solid "Beta" tag shown beside the Scholars wordmark during the launch /
  * early-access period (#760). Presentational only — the header decides whether
- * to render it via {@link isBetaBadgeEnabled}. Sits on the maroon header, so it
- * is a translucent outline: white text, thin white/40 border, transparent fill.
- * Size + letter-spacing mirror the "WEILL CORNELL MEDICINE" subtitle so it reads
- * as part of the brand. The visible text carries the meaning for screen readers;
- * `title` adds a hover tooltip for sighted users.
+ * to render it via {@link isBetaBadgeEnabled} and positions it on the wordmark
+ * row. A solid light chip (warm off-white fill, WCM carnelian text) that inverts
+ * the surrounding white-on-red, so the tag is the one element that breaks the
+ * pattern and reads unmistakably as a label (≈6.4:1 contrast, well over WCAG AA
+ * 4.5:1). Non-interactive: a plain, non-focusable <span> with no hover/click
+ * affordance of its own; the visible text is its full accessible meaning.
  */
 export function BetaBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border border-white/40 bg-transparent px-2 py-[2px] font-sans font-semibold uppercase leading-none text-white/90",
+        "inline-flex shrink-0 select-none items-center rounded-full bg-[#FBF1EE] px-2 py-0.5 font-sans text-[11px] font-medium uppercase leading-none tracking-[0.08em] text-[#A32D2D]",
         className,
       )}
-      style={{ fontSize: "10px", letterSpacing: "0.12em" }}
-      title="Scholars is in beta"
     >
       Beta
     </span>
