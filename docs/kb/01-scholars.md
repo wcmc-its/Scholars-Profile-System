@@ -29,7 +29,7 @@ Sign in at **`scholars.weill.cornell.edu/edit`** with your WCM credentials. Your
 | Edit your **overview** | `/edit` → Overview | The short narrative at the top of your profile. |
 | **Hide / show** individual publications | `/edit` → Publications | Display-only and **reversible**. It removes the paper from *your profile only* — it changes nothing in PubMed or ReCiter. |
 | **Hide your entire profile** | `/edit` → Visibility | One click; reversible any time. Use this if you'd rather not appear publicly at all. |
-| **Get a custom profile URL** | Ask the Scholars team | A superuser can set a custom web address for you; your existing `/scholars/<url>` keeps working (it redirects). An in-app self-serve request flow is rolling out — see [Your profile URL](#your-profile-url) below. |
+| **Get a custom profile URL** | Ask the Scholars team | Not self-serve — email the Scholars team (or open a Service Desk ticket) and an administrator sets it. Your existing address keeps working (it redirects). Details under [Your profile URL](#your-profile-url) below. |
 | **Request a change** to anything else | "Request a change" on any field | Routes to the office that owns the field (see below). |
 
 ## What you can't change here — and where it *does* get changed
@@ -57,7 +57,7 @@ Your public profile has a short, stable web address — `scholars.weill.cornell.
 - **It's generated for you** from your preferred name in the Web Directory — lowercased, accents removed, spaces turned into hyphens (e.g. *Mary-Anne O'Brien* → `mary-anne-obrien`). You don't set it.
 - **A number on the end** (`jane-smith-2`) just means someone already had the name-based address when your profile was created. The first profile keeps the plain form; later namesakes are numbered in creation order. It isn't a ranking.
 - **It's stable.** If your preferred name changes — or an administrator gives you a custom address — the old address keeps working and redirects to the new one, so existing links and citations don't break.
-- **Want a different address?** Use **Request a change**; it's logged as a support ticket and a Scholars administrator sets your new address in the app. Custom addresses are still based on your name — first and last name, optionally a middle initial or a fuller form to distinguish you from a namesake — not a free-choice handle, so you can't claim a word like a research area or department.
+- **Want a different address?** Custom addresses aren't self-serve — email the Scholars team (or open a Service Desk ticket) and say what you'd like. Addresses stay name-based, so ask for a variation of your first and last name — you can add a middle initial or a fuller form (e.g. `jane-q-smith`) if a namesake already has the plain form. You can't claim a free-choice word like a research area or department. An administrator reviews the request, sets your new address, and replies to your ticket when it's done — usually within a few business days; your old address keeps working and redirects.
 
 ---
 
