@@ -84,6 +84,8 @@ model Scholar {
   coiActivities        CoiActivity[]
   coiGapCandidates     CoiGapCandidate[]
   nihProfiles          PersonNihProfile[]
+  overviewGenerations  OverviewGeneration[]
+  overviewProvenance   OverviewProvenance?
   department           Department?         @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?           @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?            @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -1313,6 +1315,48 @@ model RequestChangeRateLimit {
 
   @@id([cwid, windowStart])
   @@map("request_change_rate_limit")
+}
+
+/// One generated overview candidate (#742 v2, overview-statement-generator-spec.md).
+/// Written on EVERY Generate; it is never the published value (that stays in
+/// FieldOverride(overview)) — this is the version HISTORY the scholar browses,
+/// loads, and regenerates from. `model` + `params` record exactly which model and
+/// which controls produced the draft. In the main schema so the app role's existing
+/// DML covers it, with no separate-schema GRANT to forget at deploy (cf. the #493
+/// audit-grant gap).
+model OverviewGeneration {
+  id            String   @id @default(uuid()) @db.VarChar(64)
+  cwid          String   @db.VarChar(32)
+  text          String   @db.Text // sanitized HTML draft
+  model         String   @db.VarChar(64) // gateway model string used
+  params        Json // { voice, tone, length, elements[], instructions }
+  createdByCwid String   @map("created_by_cwid") @db.VarChar(32) // actor (self today)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@index([cwid, createdAt(sort: Desc)]) // the scholar's drafts, newest first
+  @@map("overview_generation")
+}
+
+/// Provenance of the CURRENTLY PUBLISHED overview (#742 v2). One row per scholar,
+/// upserted whenever the overview is saved. Answers "is the live bio authored,
+/// generated, or generated-then-edited, and by which model / which generation?"
+/// Surfaced in /edit only (never public). `sourceGenerationId` is a SOFT pointer to
+/// the OverviewGeneration the saved text derived from (no FK — a draft may be pruned
+/// later; null for a hand-authored save). In the main schema so the app role's
+/// existing DML covers it (cf. the #493 audit-grant gap).
+model OverviewProvenance {
+  cwid               String   @id @db.VarChar(32)
+  origin             String   @db.VarChar(24) // 'authored' | 'generated' | 'generated_edited'
+  model              String?  @db.VarChar(64) // null when authored
+  sourceGenerationId String?  @map("source_generation_id") @db.VarChar(64)
+  updatedByCwid      String   @map("updated_by_cwid") @db.VarChar(32)
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@map("overview_provenance")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,

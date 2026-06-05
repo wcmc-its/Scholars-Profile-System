@@ -15,6 +15,7 @@ const {
   mockHasSufficient,
   mockGenerateDraft,
   mockRecordAttempt,
+  mockGenerationCreate,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockEnabled: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockHasSufficient: vi.fn(),
   mockGenerateDraft: vi.fn(),
   mockRecordAttempt: vi.fn(),
+  mockGenerationCreate: vi.fn(),
 }));
 
 // readEditRequest resolves identity through the #637 effective-identity seam;
@@ -47,6 +49,10 @@ vi.mock("@/lib/edit/overview-generator", () => ({
 }));
 vi.mock("@/lib/edit/rate-limit", () => ({
   recordOverviewGenerateAttempt: mockRecordAttempt,
+}));
+// #742 Phase B — the route now best-effort records a version-history row.
+vi.mock("@/lib/db", () => ({
+  db: { write: { overviewGeneration: { create: mockGenerationCreate } } },
 }));
 
 import { POST } from "@/app/api/edit/overview/generate/route";
@@ -74,6 +80,7 @@ beforeEach(() => {
   mockHasSufficient.mockReturnValue(true);
   mockGenerateDraft.mockResolvedValue({ draft: "<p>Draft.</p>", model: "anthropic/claude-sonnet-4.5" });
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
+  mockGenerationCreate.mockResolvedValue({ id: "gen123" });
 });
 
 // The shape normalizeOverviewParams produces for a MISSING/garbage `params`:
@@ -163,13 +170,38 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).not.toHaveBeenCalled();
   });
 
-  it("200 with the sanitized draft + model on success", async () => {
+  it("200 with the sanitized draft + model + generationId on success", async () => {
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       ok: true,
       draft: "<p>Draft.</p>",
       model: "anthropic/claude-sonnet-4.5",
+      generationId: "gen123",
+    });
+    // the history row is written from the actor's cwid with the normalized params
+    expect(mockGenerationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          cwid: "self01",
+          text: "<p>Draft.</p>",
+          model: "anthropic/claude-sonnet-4.5",
+          params: NORMALIZED_EMPTY,
+          createdByCwid: "self01",
+        }),
+      }),
+    );
+  });
+
+  it("still 200 with generationId null when the history insert throws (draft preserved)", async () => {
+    mockGenerationCreate.mockRejectedValue(new Error("overview_generation insert failed"));
+    const res = await POST(post({ entityId: "self01" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      draft: "<p>Draft.</p>", // the draft is never lost over a history-write hiccup
+      model: "anthropic/claude-sonnet-4.5",
+      generationId: null,
     });
   });
 
