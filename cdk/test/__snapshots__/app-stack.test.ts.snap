@@ -352,6 +352,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_OVERVIEW_GENERATE",
+                "Value": "on",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -678,6 +682,21 @@ exports[`AppStack prod matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "AI_GATEWAY_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/ai-gateway-api-key",
                     ],
                   ],
                 },
@@ -2345,6 +2364,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/ai-gateway-api-key",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -2576,6 +2607,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/prod/ai-gateway-api-key-??????",
                   ],
                 ],
               },
@@ -3287,6 +3337,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "SELF_EDIT_OVERVIEW_GENERATE",
+                "Value": "on",
+              },
+              {
                 "Name": "FEEDBACK_BADGE_ENABLED",
                 "Value": "on",
               },
@@ -3613,6 +3667,21 @@ exports[`AppStack staging matches the snapshot 1`] = `
                         "Ref": "AWS::Partition",
                       },
                       ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter:SCHOLARS_RECITERDB_PASSWORD::",
+                    ],
+                  ],
+                },
+              },
+              {
+                "Name": "AI_GATEWAY_API_KEY",
+                "ValueFrom": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/ai-gateway-api-key",
                     ],
                   ],
                 },
@@ -5366,6 +5435,18 @@ service:
                     ],
                   ],
                 },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition",
+                      },
+                      ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/ai-gateway-api-key",
+                    ],
+                  ],
+                },
               ],
             },
             {
@@ -5597,6 +5678,25 @@ service:
                       "Ref": "AWS::Partition",
                     },
                     ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/etl/reciter-??????",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":secretsmanager:us-east-1:123456789012:secret:scholars/staging/ai-gateway-api-key-??????",
                   ],
                 ],
               },

@@ -660,15 +660,17 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the ten app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
+        // saml-sp/prod/cert (the SP public cert for metadata, #466),
         // newrelic-license-key (the New Relic ingest key for the ADOT
-        // collector's otlphttp/newrelic exporter, B24). ADR-009 moved
+        // collector's otlphttp/newrelic exporter, B24), and ai-gateway-api-key
+        // (the #742 overview-statement generator's Vercel AI Gateway key, app
+        // container). ADR-009 moved
         // db/bootstrap to the deploy execution role and keeps db/migrate off
         // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
@@ -693,7 +695,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(10);
+        expect(resourceList).toHaveLength(11);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1457,6 +1459,13 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
       });
 
+      it("enables the #742 overview generator in prod (SELF_EDIT_OVERVIEW_GENERATE=on, on in both envs)", () => {
+        // Enabled in both envs per the 2026-06-05 operator decision; the AI
+        // Gateway key is wired into the app task's secrets so the generator can
+        // reach the gateway. Activation is the manual cdk deploy.
+        expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
+      });
+
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
         // The live LDAP superuser check can't reach the WCM directory yet, so
         // the allowlist confers the tier without LDAP and the group CN stays
@@ -1541,6 +1550,8 @@ describe("AppStack", () => {
           "scholars/saml-sp/prod/cert",
           // New Relic ingest key (B24) -- ADOT collector otlphttp/newrelic.
           "scholars/prod/newrelic-license-key",
+          // #742 AI Gateway key -- app container's overview-statement generator.
+          "scholars/prod/ai-gateway-api-key",
           // Deploy-time migration DSN (ADR-009) -- injected into the migrate +
           // verify-grants tasks on the deploy execution role.
           "scholars/prod/db/migrate",
@@ -1827,6 +1838,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
+    });
+
+    it("enables the #742 overview generator in staging (SELF_EDIT_OVERVIEW_GENERATE=on, on in both envs)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {
