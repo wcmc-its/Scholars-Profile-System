@@ -36,6 +36,7 @@ import {
   generateOverviewDraft,
   OVERVIEW_SYSTEM_PROMPT,
 } from "@/lib/edit/overview-generator";
+import { DEFAULT_OVERVIEW_PARAMS } from "@/lib/edit/overview-params";
 import { gatewayKeyFromEnv } from "@/lib/seo/llm-client";
 
 /**
@@ -253,7 +254,7 @@ async function main(): Promise<void> {
       doc.push(OVERVIEW_SYSTEM_PROMPT);
       doc.push("");
       doc.push(`USER:`);
-      doc.push(buildOverviewUserPrompt(facts));
+      doc.push(buildOverviewUserPrompt(facts, DEFAULT_OVERVIEW_PARAMS));
       doc.push("```");
       doc.push("");
       ok++;
@@ -262,11 +263,16 @@ async function main(): Promise<void> {
     }
 
     let draft: string;
+    let model: string;
     try {
-      draft = await generateOverviewDraft(facts, {
+      // Phase A: the default params drive the validation run — the same shape
+      // the v1 fixed prompt produced (third person, formal, standard length).
+      const result = await generateOverviewDraft(facts, DEFAULT_OVERVIEW_PARAMS, {
         model: args.model,
         temperature: args.temperature,
       });
+      draft = result.draft;
+      model = result.model;
     } catch (err) {
       failed++;
       console.warn(`  generation failed: ${shortErr(err)}`);
@@ -277,9 +283,9 @@ async function main(): Promise<void> {
 
     const words = wordCount(draft);
     ok++;
-    console.log(`  draft generated (${words} words)`);
+    console.log(`  draft generated (${words} words, model ${model})`);
 
-    doc.push(`### Generated draft (sanitized HTML — ${words} words)`);
+    doc.push(`### Generated draft (sanitized HTML — ${words} words · model \`${model}\`)`);
     doc.push("");
     doc.push("```html");
     doc.push(draft);

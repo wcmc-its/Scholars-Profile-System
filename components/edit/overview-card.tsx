@@ -38,9 +38,11 @@ import { Check, RefreshCw, Sparkles } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
 import { OverviewEditor } from "@/components/edit/overview-editor";
+import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
 import { cn } from "@/lib/utils";
 
 /** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview). */
@@ -171,6 +173,9 @@ function OverviewEditorCard({
   const [lastGeneratedDraft, setLastGeneratedDraft] = React.useState<string | null>(null);
   const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
+  // The steering controls' value (voice/tone/length/elements/instructions). Sent
+  // with each generate request; the server re-normalizes it (never trusted).
+  const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
 
   const dirty = currentHtml !== savedHtml;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
@@ -216,10 +221,10 @@ function OverviewEditorCard({
       const res = await fetch("/api/edit/overview/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entityId: cwid }),
+        body: JSON.stringify({ entityId: cwid, params }),
       });
       const data = (await res.json()) as
-        | { ok: true; draft: string }
+        | { ok: true; draft: string; model: string }
         | { ok: false; error: string };
       if (!res.ok || data.ok !== true) {
         // Editor is left untouched on any failure (spec G8) — only a notice or
@@ -332,6 +337,20 @@ function OverviewEditorCard({
             Draft from your Scholars publications, topics, and grants — you review and edit it.
           </span>
         </div>
+      )}
+      {generateEnabled && (
+        <details className="group" data-testid="overview-generate-options">
+          <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
+            Generation options
+          </summary>
+          <div className="mt-3">
+            <OverviewGenerateControls
+              value={params}
+              onChange={setParams}
+              disabled={isGenerating || isSaving}
+            />
+          </div>
+        </details>
       )}
       {generateNotice && (
         <Alert data-testid="overview-generate-notice">
