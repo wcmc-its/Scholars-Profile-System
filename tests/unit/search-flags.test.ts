@@ -116,22 +116,22 @@ describe("resolveFundingConceptEnabled (#295)", () => {
     else process.env.SEARCH_FUNDING_TAB_CONCEPT = original;
   });
 
-  it("defaults to false when the env is unset", () => {
-    expect(resolveFundingConceptEnabled()).toBe(false);
-  });
-
-  it("is true only for exactly 'on'", () => {
-    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+  it("defaults to true (on) when the env is unset", () => {
     expect(resolveFundingConceptEnabled()).toBe(true);
   });
 
-  it("is false for any other value (off / casing / truthy strings)", () => {
+  it("is off only for exactly 'off'", () => {
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "off";
     expect(resolveFundingConceptEnabled()).toBe(false);
+  });
+
+  it("is on for 'on' and any other non-'off' value", () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "on";
+    expect(resolveFundingConceptEnabled()).toBe(true);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "ON";
-    expect(resolveFundingConceptEnabled()).toBe(false);
+    expect(resolveFundingConceptEnabled()).toBe(true);
     process.env.SEARCH_FUNDING_TAB_CONCEPT = "true";
-    expect(resolveFundingConceptEnabled()).toBe(false);
+    expect(resolveFundingConceptEnabled()).toBe(true);
   });
 });
 

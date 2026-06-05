@@ -130,22 +130,23 @@ export function scopeToMeshParams(scope: Scope): { meshOff: boolean; meshStrict:
 /**
  * Issue #295 — funding-tab concept clause. When `on`, `searchFunding` adds a
  * resolved-MeSH OR-of-evidence clause so a concept query also matches NIH
- * grants by descriptor. Default `off`: it stays off until the funding index
- * has been rebuilt with the `meshDescriptorUi` field (issue #295 PR 1).
+ * grants by descriptor. Default `on`; `SEARCH_FUNDING_TAB_CONCEPT=off` rolls back
+ * to literal-only admission (the `meshDescriptorUi` concept clause is indexed).
  *
  * Deliberately a separate flag from `SEARCH_PUB_TAB_CONCEPT_MODE` — the two
  * surfaces have independent rollback triggers, the same reason
  * `PUBLICATIONS_RESTRUCTURED_MSM` is defined apart from its people-tab twin.
  */
 export function resolveFundingConceptEnabled(): boolean {
-  return process.env.SEARCH_FUNDING_TAB_CONCEPT === "on";
+  return process.env.SEARCH_FUNDING_TAB_CONCEPT !== "off";
 }
 
 /**
  * PLAN P4 — funding-tab per-result reason lines. When `on`, `searchFunding`
  * adds a funding title highlight, reads `matched_queries` to flag the
  * concept-admission path, and runs a query-time pub-index aggregation to count
- * each grant's on-topic funded publications (X of Y). Default `off`.
+ * each grant's on-topic funded publications (X of Y). Default `on`
+ * (`SEARCH_FUNDING_MATCH_REASON=off` rolls back).
  *
  * No reindex: X is computed at QUERY TIME against the publications index using
  * the funded pmids the funding hit already carries (mirrors the People-tab
@@ -157,7 +158,7 @@ export function resolveFundingConceptEnabled(): boolean {
  * back independently.
  */
 export function resolveFundingMatchReason(): boolean {
-  return process.env.SEARCH_FUNDING_MATCH_REASON === "on";
+  return process.env.SEARCH_FUNDING_MATCH_REASON !== "off";
 }
 
 /**
@@ -219,11 +220,12 @@ export function resolveDeptLeadershipBoost(): boolean {
  * the query-keyed highlighter can't (the typed term isn't in the scholar's
  * text). Pure additive metadata — no effect on ranking or the result set.
  *
- * Default off until eval; this is an explainability/UX change, not a ranking
- * change, so it gets its own lever independent of `SEARCH_PEOPLE_RELEVANCE_MODE`.
+ * Default on (`SEARCH_PEOPLE_MATCH_PROVENANCE=off` rolls back); this is an
+ * explainability/UX change, not a ranking change, so it gets its own lever
+ * independent of `SEARCH_PEOPLE_RELEVANCE_MODE`.
  */
 export function resolvePeopleMatchProvenance(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE === "on";
+  return process.env.SEARCH_PEOPLE_MATCH_PROVENANCE !== "off";
 }
 
 /**
@@ -243,12 +245,12 @@ export function resolvePeopleMatchProvenance(): boolean {
  * possibly-sensitive blob makes a poor snippet.
  *
  * Pure presentation metadata — no effect on the query predicate, scoring, or
- * result set. Default off until eval; a separate lever from
+ * result set. Default on (`SEARCH_PEOPLE_MATCH_EXPLAIN=off` rolls back); a separate lever from
  * `SEARCH_PEOPLE_MATCH_PROVENANCE` (the MeSH "why this match" note) and from
  * `SEARCH_GENERIC_TERM_DEMOTE`, each with an independent rollback trigger.
  */
 export function resolvePeopleMatchExplain(): boolean {
-  return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN === "on";
+  return process.env.SEARCH_PEOPLE_MATCH_EXPLAIN !== "off";
 }
 
 export type GenericTermMode = "off" | "resolve" | "on";
@@ -319,12 +321,12 @@ export function resolvePubRecencyMode(): PubRecencyMode {
  * emits `titleHighlight` for the row to render. Pure presentation metadata: no
  * effect on the query predicate, scoring, or result set.
  *
- * Default off until verified; a separate lever from the `SEARCH_PUB_TAB_*`
+ * Default on (`SEARCH_PUB_HIGHLIGHT=off` rolls back); a separate lever from the `SEARCH_PUB_TAB_*`
  * ranking flags and from the People-tab `SEARCH_PEOPLE_MATCH_EXPLAIN`, each with
  * an independent rollback trigger.
  */
 export function resolvePublicationHighlight(): boolean {
-  return process.env.SEARCH_PUB_HIGHLIGHT === "on";
+  return process.env.SEARCH_PUB_HIGHLIGHT !== "off";
 }
 
 /**
@@ -338,9 +340,9 @@ export function resolvePublicationHighlight(): boolean {
  * can render the same "Why this match" note as the Scholars tab. Pure additive
  * metadata — no effect on ranking or the result set.
  *
- * Default off until eval; a separate lever from the People-tab provenance flag
+ * Default on (`SEARCH_PUB_MATCH_PROVENANCE=off` rolls back); a separate lever from the People-tab provenance flag
  * and from `SEARCH_PUB_HIGHLIGHT`, each with an independent rollback trigger.
  */
 export function resolvePublicationMatchProvenance(): boolean {
-  return process.env.SEARCH_PUB_MATCH_PROVENANCE === "on";
+  return process.env.SEARCH_PUB_MATCH_PROVENANCE !== "off";
 }

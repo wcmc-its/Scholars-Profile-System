@@ -325,12 +325,19 @@ describe("searchFunding (OpenSearch)", () => {
 
 describe("searchFunding — issue #295 MeSH concept clause", () => {
   const original = process.env.SEARCH_FUNDING_TAB_CONCEPT;
+  const reasonOriginal = process.env.SEARCH_FUNDING_MATCH_REASON;
   beforeEach(() => {
     delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
+    // Isolate #295 concept admission from the P4 reason layer: with the reason
+    // flag on (now the default) searchFunding tags the terms clause with
+    // `_name` and fires a second pub-index request, so pin it off here.
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
   });
   afterEach(() => {
     if (original === undefined) delete process.env.SEARCH_FUNDING_TAB_CONCEPT;
     else process.env.SEARCH_FUNDING_TAB_CONCEPT = original;
+    if (reasonOriginal === undefined) delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    else process.env.SEARCH_FUNDING_MATCH_REASON = reasonOriginal;
   });
 
   const NEOPLASMS: MeshResolution = {
@@ -371,7 +378,8 @@ describe("searchFunding — issue #295 MeSH concept clause", () => {
     });
   });
 
-  it("leaves the query text-only when the flag is off (default)", async () => {
+  it("leaves the query text-only when the flag is off", async () => {
+    process.env.SEARCH_FUNDING_TAB_CONCEPT = "off";
     await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
     expect(mustOf()).toEqual([textClause]);
   });
@@ -516,7 +524,7 @@ describe("searchFunding — PLAN P4 match-reason (funded outputs + named queries
   });
 
   it("leaves the funding query body untagged when the reason flag is off (expanded non-regression)", async () => {
-    delete process.env.SEARCH_FUNDING_MATCH_REASON;
+    process.env.SEARCH_FUNDING_MATCH_REASON = "off";
     await runSearch({ q: "cancer", meshResolution: NEOPLASMS });
     const must = (fundingRequest().body.query as { bool: { must: unknown[] } }).bool.must;
     const should = (must[0] as { bool: { should: unknown[] } }).bool.should;
