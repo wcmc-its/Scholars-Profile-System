@@ -42,8 +42,6 @@ function expectedSecrets(env: "staging" | "prod"): string[] {
     `scholars/saml-sp/${env}/cert`,
     `scholars/${env}/saml/idp-cert`,
     `scholars/${env}/newrelic-license-key`,
-    // #742 — Vercel AI Gateway key for the overview-statement generator.
-    `scholars/${env}/ai-gateway-api-key`,
     ...PER_SOURCE_ETL_NAMES.map((s) => `scholars/${env}/etl/${s}`),
     // #746 — ReCiter engine REST API (ETL-task only); distinct from the
     // etl/reciter ReciterDB DSN above.

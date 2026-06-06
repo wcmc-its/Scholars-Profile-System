@@ -660,17 +660,15 @@ describe("AppStack", () => {
     });
 
     describe("IAM role split (B06)", () => {
-      it("the app task-execution role policy lists exactly the eleven app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
+      it("the app task-execution role policy lists exactly the ten app consumer secret ARNs (ADR-009: no migrate, no bootstrap)", () => {
         // No `*` resource on secretsmanager:* (Phase 1 hard rule).
-        // The eleven ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
+        // The ten ARNs are scholars/prod/db/app-rw, db/app-ro, opensearch/app,
         // revalidate-token, session-cookie-key, the SAML SP private key,
         // etl/reciter (ReciterDB connection for funding/mentoring surfaces),
         // saml/idp-cert (the IdP signing-cert trust anchor, #466),
-        // saml-sp/prod/cert (the SP public cert for metadata, #466),
+        // saml-sp/prod/cert (the SP public cert for metadata, #466), and
         // newrelic-license-key (the New Relic ingest key for the ADOT
-        // collector's otlphttp/newrelic exporter, B24), and ai-gateway-api-key
-        // (the #742 overview-statement generator's Vercel AI Gateway key, app
-        // container). ADR-009 moved
+        // collector's otlphttp/newrelic exporter, B24). ADR-009 moved
         // db/bootstrap to the deploy execution role and keeps db/migrate off
         // this role entirely (req 4).
         const policies = template.findResources("AWS::IAM::Policy");
@@ -695,7 +693,7 @@ describe("AppStack", () => {
         const resourceList = Array.isArray(secretsStmt?.Resource)
           ? (secretsStmt?.Resource as unknown[])
           : [secretsStmt?.Resource];
-        expect(resourceList).toHaveLength(11);
+        expect(resourceList).toHaveLength(10);
         // No `*` ever appears in the resource list.
         for (const r of resourceList) {
           expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
@@ -1380,8 +1378,8 @@ describe("AppStack", () => {
         // xray:PutTraceSegments + xray:PutTelemetryRecords on Resource:*.
         // Inline (not AWSXRayDaemonWriteAccess) so the action surface stays
         // pinned + immune to AWS quietly extending the managed document.
-        // The task role now carries two inline policies (X-Ray + SES); select
-        // the X-Ray one by its actions rather than assuming a single policy.
+        // The task role now carries three inline policies (X-Ray + SES +
+        // Bedrock); select the X-Ray one by its actions, not by position.
         const taskRolePolicies = findTaskRolePolicies();
         const xrayPolicy = taskRolePolicies.find((p) =>
           JSON.stringify(p.Properties?.PolicyDocument).includes("xray:"),
@@ -1430,6 +1428,36 @@ describe("AppStack", () => {
         expect(stmt.Condition).toMatchObject({
           StringEquals: { "ses:FromAddress": "no-reply-scholars@weill.cornell.edu" },
         });
+      });
+
+      it("the Bedrock grant is the single bedrock:InvokeModel action, scoped to the Claude Sonnet 4.x model + us inference profile (#742)", () => {
+        // Synth-time guard: the overview-statement generator authenticates to
+        // Amazon Bedrock with THIS task role (no API key, institutional AWS
+        // billing). Least-privilege -- one action (generateText, not streaming),
+        // scoped to the Sonnet 4.x foundation models + the us. cross-region
+        // inference profile, never a bare `*`.
+        const bedrockPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes("bedrock:"),
+        );
+        expect(bedrockPolicy).toBeDefined();
+        const statements = bedrockPolicy?.Properties?.PolicyDocument?.Statement as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("bedrock:InvokeModel");
+        // Non-streaming only: no InvokeModelWithResponseStream.
+        expect(JSON.stringify(stmt.Action)).not.toContain("ResponseStream");
+        // Resource is an array of the inference-profile ARN (account is a CFN
+        // token -> an Fn::Join) and the AWS-owned foundation-model ARN (plain
+        // string). Neither is a blanket "*".
+        const resources = Array.isArray(stmt.Resource)
+          ? (stmt.Resource as unknown[])
+          : [stmt.Resource];
+        for (const r of resources) expect(r).not.toBe("*");
+        const serialized = JSON.stringify(stmt.Resource);
+        expect(serialized).toContain("inference-profile/us.anthropic.claude-sonnet-4-");
+        expect(serialized).toContain("foundation-model/anthropic.claude-sonnet-4-");
       });
 
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {
@@ -1550,8 +1578,6 @@ describe("AppStack", () => {
           "scholars/saml-sp/prod/cert",
           // New Relic ingest key (B24) -- ADOT collector otlphttp/newrelic.
           "scholars/prod/newrelic-license-key",
-          // #742 AI Gateway key -- app container's overview-statement generator.
-          "scholars/prod/ai-gateway-api-key",
           // Deploy-time migration DSN (ADR-009) -- injected into the migrate +
           // verify-grants tasks on the deploy execution role.
           "scholars/prod/db/migrate",

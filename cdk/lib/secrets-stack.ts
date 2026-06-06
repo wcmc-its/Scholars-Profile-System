@@ -211,20 +211,6 @@ export class SecretsStack extends Stack {
         name: `scholars/${env}/newrelic-license-key`,
         description: `SPS New Relic ingest license key (${env}) — OTLP/HTTP trace export from the ADOT collector sidecar. Read as NEW_RELIC_LICENSE_KEY; seed out-of-band with the 40-char INGEST-LICENSE key (US datacenter).`,
       },
-      // #742 — Vercel AI Gateway API key for the /edit overview-statement
-      // generator. Read as AI_GATEWAY_API_KEY by the APP container (the
-      // "Generate a draft" surface, via lib/seo/llm-client.ts) and by the
-      // operator's seo:llm-rank / overview-validation scripts. A secret, not
-      // env: it is a write credential to a billable AI Gateway account. Per-env
-      // key with its own AI Gateway budget so a leaked staging key cannot spend
-      // prod's. Seed out-of-band; the generator 500s without it even when
-      // SELF_EDIT_OVERVIEW_GENERATE=on. The "-key" tail (3 chars) sidesteps the
-      // Secrets Manager 6-char-tail partial-ARN gotcha (cf. session-cookie-key).
-      {
-        constructId: "AiGatewayApiKey",
-        name: `scholars/${env}/ai-gateway-api-key`,
-        description: `SPS Vercel AI Gateway API key (${env}) — read as AI_GATEWAY_API_KEY by the App task's #742 overview-statement generator and the seo:llm-rank scripts. Seed out-of-band; per-env key with its own AI Gateway budget.`,
-      },
       // Per-source ETL credential stubs (Phase 3, EtlStack). Each source
       // in the nightly/weekly/annual Step Functions state machines that
       // calls an external system gets its own secret so credentials can

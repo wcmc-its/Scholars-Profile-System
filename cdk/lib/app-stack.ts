@@ -292,16 +292,6 @@ export class AppStack extends Stack {
       "NewRelicLicenseKeySecret",
       `scholars/${env}/newrelic-license-key`,
     );
-    // #742 — Vercel AI Gateway API key for the /edit overview-statement
-    // generator. Injected into the APP container (not the ADOT sidecar) as
-    // AI_GATEWAY_API_KEY; lib/seo/llm-client.ts reads it for the gateway call.
-    // The "-key" tail (3 chars) sidesteps the Secrets Manager 6-char-tail
-    // partial-ARN gotcha. SecretsStack defines the stub.
-    const aiGatewayApiKeySecret = secretsmanager.Secret.fromSecretNameV2(
-      this,
-      "AiGatewayApiKeySecret",
-      `scholars/${env}/ai-gateway-api-key`,
-    );
 
     // ADR-009 exec-role split -- two execution roles, two secret-ARN lists:
     //
@@ -330,8 +320,6 @@ export class AppStack extends Stack {
       // New Relic ingest key (B24): consumed by the ADOT collector sidecar,
       // not the app container. Execution role still needs GetSecretValue on it.
       newRelicLicenseKeySecret.secretArn,
-      // #742 AI Gateway key: consumed by the app container's overview generator.
-      aiGatewayApiKeySecret.secretArn,
     ];
     // The deploy-time tasks' DSNs (ADR-009). migrate injects only the migrate
     // DSN; verify-grants injects all four role DSNs; db-bootstrap injects
@@ -677,6 +665,44 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // Bedrock InvokeModel grant (#742 -- overview-statement generator).
+    //
+    // The app container calls Claude on Amazon Bedrock to draft faculty
+    // overview statements (lib/edit/overview-generator.ts, via the AI SDK
+    // @ai-sdk/amazon-bedrock provider with fromNodeProviderChain()). The
+    // provider resolves THIS task role at runtime -- institutional AWS
+    // billing, no API key, no secret to seed. A custom *inline* policy with
+    // the single action bedrock:InvokeModel (the generator uses generateText,
+    // not streaming, so no InvokeModelWithResponseStream).
+    //
+    // Scoped to the Claude Sonnet 4.x family, NOT a bare `*`:
+    //   - the us. cross-region INFERENCE PROFILE the model id resolves to
+    //     (account-scoped), and
+    //   - the underlying FOUNDATION MODELs (AWS-owned, empty account field)
+    //     the profile routes to.
+    // Region is `*` because a us. inference-profile call fans out across the
+    // US regions (us-east-1/-2, us-west-2); the family wildcard lets a
+    // 4.5 -> 4.6 bump via OVERVIEW_GENERATE_MODEL skip an IAM change while
+    // still excluding Opus/Haiku and every non-Anthropic provider. Contains
+    // no secretsmanager reference, so the "zero secretsmanager on the task
+    // role" assertion still holds.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleBedrockPolicy", {
+      policyName: `sps-task-${env}-bedrock`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["bedrock:InvokeModel"],
+          resources: [
+            `arn:aws:bedrock:*:${this.account}:inference-profile/us.anthropic.claude-sonnet-4-*`,
+            "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-*",
+          ],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
@@ -917,15 +943,16 @@ export class AppStack extends Stack {
         // generator. overviewGenerateEnabled() reads === "on"
         // (lib/edit/overview-generator.ts); when off there are NO tabs and the
         // Overview surface is byte-identical to the manual editor. Enabled in
-        // BOTH envs per operator decision 2026-06-05. HARD DEPENDENCY: the app
-        // task must carry AI_GATEWAY_API_KEY (wired into `secrets:` below) -- with
-        // the flag on but the key unset, "Generate a draft" 500s
-        // (lib/seo/llm-client.ts throws). Methods/metrics grounding also needs
-        // the scholar_tool migration applied + etl:dynamodb run in that env. The
-        // spec's validation-run gate (>=4/5 publishable, 0 faithfulness
-        // violations; scripts/edit/overview-validation.ts) is tracked separately
-        // in #742. Takes effect ONLY on a manual `cdk deploy --exclusively
-        // Sps-App-<env>` (the CD pipeline re-rolls the image, never CDK).
+        // BOTH envs per operator decision 2026-06-05. The generator calls
+        // Claude on Amazon Bedrock (institutional AWS billing, no API key) and
+        // authenticates with THIS task role via the AWS SDK credential chain --
+        // the TaskRoleBedrockPolicy below grants bedrock:InvokeModel. No secret
+        // to seed. Methods/metrics grounding additionally needs the scholar_tool
+        // migration applied + etl:dynamodb run in that env. The spec's
+        // validation-run gate (>=4/5 publishable, 0 faithfulness violations;
+        // scripts/edit/overview-validation.ts) is tracked separately in #742.
+        // Takes effect ONLY on a manual `cdk deploy --exclusively Sps-App-<env>`
+        // (the CD pipeline re-rolls the image, never CDK).
         SELF_EDIT_OVERVIEW_GENERATE: "on",
         // #538 -- site-wide feedback badge + /about/feedback form. When "on",
         // the badge renders on every page (except /about/feedback itself,
@@ -1063,12 +1090,6 @@ export class AppStack extends Stack {
           etlReciterSecret,
           "SCHOLARS_RECITERDB_PASSWORD",
         ),
-        // #742 -- Vercel AI Gateway key for the overview-statement generator.
-        // Whole-secret string; lib/seo/llm-client.ts reads it as
-        // AI_GATEWAY_API_KEY. Required whenever SELF_EDIT_OVERVIEW_GENERATE=on
-        // (set above), else "Generate a draft" 500s. ARN is in
-        // appConsumerSecretArns so the execution role can pull it at task start.
-        AI_GATEWAY_API_KEY: ecs.Secret.fromSecretsManager(aiGatewayApiKeySecret),
       },
     });
 
