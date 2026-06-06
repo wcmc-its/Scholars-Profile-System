@@ -119,6 +119,60 @@ describe("resolveProjectGrantJoin", () => {
     expect(unresolved).toHaveLength(1);
     expect(unresolved[0]!.profile_id).toBe(300);
   });
+
+  // #766 — the contact-PI shortcut must not stamp the contact PI's
+  // profile_id onto a scholar whose name doesn't match. On an MPI grant
+  // we hold a co-PI's row for, RePORTER's contact PI is a different person.
+  it("does not attribute a non-matching contact PI to our lone grant row (#766)", () => {
+    // We hold the WCM grant row for Carl Nathan (co-PI on a TB grant whose
+    // RePORTER contact PI is Sabine Ehrt). Ehrt's profile must NOT map to him.
+    const proj = project({
+      core_project_num: "R01AI111",
+      principal_investigators: [
+        pi({ profile_id: 6786880, full_name: "Sabine Ehrt", is_contact_pi: true }),
+        pi({ profile_id: 1860967, full_name: "Carl F Nathan", is_contact_pi: false }),
+      ],
+    });
+    const grants = [grant({ cwid: "cnathan", role: "PI", fullName: "Carl Nathan" })];
+    const { observations, unresolved } = resolveProjectGrantJoin(proj, grants);
+    // Nathan still resolves — via name-match against the grant row (grant_join_pi),
+    // not the contact shortcut. Ehrt is left unresolved, never mapped to cnathan.
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({
+      profileId: 1860967,
+      cwid: "cnathan",
+      resolutionSource: "grant_join_pi",
+    });
+    expect(observations.some((o) => o.profileId === 6786880)).toBe(false);
+    expect(unresolved.map((u) => u.profile_id)).toEqual([6786880]);
+  });
+
+  it("leaves the contact PI unresolved when no listed PI name-matches our row (#766)", () => {
+    // Single-PI grant: RePORTER lists only the contact PI (Ehrt); we hold a
+    // row for cnathan (a co-I not surfaced in principal_investigators[]).
+    // Nothing should resolve here — his profile comes from his own grants.
+    const proj = project({
+      core_project_num: "R01AI222",
+      principal_investigators: [pi({ profile_id: 6786880, full_name: "Sabine Ehrt", is_contact_pi: true })],
+    });
+    const grants = [grant({ cwid: "cnathan", role: "PI", fullName: "Carl Nathan" })];
+    const { observations, unresolved } = resolveProjectGrantJoin(proj, grants);
+    expect(observations).toHaveLength(0);
+    expect(unresolved.map((u) => u.profile_id)).toEqual([6786880]);
+  });
+
+  it("does not map a prime grant's contact PI to our subaward-holder row (#766)", () => {
+    // We hold a PI-Subaward row on a prime grant; RePORTER's prime contact PI
+    // is the prime institution's investigator, not our sub-PI.
+    const proj = project({
+      core_project_num: "R01CA333",
+      principal_investigators: [pi({ profile_id: 700, full_name: "Prime Investigator", is_contact_pi: true })],
+    });
+    const grants = [grant({ cwid: "sub1234", role: "PI-Subaward", fullName: "Sub Awardee" })];
+    const { observations, unresolved } = resolveProjectGrantJoin(proj, grants);
+    expect(observations).toHaveLength(0);
+    expect(unresolved.map((u) => u.profile_id)).toEqual([700]);
+  });
 });
 
 describe("resolveByNameFallback", () => {

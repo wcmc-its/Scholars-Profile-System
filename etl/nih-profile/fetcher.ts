@@ -191,6 +191,59 @@ export async function searchProjectsByPiName(opts: {
   }));
 }
 
+/**
+ * Look up the projects (and thus the PI names) for a set of NIH eRA Commons
+ * `profile_id`s. Used by the one-off `cleanup-misattributed` script (#766) to
+ * recover the real name behind a `nih_profile_id` so a wrong-person row can be
+ * told from a legitimate one — `person_nih_profile` stores only the id.
+ *
+ * `criteria.pi_profile_ids` matches any project where one of the listed
+ * profile_ids is a PI; the returned `principal_investigators[]` carry the
+ * canonical full_name for that id. Pass a bounded batch (≤ ~50) per call.
+ */
+export async function searchProjectsByProfileIds(
+  profileIds: number[],
+): Promise<ReporterProject[]> {
+  if (profileIds.length === 0) return [];
+  const resp = await fetch(NIH_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      criteria: { pi_profile_ids: profileIds },
+      include_fields: [
+        "ApplId",
+        "CoreProjectNum",
+        "ProjectEndDate",
+        "PrincipalInvestigators",
+      ],
+      limit: PAGE_LIMIT,
+      offset: 0,
+    }),
+    cache: "no-store",
+  });
+  if (!resp.ok) {
+    throw new Error(
+      `NIH RePORTER pi_profile_ids search failed: HTTP ${resp.status} (${profileIds.length} ids)`,
+    );
+  }
+  const data = (await resp.json()) as {
+    results?: Array<{
+      appl_id: number;
+      core_project_num: string | null;
+      project_end_date: string | null;
+      principal_investigators?: ReporterPI[];
+    }>;
+  };
+  return (data.results ?? []).map((r) => ({
+    appl_id: r.appl_id,
+    core_project_num: r.core_project_num,
+    project_end_date: r.project_end_date,
+    principal_investigators: (r.principal_investigators ?? []).filter(
+      (pi) => typeof pi.profile_id === "number" && pi.profile_id > 0,
+    ),
+  }));
+}
+
 /** Sleep helper — exposed so the orchestrator can throttle batch loops
  *  without re-importing setTimeout. */
 export function sleepBetweenRequests(): Promise<void> {
