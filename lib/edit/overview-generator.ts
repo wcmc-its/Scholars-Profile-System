@@ -10,14 +10,17 @@
  * and run through `sanitizeOverviewHtml` — the same stored-XSS boundary every
  * overview crosses before it reaches the editor.
  *
- * The single network touch is `generateText` through the Vercel AI Gateway
- * (`lib/seo/llm-client.ts` is the precedent): a bare `provider/model` string,
- * NO tools (the model must not browse — it writes only from FACTS), and the
- * gateway key is read from the environment by the SDK, never passed here. On any
- * gateway throw the error propagates so the route maps it to a 502 and NEVER
- * writes the DB (SPEC § States & edge cases G8).
+ * The single network touch is `generateText` against Claude on Amazon Bedrock
+ * (the AI SDK `@ai-sdk/amazon-bedrock` provider): a cross-region inference-
+ * profile id, NO tools (the model must not browse — it writes only from FACTS),
+ * and credentials come from the AWS SDK chain — the ECS task role in deployment
+ * (institutional AWS billing, no API key) and the operator's shell creds locally.
+ * On any Bedrock throw the error propagates so the route maps it to a 502 and
+ * NEVER writes the DB (SPEC § States & edge cases G8).
  */
 import { generateText } from "ai";
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
+import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
 import { sanitizeOverviewHtml } from "@/lib/edit/validators";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
@@ -29,9 +32,11 @@ import {
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
 
-/** Default gateway model — operator-tunable; verify against the live gateway
- *  model list. Sonnet matches the parametric catalog's anthropic entry. */
-const DEFAULT_MODEL = "anthropic/claude-sonnet-4.5";
+/** Default model — a Claude Sonnet 4.x cross-region inference profile on Amazon
+ *  Bedrock. Operator-tunable via OVERVIEW_GENERATE_MODEL; the TaskRoleBedrockPolicy
+ *  (cdk app-stack) scopes bedrock:InvokeModel to the `claude-sonnet-4-*` family, so
+ *  a 4.5 → 4.6 bump needs no IAM change. */
+const DEFAULT_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
 /** Low-but-not-zero temperature — grounded prose, minimal confabulation. */
 const DEFAULT_TEMPERATURE = 0.4;
 
@@ -204,18 +209,26 @@ export async function generateOverviewDraft(
   params: OverviewParams,
   opts?: { model?: string; temperature?: number },
 ): Promise<{ draft: string; model: string }> {
-  const model = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
+  const modelId = opts?.model ?? process.env.OVERVIEW_GENERATE_MODEL ?? DEFAULT_MODEL;
   const temperature =
     opts?.temperature ?? (Number(process.env.OVERVIEW_GENERATE_TEMPERATURE) || DEFAULT_TEMPERATURE);
 
+  // Amazon Bedrock via the AWS SDK credential chain — the ECS task role in
+  // deployment (TaskRoleBedrockPolicy grants bedrock:InvokeModel), the operator's
+  // shell creds locally. No API key is read or passed; billing is the AWS account.
+  const bedrock = createAmazonBedrock({
+    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? "us-east-1",
+    credentialProvider: fromNodeProviderChain(),
+  });
+
   const result = await generateText({
-    model,
+    model: bedrock(modelId),
     system: OVERVIEW_SYSTEM_PROMPT,
     prompt: buildOverviewUserPrompt(facts, params),
     temperature,
   });
 
-  return { draft: sanitizeOverviewHtml(proseToParagraphHtml(result.text)), model };
+  return { draft: sanitizeOverviewHtml(proseToParagraphHtml(result.text)), model: modelId };
 }
 
 /**

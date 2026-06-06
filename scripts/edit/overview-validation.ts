@@ -4,9 +4,10 @@
  * gated "Validation run (build gate — do this first)".
  *
  *   npm run edit:overview-validate -- --dry-run    # assemble facts + print the
- *                                                  # prompt; NO gateway call, NO
- *                                                  # AI_GATEWAY_API_KEY required
- *   npm run edit:overview-validate                 # live run (needs AI_GATEWAY_API_KEY)
+ *                                                  # prompt; NO Bedrock call, no
+ *                                                  # AWS credentials needed
+ *   npm run edit:overview-validate                 # live run — calls Claude on
+ *                                                  # Bedrock with your AWS creds
  *   npm run edit:overview-validate -- --cwids abc1234,def5678   # override sample
  *
  * This proves the metadata-grounded approach produces publishable quality
@@ -22,9 +23,9 @@
  * graceful degradation is exercised too. Output (operator-graded, NOT committed
  * to git history by this script): docs/overview-coverage/validation-run-results.md
  *
- * Mirrors scripts/seo/llm-rank.ts: `--dry-run` makes zero API calls and needs no
- * key; the live path calls gatewayKeyFromEnv() to fail fast with a secret-free
- * message when AI_GATEWAY_API_KEY is unset.
+ * `--dry-run` makes zero API calls; the live path calls Claude on Amazon Bedrock
+ * through the overview generator, authenticating with the AWS credential chain
+ * (your shell creds locally) — institutional billing, no API key.
  */
 import "dotenv/config";
 import { promises as fs } from "node:fs";
@@ -37,7 +38,6 @@ import {
   OVERVIEW_SYSTEM_PROMPT,
 } from "@/lib/edit/overview-generator";
 import { DEFAULT_OVERVIEW_PARAMS } from "@/lib/edit/overview-params";
-import { gatewayKeyFromEnv } from "@/lib/seo/llm-client";
 
 /**
  * The SPEC's validation sample — a deliberate spread across the faculty types
@@ -184,9 +184,10 @@ function acceptanceChecklist(): string {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!args.dryRun) {
-    gatewayKeyFromEnv(); // fail fast (and secret-free) if the key is missing
-  }
+  // Live runs call Claude on Bedrock via the overview generator, which resolves
+  // AWS credentials from the standard chain (your shell creds locally). No key to
+  // check here; a missing/expired credential surfaces as a clear AWS error on the
+  // first generate call below.
 
   const now = new Date().toISOString();
   const doc: string[] = [];
@@ -258,7 +259,7 @@ async function main(): Promise<void> {
       doc.push("```");
       doc.push("");
       ok++;
-      console.log(`  facts assembled; prompt rendered (dry-run, no gateway call)`);
+      console.log(`  facts assembled; prompt rendered (dry-run, no Bedrock call)`);
       continue;
     }
 
@@ -276,7 +277,7 @@ async function main(): Promise<void> {
     } catch (err) {
       failed++;
       console.warn(`  generation failed: ${shortErr(err)}`);
-      doc.push(`> **Generation failed (gateway error/timeout):** ${shortErr(err)}`);
+      doc.push(`> **Generation failed (Bedrock error/timeout):** ${shortErr(err)}`);
       doc.push("");
       continue;
     }

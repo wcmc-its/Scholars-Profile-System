@@ -83,12 +83,14 @@
     "edit:overview-validate": "tsx scripts/edit/overview-validation.ts"
   },
   "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^3.0.100",
     "@ai-sdk/google": "^3.0.80",
     "@ai-sdk/openai": "^3.0.67",
     "@aws-sdk/client-cloudfront": "^3.1049.0",
     "@aws-sdk/client-dynamodb": "^3.1039.0",
     "@aws-sdk/client-s3": "^3.1044.0",
     "@aws-sdk/client-sesv2": "^3.1054.0",
+    "@aws-sdk/credential-providers": "^3.1063.0",
     "@aws-sdk/lib-dynamodb": "^3.1039.0",
     "@node-saml/node-saml": "^5.1.0",
     "@opensearch-project/opensearch": "^3.6.0",

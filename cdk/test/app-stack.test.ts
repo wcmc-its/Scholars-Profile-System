@@ -1378,8 +1378,8 @@ describe("AppStack", () => {
         // xray:PutTraceSegments + xray:PutTelemetryRecords on Resource:*.
         // Inline (not AWSXRayDaemonWriteAccess) so the action surface stays
         // pinned + immune to AWS quietly extending the managed document.
-        // The task role now carries two inline policies (X-Ray + SES); select
-        // the X-Ray one by its actions rather than assuming a single policy.
+        // The task role now carries three inline policies (X-Ray + SES +
+        // Bedrock); select the X-Ray one by its actions, not by position.
         const taskRolePolicies = findTaskRolePolicies();
         const xrayPolicy = taskRolePolicies.find((p) =>
           JSON.stringify(p.Properties?.PolicyDocument).includes("xray:"),
@@ -1430,6 +1430,36 @@ describe("AppStack", () => {
         });
       });
 
+      it("the Bedrock grant is the single bedrock:InvokeModel action, scoped to the Claude Sonnet 4.x model + us inference profile (#742)", () => {
+        // Synth-time guard: the overview-statement generator authenticates to
+        // Amazon Bedrock with THIS task role (no API key, institutional AWS
+        // billing). Least-privilege -- one action (generateText, not streaming),
+        // scoped to the Sonnet 4.x foundation models + the us. cross-region
+        // inference profile, never a bare `*`.
+        const bedrockPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes("bedrock:"),
+        );
+        expect(bedrockPolicy).toBeDefined();
+        const statements = bedrockPolicy?.Properties?.PolicyDocument?.Statement as
+          | Array<Record<string, unknown>>
+          | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("bedrock:InvokeModel");
+        // Non-streaming only: no InvokeModelWithResponseStream.
+        expect(JSON.stringify(stmt.Action)).not.toContain("ResponseStream");
+        // Resource is an array of the inference-profile ARN (account is a CFN
+        // token -> an Fn::Join) and the AWS-owned foundation-model ARN (plain
+        // string). Neither is a blanket "*".
+        const resources = Array.isArray(stmt.Resource)
+          ? (stmt.Resource as unknown[])
+          : [stmt.Resource];
+        for (const r of resources) expect(r).not.toBe("*");
+        const serialized = JSON.stringify(stmt.Resource);
+        expect(serialized).toContain("inference-profile/us.anthropic.claude-sonnet-4-");
+        expect(serialized).toContain("foundation-model/anthropic.claude-sonnet-4-");
+      });
+
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {
         // Dormant by default: the endpoint 503s + the client mailto: fallback
         // stays in force until ops flip the flag post-verification.
@@ -1455,6 +1485,13 @@ describe("AppStack", () => {
         // Per the 2026-06-03 product decision the lifecycle is enabled in both
         // envs (no staging-only soak); activation is the manual cdk deploy.
         expect(appContainerEnv().get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
+      });
+
+      it("enables the #742 overview generator in prod (SELF_EDIT_OVERVIEW_GENERATE=on, on in both envs)", () => {
+        // Enabled in both envs per the 2026-06-05 operator decision; the AI
+        // Gateway key is wired into the app task's secrets so the generator can
+        // reach the gateway. Activation is the manual cdk deploy.
+        expect(appContainerEnv().get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
       });
 
       it("ships the #443 interim superuser allowlist with the group CN left unset", () => {
@@ -1827,6 +1864,20 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("SELF_EDIT_SLUG_REQUEST")).toBe("on");
+    });
+
+    it("enables the #742 overview generator in staging (SELF_EDIT_OVERVIEW_GENERATE=on, on in both envs)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appContainer = (
+        Object.values(taskDefs).find((r) => r.Properties?.Family === "sps-app-staging")
+          ?.Properties?.ContainerDefinitions as
+          | Array<{ Name?: string; Environment?: Array<{ Name?: string; Value?: string }> }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("SELF_EDIT_OVERVIEW_GENERATE")).toBe("on");
     });
 
     it("autoscales between min=1 and max=3 for staging (#596)", () => {
