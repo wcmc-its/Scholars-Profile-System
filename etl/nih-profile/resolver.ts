@@ -104,7 +104,7 @@ function isPiRole(role: string): boolean {
   return role === "PI" || role === "PI-Subaward" || role === "Co-PI";
 }
 
-function reporterPiName(pi: ReporterPI): string {
+export function reporterPiName(pi: ReporterPI): string {
   if (pi.full_name && pi.full_name.trim()) return pi.full_name;
   return [pi.first_name, pi.middle_name, pi.last_name]
     .filter((s): s is string => !!s && s.trim().length > 0)
@@ -129,20 +129,36 @@ export function resolveProjectGrantJoin(
   // Pool of candidate cwids on this project (PI-level roles only).
   const candidates = grants.filter((g) => isPiRole(g.role));
   const used = new Set<string>(); // cwids already paired on this project
-  // Single PI-level candidate covers >90% of projects — use the cwid
-  // for the contact PI directly.
-  const contactCwid =
+  // Presumptive contact-PI grant row: the lone PI-level row when we hold
+  // exactly one (>90% of projects), else an explicit PI/PI-Subaward row.
+  const contactCandidate =
     candidates.length === 1
-      ? candidates[0]!.cwid
-      : candidates.find((g) => g.role === "PI" || g.role === "PI-Subaward")?.cwid ?? null;
+      ? candidates[0]!
+      : candidates.find((g) => g.role === "PI" || g.role === "PI-Subaward") ?? null;
 
   for (const pi of project.principal_investigators) {
     const piName = reporterPiName(pi);
     let cwid: string | null = null;
     let source: ResolutionSource | null = null;
 
-    if (pi.is_contact_pi && contactCwid && !used.has(contactCwid)) {
-      cwid = contactCwid;
+    // Contact-PI shortcut, but only when the RePORTER contact PI's name
+    // actually agrees with the candidate scholar (#766). Holding the lone
+    // WCM grant row on a multiple-PI / subaward grant does NOT make us the
+    // contact PI — on an MPI grant where we hold a *co*-PI's row, RePORTER's
+    // contact PI is a different person, and stamping their profile_id onto
+    // our scholar produced wrong-person `nih_profile_id` rows (e.g. Ehrt's
+    // profile attributed to cnathan). The name guard discriminates exactly
+    // the legitimate case (contact PI == our scholar, names match) from the
+    // bug (contact PI != our scholar). When it fails, the else-branch still
+    // name-matches the PI against every candidate, so a genuinely-listed
+    // co-PI we hold a row for resolves via grant_join_pi.
+    if (
+      pi.is_contact_pi &&
+      contactCandidate &&
+      !used.has(contactCandidate.cwid) &&
+      namesMatch(piName, contactCandidate.fullName)
+    ) {
+      cwid = contactCandidate.cwid;
       source = "grant_join_contact";
     } else {
       // Name-match against any unused PI-level grant row on this project.
