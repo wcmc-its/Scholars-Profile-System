@@ -36,7 +36,13 @@ import { db } from "../../lib/db";
 import { searchProjectsByProfileIds, sleepBetweenRequests, type ReporterPI } from "./fetcher";
 import { namesMatch, reporterPiName } from "./resolver";
 
-const BATCH_SIZE = 50;
+// One profile_id per request. `searchProjectsByProfileIds` fetches a single
+// 500-row page (no pagination); batching many prolific PIs together overflows
+// that page, so ids whose projects sort past row 500 came back nameless and
+// were wrongly parked as "no RePORTER name → keep" (#766 cleanup under-deleted).
+// With a single id, every returned project lists that id as a PI, so its name
+// is always present in the first page. 1 req/sec keeps us within NIH's limit.
+const BATCH_SIZE = 1;
 
 type SuspectRow = {
   cwid: string;
