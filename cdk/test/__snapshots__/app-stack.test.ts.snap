@@ -3376,7 +3376,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SECURITY_CSP_MODE",
-                "Value": "report-only",
+                "Value": "enforce",
               },
             ],
             "Essential": true,
