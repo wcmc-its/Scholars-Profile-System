@@ -17,6 +17,12 @@ const {
   mockTxSlugHistoryUpsert,
   mockTxGenerationFindUnique,
   mockTxProvenanceUpsert,
+  // Amendment 4 — the unit-admin resolver (resolveEditableUnitViaUnitAdmin)
+  // reads these on the non-self overview path before denying.
+  mockScholarFindUnique,
+  mockDivisionMembershipFindMany,
+  mockDivisionFindMany,
+  mockUnitAdminFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -33,6 +39,10 @@ const {
   mockTxSlugHistoryUpsert: vi.fn(),
   mockTxGenerationFindUnique: vi.fn(),
   mockTxProvenanceUpsert: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
+  mockDivisionMembershipFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockUnitAdminFindMany: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -52,12 +62,17 @@ vi.mock("@/lib/auth/session-server", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      scholar: { findFirst: mockScholarFindFirst },
+      scholar: { findFirst: mockScholarFindFirst, findUnique: mockScholarFindUnique },
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
       slugHistory: { findFirst: mockSlugHistoryFindFirst },
       // #779 — the non-self overview path now probes for a proxy grant before
       // denying; no grant in these self/superuser tests, so it returns null.
       scholarProxy: { findUnique: async () => null },
+      // Amendment 4 — and then for a unit-admin role over a unit the scholar
+      // belongs to. Deny by default (no scholar row ⇒ resolver returns null).
+      divisionMembership: { findMany: mockDivisionMembershipFindMany },
+      division: { findMany: mockDivisionFindMany },
+      unitAdmin: { findMany: mockUnitAdminFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -111,6 +126,12 @@ beforeEach(() => {
   // #742 Phase B — no source generation by default; provenance upsert resolves.
   mockTxGenerationFindUnique.mockResolvedValue(null);
   mockTxProvenanceUpsert.mockResolvedValue({});
+  // Amendment 4 — default: no unit-admin access (the resolver short-circuits on
+  // a missing scholar row, so a non-self overview edit still denies with 403).
+  mockScholarFindUnique.mockResolvedValue(null);
+  mockDivisionMembershipFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockUnitAdminFindMany.mockResolvedValue([]);
 });
 
 describe("POST /api/edit/field", () => {
@@ -368,5 +389,61 @@ describe("POST /api/edit/field", () => {
     expect(res.status).toBe(200);
     expect(mockTxProvenanceUpsert).not.toHaveBeenCalled();
     expect(mockTxGenerationFindUnique).not.toHaveBeenCalled();
+  });
+});
+
+// Amendment 4 — org-unit administrator as profile editor (scholar-proxy-unit-
+// admin-amendment.md). The route-level WIRING of the unit-admin branch beside
+// the #779 proxy branch (membership + cascade correctness is unit-tested in
+// unit-scholar-authz.test.ts; here we drive the unitAdmin.findMany rows directly).
+describe("POST /api/edit/field — unit-admin branch (Amendment 4)", () => {
+  const UNIT_ADMIN = { cwid: "uadm01", isSuperuser: false };
+
+  it("allows an owner/curator of the scholar's unit to edit overview — 200 + unit context in the audit", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    // The scholar belongs to DEPT-MED; the admin holds a curator row over it.
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "curator" },
+    ]);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch001", fieldName: "overview", value: "<p>bio</p>" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
+    // The audit afterValues JSON carries the conferring unit (Amendment 4).
+    const auditArgs = mockExecuteRaw.mock.calls[0] as unknown[];
+    const afterJson = auditArgs.find(
+      (v): v is string => typeof v === "string" && v.includes("edited_via"),
+    );
+    expect(afterJson).toContain("unit_admin");
+    expect(afterJson).toContain("DEPT-MED");
+  });
+
+  it("denies a non-superuser with no unit-admin role over the scholar's unit — 403, writes nothing", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([]); // holds no row over the scholar's unit
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch001", fieldName: "overview", value: "<p>bio</p>" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does NOT extend the unit-admin path to a slug edit (overview-only allowlist) — 403", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    // Even with a real unit-admin role, slug stays superuser-only (the branch is
+    // gated to fieldName === 'overview').
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "owner" },
+    ]);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "sch001", fieldName: "slug", value: "new-slug" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

@@ -28,6 +28,13 @@ const {
   mockNotFound,
   mockEditPage,
   mockForbiddenEditPage,
+  // Amendment 4 — the unit-admin page gate reads these (resolver + banner name).
+  mockScholarFindUnique,
+  mockDivisionMembershipFindMany,
+  mockDivisionFindMany,
+  mockUnitAdminFindMany,
+  mockDepartmentFindUnique,
+  mockDivisionFindUnique,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEditSession: vi.fn(),
@@ -46,6 +53,12 @@ const {
   // element whose `type` is the spy.
   mockEditPage: vi.fn(() => null),
   mockForbiddenEditPage: vi.fn(() => null),
+  mockScholarFindUnique: vi.fn(),
+  mockDivisionMembershipFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockUnitAdminFindMany: vi.fn(),
+  mockDepartmentFindUnique: vi.fn(),
+  mockDivisionFindUnique: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -64,6 +77,12 @@ vi.mock("@/lib/db", () => ({
   db: {
     read: {
       scholarProxy: { findUnique: async () => null, findMany: async () => [] },
+      // Amendment 4 — the unit-admin gate's resolver + the banner name lookup.
+      scholar: { findUnique: mockScholarFindUnique },
+      divisionMembership: { findMany: mockDivisionMembershipFindMany },
+      division: { findMany: mockDivisionFindMany, findUnique: mockDivisionFindUnique },
+      unitAdmin: { findMany: mockUnitAdminFindMany },
+      department: { findUnique: mockDepartmentFindUnique },
     },
     write: {},
   },
@@ -72,7 +91,7 @@ vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   // The route canonicalizes an invalid `?attr` against this set (T1.13). Mirror
   // the real per-mode visible keys; the flag arg doesn't change membership.
-  visibleAttrKeys: (mode: "self" | "superuser") =>
+  visibleAttrKeys: (mode: "self" | "superuser" | "proxy" | "unit-admin") =>
     mode === "superuser"
       ? ["home", "name-title", "photo", "overview", "visibility", "funding", "appointments", "education", "profile-url"]
       : ["home", "name-title", "photo", "overview", "visibility", "publications", "funding", "appointments", "education", "profile-url"],
@@ -107,6 +126,14 @@ beforeEach(() => {
   mockGetSession.mockResolvedValue({ cwid: "raw" });
   mockGetEditSession.mockResolvedValue(null);
   mockLoadEditContext.mockResolvedValue(null);
+  // Amendment 4 — default: no unit-admin access (resolver short-circuits on a
+  // missing scholar row). Overridden in the unit-admin test below.
+  mockScholarFindUnique.mockResolvedValue(null);
+  mockDivisionMembershipFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockUnitAdminFindMany.mockResolvedValue([]);
+  mockDepartmentFindUnique.mockResolvedValue(null);
+  mockDivisionFindUnique.mockResolvedValue(null);
 });
 
 type ReactElementLike = { type: unknown; props: Record<string, unknown> };
@@ -219,5 +246,37 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     mockGetEditSession.mockResolvedValue(SELF); // no longer a superuser
     const result = asElement(await EditScholarPage({ params: params("other7") }));
     expect(result.type).toBe(mockForbiddenEditPage);
+  });
+
+  // Amendment 4 — org-unit administrator as profile editor.
+  it("signed-in unit admin (non-impersonating) on a managed scholar → EditPage(mode='unit-admin') + 'via {unit}' banner", async () => {
+    // Non-impersonating: raw === effective, so the unit-admin gate runs (a #637
+    // overlay would make raw.cwid !== session.cwid and skip it, IS-1).
+    mockGetSession.mockResolvedValue({ cwid: "uadm01" });
+    mockGetEditSession.mockResolvedValue({ cwid: "uadm01", isSuperuser: false });
+    mockLoadEditContext.mockResolvedValue(fakeCtx("sch001"));
+    // sch001 ∈ DEPT-MED; uadm01 holds a curator row over it.
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "curator" },
+    ]);
+    mockDepartmentFindUnique.mockResolvedValue({ name: "Medicine" });
+
+    const result = asElement(await EditScholarPage({ params: params("sch001") }));
+    expect(result.type).toBe(mockEditPage);
+    expect(result.props.mode).toBe("unit-admin");
+    expect(result.props.unitAdminBanner).toEqual({ unitKind: "department", unitName: "Medicine" });
+    expect(mockForbiddenEditPage).not.toHaveBeenCalled();
+  });
+
+  it("signed-in non-superuser with NO unit role (non-impersonating) on another cwid → ForbiddenEditPage", async () => {
+    // The unit-admin gate runs but the resolver finds no grant ⇒ the page must
+    // still fall through to the superuser re-check and 403 (no over-grant).
+    mockGetSession.mockResolvedValue({ cwid: "uadm01" });
+    mockGetEditSession.mockResolvedValue({ cwid: "uadm01", isSuperuser: false });
+    // default mocks: scholar.findUnique → null ⇒ resolver null ⇒ no unit-admin.
+    const result = asElement(await EditScholarPage({ params: params("sch001") }));
+    expect(result.type).toBe(mockForbiddenEditPage);
+    expect(mockEditPage).not.toHaveBeenCalled();
   });
 });

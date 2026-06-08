@@ -15,6 +15,12 @@ const {
   mockEducationFindUnique,
   mockAppointmentFindUnique,
   mockDepartmentFindFirst,
+  // Amendment 4 — the unit-admin resolver reads these on the non-self per-author
+  // publication-hide path before denying.
+  mockScholarFindUnique,
+  mockDivisionMembershipFindMany,
+  mockDivisionFindMany,
+  mockUnitAdminFindMany,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -29,6 +35,10 @@ const {
   mockEducationFindUnique: vi.fn(),
   mockAppointmentFindUnique: vi.fn(),
   mockDepartmentFindFirst: vi.fn(),
+  mockScholarFindUnique: vi.fn(),
+  mockDivisionMembershipFindMany: vi.fn(),
+  mockDivisionFindMany: vi.fn(),
+  mockUnitAdminFindMany: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -57,6 +67,12 @@ vi.mock("@/lib/db", () => ({
       // #779 — a per-author publication hide by a non-self actor now probes for
       // a proxy grant before denying; no grant in these tests ⇒ null ⇒ unchanged.
       scholarProxy: { findUnique: async () => null },
+      // Amendment 4 — and then for a unit-admin role over the author's unit.
+      // Deny by default (no scholar row ⇒ resolver returns null).
+      scholar: { findUnique: mockScholarFindUnique },
+      divisionMembership: { findMany: mockDivisionMembershipFindMany },
+      division: { findMany: mockDivisionFindMany },
+      unitAdmin: { findMany: mockUnitAdminFindMany },
     },
     write: { $transaction: mockTransaction },
   },
@@ -105,6 +121,12 @@ beforeEach(() => {
   mockEducationFindUnique.mockResolvedValue({ cwid: "self01" });
   mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Professor of Medicine" });
   mockDepartmentFindFirst.mockResolvedValue(null);
+  // Amendment 4 — default: no unit-admin access (resolver short-circuits on a
+  // missing scholar row, so a non-self per-author hide still denies with 403).
+  mockScholarFindUnique.mockResolvedValue(null);
+  mockDivisionMembershipFindMany.mockResolvedValue([]);
+  mockDivisionFindMany.mockResolvedValue([]);
+  mockUnitAdminFindMany.mockResolvedValue([]);
 });
 
 describe("POST /api/edit/suppress", () => {
@@ -307,5 +329,62 @@ describe("POST /api/edit/suppress", () => {
     );
     expect(res.status).toBe(200);
     expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Amendment 4 — org-unit administrator as profile editor. WIRING of the
+// unit-admin branch beside the #779 proxy branch for a per-author publication
+// hide (membership/cascade correctness lives in unit-scholar-authz.test.ts).
+describe("POST /api/edit/suppress — unit-admin branch (Amendment 4)", () => {
+  const UNIT_ADMIN = { cwid: "uadm01", isSuperuser: false };
+
+  it("lets an owner/curator of the author's unit hide that author's publication — 200, default reason, unit context audited", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    // The author (auth01) belongs to DEPT-MED; the admin holds a curator row.
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "curator" },
+    ]);
+    const res = await POST(
+      post({ entityType: "publication", entityId: "999", contributorCwid: "auth01" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+    // A unit-admin hide gets the same default reason as a self/proxy author-hide.
+    expect(mockSuppressionCreate.mock.calls[0][0].data).toMatchObject({
+      contributorCwid: "auth01",
+      reason: "Hidden by the author via /edit",
+    });
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const auditArgs = mockExecuteRaw.mock.calls[0] as unknown[];
+    const afterJson = auditArgs.find(
+      (v): v is string => typeof v === "string" && v.includes("edited_via"),
+    );
+    expect(afterJson).toContain("unit_admin");
+    expect(afterJson).toContain("DEPT-MED");
+  });
+
+  it("denies a non-superuser with no unit-admin role over the author's unit — 403", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([]); // no row over the author's unit
+    const res = await POST(
+      post({ entityType: "publication", entityId: "999", contributorCwid: "auth01" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("does NOT extend the unit-admin path to a whole-publication takedown (own-pub-hide only) — 403", async () => {
+    mockGetEditSession.mockResolvedValue(UNIT_ADMIN);
+    // A real unit-admin role does not let them take down a whole publication
+    // (no contributorCwid ⇒ superuser-only; the branch requires contributor !== null).
+    mockScholarFindUnique.mockResolvedValue({ deptCode: "DEPT-MED", divCode: null, deletedAt: null });
+    mockUnitAdminFindMany.mockResolvedValue([
+      { entityType: "department", entityId: "DEPT-MED", role: "owner" },
+    ]);
+    const res = await POST(post({ entityType: "publication", entityId: "999", reason: "takedown" }));
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

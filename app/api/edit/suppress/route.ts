@@ -18,6 +18,11 @@ import {
   isGrantedProxy,
   type ProxyLookup,
 } from "@/lib/edit/proxy-authz";
+import {
+  resolveEditableUnitViaUnitAdmin,
+  type EditableUnit,
+  type UnitScholarLookup,
+} from "@/lib/edit/unit-scholar-authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   reflectUnitChange,
@@ -85,6 +90,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // behalf of the granted scholar — drives default-reason parity with a
   // self-author-hide below (a proxy acts with exactly the scholar's surface, D4).
   let viaProxy = false;
+  // Set when an org-unit administrator (Amendment 4) authorizes the hide via a
+  // unit the author belongs to — carries the conferring unit into the B03 audit
+  // and drives the same default-reason parity as a self/proxy author-hide.
+  let viaUnitAdminUnit: EditableUnit | null = null;
 
   // #540 Phase 5 — unit retire: existence + Superuser gate, then fall into
   // the shared write path below. SPEC § Authorization — unit retire is
@@ -191,6 +200,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
       }
     }
+    // Org-unit administrator as profile editor (Amendment 4). Same positive
+    // allowlist as the proxy hide — `publication` AND `contributorCwid === the
+    // author` only — and the same `realCwid`-keyed / not-impersonating gate
+    // (IS-1). An owner/curator of a unit the author belongs to may hide that
+    // author's misattributed publication; the conferring unit is audited.
+    if (
+      !authz.ok &&
+      entityType === "publication" &&
+      contributor !== null &&
+      impersonatedCwid === null
+    ) {
+      const unit = await resolveEditableUnitViaUnitAdmin(
+        realCwid,
+        contributor,
+        db.read as unknown as UnitScholarLookup,
+      );
+      if (unit) {
+        authz = { ok: true };
+        viaUnitAdminUnit = unit;
+      }
+    }
     if (!authz.ok) {
       logEditDenial({
         actorCwid: session.cwid,
@@ -220,7 +250,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     reasonValue = trimmedReason;
   } else if (isSelfScholar || isSelfEntity) {
     reasonValue = SELF_SUPPRESS_REASON;
-  } else if (isSelfAuthorHide || viaProxy) {
+  } else if (isSelfAuthorHide || viaProxy || viaUnitAdminUnit !== null) {
     reasonValue = SELF_HIDE_REASON;
   } else {
     // A superuser suppression's reason is mandatory (self-edit-spec.md;
@@ -270,6 +300,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           suppression_id: created.id,
           contributor_cwid: contributor,
           reason: reasonValue,
+          // Amendment 4 — record the unit that conferred a unit-admin hide
+          // (absent for self / proxy / superuser hides).
+          ...(viaUnitAdminUnit
+            ? {
+                edited_via: "unit_admin",
+                via_unit_type: viaUnitAdminUnit.kind,
+                via_unit_code: viaUnitAdminUnit.code,
+              }
+            : {}),
         },
         ts: new Date(),
         requestId,
