@@ -121,12 +121,17 @@ function isGatedOrLegacyPath(pathname: string): boolean {
  * `Host` header IS the public host the viewer requested (the same value
  * `lib/edit/authz.ts` trusts for its same-origin CSRF check), so use it.
  * Falls back to the relative path only if `Host` is somehow absent.
+ *
+ * Scheme is always `https`: the public site is HTTPS-only (HSTS + CloudFront
+ * redirect-to-https). `x-forwarded-proto` is deliberately NOT used — at the
+ * Fargate task it reflects the internal ALB->container hop (`http`), not the
+ * viewer's scheme, so trusting it emitted an `http://` Location that only
+ * worked because the browser upgraded it.
  */
 function absoluteLocation(request: NextRequest, pathAndQuery: string): string {
   const host = request.headers.get("host");
   if (!host) return pathAndQuery;
-  const proto = request.headers.get("x-forwarded-proto") ?? "https";
-  return `${proto}://${host}${pathAndQuery}`;
+  return `https://${host}${pathAndQuery}`;
 }
 
 export async function middleware(request: NextRequest): Promise<NextResponse> {
