@@ -11,11 +11,13 @@
 import { redirect, notFound } from "next/navigation";
 
 import { EditPage, visibleAttrKeys } from "@/components/edit/edit-page";
+import { ProxyLanding } from "@/components/edit/proxy-landing";
 import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
+import { scholarsServedByProxy, type ProxyListLookup } from "@/lib/edit/proxy-authz";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
@@ -59,9 +61,29 @@ export default async function EditSelfPage({
     includeCoiGap,
   });
   if (!ctx) {
-    // A signed-in user whose scholar row was hard-archived (deletedAt set)
-    // has nothing to edit. This is rare — the ED ETL would have to have
-    // deleted them after SSO authenticated them.
+    // A signed-in user with no Scholar row may still be a scholar-assigned proxy
+    // editor (#779) — pure administrative staff (Beth Chunn) editing on a
+    // scholar's behalf. Route them to whom they serve: one grant → straight to
+    // that scholar; several → a chooser (D5 department-admin fan-out). Keyed on
+    // the effective cwid (their own identity — a proxy never impersonates). A
+    // non-proxy (incl. a hard-archived scholar) still 404s.
+    const served = await scholarsServedByProxy(editCwid, db.read as unknown as ProxyListLookup);
+    if (served.length === 1) {
+      redirect(`/edit/scholar/${encodeURIComponent(served[0])}`);
+    }
+    if (served.length > 1) {
+      const scholars = await db.read.scholar.findMany({
+        where: { cwid: { in: served }, deletedAt: null },
+        select: { cwid: true, preferredName: true },
+        orderBy: { preferredName: "asc" },
+      });
+      if (scholars.length === 1) {
+        redirect(`/edit/scholar/${encodeURIComponent(scholars[0].cwid)}`);
+      }
+      if (scholars.length > 1) {
+        return <ProxyLanding scholars={scholars} />;
+      }
+    }
     notFound();
   }
   const { attr } = (await searchParams) ?? {};
@@ -100,6 +122,17 @@ export default async function EditSelfPage({
   const units = await loadManageableUnits(editCwid, db.read);
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
 
+  // #779 — the scholar manages their own proxy editors. Keyed on the EFFECTIVE
+  // editing identity (their own profile); the grant/revoke route blocks while
+  // impersonating, so the panel actions are inert under a "View as" overlay.
+  const proxyEditors = (
+    await db.read.scholarProxy.findMany({
+      where: { scholarCwid: editCwid },
+      select: { proxyCwid: true, grantedBy: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    })
+  ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
+
   return (
     <EditPage
       ctx={ctx}
@@ -109,6 +142,7 @@ export default async function EditSelfPage({
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
       manageableUnits={manageableUnits}
+      proxyEditors={proxyEditors}
     />
   );
 }

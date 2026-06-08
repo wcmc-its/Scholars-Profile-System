@@ -40,6 +40,7 @@ Plus **break-glass** — the emergency-access and kill-switch procedures.
 | **Superuser** | Enterprise Directory group `ITS:Library:Scholars/superuser-role` (LDAPS lookup of the group's `member` list, keyed on session CWID) | **every `/edit/*` GET and `/api/edit/*` POST** — never cached in the session | Everything: edit any field incl. `slug`, suppress/revoke anything (incl. whole-publication takedown), grant/revoke any unit role, view suppressed data on the superuser GET pages. |
 | **Unit Owner** | a `unit_admin` row (`role=owner`) for the unit | per POST | Edit the unit (`description`, leadership, roster) **and manage access** (grant/revoke `owner`/`curator`) within the owned subtree; proxy-edit scholars whose LDAP-primary unit is in scope. |
 | **Unit Curator** | a `unit_admin` row (`role=curator`) | per POST | Edit the unit **only**. Cannot delegate (cannot grant any role) — the load-bearing line that stops a curator self-escalating. |
+| **Proxy editor** | a `scholar_proxy` row `(scholarCwid, proxyCwid)` — the scholar's explicit designee (#779, ADR-005 Amendment 3); the proxy holds **no other role** (not Self/Superuser/Unit role), enforced at grant **and** re-checked at every edit | per request, keyed on the **real** cwid | Edit *the granted scholar's* `overview` and hide *that scholar's* own misattributed publications — exactly self-edit scope, on exactly that one scholar. Cannot edit `slug`/upstream fields; cannot manage the proxy list. Distinct from a Unit Owner/Curator's unit-scoped proxy edit. |
 
 Key properties:
 
@@ -75,7 +76,7 @@ The per-unit predicates live in [`lib/edit/authz.ts`](../lib/edit/authz.ts):
 
 | Action | Who |
 |---|---|
-| Edit `overview` (bio) | Self only (a superuser does **not** inherit it — broad admin field-editing is deferred), or an in-scope unit Owner/Curator via proxy. |
+| Edit `overview` (bio) | Self only (a superuser does **not** inherit it — broad admin field-editing is deferred), or an in-scope unit Owner/Curator via proxy, or the scholar's designated **proxy editor** (#779). |
 | Edit `slug` (vanity URL) | **Superuser only.** A scholar *requests* a slug ([`slug-personalization-spec.md`](./slug-personalization-spec.md)); a superuser approves/sets it. |
 | Hide whole publication (retraction/takedown) | **Superuser only.** |
 | Hide self as a contributor | The contributor themselves. |

@@ -18,6 +18,7 @@ import { FundingCard } from "@/components/edit/funding-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
+import { ProxyEditorCard, type ProxyRow } from "@/components/edit/proxy-editor-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
@@ -46,7 +47,8 @@ type AttrKey =
   | "coi"
   | "coi-gap"
   | "mentees"
-  | "profile-url";
+  | "profile-url"
+  | "proxy-editors";
 
 type AttrDef = {
   key: AttrKey;
@@ -81,12 +83,40 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
+  // Proxy editors (#779) — the scholar (self) manages their own designees; a
+  // superuser manages them on the scholar's behalf. NOT shown in proxy mode: a
+  // proxy can never manage the proxy list (CD-2; excluded in `attrsForMode`).
+  { key: "proxy-editors", label: "Proxy editors", modes: ["self", "superuser"] },
 ];
 
-const DEFAULT_ATTR: Record<"self" | "superuser", AttrKey> = {
+const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   self: "home",
   superuser: "home",
+  proxy: "home",
 };
+
+/** The actor surfaces. `proxy` (#779) is a scholar-assigned designee: it reuses
+ *  the SELF editable surface (overview + publication hiding) on the scholar's
+ *  route, minus the self-only Profile URL request and the "From your
+ *  publications" advisory. Visual/interaction polish is a UI-SPEC deliverable. */
+type EditMode = "self" | "superuser" | "proxy";
+
+/** The attribute set visible for a mode, before flag/candidate filtering.
+ *  `proxy` mirrors `self` minus `profile-url` (slug is self/superuser-only — a
+ *  proxy cannot request a slug for the scholar) and `coi-gap` (self-only
+ *  advisory; the loader returns no candidates for a proxy anyway). */
+function attrsForMode(mode: EditMode): AttrDef[] {
+  if (mode === "proxy") {
+    return ATTRIBUTES.filter(
+      (a) =>
+        a.modes.includes("self") &&
+        a.key !== "profile-url" &&
+        a.key !== "coi-gap" &&
+        a.key !== "proxy-editors", // a proxy can never manage the proxy list (CD-2)
+    );
+  }
+  return ATTRIBUTES.filter((a) => a.modes.includes(mode));
+}
 
 /**
  * Self-mode rail grouping + editability tier (vision-round T2.2). Leads with
@@ -100,6 +130,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "home",
   "overview",
   "visibility",
+  "proxy-editors",
   // "From WCM systems" group — ordered per operator request. (Profile URL is
   // owned ⇒ joins "Yours to edit" only when the slug-request flag is on;
   // gated/read-only it leads the WCM group.)
@@ -118,6 +149,7 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   home: "owned",
   overview: "owned",
   visibility: "owned",
+  "proxy-editors": "owned",
   "profile-url": "owned",
   publications: "sourced",
   funding: "sourced",
@@ -149,6 +181,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "photo",
   "overview",
   "visibility",
+  "proxy-editors",
   "funding",
   "appointments",
   "education",
@@ -158,7 +191,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
 
 export type EditPageProps = {
   ctx: EditContext;
-  mode?: "self" | "superuser";
+  mode?: EditMode;
   /** The selected attribute from `?attr=`; falls back to the mode's default. */
   attr?: string;
   /** Whether the self "Profile URL" request card is enabled (#497 PR-3,
@@ -176,6 +209,10 @@ export type EditPageProps = {
   /** Self mode only: org units the viewer may also curate (#753), surfaced on
    *  the Home panel. Empty for most scholars. */
   manageableUnits?: ManageableUnit[];
+  /** The scholar's current proxy-editor grants (#779), for the "Proxy editors"
+   *  panel in self / superuser mode. `null` ⇒ the panel renders nothing (e.g.
+   *  proxy mode, where it is not even in the rail). */
+  proxyEditors?: ProxyRow[] | null;
 };
 
 /**
@@ -186,16 +223,16 @@ export type EditPageProps = {
  * canonicalize an invalid `?attr` without re-deriving this list (T1.13).
  */
 export function visibleAttrKeys(
-  mode: "self" | "superuser",
+  mode: EditMode,
   slugRequestEnabled: boolean,
   hasCoiGap = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
-  return ATTRIBUTES.filter((a) => a.modes.includes(mode))
+  return attrsForMode(mode)
     // The "From your publications" item only exists when there are candidates to
     // show — an empty panel is never surfaced, and an `?attr=coi-gap` with zero
     // candidates canonicalizes away (the page redirects to bare /edit) rather
-    // than rendering an empty panel or 404-looping.
+    // than rendering an empty panel or 404-looping. (proxy drops it outright.)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .map((a) => a.key);
 }
@@ -208,6 +245,7 @@ export function EditPage({
   latestSlugRequest = null,
   canBrowseProfiles = false,
   manageableUnits = [],
+  proxyEditors = null,
 }: EditPageProps) {
   // "From your publications" is conditionally present: only in self mode and
   // only when the loader returned candidates (the loader itself enforces the
@@ -215,9 +253,11 @@ export function EditPage({
   // it from the visible set otherwise so it appears in neither the rail nor the
   // valid-attr set — an empty panel is never surfaced.
   const hasCoiGap = mode === "self" && ctx.unmatchedPubmedCoi.length > 0;
-  const visible = ATTRIBUTES.filter((a) => a.modes.includes(mode)).filter(
-    (a) => a.key !== "coi-gap" || hasCoiGap,
-  );
+  const visible = attrsForMode(mode).filter((a) => a.key !== "coi-gap" || hasCoiGap);
+  // A proxy reuses the SELF rail/cards on the scholar's route (D4). Treated like
+  // self for layout; the distinct chrome (banner, breadcrumb, no account menu)
+  // is the shell's job.
+  const selfLike = mode === "self" || mode === "proxy";
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
@@ -229,7 +269,7 @@ export function EditPage({
     k === "profile-url" && mode === "self" && !slugRequestEnabled ? "readonly" : SELF_RAIL_KIND[k];
 
   const railItems: RailItem[] =
-    mode === "self"
+    selfLike
       ? SELF_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
           if (!a) return [];
@@ -252,7 +292,9 @@ export function EditPage({
           const a = visible.find((v) => v.key === k);
           return a ? [{ key: a.key, label: a.label, readonly: a.readonly }] : [];
         });
-  const basePath = mode === "superuser" ? `/edit/scholar/${ctx.scholar.cwid}` : "/edit";
+  // Self edits at "/edit"; superuser and proxy edit a named scholar at
+  // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
+  const basePath = mode === "self" ? "/edit" : `/edit/scholar/${ctx.scholar.cwid}`;
   const scholarName = ctx.scholar.preferredName;
 
   return (
@@ -275,6 +317,7 @@ export function EditPage({
         slugRequestEnabled,
         manageableUnits,
         canBrowseProfiles,
+        proxyEditors,
       )}
     </EditShell>
   );
@@ -283,14 +326,21 @@ export function EditPage({
 function renderPanel(
   key: AttrKey,
   ctx: EditContext,
-  mode: "self" | "superuser",
+  mode: EditMode,
   scholarName: string,
   latestSlugRequest: SlugRequestSummary | null,
   slugRequestEnabled: boolean,
   manageableUnits: ManageableUnit[],
   isSuperuser: boolean,
+  proxyEditors: ProxyRow[] | null,
 ) {
   const cwid = ctx.scholar.cwid;
+  // Child cards model only self vs superuser. A proxy reuses the SELF cards
+  // (overview editable, publications hide); the proxy-specific affordance gates
+  // (no generate, no preview link, no slug request) are derived from the REAL
+  // `mode` at each call site below, never from `childMode`.
+  const childMode: "self" | "superuser" = mode === "superuser" ? "superuser" : "self";
+  const detailBase = mode === "self" ? "/edit" : `/edit/scholar/${cwid}`;
   switch (key) {
     case "home": {
       const hiddenPublications = ctx.publications.filter((p) => p.state !== "shown").length;
@@ -304,16 +354,18 @@ function renderPanel(
       // target's. (When a superuser edits their OWN profile this is mode='self'.)
       return (
         <HomePanel
-          mode={mode}
-          basePath={mode === "superuser" ? `/edit/scholar/${cwid}` : "/edit"}
+          mode={childMode}
+          basePath={detailBase}
           preferredName={scholarName}
           identityImageEndpoint={identityImageEndpoint(cwid)}
           hasBio={ctx.scholar.overview.trim().length > 0}
           isHidden={isHidden}
           totalPublications={ctx.publications.length}
           hiddenPublications={hiddenPublications}
-          manageableUnits={mode === "superuser" ? [] : manageableUnits}
-          isSuperuser={mode === "superuser" ? false : isSuperuser}
+          // "Units you manage" + the cross-link are the viewer's own affordances —
+          // shown only to a genuine self viewer, never a superuser or a proxy.
+          manageableUnits={mode === "self" ? manageableUnits : []}
+          isSuperuser={mode === "self" ? isSuperuser : false}
         />
       );
     }
@@ -370,7 +422,7 @@ function renderPanel(
           cwid={cwid}
           suppression={ctx.scholar.suppression}
           scholarName={scholarName}
-          mode={mode}
+          mode={childMode}
         />
       );
     case "publications":
@@ -382,29 +434,29 @@ function renderPanel(
         />
       );
     case "funding":
-      return <FundingCard cwid={cwid} mode={mode} scholarName={scholarName} grants={ctx.grants} />;
+      return <FundingCard cwid={cwid} mode={childMode} scholarName={scholarName} grants={ctx.grants} />;
     case "appointments":
       return (
         <AppointmentsCard
           cwid={cwid}
-          mode={mode}
+          mode={childMode}
           scholarName={scholarName}
           appointments={ctx.appointments}
         />
       );
     case "education":
       return (
-        <EducationCard cwid={cwid} mode={mode} scholarName={scholarName} educations={ctx.educations} />
+        <EducationCard cwid={cwid} mode={childMode} scholarName={scholarName} educations={ctx.educations} />
       );
     case "mentees":
       return (
-        <MenteesCard cwid={cwid} mode={mode} scholarName={scholarName} mentees={ctx.mentees} />
+        <MenteesCard cwid={cwid} mode={childMode} scholarName={scholarName} mentees={ctx.mentees} />
       );
     case "coi":
       return (
         <CoiCard
           cwid={cwid}
-          mode={mode}
+          mode={childMode}
           scholarName={scholarName}
           disclosures={ctx.coiDisclosures}
           // The bridge to "From your publications" only appears for a genuine
@@ -439,6 +491,18 @@ function renderPanel(
       }
       return (
         <SlugRequestCard cwid={cwid} currentSlug={ctx.scholar.slug} latestRequest={latestSlugRequest} />
+      );
+    case "proxy-editors":
+      // Self (the scholar) or superuser (on the scholar's behalf) manages the
+      // scholar's designees. Never reached in proxy mode (excluded from the rail
+      // — a proxy can't manage the proxy list, CD-2).
+      return (
+        <ProxyEditorCard
+          scholarCwid={cwid}
+          scholarName={scholarName}
+          mode={childMode}
+          proxies={proxyEditors}
+        />
       );
   }
 }

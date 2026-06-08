@@ -960,6 +960,41 @@ model UnitAdmin {
   @@map("unit_admin")
 }
 
+/// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005
+/// Amendment 3). One row per (scholarCwid, proxyCwid): a scholar names a specific
+/// individual to edit THEIR profile on their behalf, scoped to exactly what the
+/// scholar could self-edit (overview + hiding the scholar's own misattributed
+/// publications). The grant reaches EXACTLY that one scholar — it is NOT the
+/// #540 unit-role "proxy editing" (which is role-derived and reaches a whole
+/// unit subtree); the two authorization axes are kept distinct in code and audit.
+///
+/// Inserted on grant (self-assign, or superuser-assign on the scholar's behalf),
+/// HARD-DELETED on revoke; B03 audits both (`proxy_grant` / `proxy_revoke`). No
+/// soft-revoke column — a grant is crisply present or absent, matching the
+/// UnitAdmin precedent (ADR-005 Amendment 1 § A1.1); the append-only audit log is
+/// the sole revoke history. The per-edit authorization checks ROW EXISTENCE only
+/// (no `revokedAt` filter — there is no such column).
+///
+/// `grantedBy` is the REAL grantor cwid (the scholar self-assigning, or a
+/// superuser acting on their behalf) — written from `realCwid`, never the
+/// effective/impersonated cwid. A historical breadcrumb, not a live FK: the grant
+/// stands even if the grantor is later deprovisioned.
+///
+/// No FK to Scholar on EITHER column. `proxyCwid` is by design NOT a Scholar (the
+/// proxy holds no other role — enforced in application code, not the DB);
+/// `scholarCwid` carries no FK so a grant outlives a soft-deleted scholar inertly
+/// (unexercisable while the scholar is deleted — see lib/edit/proxy-authz.ts).
+model ScholarProxy {
+  scholarCwid String   @map("scholar_cwid") @db.VarChar(32) // the granted scholar
+  proxyCwid   String   @map("proxy_cwid") @db.VarChar(32) // the designee (holds NO other role)
+  grantedBy   String   @map("granted_by") @db.VarChar(32) // REAL grantor cwid (scholar self, or superuser)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@id([scholarCwid, proxyCwid])
+  @@index([proxyCwid]) // reverse lookup: which scholars does this proxy serve? (landing redirect, drift audit)
+  @@map("scholar_proxy")
+}
+
 /// Per-publication × scholar × parent_topic triple, projected from TOPIC# rows.
 /// One PublicationTopic row per `TOPIC#<parent_topic_id>` item in DynamoDB.
 /// Subtopic data lives as embedded JSON fields here (no separate subtopic table).

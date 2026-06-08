@@ -39,6 +39,11 @@ import {
   type UnitRef,
 } from "@/lib/edit/authz";
 import { computeOverviewOrigin } from "@/lib/edit/overview-provenance";
+import {
+  checkProxyConflictingRole,
+  isGrantedProxy,
+  type ProxyLookup,
+} from "@/lib/edit/proxy-authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   reflectOverviewEdit,
@@ -158,7 +163,33 @@ async function handleScholarFieldEdit(params: {
     return editError(400, "invalid_value", "value");
   }
 
-  const authz = authorizeFieldEdit(session, { entityId, fieldName });
+  let authz = authorizeFieldEdit(session, { entityId, fieldName });
+  // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted
+  // proxy may edit the scholar's `overview` — and ONLY `overview` (a positive
+  // allowlist; `slug` stays superuser-only — PE-03/D4). Keyed on `realCwid`,
+  // NEVER `session.cwid`/effective (PE-01): a proxy is its own identity, so when
+  // not impersonating `realCwid === session.cwid`; the `impersonatedCwid===null`
+  // assertion stops a #637 overlay from riding the grant (IS-1). The full
+  // three-leg D3 conflict re-check runs fail-closed at edit time (PE-02/CD-3).
+  if (!authz.ok && fieldName === "overview" && impersonatedCwid === null) {
+    if (await isGrantedProxy(realCwid, entityId, db.read as unknown as ProxyLookup)) {
+      const conflict = await checkProxyConflictingRole(
+        realCwid,
+        db.read as unknown as ProxyLookup,
+      );
+      if (conflict.ok) {
+        authz = { ok: true };
+      } else {
+        logEditDenial({
+          actorCwid: realCwid,
+          targetCwid: entityId,
+          path: PATH,
+          reason: "proxy_conflict",
+        });
+        return editError(403, "proxy_conflict");
+      }
+    }
+  }
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,

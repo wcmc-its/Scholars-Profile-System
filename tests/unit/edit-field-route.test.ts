@@ -55,6 +55,9 @@ vi.mock("@/lib/db", () => ({
       scholar: { findFirst: mockScholarFindFirst },
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
       slugHistory: { findFirst: mockSlugHistoryFindFirst },
+      // #779 — the non-self overview path now probes for a proxy grant before
+      // denying; no grant in these self/superuser tests, so it returns null.
+      scholarProxy: { findUnique: async () => null },
     },
     write: { $transaction: mockTransaction },
   },

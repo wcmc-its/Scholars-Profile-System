@@ -58,7 +58,16 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
-vi.mock("@/lib/db", () => ({ db: { read: {}, write: {} } }));
+// #779 — the page now probes for a proxy grant (page-gate authz) and loads the
+// scholar's proxy editors. No grants in these authorization-matrix tests.
+vi.mock("@/lib/db", () => ({
+  db: {
+    read: {
+      scholarProxy: { findUnique: async () => null, findMany: async () => [] },
+    },
+    write: {},
+  },
+}));
 vi.mock("@/components/edit/edit-page", () => ({
   EditPage: mockEditPage,
   // The route canonicalizes an invalid `?attr` against this set (T1.13). Mirror

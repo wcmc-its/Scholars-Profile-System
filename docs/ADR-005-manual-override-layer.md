@@ -489,3 +489,33 @@ This makes `Scholar.slug` a *partially manual-driven* column — the one place a
 The system's deliberate disappearance mechanism is **soft delete** — `Scholar.deletedAt` (departed) and `Scholar.status='suppressed'` (manual takedown). Both keep the row, and thus its `slug_history`, intact; the read paths already filter on both, so a soft-deleted scholar's slugs neither resolve nor 301 to a live profile, yet remain *reserved* against reuse.
 
 **Requirement:** application code MUST NOT hard-delete a `Scholar` row. Removal from public view is always a soft delete (`deletedAt` / `status`). This is a convention guarded by PR review and the threat model (#497 §7), not a DB constraint — `onDelete: Cascade` is retained because it is correct for the legitimate operational case (a true data-erasure run, e.g. a GDPR/right-to-be-forgotten action, deliberately *should* take the history with it). The prohibition is on routine app-layer deletion, not on that out-of-band administrative path.
+
+## Amendment 3 (2026-06-08) — Scholar-assigned proxy editor (a per-scholar designee)
+
+**Status:** Accepted
+**Date:** 2026-06-08
+**Issue:** [#779](https://github.com/wcmc-its/Scholars-Profile-System/issues/779)
+**Spec:** [`scholar-proxy-spec.md`](./scholar-proxy-spec.md) (authoritative; this amendment ratifies it)
+**Amends:** adds one new access-grant table (`ScholarProxy`) and one new authorized actor on the existing scholar write path. **Additive** — no base-ADR or Amendment 1/2 mechanism changes.
+
+**Driver.** A scholar must be able to designate a *specific individual* to edit *their* profile on their behalf — e.g. Beth Chunn (`bec4010`), administrative staff with no Scholar profile, editing for Rahul Sharma (`ras2022`). This is **distinct from Amendment 1 §A1.3's unit-role "proxy editing"**: that authority is role-derived and reaches a whole unit subtree (an Owner/Curator of the scholar's home unit); this is *designee-derived and scholar-scoped* — an explicit `(scholarCwid, proxyCwid)` grant reaching exactly one scholar. The two axes are deliberately mutually exclusive at the person level (see A3.2 D3).
+
+### A3.1 Storage extension
+
+One new table, mirroring the `UnitAdmin` precedent (Amendment 1 §A1.1): `ScholarProxy(scholarCwid, proxyCwid, grantedBy, createdAt)`, composite PK `(scholarCwid, proxyCwid)`, `@@index([proxyCwid])`, **no FK on either column**, **hard-delete on revoke** (the B03 append-only log is the sole revoke history). The audit `action` ENUM gains `proxy_grant` / `proxy_revoke`; `EntityType` is unchanged (a grant's audit target is the `scholar`). The grant reuses the existing write path verbatim — `field_override(scholar, …, 'overview')` and the per-author `suppression` — adding no new write mechanism.
+
+### A3.2 The five fixed decisions
+
+- **D1 Provisioning** — the scholar self-assigns from `/edit`; a superuser may assign on their behalf. Grant authz keys on the **real** human (`realCwid`), never the effective/impersonated identity; a proxy can never grant/revoke.
+- **D2 Activation** — both parties notified, effective immediately, no acceptance step; either the scholar or a superuser may revoke. Silent on revoke. Notification is best-effort and dormant by flag.
+- **D3 "No other role"** — a CWID may be a proxy only if it currently holds **none** of: a non-deleted `Scholar` row, a `UnitAdmin` row, or superuser group membership. Enforced **blocking at grant time AND fail-closed at every proxy edit** (the live `isSuperuser` leg is never deferred). This is what keeps the designee and unit-role axes mutually exclusive.
+- **D4 Edit scope = self-edit scope** — `overview` + hiding the scholar's own misattributed publications; never `slug` (superuser-only) or upstream scalars. A `field_override` on an upstream scalar masks the system of record regardless of actor (the base ADR's reasoning, actor-independent).
+- **D5 Cardinality** — many-to-many (one proxy may serve many scholars; a scholar may name several), composite PK enforces one row per pair, with a server-backed per-scholar cap behind any UI soft-limit.
+
+### A3.3 Relationship to #637 impersonation
+
+A proxy is **orthogonal** to the "View as" overlay: it is the proxy's own real identity (no session overlay), authorization keys on `realCwid`, the audit row carries `actor_cwid = proxy` / `impersonated_cwid = NULL`, and the grant endpoint is blocked while impersonating. A superuser cannot impersonate a non-scholar proxy (the impersonation candidate set is `Scholar` rows only), closing the "impersonate a proxy to inherit their reach" vector at the source.
+
+### A3.4 Numbering note
+
+This is **Amendment 3**, not 2 — Amendment 2 (above) is the slug-override reconcile-on-write decision. (The spec's earlier drafts said "Amendment 2"; corrected here.)

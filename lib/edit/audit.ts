@@ -62,7 +62,18 @@ export type AuditAction =
   /** a scholar UNDID a COI-gap dismissal ("Undo") — the inverse of
    *  `coi_gap_dismiss`, restoring the suggestion to their advisory view. Same
    *  self-scoped, non-compliance posture. */
-  | "coi_gap_restore";
+  | "coi_gap_restore"
+  /** a scholar (or a superuser on their behalf) assigned a proxy editor
+   *  (scholar-proxy-spec.md / #779). `targetEntityType='scholar'`,
+   *  `targetEntityId` is the granted scholar's cwid; `afterValues` carries the
+   *  `{ proxy_cwid, granted_by }` of the new grant. Never an impersonated action
+   *  (`impersonatedCwid` is always null — the grant endpoint blocks while
+   *  impersonating). */
+  | "proxy_grant"
+  /** a scholar (or a superuser on their behalf) revoked a proxy editor
+   *  (scholar-proxy-spec.md / #779). `beforeValues` carries the revoked grant's
+   *  `{ proxy_cwid, granted_by }`. */
+  | "proxy_revoke";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =

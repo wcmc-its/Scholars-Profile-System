@@ -13,6 +13,11 @@ import { type NextRequest, type NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
 import { authorizeSuppress, logEditDenial } from "@/lib/edit/authz";
+import {
+  checkProxyConflictingRole,
+  isGrantedProxy,
+  type ProxyLookup,
+} from "@/lib/edit/proxy-authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   reflectUnitChange,
@@ -76,6 +81,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (entityType !== "publication" && contributor !== null) {
     return editError(400, "invalid_contributor", "contributorCwid");
   }
+  // Set when a scholar-assigned proxy (#779) authorizes a per-author hide on
+  // behalf of the granted scholar — drives default-reason parity with a
+  // self-author-hide below (a proxy acts with exactly the scholar's surface, D4).
+  let viaProxy = false;
 
   // #540 Phase 5 — unit retire: existence + Superuser gate, then fall into
   // the shared write path below. SPEC § Authorization — unit retire is
@@ -144,12 +153,44 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   //     appointment); the Superuser gate above (`isUnit` branch) is the
   //     unit-specific authz. ---
   if (!isUnit) {
-    const authz = authorizeSuppress(session, {
+    let authz = authorizeSuppress(session, {
       entityType,
       entityId,
       contributorCwid: contributor,
       ownerCwid,
     });
+    // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted
+    // proxy may hide ONLY the granted scholar's OWN authorship — `publication`
+    // AND `contributorCwid === the granted scholar` (a positive allowlist:
+    // never another author's authorship, never a whole-publication takedown,
+    // never a scholar/grant/education/appointment/mentee suppression —
+    // PE-03/IS-2). Keyed on `realCwid`, never while impersonating (PE-01/IS-1);
+    // D3 conflict re-check runs fail-closed (PE-02).
+    if (
+      !authz.ok &&
+      entityType === "publication" &&
+      contributor !== null &&
+      impersonatedCwid === null
+    ) {
+      if (await isGrantedProxy(realCwid, contributor, db.read as unknown as ProxyLookup)) {
+        const conflict = await checkProxyConflictingRole(
+          realCwid,
+          db.read as unknown as ProxyLookup,
+        );
+        if (conflict.ok) {
+          authz = { ok: true };
+          viaProxy = true;
+        } else {
+          logEditDenial({
+            actorCwid: realCwid,
+            targetCwid: contributor,
+            path: PATH,
+            reason: "proxy_conflict",
+          });
+          return editError(403, "proxy_conflict");
+        }
+      }
+    }
     if (!authz.ok) {
       logEditDenial({
         actorCwid: session.cwid,
@@ -179,7 +220,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     reasonValue = trimmedReason;
   } else if (isSelfScholar || isSelfEntity) {
     reasonValue = SELF_SUPPRESS_REASON;
-  } else if (isSelfAuthorHide) {
+  } else if (isSelfAuthorHide || viaProxy) {
     reasonValue = SELF_HIDE_REASON;
   } else {
     // A superuser suppression's reason is mandatory (self-edit-spec.md;

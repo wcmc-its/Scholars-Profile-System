@@ -39,6 +39,11 @@ export type AuthzDenialReason =
   | "authority_violation"
   /** a proxy edit whose target scholar's LDAP-primary unit is outside the actor's scope */
   | "proxy_target_not_in_unit"
+  // ─── scholar-assigned proxy editor (#779 / scholar-proxy-spec.md) ───
+  /** a scholar-assigned proxy edit by a CWID that has since acquired a
+   *  conflicting role (D3 fail-closed re-check at edit time) — distinct from the
+   *  #540 `proxy_target_not_in_unit` (which is the unit-role axis) */
+  | "proxy_conflict"
   // ─── #728 § 2.2 #3 / § 5 MUST-7 ED-locked grant ───
   /** a grant/revoke against a `unit_admin` row whose `source` LIKE 'ED:%' by a non-superuser */
   | "ed_locked";
