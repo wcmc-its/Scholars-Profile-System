@@ -140,6 +140,20 @@ export interface SpsEnvConfig {
    * now.
    */
   readonly samlSpAcsUrl: string;
+  /**
+   * Content-Security-Policy rollout mode (#374). Surfaced as the
+   * `SECURITY_CSP_MODE` env var on the app task; `lib/security-headers.ts`
+   * `resolveCspMode()` reads it. `"report-only"` (the default both envs ship
+   * at launch) sends the policy as `Content-Security-Policy-Report-Only`;
+   * `"enforce"` flips the same policy value to the enforcing
+   * `Content-Security-Policy` header. Per-env so staging can be promoted to
+   * `enforce` first — once its post-#636 report feed is confirmed clean under
+   * real traffic — before prod, each promotion a one-line edit + `cdk deploy
+   * Sps-App-<env>` (CD re-rolls the image only, never the task-def env). The
+   * value is the same in both modes, so the flip is reversible by flipping
+   * back.
+   */
+  readonly cspMode: "report-only" | "enforce";
 
   // --- EtlStack (Phase 3) ---
 
@@ -250,6 +264,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
     samlSpAcsUrl:
       "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
+    // #374 — stays report-only until the post-#636 report feed is confirmed
+    // clean under real staging traffic, then flip to "enforce" + redeploy.
+    cspMode: "report-only",
     etlSchedulesEnabled: true,
     // #393 — continuous reconciler backstop; enabled both envs (see flag JSDoc).
     reconcileScheduleEnabled: true,
@@ -300,6 +317,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     appRwGranteeHost: "%",
     samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
     samlSpAcsUrl: "https://scholars.weill.cornell.edu/api/auth/saml/callback",
+    // #374 — prod follows staging: promote to "enforce" only after staging has
+    // run enforce cleanly and prod's own report feed is confirmed clean.
+    cspMode: "report-only",
     // Prod schedules ship disabled — first run is operator-driven after
     // runbook review, then `aws events enable-rule` flips them on (see
     // PRODUCTION_ADDENDUM § EtlStack).
