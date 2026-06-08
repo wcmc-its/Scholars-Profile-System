@@ -1,6 +1,6 @@
 /**
  * Scholar-assigned proxy editor — authorization predicates
- * (scholar-proxy-spec.md / #779, ADR-005 Amendment 2).
+ * (scholar-proxy-spec.md / #779, ADR-005 Amendment 3).
  *
  * Kept in a dedicated module so `lib/edit/authz.ts` stays the self-edit / #540
  * unit-role predicate set and the two authorization axes never blur. These

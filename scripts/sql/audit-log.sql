@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         existing ENUM ordinals.
 --   #779:              + proxy_grant · proxy_revoke  (scholar-assigned proxy
 --                         editor grant/revoke; scholar-proxy-spec.md / ADR-005
---                         Amendment 2; target_entity_type='scholar',
+--                         Amendment 3; target_entity_type='scholar',
 --                         target_entity_id is the granted scholar cwid). Appended
 --                         LAST to preserve existing ENUM ordinals.
 -- =============================================================================

@@ -8,7 +8,7 @@
 **Coordinates with:** [`self-edit-spec.md`](./self-edit-spec.md) — the scholar-facing feature on the same mechanism; this SPEC reuses its scholar write path verbatim and adds one new authorized actor. And [`unit-curation-spec.md`](./unit-curation-spec.md) (#540) — whose unit-role *"proxy editing"* (layer 3) this SPEC is **distinct from** (see [Relationship to #540](#relationship-to-540-unit-role-proxy-editing)).
 **Coordinates with:** [`impersonation-spec.md`](./impersonation-spec.md) (#637) — the "View as" effective-identity overlay, which proxy editing must be kept **orthogonal** to (see [Identity and session](#identity-and-session)).
 **Gated by:** B01 [#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100) (SSO), B02 [#101](https://github.com/wcmc-its/Scholars-Profile-System/issues/101) (authorization predicate + telemetry), B03 [#102](https://github.com/wcmc-its/Scholars-Profile-System/issues/102) (append-only audit log)
-**Requires:** an additive `EntityType`/audit-ENUM extension and one new table (`ScholarProxy`), parallel to the [ADR-005 Amendment 1](./ADR-005-manual-override-layer.md#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) `UnitAdmin` precedent. Should be **ratified into ADR-005 as Amendment 2** (same mechanism, one new access-grant table).
+**Requires:** an additive `EntityType`/audit-ENUM extension and one new table (`ScholarProxy`), parallel to the [ADR-005 Amendment 1](./ADR-005-manual-override-layer.md#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) `UnitAdmin` precedent. Ratified into ADR-005 as **Amendment 3** (Amendment 2 is the slug-override reconcile decision; this is the next free number) — same mechanism, one new access-grant table.
 
 ---
 
@@ -592,7 +592,7 @@ The reviewer is a security expert; this section folds in the priv-esc (PE), conf
 | **4 — Edit write paths** | Page-gate proxy tier (between self/superuser and the null/#536 guards). Field-route `overview`-only proxy branch (composite bind + fail-closed re-check + `realCwid` + `impersonatedCwid===null`). Suppress-route scoped `publication`+`contributorCwid===scholarCwid` branch. `mode="proxy"` + banner. | `app/edit/scholar/[cwid]/page.tsx`, `app/api/edit/field/route.ts`, `app/api/edit/suppress/route.ts`, `components/edit/edit-page.tsx`, `components/site/proxy-banner.tsx` |
 | **5 — API + UI (grant/revoke)** | `POST /api/edit/proxy` (mirror `grant/route.ts`; `readEditRequest`; normalize CWIDs; impersonation block; real-self/real-superuser authz; D3 blocking + opaque code; cardinality cap; hard-delete + audit in one tx). Scholar "My proxy editors" panel + superuser admin panel; reuse `DirectoryPeopleTypeahead`. Route tests (CSRF, cross-scholar, proxy-cannot-grant). | `app/api/edit/proxy/route.ts`, `components/edit/proxy-editor-card.tsx`, `components/edit/proxy-editor-admin-card.tsx`, `tests/unit/proxy-grant-route.test.ts` |
 | **6 — Notification** | `lib/edit/proxy-notification.ts` (compose proxy + scholar bodies, grantor-branched copy). Optionally extend `/api/directory/people` + `lib/sources/ldap` to include email. Commit-first/notify-after wiring; dormant behind a send flag. | `lib/edit/proxy-notification.ts`, `app/api/edit/proxy/route.ts`, `app/api/directory/people/route.ts` |
-| **7 — Audit + ops** | Audit queries A–E in a runbook; schedule the D3 drift watch (query D); update `docs/access-control-rbac.md` with the "Proxy Editor" row; ratify ADR-005 Amendment 2. | `docs/scholar-proxy-spec.md`, `docs/access-control-rbac.md`, `docs/ADR-005-manual-override-layer.md` |
+| **7 — Audit + ops** | Audit queries A–E in a runbook; schedule the D3 drift watch (query D); update `docs/access-control-rbac.md` with the "Proxy Editor" row; ratify ADR-005 Amendment 3. | `docs/scholar-proxy-spec.md`, `docs/access-control-rbac.md`, `docs/ADR-005-manual-override-layer.md` |
 
 ---
 
@@ -613,7 +613,7 @@ The reviewer is a security expert; this section folds in the priv-esc (PE), conf
 
 ## References
 
-- [ADR-005](./ADR-005-manual-override-layer.md) — the `field_override` / `suppression` mechanism this SPEC reuses; this SPEC should be ratified as **Amendment 2** (one new access-grant table, parallel to Amendment 1's `UnitAdmin`).
+- [ADR-005](./ADR-005-manual-override-layer.md) — the `field_override` / `suppression` mechanism this SPEC reuses; this SPEC is ratified as **Amendment 3** (one new access-grant table, parallel to Amendment 1's `UnitAdmin`; Amendment 2 is the slug-override reconcile decision).
 - [`self-edit-spec.md`](./self-edit-spec.md) — the scholar-facing sibling; the proxy reuses its scholar write path, field set, validation, sanitization, and `/edit/scholar/[cwid]` route. Its authorization table widens its `overview`-edit and per-author publication-hide rows to admit the granted-proxy actor.
 - [`unit-curation-spec.md`](./unit-curation-spec.md) (#540) — the **distinct** unit-role proxy model; this SPEC keeps the two axes separate ([Relationship to #540](#relationship-to-540-unit-role-proxy-editing)).
 - [`impersonation-spec.md`](./impersonation-spec.md) (#637) — the effective-identity overlay this SPEC stays orthogonal to ([Identity and session](#identity-and-session)).

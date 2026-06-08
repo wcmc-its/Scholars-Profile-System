@@ -961,7 +961,7 @@ model UnitAdmin {
 }
 
 /// Scholar-assigned proxy editor grant (scholar-proxy-spec.md / #779, ADR-005
-/// Amendment 2). One row per (scholarCwid, proxyCwid): a scholar names a specific
+/// Amendment 3). One row per (scholarCwid, proxyCwid): a scholar names a specific
 /// individual to edit THEIR profile on their behalf, scoped to exactly what the
 /// scholar could self-edit (overview + hiding the scholar's own misattributed
 /// publications). The grant reaches EXACTLY that one scholar — it is NOT the
