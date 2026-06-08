@@ -64,6 +64,17 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  * report-only header unchanged). Middleware runs per request, so the env is
  * read live and a task-def flip + service roll promotes the policy with no
  * rebuild. See lib/security-headers.ts.
+ *
+ * Apply ONLY to document responses (`NextResponse.next()`). It must NOT wrap a
+ * redirect: this middleware emits 301/302 responses with a **relative**
+ * `Location` (the request host is the internal container address behind the
+ * proxy, so an absolute redirect is unreachable — see the SSO branch). Setting
+ * a header on an already-constructed redirect makes the edge runtime re-finalize
+ * the response and re-parse that relative `Location` through `new URL()`, which
+ * throws `TypeError: Invalid URL` and 500s the route (regressed `/edit` when it
+ * first shipped). Redirects and bodyless 401/404s carry no document, so they
+ * need no CSP anyway — return them directly. The browser gets the CSP on the
+ * page it lands on, which is itself a `next()` response.
  */
 function withSecurityHeaders(response: NextResponse): NextResponse {
   const cspHeaders = buildCspResponseHeaders({
@@ -123,12 +134,12 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       // send the browser to an unreachable address (ip-...:3000). The browser
       // resolves a relative Location against the public URL it requested. cwid
       // is regex-constrained ([A-Za-z0-9._-]) so it is safe in the header.
-      return withSecurityHeaders(
-        new NextResponse(null, {
-          status: 301,
-          headers: { Location: `/scholars/by-cwid/${cwid}` },
-        }),
-      );
+      // Redirect (relative Location): returned directly, NOT through
+      // withSecurityHeaders — see its doc for why mutating a redirect 500s.
+      return new NextResponse(null, {
+        status: 301,
+        headers: { Location: `/scholars/by-cwid/${cwid}` },
+      });
     }
     // Out-of-set CWID -- not in the academic-faculty roster. Fall through
     // so the existing 404 handling renders without a redirect.
@@ -145,7 +156,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     request.nextUrl.pathname.startsWith("/api/impersonation") &&
     process.env.IMPERSONATION_ENABLED !== "true"
   ) {
-    return withSecurityHeaders(new NextResponse(null, { status: 404 }));
+    return new NextResponse(null, { status: 404 });
   }
 
   let authenticated = false;
@@ -165,7 +176,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   ) {
     // API route: 401, empty body — no redirect, no leakage
     // (#100 AC; self-edit-spec.md edge case 16; #637 §7 — "no session" ⇒ 401).
-    return withSecurityHeaders(new NextResponse(null, { status: 401 }));
+    return new NextResponse(null, { status: 401 });
   }
 
   // Page route: redirect to SSO login, remembering the intended destination.
@@ -185,15 +196,15 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (process.env.NODE_ENV === "development" && !process.env.SAML_IDP_SSO_URL) {
     const devLogin = new URL("/api/auth/dev-login", request.nextUrl.origin);
     devLogin.searchParams.set("return", returnTo);
-    return withSecurityHeaders(NextResponse.redirect(devLogin, 302));
+    return NextResponse.redirect(devLogin, 302);
   }
 
-  return withSecurityHeaders(
-    new NextResponse(null, {
-      status: 302,
-      headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
-    }),
-  );
+  // Redirect (relative Location): returned directly, NOT through
+  // withSecurityHeaders — see its doc for why mutating a redirect 500s.
+  return new NextResponse(null, {
+    status: 302,
+    headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
+  });
 }
 
 export const config = {

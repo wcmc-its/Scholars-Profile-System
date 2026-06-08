@@ -199,9 +199,23 @@ describe("middleware — runtime CSP headers (#374)", () => {
     expect(res.headers.get("content-security-policy")).toBeNull();
   });
 
-  it("also attaches the CSP to the gated surfaces (e.g. an unauthenticated /edit SSO redirect)", async () => {
+  it("does NOT attach CSP to the SSO redirect, and the redirect stays a clean 302 (regression guard)", async () => {
+    // Wrapping a relative-Location redirect with response-header mutation makes
+    // the edge runtime re-parse Location via new URL() → "Invalid URL" → 500
+    // (regressed /edit when CSP first moved to middleware). Redirects are
+    // returned directly: no CSP, and a clean 302 to SSO.
     const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
-    expect(res.status).toBe(302); // still gated
+    expect(res.status).toBe(302);
+    const loc = new URL(res.headers.get("location")!, ORIGIN);
+    expect(loc.pathname).toBe("/api/auth/saml/login");
+    expect(res.headers.get("content-security-policy-report-only")).toBeNull();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("attaches the CSP to an authenticated /edit document (a next() response)", async () => {
+    const res = await middleware(await authedRequest("/edit"));
+    expect(res.status).not.toBe(302);
+    expect(res.status).not.toBe(401);
     expect(
       res.headers.get("content-security-policy-report-only"),
     ).toBeTruthy();
