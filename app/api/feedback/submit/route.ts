@@ -20,6 +20,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
+import { apiError } from "@/lib/api/error-response";
 import { db } from "@/lib/db";
 import { CURRENT_CONSENT_VERSION } from "@/lib/feedback/consent";
 import { normalizeUserCwid } from "@/lib/feedback/cwid";
@@ -68,8 +69,13 @@ function clampLikert5(v: unknown): number | null {
   return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
 }
 
+// Error responses fold into the standard flat `{ error: "<code>" }` + `no-store`
+// shape (#686 / error-handling-spec §5). The client (`feedback-form.tsx`)
+// branches on `res.ok` and reads `respBody.error` as a string, so dropping the
+// `{ ok: false }` discriminant from the *error* path is transparent to it. The
+// success path stays `{ ok: true }`.
 function err(status: number, error: string) {
-  return NextResponse.json({ ok: false, error }, { status });
+  return apiError(error, status);
 }
 
 function isSameOrigin(request: NextRequest): boolean {

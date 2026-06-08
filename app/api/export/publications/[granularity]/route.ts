@@ -19,6 +19,7 @@
  *     rate limiting deferred to Phase 2
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import {
   AUTHORSHIP_HEADERS,
   ARTICLE_HEADERS,
@@ -113,7 +114,7 @@ export async function POST(
 ) {
   const { granularity: raw } = await ctx.params;
   if (!GRANULARITY_ALLOWLIST.has(raw as RouteGranularity)) {
-    return NextResponse.json({ error: "invalid granularity" }, { status: 400 });
+    return apiError("invalid granularity", 400);
   }
   const granularity = raw as RouteGranularity;
 
@@ -121,11 +122,11 @@ export async function POST(
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+    return apiError("invalid body", 400);
   }
   const req = parseBody(body);
   if (!req) {
-    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+    return apiError("invalid body", 400);
   }
 
   if (granularity === "bibliography") {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import { getPublicationDetail } from "@/lib/api/publication-detail";
 
 /**
@@ -19,10 +20,7 @@ export async function GET(
   const { pmid } = await context.params;
   const payload = await getPublicationDetail(pmid);
   if (!payload) {
-    return NextResponse.json(
-      { error: "Publication not found" },
-      { status: 404 },
-    );
+    return apiError("Publication not found", 404);
   }
   return NextResponse.json(payload);
 }

@@ -10,6 +10,7 @@
  * with static error strings.
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import { getSubtopicScholars } from "@/lib/api/topics";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +24,10 @@ export async function GET(
 ): Promise<NextResponse> {
   const { slug, subtopicId } = await params;
   if (!TOPIC_SLUG_RE.test(slug)) {
-    return NextResponse.json({ error: "invalid topic slug" }, { status: 400 });
+    return apiError("invalid topic slug", 400);
   }
   if (!SUBTOPIC_RE.test(subtopicId)) {
-    return NextResponse.json({ error: "invalid subtopic" }, { status: 400 });
+    return apiError("invalid subtopic", 400);
   }
 
   const scholars = await getSubtopicScholars(slug, subtopicId);

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import {
   searchPeople,
   searchPublications,
@@ -322,7 +323,7 @@ export async function GET(request: NextRequest) {
   let topic: string | undefined;
   if (topicRaw !== null && topicRaw.length > 0) {
     if (!TOPIC_SLUG_RE.test(topicRaw)) {
-      return NextResponse.json({ error: "invalid topic" }, { status: 400 });
+      return apiError("invalid topic", 400);
     }
     topic = topicRaw;
   }

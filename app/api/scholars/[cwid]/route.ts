@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import { getScholarByCwid } from "@/lib/api/scholars";
 
 /**
@@ -16,7 +17,7 @@ export async function GET(
   const { cwid } = await context.params;
   const result = await getScholarByCwid(cwid);
   if (!result) {
-    return NextResponse.json({ error: "Scholar not found" }, { status: 404 });
+    return apiError("Scholar not found", 404);
   }
   return NextResponse.json(result);
 }
