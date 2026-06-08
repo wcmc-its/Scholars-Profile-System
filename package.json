@@ -57,6 +57,7 @@
     "etl:gates": "tsx etl/gates/index.ts",
     "etl:nih-profile": "tsx etl/nih-profile/index.ts",
     "etl:completeness": "tsx etl/completeness/index.ts",
+    "etl:proxy-drift": "tsx etl/proxy-drift/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:coi-gap": "tsx etl/coi-gap/index.ts",
     "etl:dynamodb:probe-synopsis": "tsx etl/dynamodb/probe-synopsis.ts",
