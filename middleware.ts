@@ -109,6 +109,26 @@ function isGatedOrLegacyPath(pathname: string): boolean {
   );
 }
 
+/**
+ * Build an ABSOLUTE redirect `Location` for a same-origin path.
+ *
+ * Redirect targets must be absolute: the Next runtime parses a middleware
+ * redirect's `Location` through `new URL()`, which throws `TypeError: Invalid
+ * URL` on a bare relative path and 500s the route (this is what broke an
+ * unauthenticated `/edit` redirect). `request.nextUrl` cannot supply the base —
+ * behind CloudFront -> ALB -> Fargate it carries the internal container host, so
+ * an absolute redirect built from it points at an unreachable `ip-…:3000`. The
+ * `Host` header IS the public host the viewer requested (the same value
+ * `lib/edit/authz.ts` trusts for its same-origin CSRF check), so use it.
+ * Falls back to the relative path only if `Host` is somehow absent.
+ */
+function absoluteLocation(request: NextRequest, pathAndQuery: string): string {
+  const host = request.headers.get("host");
+  if (!host) return pathAndQuery;
+  const proto = request.headers.get("x-forwarded-proto") ?? "https";
+  return `${proto}://${host}${pathAndQuery}`;
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
   // Public fast path. The broadened matcher (for CSP coverage) runs this on
   // every non-static request, but the SSO gate + legacy redirects apply only to
@@ -129,16 +149,16 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (vivoMatch) {
     const cwid = vivoMatch[1];
     if (cwid && VIVO_CWID_SET.has(cwid)) {
-      // Relative Location: behind CloudFront -> ALB -> Fargate, request.nextUrl
-      // carries the container's internal host, so an absolute redirect would
-      // send the browser to an unreachable address (ip-...:3000). The browser
-      // resolves a relative Location against the public URL it requested. cwid
-      // is regex-constrained ([A-Za-z0-9._-]) so it is safe in the header.
-      // Redirect (relative Location): returned directly, NOT through
-      // withSecurityHeaders — see its doc for why mutating a redirect 500s.
+      // Absolute Location via the Host header (see absoluteLocation): the
+      // runtime parses the target through new URL(), which rejects a relative
+      // path. cwid is regex-constrained ([A-Za-z0-9._-]) so it is safe in the
+      // header. Returned directly, NOT through withSecurityHeaders — see its
+      // doc for why mutating a redirect 500s.
       return new NextResponse(null, {
         status: 301,
-        headers: { Location: `/scholars/by-cwid/${cwid}` },
+        headers: {
+          Location: absoluteLocation(request, `/scholars/by-cwid/${cwid}`),
+        },
       });
     }
     // Out-of-set CWID -- not in the academic-faculty roster. Fall through
@@ -180,30 +200,33 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   // Page route: redirect to SSO login, remembering the intended destination.
-  // Relative Location (see the VIVO branch above + the SAML callback route):
-  // request.nextUrl is the container's internal host behind the proxy, so an
-  // absolute redirect is unreachable. encodeURIComponent keeps the return value
-  // safe in the header; the login route re-validates it via safeReturnPath.
+  // encodeURIComponent keeps the return value safe in the header; the login
+  // route re-validates it via safeReturnPath.
   const returnTo = request.nextUrl.pathname + request.nextUrl.search;
 
   // Local-dev guard. Under `next dev` with no IdP configured, the SAML login
-  // route 503s and — worse — the dev middleware adapter rejects a RELATIVE
-  // Location with "Invalid URL" (the prod edge runtime accepts it, which is why
-  // the line below stays relative). Bounce to the local dev-login route with an
-  // ABSOLUTE URL the dev adapter accepts. Scoped to NODE_ENV==="development" +
-  // unset SAML so the test and prod paths stay byte-identical; the dev-login
-  // route is itself local-only (404s in production).
+  // route 503s. Bounce to the local dev-login route with an ABSOLUTE URL built
+  // from the dev origin (request.nextUrl.origin is the real localhost host in
+  // dev). Scoped to NODE_ENV==="development" + unset SAML so the test and prod
+  // paths stay byte-identical; the dev-login route is itself local-only (404s
+  // in production).
   if (process.env.NODE_ENV === "development" && !process.env.SAML_IDP_SSO_URL) {
     const devLogin = new URL("/api/auth/dev-login", request.nextUrl.origin);
     devLogin.searchParams.set("return", returnTo);
     return NextResponse.redirect(devLogin, 302);
   }
 
-  // Redirect (relative Location): returned directly, NOT through
-  // withSecurityHeaders — see its doc for why mutating a redirect 500s.
+  // Absolute Location via the Host header (see absoluteLocation): the runtime
+  // parses the redirect target through new URL(), which 500s on a relative
+  // path. Returned directly, NOT through withSecurityHeaders — see its doc.
   return new NextResponse(null, {
     status: 302,
-    headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
+    headers: {
+      Location: absoluteLocation(
+        request,
+        `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}`,
+      ),
+    },
   });
 }
 

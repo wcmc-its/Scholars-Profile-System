@@ -199,15 +199,19 @@ describe("middleware — runtime CSP headers (#374)", () => {
     expect(res.headers.get("content-security-policy")).toBeNull();
   });
 
-  it("does NOT attach CSP to the SSO redirect, and the redirect stays a clean 302 (regression guard)", async () => {
-    // Wrapping a relative-Location redirect with response-header mutation makes
-    // the edge runtime re-parse Location via new URL() → "Invalid URL" → 500
-    // (regressed /edit when CSP first moved to middleware). Redirects are
-    // returned directly: no CSP, and a clean 302 to SSO.
-    const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
+  it("redirects unauthenticated /edit to an ABSOLUTE SSO Location and attaches no CSP (regression guard)", async () => {
+    // The runtime parses a middleware redirect's Location through new URL();
+    // a bare relative path throws "Invalid URL" and 500s (the pre-existing
+    // /edit bug). The Location is built absolute from the Host header. A
+    // redirect also carries no CSP — it is returned directly, not wrapped.
+    const host = "scholars.weill.cornell.edu";
+    const res = await middleware(
+      new NextRequest(`${ORIGIN}/edit`, { headers: { host } }),
+    );
     expect(res.status).toBe(302);
-    const loc = new URL(res.headers.get("location")!, ORIGIN);
-    expect(loc.pathname).toBe("/api/auth/saml/login");
+    expect(res.headers.get("location")).toBe(
+      `https://${host}/api/auth/saml/login?return=%2Fedit`,
+    );
     expect(res.headers.get("content-security-policy-report-only")).toBeNull();
     expect(res.headers.get("content-security-policy")).toBeNull();
   });
