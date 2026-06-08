@@ -1557,10 +1557,39 @@ exports[`EtlStack prod matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ETL ECS task role (prod). ETL runtime identity; zero AWS API permissions today.",
+        "Description": "SPS ETL ECS task role (prod). ETL runtime identity; read-only access to the three ReciterAI-published IAM-based sources (DynamoDB table + spotlight/hierarchy artifact buckets).",
         "RoleName": "sps-etl-task-prod",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskRoleReciterAiPolicy94DB4024": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "dynamodb:Scan",
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+                "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-prod-reciterai",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "HeartbeatCadenceAlarm4771CCDE": {
       "Properties": {
@@ -5755,10 +5784,39 @@ exports[`EtlStack staging matches the snapshot 1`] = `
           ],
           "Version": "2012-10-17",
         },
-        "Description": "SPS ETL ECS task role (staging). ETL runtime identity; zero AWS API permissions today.",
+        "Description": "SPS ETL ECS task role (staging). ETL runtime identity; read-only access to the three ReciterAI-published IAM-based sources (DynamoDB table + spotlight/hierarchy artifact buckets).",
         "RoleName": "sps-etl-task-staging",
       },
       "Type": "AWS::IAM::Role",
+    },
+    "EtlTaskRoleReciterAiPolicy94DB4024": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "dynamodb:Scan",
+              "Effect": "Allow",
+              "Resource": "arn:aws:dynamodb:us-east-1:123456789012:table/reciterai",
+            },
+            {
+              "Action": "s3:GetObject",
+              "Effect": "Allow",
+              "Resource": [
+                "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+                "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-etl-task-staging-reciterai",
+        "Roles": [
+          {
+            "Ref": "EtlTaskRoleD514E3A1",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
     },
     "HeartbeatCadenceAlarm4771CCDE": {
       "Properties": {
