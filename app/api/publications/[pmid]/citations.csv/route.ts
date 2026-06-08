@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import {
   getCitingPublicationsForCsv,
   serializeCitingPubsCsv,
@@ -25,13 +25,10 @@ export async function GET(
     rows = await getCitingPublicationsForCsv(pmid);
   } catch (err) {
     console.error("[citations.csv] reciterdb fetch failed", err);
-    return NextResponse.json(
-      { error: "Citation source unavailable" },
-      { status: 502 },
-    );
+    return apiError("Citation source unavailable", 502);
   }
   if (rows === null) {
-    return NextResponse.json({ error: "Invalid pmid" }, { status: 400 });
+    return apiError("Invalid pmid", 400);
   }
   const csv = serializeCitingPubsCsv(rows);
   // Filename gets the cited pmid for at-a-glance identification in the

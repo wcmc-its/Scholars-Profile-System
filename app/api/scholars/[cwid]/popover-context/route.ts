@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import {
   fetchAuthorshipOnPub,
   fetchCoPubsSummary,
@@ -33,7 +34,7 @@ export async function GET(
 
   const header = await fetchPopoverHeader(cwid);
   if (!header) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
+    return apiError("not found", 404);
   }
 
   // Per-surface contextual lookups. Each is independent so a single failure

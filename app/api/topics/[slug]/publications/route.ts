@@ -18,6 +18,7 @@
  * Does NOT log request URL or param values (silent rejection per T-03-05-06).
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { apiError } from "@/lib/api/error-response";
 import {
   getTopicPublications,
   type TopicPublicationSort,
@@ -50,20 +51,20 @@ export async function GET(
 ): Promise<NextResponse> {
   const { slug } = await params;
   if (!TOPIC_SLUG_RE.test(slug)) {
-    return NextResponse.json({ error: "invalid topic slug" }, { status: 400 });
+    return apiError("invalid topic slug", 400);
   }
 
   const sp = request.nextUrl.searchParams;
 
   const sortRaw = sp.get("sort") ?? "newest";
   if (!SORT_ALLOWLIST.has(sortRaw as TopicPublicationSort)) {
-    return NextResponse.json({ error: "invalid sort" }, { status: 400 });
+    return apiError("invalid sort", 400);
   }
   const sort = sortRaw as TopicPublicationSort;
 
   const filterRaw = sp.get("filter") ?? "research_articles_only";
   if (!FILTER_ALLOWLIST.has(filterRaw as TopicPublicationFilter)) {
-    return NextResponse.json({ error: "invalid filter" }, { status: 400 });
+    return apiError("invalid filter", 400);
   }
   const filter = filterRaw as TopicPublicationFilter;
 
@@ -71,7 +72,7 @@ export async function GET(
   const subtopicRaw = sp.get("subtopic");
   if (subtopicRaw !== null) {
     if (!SUBTOPIC_RE.test(subtopicRaw)) {
-      return NextResponse.json({ error: "invalid subtopic" }, { status: 400 });
+      return apiError("invalid subtopic", 400);
     }
     subtopic = subtopicRaw;
   }
@@ -82,7 +83,7 @@ export async function GET(
   const tierRaw = sp.get("tier");
   if (tierRaw !== null) {
     if (!TIER_ALLOWLIST.has(tierRaw as TopicPublicationTier)) {
-      return NextResponse.json({ error: "invalid tier" }, { status: 400 });
+      return apiError("invalid tier", 400);
     }
     tier = tierRaw as TopicPublicationTier;
   }
@@ -90,14 +91,14 @@ export async function GET(
   const pageStr = sp.get("page") ?? "1";
   const pageNum = parseInt(pageStr, 10);
   if (!Number.isFinite(pageNum) || pageNum < 1) {
-    return NextResponse.json({ error: "invalid page" }, { status: 400 });
+    return apiError("invalid page", 400);
   }
   // URL is 1-indexed; service is 0-indexed; clamp to MAX_PAGE.
   const page = Math.min(pageNum, MAX_PAGE) - 1;
 
   const result = await getTopicPublications(slug, { sort, subtopic, page, filter, tier });
   if (result === null) {
-    return NextResponse.json({ error: "topic not found" }, { status: 404 });
+    return apiError("topic not found", 404);
   }
 
   // Return result with page converted back to 1-indexed for API consumers.
