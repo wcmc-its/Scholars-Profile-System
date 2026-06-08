@@ -73,7 +73,17 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         {hit.journal && hit.year ? ". " : null}
         {hit.year ?? null}.
       </div>
-      <AuthorChipRow authors={hit.wcmAuthors} pmid={hit.pmid} />
+      {/* #718 — chips when there's a displayable WCM author; otherwise fall back
+          to the unstructured byline (suppression-safe, hydrated server-side) so a
+          pub whose only WCM author was soft-deleted never renders attribution-less.
+          Both empty (suppressed/dark) → nothing, as before. */}
+      {hit.wcmAuthors.length > 0 ? (
+        <AuthorChipRow authors={hit.wcmAuthors} pmid={hit.pmid} />
+      ) : hit.authorsFallback ? (
+        <p className="mt-2 line-clamp-2 text-[13px] leading-snug text-[#6b6b6b]">
+          {hit.authorsFallback}
+        </p>
+      ) : null}
       {/* PLAN R4 — reason line ONLY when the match isn't self-evident: a direct
           title hit (titleHighlight) already shows why, so no reason. A concept
           expansion (no literal term in the title) gets the quiet sparkle line. */}
