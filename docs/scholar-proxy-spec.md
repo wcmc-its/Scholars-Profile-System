@@ -61,7 +61,7 @@ This SPEC is a **different authorization model**. It is **designee-derived and s
 
 The two models are deliberately **mutually exclusive at the person level**: D3 forbids granting a scholar-proxy to anyone who holds a `UnitAdmin` row, so a single CWID can never hold both axes of authority simultaneously and create an ambiguous, additive reach. Both models **reuse the same write path** (`field_override(scholar,…,'overview')` + per-author `suppression` + the `/edit/scholar/[cwid]` route + the `actorCwid <> entityId` audit marker) — this SPEC adds **no new write mechanism**, only a new authorized actor and a distinct grant table.
 
-The existing `canProxyEdit` predicate (`lib/edit/authz.ts:385`) is the **#540 unit-role** predicate — defined but, as of this writing, **not yet wired into any write route** (verified: zero call sites in `app/api/edit/*`). This SPEC does **not** overload it. It adds a **separate** predicate, `isGrantedProxy`, so the two authorization axes stay distinct in code and in the audit log.
+The `canProxyEdit` predicate (`lib/edit/authz.ts`) was the **#540 unit-role** predicate — defined but never wired into any write route (verified: zero call sites in `app/api/edit/*`). This SPEC did **not** overload it; it adds a **separate** predicate, `isGrantedProxy`, so the two authorization axes stay distinct in code and in the audit log. **(Update: `canProxyEdit` was RETIRED in [ADR-005 Amendment 4](./ADR-005-manual-override-layer.md#amendment-4-2026-06-08--org-unit-administrators-as-scholar-profile-editors) P4 — its "roster never confers edit" invariant is the deliberate opposite of Amendment 4 D1; the role-derived path a route actually calls is `lib/edit/unit-scholar-authz.ts:resolveEditableUnitViaUnitAdmin`.)**
 
 ---
 
@@ -89,18 +89,20 @@ On a successful grant, **both** the named proxy and the scholar are notified (em
 
 ### D3 — "No other role": a proxy holds no other role in the system
 
-A CWID may be granted as a proxy **only if it currently holds NONE of**:
+> **⚠️ NARROWED by [ADR-005 Amendment 4 (D4)](./ADR-005-manual-override-layer.md#amendment-4-2026-06-08--org-unit-administrators-as-scholar-profile-editors) — PR #791.** Amendment 4 adds a role-derived org-unit-administrator editing path, which makes "a roled person can't be a proxy" counter-productive. **Legs 1 (scholar) and 2 (unit-admin) are dropped; only leg 3 (superuser) remains.** A scholar or org-unit administrator *may* now be an explicitly-assigned proxy; only a superuser is excluded (a grant to them is a meaningless no-op). The three-leg description below is the **#779-as-originally-shipped** form, retained for context — wherever it says "all three legs" / "no other role," read "the single superuser leg" / "is not a superuser" post-Amendment-4. The add-proxy copy is corrected to *"must not already be a Scholars administrator."*
 
-1. a **non-deleted** `Scholar` row (`scholar.cwid = proxyCwid AND deletedAt IS NULL`),
-2. a **`UnitAdmin`** row (owner or curator) (`unit_admin.cwid = proxyCwid`), or
-3. **superuser** group membership (live LDAPS `isSuperuser(proxyCwid)`).
+A CWID may be granted as a proxy **only if it currently holds NONE of** (✂︎ legs 1–2 dropped by Amendment 4 D4 — superuser-only now):
+
+1. ~~a **non-deleted** `Scholar` row~~ (dropped — Amendment 4 D4),
+2. ~~a **`UnitAdmin`** row (owner or curator)~~ (dropped — Amendment 4 D4), or
+3. **superuser** group membership (live LDAPS `isSuperuser(proxyCwid)`) — **the one remaining leg**.
 
 Enforced at **grant time** (blocking) **and** re-checked **fail-closed at every proxy edit**, so a later-acquired conflicting role disables the proxy path on the next request.
 
 - **Rationale.** A scholar-proxy is a *limited, named delegate*. If the same CWID is a Unit Owner, they already hold broader authority over many scholars — the explicit grant is shadowed and authorization becomes ambiguous. If they are a superuser, the grant is meaningless (they can edit anyway) and laundering a superuser as a benign "designated editor" muddies the audit. If they are a scholar, a grant for their own profile is a no-op and a grant for another scholar creates a confusing two-path edit surface.
 - **Enforcement seam.** MySQL has no exclusion constraint, so D3 is **application-enforced** at two points and **audited** at a third (the drift query). Both the grant-time and edit-time checks run **all three legs**, including the live `isSuperuser` leg — the superuser leg is **not** deferred (PE-02, PE-05, CD-3, IS-7). The edit-time check evaluates the **proxy's own `realCwid`**, because the request preamble computes `isSuperuser` only for the *effective* cwid (PE-02).
 - **Rejected alternative — grant-time check only.** A proxy hired as faculty / promoted to curator / added to the superuser group after the grant would keep editing under a now-illegitimate, role-shadowed path until the grant is manually revoked. The per-edit re-check closes that window to one request.
-- **Rejected alternative — auto-revoke on conflict.** Invasive (requires a hook on every role-acquisition path). The fail-closed per-edit re-check disables the path immediately; the stale row is caught by the scheduled drift audit ([query D](#audit-queries)) and cleaned up manually.
+- **Rejected alternative — auto-revoke on conflict.** Invasive (requires a hook on every role-acquisition path). The fail-closed per-edit re-check disables the path immediately; the stale row would have been caught by a scheduled drift audit ([query D](#audit-queries)) — but that audit is **retired by Amendment 4 D4** (a roled proxy is no longer a conflict; the surviving superuser case is caught live per-edit, not by SQL).
 
 ### D4 — Edit scope = self-edit scope
 
@@ -337,6 +339,7 @@ Exactly one path applies (mutual exclusion); evaluated top to bottom.
 | 1 | `realCwid === S` (self) | **ALLOW** (self-edit; `authorizeFieldEdit`) |
 | 2 | `await isSuperuser(realCwid)` | **ALLOW** — but for `overview` a superuser does **not** inherit self-edit; this row is for the **`slug`** path and the page gate, not `overview`. For `overview`, a superuser editing another scholar goes through impersonation (#637), not this feature. |
 | 3 | `isGrantedProxy(realCwid, S)` **and** `checkProxyConflictingRole(realCwid).ok` **and** `impersonatedCwid === null` | **ALLOW** via the proxy path |
+| 3b | `resolveEditableUnitViaUnitAdmin(realCwid, S)` returns a unit **and** `impersonatedCwid === null` | **ALLOW** via the org-unit-administrator path ([ADR-005 Amendment 4](./ADR-005-manual-override-layer.md#amendment-4-2026-06-08--org-unit-administrators-as-scholar-profile-editors)); evaluated after the #779 proxy branch |
 | 4 | A `ScholarProxy` row exists but `checkProxyConflictingRole` fails | **DENY** `403 proxy_conflict` (D3 fail-closed) |
 | 5 | none of the above | **DENY** `403 not_self` |
 
@@ -473,11 +476,12 @@ SELECT sp.scholar_cwid, sp.proxy_cwid, sp.granted_by, sp.created_at
 FROM scholar_proxy sp
 ORDER BY sp.scholar_cwid, sp.created_at;
 
--- D) D3 DRIFT WATCH (run on a schedule). A proxy that has since acquired a
---    conflicting role (Scholar / UnitAdmin). The superuser leg is checked live
---    per-edit (fail-closed) and cannot be expressed in SQL; this catches the DB
---    legs. A hit means the per-edit re-check is already DENYING the proxy path,
---    but the stale grant row should be revoked manually.
+-- D) [OBSOLETE — superseded by ADR-005 Amendment 4 D4; PR #786 closed unmerged]
+--    D3 DRIFT WATCH. Once the scholar/unit-admin proxy-conflict legs are dropped,
+--    a Scholar/UnitAdmin proxy is a LEGITIMATE state, not drift — so this query's
+--    two DB legs no longer indicate a problem. The one surviving conflict
+--    (superuser) is checked live per-edit and is not SQL-expressible. Retained as
+--    historical context only; do NOT schedule it.
 SELECT sp.scholar_cwid, sp.proxy_cwid, sp.created_at AS granted_at,
        CASE WHEN s.cwid IS NOT NULL THEN 'scholar'
             WHEN ua.cwid IS NOT NULL THEN 'unit_admin' END AS conflicting_role
@@ -551,10 +555,10 @@ The reviewer is a security expert; this section folds in the priv-esc (PE), conf
 |---|---|---|---|
 | 1 | Proxy `bec4010` granted for `ras2022` | `POST /api/edit/field {scholar, ras2022, overview}` | **ALLOW** — `field_override(scholar, ras2022, 'overview')`, `actorCwid=bec4010`; audit `actor_cwid=bec4010`, `impersonated_cwid=NULL`. |
 | 2 | Proxy `bec4010` (granted for `ras2022`) | `POST /api/edit/field {scholar, **xyz9999**, overview}` (NON-granted scholar) | **403 `not_self`** — composite-PK bind finds no grant for `(xyz9999, bec4010)`; no write, no audit (PE-06). |
-| 3 | Scholar `ras2022` grants a CWID that **is a Scholar** | `POST /api/edit/proxy {ras2022, <scholar cwid>, grant}` | **403 `proxy_ineligible`** (server log: `proxy_is_scholar`) — D3 leg 1 blocks (PE-05/CD-6). |
-| 4 | Scholar grants a CWID that **holds a `UnitAdmin` row** | grant | **403 `proxy_ineligible`** (log: `proxy_is_unit_admin`) — D3 leg 2. |
+| 3 | Scholar `ras2022` grants a CWID that **is a Scholar** | `POST /api/edit/proxy {ras2022, <scholar cwid>, grant}` | ~~**403 `proxy_ineligible`** (`proxy_is_scholar`) — D3 leg 1~~ → **Amendment 4 D4: now ALLOWED** (leg 1 dropped). |
+| 4 | Scholar grants a CWID that **holds a `UnitAdmin` row** | grant | ~~**403 `proxy_ineligible`** (`proxy_is_unit_admin`) — D3 leg 2~~ → **Amendment 4 D4: now ALLOWED** (leg 2 dropped). |
 | 5 | Scholar grants a CWID that **is a superuser** | grant | **403 `proxy_ineligible`** (log: `proxy_is_superuser`) — D3 leg 3 runs **at grant time**, not deferred (CD-3). |
-| 6 | Clean proxy `bec4010` granted, then **added to the superuser group** in ED, then edits | `POST /api/edit/field {scholar, ras2022, overview}` | **403 `proxy_conflict`** — per-edit `checkProxyConflictingRole(bec4010)` live `isSuperuser` leg returns true (PE-02). Grant row remains; drift query D flags it. |
+| 6 | Clean proxy `bec4010` granted, then **added to the superuser group** in ED, then edits | `POST /api/edit/field {scholar, ras2022, overview}` | **403 `proxy_conflict`** — per-edit `checkProxyConflictingRole(bec4010)` live `isSuperuser` leg returns true (PE-02). Still valid post-Amendment-4 (superuser is the one kept leg). Grant row remains until manually revoked. |
 | 7 | Clean proxy granted, then **made a Scholar** (ED), then edits | field overview | **403 `proxy_conflict`** — D3 leg 1 at edit time. |
 | 8 | Grant **revoked**; same proxy session re-POSTs | field overview | **403 `not_self`** — hard-deleted row; per-request lookup returns null on the **next** request (IS-6); no `revokedAt` filter (CD-8). |
 | 9 | Proxy `bec4010` (granted for `ras2022`) | `POST /api/edit/field {scholar, ras2022, **slug**}` | **403 `not_superuser`** — `slug` routes to the superuser leg; the proxy branch is `overview`-only (PE-03/D4). |
@@ -592,7 +596,7 @@ The reviewer is a security expert; this section folds in the priv-esc (PE), conf
 | **4 — Edit write paths** | Page-gate proxy tier (between self/superuser and the null/#536 guards). Field-route `overview`-only proxy branch (composite bind + fail-closed re-check + `realCwid` + `impersonatedCwid===null`). Suppress-route scoped `publication`+`contributorCwid===scholarCwid` branch. `mode="proxy"` + banner. | `app/edit/scholar/[cwid]/page.tsx`, `app/api/edit/field/route.ts`, `app/api/edit/suppress/route.ts`, `components/edit/edit-page.tsx`, `components/site/proxy-banner.tsx` |
 | **5 — API + UI (grant/revoke)** | `POST /api/edit/proxy` (mirror `grant/route.ts`; `readEditRequest`; normalize CWIDs; impersonation block; real-self/real-superuser authz; D3 blocking + opaque code; cardinality cap; hard-delete + audit in one tx). Scholar "My proxy editors" panel + superuser admin panel; reuse `DirectoryPeopleTypeahead`. Route tests (CSRF, cross-scholar, proxy-cannot-grant). | `app/api/edit/proxy/route.ts`, `components/edit/proxy-editor-card.tsx`, `components/edit/proxy-editor-admin-card.tsx`, `tests/unit/proxy-grant-route.test.ts` |
 | **6 — Notification** | `lib/edit/proxy-notification.ts` (compose proxy + scholar bodies, grantor-branched copy). Optionally extend `/api/directory/people` + `lib/sources/ldap` to include email. Commit-first/notify-after wiring; dormant behind a send flag. | `lib/edit/proxy-notification.ts`, `app/api/edit/proxy/route.ts`, `app/api/directory/people/route.ts` |
-| **7 — Audit + ops** | Audit queries A–E in a runbook; schedule the D3 drift watch (query D); update `docs/access-control-rbac.md` with the "Proxy Editor" row; ratify ADR-005 Amendment 3. | `docs/scholar-proxy-spec.md`, `docs/access-control-rbac.md`, `docs/ADR-005-manual-override-layer.md` |
+| **7 — Audit + ops** | Audit queries A–E in a runbook (`docs/scholar-proxy-runbook.md`); ~~schedule the D3 drift watch (query D)~~ **— voided: query D / PR #786 retired by [ADR-005 Amendment 4 D4](./ADR-005-manual-override-layer.md#amendment-4-2026-06-08--org-unit-administrators-as-scholar-profile-editors)** (its DB legs are no longer conflicts); update `docs/access-control-rbac.md` with the "Proxy Editor" row; ratify ADR-005 Amendment 3. | `docs/scholar-proxy-spec.md`, `docs/access-control-rbac.md`, `docs/ADR-005-manual-override-layer.md` |
 
 ---
 
@@ -602,7 +606,7 @@ The reviewer is a security expert; this section folds in the priv-esc (PE), conf
 - **Widening the proxy field set beyond self-edit scope.** No `slug`, no upstream scalars, no whole-profile/whole-publication suppression — D4 is a hard architectural constraint, not a per-grant policy.
 - **An acceptance step / pending-invite state.** D2 is effective-immediately; the grant table has no `accepted` flag.
 - **Soft-revoke / revoke-reason metadata.** Hard-delete only; B03 is the revoke history.
-- **Auto-revoke on role conflict.** The per-edit fail-closed re-check disables the path; the stale row is cleaned manually via the drift audit.
+- **Auto-revoke on role conflict.** The per-edit fail-closed re-check disables the path immediately. (The scheduled drift audit that would have flagged a stale grant is retired by Amendment 4 D4 — a roled proxy is no longer a conflict; a proxy who becomes a superuser is caught live per-edit.)
 - **A FK from `scholar_proxy` to `scholar` (cascade).** No FK on either column (D3 forbids `proxyCwid` being a scholar; `scholarCwid` carries none to let a grant outlive a soft-delete inertly). Cleanup is the audit query, not a cascade.
 - **Rate limiting on the grant endpoint.** The server-backed cardinality cap bounds the per-scholar count; a fixed-window per-actor rate limit (mirroring `request_change_rate_limit`) is a flagged fast-follow if abuse appears.
 - **A proxy-management admin console (browse-all grants).** v1 manages per-scholar from `/edit`/`/edit/scholar/[cwid]`; a global console is a follow-up.

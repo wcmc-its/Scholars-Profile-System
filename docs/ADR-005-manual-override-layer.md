@@ -5,8 +5,8 @@
 **Authors:** Scholars Profile System development team
 **Supersedes:** —
 **Superseded by:** —
-**Amendments:** [Amendment 1 (2026-05-27) — org-unit curation & three-tier access model](#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) — **Accepted** · [Amendment 2 (2026-05-27) — slug override reconcile-on-write & hard-delete prohibition](#amendment-2-2026-05-27--slug-override-reconcile-on-write-d5-and-the-scholar-hard-delete-prohibition) — **Accepted**
-**Tracks:** [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) (slug override), [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) (suppression), [#358](https://github.com/wcmc-its/Scholars-Profile-System/issues/358) (org-unit curation — Amendment 1), [#497](https://github.com/wcmc-its/Scholars-Profile-System/issues/497) (slug personalization — Amendment 2)
+**Amendments:** [Amendment 1 (2026-05-27) — org-unit curation & three-tier access model](#amendment-1-2026-05-27--org-unit-curation-entity-type-extension-and-three-tier-access-model) — **Accepted** · [Amendment 2 (2026-05-27) — slug override reconcile-on-write & hard-delete prohibition](#amendment-2-2026-05-27--slug-override-reconcile-on-write-d5-and-the-scholar-hard-delete-prohibition) — **Accepted** · [Amendment 3 (2026-06-08) — scholar-assigned proxy editor (a per-scholar designee)](#amendment-3-2026-06-08--scholar-assigned-proxy-editor-a-per-scholar-designee) — **Accepted** · [Amendment 4 (2026-06-08) — org-unit administrators as scholar-profile editors](#amendment-4-2026-06-08--org-unit-administrators-as-scholar-profile-editors) — **Accepted**
+**Tracks:** [#29](https://github.com/wcmc-its/Scholars-Profile-System/issues/29) (slug override), [#160](https://github.com/wcmc-its/Scholars-Profile-System/issues/160) (suppression), [#358](https://github.com/wcmc-its/Scholars-Profile-System/issues/358) (org-unit curation — Amendment 1), [#497](https://github.com/wcmc-its/Scholars-Profile-System/issues/497) (slug personalization — Amendment 2), [#779](https://github.com/wcmc-its/Scholars-Profile-System/issues/779) (scholar-assigned proxy — Amendment 3; org-unit-admin profile editing — Amendment 4)
 **Gates:** B01–B03 ([#100](https://github.com/wcmc-its/Scholars-Profile-System/issues/100)/[#101](https://github.com/wcmc-its/Scholars-Profile-System/issues/101)/[#102](https://github.com/wcmc-its/Scholars-Profile-System/issues/102)) — self-edit auth, authorization, and audit
 
 ---
@@ -519,3 +519,74 @@ A proxy is **orthogonal** to the "View as" overlay: it is the proxy's own real i
 ### A3.4 Numbering note
 
 This is **Amendment 3**, not 2 — Amendment 2 (above) is the slug-override reconcile-on-write decision. (The spec's earlier drafts said "Amendment 2"; corrected here.)
+
+---
+
+## Amendment 4 (2026-06-08) — Org-unit administrators as scholar-profile editors
+
+**Status:** Accepted
+**Date:** 2026-06-08
+**Issue:** [#779](https://github.com/wcmc-its/Scholars-Profile-System/issues/779) (extends Amendment 3); references [#540](https://github.com/wcmc-its/Scholars-Profile-System/issues/540)/[#728](https://github.com/wcmc-its/Scholars-Profile-System/issues/728) (org-unit roles — Amendment 1)
+**Spec:** [`scholar-proxy-unit-admin-amendment.md`](./scholar-proxy-unit-admin-amendment.md) (companion design doc — authoritative for the long-form rationale); [`scholar-proxy-spec.md`](./scholar-proxy-spec.md) (#779, the sibling designee axis)
+**Amends:** adds **one new role-derived authorized actor** on the existing scholar `overview` / own-publication-hide write path — reusing `field_override(scholar, …, 'overview')` + per-author `suppression`, **no new table**. It **reverses Amendment 1 §A1.3 T3** (roster membership now *can* confer profile-edit rights — see A4.3 T5) and **narrows Amendment 3 §A3.2 D3** (the "no other role" proxy rule shrinks to "not a superuser" — see A4.5). Additive otherwise; no base-ADR or Amendment 1/2 storage/read-merge mechanism changes.
+**Implementation:** P1 predicate ([#788](https://github.com/wcmc-its/Scholars-Profile-System/pull/788)) + P2 write-path wiring/banner/audit ([#790](https://github.com/wcmc-its/Scholars-Profile-System/pull/790)) merged; P3 panel + P4 conflict-relaxation in [#791](https://github.com/wcmc-its/Scholars-Profile-System/pull/791).
+
+**Driver.** Today a `UnitAdmin` (Amendment 1) edits unit **entities** — a department/division/center's description, leadership, roster — but has **no** edit access to an individual member's *profile*: `authorizeFieldEdit` for a scholar's `overview` is self-only, and `/edit/scholar/[cwid]` admits only self / superuser / #779-designee. The institutional reality is the opposite: "my department administrator maintains my faculty's bios." Two gaps surfaced testing the shipped #779 proxy editor — (1) its "Add a proxy editor" copy excluded *"a scholar, an org-unit administrator, or a Scholars administrator,"* yet the people a unit delegates this to **usually hold one of those roles**; (2) there was no way to *show* who can edit a scholar by virtue of an org-unit role, because that access did not exist. Amendment 4 adds that role-derived capability beside #779's explicit-designee path and folds in the answer to (1) — a single coherent model of *"who may edit Dr. X's profile."*
+
+### A4.1 Membership / storage model
+
+**No new table.** The capability is a new *predicate* over existing data:
+`lib/edit/unit-scholar-authz.ts:resolveEditableUnitViaUnitAdmin` (boolean façade `canEditScholarViaUnit`). Scholar `S` is a **member** of unit `U` when `U` is:
+
+- **`S`'s department** — `Scholar.deptCode` (ED/LDAP-authoritative, **not** `field_override`-able, **not** appointment-derived);
+- **`S`'s LDAP-primary division** — `Scholar.divCode`;
+- **a division `S` is on the roster of** — a `DivisionMembership` row (`cwid = S`). **D1 deliberately INCLUDES the curator-editable manual roster** (this is the divergence from Amendment 1 T3 — see A4.3 T5).
+
+The **dept→division cascade** (Amendment 1 §A1.2) applies: an owner/curator of a division's *parent department* reaches scholars in that division (parent resolved from `Division.deptCode`; an orphan roster code with no `Division` row simply does not cascade — checked at the division level, never throws). The membership derivation is single-sourced — the predicate reuses `getEffectiveUnitRole`, never re-implementing the cascade. **Centers are excluded** (D1): `CenterMembership` is never consulted and no `center` lookup is issued, so a center admin gains nothing here.
+
+### A4.2 Access model
+
+A request by real CWID `A` to edit scholar `S`'s `overview` (or hide one of `S`'s own publications) is allowed via this path **iff all** hold:
+
+1. `impersonatedCwid === null` — a #637 "View as" overlay never confers it (mirrors #779's real-CWID rule; A keys on `EditRequestContext.realCwid`, never `session.cwid`/effective);
+2. `A` holds a `UnitAdmin` row with `role ∈ {owner, curator}` (**D2** — both) on a unit `U`;
+3. `S` is a member of `U` per A4.1 (department / LDAP-or-roster division, with the cascade);
+4. the field is in the **positive allowlist** — `overview` for a field edit; `publication` + `contributorCwid === S` for a hide (identical to the #779 proxy scope).
+
+It is a **separate predicate** from #779's `isGrantedProxy`; both feed the same `overview`/suppress allow branches, the unit-admin branch evaluated **after** the #779 proxy branch. Re-evaluated **live per request** against the `unit_admin` row (never cached), fail-closed (empty inputs, a missing/soft-deleted scholar, a scholar with no units, or no owner/curator grant ⇒ deny; a thrown DB error propagates to a deny). Every write is a non-repudiable **B03 audit row** (`actor_cwid = A`); the conferring unit is recorded in `after_values` (`edited_via: 'unit_admin'`, `via_unit_type`, `via_unit_code`) — **no new audit `action` ENUM** (it reuses `field_override` / `suppression_create`). `slug`, visibility, whole-scholar suppression, and every unit-structural field stay out of scope.
+
+### A4.3 Threat model
+
+In scope — the new role-derived edit surface. Authentication (B01), audit integrity (B03), session freshness (B02 per-request re-check), and the integrity of LDAP's department/division tree are inherited/out of scope as in Amendment 1.
+
+| # | Threat | Mitigation |
+|---|---|---|
+| **T1** | A department owner/curator edits **any** member's bio (the core new surface). | Scope-bounded to `overview` + own-publication hide (no slug/visibility/structure); every write is a B03 row (`actor_cwid` = the admin); the membership relation is column/roster-sourced and live-checked. |
+| **T2** | **Stale role** — editing after losing the unit role. | Per-edit re-check on the live `unit_admin` row, **no caching** — a revoke takes effect on the very next request (mirrors #779's fail-closed re-check). |
+| **T3** | **Cascade over-reach** — a dept owner reaching unrelated divisions. | "Member-of" + cascade are explicit and bounded by the #540 owner→division relation; a division grant never cascades upward; centers do not cascade. |
+| **T4** | **Impersonation riding the path** — a superuser impersonates an admin (or the scholar) to inherit it. | `impersonatedCwid === null` gate + real-CWID keying (#637 orthogonality). The impersonation candidate set is `Scholar` rows only, and the key is `realCwid`. |
+| **T5** | **Roster self-add escalation** — a division **curator** adds an arbitrary scholar to that division's `DivisionMembership` roster (curator-editable via `POST /api/edit/roster`, gated by the same `getEffectiveUnitRole`) and thereby gains `overview`/own-pub-hide edit over that scholar. | **Accepted risk.** This **deliberately reverses Amendment 1 §A1.3 T3** ("roster membership never confers profile-edit rights"): D1 counts the roster on purpose, because the role-derived path *is* intentional institutional access (D3). The risk is **bounded** (overview + own-pub hide only — no slug/visibility/structure), **automatic & institutional** (not a silent capture: the scholar/superuser panel lists exactly who can edit), and **fully traceable** — every such edit is a B03 row (`actor_cwid` = the curator) *and* the roster addition is itself B03-audited. Revisit if faculty object or if abuse appears in the audit trail. |
+
+**Out of scope (explicitly):** editing a scholar **not** in the admin's unit (the relation gate denies); structural fields (`slug`); whole-scholar suppression/visibility; any write beyond the allowlist; a curator of an `ED:`-locked unit reaching anything beyond the allowlist.
+
+**Consent posture (D3): automatic, no opt-out (v1).** Unlike #779's opt-in grant, the scholar does not opt in and cannot opt out — this is intentional institutional access. Mitigated by visibility (the read-only "Org-unit administrators" group on the Profile-editors panel lists who can edit) and full audit, not by consent.
+
+### A4.4 Alternatives considered
+
+- **A — Status quo (#779 only).** Rejected: doesn't match the institutional "dept admin manages faculty bios" reality; every delegate must be hand-assigned per scholar.
+- **B — Relax #779 only (allow assigning roled people), no role-derived path.** Answers gap (1) but a dept admin still must be assigned *per scholar*, and the panel still can't *show* role-derived editors (gap (2)). Partial — rejected.
+- **C — Role-derived unit-admin editing + keep #779 (this amendment).** Accepted — covers both gaps; #779 stays for explicit, cross-unit, or no-role delegates.
+- **D — #637 "View as" for unit admins.** Rejected: impersonation is a heavier, support-oriented model (amber banner, full overlay audit) — the wrong tool for routine bio upkeep.
+- **Rejected reuse of `canProxyEdit`.** Amendment 1 shipped a pure `canProxyEdit(session, homeUnitRole)` predicate whose invariant is "roster membership never confers profile-edit rights — T3" — the **exact opposite** of D1. It was never wired into any route, could not be adopted without contradicting D1, and was **retired** in P4 (the route calls `resolveEditableUnitViaUnitAdmin` instead).
+
+### A4.5 Downstream requirements (enforceable)
+
+1. The predicate **MUST** key on `realCwid`, never `session.cwid`/effective, and the caller **MUST** assert `impersonatedCwid === null` before the unit-admin branch.
+2. **Centers MUST NOT be consulted** — no `center` lookup is issued (D1).
+3. The B03 row **MUST** carry the conferring unit in `after_values` (`edited_via`/`via_unit_type`/`via_unit_code`); **no new audit ENUM**.
+4. **D4 — narrow Amendment 3 §A3.2 D3.** `checkProxyConflictingRole` **MUST** drop the `proxy_is_scholar` and `proxy_is_unit_admin` legs and **keep `proxy_is_superuser`** — a scholar or org-unit administrator *may* be an explicitly-assigned #779 proxy; only a superuser is excluded (a grant to them is a meaningless no-op, since they already edit everything). Because the check is the shared gate at grant time **and** at every per-edit/page re-check, the single change relaxes the path end-to-end. The add-proxy copy is corrected to *"must not already be a Scholars administrator."*
+5. **The #786 D3 drift audit MUST be retired** (close PR #786 unmerged). Its purpose was to catch grants violating the dropped legs; once `scholar`/`unit_admin` are no longer conflicts its two SQL-expressible legs flag legitimate states, and the sole surviving conflict (superuser) is SQL-inexpressible **and** already enforced live per-edit. The role-derived path has no grant row that can go stale (it is re-evaluated live per request), so there is no unit-admin drift analog to build.
+
+### A4.6 Numbering note
+
+This is **Amendment 4** — Amendment 3 (above) is the #779 scholar-assigned **designee** proxy; Amendment 4 is the **role-derived** org-unit-administrator path. The two proxy axes are siblings, not the same decision. (The companion draft's header was correct; this note mirrors A3.4 to prevent a renumbering slip.)
