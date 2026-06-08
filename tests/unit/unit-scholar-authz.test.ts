@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   canEditScholarViaUnit,
+  listUnitAdminEditorsForScholar,
+  type UnitAdminEditorsLookup,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
 
@@ -244,5 +246,248 @@ describe("canEditScholarViaUnit — fail-closed", () => {
     });
     expect(await canEditScholarViaUnit(ADMIN, SCHOLAR, db)).toBe(false);
     expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// listUnitAdminEditorsForScholar — the INVERSE listing (Amendment 4 P3).
+// "Given a scholar, who administers a unit they belong to?" Mirrors the forward
+// resolver's membership model + cascade attribution. A display listing only —
+// authorization stays the forward predicate's job, so coverage here is about the
+// listing being faithful, not about gating.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** A `UnitAdminEditorsLookup` mock that honors the inverse query shape: the
+ *  `unit_admin` scan filters on `where.OR` by unit code (NO single `cwid`), and
+ *  the division/department reads resolve display NAMES. */
+function inverseLookup(opts: {
+  scholars?: Record<string, ScholarRow>;
+  rosters?: Record<string, string[]>;
+  /** divisionCode → { deptCode (parent), name }. Omit a code to simulate an
+   *  orphan roster entry with no `Division` row. */
+  divisions?: Record<string, { deptCode: string; name: string }>;
+  /** deptCode → name. Omit a code to simulate a pruned `Department` row. */
+  departments?: Record<string, string>;
+  unitAdmins?: UnitAdminRow[];
+}): UnitAdminEditorsLookup {
+  const scholars = opts.scholars ?? {};
+  const rosters = opts.rosters ?? {};
+  const divisions = opts.divisions ?? {};
+  const departments = opts.departments ?? {};
+  const rows = opts.unitAdmins ?? [];
+  return {
+    scholar: {
+      findUnique: vi.fn(async ({ where }) => {
+        const s = scholars[where.cwid];
+        return s
+          ? { deptCode: s.deptCode, divCode: s.divCode, deletedAt: s.deletedAt ?? null }
+          : null;
+      }),
+    },
+    divisionMembership: {
+      findMany: vi.fn(async ({ where }) =>
+        (rosters[where.cwid] ?? []).map((divisionCode) => ({ divisionCode })),
+      ),
+    },
+    division: {
+      findMany: vi.fn(async ({ where }) =>
+        where.code.in
+          .filter((code: string) => code in divisions)
+          .map((code: string) => ({
+            code,
+            deptCode: divisions[code].deptCode,
+            name: divisions[code].name,
+          })),
+      ),
+    },
+    department: {
+      findMany: vi.fn(async ({ where }) =>
+        where.code.in
+          .filter((code: string) => code in departments)
+          .map((code: string) => ({ code, name: departments[code] })),
+      ),
+    },
+    unitAdmin: {
+      findMany: vi.fn(async ({ where }) =>
+        rows
+          .filter((r) =>
+            where.OR.some(
+              (c: { entityType: string; entityId: { in: string[] } }) =>
+                c.entityType === r.entityType && c.entityId.in.includes(r.entityId),
+            ),
+          )
+          .map((r) => ({
+            cwid: r.cwid,
+            entityType: r.entityType,
+            entityId: r.entityId,
+            role: r.role,
+          })),
+      ),
+    },
+  };
+}
+
+describe("listUnitAdminEditorsForScholar — fail-closed", () => {
+  it("returns [] with no DB hit on an empty scholar cwid", async () => {
+    const db = inverseLookup({ scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } } });
+    expect(await listUnitAdminEditorsForScholar("", db)).toEqual([]);
+    expect(db.scholar.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("returns [] for a missing scholar", async () => {
+    const db = inverseLookup({
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar("ghost9", db)).toEqual([]);
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns [] for a SOFT-DELETED scholar without querying unit_admin", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null, deletedAt: new Date("2026-01-01") } },
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([]);
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns [] (and never queries unit_admin) for a scholar with no department and no divisions", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: null } },
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([]);
+    expect(db.unitAdmin.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("listUnitAdminEditorsForScholar — attribution + cascade (mirrors the forward resolver)", () => {
+  it("lists a department admin attributed to the DEPARTMENT, name resolved", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      departments: { [DEPT]: "Department of Medicine" },
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "curator" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "department",
+        conferringUnitCode: DEPT,
+        conferringUnitName: "Department of Medicine",
+        role: "curator",
+      },
+    ]);
+  });
+
+  it("lists a division admin attributed to the DIVISION, name resolved", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: DIV } },
+      divisions: { [DIV]: { deptCode: DEPT, name: "Division of Cardiology" } },
+      unitAdmins: [{ entityType: "division", entityId: DIV, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "division",
+        conferringUnitCode: DIV,
+        conferringUnitName: "Division of Cardiology",
+        role: "owner",
+      },
+    ]);
+  });
+
+  it("attributes a PARENT-department admin to the CHILD division (cascade — not the parent dept)", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: null, divCode: DIV } },
+      divisions: { [DIV]: { deptCode: DEPT, name: "Division of Cardiology" } },
+      departments: { [DEPT]: "Department of Medicine" },
+      // ADMIN owns the PARENT department, holds no row on the division itself.
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "division",
+        conferringUnitCode: DIV,
+        conferringUnitName: "Division of Cardiology",
+        role: "owner",
+      },
+    ]);
+  });
+
+  it("never lists a CENTER admin, even one keyed to the scholar's department code", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      departments: { [DEPT]: "Department of Medicine" },
+      unitAdmins: [{ entityType: "center", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([]);
+  });
+
+  it("dedupes an admin granted both owner and curator on the same unit, keeping owner", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      departments: { [DEPT]: "Department of Medicine" },
+      unitAdmins: [
+        { entityType: "department", entityId: DEPT, cwid: ADMIN, role: "curator" },
+        { entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" },
+      ],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "department",
+        conferringUnitCode: DEPT,
+        conferringUnitName: "Department of Medicine",
+        role: "owner",
+      },
+    ]);
+  });
+
+  it("lists multiple distinct admins in a stable order, source-agnostically (ED-sourced rows included)", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: DIV } },
+      divisions: { [DIV]: { deptCode: DEPT, name: "Division of Cardiology" } },
+      departments: { [DEPT]: "Department of Medicine" },
+      unitAdmins: [
+        // OTHER_ADMIN's division grant could be ED-sourced — the resolver never
+        // reads `source`, so it is listed exactly like a native grant.
+        { entityType: "division", entityId: DIV, cwid: OTHER_ADMIN, role: "curator" },
+        { entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" },
+      ],
+    });
+    const list = await listUnitAdminEditorsForScholar(SCHOLAR, db);
+    expect(list.map((e) => e.adminCwid)).toEqual([ADMIN, OTHER_ADMIN]); // adm001 < adm999
+    expect(list[0]).toEqual({
+      adminCwid: ADMIN,
+      conferringUnitKind: "department",
+      conferringUnitCode: DEPT,
+      conferringUnitName: "Department of Medicine",
+      role: "owner",
+    });
+    expect(list[1]).toEqual({
+      adminCwid: OTHER_ADMIN,
+      conferringUnitKind: "division",
+      conferringUnitCode: DIV,
+      conferringUnitName: "Division of Cardiology",
+      role: "curator",
+    });
+  });
+
+  it("falls back to the unit code when the name row is gone (pruned unit)", async () => {
+    const db = inverseLookup({
+      scholars: { [SCHOLAR]: { deptCode: DEPT, divCode: null } },
+      // DEPT intentionally absent from `departments` → no name row.
+      unitAdmins: [{ entityType: "department", entityId: DEPT, cwid: ADMIN, role: "owner" }],
+    });
+    expect(await listUnitAdminEditorsForScholar(SCHOLAR, db)).toEqual([
+      {
+        adminCwid: ADMIN,
+        conferringUnitKind: "department",
+        conferringUnitCode: DEPT,
+        conferringUnitName: DEPT,
+        role: "owner",
+      },
+    ]);
   });
 });

@@ -212,3 +212,231 @@ export async function canEditScholarViaUnit(
 ): Promise<boolean> {
   return (await resolveEditableUnitViaUnitAdmin(adminCwid, scholarCwid, db)) !== null;
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// The INVERSE direction — "who may edit this scholar?" (Amendment 4 P3)
+//
+// `resolveEditableUnitViaUnitAdmin` is the FORWARD predicate (one admin + one
+// scholar → may they edit?). The read-only "Org-unit administrators" group on
+// the Profile-editors panel needs the inverse: given a scholar, list every
+// org-unit administrator who can edit them. There is no single-actor short-cut
+// here — `loadManageableUnits` / `getEffectiveUnitRole` both key on one actor's
+// cwid — so this resolver re-uses the SAME membership derivation (deptCode +
+// divCode + roster, dept→division cascade, centers excluded — D1) and then does
+// ONE `unit_admin` scan over the scholar's membership units. It is a *listing*,
+// never an authorization gate: every write path still calls the forward
+// predicate, so a stale or over-broad entry here can never confer edit access.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The Prisma surface {@link listUnitAdminEditorsForScholar} reads. Distinct from
+ * {@link UnitScholarLookup}: the inverse scan queries `unit_admin` by unit code
+ * (no single `cwid`), and it resolves department + division display NAMES (the
+ * forward resolver only needs a division's parent `deptCode`). `db.read`
+ * satisfies it structurally; cast at the call site
+ * (`db.read as unknown as UnitAdminEditorsLookup`).
+ */
+export type UnitAdminEditorsLookup = {
+  scholar: {
+    findUnique: (args: {
+      where: { cwid: string };
+      select: { deptCode: true; divCode: true; deletedAt: true };
+    }) => Promise<{ deptCode: string | null; divCode: string | null; deletedAt: Date | null } | null>;
+  };
+  divisionMembership: {
+    findMany: (args: {
+      where: { cwid: string };
+      select: { divisionCode: true };
+    }) => Promise<Array<{ divisionCode: string }>>;
+  };
+  division: {
+    findMany: (args: {
+      where: { code: { in: string[] } };
+      select: { code: true; deptCode: true; name: true };
+    }) => Promise<Array<{ code: string; deptCode: string; name: string }>>;
+  };
+  department: {
+    findMany: (args: {
+      where: { code: { in: string[] } };
+      select: { code: true; name: true };
+    }) => Promise<Array<{ code: string; name: string }>>;
+  };
+  unitAdmin: {
+    findMany: (args: {
+      where: { OR: Array<{ entityType: "department" | "division"; entityId: { in: string[] } }> };
+      select: { cwid: true; entityType: true; entityId: true; role: true };
+    }) => Promise<
+      Array<{
+        cwid: string;
+        entityType: "department" | "division" | "center";
+        entityId: string;
+        role: "owner" | "curator";
+      }>
+    >;
+  };
+};
+
+/**
+ * One org-unit administrator who may edit a scholar's profile, attributed to the
+ * scholar's membership unit (the relation that confers access). Returned by
+ * {@link listUnitAdminEditorsForScholar} for the read-only Profile-editors group.
+ * `adminCwid` is a real WCM person who often has no `Scholar` row (administrative
+ * staff), so the display name is resolved client-side from the directory — only
+ * the unit NAME (Scholars-DB-sourced) is resolved here. `conferringUnitKind` is
+ * never `center` (centers are excluded — D1).
+ */
+export type UnitAdminEditor = {
+  adminCwid: string;
+  conferringUnitKind: "department" | "division";
+  conferringUnitCode: string;
+  conferringUnitName: string;
+  role: "owner" | "curator";
+};
+
+/**
+ * List every org-unit administrator who may edit `scholarCwid`'s profile via the
+ * Amendment 4 path — the inverse of {@link resolveEditableUnitViaUnitAdmin}.
+ *
+ * Membership is derived exactly as the forward resolver does (department
+ * `Scholar.deptCode`, LDAP-primary division `Scholar.divCode`, roster
+ * `DivisionMembership`, dept→division cascade via `Division.deptCode`; centers
+ * excluded). Each `unit_admin` row is attributed to the scholar's membership
+ * unit: a division row → that division; a department row that is the scholar's
+ * OWN department → that department; a department row that is only the PARENT of
+ * one of the scholar's divisions → the CHILD division (mirroring the forward
+ * resolver's cascade naming and the "via {unit} administrator" banner, so this
+ * list never disagrees with what the admin sees in their own session).
+ *
+ * Dedupes (admin, unit) to the highest role (owner > curator). Fail-closed:
+ * empty `scholarCwid` (no DB hit), a missing or soft-deleted scholar, or a
+ * scholar with no department and no divisions ⇒ `[]` (no `unit_admin` query). A
+ * thrown DB error propagates. This is a display listing only — authorization is
+ * always the forward predicate's job.
+ */
+export async function listUnitAdminEditorsForScholar(
+  scholarCwid: string,
+  db: UnitAdminEditorsLookup,
+): Promise<UnitAdminEditor[]> {
+  if (!scholarCwid) return [];
+
+  const scholar = await db.scholar.findUnique({
+    where: { cwid: scholarCwid },
+    select: { deptCode: true, divCode: true, deletedAt: true },
+  });
+  if (!scholar || scholar.deletedAt !== null) return [];
+
+  // Division membership = LDAP-primary (`divCode`) ∪ roster (`DivisionMembership`).
+  const rosterRows = await db.divisionMembership.findMany({
+    where: { cwid: scholarCwid },
+    select: { divisionCode: true },
+  });
+  const divisionCodes = new Set<string>();
+  if (scholar.divCode) divisionCodes.add(scholar.divCode);
+  for (const row of rosterRows) divisionCodes.add(row.divisionCode);
+
+  // Nobody can reach a scholar with no department and no divisions via this path.
+  if (!scholar.deptCode && divisionCodes.size === 0) return [];
+
+  // Resolve each division's parent department (for the cascade) and display name
+  // in one batched read. An orphan roster code with no `Division` row simply has
+  // no parent (not cascaded) and no name (falls back to the code below).
+  const parentByDivision = new Map<string, string>();
+  const divisionName = new Map<string, string>();
+  if (divisionCodes.size > 0) {
+    const divisions = await db.division.findMany({
+      where: { code: { in: [...divisionCodes] } },
+      select: { code: true, deptCode: true, name: true },
+    });
+    for (const d of divisions) {
+      parentByDivision.set(d.code, d.deptCode);
+      divisionName.set(d.code, d.name);
+    }
+  }
+
+  // The departments whose admins confer access: the scholar's own department,
+  // plus the parent department of each of the scholar's divisions (cascade — D1).
+  const deptCodes = new Set<string>();
+  if (scholar.deptCode) deptCodes.add(scholar.deptCode);
+  for (const parent of parentByDivision.values()) deptCodes.add(parent);
+
+  // ONE scan over the scholar's membership units. (Either `deptCodes` or
+  // `divisionCodes` is non-empty here — the no-units case returned above.)
+  const orClauses: Array<{ entityType: "department" | "division"; entityId: { in: string[] } }> = [];
+  if (deptCodes.size > 0) orClauses.push({ entityType: "department", entityId: { in: [...deptCodes] } });
+  if (divisionCodes.size > 0)
+    orClauses.push({ entityType: "division", entityId: { in: [...divisionCodes] } });
+
+  const rows = await db.unitAdmin.findMany({
+    where: { OR: orClauses },
+    select: { cwid: true, entityType: true, entityId: true, role: true },
+  });
+
+  type Attributed = {
+    adminCwid: string;
+    kind: "department" | "division";
+    code: string;
+    role: "owner" | "curator";
+  };
+  const best = new Map<string, Attributed>();
+  const consider = (a: Attributed) => {
+    const key = `${a.adminCwid}:${a.kind}:${a.code}`;
+    const existing = best.get(key);
+    // owner subsumes curator (mirrors `loadManageableUnits`).
+    if (!existing || (existing.role === "curator" && a.role === "owner")) best.set(key, a);
+  };
+
+  for (const r of rows) {
+    if (r.entityType === "division") {
+      if (!divisionCodes.has(r.entityId)) continue; // defensive — outside the requested set
+      consider({ adminCwid: r.cwid, kind: "division", code: r.entityId, role: r.role });
+    } else if (r.entityType === "department") {
+      if (scholar.deptCode && r.entityId === scholar.deptCode) {
+        // The scholar's OWN department — name the department (forward resolver
+        // checks the department first, before any cascade).
+        consider({ adminCwid: r.cwid, kind: "department", code: r.entityId, role: r.role });
+      } else {
+        // A parent-department admin reaches the scholar through the cascade —
+        // attribute to each child division the scholar belongs to.
+        for (const [divCode, parent] of parentByDivision) {
+          if (parent === r.entityId) {
+            consider({ adminCwid: r.cwid, kind: "division", code: divCode, role: r.role });
+          }
+        }
+      }
+    }
+    // `center` rows are never requested (the OR is department/division only) and
+    // are ignored defensively if one ever appears.
+  }
+
+  // Department names need a batched lookup (division names came from the read
+  // above); a unit row that has since been pruned falls back to its code.
+  const deptNameCodes = [
+    ...new Set([...best.values()].filter((a) => a.kind === "department").map((a) => a.code)),
+  ];
+  const deptName = new Map<string, string>();
+  if (deptNameCodes.length > 0) {
+    const depts = await db.department.findMany({
+      where: { code: { in: deptNameCodes } },
+      select: { code: true, name: true },
+    });
+    for (const d of depts) deptName.set(d.code, d.name);
+  }
+
+  const result: UnitAdminEditor[] = [...best.values()].map((a) => ({
+    adminCwid: a.adminCwid,
+    conferringUnitKind: a.kind,
+    conferringUnitCode: a.code,
+    conferringUnitName:
+      a.kind === "department" ? (deptName.get(a.code) ?? a.code) : (divisionName.get(a.code) ?? a.code),
+    role: a.role,
+  }));
+
+  // Stable order so the rendered list and the tests are deterministic.
+  result.sort(
+    (x, y) =>
+      x.adminCwid.localeCompare(y.adminCwid) ||
+      x.conferringUnitKind.localeCompare(y.conferringUnitKind) ||
+      x.conferringUnitCode.localeCompare(y.conferringUnitCode),
+  );
+  return result;
+}

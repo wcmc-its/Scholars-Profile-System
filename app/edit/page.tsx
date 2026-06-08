@@ -18,6 +18,10 @@ import { isSuperuser } from "@/lib/auth/superuser";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { scholarsServedByProxy, type ProxyListLookup } from "@/lib/edit/proxy-authz";
+import {
+  listUnitAdminEditorsForScholar,
+  type UnitAdminEditorsLookup,
+} from "@/lib/edit/unit-scholar-authz";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
@@ -133,6 +137,18 @@ export default async function EditSelfPage({
     })
   ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
 
+  // Amendment 4 P3 — the read-only "Org-unit administrators" group: who can edit
+  // this scholar's profile because they administer a unit the scholar belongs to.
+  // Keyed on the effective editing identity (their own profile); a display
+  // listing only — never an authorization decision.
+  const unitAdminEditors = (
+    await listUnitAdminEditorsForScholar(editCwid, db.read as unknown as UnitAdminEditorsLookup)
+  ).map((u) => ({
+    adminCwid: u.adminCwid,
+    conferringUnitKind: u.conferringUnitKind,
+    conferringUnitName: u.conferringUnitName,
+  }));
+
   return (
     <EditPage
       ctx={ctx}
@@ -143,6 +159,7 @@ export default async function EditSelfPage({
       canBrowseProfiles={canBrowseProfiles}
       manageableUnits={manageableUnits}
       proxyEditors={proxyEditors}
+      unitAdminEditors={unitAdminEditors}
     />
   );
 }

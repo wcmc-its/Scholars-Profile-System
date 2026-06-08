@@ -34,7 +34,9 @@ import {
   type ProxyLookup,
 } from "@/lib/edit/proxy-authz";
 import {
+  listUnitAdminEditorsForScholar,
   resolveEditableUnitViaUnitAdmin,
+  type UnitAdminEditorsLookup,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
@@ -180,7 +182,7 @@ export default async function EditScholarPage({
     ? await loadLatestSlugRequest(session.cwid, db.read)
     : null;
 
-  // #779 — the "Proxy editors" panel: the scholar (self) or a superuser manages
+  // #779 — the "Profile editors" panel: the scholar (self) or a superuser manages
   // the scholar's designees. Neither a proxy (#779) nor a unit admin (Amendment
   // 4) can manage the list, so the panel is absent in those modes (and excluded
   // from the rail).
@@ -195,6 +197,25 @@ export default async function EditScholarPage({
           })
         ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
 
+  // Amendment 4 P3 — the read-only "Org-unit administrators" group inside the
+  // Profile editors panel. Gated to the same modes as the proxy list (self /
+  // superuser); a proxy or unit admin never sees the panel, so it stays `null`
+  // there. This is a display listing — the write paths re-derive authorization
+  // via `resolveEditableUnitViaUnitAdmin`, never from this list.
+  const unitAdminEditors =
+    mode === "proxy" || mode === "unit-admin"
+      ? null
+      : (
+          await listUnitAdminEditorsForScholar(
+            targetCwid,
+            db.read as unknown as UnitAdminEditorsLookup,
+          )
+        ).map((u) => ({
+          adminCwid: u.adminCwid,
+          conferringUnitKind: u.conferringUnitKind,
+          conferringUnitName: u.conferringUnitName,
+        }));
+
   return (
     <EditPage
       ctx={ctx}
@@ -203,6 +224,7 @@ export default async function EditScholarPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       proxyEditors={proxyEditors}
+      unitAdminEditors={unitAdminEditors}
       unitAdminBanner={unitAdminBanner}
     />
   );
