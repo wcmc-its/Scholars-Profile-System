@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- session events: `impersonation_start` / `impersonation_end` (R5 -- audit
   -- enter AND exit; `target_entity_type='scholar'`, `target_entity_id` the
   -- impersonated CWID).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore') NOT NULL,
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -168,11 +168,16 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         `coi_gap_candidate.id`, target_entity_type=
 --                         'coi_gap_candidate'). Appended LAST to preserve
 --                         existing ENUM ordinals.
+--   #779:              + proxy_grant · proxy_revoke  (scholar-assigned proxy
+--                         editor grant/revoke; scholar-proxy-spec.md / ADR-005
+--                         Amendment 2; target_entity_type='scholar',
+--                         target_entity_id is the granted scholar cwid). Appended
+--                         LAST to preserve existing ENUM ordinals.
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke')
     NOT NULL;
 
 -- target_entity_type history:
