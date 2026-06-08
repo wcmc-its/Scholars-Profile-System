@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
+import {
+  buildCspResponseHeaders,
+  resolveCspMode,
+} from "@/lib/security-headers";
 import vivoRedirectCwids from "@/data/vivo-redirects.json";
 
 /**
@@ -50,7 +54,60 @@ const VIVO_PATH_RE = /^\/(?:display|individual|profile)\/cwid-([A-Za-z0-9._\-]+)
  * `saml.ts` (Node-only), `superuser.ts` (Node-only), or `session-server.ts`
  * (`next/headers`).
  */
+/**
+ * Attach the runtime Content-Security-Policy headers (#374) to a response.
+ *
+ * Emitted here, in middleware, rather than from `next.config.ts` `headers()`:
+ * that function is evaluated at `next build` and frozen into the routes
+ * manifest, so `SECURITY_CSP_MODE` read there can never flip a deployed image
+ * (proven on staging 2026-06-08 — a task-def env change left the baked
+ * report-only header unchanged). Middleware runs per request, so the env is
+ * read live and a task-def flip + service roll promotes the policy with no
+ * rebuild. See lib/security-headers.ts.
+ */
+function withSecurityHeaders(response: NextResponse): NextResponse {
+  const cspHeaders = buildCspResponseHeaders({
+    isProduction: process.env.NODE_ENV === "production",
+    cspMode: resolveCspMode(process.env.SECURITY_CSP_MODE),
+  });
+  for (const { key, value } of cspHeaders) {
+    response.headers.set(key, value);
+  }
+  return response;
+}
+
+/**
+ * The path prefixes the SSO gate + legacy-redirect logic below acts on — the
+ * original `config.matcher` set. The matcher is now broadened to every
+ * non-static request so the CSP covers every document, which means this
+ * function runs on public pages too; gating must therefore stay explicitly
+ * scoped to these prefixes. A path outside them is a pass-through that only
+ * receives the security headers — a public page must NEVER reach the gate.
+ */
+function isGatedOrLegacyPath(pathname: string): boolean {
+  return (
+    pathname === "/edit" ||
+    pathname.startsWith("/edit/") ||
+    pathname === "/api/edit" ||
+    pathname.startsWith("/api/edit/") ||
+    pathname === "/api/impersonation" ||
+    pathname.startsWith("/api/impersonation/") ||
+    pathname.startsWith("/display/") ||
+    pathname.startsWith("/individual/") ||
+    pathname.startsWith("/profile/")
+  );
+}
+
 export async function middleware(request: NextRequest): Promise<NextResponse> {
+  // Public fast path. The broadened matcher (for CSP coverage) runs this on
+  // every non-static request, but the SSO gate + legacy redirects apply only to
+  // the prefixes in isGatedOrLegacyPath. Everything else — every public page,
+  // every non-edit API route — passes straight through with only the security
+  // headers attached, never touching the session or the gate.
+  if (!isGatedOrLegacyPath(request.nextUrl.pathname)) {
+    return withSecurityHeaders(NextResponse.next());
+  }
+
   // ------------------------------------------------------------------
   // B14 legacy-URL redirect layer. Runs before the SSO gate because the
   // legacy paths are public and should never trigger an SSO redirect
@@ -66,14 +123,16 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
       // send the browser to an unreachable address (ip-...:3000). The browser
       // resolves a relative Location against the public URL it requested. cwid
       // is regex-constrained ([A-Za-z0-9._-]) so it is safe in the header.
-      return new NextResponse(null, {
-        status: 301,
-        headers: { Location: `/scholars/by-cwid/${cwid}` },
-      });
+      return withSecurityHeaders(
+        new NextResponse(null, {
+          status: 301,
+          headers: { Location: `/scholars/by-cwid/${cwid}` },
+        }),
+      );
     }
     // Out-of-set CWID -- not in the academic-faculty roster. Fall through
     // so the existing 404 handling renders without a redirect.
-    return NextResponse.next();
+    return withSecurityHeaders(NextResponse.next());
   }
 
   // #637 — flag-off short-circuit. When `IMPERSONATION_ENABLED` is unset the
@@ -86,7 +145,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     request.nextUrl.pathname.startsWith("/api/impersonation") &&
     process.env.IMPERSONATION_ENABLED !== "true"
   ) {
-    return new NextResponse(null, { status: 404 });
+    return withSecurityHeaders(new NextResponse(null, { status: 404 }));
   }
 
   let authenticated = false;
@@ -97,7 +156,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     // "unauthenticated" so the gate stays closed rather than 500ing the page.
     authenticated = false;
   }
-  if (authenticated) return NextResponse.next();
+  if (authenticated) return withSecurityHeaders(NextResponse.next());
 
   // Unauthenticated below this point.
   if (
@@ -106,7 +165,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   ) {
     // API route: 401, empty body — no redirect, no leakage
     // (#100 AC; self-edit-spec.md edge case 16; #637 §7 — "no session" ⇒ 401).
-    return new NextResponse(null, { status: 401 });
+    return withSecurityHeaders(new NextResponse(null, { status: 401 }));
   }
 
   // Page route: redirect to SSO login, remembering the intended destination.
@@ -126,27 +185,24 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   if (process.env.NODE_ENV === "development" && !process.env.SAML_IDP_SSO_URL) {
     const devLogin = new URL("/api/auth/dev-login", request.nextUrl.origin);
     devLogin.searchParams.set("return", returnTo);
-    return NextResponse.redirect(devLogin, 302);
+    return withSecurityHeaders(NextResponse.redirect(devLogin, 302));
   }
 
-  return new NextResponse(null, {
-    status: 302,
-    headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
-  });
+  return withSecurityHeaders(
+    new NextResponse(null, {
+      status: 302,
+      headers: { Location: `/api/auth/saml/login?return=${encodeURIComponent(returnTo)}` },
+    }),
+  );
 }
 
 export const config = {
-  matcher: [
-    "/edit",
-    "/edit/:path*",
-    "/api/edit",
-    "/api/edit/:path*",
-    // #637 "View as" impersonation — start/stop + candidates search.
-    "/api/impersonation",
-    "/api/impersonation/:path*",
-    // B14 legacy VIVO paths (issue #113).
-    "/display/:path*",
-    "/individual/:path*",
-    "/profile/:path*",
-  ],
+  // Run on every request except Next's own static output and the favicon, so the
+  // runtime CSP (#374) covers every HTML document. This is deliberately broader
+  // than the gated/legacy prefixes — the SSO gate stays scoped inside
+  // middleware() via isGatedOrLegacyPath, so broadening the matcher widens only
+  // header coverage, never the auth gate. Static assets (`_next/static`,
+  // `_next/image`) keep the build-time static headers from next.config and need
+  // no per-request CSP.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

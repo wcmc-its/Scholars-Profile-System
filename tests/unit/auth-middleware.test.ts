@@ -158,3 +158,52 @@ describe("middleware — B14 legacy VIVO redirects", () => {
     }
   });
 });
+
+// #374 — the Content-Security-Policy moved out of next.config.ts `headers()`
+// (baked at build time, unflippable on a deployed image) into middleware, which
+// reads SECURITY_CSP_MODE per request. The broadened matcher means middleware
+// now runs on public pages too, so the gate MUST stay scoped — these assert
+// both halves: public pages get the header but are never sent to SSO.
+describe("middleware — runtime CSP headers (#374)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("attaches the report-only CSP + Reporting-Endpoints to a public page and does NOT gate it", async () => {
+    const res = await middleware(new NextRequest(`${ORIGIN}/`));
+    // Public page: passes through, never sent to SSO.
+    expect(res.status).not.toBe(302);
+    expect(res.status).not.toBe(401);
+    expect(res.headers.get("location")).toBeNull();
+    // ...but still carries the runtime security headers.
+    expect(
+      res.headers.get("content-security-policy-report-only"),
+    ).toBeTruthy();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+    expect(res.headers.get("reporting-endpoints")).toBe(
+      'csp-endpoint="/api/csp-report"',
+    );
+  });
+
+  it("flips the public-page CSP to the enforcing header when SECURITY_CSP_MODE=enforce", async () => {
+    vi.stubEnv("SECURITY_CSP_MODE", "enforce");
+    const res = await middleware(new NextRequest(`${ORIGIN}/search?q=cancer`));
+    expect(res.headers.get("content-security-policy")).toBeTruthy();
+    expect(res.headers.get("content-security-policy-report-only")).toBeNull();
+  });
+
+  it("defaults to report-only for an unset / unknown SECURITY_CSP_MODE (fail-safe)", async () => {
+    vi.stubEnv("SECURITY_CSP_MODE", "on"); // not the literal "enforce"
+    const res = await middleware(new NextRequest(`${ORIGIN}/about`));
+    expect(
+      res.headers.get("content-security-policy-report-only"),
+    ).toBeTruthy();
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("also attaches the CSP to the gated surfaces (e.g. an unauthenticated /edit SSO redirect)", async () => {
+    const res = await middleware(new NextRequest(`${ORIGIN}/edit`));
+    expect(res.status).toBe(302); // still gated
+    expect(
+      res.headers.get("content-security-policy-report-only"),
+    ).toBeTruthy();
+  });
+});
