@@ -342,7 +342,53 @@ export class EtlStack extends Stack {
     const taskRole = new iam.Role(this, "EtlTaskRole", {
       roleName: `sps-etl-task-${env}`,
       assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-      description: `SPS ETL ECS task role (${env}). ETL runtime identity; zero AWS API permissions today.`,
+      description: `SPS ETL ECS task role (${env}). ETL runtime identity; read-only access to the three ReciterAI-published IAM-based sources (DynamoDB table + spotlight/hierarchy artifact buckets).`,
+    });
+
+    // ------------------------------------------------------------------
+    // ReciterAI source grants (read-only).
+    //
+    // Three ETL steps reach their inputs through THIS task role rather than
+    // an injected per-source secret. The `environment:` block below pins
+    // their non-secret config (table/bucket names); this policy is the
+    // matching IAM grant. Without it each step fails closed at run time
+    // (AccessDenied -> exit 1 -> the step's Retry/Catch in the state
+    // machine). Each resource is exactly what the step reads -- never a
+    // service-wide `*`:
+    //
+    //   etl:dynamodb  (nightly)  dynamodb:Scan   table/reciterai
+    //   etl:spotlight (weekly)   s3:GetObject    wcmc-reciterai-artifacts/spotlight/*
+    //   etl:hierarchy (annual)   s3:GetObject    wcmc-reciterai-hierarchy/*
+    //
+    // Read-only: the steps Scan the table and GetObject the artifacts; they
+    // never write back to ReciterAI's (account-shared) stores. The bucket
+    // and table names are the same literals injected in `environment:` below
+    // -- a rename must touch both. Spotlight is prefix-scoped to `spotlight/*`
+    // because `wcmc-reciterai-artifacts` is a shared bucket; hierarchy takes
+    // the whole bucket because `wcmc-reciterai-hierarchy` is dedicated to it.
+    // No secretsmanager reference, so the "zero secretsmanager on the ETL
+    // task role" assertion (etl-stack.test.ts) still holds.
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "EtlTaskRoleReciterAiPolicy", {
+      policyName: `sps-etl-task-${env}-reciterai`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["dynamodb:Scan"],
+          resources: [
+            `arn:aws:dynamodb:${this.region}:${this.account}:table/reciterai`,
+          ],
+        }),
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["s3:GetObject"],
+          resources: [
+            "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+            "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
+          ],
+        }),
+      ],
     });
 
     // ------------------------------------------------------------------
@@ -410,7 +456,8 @@ export class EtlStack extends Stack {
       // Non-secret config the IAM-based sources read. Values match the
       // source-script defaults; pinned here so the deployed config is
       // explicit rather than implicit in code (#442). These resources are
-      // reached via the task role (IAM), not an injected credential:
+      // reached via the task role (IAM), not an injected credential -- the
+      // EtlTaskRoleReciterAiPolicy above is the matching read grant:
       //   dynamodb  -> ReciterAI publication table (task-role scan)
       //   spotlight -> ReciterAI artifacts bucket + key prefix
       //   hierarchy -> ReciterAI hierarchy bucket

@@ -687,6 +687,96 @@ describe("EtlStack", () => {
         }
       });
 
+      // #443/#742 -- the EtlTaskRole shipped with zero grants, so the three
+      // IAM-based source steps (dynamodb nightly, spotlight weekly, hierarchy
+      // annual) failed closed (AccessDenied -> exit 1) every cadence. These
+      // guards pin EtlTaskRoleReciterAiPolicy to exactly what each step reads.
+      const etlTaskRolePolicy = () =>
+        Object.values(template.findResources("AWS::IAM::Policy")).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("EtlTaskRole") &&
+              !r.Ref.includes("EtlTaskExecutionRole"),
+          );
+        });
+
+      it("the ETL task role grants dynamodb:Scan scoped to the reciterai table (exactly Scan, no bare *)", () => {
+        const policy = etlTaskRolePolicy();
+        expect(policy).toBeDefined();
+        const statements = policy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const dynamoStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("dynamodb:Scan")
+            : action === "dynamodb:Scan";
+        });
+        expect(dynamoStmt).toBeDefined();
+        // exactly dynamodb:Scan -- never dynamodb:* or any item/write action
+        const action = dynamoStmt?.Action;
+        expect(Array.isArray(action) ? action : [action]).toEqual([
+          "dynamodb:Scan",
+        ]);
+        // resource is the single reciterai table, never a bare *
+        const serialized = JSON.stringify(dynamoStmt?.Resource);
+        expect(serialized).toMatch(/table\/reciterai/);
+        expect(serialized).not.toMatch(/\*/);
+      });
+
+      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight prefix + hierarchy bucket (no bare *, no ListBucket)", () => {
+        const policy = etlTaskRolePolicy();
+        expect(policy).toBeDefined();
+        const statements = policy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const s3Stmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("s3:GetObject")
+            : action === "s3:GetObject";
+        });
+        expect(s3Stmt).toBeDefined();
+        // exactly s3:GetObject -- never s3:*, PutObject, or ListBucket
+        const action = s3Stmt?.Action;
+        expect(Array.isArray(action) ? action : [action]).toEqual([
+          "s3:GetObject",
+        ]);
+        // object-scoped: the spotlight prefix in the shared artifacts bucket +
+        // the whole dedicated hierarchy bucket. Order matches the policy.
+        const resources = Array.isArray(s3Stmt?.Resource)
+          ? (s3Stmt?.Resource as string[])
+          : [s3Stmt?.Resource as string];
+        expect(resources).toEqual([
+          "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+          "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
+        ]);
+      });
+
+      it("the ETL task role policy is read-only -- only Scan/GetObject, never a bare * resource", () => {
+        const policy = etlTaskRolePolicy();
+        expect(policy).toBeDefined();
+        const statements = policy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements?.length).toBeGreaterThan(0);
+        for (const stmt of statements ?? []) {
+          const actions = Array.isArray(stmt.Action)
+            ? (stmt.Action as string[])
+            : [stmt.Action as string];
+          for (const a of actions) {
+            expect(a).toMatch(/^(dynamodb:Scan|s3:GetObject)$/);
+          }
+          const resources = Array.isArray(stmt.Resource)
+            ? (stmt.Resource as unknown[])
+            : [stmt.Resource];
+          for (const r of resources) {
+            expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+          }
+        }
+      });
+
       it("every EventBridge-rule role has states:StartExecution scoped to a single state-machine ARN (no *)", () => {
         const policies = template.findResources("AWS::IAM::Policy");
         const ebPolicies = Object.values(policies).filter((p) => {
