@@ -104,14 +104,14 @@ describe("ProxyEditorCard", () => {
     });
   });
 
-  it("maps proxy_ineligible to a friendly 'already has a role' message", async () => {
+  it("maps proxy_ineligible to a friendly 'Scholars administrator' message", async () => {
     stubFetch(() => jsonResponse({ ok: false, error: "proxy_ineligible" }, 403));
     render(
       <ProxyEditorCard scholarCwid={SCHOLAR} scholarName="Rahul Sharma" mode="self" proxies={[]} />,
     );
     fireEvent.click(screen.getByTestId("proxy-pick"));
     fireEvent.click(screen.getByTestId("proxy-editor-grant"));
-    await waitFor(() => expect(screen.getByText(/already has a role/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Scholars administrator/i)).toBeTruthy());
     expect(screen.queryByTestId("proxy-editor-row-new9")).toBeNull();
   });
 });

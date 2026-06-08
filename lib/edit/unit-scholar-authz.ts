@@ -11,14 +11,15 @@
  *   "May real CWID `A` edit scholar `S`'s profile **by virtue of administering
  *    an org unit `S` belongs to**?"
  *
- * It is the composition #540 left unwired: `lib/edit/authz.ts` already ships
- * `getEffectiveUnitRole` (the dept→division cascade) and the pure `canProxyEdit`
- * predicate, but nothing assembles "resolve S's units → resolve A's role on each
- * → decide". `canProxyEdit` is dead code today; this predicate is what a route
- * calls instead, and it reuses `getEffectiveUnitRole` so the cascade stays
- * single-sourced (see the "the cascade lives in getEffectiveUnitRole" contract
- * referenced from `app/api/edit/grant/route.ts`). It does NOT re-implement the
- * cascade.
+ * It is the composition #540 left unwired: `lib/edit/authz.ts` ships
+ * `getEffectiveUnitRole` (the dept→division cascade), but nothing assembled
+ * "resolve S's units → resolve A's role on each → decide". (Amendment 1's pure
+ * `canProxyEdit` predicate — retired in Amendment 4 P4 — never did: its invariant
+ * "roster membership never confers profile-edit rights" is the deliberate
+ * OPPOSITE of D1.) This predicate is what a route calls, and it reuses
+ * `getEffectiveUnitRole` so the cascade stays single-sourced (see the "the
+ * cascade lives in getEffectiveUnitRole" contract referenced from
+ * `app/api/edit/grant/route.ts`). It does NOT re-implement the cascade.
  *
  * ── Membership model (Amendment 4 D1, resolved 2026-06-08) ──────────────────
  * `S` is a member of unit `U` when `U` is:

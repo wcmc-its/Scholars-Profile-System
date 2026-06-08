@@ -37,12 +37,10 @@ export type AuthzDenialReason =
   | "scope_violation"
   /** `canGrant`: the actor's role is below the role they are trying to grant */
   | "authority_violation"
-  /** a proxy edit whose target scholar's LDAP-primary unit is outside the actor's scope */
-  | "proxy_target_not_in_unit"
   // ─── scholar-assigned proxy editor (#779 / scholar-proxy-spec.md) ───
   /** a scholar-assigned proxy edit by a CWID that has since acquired a
-   *  conflicting role (D3 fail-closed re-check at edit time) — distinct from the
-   *  #540 `proxy_target_not_in_unit` (which is the unit-role axis) */
+   *  conflicting role (the D3 fail-closed re-check at edit time — Amendment 4 D4
+   *  narrows that to "is a superuser") */
   | "proxy_conflict"
   // ─── #728 § 2.2 #3 / § 5 MUST-7 ED-locked grant ───
   /** a grant/revoke against a `unit_admin` row whose `source` LIKE 'ED:%' by a non-superuser */
@@ -381,29 +379,15 @@ export function canGrant(
   return ALLOW;
 }
 
-/**
- * `canProxyEdit` — Amendment 1 § A1.3 T3. An Owner or Curator may proxy-edit
- * a scholar's `overview` (and per-author publication hide) iff the scholar's
- * **LDAP-primary** `deptCode`/`divCode` falls within the actor's subtree.
- * Roster membership never confers profile-edit rights — that is the whole
- * point of T3. The caller resolves the scholar's home unit from the
- * `Scholar` row (LDAP-authoritative columns, never `field_override`-able)
- * and the actor's effective role on it.
- *
- * Denial `proxy_target_not_in_unit` keeps the triage clear: this is not a
- * unit-edit denial, it is a scholar-edit denial whose scope key is the
- * target's home unit, not the target CWID.
- */
-export function canProxyEdit(
-  session: EditSession,
-  homeUnitRole: EffectiveUnitRole,
-): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
-  // Self-edit is handled by the existing `authorizeFieldEdit` — proxy is
-  // strictly for someone else; the caller has already established that.
-  if (homeUnitRole === "owner" || homeUnitRole === "curator") return ALLOW;
-  return { ok: false, reason: "proxy_target_not_in_unit" };
-}
+// Amendment 1's pure `canProxyEdit` predicate (and its `proxy_target_not_in_unit`
+// denial) was RETIRED in Amendment 4 P4. It was never wired into any route — the
+// role-derived path a route actually calls is
+// `lib/edit/unit-scholar-authz.ts:resolveEditableUnitViaUnitAdmin` — and its
+// load-bearing invariant ("roster membership never confers profile-edit rights —
+// the whole point of T3") is the deliberate OPPOSITE of Amendment 4 D1, which
+// counts the curator-editable `DivisionMembership` roster as conferring
+// membership. Keeping a same-axis predicate with contradictory semantics would
+// only invite a future miswire, so it was removed rather than left dead.
 
 // ---------------------------------------------------------------------------
 // denial telemetry

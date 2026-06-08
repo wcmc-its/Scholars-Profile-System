@@ -217,8 +217,8 @@ export function ProxyEditorCard({
         >
           <p className="text-sm font-medium">Add a proxy editor</p>
           <p className="text-muted-foreground text-sm">
-            Search the WCM directory by name. The person you choose must not already be a scholar,
-            an org-unit administrator, or a Scholars administrator.
+            Search the WCM directory by name. The person you choose must not already be a Scholars
+            administrator.
           </p>
           <DirectoryPeopleTypeahead idPrefix="proxy" value={addValue} onChange={setAddValue} />
           <div>
@@ -320,7 +320,7 @@ function formatGrantedAt(d: Date): string {
 function mapErrorToMessage(code: string): string {
   switch (code) {
     case "proxy_ineligible":
-      return "That person already has a role in the system (scholar, org-unit admin, or administrator), so they can't be a proxy editor.";
+      return "That person is a Scholars administrator, so they already have full edit access and can't be added as a profile editor.";
     case "cannot_proxy_self":
       return "A scholar can't be their own proxy editor.";
     case "proxy_limit_reached":

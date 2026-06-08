@@ -93,34 +93,28 @@ describe("isGrantedProxy — composite-PK bind (PE-06 cross-scholar isolation)",
   });
 });
 
-describe("checkProxyConflictingRole — D3 'no other role', fail-closed", () => {
-  it("ok when the candidate holds none of the three roles", async () => {
+describe("checkProxyConflictingRole — D3 narrowed to superuser-only (Amendment 4 D4)", () => {
+  it("ok when the candidate holds no conflicting role", async () => {
     const db = proxyLookup({});
     expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({ ok: true });
   });
 
-  it("blocks a non-deleted Scholar (edge 3 / leg 1)", async () => {
+  it("a Scholar is NO LONGER a conflict — a roled person may be an assigned proxy (D4)", async () => {
     const db = proxyLookup({ scholars: { [PROXY]: { deletedAt: null } } });
-    expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({
-      ok: false,
-      reason: "proxy_is_scholar",
-    });
-  });
-
-  it("does NOT block a SOFT-DELETED scholar (deletedAt set is no longer an active scholar)", async () => {
-    const db = proxyLookup({ scholars: { [PROXY]: { deletedAt: new Date("2026-01-01") } } });
     expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({ ok: true });
   });
 
-  it("blocks a UnitAdmin owner/curator (edge 4 / leg 2)", async () => {
+  it("a UnitAdmin is NO LONGER a conflict — an org-unit admin may be an assigned proxy (D4)", async () => {
     const db = proxyLookup({ unitAdmins: [PROXY] });
-    expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({
-      ok: false,
-      reason: "proxy_is_unit_admin",
-    });
+    expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({ ok: true });
   });
 
-  it("blocks a superuser via the LIVE leg, NOT deferred (edge 5 / leg 3 / CD-3)", async () => {
+  it("a candidate who is BOTH a scholar AND a unit_admin (but not a superuser) is allowed", async () => {
+    const db = proxyLookup({ scholars: { [PROXY]: { deletedAt: null } }, unitAdmins: [PROXY] });
+    expect(await checkProxyConflictingRole(PROXY, db, noSuper)).toEqual({ ok: true });
+  });
+
+  it("blocks a superuser via the LIVE leg, NOT deferred (the one invariant kept — CD-3)", async () => {
     const db = proxyLookup({});
     expect(await checkProxyConflictingRole(PROXY, db, yesSuper)).toEqual({
       ok: false,
@@ -128,11 +122,11 @@ describe("checkProxyConflictingRole — D3 'no other role', fail-closed", () => 
     });
   });
 
-  it("precedence: scholar > unit_admin > superuser when several conflict", async () => {
+  it("a candidate who is scholar + unit_admin + superuser is still blocked (superuser-only)", async () => {
     const db = proxyLookup({ scholars: { [PROXY]: { deletedAt: null } }, unitAdmins: [PROXY] });
     expect(await checkProxyConflictingRole(PROXY, db, yesSuper)).toEqual({
       ok: false,
-      reason: "proxy_is_scholar",
+      reason: "proxy_is_superuser",
     });
   });
 

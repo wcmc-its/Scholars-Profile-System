@@ -22,16 +22,15 @@
 import { isSuperuser } from "@/lib/auth/superuser";
 
 /**
- * Why a CWID is ineligible to hold a proxy grant (D3). The three legs are kept
- * distinct for the SERVER-SIDE structured log only; the HTTP layer collapses
- * them to a single opaque `proxy_ineligible` so the grant endpoint is not a
- * role-oracle (scholar-proxy-spec.md threat CD-6).
+ * Why a CWID is ineligible to hold a proxy grant (D3, narrowed by Amendment 4
+ * D4). A scholar or org-unit administrator is NO LONGER a conflict — a roled
+ * person may be an explicitly-assigned proxy; only a superuser is rejected (the
+ * grant would be a meaningless no-op). Kept as a one-member union (rather than a
+ * bare boolean) so the SERVER-SIDE structured log stays specific; the HTTP layer
+ * still collapses it to an opaque `proxy_ineligible` so the grant endpoint is not
+ * a role-oracle (scholar-proxy-spec.md threat CD-6).
  */
 export type ProxyConflictReason =
-  /** the candidate has a non-deleted Scholar row — a scholar is not a proxy */
-  | "proxy_is_scholar"
-  /** the candidate holds a UnitAdmin row (owner/curator) — a broader, shadowing role */
-  | "proxy_is_unit_admin"
   /** the candidate is in the superuser group — the grant would be meaningless */
   | "proxy_is_superuser";
 
@@ -44,6 +43,13 @@ export type ProxyConflictResult =
  * `db.read` / `db.write` satisfy it structurally; cast at the call site
  * (`db.read as unknown as ProxyLookup`), mirroring `UnitAdminLookup` in
  * `authz.ts`.
+ *
+ * The `scholar` / `unitAdmin` members are retained for call-site + test-mock
+ * stability only: {@link checkProxyConflictingRole} no longer reads them now that
+ * Amendment 4 D4 dropped the scholar / unit-admin conflict legs (the sole
+ * remaining leg, superuser, comes from `isSuperuserFn`). `db.read` satisfies the
+ * wider shape trivially, so they cost nothing to keep and avoid churning the four
+ * cast sites.
  */
 export type ProxyLookup = {
   scholarProxy: {
@@ -104,35 +110,36 @@ export async function isGrantedProxy(
 }
 
 /**
- * D3 "no other role" — fail-closed. Returns `{ ok: false }` on ANY conflict.
+ * D3 "no other role", narrowed to the superuser leg (Amendment 4 D4) —
+ * fail-closed. Returns `{ ok: false, reason: "proxy_is_superuser" }` iff the
+ * candidate is a live superuser, else `{ ok: true }`.
  *
- * Runs all THREE legs, INCLUDING the live `isSuperuser` leg — it is NOT deferred
- * (threats PE-02 / PE-05 / CD-3 / IS-7). Called BLOCKING at grant time, and
- * fail-closed at EVERY proxy edit, always on the candidate's OWN cwid (the proxy
- * path passes `realCwid`, because the request preamble computes `isSuperuser`
- * only for the EFFECTIVE cwid — a proxy's own superuser status is otherwise
- * never checked).
+ * A scholar or org-unit administrator is NO LONGER a conflict: Amendment 4
+ * deliberately allows a roled person to be an explicitly-assigned proxy (the
+ * institutional reality is that delegates hold roles). The one invariant kept is
+ * "a proxy may not be a superuser" — a superuser already edits everything via the
+ * superuser path, so a proxy grant to them is a meaningless no-op.
+ *
+ * Runs the live `isSuperuser` leg — NOT deferred (threats PE-02 / CD-3 / IS-7).
+ * Called BLOCKING at grant time, and fail-closed at EVERY proxy edit, always on
+ * the candidate's OWN cwid (the proxy path passes `realCwid`, because the request
+ * preamble computes `isSuperuser` only for the EFFECTIVE cwid — a proxy's own
+ * superuser status is otherwise never checked).
  *
  * `isSuperuserFn` defaults to the real LDAPS-backed {@link isSuperuser} (itself
  * fail-closed: a directory outage resolves to "not a superuser"); it is a
  * parameter only so unit tests inject a stub instead of reaching LDAP.
  *
- * A soft-deleted Scholar row (`deletedAt !== null`) is NOT a conflict — that
- * cwid is no longer an active scholar, so it may legitimately be a proxy.
+ * `_db` is retained on the signature purely for call-site stability — the four
+ * callers cast `db.read as unknown as ProxyLookup` — and is no longer read now
+ * that the scholar / unit-admin legs are gone.
  */
 export async function checkProxyConflictingRole(
   cwid: string,
-  db: ProxyLookup,
+  _db: ProxyLookup,
   isSuperuserFn: (cwid: string) => Promise<boolean> = isSuperuser,
 ): Promise<ProxyConflictResult> {
-  const [scholar, unitAdmin, su] = await Promise.all([
-    db.scholar.findUnique({ where: { cwid }, select: { deletedAt: true } }),
-    db.unitAdmin.findFirst({ where: { cwid }, select: { cwid: true } }),
-    isSuperuserFn(cwid),
-  ]);
-  if (scholar && scholar.deletedAt === null) return { ok: false, reason: "proxy_is_scholar" };
-  if (unitAdmin) return { ok: false, reason: "proxy_is_unit_admin" };
-  if (su) return { ok: false, reason: "proxy_is_superuser" };
+  if (await isSuperuserFn(cwid)) return { ok: false, reason: "proxy_is_superuser" };
   return { ok: true };
 }
 
