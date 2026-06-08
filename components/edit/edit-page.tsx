@@ -18,7 +18,11 @@ import { FundingCard } from "@/components/edit/funding-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
-import { ProxyEditorCard, type ProxyRow } from "@/components/edit/proxy-editor-card";
+import {
+  ProxyEditorCard,
+  type ProxyRow,
+  type UnitAdminEditorRow,
+} from "@/components/edit/proxy-editor-card";
 import { PublicationsCard } from "@/components/edit/publications-card";
 import { ReadonlyAttributePanel } from "@/components/edit/readonly-attribute-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
@@ -83,10 +87,11 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
-  // Proxy editors (#779) — the scholar (self) manages their own designees; a
-  // superuser manages them on the scholar's behalf. NOT shown in proxy mode: a
-  // proxy can never manage the proxy list (CD-2; excluded in `attrsForMode`).
-  { key: "proxy-editors", label: "Proxy editors", modes: ["self", "superuser"] },
+  // Profile editors (#779 + Amendment 4) — the scholar (self) manages their own
+  // designees and sees who administers their units; a superuser does so on the
+  // scholar's behalf. NOT shown in proxy mode: a proxy can never manage the proxy
+  // list (CD-2; excluded in `attrsForMode`).
+  { key: "proxy-editors", label: "Profile editors", modes: ["self", "superuser"] },
 ];
 
 const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
@@ -213,10 +218,15 @@ export type EditPageProps = {
   /** Self mode only: org units the viewer may also curate (#753), surfaced on
    *  the Home panel. Empty for most scholars. */
   manageableUnits?: ManageableUnit[];
-  /** The scholar's current proxy-editor grants (#779), for the "Proxy editors"
+  /** The scholar's current proxy-editor grants (#779), for the "Profile editors"
    *  panel in self / superuser mode. `null` ⇒ the panel renders nothing (e.g.
    *  proxy mode, where it is not even in the rail). */
   proxyEditors?: ProxyRow[] | null;
+  /** Org-unit administrators who can also edit this scholar (Amendment 4 P3),
+   *  shown as the read-only "Org-unit administrators" group inside the Profile
+   *  editors panel. `null`/absent ⇒ the group is not rendered (proxy/unit-admin
+   *  mode, where the panel is absent from the rail). */
+  unitAdminEditors?: UnitAdminEditorRow[] | null;
   /** Unit-admin mode only (Amendment 4): the unit through which the viewer
    *  administers this scholar, for the "via {unit} administrator" banner.
    *  `null`/absent in every other mode. */
@@ -254,6 +264,7 @@ export function EditPage({
   canBrowseProfiles = false,
   manageableUnits = [],
   proxyEditors = null,
+  unitAdminEditors = null,
   unitAdminBanner = null,
 }: EditPageProps) {
   // "From your publications" is conditionally present: only in self mode and
@@ -328,6 +339,7 @@ export function EditPage({
         manageableUnits,
         canBrowseProfiles,
         proxyEditors,
+        unitAdminEditors,
       )}
     </EditShell>
   );
@@ -343,6 +355,7 @@ function renderPanel(
   manageableUnits: ManageableUnit[],
   isSuperuser: boolean,
   proxyEditors: ProxyRow[] | null,
+  unitAdminEditors: UnitAdminEditorRow[] | null,
 ) {
   const cwid = ctx.scholar.cwid;
   // Child cards model only self vs superuser. A proxy reuses the SELF cards
@@ -512,6 +525,7 @@ function renderPanel(
           scholarName={scholarName}
           mode={childMode}
           proxies={proxyEditors}
+          unitAdmins={unitAdminEditors}
         />
       );
   }

@@ -45,7 +45,10 @@ function stubFetch(grant: () => Response) {
     if (url.includes("/api/directory/people")) {
       return jsonResponse({
         ok: true,
-        people: [{ cwid: "bec4010", name: "Beth Chunn", title: "Administrator" }],
+        people: [
+          { cwid: "bec4010", name: "Beth Chunn", title: "Administrator" },
+          { cwid: "abc1234", name: "Dana Admin", title: "Department Administrator" },
+        ],
       });
     }
     return grant();
@@ -101,14 +104,65 @@ describe("ProxyEditorCard", () => {
     });
   });
 
-  it("maps proxy_ineligible to a friendly 'already has a role' message", async () => {
+  it("maps proxy_ineligible to a friendly 'Scholars administrator' message", async () => {
     stubFetch(() => jsonResponse({ ok: false, error: "proxy_ineligible" }, 403));
     render(
       <ProxyEditorCard scholarCwid={SCHOLAR} scholarName="Rahul Sharma" mode="self" proxies={[]} />,
     );
     fireEvent.click(screen.getByTestId("proxy-pick"));
     fireEvent.click(screen.getByTestId("proxy-editor-grant"));
-    await waitFor(() => expect(screen.getByText(/already has a role/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Scholars administrator/i)).toBeTruthy());
     expect(screen.queryByTestId("proxy-editor-row-new9")).toBeNull();
+  });
+});
+
+describe("ProxyEditorCard — org-unit administrators group (Amendment 4 P3)", () => {
+  it("does not render the group when unitAdmins is omitted", () => {
+    stubFetch(() => jsonResponse({ ok: true }));
+    const { container } = render(
+      <ProxyEditorCard scholarCwid={SCHOLAR} scholarName="Rahul Sharma" mode="self" proxies={[]} />,
+    );
+    expect(container.querySelector('[data-slot="unit-admin-editor-list"]')).toBeNull();
+    expect(screen.queryByTestId("unit-admin-editor-empty")).toBeNull();
+  });
+
+  it("renders the empty state when unitAdmins is []", () => {
+    stubFetch(() => jsonResponse({ ok: true }));
+    render(
+      <ProxyEditorCard
+        scholarCwid={SCHOLAR}
+        scholarName="Rahul Sharma"
+        mode="self"
+        proxies={[]}
+        unitAdmins={[]}
+      />,
+    );
+    expect(screen.getByTestId("unit-admin-editor-empty")).toBeTruthy();
+  });
+
+  it("lists an org-unit administrator read-only: hydrates the name, shows the conferring unit, no controls", async () => {
+    stubFetch(() => jsonResponse({ ok: true }));
+    const { container } = render(
+      <ProxyEditorCard
+        scholarCwid={SCHOLAR}
+        scholarName="Rahul Sharma"
+        mode="self"
+        proxies={[]}
+        unitAdmins={[
+          {
+            adminCwid: "abc1234",
+            conferringUnitKind: "department",
+            conferringUnitName: "Department of Medicine",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("unit-admin-editor-row-abc1234")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Dana Admin")).toBeTruthy());
+    expect(screen.getByText("Department of Medicine")).toBeTruthy();
+    // Role-derived ⇒ read-only: the group carries no add/remove control.
+    const group = container.querySelector('[data-slot="unit-admin-editor-list"]');
+    expect(group).not.toBeNull();
+    expect(group!.querySelector("button")).toBeNull();
   });
 });

@@ -32,6 +32,15 @@ export type ProxyRow = {
   grantedAt: Date;
 };
 
+/** One org-unit administrator who can also edit this profile (Amendment 4) —
+ *  role-derived, not assignable, so this row is read-only. `adminCwid` hydrates
+ *  to a display name via the directory, like a proxy. */
+export type UnitAdminEditorRow = {
+  adminCwid: string;
+  conferringUnitKind: "department" | "division";
+  conferringUnitName: string;
+};
+
 export type ProxyEditorCardProps = {
   /** The scholar whose proxy list this is. */
   scholarCwid: string;
@@ -43,9 +52,20 @@ export type ProxyEditorCardProps = {
   /** Current grants. `null` ⇒ render nothing (defensive; the rail only mounts
    *  this in self/superuser mode). */
   proxies: ReadonlyArray<ProxyRow> | null;
+  /** Org-unit administrators who can also edit this profile (Amendment 4 P3) —
+   *  the read-only "Org-unit administrators" group. `null`/omitted ⇒ the group
+   *  is not rendered at all; `[]` ⇒ the group shows its empty state. These are
+   *  role-derived (not assignable here), so the group has no add/remove. */
+  unitAdmins?: ReadonlyArray<UnitAdminEditorRow> | null;
 };
 
-export function ProxyEditorCard({ scholarCwid, scholarName, mode, proxies }: ProxyEditorCardProps) {
+export function ProxyEditorCard({
+  scholarCwid,
+  scholarName,
+  mode,
+  proxies,
+  unitAdmins = null,
+}: ProxyEditorCardProps) {
   const [rows, setRows] = React.useState<ProxyRow[]>(proxies ? [...proxies] : []);
   const [names, setNames] = React.useState<Map<string, { name: string; title: string | null }>>(
     new Map(),
@@ -55,9 +75,14 @@ export function ProxyEditorCard({ scholarCwid, scholarName, mode, proxies }: Pro
   const [error, setError] = React.useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = React.useState<ProxyRow | null>(null);
 
-  // Hydrate display names — a proxy has no Scholar row, so the server only knows
-  // the CWID. Best-effort: a directory hiccup leaves the table showing CWIDs.
-  const toResolve = rows.map((r) => r.proxyCwid).filter((c) => !names.has(c));
+  // Hydrate display names — neither a proxy nor an org-unit administrator
+  // necessarily has a Scholar row, so the server only knows the CWID. Best-effort:
+  // a directory hiccup leaves the rows showing CWIDs. One request covers both the
+  // proxy table and the read-only org-unit-administrator group.
+  const adminCwids = (unitAdmins ?? []).map((u) => u.adminCwid);
+  const toResolve = [...new Set([...rows.map((r) => r.proxyCwid), ...adminCwids])].filter(
+    (c) => !names.has(c),
+  );
   const toResolveKey = toResolve.join(",");
   React.useEffect(() => {
     if (toResolveKey.length === 0) return;
@@ -138,7 +163,7 @@ export function ProxyEditorCard({ scholarCwid, scholarName, mode, proxies }: Pro
       : `People authorized to edit ${scholarName}'s profile overview and hide misattributed publications on their behalf.`;
 
   return (
-    <EditPanel slot="proxy-editor-card" heading="Proxy editors" description={description}>
+    <EditPanel slot="proxy-editor-card" heading="Profile editors" description={description}>
       <div className="flex flex-col gap-4">
         {rows.length === 0 ? (
           <p className="text-muted-foreground text-sm" data-testid="proxy-editor-empty">
@@ -192,8 +217,8 @@ export function ProxyEditorCard({ scholarCwid, scholarName, mode, proxies }: Pro
         >
           <p className="text-sm font-medium">Add a proxy editor</p>
           <p className="text-muted-foreground text-sm">
-            Search the WCM directory by name. The person you choose must not already be a scholar,
-            an org-unit administrator, or a Scholars administrator.
+            Search the WCM directory by name. The person you choose must not already be a Scholars
+            administrator.
           </p>
           <DirectoryPeopleTypeahead idPrefix="proxy" value={addValue} onChange={setAddValue} />
           <div>
@@ -215,6 +240,62 @@ export function ProxyEditorCard({ scholarCwid, scholarName, mode, proxies }: Pro
           </Alert>
         )}
       </div>
+
+      {unitAdmins != null && (
+        <div
+          className="border-apollo-border mt-6 flex flex-col gap-3 border-t pt-6"
+          data-slot="unit-admin-editor-list"
+        >
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium">Org-unit administrators</p>
+            <p className="text-muted-foreground text-sm">
+              {mode === "self"
+                ? "Administrators of a department or division you belong to can also edit your overview and hide misattributed publications. This access comes from WCM org records — you can't add or remove them here."
+                : `Administrators of a department or division ${scholarName} belongs to can also edit this profile. This access comes from WCM org records and can't be changed here.`}
+            </p>
+          </div>
+          {unitAdmins.length === 0 ? (
+            <p className="text-muted-foreground text-sm" data-testid="unit-admin-editor-empty">
+              No org-unit administrators can edit this profile.
+            </p>
+          ) : (
+            <table className="w-full text-sm" data-testid="unit-admin-editor-table">
+              <thead>
+                <tr className="text-muted-foreground border-apollo-border border-b text-left">
+                  <th className="py-2 font-medium">Person</th>
+                  <th className="py-2 font-medium">Via</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unitAdmins.map((u, i) => {
+                  const shown = shownFor(u.adminCwid);
+                  return (
+                    <tr
+                      key={`${u.adminCwid}-${i}`}
+                      className="border-apollo-border border-b"
+                      data-testid={`unit-admin-editor-row-${u.adminCwid}`}
+                    >
+                      <td className="py-2">
+                        <span className="font-medium">{shown.name}</span>
+                        {shown.title && (
+                          <span className="text-muted-foreground"> · {shown.title}</span>
+                        )}
+                      </td>
+                      <td className="py-2">
+                        <span>{u.conferringUnitName}</span>
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {u.conferringUnitKind} administrator
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         open={revokeTarget !== null}
@@ -239,7 +320,7 @@ function formatGrantedAt(d: Date): string {
 function mapErrorToMessage(code: string): string {
   switch (code) {
     case "proxy_ineligible":
-      return "That person already has a role in the system (scholar, org-unit admin, or administrator), so they can't be a proxy editor.";
+      return "That person is a Scholars administrator, so they already have full edit access and can't be added as a profile editor.";
     case "cannot_proxy_self":
       return "A scholar can't be their own proxy editor.";
     case "proxy_limit_reached":

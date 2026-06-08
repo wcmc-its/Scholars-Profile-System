@@ -11,7 +11,6 @@ import {
   canEditUnit,
   canGrant,
   canManageAccess,
-  canProxyEdit,
   getEffectiveUnitRole,
   type UnitAdminLookup,
   type UnitRef,
@@ -214,30 +213,11 @@ describe("canGrant", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// canProxyEdit — edge 16, 17 (T3 capture-via-roster)
-// ---------------------------------------------------------------------------
-
-describe("canProxyEdit", () => {
-  it("allows a Superuser", () => {
-    expect(canProxyEdit(SUPER, "none")).toEqual({ ok: true });
-  });
-
-  it("allows an Owner of the scholar's LDAP-primary unit (edge 16)", () => {
-    expect(canProxyEdit(ACTOR, "owner")).toEqual({ ok: true });
-  });
-
-  it("allows a Curator of the scholar's LDAP-primary unit", () => {
-    expect(canProxyEdit(ACTOR, "curator")).toEqual({ ok: true });
-  });
-
-  it("denies when the scholar's LDAP-primary unit is outside the actor's scope (edge 17, T3)", () => {
-    // The caller has already keyed the lookup on `Scholar.deptCode` / `divCode`
-    // — never roster membership — so a `none` here means *strictly* "not in the
-    // LDAP-primary subtree", which is the T3 capture-via-roster guard.
-    expect(canProxyEdit(ACTOR, "none")).toEqual({ ok: false, reason: "proxy_target_not_in_unit" });
-  });
-});
+// canProxyEdit (Amendment 1 § A1.3 T3) was retired in Amendment 4 P4 — it was
+// never wired into a route (the role-derived path a route calls is
+// `unit-scholar-authz.ts:resolveEditableUnitViaUnitAdmin`), and its
+// "roster never confers edit" invariant is the deliberate opposite of D1. Its
+// edge-16/17 coverage retired with it.
 
 // ---------------------------------------------------------------------------
 // Per-POST re-check semantics — edge 11 ("revoke takes effect on next POST")

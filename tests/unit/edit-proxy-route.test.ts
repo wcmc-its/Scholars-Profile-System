@@ -4,8 +4,9 @@
  * Each test maps to a row in the SPEC § Edge-case test table or a threat:
  *  - Superuser-on-behalf grant → 200, audit actor = superuser (edge 19).
  *  - A proxy can never grant → 403 not_self (edge 15 / CD-2).
- *  - D3 grant-time block: candidate is a scholar / unit_admin / superuser →
- *    403 proxy_ineligible, opaque (edges 3/4/5, CD-3/CD-6), all legs run.
+ *  - D3 grant-time conflict (Amendment 4 D4 narrowed to superuser-only): a
+ *    scholar / unit_admin candidate now succeeds; only a superuser candidate →
+ *    403 proxy_ineligible, opaque (CD-3 / CD-6).
  *  - Cross-origin → 403 (CD-4).
  *  - Grant while impersonating → 403 impersonation_block (edge 18 / IS-10).
  *  - Grant for a soft-deleted scholar → 400 scholar_not_found (edge 20).
@@ -153,7 +154,8 @@ describe("/api/edit/proxy — grant", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("candidate IS a scholar → 403 proxy_ineligible, opaque (edge 3 / leg 1)", async () => {
+  it("candidate IS a scholar → now allowed (Amendment 4 D4): 200, grant committed", async () => {
+    // The proxy candidate is itself an active scholar — no longer a conflict.
     mockScholarFindUnique.mockImplementation(async ({ where }: { where: { cwid: string } }) => {
       if (where.cwid === SCHOLAR) {
         return { deletedAt: null, preferredName: "Rahul Sharma", email: "x@y" };
@@ -161,19 +163,21 @@ describe("/api/edit/proxy — grant", () => {
       return { deletedAt: null }; // the proxy candidate is itself an active scholar
     });
     const res = await POST(post({ scholarCwid: SCHOLAR, proxyCwid: PROXY, action: "grant" }));
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "proxy_ineligible" });
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockTxProxyUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: { scholarCwid: SCHOLAR, proxyCwid: PROXY, grantedBy: SCHOLAR } }),
+    );
   });
 
-  it("candidate holds a unit_admin row → 403 proxy_ineligible (edge 4 / leg 2)", async () => {
+  it("candidate holds a unit_admin row → now allowed (Amendment 4 D4): 200, grant committed", async () => {
     mockUnitAdminFindFirst.mockResolvedValue({ cwid: PROXY });
     const res = await POST(post({ scholarCwid: SCHOLAR, proxyCwid: PROXY, action: "grant" }));
-    expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "proxy_ineligible" });
+    expect(res.status).toBe(200);
+    expect(mockTransaction).toHaveBeenCalled();
   });
 
-  it("candidate IS a superuser (live leg, not deferred) → 403 proxy_ineligible (edge 5 / CD-3)", async () => {
+  it("candidate IS a superuser (live leg, not deferred) → 403 proxy_ineligible (the one kept leg / CD-3)", async () => {
     mockIsSuperuser.mockResolvedValue(true);
     const res = await POST(post({ scholarCwid: SCHOLAR, proxyCwid: PROXY, action: "grant" }));
     expect(res.status).toBe(403);
