@@ -25,6 +25,7 @@ vi.mock("@/lib/db", () => ({
 
 vi.mock("@/lib/api/topics", () => ({
   fetchWcmAuthorsForPmids: vi.fn().mockResolvedValue(new Map()),
+  fetchAuthorBylineForPmids: vi.fn().mockResolvedValue(new Map()),
 }));
 
 vi.mock("@/lib/api/mentoring-pmids", () => ({

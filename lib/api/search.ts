@@ -21,7 +21,7 @@
 import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
-import { fetchWcmAuthorsForPmids } from "@/lib/api/topics";
+import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
 import {
   getMentoringPmidBuckets,
   EMPTY_MENTORING_BUCKETS,
@@ -269,6 +269,17 @@ export type PublicationHit = {
    * the same "Why this match" note the Scholars tab uses.
    */
   matchProvenance?: MatchProvenance;
+  /**
+   * Issue #718 — unstructured author byline shown when `wcmAuthors` is empty
+   * because the pub's only confirmed WCM author was soft-deleted (left WCM), so
+   * the row would otherwise render with no attribution at all. Suppression-safe:
+   * null whenever the emptiness involves a suppressed author (ADR-005-dark or
+   * `scholar.status='suppressed'`), so the byline can never surface a suppressed
+   * scholar. Cleaned of `authors_string`'s `(( ))` WCM markers. Hydrated from
+   * MySQL per page (no reindex) — see `fetchAuthorBylineForPmids`. Always null
+   * when `wcmAuthors` is non-empty (chips win).
+   */
+  authorsFallback: string | null;
 };
 
 export type SearchFacetBucket = { value: string; count: number };
@@ -2432,6 +2443,19 @@ export async function searchPublications(opts: {
   const pmids = r.hits.hits.map((h) => h._source.pmid);
   const wcmAuthorsByPmid = await fetchWcmAuthorsForPmids(pmids);
 
+  // Issue #718 — a row whose displayable WCM author list is empty (its sole
+  // confirmed WCM author was soft-deleted / left WCM) would otherwise render with
+  // no author line at all. Hydrate a suppression-safe unstructured byline for just
+  // those pmids so the row keeps attribution. Emptiness is measured against the
+  // same `cwid+slug+headshot` predicate the per-hit chip map applies below.
+  const hasDisplayableAuthor = (pmid: string): boolean =>
+    (wcmAuthorsByPmid.get(pmid) ?? []).some(
+      (a) => a.cwid && a.slug && a.identityImageEndpoint,
+    );
+  const authorsFallbackByPmid = await fetchAuthorBylineForPmids(
+    pmids.filter((p) => !hasDisplayableAuthor(p)),
+  );
+
   // Issue #259 §1.8 — anchored-topic set for "Concept impact" computation.
   // Empty Set when the §1.8 flag is off, when no MeSH resolved, or when
   // the resolved descriptor has no curated anchors (`curatedTopicAnchors`
@@ -2459,6 +2483,21 @@ export async function searchPublications(opts: {
   return {
     hits: r.hits.hits.map((h) => {
       const enriched = wcmAuthorsByPmid.get(h._source.pmid) ?? [];
+      const wcmAuthors = enriched.flatMap((a) =>
+        a.cwid && a.slug && a.identityImageEndpoint
+          ? [
+              {
+                name: a.name,
+                cwid: a.cwid,
+                slug: a.slug,
+                identityImageEndpoint: a.identityImageEndpoint,
+                isFirst: a.isFirst,
+                isLast: a.isLast,
+                roleCategory: a.roleCategory,
+              },
+            ]
+          : [],
+      );
       // Compute per-hit impact display fields. Flag-off short-circuits to
       // both-null so legacy callers see unchanged shape.
       let impactScore: number | null = null;
@@ -2496,21 +2535,12 @@ export async function searchPublications(opts: {
         doi: h._source.doi,
         pmcid: h._source.pmcid,
         pubmedUrl: h._source.pubmedUrl,
-        wcmAuthors: enriched.flatMap((a) =>
-          a.cwid && a.slug && a.identityImageEndpoint
-            ? [
-                {
-                  name: a.name,
-                  cwid: a.cwid,
-                  slug: a.slug,
-                  identityImageEndpoint: a.identityImageEndpoint,
-                  isFirst: a.isFirst,
-                  isLast: a.isLast,
-                  roleCategory: a.roleCategory,
-                },
-              ]
-            : [],
-        ),
+        wcmAuthors,
+        // Issue #718 — byline only when there is no displayable chip; chips win.
+        authorsFallback:
+          wcmAuthors.length === 0
+            ? (authorsFallbackByPmid.get(h._source.pmid) ?? null)
+            : null,
         impactScore,
         conceptImpactScore,
         impactJustification,

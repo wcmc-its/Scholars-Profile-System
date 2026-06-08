@@ -969,6 +969,74 @@ export async function fetchWcmAuthorsForPmids(
 }
 
 /**
+ * #718 — Suppression-safe unstructured author byline for publication-search rows
+ * whose displayable WCM author list is empty (the sole confirmed WCM author was
+ * soft-deleted / left WCM, so {@link fetchWcmAuthorsForPmids} dropped them at the
+ * `deletedAt:null, status:"active"` filter). Returns a Map<pmid, byline> for the
+ * *byline-eligible* pmids only, so `PublicationResultRow` can render attribution
+ * instead of a blank row.
+ *
+ * Eligibility is **conservative — never reveal a suppressed scholar.** A pmid gets
+ * a byline only when ALL hold:
+ *   1. it has >= 1 confirmed WCM author (it is a WCM pub, not pure-external);
+ *   2. it is NOT dark per ADR-005 ({@link resolveDarkPmids} — whole-pub takedown or
+ *      every site-visible author per-author-hidden); AND
+ *   3. NO confirmed WCM author has `scholar.status = 'suppressed'` (scholar-level
+ *      suppression, independent of the ADR-005 `suppression` table — the table and
+ *      the scholar status are separate layers, so `resolveDarkPmids` alone would
+ *      not catch a `status='suppressed'` sole author).
+ * A pmid failing any clause is omitted (stays author-less) — a candidate for the
+ * #393-style reconciler / upstream data fix, not a byline.
+ *
+ * The caller passes only the pmids that came back with zero *displayable* WCM
+ * authors, so this is bounded to the author-less minority of a result page.
+ */
+export async function fetchAuthorBylineForPmids(
+  emptyPmids: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (emptyPmids.length === 0) return out;
+
+  // Confirmed WCM authors for these pmids WITHOUT the active/not-deleted filter,
+  // so we can both (a) confirm >= 1 confirmed WCM author and (b) detect a
+  // scholar-level suppressed author the chip query already dropped.
+  const [authorRows, suppressions] = await Promise.all([
+    prisma.publicationAuthor.findMany({
+      where: { pmid: { in: emptyPmids }, isConfirmed: true, cwid: { not: null } },
+      select: { pmid: true, scholar: { select: { status: true } } },
+    }),
+    loadPublicationSuppressions(emptyPmids, prisma),
+  ]);
+  const darkPmids = await resolveDarkPmids(emptyPmids, suppressions, prisma);
+
+  const hasConfirmed = new Set<string>();
+  const hasSuppressed = new Set<string>();
+  for (const row of authorRows) {
+    if (!row.scholar) continue;
+    hasConfirmed.add(row.pmid);
+    if (row.scholar.status === "suppressed") hasSuppressed.add(row.pmid);
+  }
+
+  const eligible = emptyPmids.filter(
+    (pmid) => hasConfirmed.has(pmid) && !hasSuppressed.has(pmid) && !darkPmids.has(pmid),
+  );
+  if (eligible.length === 0) return out;
+
+  const pubs = await prisma.publication.findMany({
+    where: { pmid: { in: eligible } },
+    select: { pmid: true, authorsString: true },
+  });
+  for (const pub of pubs) {
+    // `authors_string` marks WCM authors with `(( ))` (the substrings profile
+    // rendering overlays hyperlinks onto). The byline has no link target here,
+    // so strip the markers for clean display text.
+    const byline = pub.authorsString?.replace(/\(\(|\)\)/g, "").trim();
+    if (byline) out.set(pub.pmid, byline);
+  }
+  return out;
+}
+
+/**
  * D-10 — Distinct active-scholar count for a topic.
  *
  * Powers the "View all N scholars in this area →" affordance on the topic page.
