@@ -28,6 +28,11 @@ import { getSession } from "@/lib/auth/session-server";
 import { db } from "@/lib/db";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { requireSuperuserGet } from "@/lib/edit/authz";
+import {
+  checkProxyConflictingRole,
+  isGrantedProxy,
+  type ProxyLookup,
+} from "@/lib/edit/proxy-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -66,7 +71,28 @@ export default async function EditScholarPage({
   }
 
   const isSelf = session.cwid === targetCwid;
-  if (!isSelf) {
+
+  // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted,
+  // conflict-free proxy reaches EXACTLY their granted scholar's edit surface.
+  // Keyed on the RAW identity and only when NOT impersonating (`raw.cwid ===
+  // session.cwid`) — a #637 "View as" overlay must never confer the proxy path
+  // (IS-1). A proxy is NOT a superuser, so it remains subject to the
+  // soft-deleted-404 and #536 hidden-class-404 guards below (IS-9).
+  let isProxy = false;
+  if (!isSelf && !session.isSuperuser && raw.cwid === session.cwid) {
+    if (await isGrantedProxy(raw.cwid, targetCwid, db.read as unknown as ProxyLookup)) {
+      const conflict = await checkProxyConflictingRole(
+        raw.cwid,
+        db.read as unknown as ProxyLookup,
+        // Reuse the live verdict already resolved for this (non-impersonating)
+        // cwid instead of a second LDAPS round-trip.
+        async () => session.isSuperuser,
+      );
+      isProxy = conflict.ok;
+    }
+  }
+
+  if (!isSelf && !isProxy) {
     // GET-time superuser re-check — emits one `edit_authz_denied` line with
     // reason="not_superuser_get" when the actor is not a superuser. The
     // helper guarantees the two routes (this one and /edit/publication/[pmid])
@@ -102,7 +128,7 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  const mode = isSelf ? "self" : "superuser";
+  const mode = isSelf ? "self" : isProxy ? "proxy" : "superuser";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set

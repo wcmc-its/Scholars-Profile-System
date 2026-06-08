@@ -18,11 +18,12 @@ import { ArrowUpRight, ChevronLeftIcon } from "lucide-react";
 
 import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSelect } from "@/components/edit/rail-select";
+import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
 import { AccountMenu } from "@/components/site/account-menu";
 
 export type EditShellProps = {
-  mode: "self" | "superuser";
+  mode: "self" | "superuser" | "proxy";
   /** The entity display name (scholar preferred name, or a unit name). Kept as
    *  `scholarName` for call-site stability — it is the top-bar + banner label. */
   scholarName: string;
@@ -62,6 +63,7 @@ export function EditShell({
   children,
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
+  const isProxy = mode === "proxy";
   return (
     <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
@@ -122,6 +124,14 @@ export function EditShell({
                 {scholarName}
               </span>
             </nav>
+          ) : isProxy ? (
+            // A proxy has no roster to return to — a flat label naming the
+            // scholar they are editing, not a navigable breadcrumb.
+            <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
+              <span className="font-medium" aria-current="page" data-testid="edit-subnav-proxy">
+                {scholarName}
+              </span>
+            </nav>
           ) : (
             <div className="flex items-center gap-6">
               <span
@@ -155,7 +165,7 @@ export function EditShell({
         <main id="edit-detail" tabIndex={-1} aria-labelledby="panel-heading" className="min-w-0 scroll-mt-4">
           <RailSelect items={railItems} active={activeAttr} basePath={basePath} />
 
-          {!isSuperuser && (
+          {mode === "self" && (
             <p className="text-muted-foreground mt-4 mb-4 text-sm md:mt-0">
               Changes here appear on your public profile. Most fields come from WCM systems — use{" "}
               <span className="font-medium">Request a change</span> to fix those.
@@ -180,6 +190,7 @@ export function EditShell({
           )}
 
           {isSuperuser && <SuperuserBanner targetLabel={scholarName} />}
+          {isProxy && <ProxyBanner targetLabel={scholarName} />}
 
           <div className="apollo-card">{children}</div>
         </main>
