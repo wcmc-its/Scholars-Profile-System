@@ -100,21 +100,41 @@ export type UnitScholarLookup = UnitAdminLookup & {
 };
 
 /**
- * May `adminCwid` edit scholar `scholarCwid`'s profile by virtue of
- * administering (owner OR curator — D2) a unit the scholar belongs to
- * (department + LDAP/roster division, with the dept→division cascade — D1)?
- *
- * Pure boolean predicate, no wiring (Amendment 4 P1). `adminCwid` is the REAL
- * signed-in cwid; the caller has already established `adminCwid !== scholarCwid`
- * (self-edit is `authorizeFieldEdit`) and `impersonatedCwid === null`. Short-
- * circuits on the first unit that grants access.
+ * The membership unit through which a unit administrator may edit a scholar — a
+ * `department` or `division` the scholar belongs to. Returned by
+ * {@link resolveEditableUnitViaUnitAdmin} so callers can attribute the edit (the
+ * P2 B03 audit `afterValues` carries the code; the page banner resolves the
+ * display name). `kind` is never `center` — centers are excluded (D1).
  */
-export async function canEditScholarViaUnit(
+export type EditableUnit = { kind: "department" | "division"; code: string };
+
+/**
+ * Resolve THE unit through which `adminCwid` may edit `scholarCwid`'s profile —
+ * by administering (owner OR curator — D2) a unit the scholar belongs to
+ * (department + LDAP/roster division, with the dept→division cascade — D1) — or
+ * `null` if there is none.
+ *
+ * Returns the scholar's **membership unit** that the admin's effective role
+ * covers, in priority order: the scholar's department first, then each division
+ * (LDAP-primary `divCode`, then roster `DivisionMembership`). In the #540
+ * cascade case — a parent-department owner/curator reaching a division — the
+ * **division** (the unit the scholar belongs to) is the one named, since that is
+ * the relation that confers access; the admin's authority covers it via the
+ * cascade encoded in `getEffectiveUnitRole`.
+ *
+ * `adminCwid` is the REAL signed-in cwid; the caller has already established
+ * `adminCwid !== scholarCwid` (self-edit is `authorizeFieldEdit`) and
+ * `impersonatedCwid === null`. Short-circuits on the first unit that grants
+ * access. Fail-closed: empty inputs, a missing/soft-deleted scholar, a scholar
+ * with no units, or no owner/curator grant ⇒ `null` (a thrown DB error
+ * propagates — the route denies).
+ */
+export async function resolveEditableUnitViaUnitAdmin(
   adminCwid: string,
   scholarCwid: string,
   db: UnitScholarLookup,
-): Promise<boolean> {
-  if (!adminCwid || !scholarCwid) return false;
+): Promise<EditableUnit | null> {
+  if (!adminCwid || !scholarCwid) return null;
 
   // S's home units come from the LDAP-authoritative `Scholar` columns; a
   // missing or soft-deleted scholar has no editable profile (fail-closed).
@@ -122,7 +142,7 @@ export async function canEditScholarViaUnit(
     where: { cwid: scholarCwid },
     select: { deptCode: true, divCode: true, deletedAt: true },
   });
-  if (!scholar || scholar.deletedAt !== null) return false;
+  if (!scholar || scholar.deletedAt !== null) return null;
 
   // Division membership = LDAP-primary (`divCode`) ∪ roster (`DivisionMembership`).
   const rosterRows = await db.divisionMembership.findMany({
@@ -134,7 +154,7 @@ export async function canEditScholarViaUnit(
   for (const row of rosterRows) divisionCodes.add(row.divisionCode);
 
   // Nobody can reach a scholar with no department and no divisions via this path.
-  if (!scholar.deptCode && divisionCodes.size === 0) return false;
+  if (!scholar.deptCode && divisionCodes.size === 0) return null;
 
   // Resolve each division's parent department for the cascade. An orphan roster
   // code with no `Division` row stays absent from the map → `parentDeptCode:
@@ -159,7 +179,9 @@ export async function canEditScholarViaUnit(
       { kind: "department", code: scholar.deptCode },
       db,
     );
-    if (role === "owner" || role === "curator") return true;
+    if (role === "owner" || role === "curator") {
+      return { kind: "department", code: scholar.deptCode };
+    }
   }
 
   // Division membership (LDAP + roster), each with the dept→division cascade.
@@ -169,8 +191,24 @@ export async function canEditScholarViaUnit(
       { kind: "division", code, parentDeptCode: parentByDivision.get(code) ?? null },
       db,
     );
-    if (role === "owner" || role === "curator") return true;
+    if (role === "owner" || role === "curator") {
+      return { kind: "division", code };
+    }
   }
 
-  return false;
+  return null;
+}
+
+/**
+ * May `adminCwid` edit scholar `scholarCwid`'s profile via a unit-admin role?
+ * Boolean façade over {@link resolveEditableUnitViaUnitAdmin} (a non-null result
+ * ⇒ yes). Kept as the named predicate for callers that need only the yes/no
+ * answer; the write paths use the resolver so they can attribute the edit.
+ */
+export async function canEditScholarViaUnit(
+  adminCwid: string,
+  scholarCwid: string,
+  db: UnitScholarLookup,
+): Promise<boolean> {
+  return (await resolveEditableUnitViaUnitAdmin(adminCwid, scholarCwid, db)) !== null;
 }

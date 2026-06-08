@@ -93,26 +93,30 @@ const DEFAULT_ATTR: Record<EditMode, AttrKey> = {
   self: "home",
   superuser: "home",
   proxy: "home",
+  "unit-admin": "home",
 };
 
-/** The actor surfaces. `proxy` (#779) is a scholar-assigned designee: it reuses
- *  the SELF editable surface (overview + publication hiding) on the scholar's
- *  route, minus the self-only Profile URL request and the "From your
- *  publications" advisory. Visual/interaction polish is a UI-SPEC deliverable. */
-type EditMode = "self" | "superuser" | "proxy";
+/** The actor surfaces. `proxy` (#779) is a scholar-assigned designee, and
+ *  `unit-admin` (Amendment 4) is an org-unit administrator of a unit the scholar
+ *  belongs to: both reuse the SELF editable surface (overview + publication
+ *  hiding) on the scholar's route, minus the self-only Profile URL request and
+ *  the "From your publications" advisory, and neither can manage the proxy list.
+ *  Visual/interaction polish is a UI-SPEC deliverable. */
+type EditMode = "self" | "superuser" | "proxy" | "unit-admin";
 
 /** The attribute set visible for a mode, before flag/candidate filtering.
- *  `proxy` mirrors `self` minus `profile-url` (slug is self/superuser-only — a
- *  proxy cannot request a slug for the scholar) and `coi-gap` (self-only
- *  advisory; the loader returns no candidates for a proxy anyway). */
+ *  `proxy` and `unit-admin` mirror `self` minus `profile-url` (slug is
+ *  self/superuser-only — neither can request a slug for the scholar), `coi-gap`
+ *  (self-only advisory; the loader returns no candidates for them anyway), and
+ *  `proxy-editors` (only the scholar/superuser manages designees — CD-2). */
 function attrsForMode(mode: EditMode): AttrDef[] {
-  if (mode === "proxy") {
+  if (mode === "proxy" || mode === "unit-admin") {
     return ATTRIBUTES.filter(
       (a) =>
         a.modes.includes("self") &&
         a.key !== "profile-url" &&
         a.key !== "coi-gap" &&
-        a.key !== "proxy-editors", // a proxy can never manage the proxy list (CD-2)
+        a.key !== "proxy-editors", // a proxy / unit admin can never manage the proxy list (CD-2)
     );
   }
   return ATTRIBUTES.filter((a) => a.modes.includes(mode));
@@ -213,6 +217,10 @@ export type EditPageProps = {
    *  panel in self / superuser mode. `null` ⇒ the panel renders nothing (e.g.
    *  proxy mode, where it is not even in the rail). */
   proxyEditors?: ProxyRow[] | null;
+  /** Unit-admin mode only (Amendment 4): the unit through which the viewer
+   *  administers this scholar, for the "via {unit} administrator" banner.
+   *  `null`/absent in every other mode. */
+  unitAdminBanner?: { unitKind: "department" | "division"; unitName: string } | null;
 };
 
 /**
@@ -246,6 +254,7 @@ export function EditPage({
   canBrowseProfiles = false,
   manageableUnits = [],
   proxyEditors = null,
+  unitAdminBanner = null,
 }: EditPageProps) {
   // "From your publications" is conditionally present: only in self mode and
   // only when the loader returned candidates (the loader itself enforces the
@@ -254,10 +263,10 @@ export function EditPage({
   // valid-attr set — an empty panel is never surfaced.
   const hasCoiGap = mode === "self" && ctx.unmatchedPubmedCoi.length > 0;
   const visible = attrsForMode(mode).filter((a) => a.key !== "coi-gap" || hasCoiGap);
-  // A proxy reuses the SELF rail/cards on the scholar's route (D4). Treated like
-  // self for layout; the distinct chrome (banner, breadcrumb, no account menu)
-  // is the shell's job.
-  const selfLike = mode === "self" || mode === "proxy";
+  // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
+  // the scholar's route (D4). Treated like self for layout; the distinct chrome
+  // (banner, breadcrumb, no account menu) is the shell's job.
+  const selfLike = mode === "self" || mode === "proxy" || mode === "unit-admin";
   const active: AttrDef =
     visible.find((a) => a.key === attr) ??
     visible.find((a) => a.key === DEFAULT_ATTR[mode]) ??
@@ -307,6 +316,7 @@ export function EditPage({
       previewHref={profilePath(ctx.scholar.slug)}
       account={mode === "self" ? { slug: ctx.scholar.slug, preferredName: scholarName } : undefined}
       canBrowseProfiles={canBrowseProfiles}
+      unitAdmin={unitAdminBanner ?? undefined}
     >
       {renderPanel(
         active.key,

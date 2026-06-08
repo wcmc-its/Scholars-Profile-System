@@ -33,6 +33,10 @@ import {
   isGrantedProxy,
   type ProxyLookup,
 } from "@/lib/edit/proxy-authz";
+import {
+  resolveEditableUnitViaUnitAdmin,
+  type UnitScholarLookup,
+} from "@/lib/edit/unit-scholar-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 
 export const dynamic = "force-dynamic";
@@ -92,7 +96,39 @@ export default async function EditScholarPage({
     }
   }
 
-  if (!isSelf && !isProxy) {
+  // Org-unit administrator as profile editor (Amendment 4 / scholar-proxy-unit-
+  // admin-amendment.md). An owner/curator of a unit the scholar belongs to
+  // reaches the scholar's edit surface. Keyed on the RAW identity and only when
+  // NOT impersonating (`raw.cwid === session.cwid`) and not already self/proxy —
+  // a #637 "View as" overlay must never confer it (IS-1). A unit admin is NOT a
+  // superuser, so it remains subject to the soft-deleted-404 and #536
+  // hidden-class-404 guards below. The conferring unit's display name feeds the
+  // "via {unit} administrator" banner.
+  let isUnitAdmin = false;
+  let unitAdminBanner: { unitKind: "department" | "division"; unitName: string } | null = null;
+  if (!isSelf && !isProxy && !session.isSuperuser && raw.cwid === session.cwid) {
+    const unit = await resolveEditableUnitViaUnitAdmin(
+      raw.cwid,
+      targetCwid,
+      db.read as unknown as UnitScholarLookup,
+    );
+    if (unit) {
+      isUnitAdmin = true;
+      const named =
+        unit.kind === "department"
+          ? await db.read.department.findUnique({
+              where: { code: unit.code },
+              select: { name: true },
+            })
+          : await db.read.division.findUnique({
+              where: { code: unit.code },
+              select: { name: true },
+            });
+      unitAdminBanner = { unitKind: unit.kind, unitName: named?.name ?? unit.code };
+    }
+  }
+
+  if (!isSelf && !isProxy && !isUnitAdmin) {
     // GET-time superuser re-check — emits one `edit_authz_denied` line with
     // reason="not_superuser_get" when the actor is not a superuser. The
     // helper guarantees the two routes (this one and /edit/publication/[pmid])
@@ -128,7 +164,7 @@ export default async function EditScholarPage({
   // request, so it matches /edit exactly. The superuser direct-set card is
   // unaffected (it has no flag).
   const slugRequestEnabled = isSelf && isSlugRequestEnabled();
-  const mode = isSelf ? "self" : isProxy ? "proxy" : "superuser";
+  const mode = isSelf ? "self" : isProxy ? "proxy" : isUnitAdmin ? "unit-admin" : "superuser";
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set
@@ -145,10 +181,11 @@ export default async function EditScholarPage({
     : null;
 
   // #779 — the "Proxy editors" panel: the scholar (self) or a superuser manages
-  // the scholar's designees. A proxy can never manage the list, so the panel is
-  // absent in proxy mode (and excluded from the rail).
+  // the scholar's designees. Neither a proxy (#779) nor a unit admin (Amendment
+  // 4) can manage the list, so the panel is absent in those modes (and excluded
+  // from the rail).
   const proxyEditors =
-    mode === "proxy"
+    mode === "proxy" || mode === "unit-admin"
       ? null
       : (
           await db.read.scholarProxy.findMany({
@@ -166,6 +203,7 @@ export default async function EditScholarPage({
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
       proxyEditors={proxyEditors}
+      unitAdminBanner={unitAdminBanner}
     />
   );
 }
