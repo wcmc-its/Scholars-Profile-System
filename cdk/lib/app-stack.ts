@@ -1040,6 +1040,17 @@ export class AppStack extends Stack {
         // REMOVE this and set SCHOLARS_SUPERUSER_GROUP_CN once VPC->WCM LDAPS
         // routing lands. CWIDs are directory usernames, not secrets.
         SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        // #374 — Content-Security-Policy rollout mode. next.config.ts reads
+        // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
+        // ships the policy as `Content-Security-Policy-Report-Only` (the
+        // launch default both envs carry), "enforce" flips the same policy
+        // value to the enforcing `Content-Security-Policy` header. Wired here
+        // per-env (envConfig.cspMode) so promotion is a config edit + manual
+        // `cdk deploy Sps-App-<env>` — CD re-rolls the image but never the
+        // task-def env, so without this the flag would never reach the task.
+        // Promote staging first, only after its post-#636 report feed is
+        // confirmed clean under real traffic (see issue #374).
+        SECURITY_CSP_MODE: envConfig.cspMode,
       },
       secrets: {
         DATABASE_URL: ecs.Secret.fromSecretsManager(appRwSecret),
