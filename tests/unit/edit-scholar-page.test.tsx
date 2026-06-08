@@ -28,6 +28,9 @@ const {
   mockNotFound,
   mockEditPage,
   mockForbiddenEditPage,
+  mockScholarProxyFindUnique,
+  mockProxyScholarFindUnique,
+  mockUnitAdminFindFirst,
 } = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
   mockGetEditSession: vi.fn(),
@@ -46,6 +49,13 @@ const {
   // element whose `type` is the spy.
   mockEditPage: vi.fn(() => null),
   mockForbiddenEditPage: vi.fn(() => null),
+  // #779 — the page-gate proxy probe (scholarProxy.findUnique) and the three-leg
+  // D3 conflict re-check's scholar.findUnique + unitAdmin.findFirst legs. The
+  // page supplies its own isSuperuserFn closure (() => session.isSuperuser), so
+  // the superuser leg needs no separate mock here.
+  mockScholarProxyFindUnique: vi.fn(),
+  mockProxyScholarFindUnique: vi.fn(),
+  mockUnitAdminFindFirst: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -58,12 +68,17 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/auth/session-server", () => ({ getSession: mockGetSession }));
 vi.mock("@/lib/auth/effective-identity", () => ({ getEffectiveEditSession: mockGetEditSession }));
 vi.mock("@/lib/api/edit-context", () => ({ loadEditContext: mockLoadEditContext }));
-// #779 — the page now probes for a proxy grant (page-gate authz) and loads the
-// scholar's proxy editors. No grants in these authorization-matrix tests.
+// #779 — the page probes for a proxy grant (page-gate authz), runs the D3
+// conflict re-check, and loads the scholar's proxy editors. The default-no-grant
+// authorization-matrix tests leave scholarProxy.findUnique → null; the proxy
+// tests at the end override it. `findMany` backs the "Proxy editors" panel
+// (self/superuser modes only).
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      scholarProxy: { findUnique: async () => null, findMany: async () => [] },
+      scholar: { findUnique: mockProxyScholarFindUnique },
+      unitAdmin: { findFirst: mockUnitAdminFindFirst },
+      scholarProxy: { findUnique: mockScholarProxyFindUnique, findMany: async () => [] },
     },
     write: {},
   },
@@ -107,6 +122,10 @@ beforeEach(() => {
   mockGetSession.mockResolvedValue({ cwid: "raw" });
   mockGetEditSession.mockResolvedValue(null);
   mockLoadEditContext.mockResolvedValue(null);
+  // #779 — default: no proxy grant + a clean conflict re-check. Proxy tests override.
+  mockScholarProxyFindUnique.mockResolvedValue(null);
+  mockProxyScholarFindUnique.mockResolvedValue(null);
+  mockUnitAdminFindFirst.mockResolvedValue(null);
 });
 
 type ReactElementLike = { type: unknown; props: Record<string, unknown> };
@@ -219,5 +238,73 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     mockGetEditSession.mockResolvedValue(SELF); // no longer a superuser
     const result = asElement(await EditScholarPage({ params: params("other7") }));
     expect(result.type).toBe(mockForbiddenEditPage);
+  });
+
+  // ─── #779 — scholar-assigned proxy editor page gate (scholar-proxy-spec.md
+  // § "Must fix" #12). A granted, conflict-free proxy reaches EXACTLY their
+  // granted scholar's edit surface in `mode='proxy'`; a since-conflicted proxy
+  // is denied; and a proxy is still subject to the #536 hidden-class 404 (IS-9).
+  // The probe keys on the RAW identity, only when NOT impersonating. ───
+  describe("scholar-assigned proxy page gate (#779)", () => {
+    // A non-impersonating proxy: raw.cwid === effective.cwid === proxy01.
+    function actingAsProxy() {
+      mockGetSession.mockResolvedValue({ cwid: "proxy01" });
+      mockGetEditSession.mockResolvedValue({ cwid: "proxy01", isSuperuser: false });
+    }
+
+    it("a granted, conflict-free proxy → EditPage(mode='proxy'), no proxy-editors panel", async () => {
+      actingAsProxy();
+      mockScholarProxyFindUnique.mockImplementation(
+        async ({
+          where,
+        }: {
+          where: { scholarCwid_proxyCwid: { scholarCwid: string; proxyCwid: string } };
+        }) => {
+          const { scholarCwid, proxyCwid } = where.scholarCwid_proxyCwid;
+          return scholarCwid === "schA" && proxyCwid === "proxy01" ? { scholarCwid } : null;
+        },
+      );
+      mockLoadEditContext.mockResolvedValue(fakeCtx("schA"));
+      const result = asElement(await EditScholarPage({ params: params("schA") }));
+      expect(result.type).toBe(mockEditPage);
+      expect(result.props.mode).toBe("proxy");
+      // a proxy can never manage the designee list — the panel is absent in proxy mode
+      expect(result.props.proxyEditors).toBeNull();
+    });
+
+    it("a proxy of schA visiting schB (no grant) → ForbiddenEditPage (composite-PK binding)", async () => {
+      actingAsProxy();
+      // grant exists for schA only; the page asks for (schB, proxy01) → miss
+      mockScholarProxyFindUnique.mockImplementation(
+        async ({
+          where,
+        }: {
+          where: { scholarCwid_proxyCwid: { scholarCwid: string; proxyCwid: string } };
+        }) => (where.scholarCwid_proxyCwid.scholarCwid === "schA" ? { scholarCwid: "schA" } : null),
+      );
+      const result = asElement(await EditScholarPage({ params: params("schB") }));
+      expect(result.type).toBe(mockForbiddenEditPage);
+      expect(mockLoadEditContext).not.toHaveBeenCalled();
+    });
+
+    it("a granted proxy who has since become a scholar → ForbiddenEditPage (conflict re-check at GET)", async () => {
+      actingAsProxy();
+      mockScholarProxyFindUnique.mockResolvedValue({ scholarCwid: "schA" }); // grant present
+      mockProxyScholarFindUnique.mockResolvedValue({ deletedAt: null }); // proxy01 is now an active scholar
+      const result = asElement(await EditScholarPage({ params: params("schA") }));
+      expect(result.type).toBe(mockForbiddenEditPage);
+      expect(mockLoadEditContext).not.toHaveBeenCalled();
+    });
+
+    it("a hidden-class scholar (doctoral_student) → notFound() even for a granted proxy (IS-9)", async () => {
+      actingAsProxy();
+      mockScholarProxyFindUnique.mockResolvedValue({ scholarCwid: "schA" }); // grant present, clean conflict
+      const ctx = fakeCtx("schA");
+      mockLoadEditContext.mockResolvedValue({
+        ...ctx,
+        scholar: { ...ctx.scholar, roleCategory: "doctoral_student" },
+      });
+      await expect(EditScholarPage({ params: params("schA") })).rejects.toThrow("__NOT_FOUND__");
+    });
   });
 });

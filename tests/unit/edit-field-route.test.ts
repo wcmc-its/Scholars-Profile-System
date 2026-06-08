@@ -17,6 +17,10 @@ const {
   mockTxSlugHistoryUpsert,
   mockTxGenerationFindUnique,
   mockTxProvenanceUpsert,
+  mockScholarProxyFindUnique,
+  mockProxyScholarFindUnique,
+  mockUnitAdminFindFirst,
+  mockIsSuperuser,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -33,12 +37,25 @@ const {
   mockTxSlugHistoryUpsert: vi.fn(),
   mockTxGenerationFindUnique: vi.fn(),
   mockTxProvenanceUpsert: vi.fn(),
+  // #779 — the proxy branch: a grant lookup (scholarProxy.findUnique) and the
+  // three-leg D3 conflict re-check (scholar.findUnique + unitAdmin.findFirst +
+  // the live isSuperuser leg). The real proxy-authz predicates run; only these
+  // DB/LDAP surfaces are mocked.
+  mockScholarProxyFindUnique: vi.fn(),
+  mockProxyScholarFindUnique: vi.fn(),
+  mockUnitAdminFindFirst: vi.fn(),
+  mockIsSuperuser: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
 // Drive it from the same `mockGetEditSession` knob (non-impersonating: real ==
 // effective, so `actor_cwid` is this cwid and `impersonatedCwid` stays null).
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/superuser", () => ({
+  getEditSession: mockGetEditSession,
+  // #779 — the live D3 superuser leg in checkProxyConflictingRole (the route
+  // calls it without an isSuperuserFn override, so the imported one is used).
+  isSuperuser: mockIsSuperuser,
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: vi.fn().mockReturnValue(false),
@@ -52,12 +69,16 @@ vi.mock("@/lib/auth/session-server", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     read: {
-      scholar: { findFirst: mockScholarFindFirst },
+      // `scholar.findFirst` backs the slug-collision check; `scholar.findUnique`
+      // backs the #779 conflict re-check (its `proxy_is_scholar` leg).
+      scholar: { findFirst: mockScholarFindFirst, findUnique: mockProxyScholarFindUnique },
       fieldOverride: { findFirst: mockFieldOverrideFindFirst },
       slugHistory: { findFirst: mockSlugHistoryFindFirst },
-      // #779 — the non-self overview path now probes for a proxy grant before
-      // denying; no grant in these self/superuser tests, so it returns null.
-      scholarProxy: { findUnique: async () => null },
+      // #779 — the conflict re-check's `proxy_is_unit_admin` leg.
+      unitAdmin: { findFirst: mockUnitAdminFindFirst },
+      // #779 — the non-self overview path probes for a proxy grant before
+      // denying. Default: no grant (null) — restored each test in beforeEach.
+      scholarProxy: { findUnique: mockScholarProxyFindUnique },
     },
     write: { $transaction: mockTransaction },
   },
@@ -111,6 +132,12 @@ beforeEach(() => {
   // #742 Phase B — no source generation by default; provenance upsert resolves.
   mockTxGenerationFindUnique.mockResolvedValue(null);
   mockTxProvenanceUpsert.mockResolvedValue({});
+  // #779 — default: no proxy grant, and a clean conflict re-check (the actor is
+  // not a scholar / unit_admin / superuser). Proxy tests override these.
+  mockScholarProxyFindUnique.mockResolvedValue(null);
+  mockProxyScholarFindUnique.mockResolvedValue(null);
+  mockUnitAdminFindFirst.mockResolvedValue(null);
+  mockIsSuperuser.mockResolvedValue(false);
 });
 
 describe("POST /api/edit/field", () => {
@@ -368,5 +395,103 @@ describe("POST /api/edit/field", () => {
     expect(res.status).toBe(200);
     expect(mockTxProvenanceUpsert).not.toHaveBeenCalled();
     expect(mockTxGenerationFindUnique).not.toHaveBeenCalled();
+  });
+
+  // ─── #779 — scholar-assigned proxy editor (scholar-proxy-spec.md § "Must fix" #12) ───
+  // The no-grant proxy path is already covered above ("rejects a cross-scholar
+  // overview edit with 403"): with no grant the route falls through to the
+  // ordinary 403. These exercise the branch with a LIVE grant. The REAL
+  // proxy-authz predicates run — `isGrantedProxy` (composite-PK lookup) and the
+  // three-leg D3 `checkProxyConflictingRole` (incl. the live isSuperuser leg) —
+  // so the route's keying on `realCwid`, its positive `overview`-only allowlist,
+  // and the fail-closed conflict re-check are all under test.
+  describe("scholar-assigned proxy (#779)", () => {
+    const PROXY = { cwid: "proxy01", isSuperuser: false };
+
+    // proxy01 is a granted proxy for schA ONLY — a composite-PK grant, so a
+    // lookup for any other (scholar, proxy) pair misses (threat PE-06).
+    function grantProxyForSchA() {
+      mockScholarProxyFindUnique.mockImplementation(
+        async ({
+          where,
+        }: {
+          where: { scholarCwid_proxyCwid: { scholarCwid: string; proxyCwid: string } };
+        }) => {
+          const { scholarCwid, proxyCwid } = where.scholarCwid_proxyCwid;
+          return scholarCwid === "schA" && proxyCwid === "proxy01" ? { scholarCwid } : null;
+        },
+      );
+    }
+
+    it("a granted proxy edits the scholar's overview → 200; audit actor = proxy, impersonated null", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockResolveProfiles.mockResolvedValue([{ slug: "schA-slug", cwid: "schA" }]);
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "schA", fieldName: "overview", value: "<p>By the proxy.</p>" }),
+      );
+      expect(res.status).toBe(200);
+      // the grant lookup keys on (granted scholar, REAL cwid) — never session/effective (PE-01)
+      expect(mockScholarProxyFindUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scholarCwid_proxyCwid: { scholarCwid: "schA", proxyCwid: "proxy01" } },
+        }),
+      );
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+      // the B03 audit row records the proxy as actor, with no impersonation overlay.
+      // appendAuditRow binds actor_cwid first and impersonated_cwid last (audit.ts).
+      const auditArgs = mockExecuteRaw.mock.calls[0];
+      expect(auditArgs[1]).toBe("proxy01");
+      expect(auditArgs[auditArgs.length - 1]).toBe(null);
+      expect(mockReflectOverviewEdit).toHaveBeenCalled();
+    });
+
+    it("a proxy of schA editing schB's overview → 403, writes nothing (composite-PK binding)", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "schB", fieldName: "overview", value: "<p>x</p>" }),
+      );
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("a proxy who has since become a scholar → 403 proxy_conflict, writes nothing", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockProxyScholarFindUnique.mockResolvedValue({ deletedAt: null }); // proxy01 is now an active scholar
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "schA", fieldName: "overview", value: "<p>x</p>" }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "proxy_conflict" });
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("a proxy who is now a superuser → 403 proxy_conflict; the live isSuperuser leg runs at edit time", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockIsSuperuser.mockResolvedValue(true); // the D3 superuser leg, never deferred (IS-7)
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "schA", fieldName: "overview", value: "<p>x</p>" }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "proxy_conflict" });
+      expect(mockIsSuperuser).toHaveBeenCalledWith("proxy01");
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("a granted proxy may NOT edit slug — the allowlist is overview-only (403, grant never probed)", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "schA", fieldName: "slug", value: "new-slug" }),
+      );
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+      // the proxy branch is gated on fieldName === "overview"; a slug edit never reaches the grant probe
+      expect(mockScholarProxyFindUnique).not.toHaveBeenCalled();
+    });
   });
 });

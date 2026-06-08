@@ -15,6 +15,10 @@ const {
   mockEducationFindUnique,
   mockAppointmentFindUnique,
   mockDepartmentFindFirst,
+  mockScholarProxyFindUnique,
+  mockProxyScholarFindUnique,
+  mockUnitAdminFindFirst,
+  mockIsSuperuser,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -29,12 +33,22 @@ const {
   mockEducationFindUnique: vi.fn(),
   mockAppointmentFindUnique: vi.fn(),
   mockDepartmentFindFirst: vi.fn(),
+  // #779 — the proxy branch: a grant lookup + the three-leg D3 conflict re-check
+  // (scholar.findUnique + unitAdmin.findFirst + the live isSuperuser leg).
+  mockScholarProxyFindUnique: vi.fn(),
+  mockProxyScholarFindUnique: vi.fn(),
+  mockUnitAdminFindFirst: vi.fn(),
+  mockIsSuperuser: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
 // Drive it from the same `mockGetEditSession` knob (non-impersonating: real ==
 // effective, so `actor_cwid` is this cwid and `impersonatedCwid` stays null).
-vi.mock("@/lib/auth/superuser", () => ({ getEditSession: mockGetEditSession }));
+vi.mock("@/lib/auth/superuser", () => ({
+  getEditSession: mockGetEditSession,
+  // #779 — the live D3 superuser leg in checkProxyConflictingRole.
+  isSuperuser: mockIsSuperuser,
+}));
 vi.mock("@/lib/auth/effective-identity", () => ({
   getEffectiveEditSession: mockGetEditSession,
   impersonationActive: vi.fn().mockReturnValue(false),
@@ -54,9 +68,13 @@ vi.mock("@/lib/db", () => ({
       education: { findUnique: mockEducationFindUnique },
       appointment: { findUnique: mockAppointmentFindUnique },
       department: { findFirst: mockDepartmentFindFirst },
-      // #779 — a per-author publication hide by a non-self actor now probes for
-      // a proxy grant before denying; no grant in these tests ⇒ null ⇒ unchanged.
-      scholarProxy: { findUnique: async () => null },
+      // #779 — the conflict re-check's `proxy_is_scholar` / `proxy_is_unit_admin`
+      // legs (scholar.findUnique + unitAdmin.findFirst).
+      scholar: { findUnique: mockProxyScholarFindUnique },
+      unitAdmin: { findFirst: mockUnitAdminFindFirst },
+      // #779 — a per-author publication hide by a non-self actor probes for a
+      // proxy grant before denying. Default: no grant (null), set in beforeEach.
+      scholarProxy: { findUnique: mockScholarProxyFindUnique },
     },
     write: { $transaction: mockTransaction },
   },
@@ -105,6 +123,12 @@ beforeEach(() => {
   mockEducationFindUnique.mockResolvedValue({ cwid: "self01" });
   mockAppointmentFindUnique.mockResolvedValue({ cwid: "self01", title: "Professor of Medicine" });
   mockDepartmentFindFirst.mockResolvedValue(null);
+  // #779 — default: no proxy grant, and a clean conflict re-check. Overridden in
+  // the proxy tests below.
+  mockScholarProxyFindUnique.mockResolvedValue(null);
+  mockProxyScholarFindUnique.mockResolvedValue(null);
+  mockUnitAdminFindFirst.mockResolvedValue(null);
+  mockIsSuperuser.mockResolvedValue(false);
 });
 
 describe("POST /api/edit/suppress", () => {
@@ -307,5 +331,85 @@ describe("POST /api/edit/suppress", () => {
     );
     expect(res.status).toBe(200);
     expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── #779 — scholar-assigned proxy editor (scholar-proxy-spec.md § "Must fix" #12) ───
+  // A granted proxy may hide ONLY the granted scholar's OWN authorship — a
+  // positive allowlist: `publication` AND `contributorCwid === the granted
+  // scholar` (PE-03 / IS-2). The REAL proxy-authz predicates run; the route's
+  // keying on `realCwid` and the fail-closed D3 re-check are under test.
+  describe("scholar-assigned proxy (#779)", () => {
+    const PROXY = { cwid: "proxy01", isSuperuser: false };
+
+    function grantProxyForSchA() {
+      mockScholarProxyFindUnique.mockImplementation(
+        async ({
+          where,
+        }: {
+          where: { scholarCwid_proxyCwid: { scholarCwid: string; proxyCwid: string } };
+        }) => {
+          const { scholarCwid, proxyCwid } = where.scholarCwid_proxyCwid;
+          return scholarCwid === "schA" && proxyCwid === "proxy01" ? { scholarCwid } : null;
+        },
+      );
+    }
+
+    it("a granted proxy hides the scholar's OWN authorship → 200; audit actor = proxy, impersonated null", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockResolveProfiles.mockResolvedValue([{ slug: "schA-slug", cwid: "schA" }]);
+      const res = await POST(post({ entityType: "publication", entityId: "999", contributorCwid: "schA" }));
+      expect(res.status).toBe(200);
+      // the grant lookup keys on (the hidden contributor = granted scholar, REAL cwid)
+      expect(mockScholarProxyFindUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { scholarCwid_proxyCwid: { scholarCwid: "schA", proxyCwid: "proxy01" } },
+        }),
+      );
+      expect(mockSuppressionCreate).toHaveBeenCalledTimes(1);
+      expect(mockScholarUpdateMany).not.toHaveBeenCalled(); // a per-author hide never projects status
+      const auditArgs = mockExecuteRaw.mock.calls[0];
+      expect(auditArgs[1]).toBe("proxy01");
+      expect(auditArgs[auditArgs.length - 1]).toBe(null);
+    });
+
+    it("a proxy of schA hiding ANOTHER author (schB) on the same publication → 403, no write", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      const res = await POST(post({ entityType: "publication", entityId: "999", contributorCwid: "schB" }));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it("a granted proxy attempting a WHOLE-publication takedown (no contributor) → 403; grant never probed", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      const res = await POST(post({ entityType: "publication", entityId: "999" }));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+      // the proxy branch requires contributor !== null, so the grant is never consulted (IS-2)
+      expect(mockScholarProxyFindUnique).not.toHaveBeenCalled();
+    });
+
+    it("a granted proxy may NOT suppress the scholar's grant — the allowlist is publication-only (403)", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockGrantFindUnique.mockResolvedValue({ cwid: "schA" });
+      const res = await POST(post({ entityType: "grant", entityId: "INFOED-1-schA" }));
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+      // a non-publication entityType never enters the proxy branch (IS-2)
+      expect(mockScholarProxyFindUnique).not.toHaveBeenCalled();
+    });
+
+    it("a proxy who has since become a scholar → 403 proxy_conflict, no write", async () => {
+      mockGetEditSession.mockResolvedValue(PROXY);
+      grantProxyForSchA();
+      mockProxyScholarFindUnique.mockResolvedValue({ deletedAt: null }); // proxy01 is now an active scholar
+      const res = await POST(post({ entityType: "publication", entityId: "999", contributorCwid: "schA" }));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: "proxy_conflict" });
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
   });
 });
