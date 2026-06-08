@@ -54,6 +54,9 @@ vi.mock("@/lib/db", () => ({
       education: { findUnique: mockEducationFindUnique },
       appointment: { findUnique: mockAppointmentFindUnique },
       department: { findFirst: mockDepartmentFindFirst },
+      // #779 — a per-author publication hide by a non-self actor now probes for
+      // a proxy grant before denying; no grant in these tests ⇒ null ⇒ unchanged.
+      scholarProxy: { findUnique: async () => null },
     },
     write: { $transaction: mockTransaction },
   },
