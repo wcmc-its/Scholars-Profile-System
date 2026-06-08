@@ -44,6 +44,11 @@ import {
   isGrantedProxy,
   type ProxyLookup,
 } from "@/lib/edit/proxy-authz";
+import {
+  resolveEditableUnitViaUnitAdmin,
+  type EditableUnit,
+  type UnitScholarLookup,
+} from "@/lib/edit/unit-scholar-authz";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
 import {
   reflectOverviewEdit,
@@ -190,6 +195,25 @@ async function handleScholarFieldEdit(params: {
       }
     }
   }
+  // Org-unit administrator as profile editor (Amendment 4 / scholar-proxy-unit-
+  // admin-amendment.md). An owner/curator of a unit the scholar belongs to may
+  // edit the scholar's `overview` — same positive allowlist as the proxy path,
+  // same `realCwid`-keyed / not-impersonating gate (IS-1). The resolved unit is
+  // carried into the B03 audit `afterValues` for attribution. The role is
+  // re-checked live per edit (the resolver reads `unit_admin` every call), so a
+  // lost role takes effect on the next request (fail-closed).
+  let viaUnitAdminUnit: EditableUnit | null = null;
+  if (!authz.ok && fieldName === "overview" && impersonatedCwid === null) {
+    const unit = await resolveEditableUnitViaUnitAdmin(
+      realCwid,
+      entityId,
+      db.read as unknown as UnitScholarLookup,
+    );
+    if (unit) {
+      authz = { ok: true };
+      viaUnitAdminUnit = unit;
+    }
+  }
   if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,
@@ -287,7 +311,19 @@ async function handleScholarFieldEdit(params: {
         action: "field_override",
         fieldsChanged: [fieldName],
         beforeValues: { [fieldName]: existing?.value ?? null },
-        afterValues: { [fieldName]: storedValue },
+        afterValues: {
+          [fieldName]: storedValue,
+          // Amendment 4 — when the edit was authorized via a unit-admin role,
+          // record which unit conferred it (the actor's cwid alone identifies
+          // WHO, not through which unit). Absent for self / proxy edits.
+          ...(viaUnitAdminUnit
+            ? {
+                edited_via: "unit_admin",
+                via_unit_type: viaUnitAdminUnit.kind,
+                via_unit_code: viaUnitAdminUnit.code,
+              }
+            : {}),
+        },
         ts: new Date(),
         requestId,
       });

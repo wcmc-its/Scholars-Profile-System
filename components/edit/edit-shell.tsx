@@ -20,10 +20,11 @@ import { AttributeRail, type RailItem } from "@/components/edit/attribute-rail";
 import { RailSelect } from "@/components/edit/rail-select";
 import { ProxyBanner } from "@/components/edit/proxy-banner";
 import { SuperuserBanner } from "@/components/edit/superuser-banner";
+import { UnitAdminBanner } from "@/components/edit/unit-admin-banner";
 import { AccountMenu } from "@/components/site/account-menu";
 
 export type EditShellProps = {
-  mode: "self" | "superuser" | "proxy";
+  mode: "self" | "superuser" | "proxy" | "unit-admin";
   /** The entity display name (scholar preferred name, or a unit name). Kept as
    *  `scholarName` for call-site stability — it is the top-bar + banner label. */
   scholarName: string;
@@ -47,6 +48,9 @@ export type EditShellProps = {
    *  (e.g. a department's sibling-divisions list). Omitted ⇒ no visible change
    *  for the existing /edit/scholar callers. */
   subRail?: React.ReactNode;
+  /** Unit-admin mode only (Amendment 4): the unit through which the viewer
+   *  administers this scholar, naming the "via {unit} administrator" banner. */
+  unitAdmin?: { unitKind: "department" | "division"; unitName: string };
   children: React.ReactNode;
 };
 
@@ -60,10 +64,12 @@ export function EditShell({
   account,
   canBrowseProfiles = false,
   subRail,
+  unitAdmin,
   children,
 }: EditShellProps) {
   const isSuperuser = mode === "superuser";
   const isProxy = mode === "proxy";
+  const isUnitAdmin = mode === "unit-admin";
   return (
     <div className="bg-apollo-page min-h-screen" data-slot="edit-shell" data-mode={mode}>
       {/* Skip link — first focusable element, jumps past the rail to the editor. */}
@@ -124,11 +130,15 @@ export function EditShell({
                 {scholarName}
               </span>
             </nav>
-          ) : isProxy ? (
-            // A proxy has no roster to return to — a flat label naming the
-            // scholar they are editing, not a navigable breadcrumb.
+          ) : isProxy || isUnitAdmin ? (
+            // A proxy / unit admin has no roster to return to — a flat label
+            // naming the scholar they are editing, not a navigable breadcrumb.
             <nav aria-label="Breadcrumb" className="flex items-center gap-2 py-3 text-sm">
-              <span className="font-medium" aria-current="page" data-testid="edit-subnav-proxy">
+              <span
+                className="font-medium"
+                aria-current="page"
+                data-testid={isUnitAdmin ? "edit-subnav-unit-admin" : "edit-subnav-proxy"}
+              >
                 {scholarName}
               </span>
             </nav>
@@ -191,6 +201,13 @@ export function EditShell({
 
           {isSuperuser && <SuperuserBanner targetLabel={scholarName} />}
           {isProxy && <ProxyBanner targetLabel={scholarName} />}
+          {isUnitAdmin && unitAdmin && (
+            <UnitAdminBanner
+              targetLabel={scholarName}
+              unitKind={unitAdmin.unitKind}
+              unitName={unitAdmin.unitName}
+            />
+          )}
 
           <div className="apollo-card">{children}</div>
         </main>
