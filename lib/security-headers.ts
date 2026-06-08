@@ -1,20 +1,28 @@
 /**
- * Security response headers applied to every route — issue #120 (B21).
+ * Security response headers — issue #120 (B21), CSP rollout #374.
  *
- * Set in `next.config.ts` via `headers()` rather than at a CDN edge: the
- * project has no production environment yet (#99 backlog), so the policy lives
- * in the app and travels with every deploy. Once a CloudFront layer exists the
- * same values can move to a response-headers policy unchanged.
+ * The header set is split by **when its value is decided**:
  *
- * The Content-Security-Policy is **flag-gated** between report-only and
- * enforcing modes (#374). `SECURITY_CSP_MODE=enforce` ships the policy as the
- * enforcing `Content-Security-Policy` header; any other value (including
- * unset) keeps it as `Content-Security-Policy-Report-Only`, the default.
- * The policy **value** is identical in both modes (per docs/ADR-007 §
- * Decision); only the header key changes, so flipping the flag is a name
- * swap reversible by flipping it back. The intended rollout is to leave the
- * default `report-only` until a launch-time observation window confirms a
- * clean violation feed, then set `SECURITY_CSP_MODE=enforce` in prod.
+ *  - {@link buildSecurityHeaders} — the static headers (HSTS, X-Frame-Options,
+ *    X-Content-Type-Options, Referrer-Policy, Permissions-Policy). Their values
+ *    never change, so they are emitted from `next.config.ts` `headers()`, which
+ *    Next bakes into the build-time routes manifest. That is correct for static
+ *    values.
+ *
+ *  - {@link buildCspResponseHeaders} — the Content-Security-Policy (+ its
+ *    `Reporting-Endpoints` pair). This is **flag-gated** between report-only and
+ *    enforcing modes on `SECURITY_CSP_MODE` (#374), and the flag must be
+ *    readable on a *deployed* image without a rebuild. `next.config.ts`
+ *    `headers()` is evaluated at **build time** and frozen into the routes
+ *    manifest — `process.env.SECURITY_CSP_MODE` there is read during
+ *    `next build`, not per request — so a task-def env change could never flip
+ *    a deployed image (proven on staging 2026-06-08). The CSP is therefore
+ *    emitted from `middleware.ts`, which runs per request at runtime and reads
+ *    the env live. The policy **value** is identical in both modes (docs/
+ *    ADR-007 § Decision); only the header key changes, so the flip is a name
+ *    swap reversible by flipping `SECURITY_CSP_MODE` back. Rollout: leave the
+ *    default `report-only` until the observation window confirms a clean
+ *    `/api/csp-report` feed, then set `=enforce` (staging first).
  */
 
 /** One response header, shaped for `next.config.ts` `headers()`. */
@@ -101,25 +109,18 @@ export function resolveCspMode(raw: string | undefined): CspMode {
 }
 
 /**
- * The full security-header set applied to every response.
+ * The static security headers (#120), emitted from `next.config.ts`
+ * `headers()`.
  *
  * HSTS, X-Frame-Options, X-Content-Type-Options and Referrer-Policy are the
- * four static headers named by #120. Permissions-Policy completes the set by
- * denying powerful browser features this app never uses. Reporting-Endpoints
- * names the `csp-endpoint` collector that the CSP `report-to` directive
- * targets. The CSP header key is selected by `cspMode`; the policy value is
- * the same in both modes.
+ * four headers named by #120. Permissions-Policy completes the set by denying
+ * powerful browser features this app never uses. Every value here is constant,
+ * so build-time evaluation in the routes manifest is correct — unlike the CSP,
+ * which is env-gated and lives in {@link buildCspResponseHeaders} (see the
+ * module doc above). These apply to all routes (`source: "/:path*"`), including
+ * static assets the CSP middleware skips.
  */
-export function buildSecurityHeaders(opts: {
-  isProduction: boolean;
-  cspMode?: CspMode;
-}): ResponseHeader[] {
-  const cspMode: CspMode = opts.cspMode ?? "report-only";
-  const cspHeaderKey =
-    cspMode === "enforce"
-      ? "Content-Security-Policy"
-      : "Content-Security-Policy-Report-Only";
-
+export function buildSecurityHeaders(): ResponseHeader[] {
   return [
     {
       key: "Strict-Transport-Security",
@@ -132,9 +133,32 @@ export function buildSecurityHeaders(opts: {
       key: "Permissions-Policy",
       value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
     },
+  ];
+}
+
+/**
+ * The runtime CSP headers — emitted from `middleware.ts` per request so
+ * `SECURITY_CSP_MODE` is read live (see the module doc above for why this
+ * cannot live in `next.config.ts` `headers()`).
+ *
+ * Returns the `Reporting-Endpoints` group definition (the Reporting-API
+ * counterpart of the policy's `report-uri`, naming the `/api/csp-report`
+ * collector) paired with the Content-Security-Policy itself. The header *key*
+ * is selected by `cspMode` — enforcing `Content-Security-Policy` vs
+ * `Content-Security-Policy-Report-Only` — while the policy *value* is identical
+ * in both modes, so the promotion is a reversible header-name swap.
+ */
+export function buildCspResponseHeaders(opts: {
+  isProduction: boolean;
+  cspMode: CspMode;
+}): ResponseHeader[] {
+  const cspHeaderKey =
+    opts.cspMode === "enforce"
+      ? "Content-Security-Policy"
+      : "Content-Security-Policy-Report-Only";
+
+  return [
     {
-      // Defines the `csp-endpoint` group the CSP `report-to` directive
-      // targets — the Reporting-API counterpart of `report-uri` (#374).
       key: "Reporting-Endpoints",
       value: 'csp-endpoint="/api/csp-report"',
     },

@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { buildSecurityHeaders, resolveCspMode } from "./lib/security-headers";
+import { buildSecurityHeaders } from "./lib/security-headers";
 
 // Next.js 15.5 instrumentation bundle does not resolve the `node:` URI scheme
 // for built-in modules pulled in from instrumentation.ts -> lib/tracing/init.ts
@@ -54,18 +54,19 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Security headers on every response — issue #120 (B21). The CSP rollout
-  // mode is flag-gated by `SECURITY_CSP_MODE` (#374); unset = report-only.
-  // See lib/security-headers.ts. `serverActions.allowedOrigins` is
-  // intentionally absent — the codebase uses no server actions.
+  // Static security headers on every response — issue #120 (B21). These values
+  // never change, so build-time evaluation in the routes manifest is correct.
+  // The env-gated Content-Security-Policy is deliberately NOT here: `headers()`
+  // is frozen at `next build`, so `SECURITY_CSP_MODE` could never be flipped on
+  // a deployed image from it (#374). The CSP is emitted at runtime from
+  // `middleware.ts` instead. See lib/security-headers.ts. `serverActions.
+  // allowedOrigins` is intentionally absent — the codebase uses no server
+  // actions.
   async headers() {
     return [
       {
         source: "/:path*",
-        headers: buildSecurityHeaders({
-          isProduction: process.env.NODE_ENV === "production",
-          cspMode: resolveCspMode(process.env.SECURITY_CSP_MODE),
-        }),
+        headers: buildSecurityHeaders(),
       },
     ];
   },
