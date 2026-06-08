@@ -122,6 +122,17 @@ export default async function EditSelfPage({
   const units = await loadManageableUnits(editCwid, db.read);
   const manageableUnits = [...units.departments, ...units.divisions, ...units.centers];
 
+  // #779 — the scholar manages their own proxy editors. Keyed on the EFFECTIVE
+  // editing identity (their own profile); the grant/revoke route blocks while
+  // impersonating, so the panel actions are inert under a "View as" overlay.
+  const proxyEditors = (
+    await db.read.scholarProxy.findMany({
+      where: { scholarCwid: editCwid },
+      select: { proxyCwid: true, grantedBy: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    })
+  ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
+
   return (
     <EditPage
       ctx={ctx}
@@ -131,6 +142,7 @@ export default async function EditSelfPage({
       latestSlugRequest={latestSlugRequest}
       canBrowseProfiles={canBrowseProfiles}
       manageableUnits={manageableUnits}
+      proxyEditors={proxyEditors}
     />
   );
 }

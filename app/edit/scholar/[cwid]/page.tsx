@@ -144,6 +144,20 @@ export default async function EditScholarPage({
     ? await loadLatestSlugRequest(session.cwid, db.read)
     : null;
 
+  // #779 — the "Proxy editors" panel: the scholar (self) or a superuser manages
+  // the scholar's designees. A proxy can never manage the list, so the panel is
+  // absent in proxy mode (and excluded from the rail).
+  const proxyEditors =
+    mode === "proxy"
+      ? null
+      : (
+          await db.read.scholarProxy.findMany({
+            where: { scholarCwid: targetCwid },
+            select: { proxyCwid: true, grantedBy: true, createdAt: true },
+            orderBy: { createdAt: "asc" },
+          })
+        ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
+
   return (
     <EditPage
       ctx={ctx}
@@ -151,6 +165,7 @@ export default async function EditScholarPage({
       attr={attr}
       slugRequestEnabled={slugRequestEnabled}
       latestSlugRequest={latestSlugRequest}
+      proxyEditors={proxyEditors}
     />
   );
 }
