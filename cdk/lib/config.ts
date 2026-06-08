@@ -264,9 +264,15 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     samlSpEntityId: "https://scholars.weill.cornell.edu/api/auth/saml/metadata",
     samlSpAcsUrl:
       "https://scholars-staging.weill.cornell.edu/api/auth/saml/callback",
-    // #374 — stays report-only until the post-#636 report feed is confirmed
-    // clean under real staging traffic, then flip to "enforce" + redeploy.
-    cspMode: "report-only",
+    // #374 — promoted to enforce 2026-06-08. The post-#636 report feed ran
+    // clean (its one violation pattern, a SAML-login RSC prefetch, was fixed by
+    // prefetch={false} in 7274cec; zero non-probe violations in the trailing
+    // 48h; an active Playwright pass over home/search/profile/topic/about found
+    // none). Takes effect because the CSP is emitted at runtime from
+    // middleware.ts (#780) — next.config headers() baked the mode at build time
+    // and could never flip a deployed image. Prod stays report-only until
+    // staging soaks clean in enforce.
+    cspMode: "enforce",
     etlSchedulesEnabled: true,
     // #393 — continuous reconciler backstop; enabled both envs (see flag JSDoc).
     reconcileScheduleEnabled: true,
