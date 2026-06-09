@@ -131,20 +131,44 @@ export function aggregateKeywords(
   return { totalAcceptedPubs, keywords };
 }
 
+// Stable composite key for the #800/#801 overlays; "::" is collision-proof
+// because A2 supercategory ids are snake_case and never contain a colon.
+const familyOverlayKey = (supercategory: string, familyLabel: string) =>
+  `${supercategory}::${familyLabel}`;
+
+function toScholarFamilyView(r: {
+  familyId: string;
+  familyLabel: string;
+  supercategory: string;
+  pmidCount: number;
+  exemplarTools: unknown;
+}): ScholarFamilyView {
+  return {
+    familyId: r.familyId,
+    familyLabel: r.familyLabel,
+    supercategory: r.supercategory,
+    pubCount: r.pmidCount,
+    exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+  };
+}
+
 /**
- * Load the family-primary Methods lens rows for a scholar (#799), newest-first
- * by publication count. Returns [] when the lens is disabled — the master
- * render gate — so nothing flows to the page (and no SEO/JSON side channel can
- * leak) until `METHODS_LENS_ENABLED=on`.
+ * Partition a scholar's method families (#799) into the PUBLIC set — what the
+ * CloudFront-cached profile payload may carry — and the #801 SENSITIVE set,
+ * which only the scholar + admins may see (via the cookie-forwarding reveal
+ * route, never the cached payload). Both newest-first by publication count.
  *
- * Applies two read-time overlays, both keyed on the stable (supercategory,
- * family_label) pair (A2 re-mints family_id every rebuild):
- *   - #800 suppression: ALWAYS — generic families hidden from everyone.
- *   - #801 sensitivity: only when `METHODS_LENS_SENSITIVE_GATE=on` — sensitive
- *     families omitted from this (public, CloudFront-cached) payload.
+ *   - #800 suppression is applied ALWAYS, to BOTH sets (generic families are
+ *     never shown to anyone).
+ *   - #801 sensitivity partitions only when `METHODS_LENS_SENSITIVE_GATE=on`;
+ *     with the gate off every (non-suppressed) family is public and sensitive
+ *     is []. Both overlays key on the stable (supercategory, family_label).
+ *   - Returns empty sets when the lens is disabled (the master render gate).
  */
-async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
-  if (!isMethodsLensEnabled()) return [];
+async function partitionScholarFamilies(
+  cwid: string,
+): Promise<{ publicFamilies: ScholarFamilyView[]; sensitiveFamilies: ScholarFamilyView[] }> {
+  if (!isMethodsLensEnabled()) return { publicFamilies: [], sensitiveFamilies: [] };
 
   const rows = await prisma.scholarFamily.findMany({
     where: { cwid },
@@ -157,34 +181,52 @@ async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
       exemplarTools: true,
     },
   });
-  if (rows.length === 0) return [];
-
-  // Stable composite key; "::" is collision-proof because A2 supercategory ids
-  // are snake_case and never contain a colon.
-  const overlayKey = (supercategory: string, familyLabel: string) =>
-    `${supercategory}::${familyLabel}`;
+  if (rows.length === 0) return { publicFamilies: [], sensitiveFamilies: [] };
 
   const suppression = await prisma.familySuppressionOverlay.findMany({
     select: { supercategory: true, familyLabel: true },
   });
-  const hidden = new Set(suppression.map((o) => overlayKey(o.supercategory, o.familyLabel)));
+  const suppressed = new Set(
+    suppression.map((o) => familyOverlayKey(o.supercategory, o.familyLabel)),
+  );
+  const visible = rows.filter(
+    (r) => !suppressed.has(familyOverlayKey(r.supercategory, r.familyLabel)),
+  );
 
-  if (isMethodsLensSensitiveGateOn()) {
-    const sensitive = await prisma.familySensitivityOverlay.findMany({
-      select: { supercategory: true, familyLabel: true },
-    });
-    for (const o of sensitive) hidden.add(overlayKey(o.supercategory, o.familyLabel));
+  if (!isMethodsLensSensitiveGateOn()) {
+    return { publicFamilies: visible.map(toScholarFamilyView), sensitiveFamilies: [] };
   }
 
-  return rows
-    .filter((r) => !hidden.has(overlayKey(r.supercategory, r.familyLabel)))
-    .map((r) => ({
-      familyId: r.familyId,
-      familyLabel: r.familyLabel,
-      supercategory: r.supercategory,
-      pubCount: r.pmidCount,
-      exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
-    }));
+  const sensitivity = await prisma.familySensitivityOverlay.findMany({
+    select: { supercategory: true, familyLabel: true },
+  });
+  const sensitiveKeys = new Set(
+    sensitivity.map((o) => familyOverlayKey(o.supercategory, o.familyLabel)),
+  );
+  const publicFamilies: ScholarFamilyView[] = [];
+  const sensitiveFamilies: ScholarFamilyView[] = [];
+  for (const r of visible) {
+    (sensitiveKeys.has(familyOverlayKey(r.supercategory, r.familyLabel))
+      ? sensitiveFamilies
+      : publicFamilies
+    ).push(toScholarFamilyView(r));
+  }
+  return { publicFamilies, sensitiveFamilies };
+}
+
+/** PUBLIC method families for the (CloudFront-cached) profile payload (#799).
+ *  #800-suppressed and #801-gated families are excluded; [] when the lens flag
+ *  is off (the master render gate), so no SEO/JSON side channel can leak. */
+async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
+  return (await partitionScholarFamilies(cwid)).publicFamilies;
+}
+
+/** #801 — the AUDIENCE-GATED method families a scholar/admin may see but the
+ *  public may not. Served ONLY by the cookie-forwarding reveal route
+ *  (/api/edit/methods-sensitive/[cwid]) after an owner/superuser authorization
+ *  check; [] unless `METHODS_LENS_SENSITIVE_GATE=on`. */
+export async function loadSensitiveScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
+  return (await partitionScholarFamilies(cwid)).sensitiveFamilies;
 }
 
 export type ProfilePublication = ScoredPublication<{
