@@ -80,6 +80,7 @@ import {
   PUBLICATION_INDEX_WHERE,
   buildPeopleDoc,
   buildPublicationDoc,
+  isRequireDisplayableAuthorEnabled,
 } from "@/lib/search-index-docs";
 
 /**
@@ -332,7 +333,12 @@ async function buildPublicationOps(
     ops.push({ type: "delete", index: PUBLICATIONS_INDEX, id: pmid });
   } else {
     const supForPub = await loadPublicationSuppressions([pmid], db.read);
-    const doc = buildPublicationDoc(pub, supForPub);
+    // #718 — same gate as the ETL: when on, a pub left with no displayable WCM
+    // author (e.g. its last visible author was just suppressed) is deleted from
+    // the index rather than re-indexed author-less. Default off → unchanged.
+    const doc = buildPublicationDoc(pub, supForPub, {
+      requireDisplayableAuthor: isRequireDisplayableAuthorEnabled(),
+    });
     if (doc === null) {
       ops.push({ type: "delete", index: PUBLICATIONS_INDEX, id: pmid });
     } else {

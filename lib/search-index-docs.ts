@@ -344,6 +344,21 @@ export type ScholarForIndex = Prisma.ScholarGetPayload<{
 // ---------------------------------------------------------------------------
 
 /**
+ * #718 — when enabled, the publications index excludes any publication whose
+ * displayable WCM author set is empty: its only WCM author(s) are soft-deleted
+ * hidden identity classes (overwhelmingly doctoral students under #536) or are
+ * fully suppressed. Such a row renders with no attributable WCM author, and for
+ * trainees it often reflects pre-WCM work that was never WCM output. Default
+ * OFF, so merging is inert — an operator sets `SEARCH_REQUIRE_DISPLAYABLE_AUTHOR`
+ * in the search-index ETL env (and the app env, for the live suppression
+ * reconciler) and reindexes (the reindex-then-flip pattern). Reversible by
+ * clearing the flag and reindexing.
+ */
+export function isRequireDisplayableAuthorEnabled(): boolean {
+  return process.env.SEARCH_REQUIRE_DISPLAYABLE_AUTHOR === "on";
+}
+
+/**
  * Build the OpenSearch publication `_source` for `p`. Pure — given the row
  * and the loaded suppression set, the output is deterministic.
  *
@@ -363,6 +378,7 @@ export type ScholarForIndex = Prisma.ScholarGetPayload<{
 export function buildPublicationDoc(
   p: PublicationForIndex,
   sup: PublicationSuppressions,
+  opts: { requireDisplayableAuthor?: boolean } = {},
 ): Record<string, unknown> | null {
   // Derived-dark gate (ADR-005 / self-edit-spec.md audit query B).
   //
@@ -403,6 +419,15 @@ export function buildPublicationDoc(
     preferredName: a.scholar!.preferredName,
     position: a.position,
   }));
+
+  // #718 — exclude the publication when no WCM author is publicly displayable
+  // (every WCM author is soft-deleted/hidden — e.g. a doctoral student under
+  // #536 — or suppressed). `wcmAuthorRows`/`wcmAuthors` is exactly the rendered
+  // chip set, so an empty list is precisely the "author-less row" condition.
+  // The derived-dark gate above (isPublicationDark) only fires when the
+  // CONFIRMED set is fully hidden; it returns false for an EMPTY confirmed set,
+  // so this is the distinct zero-displayable-author case. Flag-gated, default off.
+  if (opts.requireDisplayableAuthor && wcmAuthors.length === 0) return null;
 
   // WCM author position roles (issue #8 follow-up). For each WCM author
   // on the paper, classify their position into {first, senior, middle}

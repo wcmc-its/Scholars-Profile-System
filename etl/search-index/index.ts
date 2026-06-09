@@ -53,6 +53,7 @@ import {
   PUBLICATION_INDEX_WHERE,
   buildPeopleDoc,
   buildPublicationDoc,
+  isRequireDisplayableAuthorEnabled,
   computePubCountBuckets,
 } from "@/lib/search-index-docs";
 import { isRetryableBulkStatus, resolveBulkConfig } from "@/lib/search-index-bulk";
@@ -254,9 +255,12 @@ async function indexPublications(concreteIndex: string) {
     if (pubs.length === 0) break;
     cursor = pubs[pubs.length - 1].pmid;
 
+    // #718 — read once per page; gates exclusion of pubs with no displayable
+    // WCM author (default off → unchanged unless the operator flips it).
+    const requireDisplayableAuthor = isRequireDisplayableAuthorEnabled();
     const docs: Array<{ pmid: string; doc: Record<string, unknown> }> = [];
     for (const p of pubs) {
-      const doc = buildPublicationDoc(p, sup);
+      const doc = buildPublicationDoc(p, sup, { requireDisplayableAuthor });
       if (doc !== null) docs.push({ pmid: p.pmid, doc });
     }
 
