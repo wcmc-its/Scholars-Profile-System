@@ -34,6 +34,9 @@ type ProfilePubsClusterProps = {
   keywords: ScholarKeyword[];
   /** #799 — family-primary Methods lens rows; empty when the lens flag is off. */
   families: ScholarFamilyView[];
+  /** #801 — whether the sensitivity gate is on; gates the Methods lens's
+   *  self/admin reveal fetch so a profile view makes no extra request when off. */
+  sensitiveGateActive: boolean;
   totalAcceptedPubs: number;
   /** Cwid of the scholar whose profile is being rendered. Threaded down
    *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
@@ -55,6 +58,7 @@ function ProfilePubsClusterInner({
   publications,
   keywords,
   families,
+  sensitiveGateActive,
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
@@ -201,7 +205,11 @@ function ProfilePubsClusterInner({
 
       {/* #799 — family-primary Methods lens, the second of the two lenses,
           stacked below Subjects. Display-only; renders null when empty. */}
-      <MethodsSection families={families} />
+      <MethodsSection
+        families={families}
+        scholarCwid={scholarCwid}
+        sensitiveGateActive={sensitiveGateActive}
+      />
 
       <ActiveFilterBanner
         count={filteredPublications.length}

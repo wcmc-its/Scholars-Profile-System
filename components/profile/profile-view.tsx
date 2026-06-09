@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/profile";
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
 
@@ -391,6 +392,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
                   families={profile.families}
+                  sensitiveGateActive={isMethodsLensSensitiveGateOn()}
                   totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
                   scholarCwid={profile.cwid}
                 />

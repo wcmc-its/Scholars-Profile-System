@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MethodsSection } from "@/components/profile/methods-section";
 import type { ScholarFamilyView } from "@/lib/api/profile";
 
@@ -56,5 +56,62 @@ describe("MethodsSection", () => {
   it("uses the singular 'family' when exactly one is hidden", () => {
     render(<MethodsSection families={makeFamilies(9)} />);
     expect(screen.getByText("+ 1 more method family")).toBeTruthy();
+  });
+});
+
+describe("MethodsSection — #801 sensitive reveal", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not fetch (or mark anything) when the sensitivity gate is off", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <MethodsSection families={makeFamilies(2)} scholarCwid="aog" sensitiveGateActive={false} />,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Hidden from the public profile")).toBeNull();
+  });
+
+  it("reveals gated families with the eye-off marker when the route returns them", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        families: [
+          {
+            familyId: "fam_sensitive",
+            familyLabel: "Genetically engineered mouse models",
+            supercategory: "animal_cell_models",
+            pubCount: 50,
+            exemplarTools: ["Cre-lox"],
+          },
+        ],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<MethodsSection families={makeFamilies(2)} scholarCwid="aog" sensitiveGateActive />);
+
+    // The public families render immediately (unmarked)...
+    expect(screen.getByText("Family 1")).toBeTruthy();
+    // ...and the gated family + its "hidden from public" marker appear after the
+    // owner/admin reveal fetch resolves.
+    await waitFor(() =>
+      expect(screen.getByText("Genetically engineered mouse models")).toBeTruthy(),
+    );
+    expect(screen.getByLabelText("Hidden from the public profile")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/edit/methods-sensitive/aog"),
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("does not mark public families (no marker when the reveal returns none)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ families: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MethodsSection families={makeFamilies(2)} scholarCwid="aog" sensitiveGateActive />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Hidden from the public profile")).toBeNull();
   });
 });
