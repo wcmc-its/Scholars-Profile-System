@@ -28,7 +28,7 @@ import DOMPurify from "isomorphic-dompurify";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
-import { RESERVED_SLUGS } from "@/lib/slug";
+import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 
 /** The v1 `field_override.fieldName` allowlist (`self-edit-spec.md`). */
 export const EDITABLE_FIELDS = ["overview", "slug"] as const;
@@ -210,7 +210,18 @@ export const SLUG_REQUEST_MIN_LENGTH = 2;
 
 export type RequestedSlugResult =
   | { ok: true; value: string }
-  | { ok: false; error: "format" | "too_long" | "too_short" | "reserved" | "numeric" | "profanity" };
+  | {
+      ok: false;
+      error: "format" | "too_long" | "too_short" | "reserved" | "numeric" | "profanity" | "not_name_based";
+    };
+
+/**
+ * The scholar's name, passed to {@link validateRequestedSlug} to enforce the
+ * name-basis policy (#678). `names` is the scholar's preferred name + full name;
+ * order is irrelevant. Omit it (legacy / pure-format callers) to skip the
+ * name check — the self-serve request route always supplies it.
+ */
+export type SlugNameContext = { names: readonly string[] };
 
 /**
  * Validate a slug a *scholar requested* (#497 §6.2/§6.3 — the PR-3 request path).
@@ -223,6 +234,11 @@ export type RequestedSlugResult =
  *     future `/123` route and is indistinguishable from a CWID (`looksLikeSlug`).
  *   - **best-effort profanity** (`profanity`) — token-exact, name-safe
  *     (`containsProfanity`); the superuser review is the real gate.
+ *   - **name-basis** (`not_name_based`, #678) — when `nameContext` is supplied,
+ *     the slug must be derivable from the scholar's own name
+ *     ({@link isNameBasedSlug}). This codifies the previously review-only policy
+ *     that custom slugs are name variants, not free-choice handles, so the
+ *     dormant self-serve queue can no longer accept "cancer" / "the-best-lab".
  *
  * Note (deviation, deliberate): the SPEC §6.2 wrote "length 2–255" and
  * "must equal deriveSlug(input)". We reconcile to the already-shipped
@@ -231,12 +247,18 @@ export type RequestedSlugResult =
  * `SLUG_PATTERN` is stricter than (and subsumes) the deriveSlug-equality intent
  * for the allowed charset.
  */
-export function validateRequestedSlug(input: string): RequestedSlugResult {
+export function validateRequestedSlug(
+  input: string,
+  nameContext?: SlugNameContext,
+): RequestedSlugResult {
   const format = validateSlugFormat(input);
   if (!format.ok) return format;
   if (format.value.length < SLUG_REQUEST_MIN_LENGTH) return { ok: false, error: "too_short" };
   if (/^[0-9]+$/.test(format.value)) return { ok: false, error: "numeric" };
   if (containsProfanity(format.value)) return { ok: false, error: "profanity" };
+  if (nameContext && !isNameBasedSlug(format.value, nameContext.names)) {
+    return { ok: false, error: "not_name_based" };
+  }
   return { ok: true, value: format.value };
 }
 

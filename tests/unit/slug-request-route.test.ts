@@ -139,6 +139,25 @@ describe("POST /api/edit/slug-request", () => {
     expect(await res.json()).toMatchObject({ error: "reserved", field: "requestedSlug" });
   });
 
+  it("passes the scholar's name to the validator for the #678 name-basis check", async () => {
+    mockScholarFindUnique.mockResolvedValue({
+      slug: "old-slug",
+      preferredName: "Jane Smith",
+      fullName: "Jane A. Smith",
+    });
+    await POST(post({ requestedSlug: "cancer" }));
+    expect(mockValidate).toHaveBeenCalledWith("cancer", {
+      names: ["Jane Smith", "Jane A. Smith"],
+    });
+  });
+
+  it("surfaces a not_name_based rejection as 400", async () => {
+    mockValidate.mockReturnValue({ ok: false, error: "not_name_based" });
+    const res = await POST(post({ requestedSlug: "cancer" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "not_name_based", field: "requestedSlug" });
+  });
+
   it("400 already_current when the slug is the scholar's live slug", async () => {
     mockScholarFindUnique.mockResolvedValue({ slug: "jane-smith" });
     const res = await POST(post({ requestedSlug: "jane-smith" }));

@@ -64,7 +64,7 @@ import {
   validateSlugFormat,
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
-import { reconcileScholarSlug } from "@/lib/slug";
+import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
 
@@ -235,6 +235,25 @@ async function handleScholarFieldEdit(params: {
     const collision = await checkSlugCollision(format.value, entityId, db.read);
     if (!collision.ok) return editError(400, collision.error, "value");
     storedValue = format.value;
+    // #678 — the custom-slug policy is name-based. A superuser override is NOT
+    // hard-blocked (legitimate edge cases: disambiguating a namesake, an agreed
+    // exception), but a non-name-based override is logged so the deviation from
+    // policy is observable / auditable. The self-serve request path enforces it.
+    const subject = await db.read.scholar.findUnique({
+      where: { cwid: entityId },
+      select: { preferredName: true, fullName: true },
+    });
+    if (subject && !isNameBasedSlug(storedValue, [subject.preferredName, subject.fullName])) {
+      console.warn(
+        JSON.stringify({
+          event: "slug_override_not_name_based",
+          path: PATH,
+          actor_cwid: session.cwid,
+          target_cwid: entityId,
+          slug: storedValue,
+        }),
+      );
+    }
   }
 
   try {

@@ -60,17 +60,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   //     POST /api/edit/field directly, not this queue. ---
   const cwid = session.cwid;
 
-  // --- format / reserved / numeric / profanity (400) ---
-  const format = validateRequestedSlug(requestedSlug);
+  // --- the actor's name feeds the #678 name-basis check (a custom slug must be
+  //     a variant of the scholar's own name, not a free-choice handle) AND the
+  //     advisory already-current check. Fetched up front so a non-name slug is
+  //     rejected with the other format guards. A missing scholar row (the actor
+  //     has no profile — should not happen on the self path) skips the name
+  //     check rather than reject every slug. ---
+  const current = await db.read.scholar.findUnique({
+    where: { cwid },
+    select: { slug: true, preferredName: true, fullName: true },
+  });
+  const nameContext = current
+    ? { names: [current.preferredName, current.fullName] }
+    : undefined;
+
+  // --- format / reserved / numeric / profanity / name-basis (400) ---
+  const format = validateRequestedSlug(requestedSlug, nameContext);
   if (!format.ok) return editError(400, format.error, "requestedSlug");
   const slug = format.value;
 
   // --- advisory checks (400, friendly): already your live slug, or taken. The
   //     authoritative collision guard is the slug_guard UNIQUE at approval. ---
-  const current = await db.read.scholar.findUnique({
-    where: { cwid },
-    select: { slug: true },
-  });
   if (current?.slug === slug) return editError(400, "already_current", "requestedSlug");
   const collision = await checkSlugCollision(slug, cwid, db.read);
   if (!collision.ok) return editError(400, "collision", "requestedSlug");
