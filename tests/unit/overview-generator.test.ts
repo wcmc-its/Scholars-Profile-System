@@ -10,12 +10,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildOverviewUserPrompt,
+  hasSparseResearchSignal,
   OVERVIEW_SYSTEM_PROMPT,
 } from "@/lib/edit/overview-generator";
 import type { OverviewFacts } from "@/lib/edit/overview-facts";
 import { DEFAULT_OVERVIEW_PARAMS, type OverviewParams } from "@/lib/edit/overview-params";
 
-/** A minimal facts payload — only the FACTS-block serialization matters here. */
+/** A minimal facts payload — only the FACTS-block serialization matters here.
+ *  Has a topic, so it is NOT sparse (`hasSparseResearchSignal` is false). */
 const FACTS: OverviewFacts = {
   name: "Jane Smith",
   title: "Professor of Medicine",
@@ -29,6 +31,16 @@ const FACTS: OverviewFacts = {
   methods: [],
   facultyMetrics: null,
   existingBio: null,
+};
+
+/** The #778 thinnest tier — no topics AND no scored pubs (the sem9023 case).
+ *  Identity / education / counts may still be present. */
+const SPARSE_FACTS: OverviewFacts = {
+  ...FACTS,
+  title: "Assistant Professor of Medicine",
+  topics: [],
+  representativePublications: [],
+  publicationCount: 3,
 };
 
 /** Override only the params fields a case cares about. */
@@ -156,5 +168,56 @@ describe("OVERVIEW_SYSTEM_PROMPT — injection guard", () => {
 
   it("no longer hardcodes the v1 third-person / 120–180 word line", () => {
     expect(OVERVIEW_SYSTEM_PROMPT).not.toContain("Third person. About 120 to 180 words.");
+  });
+
+  // #778 — the anti-filler rule must ban institutional-mission / faculty-role
+  // filler, not only adjectival praise.
+  it("bans institutional-mission / generic faculty-role filler", () => {
+    const flat = OVERVIEW_SYSTEM_PROMPT.replace(/\s+/g, " ");
+    expect(flat).toContain("generic duties of a faculty role");
+    expect(flat).toContain("state no fact about THIS person");
+  });
+});
+
+describe("hasSparseResearchSignal (#778)", () => {
+  it("is true when there are no topics AND no scored publications", () => {
+    expect(hasSparseResearchSignal(SPARSE_FACTS)).toBe(true);
+  });
+
+  it("is false when a topic is present", () => {
+    expect(hasSparseResearchSignal(FACTS)).toBe(false);
+  });
+
+  it("is false when a scored publication is present even with no topics", () => {
+    const withPub: OverviewFacts = {
+      ...SPARSE_FACTS,
+      representativePublications: [
+        {
+          pmid: "1",
+          title: "A paper",
+          venue: null,
+          year: null,
+          impact: null,
+          synopsis: null,
+          impactJustification: null,
+          topicRationale: null,
+          authorPosition: null,
+        },
+      ],
+    };
+    expect(hasSparseResearchSignal(withPub)).toBe(false);
+  });
+});
+
+describe("buildOverviewUserPrompt — sparse-tier directive (#778)", () => {
+  it("adds the factual-stub directive when FACTS lack research signal", () => {
+    const prompt = buildOverviewUserPrompt(SPARSE_FACTS, params());
+    expect(prompt).toContain("little structured research signal");
+    expect(prompt).toContain("This directive overrides the word-count band above.");
+  });
+
+  it("omits the sparse directive when FACTS carry research signal", () => {
+    const prompt = buildOverviewUserPrompt(FACTS, params());
+    expect(prompt).not.toContain("little structured research signal");
   });
 });
