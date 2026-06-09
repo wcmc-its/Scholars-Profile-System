@@ -66,6 +66,9 @@ const TRACKED: Readonly<Record<string, Cadence>> = {
   COI: "nightly",
   "ReCiterAI-projection": "nightly",
   MeshCoverage: "nightly",
+  // #794 — A2 tools taxonomy → scholar_tool. Writes a row every nightly run
+  // (a 0-row success in ddb mode), so it is freshness-tracked from the start.
+  Tools: "nightly",
   // Weekly cadence (cron 0 8 ? * SUN *)
   Spotlight: "weekly",
   Jenzabar: "weekly",

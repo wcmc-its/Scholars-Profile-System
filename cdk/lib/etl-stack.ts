@@ -356,16 +356,18 @@ export class EtlStack extends Stack {
     // machine). Each resource is exactly what the step reads -- never a
     // service-wide `*`:
     //
-    //   etl:dynamodb  (nightly)  dynamodb:Scan   table/reciterai
-    //   etl:spotlight (weekly)   s3:GetObject    wcmc-reciterai-artifacts/spotlight/*
-    //   etl:hierarchy (annual)   s3:GetObject    wcmc-reciterai-hierarchy/*
+    //   etl:dynamodb     (nightly) dynamodb:Scan  table/reciterai
+    //   etl:spotlight    (weekly)  s3:GetObject   wcmc-reciterai-artifacts/spotlight/*
+    //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
+    //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
     //
     // Read-only: the steps Scan the table and GetObject the artifacts; they
     // never write back to ReciterAI's (account-shared) stores. The bucket
     // and table names are the same literals injected in `environment:` below
-    // -- a rename must touch both. Spotlight is prefix-scoped to `spotlight/*`
-    // because `wcmc-reciterai-artifacts` is a shared bucket; hierarchy takes
-    // the whole bucket because `wcmc-reciterai-hierarchy` is dedicated to it.
+    // -- a rename must touch both. Spotlight and tools are prefix-scoped
+    // (`spotlight/*`, `tools/*`) because `wcmc-reciterai-artifacts` is a shared
+    // bucket; hierarchy takes the whole bucket because `wcmc-reciterai-hierarchy`
+    // is dedicated to it.
     // No secretsmanager reference, so the "zero secretsmanager on the ETL
     // task role" assertion (etl-stack.test.ts) still holds.
     // ------------------------------------------------------------------
@@ -385,6 +387,7 @@ export class EtlStack extends Stack {
           actions: ["s3:GetObject"],
           resources: [
             "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+            "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
         }),
@@ -472,6 +475,15 @@ export class EtlStack extends Stack {
         ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
         ARTIFACT_PREFIX: "spotlight",
         HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+        // #794 — A2 canonical tools taxonomy (etl:scholar-tool). Same shared
+        // artifacts bucket as spotlight, under the tools/ prefix.
+        TOOLS_BUCKET: "wcmc-reciterai-artifacts",
+        TOOLS_PREFIX: "tools",
+        // scholar_tool producer switch. "ddb" (legacy DynamoDB Block 5) is the
+        // reversible default until the A2 S3 path is verified in staging via a
+        // `etl:scholar-tool --dry-run` parallel-run (#794); flip to "s3"
+        // per-env to make etl:scholar-tool the sole scholar_tool writer.
+        SCHOLAR_TOOL_SOURCE: "ddb",
         // OpenSearch domain endpoint (https://...) imported from DataStack;
         // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
         // authenticates with the OPENSEARCH_USER/PASS secrets above. #447
@@ -667,6 +679,12 @@ export class EtlStack extends Stack {
       // same night) and before search:index (so the rebuilt index carries the
       // day's scores).
       { id: "Dynamodb", npmScript: "etl:dynamodb", external: true },
+      // #794 — A2 canonical tools taxonomy → scholar_tool. Runs after Dynamodb
+      // (whose scholar projection the cwid FK targets) and before SearchIndex.
+      // external:true — reads s3://wcmc-reciterai-artifacts/tools/ via the task
+      // role (no per-source secret). A no-op while SCHOLAR_TOOL_SOURCE=ddb;
+      // the sole scholar_tool writer once flipped to s3.
+      { id: "Tools", npmScript: "etl:scholar-tool", external: true },
       { id: "MeshCoverageNightly", npmScript: "etl:mesh-coverage", external: false },
       // #604 -- stamp publication_type='Retraction' on PubMed-retracted originals
       // ReCiter hasn't re-fetched yet. MUST run after Reciter (whose upsert

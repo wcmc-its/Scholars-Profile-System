@@ -68,6 +68,7 @@
     "etl:mesh-aliases": "tsx etl/mesh-aliases/index.ts",
     "etl:mesh-coverage": "tsx etl/mesh-coverage/index.ts",
     "etl:spotlight": "tsx etl/spotlight/index.ts",
+    "etl:scholar-tool": "tsx etl/tools/index.ts",
     "etl:daily": "tsx etl/orchestrate.ts",
     "etl:revalidate": "tsx etl/revalidate/index.ts",
     "etl:freshness": "tsx etl/freshness/index.ts",

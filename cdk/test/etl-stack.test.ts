@@ -98,6 +98,10 @@ const EXPECTED_ENV_CONFIG: Readonly<Record<string, string>> = {
   ARTIFACTS_BUCKET: "wcmc-reciterai-artifacts",
   ARTIFACT_PREFIX: "spotlight",
   HIERARCHY_BUCKET: "wcmc-reciterai-hierarchy",
+  // #794 — A2 tools taxonomy (etl:scholar-tool) + the reversible producer switch.
+  TOOLS_BUCKET: "wcmc-reciterai-artifacts",
+  TOOLS_PREFIX: "tools",
+  SCHOLAR_TOOL_SOURCE: "ddb",
 };
 
 function getStateMachineDefinitionText(
@@ -727,7 +731,7 @@ describe("EtlStack", () => {
         expect(serialized).not.toMatch(/\*/);
       });
 
-      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight prefix + hierarchy bucket (no bare *, no ListBucket)", () => {
+      it("the ETL task role grants s3:GetObject scoped to exactly the spotlight + tools prefixes + hierarchy bucket (no bare *, no ListBucket)", () => {
         const policy = etlTaskRolePolicy();
         expect(policy).toBeDefined();
         const statements = policy?.Properties?.PolicyDocument
@@ -744,13 +748,14 @@ describe("EtlStack", () => {
         expect(Array.isArray(action) ? action : [action]).toEqual([
           "s3:GetObject",
         ]);
-        // object-scoped: the spotlight prefix in the shared artifacts bucket +
-        // the whole dedicated hierarchy bucket. Order matches the policy.
+        // object-scoped: the spotlight + tools prefixes in the shared artifacts
+        // bucket + the whole dedicated hierarchy bucket. Order matches the policy.
         const resources = Array.isArray(s3Stmt?.Resource)
           ? (s3Stmt?.Resource as string[])
           : [s3Stmt?.Resource as string];
         expect(resources).toEqual([
           "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);
       });

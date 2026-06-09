@@ -61,6 +61,7 @@ import { resolveTopTopicByPmid } from "./top-topic-resolver";
 import { assertPublicationTopicPopulated } from "./publication-topic-guard";
 import { buildPublicationTopicWrites } from "./publication-topic-mapper";
 import { buildScholarToolWrites } from "./scholar-tool-mapper";
+import { resolveScholarToolSource } from "../../lib/etl/scholar-tool-source";
 
 const TABLE = process.env.SCHOLARS_DYNAMODB_TABLE ?? "reciterai";
 const REGION = process.env.AWS_DEFAULT_REGION ?? process.env.AWS_REGION ?? "us-east-1";
@@ -670,66 +671,77 @@ async function main() {
     // ===================================================================
     // Block 5: TOOL# → scholar_tool  (#742 v3.1 C3)
     // ===================================================================
-    // ReciterAI TOOL# items are per (tool × pmid × cwid) method/instrument
-    // observations. Roll them up to one row per (cwid, tool) for the overview
-    // generator's `methods` + a future "Methods & Tools" view. Full rebuild
-    // (deleteMany + createMany), same shape as the topic_assignment block.
-    console.log(`Scanning ${TABLE} for TOOL# records (paginated)...`);
-    const toolItems: ToolRecord[] = [];
-    {
-      let lastKey: Record<string, unknown> | undefined;
-      let pages = 0;
-      do {
-        const resp = await ddb.send(
-          new ScanCommand({
-            TableName: TABLE,
-            FilterExpression: "begins_with(PK, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "TOOL#" },
-            ExclusiveStartKey: lastKey,
-          }),
-        );
-        for (const it of (resp.Items ?? []) as ToolRecord[]) toolItems.push(it);
-        pages += 1;
-        if (pages % 10 === 0) {
-          console.log(`  ...scanned ${toolItems.length} TOOL# items so far (${pages} pages)`);
-        }
-        lastKey = resp.LastEvaluatedKey;
-      } while (lastKey);
-    }
-    console.log(`Found ${toolItems.length} TOOL# records.`);
-
-    // The TOOL# PK carries the (sanitized) tool name and each item its
-    // tool_category, so the rollup needs no TOOL_INDEX# join — keeps the scan
-    // single-prefix. The mapper is pure + unit-tested (./scholar-tool-mapper.ts).
-    const toolResult = buildScholarToolWrites(toolItems, { ourCwidSet });
-    console.log(
-      `scholar_tool candidates: ${toolResult.writes.length} rows ` +
-        `(skipped ${toolResult.skippedMissingCwid} out-of-scope cwid, ` +
-        `${toolResult.skippedMissingFields} missing tool/pmid).`,
-    );
-
-    console.log("Resetting scholar_tool table...");
-    await db.write.scholarTool.deleteMany();
-
+    // #794 — scholar_tool is being repointed to the A2 canonical S3 taxonomy
+    // (etl/tools/index.ts). This legacy DDB rollup runs ONLY while
+    // SCHOLAR_TOOL_SOURCE=ddb (the reversible default); when flipped to s3,
+    // etl:scholar-tool is the sole scholar_tool writer and this block is skipped
+    // so the two writers never both rebuild the table in one nightly run.
     let scholarToolRowsInserted = 0;
-    const TOOL_BATCH = 500;
-    for (let i = 0; i < toolResult.writes.length; i += TOOL_BATCH) {
-      const chunk = toolResult.writes.slice(i, i + TOOL_BATCH);
-      await db.write.scholarTool.createMany({
-        data: chunk.map((w) => ({
-          cwid: w.cwid,
-          toolName: w.toolName,
-          category: w.category,
-          pmidCount: w.pmidCount,
-          maxConfidence: new Prisma.Decimal(w.maxConfidence),
-          sampleContext: w.sampleContext,
-          pmids: w.pmids,
-        })),
-        skipDuplicates: true,
-      });
-      scholarToolRowsInserted += chunk.length;
+    if (resolveScholarToolSource() === "ddb") {
+      // ReciterAI TOOL# items are per (tool × pmid × cwid) method/instrument
+      // observations. Roll them up to one row per (cwid, tool) for the overview
+      // generator's `methods` + a future "Methods & Tools" view. Full rebuild
+      // (deleteMany + createMany), same shape as the topic_assignment block.
+      console.log(`Scanning ${TABLE} for TOOL# records (paginated)...`);
+      const toolItems: ToolRecord[] = [];
+      {
+        let lastKey: Record<string, unknown> | undefined;
+        let pages = 0;
+        do {
+          const resp = await ddb.send(
+            new ScanCommand({
+              TableName: TABLE,
+              FilterExpression: "begins_with(PK, :prefix)",
+              ExpressionAttributeValues: { ":prefix": "TOOL#" },
+              ExclusiveStartKey: lastKey,
+            }),
+          );
+          for (const it of (resp.Items ?? []) as ToolRecord[]) toolItems.push(it);
+          pages += 1;
+          if (pages % 10 === 0) {
+            console.log(`  ...scanned ${toolItems.length} TOOL# items so far (${pages} pages)`);
+          }
+          lastKey = resp.LastEvaluatedKey;
+        } while (lastKey);
+      }
+      console.log(`Found ${toolItems.length} TOOL# records.`);
+
+      // The TOOL# PK carries the (sanitized) tool name and each item its
+      // tool_category, so the rollup needs no TOOL_INDEX# join — keeps the scan
+      // single-prefix. The mapper is pure + unit-tested (./scholar-tool-mapper.ts).
+      const toolResult = buildScholarToolWrites(toolItems, { ourCwidSet });
+      console.log(
+        `scholar_tool candidates: ${toolResult.writes.length} rows ` +
+          `(skipped ${toolResult.skippedMissingCwid} out-of-scope cwid, ` +
+          `${toolResult.skippedMissingFields} missing tool/pmid).`,
+      );
+
+      console.log("Resetting scholar_tool table...");
+      await db.write.scholarTool.deleteMany();
+
+      const TOOL_BATCH = 500;
+      for (let i = 0; i < toolResult.writes.length; i += TOOL_BATCH) {
+        const chunk = toolResult.writes.slice(i, i + TOOL_BATCH);
+        await db.write.scholarTool.createMany({
+          data: chunk.map((w) => ({
+            cwid: w.cwid,
+            toolName: w.toolName,
+            category: w.category,
+            pmidCount: w.pmidCount,
+            maxConfidence: new Prisma.Decimal(w.maxConfidence),
+            sampleContext: w.sampleContext,
+            pmids: w.pmids,
+          })),
+          skipDuplicates: true,
+        });
+        scholarToolRowsInserted += chunk.length;
+      }
+      console.log(`scholar_tool inserts complete: ${scholarToolRowsInserted} rows.`);
+    } else {
+      console.log(
+        "SCHOLAR_TOOL_SOURCE=s3 — skipping legacy TOOL# rollup; etl:scholar-tool owns scholar_tool (#794).",
+      );
     }
-    console.log(`scholar_tool inserts complete: ${scholarToolRowsInserted} rows.`);
 
     // ===================================================================
     // Bookkeeping
