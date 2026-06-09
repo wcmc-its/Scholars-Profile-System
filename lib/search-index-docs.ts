@@ -268,6 +268,10 @@ export const PUBLICATION_INDEX_INCLUDE = {
           preferredName: true,
           deletedAt: true,
           status: true,
+          // #718 — needed by the alumni keep-rule: a pub authored by an
+          // `affiliate_alumni` is retained even though that author is hidden
+          // (soft-deleted) and so contributes no displayable chip.
+          roleCategory: true,
         },
       },
     },
@@ -427,7 +431,18 @@ export function buildPublicationDoc(
   // The derived-dark gate above (isPublicationDark) only fires when the
   // CONFIRMED set is fully hidden; it returns false for an EMPTY confirmed set,
   // so this is the distinct zero-displayable-author case. Flag-gated, default off.
-  if (opts.requireDisplayableAuthor && wcmAuthors.length === 0) return null;
+  //
+  // Alumni exception: an `affiliate_alumni` author is a legitimate (former) WCM
+  // person whose work is real WCM output, unlike a current trainee. Alumni are a
+  // hidden class (soft-deleted, no chip), so they never appear in `wcmAuthors`;
+  // keep the pub anyway when one authored it — it renders via the unstructured
+  // byline fallback (#775), name as plain text, no link.
+  if (opts.requireDisplayableAuthor && wcmAuthors.length === 0) {
+    const hasAlumniAuthor = p.authors.some(
+      (a) => a.scholar?.roleCategory === "affiliate_alumni",
+    );
+    if (!hasAlumniAuthor) return null;
+  }
 
   // WCM author position roles (issue #8 follow-up). For each WCM author
   // on the paper, classify their position into {first, senior, middle}
