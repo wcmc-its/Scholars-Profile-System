@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "audit:db-writes": "tsx scripts/audit-db-writes.ts",
     "audit:specialty-mesh": "tsx scripts/audit-specialty-mesh-mapping.ts",
+    "audit:807-concept-gap": "tsx scripts/audit-807-concept-gap.ts",
     "diagrams": "node scripts/diagrams/build.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

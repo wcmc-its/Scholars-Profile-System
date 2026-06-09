@@ -5,6 +5,7 @@ import { TransitionLink as Link } from "@/components/search/transition-link";
 import { Search } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { HoverTooltip } from "@/components/ui/hover-tooltip";
 
 const TOP_VISIBLE = 10;
 const EXPANDED_VISIBLE = 50;
@@ -79,7 +80,14 @@ export function AuthorFacet({
     <div className="mb-5">
       <div className="mb-2 flex items-baseline justify-between">
         <h3 className="text-[13px] font-semibold text-[#1a1a1a]">
-          Author{" "}
+          <HoverTooltip
+            wide
+            text="WCM authors appearing on the publications matched here. This is not the Scholars count on the tab bar — that counts scholars whose own body of work matches your search. The two answer different questions and can differ."
+          >
+            <span className="cursor-help underline decoration-dotted decoration-[#b8b6ad] underline-offset-2">
+              Authors of these publications
+            </span>
+          </HoverTooltip>
           <span className="ml-1 text-[12px] font-normal text-muted-foreground tabular-nums">
             {totalDistinct.toLocaleString()}
           </span>
