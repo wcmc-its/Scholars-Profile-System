@@ -235,26 +235,14 @@ async function handleScholarFieldEdit(params: {
     const collision = await checkSlugCollision(format.value, entityId, db.read);
     if (!collision.ok) return editError(400, collision.error, "value");
     storedValue = format.value;
-    // #678 — the custom-slug policy is name-based. A superuser override is NOT
-    // hard-blocked (legitimate edge cases: disambiguating a namesake, an agreed
-    // exception), but a non-name-based override is logged so the deviation from
-    // policy is observable / auditable. The self-serve request path enforces it.
-    const subject = await db.read.scholar.findUnique({
-      where: { cwid: entityId },
-      select: { preferredName: true, fullName: true },
-    });
-    if (subject && !isNameBasedSlug(storedValue, [subject.preferredName, subject.fullName])) {
-      console.warn(
-        JSON.stringify({
-          event: "slug_override_not_name_based",
-          path: PATH,
-          actor_cwid: session.cwid,
-          target_cwid: entityId,
-          slug: storedValue,
-        }),
-      );
-    }
   }
+
+  // #678 — name-basis is a WARN (not a block) on the superuser override path:
+  // superusers have legitimate edge cases (namesake disambiguation, an agreed
+  // exception). Set inside the transaction (where the subject row is read on the
+  // same surface `reconcileScholarSlug` uses), emitted after commit. The
+  // self-serve request path is where name-basis is actually enforced.
+  let slugNotNameBased = false;
 
   try {
     await db.write.$transaction(async (tx) => {
@@ -321,6 +309,16 @@ async function handleScholarFieldEdit(params: {
       }
       if (fieldName === "slug") {
         await reconcileScholarSlug(tx, entityId, storedValue);
+        const subject = await tx.scholar.findUnique({
+          where: { cwid: entityId },
+          select: { preferredName: true, fullName: true },
+        });
+        if (
+          subject &&
+          !isNameBasedSlug(storedValue, [subject.preferredName, subject.fullName])
+        ) {
+          slugNotNameBased = true;
+        }
       }
       await appendAuditRow(tx, {
         actorCwid: realCwid,
@@ -350,6 +348,18 @@ async function handleScholarFieldEdit(params: {
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
+  }
+
+  if (slugNotNameBased) {
+    console.warn(
+      JSON.stringify({
+        event: "slug_override_not_name_based",
+        path: PATH,
+        actor_cwid: session.cwid,
+        target_cwid: entityId,
+        slug: storedValue,
+      }),
+    );
   }
 
   if (fieldName === "overview") {
