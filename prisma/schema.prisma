@@ -94,6 +94,7 @@ model Scholar {
   overviewGenerations  OverviewGeneration[]
   overviewProvenance   OverviewProvenance?
   scholarTools         ScholarTool[]
+  scholarFamilies      ScholarFamily[]
   department           Department?          @relation(fields: [deptCode], references: [code], onDelete: SetNull)
   division             Division?            @relation(fields: [divCode], references: [code], onDelete: SetNull)
   postdoctoralMentor   Scholar?             @relation("PostdocMentor", fields: [postdoctoralMentorCwid], references: [cwid], onDelete: SetNull)
@@ -1431,6 +1432,49 @@ model ScholarTool {
   @@unique([cwid, toolName])
   @@index([cwid, pmidCount(sort: Desc)])
   @@map("scholar_tool")
+}
+
+/// Per-(scholar, method-family) rollup from the A2 canonical taxonomy (#799).
+/// The family-primary "Methods & tools" lens shows these families as the entity,
+/// expandable to member tools. Written by etl/tools (the S3 loader, alongside
+/// `scholar_tool`) from the per-scholar `faculty{<cwid>}.families[]` rollup in the
+/// A2 `tools.json` artifact; dormant until `SCHOLAR_TOOL_SOURCE=s3` (the same
+/// flag that gates the tool rollup). Full-replacement each run — the uuid `id` and
+/// `family_id` are both unstable across A2 rebuilds (families are re-minted on
+/// every relabel), so this is a rebuild keyed by (cwid, family_id), never an
+/// upsert; downstream overlays (#800 suppression, #801 gating) key on
+/// (supercategory, label), NOT family_id. Contract: faculty.families[] carries
+/// exactly { family_id, label, supercategory, pub_count, exemplar_tool_ids[] };
+/// `pub_count` is the per-scholar, C-tier-reconciled distinct-publication count
+/// computed upstream (read directly, never re-aggregated SPS-side).
+model ScholarFamily {
+  id                String   @id @default(uuid()) @db.VarChar(64)
+  cwid              String   @db.VarChar(32)
+  /// A2 family id (e.g. "fam_0042"). NOT stable across A2 rebuilds — re-keyed on
+  /// every full-replacement load; safe only as the (cwid, family_id) rebuild key.
+  familyId          String   @map("family_id") @db.VarChar(64)
+  /// Display-grade family label from the A2 taxonomy (#799a — surfaced directly).
+  familyLabel       String   @map("family_label") @db.VarChar(255)
+  /// One of the A2 supercategory ids (e.g. "animal_cell_models"). The #801 gating
+  /// key and the #800 group key. Open set (drifted 13→14); guard, don't hard-enum.
+  supercategory     String   @db.VarChar(128)
+  /// Per-scholar, C-reconciled distinct-publication count (drives ranking + the
+  /// "All work" count). Read directly from the artifact; never re-aggregated.
+  pmidCount         Int      @map("pmid_count")
+  /// Up to ~3 representative member `canonical_tool_id` strings (per-scholar
+  /// ranked). The only durable tool key — there is no upstream tool uuid.
+  exemplarToolIds   Json     @map("exemplar_tool_ids")
+  /// The `manifest.sha256` of the artifact this row was loaded from — lets a
+  /// family-id renumber be detected per refresh (no semantic taxonomy_version).
+  sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
+  refreshedAt       DateTime @default(now()) @map("refreshed_at")
+
+  scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
+
+  @@unique([cwid, familyId])
+  @@index([cwid, pmidCount(sort: Desc)])
+  @@index([supercategory])
+  @@map("scholar_family")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,
