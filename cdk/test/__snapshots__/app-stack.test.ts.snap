@@ -404,6 +404,14 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "root",
               },
               {
+                "Name": "METHODS_LENS_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "METHODS_LENS_SENSITIVE_GATE",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
               },
@@ -3369,6 +3377,14 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "PROFILE_CANONICAL",
                 "Value": "root",
+              },
+              {
+                "Name": "METHODS_LENS_ENABLED",
+                "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_SENSITIVE_GATE",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",

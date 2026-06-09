@@ -1475,6 +1475,15 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("RECITER_REJECT_SEND")).toBe("off");
       });
 
+      it("keeps the Methods lens dark in prod (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both OFF, #799/#801 staging-first)", () => {
+        // Env-gated: both ON in staging, OFF in prod until the staging soak
+        // completes and the prod data steps (#794 cutover + #801 overlay seed)
+        // are done. Off in prod = loadScholarFamilies returns [] so nothing
+        // renders and no sensitive family leaks.
+        expect(appContainerEnv().get("METHODS_LENS_ENABLED")).toBe("off");
+        expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
+      });
+
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
         // Both envs are cut over to root; the flag stays set explicitly as the
         // soak rollback lever (set back to "scholars" + redeploy to revert).
@@ -1850,6 +1859,26 @@ describe("AppStack", () => {
         (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
       );
       expect(envByName.get("RECITER_REJECT_SEND")).toBe("on");
+    });
+
+    it("activates the Methods lens in staging first (METHODS_LENS_ENABLED + METHODS_LENS_SENSITIVE_GATE both ON, #799/#801)", () => {
+      const taskDefs = template.findResources("AWS::ECS::TaskDefinition");
+      const appTaskDef = Object.values(taskDefs).find(
+        (r) => r.Properties?.Family === "sps-app-staging",
+      );
+      const appContainer = (
+        appTaskDef?.Properties?.ContainerDefinitions as
+          | Array<{
+              Name?: string;
+              Environment?: Array<{ Name?: string; Value?: string }>;
+            }>
+          | undefined
+      )?.find((c) => c.Name === "app");
+      const envByName = new Map(
+        (appContainer?.Environment ?? []).map((e) => [e.Name as string, e.Value]),
+      );
+      expect(envByName.get("METHODS_LENS_ENABLED")).toBe("on");
+      expect(envByName.get("METHODS_LENS_SENSITIVE_GATE")).toBe("on");
     });
 
     it("enables the slug-request lifecycle in staging (#497, on in both envs)", () => {
