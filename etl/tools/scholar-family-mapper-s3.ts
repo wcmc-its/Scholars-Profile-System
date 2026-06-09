@@ -24,6 +24,11 @@
  *   - `family_id` is NOT stable across A2 rebuilds; it is only ever the
  *     (cwid, family_id) rebuild key here. Downstream suppression (#800) and
  *     audience-gating (#801) overlays key on (supercategory, label) instead.
+ *   - `exemplar_tool_ids` are canonical_tool_id strings, which SPS has no
+ *     read-time id→name map for (scholar_tool is keyed by name, not id). So we
+ *     resolve them to member-tool DISPLAY NAMES here, via the same canonical
+ *     tools[] index the sibling tool mapper joins on — that is what the lens
+ *     renders ("CheXpert · MIMIC-CXR"). Names refresh on every full-replace run.
  */
 import type { ToolsArtifactSlice } from "./scholar-tool-mapper-s3";
 
@@ -44,7 +49,9 @@ export type ScholarFamilyWrite = {
   familyLabel: string;
   supercategory: string;
   pmidCount: number;
-  exemplarToolIds: string[];
+  /** Resolved member-tool DISPLAY NAMES (canonical_tool_id → tools[].display_name),
+   *  per-scholar ranked — what the lens shows ("CheXpert · MIMIC-CXR"). */
+  exemplarTools: string[];
 };
 
 export type BuildScholarFamilyS3Result = {
@@ -68,16 +75,26 @@ type Accum = {
   familyLabel: string;
   supercategory: string;
   pmidCount: number;
-  exemplarToolIds: string[];
+  exemplarTools: string[];
 };
 
-function cleanExemplarIds(raw: unknown): string[] {
+/**
+ * Resolve raw `exemplar_tool_ids` → member-tool DISPLAY NAMES via the canonical
+ * tools[] index, preserving order and de-duping. Unresolvable ids are dropped — a
+ * cosmetic, bounded loss (exemplars are ≤3 and back only the lens's sub-label).
+ */
+function resolveExemplarTools(raw: unknown, toolsById: Map<string, string>): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const v of raw) {
-    if (typeof v === "string") {
-      const t = v.trim();
-      if (t) out.push(t);
+    if (typeof v !== "string") continue;
+    const id = v.trim();
+    if (!id) continue;
+    const name = toolsById.get(id);
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      out.push(name);
     }
   }
   return out;
@@ -107,6 +124,16 @@ export function buildScholarFamilyWritesFromS3(
 ): BuildScholarFamilyS3Result {
   const topN = opts.topNPerScholar ?? 50;
   const known = opts.knownSupercategories;
+
+  // Index canonical tools by id → display name, to resolve each family's
+  // exemplar_tool_ids into the member-tool names the lens renders.
+  const toolsById = new Map<string, string>();
+  for (const t of artifact.tools ?? []) {
+    if (t && typeof t.canonical_tool_id === "string" && typeof t.display_name === "string") {
+      const name = t.display_name.trim();
+      if (name) toolsById.set(t.canonical_tool_id, name);
+    }
+  }
 
   const writes: ScholarFamilyWrite[] = [];
   let skippedMissingCwid = 0;
@@ -141,14 +168,14 @@ export function buildScholarFamilyWritesFromS3(
       }
       if (known && !known.has(supercategory)) unknownSupercategory += 1;
 
-      const exemplarToolIds = cleanExemplarIds(f?.exemplar_tool_ids);
+      const exemplarTools = resolveExemplarTools(f?.exemplar_tool_ids, toolsById);
       const prev = byFamilyId.get(familyId);
       if (!prev) {
-        byFamilyId.set(familyId, { familyLabel, supercategory, pmidCount, exemplarToolIds });
+        byFamilyId.set(familyId, { familyLabel, supercategory, pmidCount, exemplarTools });
       } else if (pmidCount > prev.pmidCount) {
         // Same family_id appeared twice: keep the strongest count + its exemplars.
         prev.pmidCount = pmidCount;
-        prev.exemplarToolIds = exemplarToolIds;
+        prev.exemplarTools = exemplarTools;
       }
     }
 
@@ -163,7 +190,7 @@ export function buildScholarFamilyWritesFromS3(
         familyLabel: e.familyLabel,
         supercategory: e.supercategory,
         pmidCount: e.pmidCount,
-        exemplarToolIds: e.exemplarToolIds,
+        exemplarTools: e.exemplarTools,
       });
     }
   }

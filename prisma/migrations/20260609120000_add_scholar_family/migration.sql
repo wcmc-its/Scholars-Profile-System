@@ -6,7 +6,7 @@ CREATE TABLE `scholar_family` (
     `family_label` VARCHAR(255) NOT NULL,
     `supercategory` VARCHAR(128) NOT NULL,
     `pmid_count` INTEGER NOT NULL,
-    `exemplar_tool_ids` JSON NOT NULL,
+    `exemplar_tools` JSON NOT NULL,
     `source_artifact_sha` VARCHAR(64) NULL,
     `refreshed_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 

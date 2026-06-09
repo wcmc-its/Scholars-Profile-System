@@ -385,7 +385,7 @@ async function main(): Promise<void> {
         familyLabel: w.familyLabel,
         supercategory: w.supercategory,
         pmidCount: w.pmidCount,
-        exemplarToolIds: w.exemplarToolIds,
+        exemplarTools: w.exemplarTools,
         sourceArtifactSha: manifest.sha256,
       })),
       skipDuplicates: true,

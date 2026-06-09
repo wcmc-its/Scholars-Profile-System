@@ -1461,9 +1461,11 @@ model ScholarFamily {
   /// Per-scholar, C-reconciled distinct-publication count (drives ranking + the
   /// "All work" count). Read directly from the artifact; never re-aggregated.
   pmidCount         Int      @map("pmid_count")
-  /// Up to ~3 representative member `canonical_tool_id` strings (per-scholar
-  /// ranked). The only durable tool key — there is no upstream tool uuid.
-  exemplarToolIds   Json     @map("exemplar_tool_ids")
+  /// Up to ~3 representative member-tool DISPLAY NAMES (e.g. "CheXpert"),
+  /// resolved at ETL time from the per-scholar `exemplar_tool_ids` via the
+  /// canonical tools[] index — scholar_tool has no canonical id to join on, so
+  /// the lens cannot resolve ids→names at read time. Refreshed every load.
+  exemplarTools     Json     @map("exemplar_tools")
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
   sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
