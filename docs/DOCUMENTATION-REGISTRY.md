@@ -43,6 +43,7 @@ in **§10**.
 | Who changed this profile field, and when? | [`b03-audit-log.md`](./b03-audit-log.md) |
 | If X is down, what breaks? | [`dependency-outage-matrix.md`](./dependency-outage-matrix.md) |
 | Where does the data come from / how is it refreshed? | [`dependency-outage-matrix.md`](./dependency-outage-matrix.md), [`data-population-runbook.md`](./data-population-runbook.md) |
+| Where do the **Methods & tools** come from? Is the tools taxonomy in DynamoDB? | [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) (no — it's a ReciterAI S3 artifact) |
 | What does this field mean / where is it from? | [`data-dictionary.md`](./data-dictionary.md) |
 | What's the VPC / network / security picture? | [`network-security-topology.md`](./network-security-topology.md) |
 | What does it cost to run? | [`cost-model.md`](./cost-model.md) |
@@ -128,6 +129,7 @@ in **§10**.
 | [`etl/jenzabar-gs-faculty-probe.md`](./etl/jenzabar-gs-faculty-probe.md) | The Jenzabar Graduate-School faculty appointments source — what the view exposes (#193). |
 | [`data-population-runbook.md`](./data-population-runbook.md) | The operational procedure to load/refresh that data and the search index. |
 | [`spotlight-integration-plan.md`](./spotlight-integration-plan.md) | How ReciterAI spotlight data integrates into the home page. |
+| [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md) | Where the **Methods & tools** (method-family) taxonomy comes from — the ReciterAI A2 artifact on S3 (**not** DynamoDB; the legacy `reciterai` `TOOL#` rows are per-PMID activity, not the canonical registry), the published `tools[]`/`families[]` schema, the `etl:scholar-tool` loader + reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) switch (#794), the `scholar_tool` field mapping, and the offline consolidation-export script. |
 | [`coi-pubmed-suggestion-approach.md`](./coi-pubmed-suggestion-approach.md) | Where the self-only "From your publications" COI suggestions come from — the nightly `etl:coi-gap` source, the extract→attribute→diff→tier pipeline, the funnel (why ~10.7k co-author matches get suppressed), worked examples, and the v0 quality limits. |
 
 ## 7. Architecture Decision Records — why it's built this way
@@ -234,7 +236,12 @@ while writing the §1–§8 docs. Tracked in **[issue #560](https://github.com/w
 
 ---
 
-*Last updated: 2026-06-03 — §0/§3 added [`etl-monitoring.md`](./etl-monitoring.md) (#595):
+*Last updated: 2026-06-09 — §0/§6 added [`scholar-tools-taxonomy.md`](./scholar-tools-taxonomy.md):
+where the Methods & tools (method-family) taxonomy lives — the ReciterAI A2 artifact set on S3
+(`tools/latest/{tools,families}.json`), **not** DynamoDB (the legacy `reciterai` `TOOL#` rows are
+per-PMID activity, not the canonical registry) — plus the published `tools[]`/`families[]` schema,
+the `etl:scholar-tool` loader, the reversible `SCHOLAR_TOOL_SOURCE` (ddb→s3) cutover switch (#794),
+the `scholar_tool` field mapping, and the offline consolidation-export script. 2026-06-03 — §0/§3 added [`etl-monitoring.md`](./etl-monitoring.md) (#595):
 how ETL failures and stale data surface to Teams (per-step failure + status/cadence alarms +
 the new daily freshness heartbeat, all via `etl-failures-<env>` → on-call relay), prompted by
 an 8-night-silent nightly-cadence failure whose alarm topic had no subscriber. Earlier 2026-06-03 — §0/§8 added [`search-recall.md`](./search-recall.md): why `covid19`/`tylenol`
