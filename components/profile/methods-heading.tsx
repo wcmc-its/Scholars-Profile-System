@@ -1,4 +1,4 @@
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Wrench } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 // #799 — copy describing how the Methods & tools lens is derived. Matches the
@@ -14,6 +14,7 @@ const METHODS_INFO_COPY =
 export function MethodsHeading() {
   return (
     <h2 className="mb-1 flex items-center gap-2 text-lg font-semibold tracking-tight">
+      <Wrench className="text-muted-foreground size-[18px] shrink-0" aria-hidden="true" />
       Methods &amp; tools
       <TooltipProvider>
         <Tooltip>
