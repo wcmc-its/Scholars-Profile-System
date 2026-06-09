@@ -34,6 +34,7 @@ import {
 } from "@/components/scholar/person-card-role-pill";
 import { GrantRolePill } from "@/components/scholar/person-card-grant-role-pill";
 import { profilePath } from "@/lib/profile-url";
+import { sanitizePubmedHtml } from "@/lib/utils";
 
 export type PersonPopoverSurface =
   | "facet"
@@ -634,7 +635,10 @@ function SurfaceRecentList({
         <ul className="m-0 list-none space-y-1.5 p-0">
           {grants.map((g) => (
             <li key={g.id} className="text-[12px] leading-snug">
-              <span className="line-clamp-2">{g.title}</span>
+              <span
+                className="line-clamp-2"
+                dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(g.title) }}
+              />
               <span className="ml-1 text-[11px] text-muted-foreground">
                 {g.sponsor ? `${g.sponsor} · ${g.endYear}` : g.endYear}
               </span>
@@ -664,7 +668,10 @@ function SurfaceRecentList({
       <ul className="m-0 list-none space-y-1.5 p-0">
         {rows.map((r) => (
           <li key={r.pmid} className="text-[12px] leading-snug">
-            <span className="line-clamp-2">{r.title}</span>
+            <span
+              className="line-clamp-2"
+              dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(r.title) }}
+            />
             {r.year ? (
               <span className="ml-1 text-[11px] text-muted-foreground">{r.year}</span>
             ) : null}

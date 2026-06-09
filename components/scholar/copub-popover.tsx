@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { sanitizePubmedHtml } from "@/lib/utils";
 import type { CoPublication } from "@/lib/api/mentoring";
 
 /** Above this count we collapse to the most-recent N and show a "Show all"
@@ -78,7 +79,10 @@ export function CoPubPopover({
                 rel="noopener noreferrer"
                 className="block rounded px-2 py-1.5 text-xs leading-snug hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
-                <span className="line-clamp-2">{p.title}</span>
+                <span
+                  className="line-clamp-2"
+                  dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(p.title) }}
+                />
                 {p.year ? (
                   <span className="text-muted-foreground mt-0.5 block text-[11px]">
                     {p.year}
