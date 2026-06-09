@@ -390,6 +390,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                 <ProfilePubsCluster
                   publications={profile.publications}
                   keywords={profile.keywords.keywords}
+                  families={profile.families}
                   totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
                   scholarCwid={profile.cwid}
                 />

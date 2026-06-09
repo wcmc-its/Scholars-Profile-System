@@ -1,4 +1,4 @@
-import { HelpCircle } from "lucide-react";
+import { HelpCircle, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -19,6 +19,7 @@ const TOPICS_INFO_COPY =
 export function TopicsHeading() {
   return (
     <h2 className="mb-1 flex items-center gap-2 text-lg font-semibold tracking-tight">
+      <Tag className="text-muted-foreground size-[18px] shrink-0" aria-hidden="true" />
       Topics
       {/* Issue #163 — use the shared dark-tooltip pattern (matches
           DisclosureInfoTooltip) instead of the native browser `title`

@@ -1479,6 +1479,42 @@ model ScholarFamily {
   @@map("scholar_family")
 }
 
+/// #800 — editorial suppression overlay for the Methods lens: families that are
+/// too generic to be informative ("Observational study design", "Descriptive
+/// statistics") are hidden from the lens, the overview FACTS block, and any
+/// public output — for EVERYONE (this is relevance, not access control). Applied
+/// unconditionally in the data layer; an empty table is a no-op. Keyed on
+/// (supercategory, family_label) NOT family_id, because A2 re-mints family_id on
+/// every rebuild — the (supercategory, label) pair is the stable identity.
+/// Curated/editorial-owned, gaps-only (mirrors the mesh_curated_alias pattern):
+/// SPS only fills what the upstream A2 salience signals do not already suppress.
+model FamilySuppressionOverlay {
+  supercategory String   @db.VarChar(128)
+  familyLabel   String   @map("family_label") @db.VarChar(255)
+  sourceNote    String?  @map("source_note") @db.Text
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@id([supercategory, familyLabel])
+  @@map("family_suppression_overlay")
+}
+
+/// #801 — audience-gated sensitivity overlay for the Methods lens: families that
+/// are scientifically legitimate but carry reputational/safety risk on a public
+/// profile (curated live-animal-model families within `animal_cell_models`).
+/// Distinct from suppression: these are hidden from the PUBLIC payload only when
+/// `METHODS_LENS_SENSITIVE_GATE=on`, not removed for everyone. Same stable
+/// (supercategory, family_label) key. Compliance/Communications-owned; dormant
+/// pending External Affairs policy sign-off on the curated scope.
+model FamilySensitivityOverlay {
+  supercategory String   @db.VarChar(128)
+  familyLabel   String   @map("family_label") @db.VarChar(255)
+  sourceNote    String?  @map("source_note") @db.Text
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@id([supercategory, familyLabel])
+  @@map("family_sensitivity_overlay")
+}
+
 /// A scholar's request for a personalized profile slug (#497 PR-3,
 /// docs/slug-personalization-spec.md § 4.1). This is the *approval queue*, not
 /// the source of truth: an approved request writes a FieldOverride(slug) row +
