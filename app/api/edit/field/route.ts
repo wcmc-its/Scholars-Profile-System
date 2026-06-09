@@ -64,7 +64,7 @@ import {
   validateSlugFormat,
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
-import { reconcileScholarSlug } from "@/lib/slug";
+import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
 
@@ -237,6 +237,13 @@ async function handleScholarFieldEdit(params: {
     storedValue = format.value;
   }
 
+  // #678 — name-basis is a WARN (not a block) on the superuser override path:
+  // superusers have legitimate edge cases (namesake disambiguation, an agreed
+  // exception). Set inside the transaction (where the subject row is read on the
+  // same surface `reconcileScholarSlug` uses), emitted after commit. The
+  // self-serve request path is where name-basis is actually enforced.
+  let slugNotNameBased = false;
+
   try {
     await db.write.$transaction(async (tx) => {
       const key = {
@@ -302,6 +309,16 @@ async function handleScholarFieldEdit(params: {
       }
       if (fieldName === "slug") {
         await reconcileScholarSlug(tx, entityId, storedValue);
+        const subject = await tx.scholar.findUnique({
+          where: { cwid: entityId },
+          select: { preferredName: true, fullName: true },
+        });
+        if (
+          subject &&
+          !isNameBasedSlug(storedValue, [subject.preferredName, subject.fullName])
+        ) {
+          slugNotNameBased = true;
+        }
       }
       await appendAuditRow(tx, {
         actorCwid: realCwid,
@@ -331,6 +348,18 @@ async function handleScholarFieldEdit(params: {
   } catch (err) {
     logEditFailure(PATH, err);
     return editError(500, "write_failed");
+  }
+
+  if (slugNotNameBased) {
+    console.warn(
+      JSON.stringify({
+        event: "slug_override_not_name_based",
+        path: PATH,
+        actor_cwid: session.cwid,
+        target_cwid: entityId,
+        slug: storedValue,
+      }),
+    );
   }
 
   if (fieldName === "overview") {

@@ -203,3 +203,87 @@ export async function reconcileScholarSlug(
   });
   return true;
 }
+
+// ---------------------------------------------------------------------------
+// name-basis check (#678) — custom slugs are policy-constrained to be a variant
+// of the scholar's OWN name (first/last/middle, in any order, optionally with a
+// middle/first initial and the numeric collision suffix), not free-choice
+// handles. Until now that policy was enforced only by superuser / ServiceNow
+// review (`validateRequestedSlug` checked format/reserved/numeric/profanity but
+// NOT name-derivation). `isNameBasedSlug` is the code enforcement: it blocks
+// vanity slugs ("cancer", "the-best-lab") the format check alone admits.
+//
+// It is deliberately a *guardrail*, not a proof system. Single-letter initial
+// segments are allowed (so "j-smith" and "john-a-smith" pass), which makes it
+// mildly over-permissive for degenerate initial-only slugs — acceptable because
+// the human review remains the authoritative gate; the goal here is to stop an
+// obviously non-name slug from being auto-accepted by the dormant self-serve
+// queue. A glued form ("jsmith") and the hyphenated form ("j-smith") are judged
+// identically (hyphens are removed before segmentation).
+// ---------------------------------------------------------------------------
+
+/**
+ * Slug-normalized word tokens of a set of name strings (a scholar's preferred
+ * name + full name). Reuses {@link deriveSlug}'s normalization (diacritics,
+ * apostrophes, punctuation) then splits on the hyphen separators it produces.
+ * "John A. Smith" → {"john", "a", "smith"}; a non-romanizable name → ∅.
+ */
+function nameSlugTokens(names: readonly string[]): Set<string> {
+  const tokens = new Set<string>();
+  for (const name of names) {
+    for (const token of deriveSlug(name).split("-")) {
+      if (token) tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Whether `core` (a slug with hyphens removed and the trailing numeric collision
+ * suffix already stripped) segments end-to-end into name `tokens` and single-
+ * letter `initials` — i.e. it is built only from pieces of the scholar's name.
+ * O(n²) word-break over n ≤ 64 (the slug length cap).
+ */
+function segmentsFromName(
+  core: string,
+  tokens: ReadonlySet<string>,
+  initials: ReadonlySet<string>,
+): boolean {
+  const n = core.length;
+  if (n === 0) return false;
+  // reachable[i] === true ⇒ core[0..i) is a valid name-derived prefix.
+  const reachable = new Array<boolean>(n + 1).fill(false);
+  reachable[0] = true;
+  for (let i = 0; i < n; i++) {
+    if (!reachable[i]) continue;
+    if (initials.has(core[i])) reachable[i + 1] = true; // a first/middle initial
+    for (let j = i + 1; j <= n; j++) {
+      if (tokens.has(core.slice(i, j))) reachable[j] = true; // a full name token
+    }
+  }
+  return reachable[n];
+}
+
+/**
+ * True when `slug` is derivable from the scholar's name. `names` is the
+ * scholar's preferred name + full name (caller order irrelevant). Returns
+ * `false` when no usable name is supplied (nothing to derive from), so the
+ * enforced request path fails closed.
+ *
+ * Accepts: any ordering of the name's word tokens, glued or hyphenated, with
+ * single-letter first/middle initials and an optional `-2`/`-3` collision
+ * suffix. Rejects: a slug containing a token (or stray digit) that is not part
+ * of the name.
+ */
+export function isNameBasedSlug(slug: string, names: readonly string[]): boolean {
+  const tokens = nameSlugTokens(names);
+  if (tokens.size === 0) return false;
+  const initials = new Set<string>();
+  for (const token of tokens) initials.add(token[0]);
+
+  const parts = slug.split("-");
+  // Drop a single trailing numeric collision suffix (`-2`, `-3`, …).
+  if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) parts.pop();
+  const core = parts.join("");
+  return segmentsFromName(core, tokens, initials);
+}

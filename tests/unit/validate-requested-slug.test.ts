@@ -48,6 +48,41 @@ describe("validateRequestedSlug", () => {
     expect(validateRequestedSlug("cockburn")).toEqual({ ok: true, value: "cockburn" });
     expect(validateRequestedSlug("shitake-tan")).toEqual({ ok: true, value: "shitake-tan" });
   });
+
+  describe("name-basis (#678 — enforced only when a name context is supplied)", () => {
+    const JANE = { names: ["Jane Smith", "Jane A. Smith"] };
+
+    it("accepts a slug derived from the scholar's name", () => {
+      expect(validateRequestedSlug("jane-smith", JANE)).toEqual({ ok: true, value: "jane-smith" });
+      expect(validateRequestedSlug("jsmith", JANE)).toEqual({ ok: true, value: "jsmith" });
+      expect(validateRequestedSlug("jane-a-smith", JANE)).toEqual({
+        ok: true,
+        value: "jane-a-smith",
+      });
+    });
+
+    it("rejects a non-name vanity slug as not_name_based", () => {
+      expect(validateRequestedSlug("cancer", JANE)).toEqual({ ok: false, error: "not_name_based" });
+      expect(validateRequestedSlug("the-best-lab", JANE)).toEqual({
+        ok: false,
+        error: "not_name_based",
+      });
+    });
+
+    it("runs the earlier guards before the name check (format/reserved/numeric/profanity win)", () => {
+      expect(validateRequestedSlug("search", JANE)).toEqual({ ok: false, error: "reserved" });
+      expect(validateRequestedSlug("12345", JANE)).toEqual({ ok: false, error: "numeric" });
+      expect(validateRequestedSlug("john-fuck-smith", { names: ["John Smith"] })).toEqual({
+        ok: false,
+        error: "profanity",
+      });
+    });
+
+    it("skips the name check entirely when no context is given (back-compat)", () => {
+      // A context-free call keeps the prior behavior — a non-name slug passes.
+      expect(validateRequestedSlug("cancer")).toEqual({ ok: true, value: "cancer" });
+    });
+  });
 });
 
 describe("containsProfanity", () => {

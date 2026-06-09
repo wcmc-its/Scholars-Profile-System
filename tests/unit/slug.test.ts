@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   deriveSlug,
+  isNameBasedSlug,
   looksLikeSlug,
   nextAvailableSlug,
   reconcileScholarSlug,
@@ -139,6 +140,66 @@ describe("reconcileScholarSlug (#497 §5.1 — Option B shared helper)", () => {
     expect(changed).toBe(false);
     expect(t.slugHistory.upsert).not.toHaveBeenCalled();
     expect(t.scholar.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("isNameBasedSlug (#678 — custom slugs must be name variants)", () => {
+  const JANE = ["Jane Smith", "Jane A. Smith"]; // preferred + full
+
+  it("accepts the canonical first-last slug and its reorderings", () => {
+    expect(isNameBasedSlug("jane-smith", JANE)).toBe(true);
+    expect(isNameBasedSlug("smith-jane", JANE)).toBe(true);
+  });
+
+  it("accepts a glued form identically to the hyphenated form", () => {
+    expect(isNameBasedSlug("janesmith", JANE)).toBe(true);
+    expect(isNameBasedSlug("jsmith", JANE)).toBe(true); // first initial + last
+    expect(isNameBasedSlug("smithj", JANE)).toBe(true);
+  });
+
+  it("accepts a first/middle initial drawn from the full name", () => {
+    // 'a' is not a token of "Jane Smith" but is the initial of the middle "A."
+    expect(isNameBasedSlug("jane-a-smith", JANE)).toBe(true);
+    expect(isNameBasedSlug("john-a-smith", ["John Smith", "John Alan Smith"])).toBe(true);
+  });
+
+  it("accepts the numeric collision suffix", () => {
+    expect(isNameBasedSlug("jane-smith-2", JANE)).toBe(true);
+    expect(isNameBasedSlug("jane-smith-37", JANE)).toBe(true);
+  });
+
+  it("accepts a hyphenated surname in any grouping", () => {
+    const m = ["María García-López"];
+    expect(isNameBasedSlug("garcia-lopez", m)).toBe(true);
+    expect(isNameBasedSlug("maria-garcia-lopez", m)).toBe(true);
+    expect(isNameBasedSlug("garcialopez", m)).toBe(true);
+  });
+
+  it("normalizes diacritics / apostrophes via deriveSlug before matching", () => {
+    expect(isNameBasedSlug("jose-nunez", ["José Núñez"])).toBe(true);
+    expect(isNameBasedSlug("obrien", ["Mary O'Brien"])).toBe(true);
+  });
+
+  it("rejects a vanity slug that is not derived from the name", () => {
+    expect(isNameBasedSlug("cancer", JANE)).toBe(false);
+    expect(isNameBasedSlug("the-best-lab", JANE)).toBe(false);
+    expect(isNameBasedSlug("cardiology", JANE)).toBe(false);
+  });
+
+  it("rejects a slug mixing a name token with a non-name token", () => {
+    expect(isNameBasedSlug("jane-cancer", JANE)).toBe(false);
+    expect(isNameBasedSlug("smith-lab", JANE)).toBe(false);
+  });
+
+  it("rejects a stray non-suffix digit", () => {
+    expect(isNameBasedSlug("jane2", JANE)).toBe(false);
+    expect(isNameBasedSlug("jane-2-smith", JANE)).toBe(false);
+  });
+
+  it("returns false when no usable name is supplied (fails closed)", () => {
+    expect(isNameBasedSlug("jane-smith", [])).toBe(false);
+    expect(isNameBasedSlug("jane-smith", [""])).toBe(false);
+    expect(isNameBasedSlug("anything", ["李明"])).toBe(false); // non-romanizable
   });
 });
 
