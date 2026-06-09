@@ -91,6 +91,10 @@ async function main() {
     ["Hierarchy", "etl/hierarchy/index.ts"],
     ["Spotlight", "etl/spotlight/index.ts"],
     ["DynamoDB", "etl/dynamodb/index.ts"],
+    // #794 — A2 canonical tools taxonomy → scholar_tool. Runs AFTER DynamoDB
+    // (whose FACULTY#/scholar projection the cwid FK targets) and is the sole
+    // scholar_tool writer when SCHOLAR_TOOL_SOURCE=s3; a no-op in ddb mode.
+    ["Tools", "etl/tools/index.ts"],
     // Spec §1.7 — runs after ReCiter so the publication.mesh_terms numerator
     // is fresh. No-op-safe: if ReCiter failed earlier this still updates
     // against the prior snapshot, which is at worst stale by one cycle.
