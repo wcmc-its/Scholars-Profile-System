@@ -1,0 +1,82 @@
+<style>
+.seg{display:inline-flex;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);overflow:hidden;flex:none}
+.seg button{font-size:12px;padding:5px 11px;border:none;background:transparent;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
+.seg button[aria-pressed="true"]{background:var(--color-background-info);color:var(--color-text-info)}
+.seg button+button{border-left:0.5px solid var(--color-border-secondary)}
+.lhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:3px}
+.laxis{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:500}
+.laxis i{font-size:18px;color:var(--color-text-tertiary)}
+.lcap{font-size:12px;color:var(--color-text-tertiary);font-weight:400}
+.basis{font-size:12px;color:var(--color-text-tertiary);margin:0 0 12px}
+.schip{display:inline-flex;font-size:13px;padding:4px 10px;margin:0 6px 6px 0;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.schip .n{color:var(--color-text-tertiary);margin-left:5px}
+.mrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-top:0.5px solid var(--color-border-tertiary)}
+.mrow .ml{flex:1}
+.mrow .mt{font-size:14px}
+.mrow .ms{font-size:12px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
+.mrow .mc{font-size:13px;color:var(--color-text-tertiary);padding-top:1px}
+</style>
+
+<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:18px 20px;max-width:580px">
+  <h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Two complementary lenses: subjects from MeSH major headings, and methods inferred from tools and datasets, each with its own scope toggle.</h2>
+
+  <div class="lhead">
+    <span class="laxis"><i class="ti ti-tag" aria-hidden="true"></i>Subjects <span class="lcap">— what the work is about</span></span>
+    <div class="seg" data-lens="subj"><button data-s="all" aria-pressed="true">All work</button><button data-s="lead" aria-pressed="false">Lead work</button></div>
+  </div>
+  <p class="basis" id="subj-basis">MeSH major headings · across all 162 publications, every author role</p>
+  <div id="subj-body" style="display:flex;flex-wrap:wrap;margin-bottom:22px"></div>
+
+  <div class="lhead" style="border-top:0.5px solid var(--color-border-tertiary);padding-top:16px">
+    <span class="laxis"><i class="ti ti-tools" aria-hidden="true"></i>Methods &amp; tools <span class="lcap">— how the work is done</span></span>
+    <div class="seg" data-lens="meth"><button data-s="all" aria-pressed="false">All work</button><button data-s="lead" aria-pressed="true">Lead work</button></div>
+  </div>
+  <p class="basis" id="meth-basis">Inferred from datasets &amp; models · 41 first/senior-authored articles</p>
+  <div id="meth-body"></div>
+
+</div>
+
+<script>
+(function(){
+  var subjAll=[["Data Mining",15],["Natural Language Processing",15],["Deep Learning",12],["Artificial Intelligence",9],["Biomedical Research",6],["Software",5],["Computational Biology",4],["COVID-19",4]];
+  var subjLead=[["Natural Language Processing",7],["Deep Learning",6],["Artificial Intelligence",5],["Data Mining",5],["Diagnostic Imaging",3],["Biomedical Research",3]];
+  var subjMore={all:20,lead:8};
+  var subjBasis={all:"MeSH major headings · across all 162 publications, every author role",lead:"MeSH major headings · 41 first/senior-authored articles"};
+
+  var meth=[
+    ["Chest radiograph models","CheXpert · MIMIC-CXR · MIDRC",14,5],
+    ["LLM clinical evaluation","GPT-4 · GPT-4o · Llama",12,4],
+    ["Clinical text models","BERT · BiomedBERT · PubMedBERT",9,3],
+    ["Evidence summarization","LongT5 · PRIMERA · LDA",7,4],
+    ["Retinal &amp; ophthalmic imaging","AREDS · OHTS · LTSA",6,3],
+    ["EHR &amp; registry data","MIMIC-IV · SAPS-II · NVDRS",3,1]
+  ];
+  var methBasis={all:"Inferred from datasets &amp; models · across all 162 publications",lead:"Inferred from datasets &amp; models · 41 first/senior-authored articles"};
+
+  function renderSubj(s){
+    var data=s==='all'?subjAll:subjLead;
+    var html=data.map(function(d){return '<span class="schip">'+d[0]+'<span class="n">'+d[1]+'</span></span>';}).join('');
+    html+='<span class="schip" style="color:var(--color-text-tertiary)">+ '+subjMore[s]+' more →</span>';
+    document.getElementById('subj-body').innerHTML=html;
+    document.getElementById('subj-basis').innerHTML=subjBasis[s];
+  }
+  function renderMeth(s){
+    var idx=s==='all'?2:3;
+    var html=meth.map(function(m){return '<div class="mrow"><div class="ml"><div class="mt">'+m[0]+'</div><div class="ms">'+m[1]+'</div></div><span class="mc">'+m[idx]+'</span></div>';}).join('');
+    document.getElementById('meth-body').innerHTML=html;
+    document.getElementById('meth-basis').innerHTML=methBasis[s];
+  }
+  document.querySelectorAll('.seg').forEach(function(seg){
+    var lens=seg.getAttribute('data-lens');
+    seg.querySelectorAll('button').forEach(function(b){
+      b.addEventListener('click',function(){
+        seg.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed','false');});
+        b.setAttribute('aria-pressed','true');
+        var s=b.getAttribute('data-s');
+        if(lens==='subj')renderSubj(s);else renderMeth(s);
+      });
+    });
+  });
+  renderSubj('all');renderMeth('lead');
+})();
+</script>
