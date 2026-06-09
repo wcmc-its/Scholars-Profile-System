@@ -234,8 +234,17 @@ function PaperRow({
   cycleId: string;
 }) {
   const pubmedUrl = `https://pubmed.ncbi.nlm.nih.gov/${pmid}`;
-  const visible = authors.slice(0, AUTHOR_DISPLAY_CAP);
-  const overflow = authors.length - visible.length;
+  // #811 — never slice off the senior (last) author. SpotlightAuthor carries no
+  // isLast flag, but lib/api/home documents the array as byline-position order,
+  // so the senior is the last element. On overflow keep the first (CAP-1), the
+  // +N pill, then pin the senior last: [First] [Second] … +N more … [Senior].
+  // No overflow → render every author in order with no tail and no duplication.
+  const hasTail = authors.length > AUTHOR_DISPLAY_CAP;
+  const visible = hasTail
+    ? authors.slice(0, AUTHOR_DISPLAY_CAP - 1)
+    : authors.slice(0, AUTHOR_DISPLAY_CAP);
+  const senior = hasTail ? authors[authors.length - 1] : null;
+  const overflow = authors.length - visible.length - (senior ? 1 : 0);
 
   // Fire-and-forget CTR beacon. Mirrors the search-result pattern: the Blob
   // wrapper sets the JSON content-type the route's request.json() expects.
@@ -271,6 +280,7 @@ function PaperRow({
           <AuthorChip key={a.cwid} author={a} />
         ))}
         {overflow > 0 ? <span className="text-zinc-500">+{overflow} more</span> : null}
+        {senior ? <AuthorChip key={`senior-${senior.cwid}`} author={senior} /> : null}
         <span aria-hidden="true">·</span>
         <span className="italic">
           <span dangerouslySetInnerHTML={{ __html: sanitizePubmedHtml(journal) }} />
