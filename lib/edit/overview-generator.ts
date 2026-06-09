@@ -62,7 +62,11 @@ export const OVERVIEW_SYSTEM_PROMPT = [
   "- Write ONLY from the FACTS. Do not state any award, honor, position, degree",
   "  field, date, collaboration, or affiliation that is not present in FACTS.",
   "- If FACTS is sparse, write a SHORTER overview — never pad with generic praise",
-  '  such as "world-renowned" or "leading expert".',
+  '  such as "world-renowned" or "leading expert", and never add filler about the',
+  '  institution\'s mission, a "commitment to" or "dedication to" the field, or the',
+  "  generic duties of a faculty role (teaching, scholarship, service) that any",
+  "  colleague could equally claim. Such sentences state no fact about THIS person —",
+  "  omit them rather than reach for them to fill space.",
   "- Ground specifics in synopsis, impactJustification, and topicRationale: you may",
   "  name a flagship dataset, method, platform, or contribution when those support",
   "  it, but attribute no result not backed by a synopsis, justification, rationale,",
@@ -122,12 +126,27 @@ function lengthDirective(length: OverviewLength): string {
 }
 
 /**
+ * #778 — true when FACTS carry no research signal: no parent topics AND no
+ * scored/representative publications. These thinnest-tier faculty are where the
+ * model tends to pad with generic institutional filler (a "commitment to
+ * advancing the field" / "participates in the educational mission" second
+ * paragraph) instead of stopping. Identity, education, publication count, and
+ * active years may still be present — the factual stub is built from those.
+ * Exported for the route (low-value flagging) + unit tests.
+ */
+export function hasSparseResearchSignal(facts: OverviewFacts): boolean {
+  return facts.topics.length === 0 && facts.representativePublications.length === 0;
+}
+
+/**
  * Serialize the facts + the steering params into the user turn. The FACTS block
  * is unchanged from v1 (fenced JSON, treated strictly as data). The param
  * directives steer voice / register / length / theme emphasis; the optional
  * free-text `instructions` ride LAST in a clearly-delimited, explicitly-untrusted
  * block — never in the system prompt — so the grounding rules win (SPEC § threat
- * model — prompt injection).
+ * model — prompt injection). When FACTS lack any research signal
+ * (`hasSparseResearchSignal`), a factual-stub directive is added so the model
+ * stops after the concrete facts instead of inventing filler (#778).
  */
 export function buildOverviewUserPrompt(facts: OverviewFacts, params: OverviewParams): string {
   const lines: string[] = [
@@ -148,6 +167,23 @@ export function buildOverviewUserPrompt(facts: OverviewFacts, params: OverviewPa
         `Emphasize these themes: ${labels.join(", ")}. Give less weight to themes not listed.`,
       );
     }
+  }
+
+  // #778 — thinnest-tier faculty (no topics, no scored publications) are where
+  // the model pads with generic institutional filler. Give it an explicit
+  // factual-stub directive so it stops after the concrete facts; this overrides
+  // the length band above when they conflict (a true short stub beats a padded
+  // one).
+  if (hasSparseResearchSignal(facts)) {
+    lines.push(
+      "This faculty member has little structured research signal (no research topics " +
+        "and no scored publications in FACTS). Write a brief, concrete factual stub from " +
+        "only what is present — name, title, department, education, publication count, and " +
+        "active years — and then STOP. Do NOT add any sentence or paragraph about the " +
+        'institution\'s mission, a "commitment to" the field, or the general duties of a ' +
+        "faculty role; if there is nothing concrete left to say, a few factual sentences is " +
+        "the correct and complete length. This directive overrides the word-count band above.",
+    );
   }
 
   lines.push("");
