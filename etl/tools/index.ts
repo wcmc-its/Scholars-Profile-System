@@ -1,5 +1,9 @@
 /**
- * Tools ETL — #794. A2 canonical tools/methods taxonomy (v7) → `scholar_tool`.
+ * Tools ETL — #794 / #799. A2 canonical tools/methods taxonomy → `scholar_tool`
+ * (per-tool rollup, #794) AND `scholar_family` (per-method-family rollup, #799,
+ * the family-primary Methods lens). Both are written from the SAME `tools.json`
+ * fetch so the two rollups can never skew, under the same `SCHOLAR_TOOL_SOURCE`
+ * gate. The family mapping lives in ./scholar-family-mapper-s3.ts.
  *
  * Repoints the `scholar_tool` table from the legacy ReciterAI `TOOL#` DynamoDB
  * scan (etl/dynamodb Block 5 — slug-mangled, no canonical dedup, no method
@@ -45,6 +49,10 @@ import {
   buildScholarToolWritesFromS3,
   type ToolsArtifactSlice,
 } from "./scholar-tool-mapper-s3";
+import {
+  buildScholarFamilyWritesFromS3,
+  type ScholarFamilyWrite,
+} from "./scholar-family-mapper-s3";
 
 // ---------------------------------------------------------------------------
 // Module-level env constants — AWS SDK default credential chain; never hardcode
@@ -174,6 +182,37 @@ async function printDryRunDiff(
 }
 
 // ---------------------------------------------------------------------------
+// Dry-run family preview — the staging verification artifact for #799: how many
+// families would write, and the top families for a small sample of scholars.
+// ---------------------------------------------------------------------------
+
+function printFamilyDryRun(writes: ScholarFamilyWrite[]): void {
+  const byCwid = new Map<string, ScholarFamilyWrite[]>(); // cwid → families, rank order preserved
+  for (const w of writes) {
+    const list = byCwid.get(w.cwid) ?? [];
+    list.push(w);
+    byCwid.set(w.cwid, list);
+  }
+  const sample = [...byCwid.keys()].slice(0, 5);
+  log("dry_run_family_sample", {
+    scholars_with_families: byCwid.size,
+    sampled_cwids: sample.length,
+  });
+  for (const cwid of sample) {
+    const fams = byCwid.get(cwid) ?? [];
+    log("dry_run_family_top", {
+      cwid,
+      families: fams.length,
+      top10: fams.slice(0, 10).map((f) => ({
+        label: f.familyLabel,
+        supercategory: f.supercategory,
+        pmid_count: f.pmidCount,
+      })),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main ETL flow
 // ---------------------------------------------------------------------------
 
@@ -283,10 +322,24 @@ async function main(): Promise<void> {
     unknown_tool_fallback: result.unknownToolFallback,
   });
 
+  // scholar_family (#799) — mapped from the same artifact slice. Reuse the same
+  // FK scope; the family rollup carries its own counters (see the mapper).
+  const familyResult = buildScholarFamilyWritesFromS3(artifact, { ourCwidSet });
+  log("mapped_families", {
+    rows: familyResult.writes.length,
+    skipped_out_of_scope_cwid: familyResult.skippedMissingCwid,
+    skipped_missing_fields: familyResult.skippedMissingFields,
+    unknown_supercategory: familyResult.unknownSupercategory,
+  });
+
   // Dry-run: diff against the live table and stop — never write, never record.
   if (dryRun) {
     await printDryRunDiff(result.writes);
-    log("dry_run_complete", { rows_would_write: result.writes.length });
+    printFamilyDryRun(familyResult.writes);
+    log("dry_run_complete", {
+      rows_would_write: result.writes.length,
+      family_rows_would_write: familyResult.writes.length,
+    });
     return;
   }
 
@@ -315,8 +368,34 @@ async function main(): Promise<void> {
     inserted += chunk.length;
   }
 
+  // scholar_family (#799) — same full-replacement semantics (deleteMany then
+  // chunked createMany), written from the same artifact + the same gate. The
+  // uuid id and family_id are both unstable across A2 rebuilds, so this is a
+  // rebuild keyed by @@unique([cwid, family_id]); stamp the source artifact
+  // sha256 on every row so a family-id renumber is detectable per refresh.
+  await db.write.scholarFamily.deleteMany();
+  let familiesInserted = 0;
+  const FAMILY_BATCH = 500;
+  for (let i = 0; i < familyResult.writes.length; i += FAMILY_BATCH) {
+    const chunk = familyResult.writes.slice(i, i + FAMILY_BATCH);
+    await db.write.scholarFamily.createMany({
+      data: chunk.map((w) => ({
+        cwid: w.cwid,
+        familyId: w.familyId,
+        familyLabel: w.familyLabel,
+        supercategory: w.supercategory,
+        pmidCount: w.pmidCount,
+        exemplarTools: w.exemplarTools,
+        sourceArtifactSha: manifest.sha256,
+      })),
+      skipDuplicates: true,
+    });
+    familiesInserted += chunk.length;
+  }
+
   log("write_complete", {
     rows: inserted,
+    family_rows: familiesInserted,
     version: manifest.version,
     sha256_prefix: manifest.sha256.slice(0, 12),
   });
