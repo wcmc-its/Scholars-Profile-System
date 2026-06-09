@@ -700,6 +700,7 @@ function ModeTabs({
         label="Scholars"
         count={peopleCount}
         active={activeType === "people"}
+        title="Scholars whose own profile matches your search — counted differently from the Publications tab's author list (authors of the matched publications)."
       />
       <ModeTab
         href={pubHref}
@@ -722,15 +723,18 @@ function ModeTab({
   label,
   count,
   active,
+  title,
 }: {
   href: string;
   label: string;
   count: number;
   active: boolean;
+  title?: string;
 }) {
   return (
     <Link
       href={href}
+      title={title}
       className={`-mb-px inline-flex h-[42px] items-center gap-2 border-b-2 px-4 text-[13px] transition-colors ${
         active
           ? "border-[#2c4f6e] font-semibold text-[#2c4f6e]"
