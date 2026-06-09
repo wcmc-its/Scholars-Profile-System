@@ -4,6 +4,7 @@ import type { PublicationSuppressions } from "@/lib/api/manual-layer";
 import {
   buildPeopleDoc,
   buildPublicationDoc,
+  isRequireDisplayableAuthorEnabled,
   type PublicationForIndex,
   type ScholarForIndex,
 } from "@/lib/search-index-docs";
@@ -30,6 +31,10 @@ function makePub(
     isLast?: boolean;
     position: number;
     totalAuthors: number;
+    /** #718 — soft-deleted (hidden identity class, e.g. doctoral student under
+     *  #536) when set; defaults to a live, active scholar. */
+    deletedAt?: Date | null;
+    status?: string;
   }>,
 ): PublicationForIndex {
   const p: Partial<PublicationForIndex> = {
@@ -61,8 +66,8 @@ function makePub(
         cwid: a.cwid,
         slug: a.cwid,
         preferredName: a.cwid,
-        deletedAt: null,
-        status: "active",
+        deletedAt: a.deletedAt ?? null,
+        status: a.status ?? "active",
       },
     })) as unknown as PublicationForIndex["authors"],
     publicationTopics: [],
@@ -155,6 +160,62 @@ describe("buildPublicationDoc — suppression integration (C3)", () => {
     const doc = buildPublicationDoc(p, sup);
     expect(doc).not.toBeNull();
     expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual(["ann"]);
+  });
+});
+
+describe("buildPublicationDoc — require-displayable-author gate (#718)", () => {
+  // A pub whose only WCM author is soft-deleted (a hidden identity class — e.g.
+  // a doctoral student under #536) has an empty *displayable* author set. The
+  // derived-dark gate does NOT catch this (the CONFIRMED set is empty, so
+  // isPublicationDark returns false), so it is the distinct case the #718 gate
+  // handles.
+  const soleDeleted = makePub("1", [
+    {
+      cwid: "trainee",
+      isFirst: true,
+      isLast: true,
+      position: 1,
+      totalAuthors: 1,
+      deletedAt: new Date("2026-05-13"),
+    },
+  ]);
+
+  it("OFF (default): still emits the doc with an empty WCM author set (pre-#718 behavior)", () => {
+    const doc = buildPublicationDoc(soleDeleted, NO_SUP);
+    expect(doc).not.toBeNull();
+    expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual([]);
+  });
+
+  it("ON: drops the publication when no WCM author is displayable", () => {
+    expect(
+      buildPublicationDoc(soleDeleted, NO_SUP, { requireDisplayableAuthor: true }),
+    ).toBeNull();
+  });
+
+  it("ON: keeps a pub that still has a displayable WCM author (only the deleted one drops)", () => {
+    const mixed = makePub("2", [
+      { cwid: "live", isFirst: true, position: 1, totalAuthors: 2 },
+      {
+        cwid: "trainee",
+        isLast: true,
+        position: 2,
+        totalAuthors: 2,
+        deletedAt: new Date("2026-05-13"),
+      },
+    ]);
+    const doc = buildPublicationDoc(mixed, NO_SUP, { requireDisplayableAuthor: true });
+    expect(doc).not.toBeNull();
+    expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual(["live"]);
+  });
+});
+
+describe("isRequireDisplayableAuthorEnabled (#718)", () => {
+  it("is true only when SEARCH_REQUIRE_DISPLAYABLE_AUTHOR === 'on'", () => {
+    vi.stubEnv("SEARCH_REQUIRE_DISPLAYABLE_AUTHOR", "on");
+    expect(isRequireDisplayableAuthorEnabled()).toBe(true);
+    vi.stubEnv("SEARCH_REQUIRE_DISPLAYABLE_AUTHOR", "");
+    expect(isRequireDisplayableAuthorEnabled()).toBe(false);
+    vi.unstubAllEnvs();
   });
 });
 
