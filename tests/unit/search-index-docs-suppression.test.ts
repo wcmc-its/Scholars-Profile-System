@@ -35,6 +35,8 @@ function makePub(
      *  #536) when set; defaults to a live, active scholar. */
     deletedAt?: Date | null;
     status?: string;
+    /** #718 — role_category; `affiliate_alumni` triggers the alumni keep-rule. */
+    roleCategory?: string;
   }>,
 ): PublicationForIndex {
   const p: Partial<PublicationForIndex> = {
@@ -68,6 +70,7 @@ function makePub(
         preferredName: a.cwid,
         deletedAt: a.deletedAt ?? null,
         status: a.status ?? "active",
+        roleCategory: a.roleCategory ?? "full_time_faculty",
       },
     })) as unknown as PublicationForIndex["authors"],
     publicationTopics: [],
@@ -206,6 +209,28 @@ describe("buildPublicationDoc — require-displayable-author gate (#718)", () =>
     const doc = buildPublicationDoc(mixed, NO_SUP, { requireDisplayableAuthor: true });
     expect(doc).not.toBeNull();
     expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual(["live"]);
+  });
+
+  it("ON: keeps a pub whose only author is an alumnus (#718 alumni exception)", () => {
+    // An alumnus is soft-deleted (hidden, no chip) but their work is real WCM
+    // output — the pub stays, rendered via the byline fallback. `wcmAuthors` is
+    // empty (alumnus is deletedAt) yet the doc is retained.
+    const soleAlumnus = makePub("3", [
+      {
+        cwid: "alum",
+        isFirst: true,
+        isLast: true,
+        position: 1,
+        totalAuthors: 1,
+        deletedAt: new Date("2026-05-13"),
+        roleCategory: "affiliate_alumni",
+      },
+    ]);
+    const doc = buildPublicationDoc(soleAlumnus, NO_SUP, {
+      requireDisplayableAuthor: true,
+    });
+    expect(doc).not.toBeNull();
+    expect((doc as { wcmAuthorCwids: string[] }).wcmAuthorCwids).toEqual([]);
   });
 });
 

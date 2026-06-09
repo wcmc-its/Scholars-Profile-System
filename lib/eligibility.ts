@@ -14,6 +14,11 @@
 export type RoleCategory =
   | "full_time_faculty"
   | "affiliated_faculty"
+  // A WCM alumnus (ED person-type `affiliate-alumni`). A hidden identity class
+  // like `doctoral_student` — not surfaced or faceted — but their publications
+  // are retained (see buildPublicationDoc / #718). Distinct from
+  // `affiliated_faculty`, which they were previously (wrongly) bucketed into.
+  | "affiliate_alumni"
   | "postdoc"
   | "fellow"
   | "non_faculty_academic"
@@ -26,17 +31,20 @@ export type RoleCategory =
 /**
  * Public-display carve (issue #536).
  *
- * Doctoral students are not surfaced on any directed-traffic surface — people
- * search + autocomplete, /browse, the `/scholars/[slug]` profile route, and the
- * algorithmic home surfaces. They remain only as *relational* mentions (PhD-mentee
- * names on a PI's profile, co-authorship chips), where the name renders as plain
- * text rather than a link.
+ * Doctoral students and alumni (`affiliate_alumni`) are not surfaced on any
+ * directed-traffic surface — people search + autocomplete, /browse, the
+ * `/scholars/[slug]` profile route, and the algorithmic home surfaces. They
+ * remain only as *relational* mentions (PhD-mentee names on a PI's profile,
+ * co-authorship chips), where the name renders as plain text rather than a link.
+ * Alumni are additionally soft-deleted in the ED ETL, so every `deletedAt`-keyed
+ * hide site drops them; their publications are retained via the #718 alumni
+ * keep-rule in `buildPublicationDoc`.
  *
  * This is an identity-class display rule, distinct from ELIGIBLE_ROLES (algorithmic
  * relevance) and TOP_SCHOLARS_ELIGIBLE_ROLES (PI-only chip row): a hidden role is
  * removed everywhere a profile link would be generated, not just from ranked surfaces.
  *
- * Every RoleCategory *except* `doctoral_student` is publicly displayed.
+ * Every RoleCategory *except* `doctoral_student` and `affiliate_alumni` is publicly displayed.
  */
 export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
   "full_time_faculty",
@@ -50,15 +58,19 @@ export const PUBLICLY_DISPLAYED_ROLES: ReadonlyArray<RoleCategory> = [
   "emeritus",
 ] as const;
 
-const HIDDEN_DISPLAY_ROLES: ReadonlySet<RoleCategory> = new Set(["doctoral_student"]);
+const HIDDEN_DISPLAY_ROLES: ReadonlySet<RoleCategory> = new Set([
+  "doctoral_student",
+  "affiliate_alumni",
+]);
 
 /**
  * Whether a scholar with this role may be surfaced on a public directed-traffic
  * surface (search/browse/profile/home) and rendered as a clickable profile link.
  *
  * Fail-open for display: a `null`/`undefined`/unknown role is treated as publicly
- * displayed — only the explicit hidden identity class (`doctoral_student`) is
- * suppressed. This mirrors the index/route/link sites all reading the same column.
+ * displayed — only the explicit hidden identity classes (`doctoral_student`,
+ * `affiliate_alumni`) are suppressed. This mirrors the index/route/link sites all
+ * reading the same column.
  */
 export function isPubliclyDisplayed(
   role: RoleCategory | string | null | undefined,

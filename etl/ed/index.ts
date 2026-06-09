@@ -81,7 +81,8 @@ import {
  * a PHD student pulled from ou=students with a residual personTypeCode does
  * not get re-classified.
  */
-function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
+// Exported for unit tests (tests/unit/etl-ed-role-category.test.ts).
+export function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   if (f.ou === "students" && f.degreeCode === "PHD") return "doctoral_student";
 
   const primary = f.primaryPersonTypeCode ?? "";
@@ -148,6 +149,17 @@ function deriveRoleCategory(f: EdFacultyEntry): RoleCategory {
   // out upstream, but the catch is defensive).
   if (primary === "employee-staff-new-york" || has("employee-nonacademic")) {
     return "non_academic";
+  }
+
+  // WCM alumnus (ED person-type `affiliate-alumni`). Placed last so an alum who
+  // also holds a current appointment (faculty / postdoc / etc.) is classified by
+  // that active role above; only a *pure* alumnus reaches here. Previously these
+  // fell through to the `affiliated_faculty` catch-all, wrongly giving them a
+  // faculty profile + facet. A hidden identity class (lib/eligibility.ts) —
+  // soft-deleted below so every display site drops them, publications retained
+  // via the #718 alumni keep-rule. NOTE: confirm the exact ED code at activation.
+  if (primary === "affiliate-alumni" || has("affiliate-alumni")) {
+    return "affiliate_alumni";
   }
 
   // Catch-all: anything else gets "affiliated_faculty". This includes
@@ -851,6 +863,22 @@ async function main() {
         data: { deletedAt: new Date() },
       });
       softDeleted += 1;
+    }
+
+    // Alumni (`affiliate_alumni`) are a hidden identity class like doctoral
+    // students: present in ED but never surfaced. They ARE in the run (so the
+    // departed pass above doesn't catch them) — soft-delete by role so every
+    // `deletedAt`-keyed hide site (people index `PEOPLE_INDEX_WHERE`, author
+    // chips, profile route) drops them. Their publications are retained via the
+    // #718 alumni keep-rule. Runs after the upsert/reactivation pass, so it is
+    // idempotent (an alum reactivated on reappearance is re-hidden here); a
+    // genuine role change away from alumnus stops matching and stays active.
+    const alumniHidden = await db.write.scholar.updateMany({
+      where: { roleCategory: "affiliate_alumni", deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    if (alumniHidden.count > 0) {
+      console.log(`ED ETL: soft-hid ${alumniHidden.count} affiliate_alumni scholar(s)`);
     }
 
     // Issue #162 — NYP affiliate titles. Run after soft-delete so the

@@ -21,6 +21,7 @@ describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
   const ALL_ROLES: RoleCategory[] = [
     "full_time_faculty",
     "affiliated_faculty",
+    "affiliate_alumni",
     "postdoc",
     "fellow",
     "non_faculty_academic",
@@ -31,16 +32,20 @@ describe("isPubliclyDisplayed / PUBLICLY_DISPLAYED_ROLES (#536)", () => {
     "emeritus",
   ];
 
-  it("hides exactly doctoral_student; every other role is publicly displayed", () => {
+  it("hides exactly the two hidden identity classes; every other role is publicly displayed", () => {
     for (const role of ALL_ROLES) {
-      expect(isPubliclyDisplayed(role)).toBe(role !== "doctoral_student");
+      const hidden = role === "doctoral_student" || role === "affiliate_alumni";
+      expect(isPubliclyDisplayed(role)).toBe(!hidden);
     }
   });
 
-  it("PUBLICLY_DISPLAYED_ROLES is every RoleCategory except doctoral_student", () => {
+  it("PUBLICLY_DISPLAYED_ROLES is every RoleCategory except the hidden classes", () => {
     expect(PUBLICLY_DISPLAYED_ROLES).not.toContain("doctoral_student");
+    expect(PUBLICLY_DISPLAYED_ROLES).not.toContain("affiliate_alumni");
     expect([...PUBLICLY_DISPLAYED_ROLES].sort()).toEqual(
-      ALL_ROLES.filter((r) => r !== "doctoral_student").sort(),
+      ALL_ROLES.filter(
+        (r) => r !== "doctoral_student" && r !== "affiliate_alumni",
+      ).sort(),
     );
     // The set membership predicate agrees with the published allow-list.
     for (const role of PUBLICLY_DISPLAYED_ROLES) {
@@ -63,12 +68,13 @@ describe("TOP_SCHOLARS_ELIGIBLE_ROLES (CONTEXT.md D-14 narrowed override)", () =
 });
 
 describe("RoleCategory type (compile-time check)", () => {
-  it("includes all 10 spec-mandated categories", () => {
+  it("includes all 11 spec-mandated categories", () => {
     // Each literal asserted against the type via a typed array.
     // If any member is misspelled or missing from the union, this fails to compile.
     const allRoles: RoleCategory[] = [
       "full_time_faculty",
       "affiliated_faculty",
+      "affiliate_alumni",
       "postdoc",
       "fellow",
       "non_faculty_academic",
@@ -78,7 +84,7 @@ describe("RoleCategory type (compile-time check)", () => {
       "lecturer",
       "emeritus",
     ];
-    expect(allRoles).toHaveLength(10);
+    expect(allRoles).toHaveLength(11);
   });
 
   it("ELIGIBLE_ROLES is a subset of RoleCategory", () => {
