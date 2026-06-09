@@ -11,6 +11,14 @@
  * the clinical-profile URL. `knowsAbout` is fed from the scholar's MeSH
  * keyword aggregation. ORCID is omitted until the data model carries it
  * (tracked in #171).
+ *
+ * Name-part decomposition (#684) — `givenName`/`additionalName`/`familyName`
+ * (from the postnominal-free name), `honorificSuffix` (the degree), a bare-name
+ * `alternateName`, and `mainEntityOfPage` are emitted so a *bare-name* query
+ * ("christopher mason weill cornell") binds to this page rather than the
+ * scholar's competing clinical/lab/department pages. These on-page signals are
+ * the slice of #684 this page owns; the dominant levers (interlinking competing
+ * WCM pages → profile, and overview content) are tracked in #683 and #742.
  */
 
 import { canonicalProfilePath } from "@/lib/profile-url";
@@ -54,7 +62,48 @@ export type PersonJsonLdInput = {
    *  `aggregateKeywords` (sorted by pubCount desc). Capped at
    *  KNOWS_ABOUT_CAP. */
   keywords?: ReadonlyArray<{ displayLabel: string }>;
+  /** Postnominal-free personal name ("Christopher E. Mason"), used to derive
+   *  `givenName`/`additionalName`/`familyName` and a bare-name `alternateName`
+   *  (#684). Pass `preferredName` from the payload (which carries no
+   *  postnominal — `publishedName` does). Name parts are omitted when this is
+   *  absent or unsplittable; `alternateName` is omitted when it equals the
+   *  display `name`. */
+  nameParts?: string | null;
+  /** Postnominal degree string ("MD", "PhD") → `honorificSuffix`. Null/absent
+   *  when the scholar has no postnominal. */
+  honorificSuffix?: string | null;
 };
+
+/**
+ * Split a postnominal-free personal name into Schema.org name parts.
+ *
+ * `givenName` = first token, `familyName` = last token, `additionalName` = any
+ * middle tokens (a middle name or initial, e.g. "E." for "Christopher E.
+ * Mason"). Returns all-null for a name that can't be confidently split (empty
+ * or a single token) so the builder never emits a speculative part. Particles
+ * ("van der") fall into `additionalName` — imperfect but rare and harmless for
+ * entity resolution.
+ *
+ * Exported for unit tests + reuse.
+ */
+export function splitPersonName(name: string | null | undefined): {
+  givenName: string | null;
+  additionalName: string | null;
+  familyName: string | null;
+} {
+  const tokens = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) {
+    return { givenName: null, additionalName: null, familyName: null };
+  }
+  const givenName = tokens[0];
+  const familyName = tokens[tokens.length - 1];
+  const middle = tokens.slice(1, -1).join(" ");
+  return {
+    givenName,
+    additionalName: middle.length > 0 ? middle : null,
+    familyName,
+  };
+}
 
 export function buildPersonJsonLd(
   profile: PersonJsonLdInput,
@@ -79,11 +128,16 @@ export function buildPersonJsonLd(
   if (profile.orcid) sameAs.push(`https://orcid.org/${profile.orcid}`);
   if (profile.clinicalProfileUrl) sameAs.push(profile.clinicalProfileUrl);
 
+  const url = `${baseUrl}${canonicalProfilePath(profile.slug)}`;
+
   const out: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "Person",
     name: profile.preferredName,
-    url: `${baseUrl}${canonicalProfilePath(profile.slug)}`,
+    url,
+    // Declare this page as the canonical home of the Person entity — a name
+    // signal that helps consolidate the bare-name query onto the profile (#684).
+    mainEntityOfPage: url,
     image: profile.identityImageEndpoint,
     affiliation: {
       "@type": "Organization",
@@ -93,6 +147,17 @@ export function buildPersonJsonLd(
     },
     worksFor,
   };
+
+  // Decomposed name parts + degree + bare-name alternate (#684).
+  const parts = splitPersonName(profile.nameParts);
+  if (parts.givenName) out.givenName = parts.givenName;
+  if (parts.additionalName) out.additionalName = parts.additionalName;
+  if (parts.familyName) out.familyName = parts.familyName;
+  if (profile.honorificSuffix) out.honorificSuffix = profile.honorificSuffix;
+  const bareName = profile.nameParts?.trim();
+  if (bareName && bareName !== profile.preferredName.trim()) {
+    out.alternateName = bareName;
+  }
 
   if (profile.primaryTitle) {
     out.jobTitle = profile.primaryTitle;

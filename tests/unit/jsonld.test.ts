@@ -13,6 +13,13 @@
  *  - sameAs includes clinicalProfileUrl when present; omitted otherwise
  *  - knowsAbout drawn from MeSH keywords, capped, omitted when empty
  *  - ORCID not yet emitted — schema field doesn't exist; tracked in #171
+ *
+ * #684 name-signal additions:
+ *  - mainEntityOfPage always emitted, equal to url
+ *  - givenName/additionalName/familyName derived from nameParts (postnominal-free)
+ *  - honorificSuffix from the postnominal
+ *  - alternateName = bare name, only when it differs from the display name
+ *  - all name parts omitted when nameParts is absent/unsplittable
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -20,6 +27,7 @@ import {
   buildOrganizationJsonLd,
   buildPersonJsonLd,
   overviewToDescription,
+  splitPersonName,
   type PersonJsonLdInput,
 } from "@/lib/seo/jsonld";
 
@@ -168,6 +176,98 @@ describe("buildPersonJsonLd", () => {
     expect(empty).not.toHaveProperty("knowsAbout");
     const absent = buildPersonJsonLd({ ...baseInput, keywords: undefined });
     expect(absent).not.toHaveProperty("knowsAbout");
+  });
+
+  // #684 — name-signal additions.
+  it("always emits mainEntityOfPage equal to url", () => {
+    const ld = buildPersonJsonLd(baseInput);
+    expect(ld.mainEntityOfPage).toBe(ld.url);
+  });
+
+  it("decomposes nameParts into given/additional/family + honorificSuffix", () => {
+    const ld = buildPersonJsonLd({
+      ...baseInput,
+      preferredName: "Christopher E. Mason, PhD",
+      nameParts: "Christopher E. Mason",
+      honorificSuffix: "PhD",
+    });
+    expect(ld.givenName).toBe("Christopher");
+    expect(ld.additionalName).toBe("E.");
+    expect(ld.familyName).toBe("Mason");
+    expect(ld.honorificSuffix).toBe("PhD");
+  });
+
+  it("emits the bare-name alternateName when it differs from the display name", () => {
+    const ld = buildPersonJsonLd({
+      ...baseInput,
+      preferredName: "Christopher E. Mason, PhD",
+      nameParts: "Christopher E. Mason",
+      honorificSuffix: "PhD",
+    });
+    expect(ld.alternateName).toBe("Christopher E. Mason");
+  });
+
+  it("omits alternateName + additionalName + honorificSuffix for a two-token, degreeless name", () => {
+    const ld = buildPersonJsonLd({
+      ...baseInput,
+      preferredName: "Olivier Elemento",
+      nameParts: "Olivier Elemento",
+      honorificSuffix: null,
+    });
+    expect(ld.givenName).toBe("Olivier");
+    expect(ld.familyName).toBe("Elemento");
+    expect(ld).not.toHaveProperty("additionalName");
+    expect(ld).not.toHaveProperty("honorificSuffix");
+    expect(ld).not.toHaveProperty("alternateName");
+  });
+
+  it("omits all name parts when nameParts is absent", () => {
+    const ld = buildPersonJsonLd(baseInput); // baseInput carries no nameParts
+    expect(ld).not.toHaveProperty("givenName");
+    expect(ld).not.toHaveProperty("additionalName");
+    expect(ld).not.toHaveProperty("familyName");
+    expect(ld).not.toHaveProperty("alternateName");
+    expect(ld).not.toHaveProperty("honorificSuffix");
+  });
+});
+
+describe("splitPersonName", () => {
+  it("splits a two-token name into given + family", () => {
+    expect(splitPersonName("Olivier Elemento")).toEqual({
+      givenName: "Olivier",
+      additionalName: null,
+      familyName: "Elemento",
+    });
+  });
+
+  it("puts middle tokens (including initials) in additionalName", () => {
+    expect(splitPersonName("Christopher E. Mason")).toEqual({
+      givenName: "Christopher",
+      additionalName: "E.",
+      familyName: "Mason",
+    });
+    expect(splitPersonName("Mary Jane Watson Parker")).toEqual({
+      givenName: "Mary",
+      additionalName: "Jane Watson",
+      familyName: "Parker",
+    });
+  });
+
+  it("collapses surrounding/extra whitespace before splitting", () => {
+    expect(splitPersonName("  Parag   Goyal ")).toEqual({
+      givenName: "Parag",
+      additionalName: null,
+      familyName: "Goyal",
+    });
+  });
+
+  it("returns all-null for unsplittable input (empty / single token / nullish)", () => {
+    const allNull = { givenName: null, additionalName: null, familyName: null };
+    expect(splitPersonName("Madonna")).toEqual(allNull);
+    expect(splitPersonName("")).toEqual(allNull);
+    expect(splitPersonName("   ")).toEqual(allNull);
+    expect(splitPersonName(null)).toEqual(allNull);
+    expect(splitPersonName(undefined)).toEqual(allNull);
   });
 });
 
