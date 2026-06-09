@@ -54,6 +54,9 @@ seed-output/
 # Exception: #642 curated MeSH-alias seed — checked in for the same reason
 # (curation-team edits flow through PR review).
 !etl/mesh-aliases/curated.csv
+# Exception: #801 curated audience-gated family seed — checked in so the
+# External-Affairs-approved subset flows through PR review (etl:family-sensitivity).
+!etl/family-sensitivity/curated.csv
 # Exception: VIVO pageview baseline raw New Relic exports (issue #595) — checked
 # in so the baseline isn't a secondary analysis. Public URLs only (no PII).
 !docs/data/vivo-pageview-baseline/*.csv
