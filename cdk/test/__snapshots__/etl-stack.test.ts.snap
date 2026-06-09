@@ -4818,7 +4818,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_TOOL_SOURCE",
-                "Value": "ddb",
+                "Value": "s3",
               },
               {
                 "Name": "OPENSEARCH_NODE",

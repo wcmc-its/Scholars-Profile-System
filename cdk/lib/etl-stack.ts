@@ -479,11 +479,15 @@ export class EtlStack extends Stack {
         // artifacts bucket as spotlight, under the tools/ prefix.
         TOOLS_BUCKET: "wcmc-reciterai-artifacts",
         TOOLS_PREFIX: "tools",
-        // scholar_tool producer switch. "ddb" (legacy DynamoDB Block 5) is the
-        // reversible default until the A2 S3 path is verified in staging via a
-        // `etl:scholar-tool --dry-run` parallel-run (#794); flip to "s3"
-        // per-env to make etl:scholar-tool the sole scholar_tool writer.
-        SCHOLAR_TOOL_SOURCE: "ddb",
+        // scholar_tool producer switch (#794). "ddb" (legacy DynamoDB Block 5)
+        // is the reversible default; "s3" makes etl:scholar-tool the sole
+        // scholar_tool writer over the A2 canonical taxonomy and also populates
+        // scholar_family (the #799 Methods lens). STAGING-FIRST cutover: "s3" in
+        // staging now, prod stays "ddb" until the staging soak completes and the
+        // prod cutover is signed off (it reverses a team deferral + unblocks
+        // ReciterAI's legacy TOOL# deletion). Applied via cdk deploy
+        // --exclusively Sps-Etl-<env>; run etl:scholar-tool after the deploy.
+        SCHOLAR_TOOL_SOURCE: env === "staging" ? "s3" : "ddb",
         // OpenSearch domain endpoint (https://...) imported from DataStack;
         // the search-index step's lib/search.ts reads OPENSEARCH_NODE and
         // authenticates with the OPENSEARCH_USER/PASS secrets above. #447

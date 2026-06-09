@@ -101,6 +101,10 @@ const EXPECTED_ENV_CONFIG: Readonly<Record<string, string>> = {
   // #794 — A2 tools taxonomy (etl:scholar-tool) + the reversible producer switch.
   TOOLS_BUCKET: "wcmc-reciterai-artifacts",
   TOOLS_PREFIX: "tools",
+  // Env-conditional since the staging-first cutover (staging flips to "s3",
+  // covered by the staging snapshot). EXPECTED_ENV_CONFIG is asserted only
+  // against the prod template below, so this entry now guards that prod stays
+  // "ddb" until the prod cutover is signed off.
   SCHOLAR_TOOL_SOURCE: "ddb",
 };
 
