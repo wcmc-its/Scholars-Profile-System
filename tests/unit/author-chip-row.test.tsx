@@ -59,7 +59,17 @@ describe("AuthorChipRow ordering", () => {
     expect(rendered).toEqual(["Senior", "First"]);
   });
 
-  it("renders +N more pill when authors exceed the 5-chip cap", () => {
+  const renderedNames = () =>
+    screen.getAllByRole("link").map((el) => {
+      const spans = el.querySelectorAll("span");
+      return spans[spans.length - 1]?.textContent?.trim() ?? "";
+    });
+
+  // #811 — the senior (last) author is the most important byline signal, so it
+  // must never be sliced off the tail. On overflow the row keeps the first
+  // (cap-1) authors, the +N pill, then the senior last:
+  // [First] [Second] [Third] [Fourth] +N more [Senior]. The middle is hidden.
+  it("pins the senior author to the tail and hides the middle on overflow", () => {
     const authors: AuthorChip[] = Array.from({ length: 8 }, (_, i) =>
       baseChip({
         name: `Author ${i + 1}`,
@@ -70,18 +80,76 @@ describe("AuthorChipRow ordering", () => {
       }),
     );
     render(<AuthorChipRow authors={authors} />);
-    const links = screen.getAllByRole("link").map((el) => {
-      const spans = el.querySelectorAll("span");
-      return spans[spans.length - 1]?.textContent?.trim() ?? "";
-    });
-    expect(links).toEqual([
+    // First four head authors, then the senior (Author 8) — Authors 5–7 hidden.
+    expect(renderedNames()).toEqual([
+      "Author 1",
+      "Author 2",
+      "Author 3",
+      "Author 4",
+      "Author 8",
+    ]);
+    // Overflow count excludes both the head chips and the pinned-to-tail senior.
+    expect(screen.getByText(/\+3 more/)).toBeTruthy();
+  });
+
+  it("renders every author with no tail or overflow when within the cap", () => {
+    const authors: AuthorChip[] = Array.from({ length: 5 }, (_, i) =>
+      baseChip({
+        name: `Author ${i + 1}`,
+        cwid: `c${i + 1}`,
+        slug: `c${i + 1}`,
+        isFirst: i === 0,
+        isLast: i === 4,
+      }),
+    );
+    render(<AuthorChipRow authors={authors} />);
+    // Exactly CHIP_CAP authors: all shown in order, no duplicate senior tail.
+    expect(renderedNames()).toEqual([
       "Author 1",
       "Author 2",
       "Author 3",
       "Author 4",
       "Author 5",
     ]);
-    expect(screen.getByText(/\+3 more/)).toBeTruthy();
+    expect(screen.queryByText(/more/)).toBeNull();
+  });
+
+  it("renders a single author (first == last) with no overflow tail", () => {
+    render(
+      <AuthorChipRow
+        authors={[
+          baseChip({ name: "Solo", cwid: "solo1", slug: "solo", isFirst: true, isLast: true }),
+        ]}
+      />,
+    );
+    expect(renderedNames()).toEqual(["Solo"]);
+    expect(screen.queryByText(/more/)).toBeNull();
+  });
+
+  it("surfaces one co-last author at the tail when co-last authors overflow", () => {
+    // 7 authors; the final two are co-last. The senior tail shows the last
+    // co-last author (Author 7); the other co-last (Author 6) and the hidden
+    // middle (Author 5) fall into the +N overflow.
+    const authors: AuthorChip[] = Array.from({ length: 7 }, (_, i) =>
+      baseChip({
+        name: `Author ${i + 1}`,
+        cwid: `c${i + 1}`,
+        slug: `c${i + 1}`,
+        isFirst: i === 0,
+        isLast: i >= 5,
+      }),
+    );
+    render(<AuthorChipRow authors={authors} />);
+    const names = renderedNames();
+    expect(names).toEqual([
+      "Author 1",
+      "Author 2",
+      "Author 3",
+      "Author 4",
+      "Author 7",
+    ]);
+    expect(names[names.length - 1]).toBe("Author 7");
+    expect(screen.getByText(/\+2 more/)).toBeTruthy();
   });
 });
 

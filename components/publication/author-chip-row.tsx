@@ -103,77 +103,106 @@ export function AuthorChipRow({
         ...renderable.filter((a) => !pinned.includes(a.cwid!)),
       ];
 
-  const visible = ordered.slice(0, CHIP_CAP);
-  const overflow = ordered.length - CHIP_CAP;
   // Counts taken across the full author list (not just the visible slice) so
   // co-first / co-last labels are accurate even when some co-* authors are
   // hidden behind the +N overflow chip. (#18)
   const firstCount = authors.filter((a) => a.isFirst).length;
   const lastCount = authors.filter((a) => a.isLast).length;
+
+  // #811 — the senior (last) author is the single most important byline signal,
+  // so it must never be sliced off the tail. When the row overflows CHIP_CAP we
+  // keep the first (CHIP_CAP - 1) authors, then the +N overflow pill, then pin
+  // the senior author last: [First] [Second] … +N more … [Senior]. #132
+  // guarantees authorship-position order, so the senior is the last renderable
+  // author flagged isLast (co-last surfaces one at the tail; the rest fall into
+  // overflow). If the senior already sits inside the head window — short rows, a
+  // single-author paper, or a caller pin promoting it to the front — we render
+  // the plain head slice with no tail and no duplication.
+  const seniorChip = [...renderable].reverse().find((a) => a.isLast) ?? null;
+  let visible: AuthorChip[];
+  let overflow: number;
+  let tail: AuthorChip | null = null;
+  if (ordered.length <= CHIP_CAP) {
+    visible = ordered;
+    overflow = 0;
+  } else {
+    const head = ordered.slice(0, CHIP_CAP - 1);
+    if (seniorChip && !head.some((a) => a.cwid === seniorChip.cwid)) {
+      visible = head;
+      tail = seniorChip;
+      // Overflow excludes both the head chips and the pinned-to-tail senior.
+      overflow = ordered.length - head.length - 1;
+    } else {
+      visible = ordered.slice(0, CHIP_CAP);
+      overflow = ordered.length - CHIP_CAP;
+    }
+  }
+
+  function renderChip(a: AuthorChip, key: string) {
+    const chipClass = `inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
+      a.isFirst,
+      a.isLast,
+    )}`;
+    const inner = (
+      <>
+        <HeadshotAvatar
+          size="sm"
+          cwid={a.cwid!}
+          preferredName={a.name}
+          identityImageEndpoint={a.identityImageEndpoint ?? ""}
+        />
+        <span>{a.name}</span>
+      </>
+    );
+    const tooltipText = chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount);
+    // #536 — a hidden identity class (doctoral student) keeps its name in
+    // the relational co-author context but gets no click target: the chip
+    // renders as a static span and the navigating PersonPopover is skipped
+    // (its profile would 404). Fail-open: missing role → linkable.
+    const linkable = isPubliclyDisplayed(a.roleCategory);
+    const inlineChip = a.slug && linkable ? (
+      <a href={profilePath(a.slug)} className={chipClass}>
+        {inner}
+      </a>
+    ) : (
+      <span className={chipClass}>{inner}</span>
+    );
+    // PersonPopover supersedes HoverTooltip when we have authorship context
+    // (the pmid + the author's cwid). Without context (no pmid passed by
+    // the caller) — or for a non-linkable author (#536) — fall back to the
+    // legacy tooltip so the name shows without a navigable popover.
+    if (!pmid || !linkable) {
+      return (
+        <HoverTooltip key={key} text={tooltipText}>
+          {inlineChip}
+        </HoverTooltip>
+      );
+    }
+    const surface: "pub-chip" | "co-author" =
+      currentProfileCwid && a.cwid !== currentProfileCwid ? "co-author" : "pub-chip";
+    return (
+      <PersonPopover
+        key={key}
+        cwid={a.cwid!}
+        surface={surface}
+        contextPubPmid={pmid}
+        contextScholarCwid={surface === "co-author" ? currentProfileCwid : undefined}
+        currentProfileCwid={currentProfileCwid}
+      >
+        {inlineChip}
+      </PersonPopover>
+    );
+  }
+
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      {visible.map((a, i) => {
-        const chipClass = `inline-flex items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 text-xs text-foreground transition-colors ${chipBorderClass(
-          a.isFirst,
-          a.isLast,
-        )}`;
-        const inner = (
-          <>
-            <HeadshotAvatar
-              size="sm"
-              cwid={a.cwid!}
-              preferredName={a.name}
-              identityImageEndpoint={a.identityImageEndpoint ?? ""}
-            />
-            <span>{a.name}</span>
-          </>
-        );
-        const tooltipText = chipRoleLabel(a.isFirst, a.isLast, firstCount, lastCount);
-        // #536 — a hidden identity class (doctoral student) keeps its name in
-        // the relational co-author context but gets no click target: the chip
-        // renders as a static span and the navigating PersonPopover is skipped
-        // (its profile would 404). Fail-open: missing role → linkable.
-        const linkable = isPubliclyDisplayed(a.roleCategory);
-        const inlineChip = a.slug && linkable ? (
-          <a href={profilePath(a.slug)} className={chipClass}>
-            {inner}
-          </a>
-        ) : (
-          <span className={chipClass}>{inner}</span>
-        );
-        // PersonPopover supersedes HoverTooltip when we have authorship context
-        // (the pmid + the author's cwid). Without context (no pmid passed by
-        // the caller) — or for a non-linkable author (#536) — fall back to the
-        // legacy tooltip so the name shows without a navigable popover.
-        if (!pmid || !linkable) {
-          return (
-            <HoverTooltip key={`${a.cwid}-${i}`} text={tooltipText}>
-              {inlineChip}
-            </HoverTooltip>
-          );
-        }
-        const surface: "pub-chip" | "co-author" =
-          currentProfileCwid && a.cwid !== currentProfileCwid ? "co-author" : "pub-chip";
-        return (
-          <PersonPopover
-            key={`${a.cwid}-${i}`}
-            cwid={a.cwid!}
-            surface={surface}
-            contextPubPmid={pmid}
-            contextScholarCwid={
-              surface === "co-author" ? currentProfileCwid : undefined
-            }
-            currentProfileCwid={currentProfileCwid}
-          >
-            {inlineChip}
-          </PersonPopover>
-        );
-      })}
+      {visible.map((a, i) => renderChip(a, `${a.cwid}-${i}`))}
       {overflow > 0 && (
         <span className="inline-flex items-center rounded-full border border-zinc-300 bg-background px-2.5 py-0.5 text-xs text-muted-foreground">
           +{overflow} more →
         </span>
       )}
+      {tail && renderChip(tail, `senior-${tail.cwid}`)}
     </div>
   );
 }
