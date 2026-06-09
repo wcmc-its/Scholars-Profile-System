@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import type { ProfilePublication, ScholarKeyword } from "@/lib/api/profile";
+import type { ProfilePublication, ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
 import {
   deriveAuthorPositionRole,
@@ -10,6 +10,7 @@ import {
   type PositionFilter,
   type SelectedPositions,
 } from "@/components/profile/author-position-badge";
+import { MethodsSection } from "@/components/profile/methods-section";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
 import { TopicsUpdatingPlaceholder } from "@/components/profile/topics-updating-placeholder";
@@ -31,6 +32,8 @@ const VALID_NON_ALL_POSITIONS: ReadonlySet<Exclude<PositionFilter, "all">> = new
 type ProfilePubsClusterProps = {
   publications: ProfilePublication[];
   keywords: ScholarKeyword[];
+  /** #799 — family-primary Methods lens rows; empty when the lens flag is off. */
+  families: ScholarFamilyView[];
   totalAcceptedPubs: number;
   /** Cwid of the scholar whose profile is being rendered. Threaded down
    *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
@@ -51,6 +54,7 @@ export function ProfilePubsCluster(props: ProfilePubsClusterProps) {
 function ProfilePubsClusterInner({
   publications,
   keywords,
+  families,
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
@@ -194,6 +198,10 @@ function ProfilePubsClusterInner({
           onClearAll={onClearAll}
         />
       ) : null}
+
+      {/* #799 — family-primary Methods lens, the second of the two lenses,
+          stacked below Subjects. Display-only; renders null when empty. */}
+      <MethodsSection families={families} />
 
       <ActiveFilterBanner
         count={filteredPublications.length}

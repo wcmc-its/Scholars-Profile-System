@@ -19,6 +19,10 @@ import { coreProjectNum } from "@/lib/award-number";
 import { isFundingActive } from "@/lib/funding-active";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
+  isMethodsLensEnabled,
+  isMethodsLensSensitiveGateOn,
+} from "@/lib/profile/methods-lens-flags";
+import {
   rankForSelectedHighlights,
   type ScoredPublication,
 } from "@/lib/ranking";
@@ -50,6 +54,17 @@ export type ScholarKeyword = {
 export type ProfileKeywords = {
   totalAcceptedPubs: number;
   keywords: ScholarKeyword[];
+};
+
+/** One row of the family-primary Methods lens (#799). Sourced from the
+ *  `scholar_family` rollup; `exemplarTools` are resolved member-tool display
+ *  names. `pubCount` is the per-scholar, C-tier-reconciled publication count. */
+export type ScholarFamilyView = {
+  familyId: string;
+  familyLabel: string;
+  supercategory: string;
+  pubCount: number;
+  exemplarTools: string[];
 };
 
 /** Publication types excluded from the Topics section's per-keyword counts.
@@ -114,6 +129,62 @@ export function aggregateKeywords(
     return a.displayLabel.localeCompare(b.displayLabel);
   });
   return { totalAcceptedPubs, keywords };
+}
+
+/**
+ * Load the family-primary Methods lens rows for a scholar (#799), newest-first
+ * by publication count. Returns [] when the lens is disabled — the master
+ * render gate — so nothing flows to the page (and no SEO/JSON side channel can
+ * leak) until `METHODS_LENS_ENABLED=on`.
+ *
+ * Applies two read-time overlays, both keyed on the stable (supercategory,
+ * family_label) pair (A2 re-mints family_id every rebuild):
+ *   - #800 suppression: ALWAYS — generic families hidden from everyone.
+ *   - #801 sensitivity: only when `METHODS_LENS_SENSITIVE_GATE=on` — sensitive
+ *     families omitted from this (public, CloudFront-cached) payload.
+ */
+async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
+  if (!isMethodsLensEnabled()) return [];
+
+  const rows = await prisma.scholarFamily.findMany({
+    where: { cwid },
+    orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    select: {
+      familyId: true,
+      familyLabel: true,
+      supercategory: true,
+      pmidCount: true,
+      exemplarTools: true,
+    },
+  });
+  if (rows.length === 0) return [];
+
+  // Stable composite key; "::" is collision-proof because A2 supercategory ids
+  // are snake_case and never contain a colon.
+  const overlayKey = (supercategory: string, familyLabel: string) =>
+    `${supercategory}::${familyLabel}`;
+
+  const suppression = await prisma.familySuppressionOverlay.findMany({
+    select: { supercategory: true, familyLabel: true },
+  });
+  const hidden = new Set(suppression.map((o) => overlayKey(o.supercategory, o.familyLabel)));
+
+  if (isMethodsLensSensitiveGateOn()) {
+    const sensitive = await prisma.familySensitivityOverlay.findMany({
+      select: { supercategory: true, familyLabel: true },
+    });
+    for (const o of sensitive) hidden.add(overlayKey(o.supercategory, o.familyLabel));
+  }
+
+  return rows
+    .filter((r) => !hidden.has(overlayKey(r.supercategory, r.familyLabel)))
+    .map((r) => ({
+      familyId: r.familyId,
+      familyLabel: r.familyLabel,
+      supercategory: r.supercategory,
+      pubCount: r.pmidCount,
+      exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+    }));
 }
 
 export type ProfilePublication = ScoredPublication<{
@@ -277,6 +348,10 @@ export type ProfilePayload = {
     }>;
   }>;
   keywords: ProfileKeywords;
+  /** #799 — family-primary Methods lens rows. Empty when the lens flag is off
+   *  or the `scholar_family` rollup has no rows for this scholar (dormant until
+   *  the SCHOLAR_TOOL_SOURCE=s3 cutover). */
+  families: ScholarFamilyView[];
   disclosures: Array<{
     entity: string | null;
     activityType: string | null;
@@ -677,6 +752,10 @@ export async function getScholarFullProfileBySlug(
     select: { nihProfileId: true },
   });
 
+  // #799 — family-primary Methods lens rows (gated + overlay-filtered). Returns
+  // [] when the lens flag is off, so this is a no-op until it is turned on.
+  const families = await loadScholarFamilies(scholar.cwid);
+
   return {
     cwid: scholar.cwid,
     slug: scholar.slug,
@@ -788,6 +867,7 @@ export async function getScholarFullProfileBySlug(
       };
     }),
     keywords,
+    families,
     disclosures: scholar.coiActivities.map((c) => ({
       entity: c.entity,
       activityType: c.activityType,
