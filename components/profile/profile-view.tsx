@@ -76,6 +76,10 @@ export async function ProfileView({ slug }: { slug: string }) {
     clinicalProfileUrl: profile.clinicalProfileUrl ?? null,
     orcid: profile.orcid ?? null,
     keywords: profile.keywords.keywords,
+    // #684 — bare (postnominal-free) name drives givenName/familyName +
+    // alternateName; the postnominal becomes honorificSuffix.
+    nameParts: profile.preferredName,
+    honorificSuffix: profile.postnominal ?? null,
   });
 
   const sparse = isSparseProfile(profile);
@@ -155,10 +159,30 @@ export async function ProfileView({ slug }: { slug: string }) {
               {profile.primaryDepartment ? (
                 <div className="text-muted-foreground mt-2 text-sm">
                   {/* Issue #167 — render "<Division> (<Department>)" when the
-                      scholar has a division; otherwise dept-only. */}
-                  {profile.division
-                    ? `${profile.division} (${profile.primaryDepartment})`
-                    : profile.primaryDepartment}
+                      scholar has a division; otherwise dept-only.
+                      #684 — link the department label to its page when a
+                      Department slug joins, building the on-site
+                      profile↔department link graph. Subtle (color inherited,
+                      hover-underline) per the division-page convention. */}
+                  {(() => {
+                    const deptLabel = profile.departmentSlug ? (
+                      <Link
+                        href={`/departments/${profile.departmentSlug}`}
+                        className="hover:underline"
+                      >
+                        {profile.primaryDepartment}
+                      </Link>
+                    ) : (
+                      profile.primaryDepartment
+                    );
+                    return profile.division ? (
+                      <>
+                        {profile.division} ({deptLabel})
+                      </>
+                    ) : (
+                      deptLabel
+                    );
+                  })()}
                 </div>
               ) : null}
               <EditMyProfileButton profileSlug={profile.slug} />

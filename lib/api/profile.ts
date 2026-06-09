@@ -177,6 +177,11 @@ export type ProfilePayload = {
   fullName: string;
   primaryTitle: string | null;
   primaryDepartment: string | null;
+  /** #684 — slug of the scholar's primary Department (from the deptCode
+   *  relation), or null when no Department row joins. The sidebar links the
+   *  `primaryDepartment` display label to `/departments/<slug>` when present,
+   *  strengthening the on-site profile↔department link graph. */
+  departmentSlug: string | null;
   /** Issue #167 — division name when the scholar has a populated divCode
    *  AND the joined division name is not "Administration" (an admin-style
    *  level2 unit that should not be surfaced as a research/clinical
@@ -433,6 +438,11 @@ export async function getScholarFullProfileBySlug(
       // "<Division> (<Department>)". Department display still comes from
       // the existing `primaryDepartment` text column.
       division: { select: { name: true } },
+      // #684 — the department page slug, so the sidebar department name can
+      // link to /departments/<slug>. The display label stays the free-text
+      // `primaryDepartment`; this is just the link target (null when the
+      // scholar's deptCode has no joined Department row).
+      department: { select: { slug: true } },
       // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
       // soft-deleted / suppressed mentors at the API layer so the card
       // never points at a hidden profile.
@@ -679,6 +689,7 @@ export async function getScholarFullProfileBySlug(
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    departmentSlug: scholar.department?.slug ?? null,
     // Issue #167 — belt-and-suspenders filter for the "Administration"
     // division label. The ED ETL drops Administration at the divCode level
     // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode
