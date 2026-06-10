@@ -9,6 +9,8 @@ import {
   fetchRecentPubs,
   fetchTopicRank,
 } from "@/lib/api/popover-context";
+import { getScholarMethodFamilies } from "@/lib/api/methods";
+import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +33,13 @@ export async function GET(
   const contextPubPmid = sp.get("contextPubPmid") || undefined;
   const contextTopicSlug = sp.get("contextTopicSlug") || undefined;
   const contextGrantProjectId = sp.get("contextGrantProjectId") || undefined;
+  // #853 — a dedicated boolean param is the ONLY safe disambiguator: both topic
+  // and methods top-scholar chips share surface="top-scholar"; topic chips always
+  // pass contextTopicSlug, methods chips never do. Keying off this param (not the
+  // absence of contextTopicSlug, which also serves generic top-scholar popovers)
+  // lights up the method-families section only for /methods, never leaking into
+  // topic pages.
+  const contextMethods = sp.get("contextMethods") === "1";
 
   const header = await fetchPopoverHeader(cwid);
   if (!header) {
@@ -50,18 +59,31 @@ export async function GET(
     (surface === "top-scholar" && !contextTopicSlug);
   const wantsRecentGrants = surface === "grant-investigator";
   const wantsTopSponsor = surface === "grant-facet";
+  // #853 — the method-families section is gated by BOTH the dedicated /methods
+  // param AND the page/surface flag. getScholarMethodFamilies also self-gates on
+  // the master lens flag, so flag-off on EITHER ⇒ []. Param absent ⇒ never queried.
+  const wantsMethodFamilies =
+    contextMethods && surface === "top-scholar" && isMethodPagesEnabled();
 
-  const [authorshipR, coPubsR, topicRankR, recentR, recentGrantsR, topSponsorR] =
-    await Promise.allSettled([
-      wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
-      wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
-      wantsTopicRank ? fetchTopicRank(cwid, contextTopicSlug!) : Promise.resolve(null),
-      wantsRecentPubs ? fetchRecentPubs(cwid, 2) : Promise.resolve([]),
-      wantsRecentGrants
-        ? fetchRecentActiveGrants(cwid, { limit: 2, excludeProjectId: contextGrantProjectId })
-        : Promise.resolve([]),
-      wantsTopSponsor ? fetchInvestigatorTopSponsor(cwid) : Promise.resolve(null),
-    ]);
+  const [
+    authorshipR,
+    coPubsR,
+    topicRankR,
+    recentR,
+    recentGrantsR,
+    topSponsorR,
+    methodFamiliesR,
+  ] = await Promise.allSettled([
+    wantsAuthorship ? fetchAuthorshipOnPub(cwid, contextPubPmid!) : Promise.resolve(null),
+    wantsCoPubs ? fetchCoPubsSummary(cwid, contextScholarCwid!) : Promise.resolve(null),
+    wantsTopicRank ? fetchTopicRank(cwid, contextTopicSlug!) : Promise.resolve(null),
+    wantsRecentPubs ? fetchRecentPubs(cwid, 2) : Promise.resolve([]),
+    wantsRecentGrants
+      ? fetchRecentActiveGrants(cwid, { limit: 2, excludeProjectId: contextGrantProjectId })
+      : Promise.resolve([]),
+    wantsTopSponsor ? fetchInvestigatorTopSponsor(cwid) : Promise.resolve(null),
+    wantsMethodFamilies ? getScholarMethodFamilies(cwid) : Promise.resolve([]),
+  ]);
   const unwrap = <T>(r: PromiseSettledResult<T>, fb: T): T =>
     r.status === "fulfilled" ? r.value : fb;
 
@@ -73,5 +95,6 @@ export async function GET(
     recentPubs: unwrap(recentR, []),
     recentGrants: unwrap(recentGrantsR, []),
     topSponsor: unwrap(topSponsorR, null),
+    methodFamilies: unwrap(methodFamiliesR, []),
   });
 }
