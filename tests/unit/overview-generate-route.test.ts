@@ -16,6 +16,7 @@ const {
   mockGenerateDraft,
   mockRecordAttempt,
   mockGenerationCreate,
+  mockAuthorizeOverviewWrite,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockEnabled: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockGenerateDraft: vi.fn(),
   mockRecordAttempt: vi.fn(),
   mockGenerationCreate: vi.fn(),
+  mockAuthorizeOverviewWrite: vi.fn(),
 }));
 
 // readEditRequest resolves identity through the #637 effective-identity seam;
@@ -50,9 +52,17 @@ vi.mock("@/lib/edit/overview-generator", () => ({
 vi.mock("@/lib/edit/rate-limit", () => ({
   recordOverviewGenerateAttempt: mockRecordAttempt,
 }));
-// #742 Phase B — the route now best-effort records a version-history row.
+// #844 follow-up — the generator authorizes via the shared overview-write
+// predicate (unit-tested in overview-authz.test.ts); here it is mocked so the
+// route's gates are exercised in isolation.
+vi.mock("@/lib/edit/overview-authz", () => ({
+  authorizeOverviewWrite: mockAuthorizeOverviewWrite,
+}));
+// #742 Phase B — the route now best-effort records a version-history row; it also
+// reads `db.read` to pass into the authz predicate (mocked above, so the value is
+// irrelevant).
 vi.mock("@/lib/db", () => ({
-  db: { write: { overviewGeneration: { create: mockGenerationCreate } } },
+  db: { read: {}, write: { overviewGeneration: { create: mockGenerationCreate } } },
 }));
 
 import { POST } from "@/app/api/edit/overview/generate/route";
@@ -81,6 +91,7 @@ beforeEach(() => {
   mockGenerateDraft.mockResolvedValue({ draft: "<p>Draft.</p>", model: "anthropic/claude-sonnet-4.5" });
   mockRecordAttempt.mockResolvedValue({ allowed: true, count: 1, limit: 10 });
   mockGenerationCreate.mockResolvedValue({ id: "gen123" });
+  mockAuthorizeOverviewWrite.mockResolvedValue({ ok: true, viaUnitAdminUnit: null });
 });
 
 // The shape normalizeOverviewParams produces for a MISSING/garbage `params`:
@@ -110,20 +121,44 @@ describe("POST /api/edit/overview/generate", () => {
     expect(await res.json()).toMatchObject({ error: "invalid_entity_id", field: "entityId" });
   });
 
-  it("403 not_self when generating for another scholar (owner-only)", async () => {
+  it("403 not_self when the shared overview-write predicate denies (unauthorized actor)", async () => {
+    mockAuthorizeOverviewWrite.mockResolvedValue({ ok: false, reason: "not_self" });
     const res = await POST(post({ entityId: "other9" }));
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: "not_self" });
     expect(mockGenerateDraft).not.toHaveBeenCalled();
+    // authorized via the shared predicate, keyed on the real cwid / non-impersonating
+    expect(mockAuthorizeOverviewWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session: SELF,
+        realCwid: "self01",
+        impersonatedCwid: null,
+        entityId: "other9",
+      }),
+    );
   });
 
-  it("403 not_self even for a superuser (the generator stays self-only after #844)", async () => {
-    // #844 widened the overview WRITE path to admins, but the generator keeps its
-    // explicit self-only check — a superuser cannot generate for another scholar.
-    mockGetEditSession.mockResolvedValue(ADMIN);
-    const res = await POST(post({ entityId: "self01" }));
+  it("403 proxy_conflict when the shared predicate rejects a conflicted proxy", async () => {
+    mockAuthorizeOverviewWrite.mockResolvedValue({ ok: false, reason: "proxy_conflict" });
+    const res = await POST(post({ entityId: "other9" }));
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: "not_self" });
+    expect(await res.json()).toMatchObject({ error: "proxy_conflict" });
+    expect(mockGenerateDraft).not.toHaveBeenCalled();
+  });
+
+  it("200 for an authorized non-self actor (superuser / proxy / unit-admin) — #844 follow-up", async () => {
+    // The generator now shares the overview-write authz: whoever may save the bio
+    // may generate a draft for it. A superuser generating for another scholar
+    // succeeds, and the history row attributes the acting cwid.
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(post({ entityId: "other9" }));
+    expect(res.status).toBe(200);
+    expect(mockGenerateDraft).toHaveBeenCalled();
+    expect(mockGenerationCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cwid: "other9", createdByCwid: "adm001" }),
+      }),
+    );
   });
 
   it("429 when rate-limited; no facts assembly, no generate", async () => {

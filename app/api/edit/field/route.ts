@@ -35,18 +35,15 @@ import {
   canEditUnit,
   getEffectiveUnitRole,
   logEditDenial,
+  type AuthzResult,
   type UnitAdminLookup,
   type UnitKind,
   type UnitRef,
 } from "@/lib/edit/authz";
 import { computeOverviewOrigin } from "@/lib/edit/overview-provenance";
+import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
+import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import {
-  checkProxyConflictingRole,
-  isGrantedProxy,
-  type ProxyLookup,
-} from "@/lib/edit/proxy-authz";
-import {
-  resolveEditableUnitViaUnitAdmin,
   type EditableUnit,
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
@@ -179,51 +176,33 @@ async function handleScholarFieldEdit(params: {
     return editError(400, "invalid_value", "value");
   }
 
-  let authz = authorizeFieldEdit(session, { entityId, fieldName });
-  // Scholar-assigned proxy editor (#779 / scholar-proxy-spec.md). A granted
-  // proxy may edit the scholar's `overview` — and ONLY `overview` (a positive
-  // allowlist; `slug` stays superuser-only — PE-03/D4). Keyed on `realCwid`,
-  // NEVER `session.cwid`/effective (PE-01): a proxy is its own identity, so when
-  // not impersonating `realCwid === session.cwid`; the `impersonatedCwid===null`
-  // assertion stops a #637 overlay from riding the grant (IS-1). The full
-  // three-leg D3 conflict re-check runs fail-closed at edit time (PE-02/CD-3).
-  if (!authz.ok && fieldName === "overview" && impersonatedCwid === null) {
-    if (await isGrantedProxy(realCwid, entityId, db.read as unknown as ProxyLookup)) {
-      const conflict = await checkProxyConflictingRole(
-        realCwid,
-        db.read as unknown as ProxyLookup,
-      );
-      if (conflict.ok) {
-        authz = { ok: true };
-      } else {
-        logEditDenial({
-          actorCwid: realCwid,
-          targetCwid: entityId,
-          path: PATH,
-          reason: "proxy_conflict",
-        });
-        return editError(403, "proxy_conflict");
-      }
-    }
-  }
-  // Org-unit administrator as profile editor (Amendment 4 / scholar-proxy-unit-
-  // admin-amendment.md). An owner/curator of a unit the scholar belongs to may
-  // edit the scholar's `overview` — same positive allowlist as the proxy path,
-  // same `realCwid`-keyed / not-impersonating gate (IS-1). The resolved unit is
-  // carried into the B03 audit `afterValues` for attribution. The role is
-  // re-checked live per edit (the resolver reads `unit_admin` every call), so a
-  // lost role takes effect on the next request (fail-closed).
+  // `overview` writes authorize via the shared `authorizeOverviewWrite` — the
+  // single source of truth the overview generator also uses (#844 follow-up, "no
+  // special rules"): self OR superuser OR granted proxy (#779) OR org-unit
+  // owner/curator (#728), keyed on `realCwid` and gated to non-impersonating
+  // (IS-1). A unit-admin allow carries the resolved membership unit into the B03
+  // audit `afterValues` for attribution. Every other field keeps the pure
+  // `authorizeFieldEdit` rule (`selectedHighlightPmids` self-only, `slug`
+  // superuser-only).
   let viaUnitAdminUnit: EditableUnit | null = null;
-  if (!authz.ok && fieldName === "overview" && impersonatedCwid === null) {
-    const unit = await resolveEditableUnitViaUnitAdmin(
+  let authz: AuthzResult;
+  if (fieldName === "overview") {
+    const ov = await authorizeOverviewWrite({
+      session,
       realCwid,
+      impersonatedCwid,
       entityId,
-      db.read as unknown as UnitScholarLookup,
-    );
-    if (unit) {
+      proxyDb: db.read as unknown as ProxyLookup,
+      unitDb: db.read as unknown as UnitScholarLookup,
+    });
+    if (ov.ok) {
       authz = { ok: true };
-      viaUnitAdminUnit = unit;
+      viaUnitAdminUnit = ov.viaUnitAdminUnit;
+    } else {
+      authz = { ok: false, reason: ov.reason };
     }
+  } else {
+    authz = authorizeFieldEdit(session, { entityId, fieldName });
   }
   if (!authz.ok) {
     logEditDenial({
