@@ -7,10 +7,15 @@
  * Input is the per-scholar `faculty{<cwid>}.families[]` slice of the A2
  * `tools.json` artifact (which embeds the faculty rollup byte-identically to the
  * standalone faculty.json — see etl/tools/index.ts). Each family entry carries
- * EXACTLY five keys (live-verified against the deployed artifact, 2026-06-09):
+ * six keys (live-verified against the deployed artifact, schema tools-a2-v2 /
+ * v2026-06-10; `pmids` added by ReciterAI#175):
  *
  *   faculty{<cwid>}.families[]  { family_id, label, supercategory, pub_count,
- *                                 exemplar_tool_ids[] }   sorted (-pub_count, family_id)
+ *                                 exemplar_tool_ids[], pmids[] }  sorted (-pub_count, family_id)
+ *
+ *   - `pmids` (#819) is the distinct member-PMID set, with the upstream invariant
+ *     distinct(pmids).length === pub_count. Read directly + coerced to digit
+ *     strings; backs the lens's click-to-filter. Absent ([]) on a pre-#175 artifact.
  *
  * Contract notes that shape this mapper:
  *   - `pub_count` is the per-scholar, C-tier-RECONCILED distinct-publication count
@@ -39,6 +44,9 @@ export type FacultyFamilyEntry = {
   supercategory?: string | null;
   pub_count?: number | null;
   exemplar_tool_ids?: unknown;
+  /** #819 — the distinct member PMIDs (ReciterAI#175). Invariant upstream:
+   *  distinct(pmids).length === pub_count. Absent on the pre-#175 artifact. */
+  pmids?: unknown;
   [key: string]: unknown;
 };
 
@@ -52,6 +60,9 @@ export type ScholarFamilyWrite = {
   /** Resolved member-tool DISPLAY NAMES (canonical_tool_id → tools[].display_name),
    *  per-scholar ranked — what the lens shows ("CheXpert · MIMIC-CXR"). */
   exemplarTools: string[];
+  /** #819 — distinct member PMIDs (digit strings), read from the artifact; backs
+   *  the click-to-filter membership. `[]` on the pre-#175 artifact (no field). */
+  pmids: string[];
 };
 
 export type BuildScholarFamilyS3Result = {
@@ -69,6 +80,13 @@ export type BuildScholarFamilyS3Result = {
    * Always 0 when `opts.knownSupercategories` is not provided.
    */
   unknownSupercategory: number;
+  /**
+   * Written family rows where `distinct(pmids).length !== pmidCount` — the
+   * ReciterAI#175 invariant. Should be 0 on a coherent artifact; a non-zero count
+   * is a data-health alarm (the loader logs it). The row is still written with the
+   * artifact's pmids (pmidCount stays the upstream pub_count).
+   */
+  pmidCountMismatch: number;
 };
 
 type Accum = {
@@ -76,6 +94,7 @@ type Accum = {
   supercategory: string;
   pmidCount: number;
   exemplarTools: string[];
+  pmids: string[];
 };
 
 /**
@@ -96,6 +115,27 @@ function resolveExemplarTools(raw: unknown, toolsById: Map<string, string>): str
       seen.add(name);
       out.push(name);
     }
+  }
+  return out;
+}
+
+/**
+ * Normalize the artifact's `pmids` into distinct digit strings, preserving order
+ * (#819). Accepts numbers or numeric strings; drops anything non-numeric. The
+ * upstream set is already distinct + C-tier-reconciled (ReciterAI#175), so this is
+ * defensive coercion, not a re-aggregation. Returns [] when absent (pre-#175).
+ */
+function normalizePmids(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    let pmid = "";
+    if (typeof v === "number" && Number.isInteger(v) && v > 0) pmid = String(v);
+    else if (typeof v === "string" && /^\d+$/.test(v.trim())) pmid = v.trim();
+    if (!pmid || seen.has(pmid)) continue;
+    seen.add(pmid);
+    out.push(pmid);
   }
   return out;
 }
@@ -139,6 +179,7 @@ export function buildScholarFamilyWritesFromS3(
   let skippedMissingCwid = 0;
   let skippedMissingFields = 0;
   let unknownSupercategory = 0;
+  let pmidCountMismatch = 0;
 
   for (const [cwid, rollup] of Object.entries(artifact.faculty ?? {})) {
     if (!cwid || !opts.ourCwidSet.has(cwid)) {
@@ -169,13 +210,15 @@ export function buildScholarFamilyWritesFromS3(
       if (known && !known.has(supercategory)) unknownSupercategory += 1;
 
       const exemplarTools = resolveExemplarTools(f?.exemplar_tool_ids, toolsById);
+      const pmids = normalizePmids(f?.pmids);
       const prev = byFamilyId.get(familyId);
       if (!prev) {
-        byFamilyId.set(familyId, { familyLabel, supercategory, pmidCount, exemplarTools });
+        byFamilyId.set(familyId, { familyLabel, supercategory, pmidCount, exemplarTools, pmids });
       } else if (pmidCount > prev.pmidCount) {
-        // Same family_id appeared twice: keep the strongest count + its exemplars.
+        // Same family_id appeared twice: keep the strongest count + its exemplars + pmids.
         prev.pmidCount = pmidCount;
         prev.exemplarTools = exemplarTools;
+        prev.pmids = pmids;
       }
     }
 
@@ -184,6 +227,9 @@ export function buildScholarFamilyWritesFromS3(
       .sort((a, b) => b.pmidCount - a.pmidCount || a.familyId.localeCompare(b.familyId));
 
     for (const e of ranked.slice(0, topN)) {
+      // Invariant alarm only among populated rows: a pre-#175 artifact has no
+      // pmids ([]) on every family, which is expected, not a mismatch.
+      if (e.pmids.length > 0 && e.pmids.length !== e.pmidCount) pmidCountMismatch += 1;
       writes.push({
         cwid,
         familyId: e.familyId,
@@ -191,9 +237,10 @@ export function buildScholarFamilyWritesFromS3(
         supercategory: e.supercategory,
         pmidCount: e.pmidCount,
         exemplarTools: e.exemplarTools,
+        pmids: e.pmids,
       });
     }
   }
 
-  return { writes, skippedMissingCwid, skippedMissingFields, unknownSupercategory };
+  return { writes, skippedMissingCwid, skippedMissingFields, unknownSupercategory, pmidCountMismatch };
 }

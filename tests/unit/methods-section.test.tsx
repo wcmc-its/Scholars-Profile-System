@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MethodsSection } from "@/components/profile/methods-section";
 import type { ScholarFamilyView } from "@/lib/api/profile";
 
@@ -10,6 +10,7 @@ function makeFamilies(n: number): ScholarFamilyView[] {
     supercategory: "imaging_microscopy",
     pubCount: 100 - i,
     exemplarTools: [`Tool ${i + 1}A`, `Tool ${i + 1}B`],
+    pmids: [`${i + 1}001`, `${i + 1}002`],
   }));
 }
 
@@ -32,6 +33,7 @@ describe("MethodsSection", () => {
             supercategory: "s",
             pubCount: 5,
             exemplarTools: [],
+            pmids: ["1", "2", "3", "4", "5"],
           },
         ]}
       />,
@@ -113,5 +115,46 @@ describe("MethodsSection — #801 sensitive reveal", () => {
     render(<MethodsSection families={makeFamilies(2)} scholarCwid="aog" sensitiveGateActive />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(screen.queryByLabelText("Hidden from the public profile")).toBeNull();
+  });
+});
+
+describe("MethodsSection — #819 family click-to-filter", () => {
+  it("renders labels as static text when filtering is off (default)", () => {
+    render(<MethodsSection families={makeFamilies(2)} />);
+    expect(screen.queryByRole("button", { name: /Family 1/ })).toBeNull();
+    expect(screen.getByText("Family 1")).toBeTruthy();
+  });
+
+  it("renders labels as toggle buttons and fires onFamilyToggle(familyId) when enabled", () => {
+    const onFamilyToggle = vi.fn();
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={[]}
+        onFamilyToggle={onFamilyToggle}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /Family 1/ });
+    expect(btn.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(btn);
+    expect(onFamilyToggle).toHaveBeenCalledWith("fam_1");
+  });
+
+  it("reflects the selected family with aria-pressed", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_2"]}
+        onFamilyToggle={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Family 2/ }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Family 1/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 });

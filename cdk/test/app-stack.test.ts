@@ -1484,6 +1484,12 @@ describe("AppStack", () => {
         expect(appContainerEnv().get("METHODS_LENS_SENSITIVE_GATE")).toBe("off");
       });
 
+      it("keeps the family click-to-filter off in prod (METHODS_LENS_FAMILY_FILTER, #819)", () => {
+        // Staging-first like the sibling Methods-lens flags; off in prod until the
+        // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
+        expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("off");
+      });
+
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {
         // Both envs are cut over to root; the flag stays set explicitly as the
         // soak rollback lever (set back to "scholars" + redeploy to revert).
@@ -1879,6 +1885,7 @@ describe("AppStack", () => {
       );
       expect(envByName.get("METHODS_LENS_ENABLED")).toBe("on");
       expect(envByName.get("METHODS_LENS_SENSITIVE_GATE")).toBe("on");
+      expect(envByName.get("METHODS_LENS_FAMILY_FILTER")).toBe("on"); // #819 staging-first
     });
 
     it("enables the slug-request lifecycle in staging (#497, on in both envs)", () => {

@@ -56,6 +56,7 @@ describe("buildScholarFamilyWritesFromS3 — canonical mapping", () => {
         supercategory: "imaging_microscopy",
         pmidCount: 12,
         exemplarTools: ["CheXpert", "MIMIC-CXR"], // resolved from canonical_tool_id, NOT the raw ids
+        pmids: [], // none in this fixture
       },
     ]);
   });
@@ -247,5 +248,72 @@ describe("buildScholarFamilyWritesFromS3 — open-set supercategory guard", () =
       { ourCwidSet: new Set(["aog"]) },
     );
     expect(res.unknownSupercategory).toBe(0);
+  });
+});
+
+describe("buildScholarFamilyWritesFromS3 — #819 pmids membership", () => {
+  it("reads pmids as distinct digit strings, coercing numbers and dropping non-numeric/dupes", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          {
+            family_id: "fam_1",
+            label: "X",
+            supercategory: "s",
+            pub_count: 3,
+            pmids: [38123456, "37999001", " 36000001 ", "37999001", "abc", null, 0],
+          },
+        ],
+      }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    // number→string, trimmed, deduped; "abc"/null/0 dropped → 3 distinct.
+    expect(writes[0].pmids).toEqual(["38123456", "37999001", "36000001"]);
+  });
+
+  it("defaults pmids to [] when the field is absent (pre-#175 artifact)", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact({ aog: [{ family_id: "fam_1", label: "X", supercategory: "s", pub_count: 2 }] }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(writes[0].pmids).toEqual([]);
+  });
+
+  it("flags pmidCountMismatch only for populated rows whose distinct(pmids).length !== pub_count", () => {
+    const res = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          // invariant holds → not a mismatch
+          { family_id: "fam_ok", label: "OK", supercategory: "s", pub_count: 2, pmids: ["1", "2"] },
+          // populated but len(1) !== pub_count(3) → mismatch
+          { family_id: "fam_bad", label: "Bad", supercategory: "s", pub_count: 3, pmids: ["9"] },
+          // empty pmids (pre-#175) → NOT counted as a mismatch
+          { family_id: "fam_empty", label: "Empty", supercategory: "s", pub_count: 4 },
+        ],
+      }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(res.pmidCountMismatch).toBe(1);
+  });
+
+  it("keeps the winning (max pub_count) entry's pmids when a family_id duplicates", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          { family_id: "fam_1", label: "Dup", supercategory: "s", pub_count: 1, pmids: ["lo"] },
+          {
+            family_id: "fam_1",
+            label: "Dup",
+            supercategory: "s",
+            pub_count: 5,
+            pmids: ["11", "12", "13", "14", "15"],
+          },
+        ],
+      }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(writes).toHaveLength(1);
+    expect(writes[0].pmidCount).toBe(5);
+    expect(writes[0].pmids).toEqual(["11", "12", "13", "14", "15"]);
   });
 });

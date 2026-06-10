@@ -65,6 +65,9 @@ export type ScholarFamilyView = {
   supercategory: string;
   pubCount: number;
   exemplarTools: string[];
+  /** #819 — distinct member PMIDs (digit strings) backing the click-to-filter.
+   *  `len === pubCount` upstream (ReciterAI#175); `[]` on a pre-#175 rollup. */
+  pmids: string[];
 };
 
 /** Publication types excluded from the Topics section's per-keyword counts.
@@ -142,6 +145,7 @@ function toScholarFamilyView(r: {
   supercategory: string;
   pmidCount: number;
   exemplarTools: unknown;
+  pmids: unknown;
 }): ScholarFamilyView {
   return {
     familyId: r.familyId,
@@ -149,6 +153,8 @@ function toScholarFamilyView(r: {
     supercategory: r.supercategory,
     pubCount: r.pmidCount,
     exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+    // Coerce defensively: the column is nullable (pre-#175 rollup) and Json.
+    pmids: Array.isArray(r.pmids) ? (r.pmids as unknown[]).map(String) : [],
   };
 }
 
@@ -179,6 +185,7 @@ async function partitionScholarFamilies(
       supercategory: true,
       pmidCount: true,
       exemplarTools: true,
+      pmids: true,
     },
   });
   if (rows.length === 0) return { publicFamilies: [], sensitiveFamilies: [] };

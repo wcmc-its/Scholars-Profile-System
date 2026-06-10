@@ -1466,6 +1466,14 @@ model ScholarFamily {
   /// canonical tools[] index — scholar_tool has no canonical id to join on, so
   /// the lens cannot resolve ids→names at read time. Refreshed every load.
   exemplarTools     Json     @map("exemplar_tools")
+  /// The distinct PMIDs that put this scholar in this family (#819 — the
+  /// click-to-filter membership). Read directly from `faculty[].families[].pmids`
+  /// in the A2 `tools.json` artifact (ReciterAI#175), where the invariant
+  /// `len(distinct pmids) === pub_count` holds. Co-located on the family payload so
+  /// the lens filters the publication list client-side (like Topics' meshTerms),
+  /// no endpoint. Nullable: the ALTER adds it to a possibly-populated table and a
+  /// MySQL JSON column takes no default; the next full-replace ETL backfills it.
+  pmids             Json?
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
   sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
