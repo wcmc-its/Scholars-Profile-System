@@ -9,7 +9,9 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // needs no reporting DB; the mentee-specific tests below inject their own loader
 // via the 4th `loadEditContext` arg, bypassing this default entirely.
 vi.mock("@/lib/api/mentoring", () => ({
-  getMenteesForMentor: vi.fn(async () => []),
+  // #843 — getMenteesForMentor now returns { mentees, copubSourceAvailable };
+  // defaultLoadMentees destructures `.mentees`, so the mock must match.
+  getMenteesForMentor: vi.fn(async () => ({ mentees: [], copubSourceAvailable: true })),
 }));
 
 import { loadEditContext } from "@/lib/api/edit-context";

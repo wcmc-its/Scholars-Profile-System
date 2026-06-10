@@ -183,39 +183,50 @@ export default async function EditScholarPage({
     redirect(basePath);
   }
 
-  const latestSlugRequest = slugRequestEnabled
-    ? await loadLatestSlugRequest(session.cwid, db.read)
-    : null;
+  // #845 — these three reads only depend on `mode` / `slugRequestEnabled` /
+  // `session.cwid` / `targetCwid` (all already resolved) and not on each other.
+  // The page is `force-dynamic`, so every `?attr=` tab click re-runs the whole
+  // server render — fan them out concurrently rather than awaiting one-by-one.
+  // The earlier proxy / unit-admin authorization gates stay sequential by design
+  // (each depends on the previous gate's verdict). Each read's comment is below.
+  const panelEditable = mode !== "proxy" && mode !== "unit-admin";
+  const [latestSlugRequest, proxyEditorRows, unitAdminEditorRows] = await Promise.all([
+    // Seed the flag-gated "Profile URL" request card (#497 PR-3) with the
+    // scholar's latest request, matching /edit (see `slugRequestEnabled` above).
+    slugRequestEnabled ? loadLatestSlugRequest(session.cwid, db.read) : Promise.resolve(null),
+    // #779 — the "Profile editors" panel: the scholar (self) or a superuser manages
+    // the scholar's designees. Neither a proxy (#779) nor a unit admin (Amendment
+    // 4) can manage the list, so the panel is absent in those modes (and excluded
+    // from the rail).
+    panelEditable
+      ? db.read.scholarProxy.findMany({
+          where: { scholarCwid: targetCwid },
+          select: { proxyCwid: true, grantedBy: true, createdAt: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve(null),
+    // Amendment 4 P3 — the read-only "Org-unit administrators" group inside the
+    // Profile editors panel. Gated to the same modes as the proxy list (self /
+    // superuser); a proxy or unit admin never sees the panel, so it stays `null`
+    // there. This is a display listing — the write paths re-derive authorization
+    // via `resolveEditableUnitViaUnitAdmin`, never from this list.
+    panelEditable
+      ? listUnitAdminEditorsForScholar(targetCwid, db.read as unknown as UnitAdminEditorsLookup)
+      : Promise.resolve(null),
+  ]);
 
-  // #779 — the "Profile editors" panel: the scholar (self) or a superuser manages
-  // the scholar's designees. Neither a proxy (#779) nor a unit admin (Amendment
-  // 4) can manage the list, so the panel is absent in those modes (and excluded
-  // from the rail).
   const proxyEditors =
-    mode === "proxy" || mode === "unit-admin"
+    proxyEditorRows === null
       ? null
-      : (
-          await db.read.scholarProxy.findMany({
-            where: { scholarCwid: targetCwid },
-            select: { proxyCwid: true, grantedBy: true, createdAt: true },
-            orderBy: { createdAt: "asc" },
-          })
-        ).map((r) => ({ proxyCwid: r.proxyCwid, grantedBy: r.grantedBy, grantedAt: r.createdAt }));
-
-  // Amendment 4 P3 — the read-only "Org-unit administrators" group inside the
-  // Profile editors panel. Gated to the same modes as the proxy list (self /
-  // superuser); a proxy or unit admin never sees the panel, so it stays `null`
-  // there. This is a display listing — the write paths re-derive authorization
-  // via `resolveEditableUnitViaUnitAdmin`, never from this list.
+      : proxyEditorRows.map((r) => ({
+          proxyCwid: r.proxyCwid,
+          grantedBy: r.grantedBy,
+          grantedAt: r.createdAt,
+        }));
   const unitAdminEditors =
-    mode === "proxy" || mode === "unit-admin"
+    unitAdminEditorRows === null
       ? null
-      : (
-          await listUnitAdminEditorsForScholar(
-            targetCwid,
-            db.read as unknown as UnitAdminEditorsLookup,
-          )
-        ).map((u) => ({
+      : unitAdminEditorRows.map((u) => ({
           adminCwid: u.adminCwid,
           conferringUnitKind: u.conferringUnitKind,
           conferringUnitName: u.conferringUnitName,

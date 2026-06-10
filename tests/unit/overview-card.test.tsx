@@ -627,10 +627,13 @@ describe("OverviewCard — version history (Phase B)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 7 — readOnly arm (the superuser surface render of another scholar's bio)
+// readOnly arm — retained defensive render. #844 removed its only live caller
+// (the superuser surface now mounts the editable manual editor), but the prop
+// and component stay for any genuinely-read-only future caller, so its render
+// stays covered.
 // ---------------------------------------------------------------------------
 
-describe("OverviewCard — readOnly arm (Phase 7)", () => {
+describe("OverviewCard — readOnly arm", () => {
   it("renders the bio as sanitized HTML in a prose container", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>Hi I am Alex.</p>" readOnly />);
     const readonly = document.querySelector('[data-slot="overview-readonly"]');
@@ -646,9 +649,11 @@ describe("OverviewCard — readOnly arm (Phase 7)", () => {
     expect((empty as HTMLElement).textContent).toBe("No bio yet.");
   });
 
-  it("renders the read-only CardDescription explaining why the bio is uneditable", () => {
+  it("renders a neutral read-only description (no longer claims only the owner can edit — #844)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
-    expect(screen.getByText("Only the profile owner can edit the bio.")).toBeTruthy();
+    expect(screen.getByText("This bio is shown read-only here.")).toBeTruthy();
+    // The pre-#844 copy is gone — a superuser CAN now edit any bio.
+    expect(screen.queryByText("Only the profile owner can edit the bio.")).toBeNull();
   });
 
   it("does NOT mount the editor, toolbar, Save button, or counter in readOnly mode", () => {

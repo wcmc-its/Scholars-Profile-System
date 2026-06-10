@@ -19,25 +19,52 @@ const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true };
 // authorizeFieldEdit  (self-edit-spec.md § Authorization, edge case 2)
 // ---------------------------------------------------------------------------
 
-describe("authorizeFieldEdit — overview is self-only", () => {
+describe("authorizeFieldEdit — overview is self OR superuser (#844)", () => {
   it("allows a scholar editing their own overview", () => {
     expect(authorizeFieldEdit(SELF, { entityId: "self01", fieldName: "overview" })).toEqual({
       ok: true,
     });
   });
 
-  it("denies a scholar editing another scholar's overview", () => {
+  it("denies a non-superuser editing another scholar's overview", () => {
     expect(authorizeFieldEdit(SELF, { entityId: "other9", fieldName: "overview" })).toEqual({
       ok: false,
       reason: "not_self",
     });
   });
 
-  it("denies even a superuser editing another scholar's overview (no inheritance)", () => {
+  it("allows a superuser editing another scholar's overview (#844)", () => {
     expect(authorizeFieldEdit(ADMIN, { entityId: "other9", fieldName: "overview" })).toEqual({
-      ok: false,
-      reason: "not_self",
+      ok: true,
     });
+  });
+
+  it("allows a superuser editing their own overview", () => {
+    expect(authorizeFieldEdit(ADMIN, { entityId: "adm001", fieldName: "overview" })).toEqual({
+      ok: true,
+    });
+  });
+});
+
+describe("authorizeFieldEdit — selectedHighlightPmids stays self-only (#844 scope)", () => {
+  it("allows a scholar editing their own highlights", () => {
+    expect(
+      authorizeFieldEdit(SELF, { entityId: "self01", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("denies a scholar editing another scholar's highlights", () => {
+    expect(
+      authorizeFieldEdit(SELF, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: false, reason: "not_self" });
+  });
+
+  it("does NOT extend the #844 superuser widening to highlights (overview-only)", () => {
+    // The #844 admin widening is scoped strictly to `overview`; a superuser does
+    // not inherit `selectedHighlightPmids` for another scholar.
+    expect(
+      authorizeFieldEdit(ADMIN, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: false, reason: "not_self" });
   });
 });
 

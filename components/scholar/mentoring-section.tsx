@@ -24,6 +24,7 @@ export function MentoringSection({
   mentorCwid,
   mentorSlug,
   currentSort = "copubs",
+  copubSourceAvailable = true,
 }: {
   mentees: MenteeChip[];
   /** Drives PersonPopover's "N co-pubs with {mentor}" context (#242) and was
@@ -36,6 +37,12 @@ export function MentoringSection({
    *  has already ordered `mentees` accordingly. Below the truncate
    *  threshold the prop is informational only — no selector renders. */
   currentSort?: MenteeSort;
+  /** Issue #843 — `false` when the live ReciterDB co-pub query threw, so every
+   *  `copublicationCount` is a fallback zero rather than a real count. The chip
+   *  badge / inline panel are then suppressed so we don't render a misleading
+   *  "0 co-pubs" (or, equally misleading, hide the badge as if zero were a
+   *  fact). The section header carries the "temporarily unavailable" note. */
+  copubSourceAvailable?: boolean;
 }) {
   // Single-expand-at-a-time: the chip whose badge is currently expanded.
   // null means no chip is expanded. Tracked on the section so opening one
@@ -101,6 +108,7 @@ export function MentoringSection({
             mentorSlug={mentorSlug}
             isExpanded={expandedCwid === m.cwid}
             onToggle={() => toggleChip(m.cwid)}
+            copubSourceAvailable={copubSourceAvailable}
           />
         ))}
       </ul>
@@ -132,6 +140,7 @@ export function MentoringSection({
               mentorSlug={mentorSlug}
               isExpanded={expandedCwid === m.cwid}
               onToggle={() => toggleChip(m.cwid)}
+              copubSourceAvailable={copubSourceAvailable}
             />
           ))}
         </ul>
@@ -200,6 +209,7 @@ export function MentoringSection({
                   mentorSlug={mentorSlug}
                   isExpanded={expandedCwid === m.cwid}
                   onToggle={() => toggleChip(m.cwid)}
+                  copubSourceAvailable={copubSourceAvailable}
                 />
               ))}
             </ul>
@@ -350,12 +360,17 @@ function MenteeChipCard({
   mentorSlug,
   isExpanded,
   onToggle,
+  copubSourceAvailable,
 }: {
   mentee: MenteeChip;
   mentorCwid: string;
   mentorSlug: string;
   isExpanded: boolean;
   onToggle: () => void;
+  /** Issue #843 — when false, the co-pub count is a fallback zero (ReciterDB
+   *  was unreachable), so the badge + inline panel are suppressed entirely
+   *  rather than rendered as a real "0". */
+  copubSourceAvailable: boolean;
 }) {
   // #536 — a hidden identity class (doctoral student) keeps its name and the
   // contextual popover but gets no profile link (the route 404s). Folding the
@@ -403,8 +418,12 @@ function MenteeChipCard({
   // co-pubs page (#184) is reached via the "View all N →" link inside
   // the expanded panel — shown at every N so the page stays reachable
   // for export / sharing even when all rows are visible inline.
+  // #843 — only render the badge when the co-pub source is available AND the
+  // count is genuinely positive. On an outage `count` is a fallback zero, so
+  // suppressing the badge here (and the inline panel below) avoids implying
+  // the mentee has no co-pubs; the section header shows the outage note.
   const badge =
-    count > 0 ? (
+    copubSourceAvailable && count > 0 ? (
       <button
         type="button"
         onClick={onToggle}
@@ -481,7 +500,9 @@ function MenteeChipCard({
         aria-hidden={!isExpanded}
       >
         <div className="overflow-hidden">
-          {count > 0 && (
+          {/* #843 — mirror the badge gate: no badge means no way to open this,
+              so the panel is only meaningful when the source is available. */}
+          {copubSourceAvailable && count > 0 && (
             <CoPubInlinePanel
               panelId={panelId}
               mentee={mentee}

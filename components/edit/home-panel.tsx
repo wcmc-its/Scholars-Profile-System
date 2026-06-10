@@ -39,9 +39,10 @@ const PANEL_HEADING_ID = "panel-heading";
 
 export type HomePanelProps = {
   /** Whose board this is. `"self"` (default) is the scholar's own task board;
-   *  `"superuser"` reframes it as a read-only completeness overview of another
-   *  scholar — third-person copy, an Overview "View" (not edit) CTA, and the
-   *  Publications row's CTA dropped (superusers have no per-scholar pubs tab). */
+   *  `"superuser"` reframes it as a completeness overview of another scholar —
+   *  third-person copy, an editable Overview CTA (#844 — admins may now edit any
+   *  bio), and the Publications row's CTA dropped (superusers have no per-scholar
+   *  pubs tab). */
   mode?: "self" | "superuser";
   basePath: string;
   preferredName: string;
@@ -402,26 +403,30 @@ function OverviewItem({
             : "Showing at the top of your public profile."
         }
         action={
+          // #844 — a superuser can now edit any scholar's overview, so the CTA is
+          // "Edit" for them too (no longer a read-only "View").
           <RowLink href={href} testId="home-card-overview">
-            {isAdmin ? "View" : "Edit"}
+            Edit
           </RowLink>
         }
       />
     );
   }
-  // Admin: overview is read-only for superusers, so the gap is a signal (amber
-  // to-do) but the CTA only views it — only the scholar can write the section.
+  // Admin: the overview gap is a signal (amber to-do); #844 lets a superuser
+  // write it on the scholar's behalf, so the CTA writes it like the self surface.
   if (isAdmin) {
     return (
       <ChecklistRow
         testId="home-item-overview"
         marker="todo"
         title="No overview yet"
-        subtitle="Only the scholar can write this section."
+        subtitle={`Write an overview for ${name}'s profile.`}
         action={
-          <RowLink href={href} testId="home-card-overview">
-            View
-          </RowLink>
+          <Button asChild variant="apollo" size="sm">
+            <Link href={href} data-testid="home-card-overview">
+              Write
+            </Link>
+          </Button>
         }
       />
     );

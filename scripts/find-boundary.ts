@@ -9,7 +9,7 @@ import { getMenteesForMentor } from "@/lib/api/mentoring";
     ) LIMIT 80
   `);
   for (const c of candidates) {
-    const mentees = await getMenteesForMentor(c.cwid);
+    const { mentees } = await getMenteesForMentor(c.cwid);
     if (mentees.length === 8 || mentees.length === 9 || mentees.length === 7) {
       console.log(`${mentees.length} ${c.slug} (${c.preferredName})`);
     }

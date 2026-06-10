@@ -98,7 +98,13 @@ export async function ProfileView({ slug }: { slug: string }) {
   // word — the component does no global re-sort, only within-bucket
   // re-sort at the grouped tier when `menteeSort === "copubs"` (URL
   // can't request class-year at that tier because no selector renders).
-  const menteesAll = await getMenteesForMentor(profile.cwid, { sort: "copubs" });
+  // #843 — `copubSourceAvailable` is false when the live ReciterDB co-pub
+  // query threw; in that case every mentee's `copublicationCount` is a
+  // fallback zero, NOT a real count, so we suppress the co-pub affordances
+  // (rollup link + per-chip badges) and show a muted "temporarily unavailable"
+  // note instead of presenting an outage as "no co-publications".
+  const { mentees: menteesAll, copubSourceAvailable } =
+    await getMenteesForMentor(profile.cwid, { sort: "copubs" });
 
   // #160 follow-up — a mentor may HIDE a mentee from their public profile. The
   // suppression layer is the SOR for that choice (ADR-005 immediacy: per-
@@ -441,6 +447,10 @@ export async function ProfileView({ slug }: { slug: string }) {
             // rollup. Hidden when no mentee has any co-pub (the rollup
             // page would render an empty state but the link wouldn't be
             // actionable in that case).
+            // #843 — when the co-pub source is unavailable the counts are all
+            // a fallback zero, so `totalCopubs` is a meaningless zero too;
+            // gate the link on the source being available so we don't drop it
+            // as if there were genuinely no co-pubs.
             const totalCopubs = mentees.reduce(
               (s, m) => s + m.copublicationCount,
               0,
@@ -462,7 +472,14 @@ export async function ProfileView({ slug }: { slug: string }) {
                 count={`${mentees.length} ${mentees.length === 1 ? "mentee" : "mentees"}`}
                 subtitle={distribution}
                 headerAction={
-                  totalCopubs > 0 ? (
+                  !copubSourceAvailable ? (
+                    // #843 — outage: counts are an artifact, not data. Surface
+                    // a muted note in the existing right-aligned slot rather
+                    // than a link the rollup page can't honestly back.
+                    <span className="text-muted-foreground text-sm">
+                      Co-publication counts are temporarily unavailable
+                    </span>
+                  ) : totalCopubs > 0 ? (
                     <a
                       href={`/scholars/${slug}/co-pubs`}
                       className="text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline whitespace-nowrap"
@@ -476,6 +493,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   mentees={mentees}
                   mentorCwid={profile.cwid}
                   mentorSlug={slug}
+                  copubSourceAvailable={copubSourceAvailable}
                 />
               </Section>
             );

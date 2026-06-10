@@ -55,15 +55,23 @@ const ALLOW: AuthzResult = { ok: true };
 // ---------------------------------------------------------------------------
 
 /**
- * `POST /api/edit/field`. `overview` and `selectedHighlightPmids` (#836) are
- * **self only** — a superuser does not inherit them (broad admin field-editing
- * is deferred). `slug` is superuser-only.
+ * `POST /api/edit/field`. `overview` is editable by the scholar themselves OR a
+ * superuser (#844 — admins may now author any scholar's bio; the broad admin
+ * field-editing of OTHER fields stays deferred, so this widening is `overview`-
+ * only). `selectedHighlightPmids` (#836) stays **self only** — a superuser does
+ * not inherit it. `slug` is superuser-only.
  */
 export function authorizeFieldEdit(
   session: EditSession,
   target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
 ): AuthzResult {
-  if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
+  if (target.fieldName === "overview") {
+    // Self OR superuser — and ONLY for `overview` (the deferred broad-admin
+    // widening must not leak to other fields via this branch — #844).
+    if (session.cwid === target.entityId || session.isSuperuser) return ALLOW;
+    return { ok: false, reason: "not_self" };
+  }
+  if (target.fieldName === "selectedHighlightPmids") {
     return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
   }
   return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };
