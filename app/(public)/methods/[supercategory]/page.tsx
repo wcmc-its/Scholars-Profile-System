@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { buildDefinedTermJsonLd } from "@/lib/seo/jsonld";
 import {
   getSupercategory,
-  getFamiliesForSupercategory,
+  getSupercategoryRollup,
   getTopScholarsForSupercategory,
 } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -49,10 +49,11 @@ export default async function SupercategoryPage({
   const sc = await getSupercategory(supercategory);
   if (!sc) notFound();
 
-  const [families, topScholars] = await Promise.all([
-    getFamiliesForSupercategory(sc.id).catch(() => []),
+  const [rollup, topScholars] = await Promise.all([
+    getSupercategoryRollup(sc.id).catch(() => ({ families: [], allWorkPubs: [] })),
     getTopScholarsForSupercategory(sc.id).catch(() => null),
   ]);
+  const { families, allWorkPubs } = rollup;
 
   // getSupercategory already rejects an all-suppressed/sensitive supercategory
   // (empty post-gate roster), so `families` is non-empty here in practice; guard
@@ -63,6 +64,7 @@ export default async function SupercategoryPage({
     familyId: f.familyId,
     familyLabel: f.familyLabel,
     scholarCount: f.scholarCount,
+    pubCount: f.pubCount ?? 0,
     exemplarTools: f.exemplarTools,
   }));
   const familyMeta: Record<string, { familyLabel: string; familySegment: string }> = {};
@@ -114,7 +116,7 @@ export default async function SupercategoryPage({
             per-family), so no scholarCount / "+ N more" affordance is passed. */}
         {topScholars && (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow scholars={topScholars} topicLabel={sc.label} />
+            <TopScholarsChipRow scholars={topScholars} topicLabel={sc.label} enablePopover />
           </div>
         )}
 
@@ -131,8 +133,10 @@ export default async function SupercategoryPage({
       <section id="families" className="scroll-mt-20">
         <SupercategoryFamilyLayout
           supercategorySlug={sc.slug}
+          supercategoryLabel={sc.label}
           families={railItems}
           familyMeta={familyMeta}
+          allWorkPubs={allWorkPubs}
         />
       </section>
     </main>
