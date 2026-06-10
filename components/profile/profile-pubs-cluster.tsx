@@ -3,7 +3,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
-import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
+import {
+  ActiveFilterBanner,
+  POSITION_BANNER_LABEL,
+} from "@/components/profile/active-filter-banner";
 import {
   deriveAuthorPositionRole,
   matchesAnyPosition,
@@ -256,6 +259,22 @@ function ProfilePubsClusterInner({
   const filterActive =
     selectedUis.length > 0 || positions.length > 0 || selectedFamilyIds.length > 0;
 
+  // #17 — one-shot confirmation trigger, with ZERO injected latency. Track the
+  // previous filtered-count and bump a generation counter the instant it changes
+  // (React's documented "adjust state during render" pattern — it re-renders
+  // synchronously before paint, so there is no timer and no flash). The
+  // generation is used as a React `key` on the animated wrappers below so they
+  // remount and their one-shot CSS keyframe self-plays exactly once. The first
+  // paint (prevCount === null) does NOT bump — the list/count pulse only on a
+  // genuine user-driven filter change. prefers-reduced-motion zeroes the CSS.
+  const currentCount = filteredPublications.length;
+  const [prevCount, setPrevCount] = useState<number | null>(null);
+  const [filterGeneration, setFilterGeneration] = useState(0);
+  if (prevCount !== currentCount) {
+    setPrevCount(currentCount);
+    if (prevCount !== null) setFilterGeneration((g) => g + 1);
+  }
+
   // The selected families, mapped back to {familyId, familyLabel} for the banner.
   const selectedFamilies = useMemo(() => {
     if (selectedFamilyIds.length === 0) return [];
@@ -317,6 +336,21 @@ function ProfilePubsClusterInner({
     [selectedKeywords],
   );
 
+  // #12 — Position is now surfaced as a third-hue (warm amber) chip in the
+  // FilterBar (it was a hidden, counts-only facet in v1). Reuses the same
+  // SelectedPositions URL state + writeUrl path; the per-chip remove drops one
+  // bucket from `?position=`.
+  const selectedPositionChips = useMemo(
+    () => positions.map((p) => ({ bucket: p, label: POSITION_BANNER_LABEL[p] })),
+    [positions],
+  );
+
+  const onRemovePosition = useCallback(
+    (bucket: Exclude<PositionFilter, "all">) =>
+      onPositionsChange(positions.filter((p) => p !== bucket)),
+    [positions, onPositionsChange],
+  );
+
   // #118 — the reciter→dynamodb consistency window. Fetched client-side
   // because the 30-min window can't be baked into the 24h-ISR profile page.
   // While open, the Topics pills would be transiently incomplete, so the
@@ -369,14 +403,26 @@ function ProfilePubsClusterInner({
 
       {/* PROFILE_FACET_REDESIGN — the unified chip bar replaces the prose banner
           when the redesign is on; otherwise the existing banner renders verbatim.
-          FilterBar returns null when nothing is selected. */}
+          FilterBar returns null when nothing is selected.
+
+          #18 FLAG-HYGIENE / REMOVAL TRIGGER: this `facetRedesignEnabled ? … : …`
+          fork (and the parallel forks in topics-section, methods-section, and the
+          empty-state block below) is the v1 #829-pill fallback kept behind the
+          flag. Once PROFILE_FACET_REDESIGN is prod-on and stable for N weeks,
+          delete the OFF branches (ActiveFilterBanner here, the legacy renderers
+          there) so two renderers don't orphan. File that cleanup as a tracked
+          follow-up on #841 (or a fresh issue) WHEN the prod flag flips — not
+          before. */}
       {facetRedesignEnabled ? (
         <FilterBar
           topics={selectedTopicChips}
           families={selectedFamilies}
+          positions={selectedPositionChips}
           count={filteredPublications.length}
+          countGeneration={filterGeneration}
           onRemoveTopic={onToggle}
           onRemoveFamily={onFamilyToggle}
+          onRemovePosition={onRemovePosition}
           onClearAll={onClearAll}
         />
       ) : (
@@ -410,13 +456,32 @@ function ProfilePubsClusterInner({
         </div>
       ) : null}
 
-      <PublicationsSection
-        publications={filteredPublications}
-        filterActive={filterActive}
-        positions={positions}
-        onPositionsChange={onPositionsChange}
-        scholarCwid={scholarCwid}
-      />
+      {/* #17 — flag-gated one-shot pulse. Keyed by filterGeneration so it remounts
+          → the CSS keyframe self-plays once when the filtered set changes; no
+          pulse on first paint (generation 0). Flag-off output is byte-identical
+          (no wrapper). */}
+      {facetRedesignEnabled ? (
+        <div
+          key={`pulse-${filterGeneration}`}
+          className={filterGeneration > 0 ? "facet-list-pulse" : undefined}
+        >
+          <PublicationsSection
+            publications={filteredPublications}
+            filterActive={filterActive}
+            positions={positions}
+            onPositionsChange={onPositionsChange}
+            scholarCwid={scholarCwid}
+          />
+        </div>
+      ) : (
+        <PublicationsSection
+          publications={filteredPublications}
+          filterActive={filterActive}
+          positions={positions}
+          onPositionsChange={onPositionsChange}
+          scholarCwid={scholarCwid}
+        />
+      )}
     </>
   );
 }

@@ -9,6 +9,14 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { ScholarFamilyView } from "@/lib/api/profile";
 import { methodFamilyPath } from "@/lib/method-url";
 
+// Resting budget for UNSELECTED method rows in the redesign panel (#1/#2).
+// Selected/pinned rows are budgeted INDEPENDENTLY (always all rendered), so a
+// 4-selected scholar shows 4 + UNSELECTED_INITIAL rows, not 6 total.
+const UNSELECTED_INITIAL = 6;
+// Inline "+N more method families" reveals this many additional unselected rows
+// per click (#3), in document flow (no nested scroll, #5).
+const UNSELECTED_STEP = 10;
+// Legacy (flag-off / pre-redesign #819) flat cap — unchanged behavior.
 const INITIAL_VISIBLE = 8;
 
 type Row = ScholarFamilyView & { sensitive: boolean };
@@ -79,6 +87,9 @@ export function MethodsSection({
   familyCounts?: Map<string, number> | null;
 }) {
   const [revealed, setRevealed] = useState<ScholarFamilyView[]>([]);
+  // #3 — how many UNSELECTED method rows are currently revealed in the resting
+  // panel. Grows by UNSELECTED_STEP on each "+N more" click; never navigates.
+  const [unselectedVisible, setUnselectedVisible] = useState(UNSELECTED_INITIAL);
 
   useEffect(() => {
     if (!sensitiveGateActive || !scholarCwid) return;
@@ -116,8 +127,30 @@ export function MethodsSection({
 
   if (rows.length === 0) return null;
 
-  const visible = rows.slice(0, INITIAL_VISIBLE);
-  const remaining = rows.length - visible.length;
+  // #1/#2 — budget UNSELECTED rows independently of selected ones (redesign
+  // only). Selected/pinned families ALWAYS render, in rank order and in place;
+  // unselected families fill up to `unselectedVisible`. Order is preserved from
+  // the rank-sorted `rows` so nothing reflows on toggle (#14). The legacy path
+  // keeps its flat INITIAL_VISIBLE cap, byte-identical.
+  let visible: Row[];
+  let hiddenUnselected: number; // #3 — N = unselected-AND-hidden families only
+  if (facetRedesignEnabled) {
+    let shownUnselected = 0;
+    visible = rows.filter((f) => {
+      if (selectedSet.has(f.familyId)) return true; // selected never budgeted out (#2)
+      if (shownUnselected < unselectedVisible) {
+        shownUnselected += 1;
+        return true;
+      }
+      return false;
+    });
+    const totalUnselected = rows.reduce((n, f) => n + (selectedSet.has(f.familyId) ? 0 : 1), 0);
+    hiddenUnselected = Math.max(0, totalUnselected - shownUnselected);
+  } else {
+    visible = rows.slice(0, INITIAL_VISIBLE);
+    hiddenUnselected = rows.length - visible.length;
+  }
+  const remaining = hiddenUnselected;
 
   return (
     <section className="mb-6">
@@ -148,14 +181,24 @@ export function MethodsSection({
               const isSelected = selectedSet.has(f.familyId);
               const inFilter = familyCounts ? (familyCounts.get(f.familyId) ?? 0) : undefined;
               const zeroCount = inFilter === 0;
+              // #7 — a SELECTED family with a 0 contextual count contributes
+              // nothing under the OTHER active filters. Deliberate, NOT an error:
+              // keep full opacity (filled + checked + remove-X) and a quiet inset
+              // ring, and mute the count. #14 — an UNSELECTED zero-count row is
+              // the dim/inert state (opacity-45), a different signal.
+              const selectedZero = isSelected && zeroCount;
+              const dimZero = zeroCount && !isSelected; // the only opacity-45 case
               return (
                 <li
                   key={f.familyId}
                   className={
-                    isSelected
-                      ? "relative flex items-center gap-3 bg-[var(--color-facet-method-fill)] px-3.5 py-3"
-                      : "relative flex items-center gap-3 px-3.5 py-3"
+                    selectedZero
+                      ? "facet-chip-transition relative flex items-center gap-3 bg-[var(--color-facet-method-fill)] px-3.5 py-3 ring-1 ring-inset ring-[var(--color-facet-method-border)]"
+                      : isSelected
+                        ? "facet-chip-transition relative flex items-center gap-3 bg-[var(--color-facet-method-fill)] px-3.5 py-3 dark:ring-1 dark:ring-inset dark:ring-[var(--color-facet-method-border)]"
+                        : "facet-chip-transition relative flex items-center gap-3 px-3.5 py-3"
                   }
+                  data-selected-zero={selectedZero ? "true" : undefined}
                 >
                   {/* Whole-row toggle: a full-bleed transparent button so any click
                       on the row toggles the family. Interactive children (EyeOff,
@@ -171,20 +214,20 @@ export function MethodsSection({
                   ) : null}
                   {isSelected ? (
                     <SquareCheck
-                      className="size-[18px] shrink-0 text-[var(--color-facet-method-accent)]"
+                      className="size-[18px] shrink-0 text-[var(--color-facet-method-count)]"
                       aria-hidden="true"
                     />
                   ) : (
                     <Square
                       className={
-                        zeroCount
+                        dimZero
                           ? "text-muted-foreground size-[18px] shrink-0 opacity-45"
                           : "text-muted-foreground size-[18px] shrink-0"
                       }
                       aria-hidden="true"
                     />
                   )}
-                  <div className={zeroCount ? "min-w-0 flex-1 opacity-45" : "min-w-0 flex-1"}>
+                  <div className={dimZero ? "min-w-0 flex-1 opacity-45" : "min-w-0 flex-1"}>
                     <div className="flex items-center gap-1.5">
                       <span
                         className={
@@ -216,7 +259,7 @@ export function MethodsSection({
                       <div
                         className={
                           isSelected
-                            ? "mt-0.5 truncate font-mono text-xs text-[var(--color-facet-method-accent)]"
+                            ? "mt-0.5 truncate font-mono text-xs text-[var(--color-facet-method-count)]"
                             : "text-muted-foreground mt-0.5 truncate font-mono text-xs"
                         }
                       >
@@ -226,24 +269,46 @@ export function MethodsSection({
                   </div>
                   <span
                     className={
-                      zeroCount
-                        ? "shrink-0 text-sm font-medium tabular-nums opacity-45"
-                        : isSelected
-                          ? "shrink-0 text-sm font-medium tabular-nums text-[var(--color-facet-method-text)]"
-                          : "text-foreground shrink-0 text-sm font-medium tabular-nums"
+                      selectedZero
+                        ? "shrink-0 text-sm font-medium tabular-nums text-[var(--color-facet-method-count)]"
+                        : dimZero
+                          ? "shrink-0 text-sm font-medium tabular-nums opacity-45"
+                          : isSelected
+                            ? "shrink-0 text-sm font-medium tabular-nums text-[var(--color-facet-method-text)]"
+                            : "text-foreground shrink-0 text-sm font-medium tabular-nums"
                     }
                   >
                     {inFilter !== undefined ? (
-                      <>
-                        {inFilter}{" "}
-                        <span
-                          className={
-                            isSelected ? "font-normal text-[var(--color-facet-method-accent)]" : ""
-                          }
-                        >
-                          of {f.pubCount}
-                        </span>
-                      </>
+                      selectedZero ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className="relative z-10 inline-flex items-center gap-1"
+                              aria-label={`No publications match ${f.familyLabel} under the current filters`}
+                            >
+                              0{" "}
+                              <span className="font-normal text-[var(--color-facet-method-count)]">
+                                of {f.pubCount}
+                              </span>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-sm leading-relaxed">
+                            No publications match this method under the current filters. Remove
+                            another filter (or this method) to see its publications.
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <>
+                          {inFilter}{" "}
+                          <span
+                            className={
+                              isSelected ? "font-normal text-[var(--color-facet-method-count)]" : ""
+                            }
+                          >
+                            of {f.pubCount}
+                          </span>
+                        </>
+                      )
                     ) : (
                       f.pubCount
                     )}
@@ -255,7 +320,7 @@ export function MethodsSection({
                       type="button"
                       aria-label={`Remove ${f.familyLabel} filter`}
                       onClick={() => onFamilyToggle?.(f.familyId)}
-                      className="relative z-10 inline-flex shrink-0 items-center text-[var(--color-facet-method-accent)]"
+                      className="relative z-10 inline-flex shrink-0 items-center text-[var(--color-facet-method-count)]"
                     >
                       <X className="size-3.5" aria-hidden="true" />
                     </button>
@@ -372,7 +437,31 @@ export function MethodsSection({
           })}
         </ul>
       </TooltipProvider>
-      {remaining > 0 ? (
+      {facetRedesignEnabled ? (
+        // #3 — inline EXPAND (never navigates); #4 — the only navigate-away
+        // control is MethodsHeading's "Browse all methods ->", so the row footer
+        // here is purely an in-flow disclosure (#5 — no nested scroll).
+        <div className="mt-2 flex items-center gap-4">
+          {remaining > 0 ? (
+            <button
+              type="button"
+              onClick={() => setUnselectedVisible((n) => n + UNSELECTED_STEP)}
+              className="text-muted-foreground inline-flex items-center text-xs underline-offset-4 hover:text-[var(--color-facet-method-count)] hover:underline"
+            >
+              + {remaining} more method {remaining === 1 ? "family" : "families"}
+            </button>
+          ) : null}
+          {unselectedVisible > UNSELECTED_INITIAL ? (
+            <button
+              type="button"
+              onClick={() => setUnselectedVisible(UNSELECTED_INITIAL)}
+              className="text-muted-foreground inline-flex items-center text-xs underline-offset-4 hover:text-[var(--color-facet-method-count)] hover:underline"
+            >
+              Show fewer
+            </button>
+          ) : null}
+        </div>
+      ) : remaining > 0 ? (
         pagesEnabled ? (
           <Link
             href="/methods"
