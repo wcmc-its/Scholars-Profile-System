@@ -5,6 +5,7 @@ import {
   getTopicScholars,
   type TopicAllScholarRole,
 } from "@/lib/api/topics";
+import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { TopicAllScholars } from "@/components/topic/topic-all-scholars";
 import {
   Breadcrumb,
@@ -126,6 +127,7 @@ export default async function TopicScholarsPage({
         selectedRole={role}
         query={q}
         page={page}
+        exportEnabled={isScholarListExportEnabled()}
       />
     </main>
   );

@@ -1129,6 +1129,13 @@ export class AppStack extends Stack {
         // needs cdk deploy Sps-App-<env> (CD only re-rolls the image) — the
         // flag-parity rule.
         PROFILE_FACET_REDESIGN: env === "staging" ? "on" : "off",
+        // #847 -- internal "download the leading scholars" CSV export. When
+        // "on", the POST /api/export/scholars/{scope} endpoint accepts
+        // authenticated requests and the download button renders; method scopes
+        // are ALSO gated by METHODS_LENS_PAGES above. Default OFF in both envs
+        // (ships dark). Wire in BOTH .env.local AND here per the flag-parity
+        // rule; `cdk deploy Sps-App-<env>` required (CD re-rolls the image only).
+        SCHOLAR_LIST_EXPORT: "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment

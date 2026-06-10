@@ -7,6 +7,8 @@ import {
   getTopScholarsForSupercategory,
 } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
+import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
 import type { FamilyRailItem } from "@/components/method/family-rail";
@@ -123,9 +125,14 @@ export default async function SupercategoryPage({
         {/* Stats — family count (additive/accurate). The distinct cross-family
             scholar count is non-additive across co-membership, so it is not
             shown as a raw sum here (§3.2 / OQ-3). */}
-        <div className="mt-4 border-t border-dashed border-border pt-4 text-sm text-muted-foreground">
-          {families.length.toLocaleString()} method{" "}
-          {families.length === 1 ? "family" : "families"}
+        <div className="mt-4 flex items-baseline justify-between gap-4 border-t border-dashed border-border pt-4">
+          <div className="text-sm text-muted-foreground">
+            {families.length.toLocaleString()} method{" "}
+            {families.length === 1 ? "family" : "families"}
+          </div>
+          {isScholarListExportEnabled() ? (
+            <ScholarListExportButton scope="supercategory" params={{ supercategory: sc.slug }} />
+          ) : null}
         </div>
       </section>
 
