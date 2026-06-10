@@ -17,12 +17,16 @@ export function TopScholarsChipRow({
   scholarCount,
   topicSlug,
   topicLabel,
+  enablePopover,
 }: {
   scholars: TopScholarChipData[];
   scholarCount?: number;
   topicSlug?: string;
   /** Topic label, used by PersonPopover's "Recent in {topic}" line (#242). */
   topicLabel?: string;
+  /** Enable the generic hover-card on non-topic surfaces (Method pages) where no
+   *  `topicSlug` is available. Forwarded to each chip. */
+  enablePopover?: boolean;
 }) {
   const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
 
@@ -45,6 +49,7 @@ export function TopScholarsChipRow({
             scholar={s}
             topicSlug={topicSlug}
             topicLabel={topicLabel}
+            enablePopover={enablePopover}
           />
         ))}
         {moreCount > 0 && topicSlug && (

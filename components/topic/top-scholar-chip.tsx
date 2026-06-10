@@ -21,10 +21,15 @@ export function TopScholarChip({
   scholar,
   topicSlug,
   topicLabel,
+  enablePopover,
 }: {
   scholar: TopScholarChipData;
   topicSlug?: string;
   topicLabel?: string;
+  /** Enable the hover-card on NON-topic surfaces (e.g. Method pages) that have no
+   *  `topicSlug`. Wraps the chip in a generic `top-scholar` popover (totals +
+   *  recent work, no topic-rank line). Ignored when `topicSlug` is present. */
+  enablePopover?: boolean;
 }) {
   const anchor = (
     <a
@@ -48,16 +53,25 @@ export function TopScholarChip({
     </a>
   );
 
-  if (!topicSlug) return anchor;
-  return (
-    <PersonPopover
-      cwid={scholar.cwid}
-      surface="top-scholar"
-      contextTopicSlug={topicSlug}
-      contextTopicLabel={topicLabel}
-      contextTopicRank={scholar.rank}
-    >
-      {anchor}
-    </PersonPopover>
-  );
+  if (topicSlug) {
+    return (
+      <PersonPopover
+        cwid={scholar.cwid}
+        surface="top-scholar"
+        contextTopicSlug={topicSlug}
+        contextTopicLabel={topicLabel}
+        contextTopicRank={scholar.rank}
+      >
+        {anchor}
+      </PersonPopover>
+    );
+  }
+  if (enablePopover) {
+    return (
+      <PersonPopover cwid={scholar.cwid} surface="top-scholar">
+        {anchor}
+      </PersonPopover>
+    );
+  }
+  return anchor;
 }

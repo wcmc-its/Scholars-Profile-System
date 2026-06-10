@@ -10,9 +10,10 @@
  * deep-link param (a different surface, a different flag — §OQ-9).
  *
  * Styling mirrors the subtopic rail's #172 selected state: 3px WCM-red left
- * border + warm-neutral fill on the active item, `tabular-nums` scholar count on
- * the right, plus a mono-middot `exemplarTools` line (static display strings, NOT
- * clickable — §3.6). Families arrive pre-sorted by scholar count desc.
+ * border + warm-neutral fill on the active item, a `tabular-nums` publication
+ * count on the right (stacked over a "pubs" caption so it never clips and reads
+ * unambiguously in the narrow rail), plus a mono-middot `exemplarTools` line
+ * (static display strings, NOT clickable — §3.6). Families arrive pre-sorted.
  */
 import { useState, useMemo, useCallback } from "react";
 import { X } from "lucide-react";
@@ -24,8 +25,11 @@ export type FamilyRailItem = {
   familyId: string;
   /** Human family label, rendered as the row title. */
   familyLabel: string;
-  /** Distinct-scholar count (additive/accurate `_count.cwid`). */
+  /** Distinct-scholar count (additive/accurate `_count.cwid`). Kept for the
+   *  row's accessible label; the visible count is `pubCount`. */
   scholarCount: number;
+  /** Distinct (#356-dark filtered) publication count — the value shown on the row. */
+  pubCount: number;
   /** Up to ~3 representative member-tool display names (static exemplars). */
   exemplarTools: string[];
 };
@@ -107,7 +111,7 @@ export function FamilyRail({
                     aria-current={isActive ? "true" : undefined}
                   >
                     <div className="min-w-0 flex-1">
-                      <div className="text-base break-words leading-snug">
+                      <div className="line-clamp-2 text-base leading-snug">
                         {f.familyLabel}
                       </div>
                       {f.exemplarTools.length > 0 && (
@@ -117,11 +121,17 @@ export function FamilyRail({
                       )}
                     </div>
                     <span
-                      className={`shrink-0 self-center text-sm tabular-nums ${
+                      className={`shrink-0 text-right tabular-nums ${
                         isActive ? "text-foreground" : "text-muted-foreground"
                       }`}
+                      aria-label={`${f.pubCount.toLocaleString()} publications, ${f.scholarCount.toLocaleString()} scholars`}
                     >
-                      {f.scholarCount}
+                      <span className="block text-sm font-medium leading-none">
+                        {f.pubCount.toLocaleString()}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-muted-foreground/80">
+                        pubs
+                      </span>
                     </span>
                   </button>
                 </li>

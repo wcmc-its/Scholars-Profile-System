@@ -19,8 +19,10 @@ import { useSearchParams } from "next/navigation";
 import { FamilyRail, type FamilyRailItem } from "@/components/method/family-rail";
 import { FamilyPublicationFeed } from "@/components/method/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
+import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { ScrollFade } from "@/components/ui/scroll-fade";
 import { familySegmentFor } from "@/lib/method-url";
+import type { MethodPublicationHit } from "@/lib/api/methods";
 
 // ---------------------------------------------------------------------------
 // Family page (type A) — full-width feed, no rail.
@@ -53,9 +55,13 @@ export function FamilyPublicationLayout({
 
 export function SupercategoryFamilyLayout(props: {
   supercategorySlug: string;
+  supercategoryLabel: string;
   families: FamilyRailItem[];
   /** familyId → { label, familySegment } for building the feed/scholars hrefs. */
   familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  /** Representative recent publications across all families — the default
+   *  "All work" panel shown until a family is selected (§A2). */
+  allWorkPubs: MethodPublicationHit[];
 }) {
   // useSearchParams() forces a CSR bailout during prerender — Suspense lets the
   // static build emit the fallback and hydrate the full UI at request time.
@@ -68,12 +74,16 @@ export function SupercategoryFamilyLayout(props: {
 
 function SupercategoryFamilyLayoutInner({
   supercategorySlug,
+  supercategoryLabel,
   families,
   familyMeta,
+  allWorkPubs,
 }: {
   supercategorySlug: string;
+  supercategoryLabel: string;
   families: FamilyRailItem[];
   familyMeta: Record<string, { familyLabel: string; familySegment: string }>;
+  allWorkPubs: MethodPublicationHit[];
 }) {
   const searchParams = useSearchParams();
   const requestedFamily = searchParams.get("family");
@@ -147,9 +157,10 @@ function SupercategoryFamilyLayoutInner({
               )}
             </>
           ) : (
-            <div className="py-8 text-sm text-muted-foreground">
-              Select a method family to see its researchers and publications.
-            </div>
+            <SupercategoryAllWorkFeed
+              pubs={allWorkPubs}
+              supercategoryLabel={supercategoryLabel}
+            />
           )}
         </div>
       </div>

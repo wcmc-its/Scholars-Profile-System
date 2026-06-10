@@ -1,14 +1,14 @@
 /**
  * `/methods` hub grid — the supercategory analog of
  * `components/home/browse-all-research-areas-grid.tsx`. Server Component renders
- * a 3-column, column-major list of the ~14 method supercategories (those with at
- * least one publicly-visible family), each linking to its supercategory page and
- * labeled with its visible-family count. Empty `items` → an unavailable state.
+ * the method supercategories (those with at least one publicly-visible family) as
+ * a multi-column masonry of GROUPS: each group is a supercategory heading (linking
+ * to its page) above its families, and every family deep-links to that family on
+ * the supercategory page via `?family={familyId}` (which scrolls the panel into
+ * view — UX feedback B5/B6). Empty `items` → an unavailable state.
  */
 import Link from "next/link";
 import type { SupercategoryHubEntry } from "@/lib/api/methods";
-
-const COLUMNS = 3;
 
 export function MethodsHubGrid({ items }: { items: SupercategoryHubEntry[] }) {
   if (items.length === 0) {
@@ -28,37 +28,44 @@ export function MethodsHubGrid({ items }: { items: SupercategoryHubEntry[] }) {
     );
   }
 
-  // Column-major split: items arrive sorted by label, so each column is a
-  // contiguous alphabetical slice. Reading order is top-to-bottom, then next
-  // column.
-  const colSize = Math.ceil(items.length / COLUMNS);
-  const columns = Array.from({ length: COLUMNS }, (_, i) =>
-    items.slice(i * colSize, (i + 1) * colSize),
-  );
+  const totalFamilies = items.reduce((sum, sc) => sum + sc.familyCount, 0);
 
   return (
     <section className="mt-12">
       <h2 className="text-lg font-semibold">Browse all research methods</h2>
       <p className="mt-1 mb-6 text-[14px] text-muted-foreground">
-        All {items.length} method categories at WCM, with family counts.
+        All {items.length} method categories at WCM — {totalFamilies.toLocaleString()}{" "}
+        method families. Jump straight to any family.
       </p>
-      <div className="grid grid-cols-1 gap-x-10 sm:grid-cols-2 lg:grid-cols-3">
-        {columns.map((col, ci) => (
-          <ul key={ci} className="divide-y divide-border">
-            {col.map((sc) => (
-              <li key={sc.id} className="flex items-start justify-between gap-3 py-2.5">
-                <a
-                  href={`/methods/${sc.slug}`}
-                  className="text-base font-medium text-foreground hover:underline"
-                >
-                  {sc.label}
-                </a>
-                <span className="shrink-0 tabular-nums text-sm text-muted-foreground">
-                  {sc.familyCount.toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
+      <div className="gap-x-10 sm:columns-2 lg:columns-3">
+        {items.map((sc) => (
+          <div key={sc.id} className="mb-7 break-inside-avoid">
+            <a
+              href={`/methods/${sc.slug}`}
+              className="group flex items-baseline justify-between gap-2"
+            >
+              <span className="text-base font-semibold text-foreground group-hover:underline">
+                {sc.label}
+              </span>
+              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
+                {sc.familyCount.toLocaleString()}
+              </span>
+            </a>
+            {sc.families.length > 0 && (
+              <ul className="mt-1.5 space-y-0.5 border-l border-border pl-3">
+                {sc.families.map((f) => (
+                  <li key={f.familyId}>
+                    <a
+                      href={`/methods/${sc.slug}?family=${encodeURIComponent(f.familyId)}`}
+                      className="block text-sm leading-snug text-muted-foreground transition-colors hover:text-[var(--color-accent-slate)] hover:underline"
+                    >
+                      {f.familyLabel}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         ))}
       </div>
     </section>

@@ -212,7 +212,9 @@ export async function getFamily(
 /** One family row in a supercategory's rail (§3.2). `scholarCount` is the
  *  distinct-scholar count (additive, accurate); `pmidCountSum` is the per-scholar
  *  `pmidCount` SUM — NON-additive across co-authors, so it is labeled, never shown
- *  as a true distinct pub count. */
+ *  as a true distinct pub count. `pubCount` is the DISTINCT (#356-dark filtered)
+ *  publication count — the value the rail displays — and is `null` unless the
+ *  caller opted into the (more expensive) pmid-union pass (`getSupercategoryRollup`). */
 export type FamilyRosterEntry = {
   familyId: string;
   familyLabel: string;
@@ -220,7 +222,11 @@ export type FamilyRosterEntry = {
   supercategory: string;
   scholarCount: number;
   pmidCountSum: number;
-  /** Up to ~3 representative member-tool display names (the latest row's). */
+  /** Distinct, dark-filtered publication count; null when not computed. */
+  pubCount: number | null;
+  /** Up to ~3 representative member-tool display names. With `getSupercategory-
+   *  Rollup` this is the deduped UNION across the family's scholars (cap 3); the
+   *  bare `getFamiliesForSupercategory` keeps the single representative row's set. */
   exemplarTools: string[];
 };
 
@@ -228,11 +234,15 @@ export type FamilyRosterEntry = {
  * Families within a supercategory, post-overlay-gate, ordered by distinct-scholar
  * count desc (the additive, accurate signal). Suppressed/sensitive families are
  * dropped BEFORE counting. Pass a preloaded `gate` to avoid re-querying the
- * overlays (the resolvers do this); omit it to load one.
+ * overlays (the resolvers do this); omit it to load one. `pubCount` is left null
+ * here (cheap path — the hub + page-rail enrichment compute it via the rollup).
+ * Pass `opts.skipExemplars` when the caller will supply its own exemplar union
+ * (avoids a redundant single-row read).
  */
 export async function getFamiliesForSupercategory(
   supercategory: string,
   gate?: FamilyOverlayGate,
+  opts?: { skipExemplars?: boolean },
 ): Promise<FamilyRosterEntry[]> {
   if (!isMethodsLensEnabled()) return [];
   const overlayGate = gate ?? (await loadFamilyOverlayGate());
@@ -252,20 +262,22 @@ export async function getFamiliesForSupercategory(
   );
   if (visible.length === 0) return [];
 
-  const chosenIds = visible
-    .map((g) => g._max.familyId)
-    .filter((id): id is string => id !== null);
-  const exemplarRows = await prisma.scholarFamily.findMany({
-    where: { supercategory, familyId: { in: chosenIds } },
-    select: { familyId: true, exemplarTools: true },
-    distinct: ["familyId"],
-  });
   const exemplarById = new Map<string, string[]>();
-  for (const r of exemplarRows) {
-    exemplarById.set(
-      r.familyId,
-      Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
-    );
+  if (!opts?.skipExemplars) {
+    const chosenIds = visible
+      .map((g) => g._max.familyId)
+      .filter((id): id is string => id !== null);
+    const exemplarRows = await prisma.scholarFamily.findMany({
+      where: { supercategory, familyId: { in: chosenIds } },
+      select: { familyId: true, exemplarTools: true },
+      distinct: ["familyId"],
+    });
+    for (const r of exemplarRows) {
+      exemplarById.set(
+        r.familyId,
+        Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
+      );
+    }
   }
 
   return visible
@@ -278,6 +290,7 @@ export async function getFamiliesForSupercategory(
         supercategory,
         scholarCount: g._count.cwid,
         pmidCountSum: g._sum.pmidCount ?? 0,
+        pubCount: null,
         exemplarTools: exemplarById.get(familyId) ?? [],
       };
     })
@@ -287,6 +300,169 @@ export async function getFamiliesForSupercategory(
         b.pmidCountSum - a.pmidCountSum ||
         a.familyLabel.localeCompare(b.familyLabel),
     );
+}
+
+/** Cap on the deduped exemplar-tool union shown per family row. */
+const EXEMPLAR_UNION_CAP = 3;
+
+/**
+ * Distinct member pmids PER FAMILY across an entire supercategory's publicly-
+ * visible, active-scholar rows, plus the supercategory-wide union — both #356-dark
+ * filtered, in ONE findMany + ONE batched suppression pass (vs. N×
+ * `collectFamilyPmids`). The per-family sets back the rail's distinct paper count;
+ * the union backs the "All work" representative feed. Suppressed/sensitive families
+ * never contribute (gated per row before their pmids enter any accumulator).
+ */
+async function collectSupercategoryFamilyPmids(
+  supercategory: string,
+  gate: FamilyOverlayGate,
+): Promise<{ pmidsByFamilyLabel: Map<string, string[]>; unionPmids: string[] }> {
+  const rows = await prisma.scholarFamily.findMany({
+    where: { supercategory, scholar: { deletedAt: null, status: "active" } },
+    select: { familyLabel: true, pmids: true },
+  });
+
+  const rawByLabel = new Map<string, Set<string>>();
+  const unionSet = new Set<string>();
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(supercategory, r.familyLabel, gate)) continue;
+    if (!Array.isArray(r.pmids)) continue;
+    let set = rawByLabel.get(r.familyLabel);
+    if (!set) {
+      set = new Set<string>();
+      rawByLabel.set(r.familyLabel, set);
+    }
+    for (const p of r.pmids as unknown[]) {
+      const s = String(p);
+      set.add(s);
+      unionSet.add(s);
+    }
+  }
+
+  const allPmids = [...unionSet];
+  const pmidsByFamilyLabel = new Map<string, string[]>();
+  if (allPmids.length === 0) return { pmidsByFamilyLabel, unionPmids: [] };
+
+  // #356 — one batched whole-pub takedown / derived-dark pass across the union.
+  const suppressions = await loadPublicationSuppressions(allPmids, prisma);
+  const dark = await resolveDarkPmids(allPmids, suppressions, prisma);
+
+  const unionPmids: string[] = [];
+  for (const p of allPmids) if (!dark.has(p)) unionPmids.push(p);
+  for (const [label, set] of rawByLabel) {
+    pmidsByFamilyLabel.set(
+      label,
+      [...set].filter((p) => !dark.has(p)),
+    );
+  }
+  return { pmidsByFamilyLabel, unionPmids };
+}
+
+/**
+ * Deduped UNION of `exemplarTools` across each family's scholar rows (cap 3),
+ * preferring the most prolific scholars' tools (rows ordered by `pmidCount` desc).
+ * Replaces the single-row exemplar so the rail's tool line is FAMILY-representative
+ * rather than one arbitrary scholar's lone tool (UX feedback A3). One findMany,
+ * bounded by the supercategory's row count.
+ */
+async function loadUnionExemplars(
+  supercategory: string,
+  familyLabels: string[],
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (familyLabels.length === 0) return out;
+
+  const rows = await prisma.scholarFamily.findMany({
+    where: {
+      supercategory,
+      familyLabel: { in: familyLabels },
+      scholar: { deletedAt: null, status: "active" },
+    },
+    orderBy: [{ pmidCount: "desc" }],
+    select: { familyLabel: true, exemplarTools: true },
+  });
+
+  const seenByLabel = new Map<string, Set<string>>();
+  for (const r of rows) {
+    let names = out.get(r.familyLabel);
+    let seen = seenByLabel.get(r.familyLabel);
+    if (!names) {
+      names = [];
+      out.set(r.familyLabel, names);
+      seen = new Set<string>();
+      seenByLabel.set(r.familyLabel, seen);
+    }
+    if (names.length >= EXEMPLAR_UNION_CAP) continue;
+    if (!Array.isArray(r.exemplarTools)) continue;
+    for (const t of r.exemplarTools as unknown[]) {
+      if (names.length >= EXEMPLAR_UNION_CAP) break;
+      const name = typeof t === "string" ? t.trim() : "";
+      if (!name || seen!.has(name)) continue;
+      seen!.add(name);
+      names.push(name);
+    }
+  }
+  return out;
+}
+
+/** The supercategory-page rollup: the family rail (with DISTINCT paper counts +
+ *  union exemplars) plus the default "All work" representative publication list —
+ *  all derived from a SINGLE supercategory-wide pmid collection. */
+export type SupercategoryRollup = {
+  families: FamilyRosterEntry[];
+  /** Representative recent publications across ALL visible families (§A2). */
+  allWorkPubs: MethodPublicationHit[];
+};
+
+/**
+ * Assemble the supercategory page's family rail and default "All work" feed in one
+ * pass. Reuses `getFamiliesForSupercategory` for the base roster (sorted, gated),
+ * then enriches each family with its DISTINCT paper count (`pubCount`) and the
+ * deduped exemplar UNION (cap 3), and resolves the representative recent
+ * publications across the supercategory-wide pmid union. Lens-off / empty ⇒ both
+ * empty. `allWorkLimit` caps the representative list (default 12).
+ */
+export async function getSupercategoryRollup(
+  supercategory: string,
+  opts?: { allWorkLimit?: number },
+): Promise<SupercategoryRollup> {
+  if (!isMethodsLensEnabled()) return { families: [], allWorkPubs: [] };
+  const gate = await loadFamilyOverlayGate();
+
+  // Base roster (skip the single-row exemplar read; we supply the union below).
+  const base = await getFamiliesForSupercategory(supercategory, gate, {
+    skipExemplars: true,
+  });
+  if (base.length === 0) return { families: [], allWorkPubs: [] };
+
+  const { pmidsByFamilyLabel, unionPmids } = await collectSupercategoryFamilyPmids(
+    supercategory,
+    gate,
+  );
+  const exemplarsByLabel = await loadUnionExemplars(
+    supercategory,
+    base.map((f) => f.familyLabel),
+  );
+
+  const families: FamilyRosterEntry[] = base.map((f) => ({
+    ...f,
+    pubCount: pmidsByFamilyLabel.get(f.familyLabel)?.length ?? 0,
+    exemplarTools: exemplarsByLabel.get(f.familyLabel) ?? [],
+  }));
+
+  let allWorkPubs: MethodPublicationHit[] = [];
+  if (unionPmids.length > 0) {
+    const pubs = await prisma.publication.findMany({
+      where: { pmid: { in: unionPmids }, publicationType: { notIn: HARD_EXCLUDE_TYPES } },
+      select: PUB_SELECT,
+      orderBy: [{ year: "desc" }, { dateAddedToEntrez: "desc" }],
+      take: opts?.allWorkLimit ?? 12,
+    });
+    const authorsByPmid = await fetchWcmAuthorsForPmids(pubs.map((p) => p.pmid));
+    allWorkPubs = pubs.map((p) => mapPublicationHit(p, authorsByPmid.get(p.pmid)));
+  }
+
+  return { families, allWorkPubs };
 }
 
 /**
@@ -877,16 +1053,30 @@ export function methodScholarLastNameInitial(preferredName: string): string {
 // Hub enumeration (§ /methods hub) — the ~14 supercategories with live families.
 // ---------------------------------------------------------------------------
 
+/** One publicly-visible family under a hub supercategory (B5/B6). `familyId` is the
+ *  live `fam_NNNN` used to build the `/methods/{sc}?family={familyId}` deep-link;
+ *  it is sourced from the same fresh roster the supercategory page renders, so it
+ *  is never stale relative to the rail. Ordered by distinct-scholar count desc. */
+export type HubFamily = {
+  familyId: string;
+  familyLabel: string;
+  scholarCount: number;
+};
+
 /** One supercategory tile for the `/methods` hub: id, slug, label, description,
- *  and the count of publicly-visible families under it (post-gate). */
-export type SupercategoryHubEntry = ResolvedSupercategory & { familyCount: number };
+ *  the count of publicly-visible families, and the family list itself (B5). */
+export type SupercategoryHubEntry = ResolvedSupercategory & {
+  familyCount: number;
+  families: HubFamily[];
+};
 
 /**
  * Enumerate the supercategories that have at least one publicly-visible family
  * (the `/methods` hub). Re-derives slug + label for each live supercategory,
  * post-overlay-gate; drops any whose entire roster is suppressed/sensitive.
- * Sorted by label. Lens-off ⇒ `[]`. Logs (warn-not-fail) a live supercategory id
- * missing from the static label map (open-set drift, §E8).
+ * Sorted by label. Each entry carries its visible families (B5) so the hub can
+ * list + deep-link them. Lens-off ⇒ `[]`. Logs (warn-not-fail) a live
+ * supercategory id missing from the static label map (open-set drift, §E8).
  */
 export async function getSupercategoryHubEntries(): Promise<SupercategoryHubEntry[]> {
   if (!isMethodsLensEnabled()) return [];
@@ -900,7 +1090,10 @@ export async function getSupercategoryHubEntries(): Promise<SupercategoryHubEntr
         JSON.stringify({ event: "methods_unmapped_supercategory", supercategory: g.supercategory }),
       );
     }
-    const families = await getFamiliesForSupercategory(g.supercategory, gate);
+    // Hub rows show only label + count, so skip the per-family exemplar read.
+    const families = await getFamiliesForSupercategory(g.supercategory, gate, {
+      skipExemplars: true,
+    });
     if (families.length === 0) continue;
     out.push({
       id: g.supercategory,
@@ -908,6 +1101,11 @@ export async function getSupercategoryHubEntries(): Promise<SupercategoryHubEntr
       label: supercategoryLabel(g.supercategory),
       description: supercategoryDescription(g.supercategory),
       familyCount: families.length,
+      families: families.map((f) => ({
+        familyId: f.familyId,
+        familyLabel: f.familyLabel,
+        scholarCount: f.scholarCount,
+      })),
     });
   }
   return out.sort((a, b) => a.label.localeCompare(b.label));
