@@ -18,6 +18,7 @@
  */
 "use client";
 
+import Link from "next/link";
 import * as React from "react";
 
 import { ConfirmDialog } from "@/components/edit/confirm-dialog";
@@ -308,6 +309,16 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
+
+        <p className="text-sm">
+          <Link
+            href={`/edit/center/${encodeURIComponent(unitCode)}/history`}
+            className="text-apollo-slate hover:underline"
+            data-testid="center-roster-history-link"
+          >
+            View change history
+          </Link>
+        </p>
       </div>
 
       <ConfirmDialog
