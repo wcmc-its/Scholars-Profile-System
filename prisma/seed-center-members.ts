@@ -1,5 +1,15 @@
 /**
- * Seed `center_membership` from CWID list files in `data/center-members/`.
+ * RETIRED / SCOPED (#540 Phase 9). Seed `center_membership` from CWID list files
+ * in `data/center-members/`.
+ *
+ * The unit-curation cutover supersedes file-based roster curation — centers are
+ * now manually-owned and their rosters are edited through `/edit/center/*`. The
+ * `data/center-members/*.txt` files are deleted, so this loader is dormant (no
+ * input → "nothing to do"). It is kept, but **scoped to `source='file:*'` rows**
+ * so a stray re-run can never delete a UI-added (`source='manual'`/`manual-ui`)
+ * roster entry (edge case 26 in docs/unit-curation-spec.md). The one-shot
+ * migration of legacy `file:*` rows to the manual layer lives in
+ * `scripts/backfills/2026-06-10-import-unit-curation.ts`.
  *
  * Each file is named `<center-slug>.txt`, one CWID per line, optional
  * `cwid` header line. Comments (lines starting with `#`) and blank lines
@@ -7,9 +17,8 @@
  *
  * Behavior:
  *   - Unknown CWIDs (no scholar match) are listed and skipped.
- *   - Re-running is safe: existing (centerCode, cwid) pairs are upserted.
- *   - After processing, `center.scholarCount` is refreshed for every
- *     center that had a file.
+ *   - Re-running is safe: only this loader's own `source='file:*'` rows are
+ *     cleared+repopulated; manual UI rows are preserved.
  *
  * Run: npx tsx prisma/seed-center-members.ts
  */
@@ -75,8 +84,12 @@ async function main() {
     const unmatched = Array.from(unmatchedSet);
 
     // Idempotent insert: clear+repopulate keeps the table in sync with the
-    // file (so removing a CWID from the file removes it on next run).
-    await db.write.centerMembership.deleteMany({ where: { centerCode: center.code } });
+    // file (so removing a CWID from the file removes it on next run). Scoped to
+    // this loader's own `source='file:*'` rows (#540 edge case 26) so a re-run
+    // never deletes a UI-added (`source='manual'`/`manual-ui`) membership.
+    await db.write.centerMembership.deleteMany({
+      where: { centerCode: center.code, source: { startsWith: "file:" } },
+    });
     if (matched.length > 0) {
       await db.write.centerMembership.createMany({
         data: matched.map((cwid) => ({
@@ -86,9 +99,12 @@ async function main() {
         })),
       });
     }
+    // refreshedAt is bumped, but scholarCount is NOT overwritten here: with UI
+    // (`manual`) rows now co-existing, only the curation write path knows the
+    // true total. The backfill / roster endpoints own scholarCount post-cutover.
     await db.write.center.update({
       where: { code: center.code },
-      data: { scholarCount: matched.length, refreshedAt: new Date() },
+      data: { refreshedAt: new Date() },
     });
 
     console.log(

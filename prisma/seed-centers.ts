@@ -1,122 +1,34 @@
 /**
- * Seed the `center` table with WCM cross-disciplinary research centers.
+ * RETIRED (#540 Phase 9). The 8 WCM cross-disciplinary research centers are no
+ * longer seeded here — they are manually-owned rows (`source='manual'`) curated
+ * through `/edit/center/*`. The unit-curation cutover moved the canonical center
+ * + Meyer-program data into `prisma/center-seed-data.ts` and the load/migration
+ * into the launch backfill `scripts/backfills/2026-06-10-import-unit-curation.ts`,
+ * which also doubles as the dev/CI fixture loader.
  *
- * Run: npx tsx prisma/seed-centers.ts
+ * This file is kept for historical reference (and as an emergency re-seed path).
+ * Running it is a no-op by default so a stray `npx tsx prisma/seed-centers.ts`
+ * can never reintroduce `source='seed'` rows after the cutover. Pass `--force`
+ * to actually upsert — and note it writes `source='manual'` now, matching the
+ * post-cutover ownership; the program upserts are unchanged (#552/#584).
  *
- * Idempotent — re-running upserts each row by `code`. `directorCwid` and
- * `scholarCount` are intentionally left null/0 here; populate via:
- *   - directorCwid: manual SQL once a real scholar match exists
- *   - scholarCount: future ETL (e.g. reporting_cancer_center for the
- *     Meyer Cancer Center)
+ * Run (no-op):      npx tsx prisma/seed-centers.ts
+ * Run (force seed):  npx tsx prisma/seed-centers.ts --force
  */
 import "dotenv/config";
 import { db } from "../lib/db";
-
-type Seed = {
-  code: string;
-  name: string;
-  slug: string;
-  description: string;
-  sortOrder: number;
-  centerType: "center" | "institute";
-};
-
-const CENTERS: Seed[] = [
-  {
-    code: "englander_ipm",
-    name: "Englander Institute for Precision Medicine",
-    slug: "englander-precision-medicine",
-    description:
-      "Genomic medicine, precision diagnostics, and translational therapeutics across cancer, rare disease, and immunology.",
-    sortOrder: 10,
-    centerType: "institute",
-  },
-  {
-    code: "meyer_cancer_center",
-    name: "Sandra and Edward Meyer Cancer Center",
-    slug: "meyer-cancer-center",
-    description:
-      "NCI-designated cancer center spanning basic, translational, and clinical oncology research at WCM and NewYork-Presbyterian.",
-    sortOrder: 20,
-    centerType: "center",
-  },
-  {
-    code: "cardiovascular_ri",
-    name: "Cardiovascular Research Institute",
-    slug: "cardiovascular-research-institute",
-    description:
-      "Multidisciplinary cardiovascular science from molecular pathways to clinical trials, including the cardio-oncology consortium.",
-    sortOrder: 40,
-    centerType: "institute",
-  },
-  {
-    code: "computational_biomed",
-    name: "Institute for Computational Biomedicine",
-    slug: "computational-biomedicine",
-    description:
-      "Computational genomics, biomedical informatics, machine learning in medicine, and clinical decision support research.",
-    sortOrder: 50,
-    centerType: "institute",
-  },
-  {
-    code: "aging_research",
-    name: "Center for Aging Research",
-    slug: "aging-research",
-    description:
-      "Geroscience, late-life cognitive and physical decline, and the clinical care of older adults across WCM and partner sites.",
-    sortOrder: 60,
-    centerType: "center",
-  },
-  {
-    code: "iris_cantor_womens_health",
-    name: "Iris Cantor Women's Health Center",
-    slug: "iris-cantor-womens-health",
-    description:
-      "Sex-specific medicine, reproductive endocrinology, and clinical research focused on women's cardiovascular and metabolic health.",
-    sortOrder: 70,
-    centerType: "center",
-  },
-  {
-    code: "inflammation_research",
-    name: "Center for Inflammation Research",
-    slug: "inflammation-research",
-    description:
-      "Innate and adaptive immunity in chronic disease, autoimmune mechanisms, and immunotherapy development.",
-    sortOrder: 80,
-    centerType: "center",
-  },
-  {
-    code: "health_equity",
-    name: "Center for Health Equity Research",
-    slug: "health-equity-research",
-    description:
-      "Population health, social determinants of health, and disparities research across NYC and national cohorts.",
-    sortOrder: 90,
-    centerType: "center",
-  },
-];
-
-/**
- * Per-center program taxonomy (#552). Only the Meyer Cancer Center uses programs
- * in v1; membershipType + programCode are surfaced in the roster editor only for
- * centers that have rows here. Keyed on the Center.code @id (`meyer_cancer_center`),
- * NOT the slug.
- *
- * This is the SOLE source of the program seed. It is NOT seeded in the
- * 20260528160000_center_management migration: `center_program` FKs to `center`,
- * which is empty at `migrate deploy` time, so seeding there fails on a fresh DB
- * (1452). The loop below upserts programs AFTER the parent center rows above, so
- * the FK is always satisfied. Idempotent — safe to re-run. (#584)
- */
-const CENTER_PROGRAMS: { centerCode: string; code: string; label: string; sortOrder: number }[] = [
-  { centerCode: "meyer_cancer_center", code: "CB", label: "Cancer Biology", sortOrder: 10 },
-  { centerCode: "meyer_cancer_center", code: "CGE", label: "Cancer Genetics & Epigenetics", sortOrder: 20 },
-  { centerCode: "meyer_cancer_center", code: "CPC", label: "Cancer Prevention and Control", sortOrder: 30 },
-  { centerCode: "meyer_cancer_center", code: "CT", label: "Cancer Therapeutics", sortOrder: 40 },
-  { centerCode: "meyer_cancer_center", code: "ZY", label: "Non-aligned Clinical", sortOrder: 50 },
-];
+import { CENTERS, CENTER_PROGRAMS } from "./center-seed-data";
 
 async function main() {
+  const force = process.argv.slice(2).includes("--force");
+  if (!force) {
+    console.log(
+      "seed-centers.ts is retired (#540 Phase 9) — skipped. Centers are manual-layer; " +
+        "use scripts/backfills/2026-06-10-import-unit-curation.ts. Pass --force to seed anyway.",
+    );
+    return;
+  }
+
   let inserted = 0;
   let updated = 0;
   for (const c of CENTERS) {
@@ -130,7 +42,7 @@ async function main() {
         description: c.description,
         sortOrder: c.sortOrder,
         centerType: c.centerType,
-        source: "seed",
+        source: "manual",
       },
       update: {
         name: c.name,
@@ -142,7 +54,7 @@ async function main() {
     });
     existing ? updated++ : inserted++;
   }
-  console.log(`Centers seeded: ${inserted} new, ${updated} updated`);
+  console.log(`Centers seeded: ${inserted} new, ${updated} updated (source='manual')`);
 
   let programs = 0;
   for (const p of CENTER_PROGRAMS) {
