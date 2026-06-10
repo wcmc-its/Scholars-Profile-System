@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { EyeOff } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, EyeOff } from "lucide-react";
 
 import { MethodsHeading } from "@/components/profile/methods-heading";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ScholarFamilyView } from "@/lib/api/profile";
+import { methodFamilyPath } from "@/lib/method-url";
 
 const INITIAL_VISIBLE = 8;
 
@@ -36,6 +38,7 @@ export function MethodsSection({
   scholarCwid,
   sensitiveGateActive = false,
   filterEnabled = false,
+  pagesEnabled = false,
   selectedFamilyIds,
   onFamilyToggle,
   onRevealedFamilies,
@@ -49,6 +52,12 @@ export function MethodsSection({
   /** #819 — when on, family labels become buttons that toggle the publication
    *  filter (mirrors Topics). When off, the lens is display-only (default). */
   filterEnabled?: boolean;
+  /** METHODS_LENS_PAGES — when on, each row gets a SEPARATE trailing outbound
+   *  link to the cross-scholar `/methods/**` family page, and the "+ N more"
+   *  line links to the `/methods` hub. Distinct from the #819 filter (a
+   *  different DOM target, action, route, and flag): the family LABEL is never
+   *  the link, so it cannot collide with the click-to-filter button. */
+  pagesEnabled?: boolean;
   /** #819 — familyIds currently selected (drives the row's pressed state). */
   selectedFamilyIds?: string[];
   /** #819 — toggle a family in the filter. */
@@ -100,7 +109,7 @@ export function MethodsSection({
 
   return (
     <section className="mb-6">
-      <MethodsHeading />
+      <MethodsHeading pagesEnabled={pagesEnabled} />
       <p className="text-muted-foreground mb-3 text-sm">
         Inferred from the datasets, models &amp; methods named in this scholar&apos;s publications
         {filterable ? " · click to filter publications" : ""}
@@ -161,14 +170,36 @@ export function MethodsSection({
               <span className="text-muted-foreground shrink-0 pt-0.5 text-sm tabular-nums">
                 {f.pubCount}
               </span>
+              {/* METHODS_LENS_PAGES — a SEPARATE trailing outbound link to the
+                  cross-scholar family page (NOT the label: that stays the #819
+                  filter button). Suppressed for sensitive families, which have
+                  no public cross-scholar page. */}
+              {pagesEnabled && !f.sensitive ? (
+                <Link
+                  href={methodFamilyPath(f.supercategory, f.familyId, f.familyLabel)}
+                  aria-label={`Researchers using ${f.familyLabel}`}
+                  className="text-muted-foreground inline-flex shrink-0 items-center pt-0.5 hover:text-[var(--color-accent-slate)]"
+                >
+                  <ArrowUpRight className="size-4" aria-hidden="true" />
+                </Link>
+              ) : null}
             </li>
           ))}
         </ul>
       </TooltipProvider>
       {remaining > 0 ? (
-        <p className="text-muted-foreground mt-2 text-xs">
-          + {remaining} more method {remaining === 1 ? "family" : "families"}
-        </p>
+        pagesEnabled ? (
+          <Link
+            href="/methods"
+            className="text-muted-foreground mt-2 inline-block text-xs underline-offset-4 hover:text-[var(--color-accent-slate)] hover:underline"
+          >
+            + {remaining} more method {remaining === 1 ? "family" : "families"}
+          </Link>
+        ) : (
+          <p className="text-muted-foreground mt-2 text-xs">
+            + {remaining} more method {remaining === 1 ? "family" : "families"}
+          </p>
+        )
       ) : null}
     </section>
   );

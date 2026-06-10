@@ -18,6 +18,11 @@
  */
 import { prisma } from "@/lib/db";
 import { canonicalProfilePath } from "@/lib/profile-url";
+import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import {
+  getSupercategoryHubEntries,
+  getFamiliesForSupercategory,
+} from "@/lib/api/methods";
 
 /**
  * Maximum URLs per child sitemap. Half the 50,000-URL protocol cap, which also
@@ -125,12 +130,45 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     priority: 0.6,
   }));
 
+  // Standalone Method pages (`/methods/**`) — only enumerated when the page
+  // surface is enabled (so dark pages aren't advertised to crawlers). Both
+  // loaders apply the master lens + #800/#801 overlay gate, so suppressed /
+  // sensitive families and all-gated supercategories never appear. Fail-soft:
+  // the whole block is skipped on any error (e.g. a DB-less CI build), matching
+  // the dynamic-section posture above.
+  const methodEntries: SitemapEntry[] = [];
+  if (isMethodPagesEnabled()) {
+    try {
+      const supercategories = await getSupercategoryHubEntries();
+      for (const sc of supercategories) {
+        methodEntries.push({
+          url: `${base}/methods/${sc.slug}`,
+          lastModified: now,
+          changeFrequency: "monthly",
+          priority: 0.5,
+        });
+        const families = await getFamiliesForSupercategory(sc.id);
+        for (const fam of families) {
+          methodEntries.push({
+            url: `${base}/methods/${sc.slug}/${fam.familySlug}`,
+            lastModified: now,
+            changeFrequency: "monthly",
+            priority: 0.5,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[sitemap] Skipping method entries:", err);
+    }
+  }
+
   return [
     ...staticEntries,
     ...scholarEntries,
     ...topicEntries,
     ...deptEntries,
     ...centerEntries,
+    ...methodEntries,
   ];
 }
 

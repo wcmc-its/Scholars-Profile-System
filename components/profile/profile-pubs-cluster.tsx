@@ -40,6 +40,10 @@ type ProfilePubsClusterProps = {
   /** #819 — whether the family rows are clickable to filter the publication list
    *  (mirrors Topics). When off, the lens is display-only and `?family=` is inert. */
   familyFilterEnabled: boolean;
+  /** Standalone Method pages (`METHODS_LENS_PAGES`) — gates the per-row outbound
+   *  link to the cross-scholar `/methods/**` pages. Distinct from the #819 filter:
+   *  a separate trailing affordance that navigates, never the label button. */
+  methodPagesEnabled: boolean;
   totalAcceptedPubs: number;
   /** Cwid of the scholar whose profile is being rendered. Threaded down
    *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
@@ -63,6 +67,7 @@ function ProfilePubsClusterInner({
   families,
   sensitiveGateActive,
   familyFilterEnabled,
+  methodPagesEnabled,
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
@@ -286,6 +291,7 @@ function ProfilePubsClusterInner({
         scholarCwid={scholarCwid}
         sensitiveGateActive={sensitiveGateActive}
         filterEnabled={familyFilterEnabled}
+        pagesEnabled={methodPagesEnabled}
         selectedFamilyIds={selectedFamilyIds}
         onFamilyToggle={onFamilyToggle}
         onRevealedFamilies={setRevealedFamilies}

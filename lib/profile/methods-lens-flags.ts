@@ -32,6 +32,24 @@ export function isMethodsLensSensitiveGateOn(): boolean {
 }
 
 /**
+ * Standalone cross-scholar Method pages gate (`/methods/**`). When off, every
+ * `/methods/**` route `notFound()`s, the search candidate/suggest contributions
+ * are suppressed, and the per-scholar inbound links are not rendered. Default
+ * off, so the page surface ships dark independent of the data substrate.
+ *
+ * NOTE: a Method page ALSO requires `isMethodsLensEnabled()` — that master flag
+ * gates the `scholar_family` data substrate. `METHODS_LENS_PAGES` is the
+ * page/surface gate layered on top; turning it on without the master flag leaves
+ * the loaders returning empty (the master gate short-circuits first), so a page
+ * still `notFound()`s. `METHODS_LENS_SENSITIVE_GATE` continues to govern #801
+ * sensitivity exactly as today. Wire this flag in BOTH `.env.local` AND the
+ * per-env `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodPagesEnabled(): boolean {
+  return process.env.METHODS_LENS_PAGES === "on";
+}
+
+/**
  * #819 — makes the Methods-lens family rows clickable to filter the scholar's
  * publication list (mirrors the Topics click-to-filter). Off by default; turning
  * it on only changes the UI affordance — the `ScholarFamily.pmids` membership is

@@ -488,6 +488,9 @@ export class EdgeStack extends Stack {
       ["/api/scholars/*/popover-context", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Topic publication feed -- reads `sort`/`filter`/`subtopic`/`tier`/`page`.
       ["/api/topics/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
+      // `page` (#824). Same shape as `/api/topics/*/publications`.
+      ["/api/methods/*/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Feedback form page -- `force-dynamic`, reads `?from=` for contextual
       // mode AND the session cookie to prefill; both are stripped by the
       // cacheable default today. AllViewer restores both.
@@ -568,6 +571,9 @@ export class EdgeStack extends Stack {
       "/departments/*",
       "/centers/*",
       "/topics/*/scholars",
+      // Cross-scholar method "all scholars in family" page (#824) -- reads
+      // `q`/`role`/`page`, all already in the allowList union above.
+      "/methods/*/*/scholars",
     ];
 
     const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {};

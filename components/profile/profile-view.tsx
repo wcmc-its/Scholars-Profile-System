@@ -29,6 +29,7 @@ import {
 import { groupPublicationsByYear } from "@/lib/profile-pub-grouping";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import {
+  isMethodPagesEnabled,
   isMethodsLensFamilyFilterOn,
   isMethodsLensSensitiveGateOn,
 } from "@/lib/profile/methods-lens-flags";
@@ -397,6 +398,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   families={profile.families}
                   sensitiveGateActive={isMethodsLensSensitiveGateOn()}
                   familyFilterEnabled={isMethodsLensFamilyFilterOn()}
+                  methodPagesEnabled={isMethodPagesEnabled()}
                   totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
                   scholarCwid={profile.cwid}
                 />

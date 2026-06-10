@@ -92,6 +92,9 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set<string>([
   "scholars",
   "search",
   "topics",
+  // Cross-scholar Method pages (`/methods/**`) — reserve so a scholar/department
+  // slug can't shadow the route or collide with the #671 root-profile catch-all.
+  "methods",
   "edit",
   "api",
   "og",
