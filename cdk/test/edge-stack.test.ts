@@ -86,6 +86,7 @@ const QUERY_KEYED_PATTERNS: ReadonlySet<string> = new Set([
   "/departments/*",
   "/centers/*",
   "/topics/*/scholars",
+  "/methods/*/*/scholars",
 ]);
 
 // The exact query-string allow-list on the custom cache policy: the union of
@@ -269,14 +270,15 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus twenty-five additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-seven additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
-        // 24 prior behaviors + the new `/_next/static/*` long-cache behavior.
-        expect(cacheBehaviors).toHaveLength(25);
+        // 24 prior behaviors + the `/_next/static/*` long-cache behavior + the
+        // two #824 method routes (/api/methods/*/*/publications, /methods/*/*/scholars).
+        expect(cacheBehaviors).toHaveLength(27);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -314,6 +316,7 @@ describe("EdgeStack", () => {
           "/api/nih-portfolio",
           "/api/scholars/*/popover-context",
           "/api/topics/*/publications",
+          "/api/methods/*/*/publications",
           "/about/feedback",
           // The two co-pub export routes MUST precede `/scholars/*` below:
           // CloudFront is first-match-wins in list order and `/scholars/*`
@@ -326,6 +329,7 @@ describe("EdgeStack", () => {
           "/departments/*",
           "/centers/*",
           "/topics/*/scholars",
+          "/methods/*/*/scholars",
         ]);
       });
 
@@ -511,6 +515,7 @@ describe("EdgeStack", () => {
           "/api/nih-portfolio",
           "/api/scholars/*/popover-context",
           "/api/topics/*/publications",
+          "/api/methods/*/*/publications",
           "/about/feedback",
           "/scholars/*/co-pubs/export",
           "/scholars/*/co-pubs/*/export",
@@ -518,6 +523,7 @@ describe("EdgeStack", () => {
           "/departments/*",
           "/centers/*",
           "/topics/*/scholars",
+          "/methods/*/*/scholars",
         ]) {
           expect(byPath.get(p)).toEqual(ghOptions);
         }
