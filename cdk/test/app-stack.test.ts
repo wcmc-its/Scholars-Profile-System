@@ -1378,8 +1378,9 @@ describe("AppStack", () => {
         // xray:PutTraceSegments + xray:PutTelemetryRecords on Resource:*.
         // Inline (not AWSXRayDaemonWriteAccess) so the action surface stays
         // pinned + immune to AWS quietly extending the managed document.
-        // The task role now carries three inline policies (X-Ray + SES +
-        // Bedrock); select the X-Ray one by its actions, not by position.
+        // The task role now carries four inline policies (X-Ray + SES +
+        // Bedrock + CloudFront); select the X-Ray one by its actions, not by
+        // position.
         const taskRolePolicies = findTaskRolePolicies();
         const xrayPolicy = taskRolePolicies.find((p) =>
           JSON.stringify(p.Properties?.PolicyDocument).includes("xray:"),
@@ -1458,6 +1459,30 @@ describe("AppStack", () => {
         const serialized = JSON.stringify(stmt.Resource);
         expect(serialized).toContain("inference-profile/us.anthropic.claude-sonnet-4-");
         expect(serialized).toContain("foundation-model/anthropic.claude-sonnet-4-");
+      });
+
+      it("the CloudFront invalidation grant is the single cloudfront:CreateInvalidation action, scoped to a distribution ARN, not * (#353)", () => {
+        // Synth-time guard (deploy-only-validation pattern): the synchronous
+        // edge-purge path (lib/edit/revalidation.ts sendCloudFrontInvalidation)
+        // runs under THIS task role and would AccessDenied once
+        // SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID is set without an explicit grant.
+        // Least-privilege: one action, scoped to a distribution ARN (CloudFront
+        // is global, so no region segment), never a bare `*`.
+        const cloudFrontPolicy = findTaskRolePolicies().find((p) =>
+          JSON.stringify(p.Properties?.PolicyDocument).includes(
+            "cloudfront:CreateInvalidation",
+          ),
+        );
+        expect(cloudFrontPolicy).toBeDefined();
+        const statements = cloudFrontPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("cloudfront:CreateInvalidation");
+        // Resource is distribution-scoped, NOT a blanket "*".
+        const resource = stmt.Resource as string;
+        expect(JSON.stringify(resource)).not.toMatch(/^"\*"$/);
+        expect(JSON.stringify(resource)).toContain(":distribution/");
       });
 
       it("the app ships the request-change mailer OFF with the verified From set (#160 Phase 2)", () => {

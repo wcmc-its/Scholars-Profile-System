@@ -104,6 +104,8 @@ export class EtlStack extends Stack {
   public readonly heartbeatStateMachine: sfn.StateMachine;
   /** #393 suppression search-index reconciler (ADR-005 layer 3), ~5 min cadence. */
   public readonly reconcileStateMachine: sfn.StateMachine;
+  /** #353 durable CloudFront-invalidation reconciler (ADR-005 layer 3), ~5 min cadence. */
+  public readonly cdnReconcileStateMachine: sfn.StateMachine;
 
   constructor(scope: Construct, id: string, props: EtlStackProps) {
     super(scope, id, props);
@@ -1262,6 +1264,301 @@ export class EtlStack extends Stack {
     reconcileCadenceAlarm.addAlarmAction(alarmAction);
 
     // ------------------------------------------------------------------
+    // #353 PR-2 -- durable CloudFront-invalidation reconciler (ADR-005 layer 3).
+    //
+    // PR-1 (#823) shipped the worker: `npm run cdn:reconcile` ->
+    // `tsx etl/cdn-reconcile/index.ts`, exit 0 = every pending edge purge
+    // replayed (or none were pending), exit 1 = >=1 row failed to invalidate
+    // again. This wires the continuous ~5 min cadence + alarms that drive it,
+    // mirroring the #393 search-index reconciler above 1:1.
+    //
+    // Compute: a dedicated LEAN Fargate task def (256/512) on the SAME ETL
+    // image, run by a minimal single-step STANDARD state machine -- the same
+    // EcsRunTask `.sync` + retry/catch + AWS/States alarm shape the #393
+    // reconciler and the cadence machines use. Lean on CPU/RAM/secrets, not on
+    // image (same fat image, so the cold start is unchanged ~30-60s -- fine for
+    // a background backstop on a 5 min cadence).
+    //
+    // Least-privilege, and TIGHTER than #393: the worker reads the
+    // `cdn_invalidation` outbox (db.read), stamps the sentinel (db.write ->
+    // single DATABASE_URL), and replays the remembered paths via
+    // `cloudfront:CreateInvalidation`. It never touches OpenSearch, so its
+    // exec role lists EXACTLY 1 secret ARN (db/etl) -- NOT the opensearch/etl
+    // secret the #393 reconciler also carries. The TASK role -- the one thing
+    // #393 lacked -- carries the single `cloudfront:CreateInvalidation` grant
+    // (the synchronous fast-path in `lib/edit/revalidation.ts` runs on the web
+    // task, granted in AppStack; this background replay runs here).
+    //
+    // Backstop, not propagation path: ADR-005 layer 1 is the synchronous
+    // `CreateInvalidation` the suppress/rename routes issue inline post-commit.
+    // This layer-3 reconciler only recovers fast-path purges lost to a crash /
+    // outage / SDK error; the ~5 min SLA is that recovery floor, not everyday
+    // edge-cache purge latency.
+    //
+    // Dormant-safe: the task injects NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID, so
+    // the worker no-ops without touching the DB (empty-queue-safe) until the
+    // operator supplies the distribution id at enable time -- exactly as the
+    // synchronous invalidation path is dormant pre-launch. This keeps the
+    // reconciler decoupled from the #502-frozen EdgeStack distribution.
+    // ------------------------------------------------------------------
+    const cdnReconcileLogGroup = new logs.LogGroup(
+      this,
+      "CdnReconcileLogGroup",
+      {
+        logGroupName: `/aws/ecs/sps-cdn-reconcile-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      },
+    );
+
+    const cdnReconcileExecutionRole = new iam.Role(
+      this,
+      "CdnReconcileTaskExecutionRole",
+      {
+        roleName: `sps-cdn-reconcile-task-exec-${env}`,
+        assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        description: `SPS CloudFront-invalidation reconciler ECS task-execution role (${env}). Pulls the ETL image, injects the db/etl secret, writes logs.`,
+      },
+    );
+    cdnReconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["ecr:GetAuthorizationToken"],
+        resources: ["*"],
+      }),
+    );
+    cdnReconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+        ],
+        resources: [etlEcrRepository.repositoryArn],
+      }),
+    );
+    // Exactly the ONE secret the cdn-reconcile worker reads (db/etl); never the
+    // opensearch/etl secret the #393 reconciler carries, and never the 8 the ETL
+    // task carries (asserted in the tests).
+    cdnReconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["secretsmanager:GetSecretValue"],
+        resources: [dbEtlSecret.secretArn],
+      }),
+    );
+    cdnReconcileExecutionRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents"],
+        resources: [
+          cdnReconcileLogGroup.logGroupArn,
+          `${cdnReconcileLogGroup.logGroupArn}:*`,
+        ],
+      }),
+    );
+
+    const cdnReconcileTaskRole = new iam.Role(this, "CdnReconcileTaskRole", {
+      roleName: `sps-cdn-reconcile-task-${env}`,
+      assumedBy: new iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+      description: `SPS CloudFront-invalidation reconciler ECS task role (${env}). Runtime identity; cloudfront:CreateInvalidation only (scoped to a distribution ARN).`,
+    });
+    // The one grant #393 lacked: replay the remembered paths via
+    // CreateInvalidation. Scoped to a distribution ARN (CloudFront is global, so
+    // there is no region segment), NEVER a bare `*`. No other permission.
+    cdnReconcileTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ["cloudfront:CreateInvalidation"],
+        resources: [`arn:aws:cloudfront::${this.account}:distribution/*`],
+      }),
+    );
+
+    const cdnReconcileTaskDefinition = new ecs.FargateTaskDefinition(
+      this,
+      "CdnReconcileTaskDefinition",
+      {
+        family: `sps-cdn-reconcile-${env}`,
+        // Lean: the worker processes <=200 rows, not the corpus. 256/512 with
+        // wide headroom; same lean sizing as the #393 reconciler.
+        cpu: 256,
+        memoryLimitMiB: 512,
+        executionRole: cdnReconcileExecutionRole,
+        taskRole: cdnReconcileTaskRole,
+      },
+    );
+    const cdnReconcileContainer = cdnReconcileTaskDefinition.addContainer(
+      "cdn-reconcile",
+      {
+        image: ecs.ContainerImage.fromEcrRepository(etlEcrRepository, "latest"),
+        // Container name `cdn-reconcile` (not `etl` / `reconcile`) keeps the
+        // three task defs' containers unambiguous for the tests.
+        containerName: "cdn-reconcile",
+        essential: true,
+        logging: ecs.LogDriver.awsLogs({
+          logGroup: cdnReconcileLogGroup,
+          streamPrefix: "cdn-reconcile",
+        }),
+        environment: {
+          NODE_ENV: "production",
+          // NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: dormant-safe -- the worker
+          // no-ops without touching the DB until the operator supplies it at
+          // enable time. No OPENSEARCH_* either (this worker never reads it).
+        },
+        secrets: {
+          // db.read + db.write collapse onto this single DSN (no
+          // DATABASE_URL_RO in-container), exactly as the #393 reconciler runs.
+          DATABASE_URL: ecs.Secret.fromSecretsManager(dbEtlSecret),
+        },
+      },
+    );
+
+    const cdnReconcileTask = new tasks.EcsRunTask(this, "TaskCdnReconcile", {
+      integrationPattern: sfn.IntegrationPattern.RUN_JOB,
+      cluster: ecsCluster,
+      taskDefinition: cdnReconcileTaskDefinition,
+      launchTarget: new tasks.EcsFargateLaunchTarget({
+        platformVersion: ecs.FargatePlatformVersion.LATEST,
+      }),
+      assignPublicIp: false,
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      securityGroups: [etlSecurityGroup],
+      containerOverrides: [
+        {
+          containerDefinition: cdnReconcileContainer,
+          command: ["npm", "run", "cdn:reconcile"],
+        },
+      ],
+      // Bounded well under the 15 min state-machine timeout so a wedged run
+      // dies before the next 5 min fire stacks on it.
+      taskTimeout: sfn.Timeout.duration(Duration.minutes(14)),
+    });
+    cdnReconcileTask.addRetry({
+      errors: ["States.TaskFailed", "States.Timeout"],
+      maxAttempts: 2,
+      backoffRate: 2,
+      interval: Duration.seconds(30),
+    });
+    cdnReconcileTask.addCatch(
+      new tasks.SnsPublish(this, "NotifyCdnReconcile", {
+        topic: this.failureTopic,
+        subject: `SPS CloudFront-invalidation reconciler ${env} -- run failed`,
+        message: sfn.TaskInput.fromObject({
+          env,
+          step: "CdnReconcile",
+          stateMachine: sfn.JsonPath.stateMachineName,
+          execution: sfn.JsonPath.executionName,
+          error: sfn.JsonPath.stringAt("$.error"),
+        }),
+      }).next(
+        new sfn.Fail(this, "FailCdnReconcile", {
+          cause: "cdn reconcile run failed",
+        }),
+      ),
+      { errors: ["States.ALL"], resultPath: "$.error" },
+    );
+
+    const cdnReconcileSmLogGroup = new logs.LogGroup(
+      this,
+      "CdnReconcileSmLogGroup",
+      {
+        logGroupName: `/aws/states/cdn-reconcile-${env}`,
+        retention: logRetention,
+        removalPolicy: RemovalPolicy.RETAIN,
+      },
+    );
+    this.cdnReconcileStateMachine = new sfn.StateMachine(
+      this,
+      "CdnReconcileStateMachine",
+      {
+        stateMachineName: `scholars-cdn-reconcile-${env}`,
+        stateMachineType: sfn.StateMachineType.STANDARD,
+        definitionBody: sfn.DefinitionBody.fromChainable(cdnReconcileTask),
+        // 15 min hard cap (vs the cadences' 24h): the worker is bounded to
+        // <=200 rows, so a longer-running execution is wedged and must not
+        // pile up at the 5 min cadence.
+        timeout: Duration.minutes(15),
+        logs: {
+          destination: cdnReconcileSmLogGroup,
+          level: sfn.LogLevel.ERROR,
+          includeExecutionData: false,
+        },
+        tracingEnabled: true,
+      },
+    );
+
+    // EventBridge rate(5 min) schedule. `cdnReconcileScheduleEnabled` is true in
+    // both envs (continuous backstop -- see config flag JSDoc). retryAttempts: 0
+    // -- a missed fire is recovered by the next 5 min fire and the idempotent
+    // worker makes an overlapping run benign, so neither a delivery retry nor a
+    // DLQ is wanted.
+    const cdnReconcileRule = new events.Rule(this, "CdnReconcileScheduleRule", {
+      ruleName: `sps-cdn-reconcile-${env}`,
+      description: `SPS CloudFront-invalidation reconciler -- 5 min cadence (${env}). #353.`,
+      schedule: events.Schedule.rate(Duration.minutes(5)),
+      enabled: envConfig.cdnReconcileScheduleEnabled,
+    });
+    cdnReconcileRule.addTarget(
+      new eventsTargets.SfnStateMachine(this.cdnReconcileStateMachine, {
+        input: events.RuleTargetInput.fromObject({}),
+        retryAttempts: 0,
+      }),
+    );
+
+    // Alarms. The cadence alarm is the load-bearing one: silent schedule death
+    // (rule disabled, IAM gap) is the failure mode that actually hurts a
+    // backstop, more than any single run failing. Both periods are 15 min.
+    const cdnReconcileDimensions = {
+      StateMachineArn: this.cdnReconcileStateMachine.stateMachineArn,
+    };
+    const cdnReconcileStatusAlarm = new cloudwatch.Alarm(
+      this,
+      "CdnReconcileStatusAlarm",
+      {
+        alarmName: `sps-cdn-reconcile-status-${env}`,
+        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- run failed (>=1 pending edge purge could not be replayed).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsFailed",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.minutes(15),
+          dimensionsMap: cdnReconcileDimensions,
+        }),
+        evaluationPeriods: 1,
+        threshold: 0,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+        // An idle 15 min window (no executions) is not a failure -- the cadence
+        // alarm below owns absence.
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      },
+    );
+    cdnReconcileStatusAlarm.addAlarmAction(alarmAction);
+
+    const cdnReconcileCadenceAlarm = new cloudwatch.Alarm(
+      this,
+      "CdnReconcileCadenceAlarm",
+      {
+        alarmName: `sps-cdn-reconcile-cadence-${env}`,
+        alarmDescription: `SPS CloudFront-invalidation reconciler (${env}) -- cadence missed (no execution started in 15 min = 3 missed 5 min fires).`,
+        metric: new cloudwatch.Metric({
+          namespace: "AWS/States",
+          metricName: "ExecutionsStarted",
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.minutes(15),
+          dimensionsMap: cdnReconcileDimensions,
+        }),
+        evaluationPeriods: 1,
+        threshold: 1,
+        comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+        // Total metric absence => the schedule is dead => breach.
+        treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+      },
+    );
+    cdnReconcileCadenceAlarm.addAlarmAction(alarmAction);
+
+    // ------------------------------------------------------------------
     // Outputs. Surface the SNS topic ARN (B23 subscribes PagerDuty),
     // each state-machine ARN (operator runbook uses them in
     // start-execution / describe-execution calls), and the ETL task
@@ -1295,6 +1592,11 @@ export class EtlStack extends Stack {
       value: this.reconcileStateMachine.stateMachineArn,
       description:
         "SPS suppression search-index reconciler state machine ARN (#393).",
+    });
+    new CfnOutput(this, "CdnReconcileStateMachineArn", {
+      value: this.cdnReconcileStateMachine.stateMachineArn,
+      description:
+        "SPS CloudFront-invalidation reconciler state machine ARN (#353).",
     });
   }
 }
