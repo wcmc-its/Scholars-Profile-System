@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { ProfilePublication, ScholarFamilyView, ScholarKeyword } from "@/lib/api/profile";
 import { ActiveFilterBanner } from "@/components/profile/active-filter-banner";
 import {
@@ -71,7 +71,6 @@ function ProfilePubsClusterInner({
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -162,9 +161,17 @@ function ProfilePubsClusterInner({
       if (nextFamilies.length === 0) params.delete("family");
       else params.set("family", nextFamilies.join(","));
       const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      // Update the URL in place with the native History API rather than
+      // router.replace(). /[slug] and /scholars/[slug] are force-dynamic, so a
+      // router navigation — even a query-only one — refetches the route's RSC
+      // payload and re-renders the whole profile on the server (multi-second on
+      // a heavy profile behind CloudFront). Filtering is entirely client-side and
+      // driven by useSearchParams(), which Next keeps in sync with
+      // history.replaceState, so this re-filters instantly with no server round
+      // trip. replaceState does not scroll, matching the prior { scroll: false }.
+      window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
     },
-    [router, pathname, searchParams],
+    [pathname, searchParams],
   );
 
   const onToggle = useCallback(
