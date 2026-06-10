@@ -364,6 +364,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "https://scholars.weill.cornell.edu",
               },
               {
+                "Name": "SITE_URL",
+                "Value": "https://scholars.weill.cornell.edu",
+              },
+              {
                 "Name": "SHOW_BETA_BADGE",
                 "Value": "on",
               },
@@ -3365,6 +3369,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "FEEDBACK_SITE_ORIGIN",
+                "Value": "https://scholars-staging.weill.cornell.edu",
+              },
+              {
+                "Name": "SITE_URL",
                 "Value": "https://scholars-staging.weill.cornell.edu",
               },
               {

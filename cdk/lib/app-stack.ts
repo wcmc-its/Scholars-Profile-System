@@ -997,6 +997,12 @@ export class AppStack extends Stack {
         // `Origin` header against. Derived from the SAML ACS URL so the env
         // can't drift between the two; same `https://<public-host>` value.
         FEEDBACK_SITE_ORIGIN: new URL(envConfig.samlSpAcsUrl).origin,
+        // Public site origin for absolute-URL metadata (canonical/OG via the
+        // root layout's `metadataBase`). RUNTIME var (read at server startup),
+        // NOT `NEXT_PUBLIC_SITE_URL` -- that one is inlined at build time, so an
+        // unset build baked the localhost fallback into every canonical. Derived
+        // from the SAML ACS URL (same per-env `https://<public-host>`).
+        SITE_URL: new URL(envConfig.samlSpAcsUrl).origin,
         // #760 -- launch-period "Beta" pill beside the Scholars wordmark.
         // DEFAULT ON: the header reads `=== "off"` (isBetaBadgeEnabled), so the
         // badge shows in both envs while we're in beta. Wired here explicitly so

@@ -12,8 +12,15 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  // `SITE_URL` is a RUNTIME env var (set per-env in the ECS task def) read at
+  // server startup — unlike `NEXT_PUBLIC_SITE_URL`, which Next inlines at BUILD
+  // time, so a deployed (build-time-unset) image baked the localhost fallback
+  // into every canonical. Prefer the runtime value; keep NEXT_PUBLIC_/localhost
+  // as the local-dev fallback chain.
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3002",
+    process.env.SITE_URL ??
+      process.env.NEXT_PUBLIC_SITE_URL ??
+      "http://localhost:3002",
   ),
   title: {
     default: "Scholars @ Weill Cornell Medicine",
