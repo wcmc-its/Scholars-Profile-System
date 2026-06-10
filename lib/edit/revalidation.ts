@@ -55,35 +55,109 @@ function revalidatePaths(paths: readonly string[]): void {
 }
 
 /**
- * Issue a CloudFront invalidation for the given paths. Dormant when
- * `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID` is unset (local / pre-launch) — exactly
- * as the superuser check is dormant without its group cn. A failure is logged,
- * never thrown.
+ * Send one `CreateInvalidation` for the given paths against a distribution.
+ * The single low-level CloudFront call, factored out so the synchronous
+ * write-path enqueue (`invalidateCloudFront`) and the durable reconciler
+ * (`lib/edit/cdn-reconcile.ts`) drive the exact same client + command — no
+ * duplicated SDK shape that could drift between the two. Throws on SDK error;
+ * the callers decide how to record the failure (enqueue row vs. retry row).
+ */
+export async function sendCloudFrontInvalidation(
+  distributionId: string,
+  paths: readonly string[],
+): Promise<void> {
+  const client = new CloudFrontClient({});
+  await client.send(
+    new CreateInvalidationCommand({
+      DistributionId: distributionId,
+      InvalidationBatch: {
+        CallerReference: randomUUID(),
+        Paths: { Quantity: paths.length, Items: [...paths] },
+      },
+    }),
+  );
+}
+
+/**
+ * Issue a CloudFront invalidation for the given paths and durably record it in
+ * the `cdn_invalidation` outbox (#353 — ADR-005 failure-model layer 3).
+ *
+ * Dormant when `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID` is unset (local /
+ * pre-launch) — exactly as the superuser check is dormant without its group cn:
+ * no enqueue, no send. Otherwise the flow is enqueue-then-attempt:
+ *
+ *   1. INSERT a pending row remembering the EXACT paths (JSON). Critically,
+ *      these are NOT recomputable later — a slug flip, a `PROFILE_CANONICAL`
+ *      change, or a mutated author set makes the originally-cached path
+ *      underivable — so the outbox persists them verbatim. This is the
+ *      deliberate point of difference from #393's recompute-from-DB sentinel.
+ *   2. Attempt the `CreateInvalidation`. On success, stamp `invalidatedAt`. On
+ *      failure, record `attempts = 1` + `lastError` and leave `invalidatedAt`
+ *      NULL so the reconciler retries it on its ≤5 min cadence.
+ *
+ * Entirely best-effort: a CloudFront error, AND even a DB enqueue failure, is
+ * logged — never thrown — so it cannot roll back the already-committed write.
+ * If the enqueue itself fails we still attempt a one-shot send (the original
+ * pre-outbox behavior) so the common case still purges the edge.
  */
 async function invalidateCloudFront(paths: readonly string[]): Promise<void> {
   const distributionId = process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID;
   if (!distributionId || paths.length === 0) return;
+
+  // 1. Enqueue a pending outbox row remembering the exact (non-recomputable)
+  //    paths. Best-effort: if the INSERT fails we log and fall through to a
+  //    best-effort one-shot send without a row to mark.
+  let rowId: string | null = null;
   try {
-    const client = new CloudFrontClient({});
-    await client.send(
-      new CreateInvalidationCommand({
-        DistributionId: distributionId,
-        InvalidationBatch: {
-          CallerReference: randomUUID(),
-          Paths: { Quantity: paths.length, Items: [...paths] },
-        },
-      }),
-    );
+    const row = await db.write.cdnInvalidation.create({
+      data: { paths: JSON.stringify([...paths]), attempts: 0 },
+      select: { id: true },
+    });
+    rowId = row.id;
   } catch (err) {
-    // A failed invalidation leaves a suppressed page edge-cached up to 24h.
-    // v1 logs it; the durable retry/outbox is #353.
     console.error(
       JSON.stringify({
-        event: "edit_cdn_invalidation_failed",
+        event: "edit_cdn_invalidation_enqueue_failed",
         paths,
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+  }
+
+  // 2. Attempt the invalidation and mark the row accordingly.
+  try {
+    await sendCloudFrontInvalidation(distributionId, paths);
+    if (rowId) {
+      await db.write.cdnInvalidation
+        .update({ where: { id: rowId }, data: { invalidatedAt: new Date() } })
+        .catch((err) => {
+          // The purge landed; only the bookkeeping stamp failed. The reconciler
+          // will harmlessly re-send and re-stamp this still-pending row.
+          console.error(
+            JSON.stringify({
+              event: "edit_cdn_invalidation_mark_failed",
+              id: rowId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        });
+    }
+  } catch (err) {
+    // A failed invalidation leaves a suppressed page edge-cached up to 24h.
+    // The row stays pending (invalidatedAt NULL) so the #353 reconciler retries.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(
+      JSON.stringify({
+        event: "edit_cdn_invalidation_failed",
+        paths,
+        error: message,
+      }),
+    );
+    if (rowId) {
+      await db.write.cdnInvalidation
+        .update({ where: { id: rowId }, data: { attempts: 1, lastError: message } })
+        .catch(() => {});
+    }
   }
 }
 
