@@ -344,6 +344,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SELF_EDIT_MANUAL_HIGHLIGHTS",
+                "Value": "off",
+              },
+              {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
                 "Value": "on",
               },
@@ -3350,6 +3354,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "RECITER_REJECT_SEND",
                 "Value": "on",
+              },
+              {
+                "Name": "SELF_EDIT_MANUAL_HIGHLIGHTS",
+                "Value": "off",
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
