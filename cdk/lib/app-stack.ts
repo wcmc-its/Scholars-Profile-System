@@ -1037,6 +1037,12 @@ export class AppStack extends Stack {
         //   METHODS_LENS_SENSITIVE_GATE -- #801 audience gate. Hides the
         //     External-Affairs-approved live-animal/in-vivo family subset from
         //     the public profile, revealing it only to the scholar/admin.
+        //   METHODS_LENS_FAMILY_FILTER -- #819 click-to-filter. Makes the family
+        //     rows clickable to filter the publication list (like Topics). Reads
+        //     scholar_family.pmids (ReciterAI#175); only changes the UI affordance,
+        //     so flipping it never 500s. Needs the pmids-bearing rollup loaded
+        //     (re-run etl:scholar-tool against the >= v2026-06-10 / tools-a2-v2
+        //     artifact) before turning on.
         // STRICT DEPLOY ORDER (never flags-first): the scholar_family rollup
         // must exist + be populated (the #794 SCHOLAR_TOOL_SOURCE=s3 cutover)
         // and the #801 sensitivity overlay must be seeded (etl:family-sensitivity)
@@ -1046,6 +1052,7 @@ export class AppStack extends Stack {
         // the CD pipeline only re-rolls the image.
         METHODS_LENS_ENABLED: env === "staging" ? "on" : "off",
         METHODS_LENS_SENSITIVE_GATE: env === "staging" ? "on" : "off",
+        METHODS_LENS_FAMILY_FILTER: env === "staging" ? "on" : "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment

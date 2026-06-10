@@ -22,6 +22,7 @@ const GATED = [
     supercategory: "animal_cell_models",
     pubCount: 11,
     exemplarTools: ["Cre-lox"],
+    pmids: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
   },
 ];
 

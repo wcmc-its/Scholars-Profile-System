@@ -37,6 +37,9 @@ type ProfilePubsClusterProps = {
   /** #801 — whether the sensitivity gate is on; gates the Methods lens's
    *  self/admin reveal fetch so a profile view makes no extra request when off. */
   sensitiveGateActive: boolean;
+  /** #819 — whether the family rows are clickable to filter the publication list
+   *  (mirrors Topics). When off, the lens is display-only and `?family=` is inert. */
+  familyFilterEnabled: boolean;
   totalAcceptedPubs: number;
   /** Cwid of the scholar whose profile is being rendered. Threaded down
    *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
@@ -59,12 +62,32 @@ function ProfilePubsClusterInner({
   keywords,
   families,
   sensitiveGateActive,
+  familyFilterEnabled,
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+
+  // #819 — the #801 sensitive families are revealed (to self/admin) inside the
+  // MethodsSection island; it hands them back here via onRevealedFamilies so the
+  // family filter can resolve their PMIDs too. [] for public viewers / gate off.
+  const [revealedFamilies, setRevealedFamilies] = useState<ScholarFamilyView[]>([]);
+
+  // All families this viewer can see (public payload + any revealed sensitive
+  // ones), deduped by familyId — the set whose rows are clickable and whose
+  // pmids back the filter.
+  const allFamilies = useMemo(() => {
+    const seen = new Set(families.map((f) => f.familyId));
+    return [...families, ...revealedFamilies.filter((f) => !seen.has(f.familyId))];
+  }, [families, revealedFamilies]);
+
+  const familyPmids = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const f of allFamilies) m.set(f.familyId, f.pmids);
+    return m;
+  }, [allFamilies]);
 
   const selectedUis = useMemo(() => {
     const raw = searchParams.get("mesh");
@@ -105,13 +128,34 @@ function ProfilePubsClusterInner({
     return out;
   }, [searchParams]);
 
+  // #819 — `?family=fam_0042,fam_0101` selection, same comma-list shape as
+  // `?mesh=`. Inert (always []) when the family-filter flag is off, so a stray
+  // param can't filter when the affordance isn't shown.
+  const selectedFamilyIds = useMemo(() => {
+    if (!familyFilterEnabled) return [];
+    const raw = searchParams.get("family");
+    if (!raw) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const part of raw.split(",")) {
+      const v = part.trim();
+      if (v.length > 0 && !seen.has(v)) {
+        seen.add(v);
+        out.push(v);
+      }
+    }
+    return out;
+  }, [searchParams, familyFilterEnabled]);
+
   const writeUrl = useCallback(
-    (nextMesh: string[], nextPositions: SelectedPositions) => {
+    (nextMesh: string[], nextPositions: SelectedPositions, nextFamilies: string[]) => {
       const params = new URLSearchParams(Array.from(searchParams.entries()));
       if (nextMesh.length === 0) params.delete("mesh");
       else params.set("mesh", nextMesh.join(","));
       if (nextPositions.length === 0) params.delete("position");
       else params.set("position", nextPositions.join(","));
+      if (nextFamilies.length === 0) params.delete("family");
+      else params.set("family", nextFamilies.join(","));
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -121,20 +165,32 @@ function ProfilePubsClusterInner({
   const onToggle = useCallback(
     (ui: string) => {
       writeUrl(
-        selectedUis.includes(ui)
-          ? selectedUis.filter((x) => x !== ui)
-          : [...selectedUis, ui],
+        selectedUis.includes(ui) ? selectedUis.filter((x) => x !== ui) : [...selectedUis, ui],
         positions,
+        selectedFamilyIds,
       );
     },
-    [selectedUis, positions, writeUrl],
+    [selectedUis, positions, selectedFamilyIds, writeUrl],
   );
 
-  const onClearAll = useCallback(() => writeUrl([], []), [writeUrl]);
+  const onFamilyToggle = useCallback(
+    (familyId: string) => {
+      writeUrl(
+        selectedUis,
+        positions,
+        selectedFamilyIds.includes(familyId)
+          ? selectedFamilyIds.filter((x) => x !== familyId)
+          : [...selectedFamilyIds, familyId],
+      );
+    },
+    [selectedUis, positions, selectedFamilyIds, writeUrl],
+  );
+
+  const onClearAll = useCallback(() => writeUrl([], [], []), [writeUrl]);
 
   const onPositionsChange = useCallback(
-    (next: SelectedPositions) => writeUrl(selectedUis, next),
-    [selectedUis, writeUrl],
+    (next: SelectedPositions) => writeUrl(selectedUis, next, selectedFamilyIds),
+    [selectedUis, selectedFamilyIds, writeUrl],
   );
 
   // Only resolved keywords (descriptorUi !== null) participate in URL state, so
@@ -165,10 +221,30 @@ function ProfilePubsClusterInner({
         return matchesAnyPosition(role, positions);
       });
     }
+    // #819 — family filter (any-selected OR across families; AND vs the topic /
+    // position axes). A pub belongs to a family iff its pmid is in that family's
+    // membership set. selectedFamilyIds is already [] when the flag is off.
+    if (selectedFamilyIds.length > 0) {
+      const wanted = new Set<string>();
+      for (const id of selectedFamilyIds)
+        for (const pmid of familyPmids.get(id) ?? []) wanted.add(pmid);
+      out = out.filter((p) => wanted.has(p.pmid));
+    }
     return out;
-  }, [publications, selectedUis, positions]);
+  }, [publications, selectedUis, positions, selectedFamilyIds, familyPmids]);
 
-  const filterActive = selectedUis.length > 0 || positions.length > 0;
+  const filterActive =
+    selectedUis.length > 0 || positions.length > 0 || selectedFamilyIds.length > 0;
+
+  // The selected families, mapped back to {familyId, familyLabel} for the banner.
+  const selectedFamilies = useMemo(() => {
+    if (selectedFamilyIds.length === 0) return [];
+    const byId = new Map(allFamilies.map((f) => [f.familyId, f]));
+    return selectedFamilyIds
+      .map((id) => byId.get(id))
+      .filter((f): f is ScholarFamilyView => Boolean(f))
+      .map((f) => ({ familyId: f.familyId, familyLabel: f.familyLabel }));
+  }, [allFamilies, selectedFamilyIds]);
 
   // #118 — the reciter→dynamodb consistency window. Fetched client-side
   // because the 30-min window can't be baked into the 24h-ISR profile page.
@@ -209,12 +285,17 @@ function ProfilePubsClusterInner({
         families={families}
         scholarCwid={scholarCwid}
         sensitiveGateActive={sensitiveGateActive}
+        filterEnabled={familyFilterEnabled}
+        selectedFamilyIds={selectedFamilyIds}
+        onFamilyToggle={onFamilyToggle}
+        onRevealedFamilies={setRevealedFamilies}
       />
 
       <ActiveFilterBanner
         count={filteredPublications.length}
         selected={selectedKeywords}
         positions={positions}
+        families={selectedFamilies}
         onClearAll={onClearAll}
       />
 

@@ -22,18 +22,23 @@ export function ActiveFilterBanner({
   count,
   selected,
   positions = [],
+  families = [],
   onClearAll,
 }: {
   count: number;
   selected: ScholarKeyword[];
   positions?: SelectedPositions;
+  /** #819 — selected method families (the family-filter segment). */
+  families?: { familyId: string; familyLabel: string }[];
   onClearAll: () => void;
 }) {
   const positionActive = positions.length > 0;
-  if (selected.length === 0 && !positionActive) return null;
+  const familyActive = families.length > 0;
+  if (selected.length === 0 && !positionActive && !familyActive) return null;
 
   const labels = selected.map((s) => s.displayLabel);
-  const filterCount = selected.length + positions.length;
+  const familyLabels = families.map((f) => f.familyLabel);
+  const filterCount = selected.length + positions.length + families.length;
   const buttonLabel = filterCount === 1 ? "Clear filter" : "Clear all";
 
   const positionPhrase =
@@ -93,6 +98,30 @@ export function ActiveFilterBanner({
             {" "}
             <span aria-hidden="true">·</span>{" "}
             <strong className="font-semibold">{positionPhrase}</strong>
+          </>
+        ) : null}
+        {familyActive ? (
+          <>
+            {" "}
+            <span aria-hidden="true">·</span> in{" "}
+            {familyLabels.length === 1 ? (
+              <strong className="font-semibold">{familyLabels[0]}</strong>
+            ) : familyLabels.length === 2 ? (
+              <>
+                <strong className="font-semibold">{familyLabels[0]}</strong> or{" "}
+                <strong className="font-semibold">{familyLabels[1]}</strong>
+              </>
+            ) : (
+              <>
+                any of:{" "}
+                {familyLabels.map((l, i) => (
+                  <span key={l}>
+                    <strong className="font-semibold">{l}</strong>
+                    {i < familyLabels.length - 1 ? ", " : ""}
+                  </span>
+                ))}
+              </>
+            )}
           </>
         ) : null}
       </span>

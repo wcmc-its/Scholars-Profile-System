@@ -330,6 +330,9 @@ async function main(): Promise<void> {
     skipped_out_of_scope_cwid: familyResult.skippedMissingCwid,
     skipped_missing_fields: familyResult.skippedMissingFields,
     unknown_supercategory: familyResult.unknownSupercategory,
+    // #819 — rows whose distinct(pmids).length !== pub_count (ReciterAI#175
+    // invariant). Should be 0; non-zero is a data-health alarm for the operator.
+    pmid_count_mismatch: familyResult.pmidCountMismatch,
   });
 
   // Dry-run: diff against the live table and stop — never write, never record.
@@ -386,6 +389,7 @@ async function main(): Promise<void> {
         supercategory: w.supercategory,
         pmidCount: w.pmidCount,
         exemplarTools: w.exemplarTools,
+        pmids: w.pmids,
         sourceArtifactSha: manifest.sha256,
       })),
       skipDuplicates: true,

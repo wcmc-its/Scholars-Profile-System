@@ -35,6 +35,10 @@ export function MethodsSection({
   families,
   scholarCwid,
   sensitiveGateActive = false,
+  filterEnabled = false,
+  selectedFamilyIds,
+  onFamilyToggle,
+  onRevealedFamilies,
 }: {
   families: ScholarFamilyView[];
   /** Cwid of the profile being viewed; needed for the #801 reveal fetch. */
@@ -42,6 +46,16 @@ export function MethodsSection({
   /** Whether METHODS_LENS_SENSITIVE_GATE is on — gates the reveal fetch so a
    *  profile view makes no extra request when #801 is dormant. */
   sensitiveGateActive?: boolean;
+  /** #819 — when on, family labels become buttons that toggle the publication
+   *  filter (mirrors Topics). When off, the lens is display-only (default). */
+  filterEnabled?: boolean;
+  /** #819 — familyIds currently selected (drives the row's pressed state). */
+  selectedFamilyIds?: string[];
+  /** #819 — toggle a family in the filter. */
+  onFamilyToggle?: (familyId: string) => void;
+  /** #819 — hands the revealed (#801) families back up to the owner so the family
+   *  filter can resolve their PMIDs; fired once when the reveal fetch resolves. */
+  onRevealedFamilies?: (families: ScholarFamilyView[]) => void;
 }) {
   const [revealed, setRevealed] = useState<ScholarFamilyView[]>([]);
 
@@ -53,7 +67,10 @@ export function MethodsSection({
     })
       .then((r) => (r.ok ? r.json() : { families: [] }))
       .then((d: { families?: ScholarFamilyView[] }) => {
-        if (!cancelled) setRevealed(Array.isArray(d.families) ? d.families : []);
+        if (cancelled) return;
+        const fams = Array.isArray(d.families) ? d.families : [];
+        setRevealed(fams);
+        onRevealedFamilies?.(fams);
       })
       .catch(() => {
         // A failed probe (401 for anon/other, network) just means no reveal —
@@ -62,7 +79,10 @@ export function MethodsSection({
     return () => {
       cancelled = true;
     };
-  }, [scholarCwid, sensitiveGateActive]);
+  }, [scholarCwid, sensitiveGateActive, onRevealedFamilies]);
+
+  const selectedSet = new Set(selectedFamilyIds ?? []);
+  const filterable = filterEnabled && typeof onFamilyToggle === "function";
 
   // Merge public (unmarked) + revealed (sensitive), de-duped by familyId, in
   // rank order. A revealed family is never also in the public set (the server
@@ -83,6 +103,7 @@ export function MethodsSection({
       <MethodsHeading />
       <p className="text-muted-foreground mb-3 text-sm">
         Inferred from the datasets, models &amp; methods named in this scholar&apos;s publications
+        {filterable ? " · click to filter publications" : ""}
       </p>
       <TooltipProvider>
         <ul className="divide-border border-border divide-y border-t">
@@ -90,7 +111,30 @@ export function MethodsSection({
             <li key={f.familyId} className="flex items-start gap-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="text-foreground flex items-center gap-1.5 text-sm">
-                  <span>{f.familyLabel}</span>
+                  {filterable ? (
+                    <button
+                      type="button"
+                      aria-pressed={selectedSet.has(f.familyId)}
+                      onClick={() => onFamilyToggle?.(f.familyId)}
+                      className={
+                        selectedSet.has(f.familyId)
+                          ? "inline-flex items-center gap-1 text-left font-medium text-[var(--color-accent-slate)]"
+                          : "inline-flex items-center gap-1 text-left underline-offset-4 hover:text-[var(--color-accent-slate)] hover:underline"
+                      }
+                    >
+                      <span>{f.familyLabel}</span>
+                      {selectedSet.has(f.familyId) ? (
+                        <span
+                          aria-hidden="true"
+                          className="-mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-accent-slate)]/15 text-[11px] leading-none"
+                        >
+                          ×
+                        </span>
+                      ) : null}
+                    </button>
+                  ) : (
+                    <span>{f.familyLabel}</span>
+                  )}
                   {f.sensitive ? (
                     <Tooltip>
                       <TooltipTrigger asChild>

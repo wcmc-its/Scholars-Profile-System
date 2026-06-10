@@ -30,3 +30,15 @@ export function isMethodsLensEnabled(): boolean {
 export function isMethodsLensSensitiveGateOn(): boolean {
   return process.env.METHODS_LENS_SENSITIVE_GATE === "on";
 }
+
+/**
+ * #819 — makes the Methods-lens family rows clickable to filter the scholar's
+ * publication list (mirrors the Topics click-to-filter). Off by default; turning
+ * it on only changes the UI affordance — the `ScholarFamily.pmids` membership is
+ * populated by the ETL unconditionally, so flipping this never 500s. Depends on
+ * `METHODS_LENS_ENABLED` (no families render when the master gate is off). Wire in
+ * BOTH `.env.local` AND cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsLensFamilyFilterOn(): boolean {
+  return process.env.METHODS_LENS_FAMILY_FILTER === "on";
+}
