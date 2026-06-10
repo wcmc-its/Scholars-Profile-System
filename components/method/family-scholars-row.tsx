@@ -107,12 +107,13 @@ export function FamilyScholarsRow({
 /**
  * One researcher chip — avatar + name + title, the same anchor markup the topic
  * Top-scholar chip uses, wrapped in the shared context-aware hover-card. Uses the
- * generic `top-scholar` surface with NO topic context (a methods surface), so the
- * card shows the scholar's totals + recent work + "View profile".
+ * generic `top-scholar` surface with NO topic context (a methods surface), with
+ * `contextMethods` so the card adds the scholar's "Prominent method families"
+ * section (#853) alongside their totals + "View profile".
  */
 function FamilyScholarChip({ scholar }: { scholar: SubtopicScholarRowData }) {
   return (
-    <PersonPopover cwid={scholar.cwid} surface="top-scholar">
+    <PersonPopover cwid={scholar.cwid} surface="top-scholar" contextMethods>
       <a
         href={profilePath(scholar.slug)}
         className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-background px-3 py-1 transition-colors hover:border-[var(--color-accent-slate)]"

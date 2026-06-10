@@ -57,7 +57,12 @@ import {
   supercategoryDescription,
   isKnownSupercategory,
 } from "@/lib/methods/supercategory-labels";
-import { supercategorySlug, extractFamilyIdFromSlug, familySlug } from "@/lib/method-url";
+import {
+  supercategorySlug,
+  extractFamilyIdFromSlug,
+  familySlug,
+  methodFamilyPath,
+} from "@/lib/method-url";
 import { deriveSlug } from "@/lib/slug";
 
 // Re-export the chip/row data shapes so Method page components import them from
@@ -668,6 +673,64 @@ export async function getFamilyScholarRows(
     pubCountTotal: totalByCwid.get(r.scholar!.cwid) ?? 0,
     rank: i + 1,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// #853 — a single scholar's prominent method families (popover section)
+// ---------------------------------------------------------------------------
+
+/** One of a scholar's prominent method families for the #853 popover section.
+ *  `href` is the canonical `/methods` family page path. */
+export type ScholarMethodFamily = {
+  supercategory: string;
+  familyLabel: string;
+  familyId: string;
+  pmidCount: number;
+  href: string;
+};
+
+/** Cap on the families surfaced in the #853 popover section. */
+const POPOVER_METHOD_FAMILIES_CAP = 5;
+
+/**
+ * A single scholar's most-prominent method families for the #853 popover
+ * section — their `ScholarFamily` rows ranked by `pmidCount` desc, restricted to
+ * overlay-VISIBLE families (suppressed/sensitive dropped BEFORE ranking via the
+ * SAME #800/#801 gate every Method page uses), capped at 5. Lens-off ⇒ `[]`. No
+ * families, or all suppressed ⇒ `[]`.
+ *
+ * Unlike the PI chip row, this loader does NOT apply the `TOP_SCHOLARS_ELIGIBLE_ROLES`
+ * carve — the popover target is already a vetted top scholar; this just enumerates
+ * THAT scholar's own families (matching the "anyone with a row" semantics of the
+ * other enumerative surfaces), filtered active/non-deleted.
+ */
+export async function getScholarMethodFamilies(
+  cwid: string,
+): Promise<ScholarMethodFamily[]> {
+  if (!isMethodsLensEnabled()) return [];
+  if (!cwid) return [];
+
+  const gate = await loadFamilyOverlayGate();
+
+  const rows = await prisma.scholarFamily.findMany({
+    where: { cwid, scholar: { deletedAt: null, status: "active" } },
+    orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    select: { supercategory: true, familyLabel: true, familyId: true, pmidCount: true },
+  });
+
+  const out: ScholarMethodFamily[] = [];
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue; // SAME gate
+    out.push({
+      supercategory: r.supercategory,
+      familyLabel: r.familyLabel,
+      familyId: r.familyId,
+      pmidCount: r.pmidCount,
+      href: methodFamilyPath(r.supercategory, r.familyId, r.familyLabel),
+    });
+    if (out.length >= POPOVER_METHOD_FAMILIES_CAP) break;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

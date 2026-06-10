@@ -18,6 +18,7 @@ export function TopScholarsChipRow({
   topicSlug,
   topicLabel,
   enablePopover,
+  contextMethods,
 }: {
   scholars: TopScholarChipData[];
   scholarCount?: number;
@@ -27,6 +28,9 @@ export function TopScholarsChipRow({
   /** Enable the generic hover-card on non-topic surfaces (Method pages) where no
    *  `topicSlug` is available. Forwarded to each chip. */
   enablePopover?: boolean;
+  /** #853 — on /methods surfaces, also surface each scholar's "Prominent method
+   *  families" section in the popover. Forwarded to each chip. */
+  contextMethods?: boolean;
 }) {
   const moreCount = scholarCount !== undefined ? scholarCount - scholars.length : 0;
 
@@ -50,6 +54,7 @@ export function TopScholarsChipRow({
             topicSlug={topicSlug}
             topicLabel={topicLabel}
             enablePopover={enablePopover}
+            contextMethods={contextMethods}
           />
         ))}
         {moreCount > 0 && topicSlug && (

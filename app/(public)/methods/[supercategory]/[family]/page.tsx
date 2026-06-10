@@ -145,7 +145,12 @@ export default async function FamilyPage({
             method-scoped "+ N more scholars →" affordance below. */}
         {topScholars && (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow scholars={topScholars} topicLabel={resolved.familyLabel} />
+            <TopScholarsChipRow
+              scholars={topScholars}
+              topicLabel={resolved.familyLabel}
+              enablePopover
+              contextMethods
+            />
           </div>
         )}
 
