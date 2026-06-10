@@ -1314,6 +1314,57 @@ model Suppression {
   @@map("suppression")
 }
 
+/// ADR-005 failure-model layer-3 outbox for a failed CloudFront invalidation
+/// (#353) — the CDN analogue of the #393 search-index reconciler, and the
+/// durable backstop the `invalidateCloudFront` best-effort path (see
+/// `lib/edit/revalidation.ts`) names as its retry mechanism.
+///
+/// Layer 1 is the synchronous `CreateInvalidation` issued in the write request;
+/// it is best-effort and never throws, so a crash, an outage, or an SDK error
+/// between the DB commit and the edge purge leaves the suppressed/renamed page
+/// edge-cached up to the ≤24h CloudFront TTL — exactly the staleness the
+/// urgency split exists to eliminate. This row is layer 3: a worker
+/// (`lib/edit/cdn-reconcile.ts`) drains pending rows on a ≤5 min cadence and
+/// retries the invalidation until it lands.
+///
+/// CRITICAL difference from #393's sentinel: #393 re-derives its OpenSearch
+/// payload from CURRENT DB state, so it persists nothing and only flags a
+/// NULL-sentinel column. #353 CANNOT do that — the paths-to-purge are NOT
+/// recomputable. A slug flip, a `PROFILE_CANONICAL` change, or a mutated author
+/// set means the exact path that was edge-cached at write time can no longer be
+/// derived later. So this outbox REMEMBERS the literal paths in `paths` (a JSON
+/// array), and the reconciler replays them verbatim.
+///
+/// Sentinel: `invalidatedAt` is NULL while pending and is stamped now() by a
+/// successful `CreateInvalidation` — mirroring the #393 NULL-timestamp pattern
+/// (NULL = "not yet delivered"). `attempts` / `lastError` carry the retry
+/// bookkeeping; the reconciler caps retries at `maxAttempts` and emits an
+/// alarm-shaped log when a row is exhausted.
+///
+/// Dormancy: rows are only ever written when
+/// `SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID` is set (production edge). Pre-launch /
+/// local, the invalidation path early-returns before enqueue and the reconciler
+/// no-ops, so this table stays empty — exactly as the synchronous invalidation
+/// is dormant. Lives in the main schema so the app role's existing DML grant
+/// already covers it (no separate-schema GRANT to forget at deploy, cf. the
+/// #493 audit-grant gap).
+model CdnInvalidation {
+  id            String    @id @default(uuid()) @db.VarChar(64)
+  /// The EXACT edge paths to purge, JSON-encoded (`JSON.stringify(paths)`).
+  /// Persisted — not recomputable — because a later slug/canonical/author-set
+  /// change makes the original path underivable. The reconciler replays these
+  /// verbatim. This is the deliberate point of difference from #393.
+  paths         String    @db.Text
+  /// Sentinel: NULL = pending; stamped now() on a successful CreateInvalidation.
+  invalidatedAt DateTime? @map("invalidated_at")
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error") @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([invalidatedAt])
+  @@map("cdn_invalidation")
+}
+
 /// Durable intent for the self-edit "Not mine" reject → ReCiter flow (#746).
 /// One row per rejected (uid, pmid), written in the reject route's transaction
 /// alongside the local suppression + B03 audit row. `goldstandard_sent_at` NULL
