@@ -5,11 +5,13 @@
  * Assembles the scholar's facts payload, calls the AI Gateway, and returns a
  * grounded, sanitized HTML draft. It NEVER writes the DB — the draft lands in
  * the `/edit` Tiptap editor as unsaved local state, and the existing
- * `POST /api/edit/field` is the only write path (SPEC § The generate flow). The
- * single-scholar flow is self-only: the actor may generate only for THEIR OWN
- * profile (a direct `session.cwid === entityId` check). This generator stays
- * self-only even though #844 widened the OVERVIEW WRITE path to superusers — the
- * bulk/admin staging path is a separate SPEC slice.
+ * `POST /api/edit/field` is the only write path (SPEC § The generate flow).
+ *
+ * Authorization is the SHARED `authorizeOverviewWrite` — the generator allows
+ * exactly whoever may WRITE the bio (#844 follow-up, "no special rules"): self OR
+ * superuser OR granted proxy (#779) OR org-unit owner/curator (#728). Generating
+ * a draft for a profile you cannot save would be pointless, so the two surfaces
+ * share one predicate and cannot drift.
  *
  * Flag-gated behind `SELF_EDIT_OVERVIEW_GENERATE` (off ⇒ 404), mirroring the
  * slug-request route's dormancy.
@@ -18,10 +20,13 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeOverviewWrite } from "@/lib/edit/overview-authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
+import { type ProxyLookup } from "@/lib/edit/proxy-authz";
 import { recordOverviewGenerateAttempt } from "@/lib/edit/rate-limit";
+import { type UnitScholarLookup } from "@/lib/edit/unit-scholar-authz";
 import {
   editError,
   editOk,
@@ -39,7 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { session, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, requestId } = req.ctx;
 
   // --- body shape ---
   const { entityId } = req.ctx.body;
@@ -56,26 +61,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // inside the facts queries. An empty selection ⇒ the facts assembler's default.
   const selection = normalizeOverviewSelection(req.ctx.body.selection);
 
-  // --- authorization: owner-only. The single-scholar generator is a self-only
-  //     #742 beta — a superuser does NOT inherit it (#844 widened the OVERVIEW
-  //     WRITE path to admins, but deliberately left the generator self-only; the
-  //     bulk/admin staging path is a separate SPEC slice). So this checks
-  //     self-identity directly rather than the now-widened `authorizeFieldEdit`. ---
-  if (session.cwid !== entityId) {
+  // --- authorization: the SHARED overview-write predicate (self OR superuser OR
+  //     granted proxy OR org-unit owner/curator — #844 follow-up). Keyed on
+  //     `realCwid`, gated to non-impersonating for the delegated legs (IS-1). The
+  //     resolved unit is not needed here (the generator writes no audit row), only
+  //     the allow/deny verdict. ---
+  const authz = await authorizeOverviewWrite({
+    session,
+    realCwid,
+    impersonatedCwid,
+    entityId,
+    proxyDb: db.read as unknown as ProxyLookup,
+    unitDb: db.read as unknown as UnitScholarLookup,
+  });
+  if (!authz.ok) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: entityId,
       path: PATH,
-      reason: "not_self",
+      reason: authz.reason,
     });
-    return editError(403, "not_self");
+    return editError(403, authz.reason);
   }
 
-  // --- per-cwid rate limit (DB write) + facts assembly (DB read). Both touch
+  // --- per-scholar rate limit (DB write) + facts assembly (DB read). Both touch
   //     the database, so a DB error is a clean 500 here rather than an unhandled
   //     throw — matching /api/edit/field. The rate limit runs first (before the
-  //     gateway call) so a burst can't run up cost; the actor is always the
-  //     target (owner-only), so the bucket key is the actor's cwid. ---
+  //     gateway call) so a burst can't run up cost; the bucket is keyed on the
+  //     TARGET scholar (`entityId`), so a per-scholar cost cap holds regardless of
+  //     which authorized actor (self / superuser / proxy / unit-admin) generates. ---
   let facts: Awaited<ReturnType<typeof assembleOverviewFacts>>;
   try {
     const rate = await recordOverviewGenerateAttempt(entityId);

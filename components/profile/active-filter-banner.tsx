@@ -6,7 +6,9 @@ import type {
   SelectedPositions,
 } from "@/components/profile/author-position-badge";
 
-const POSITION_BANNER_LABEL: Record<Exclude<PositionFilter, "all">, string> = {
+/** Canonical author-position bucket → display label. Exported so the #12
+ *  FilterBar position chip reads the same labels as this prose banner. */
+export const POSITION_BANNER_LABEL: Record<Exclude<PositionFilter, "all">, string> = {
   first: "First author",
   senior: "Senior author",
   co_author: "Co-author",

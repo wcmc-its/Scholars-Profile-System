@@ -278,3 +278,151 @@ describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
     expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
   });
 });
+
+describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () => {
+  const redesignProps = {
+    filterEnabled: true,
+    onFamilyToggle: () => {},
+    facetRedesignEnabled: true as const,
+  };
+
+  function rowsUl() {
+    return screen.getByText("Family 1").closest("ul") as HTMLElement;
+  }
+
+  // #1 — cap UNSELECTED rows at 6 in the resting redesign panel.
+  it("#1 caps unselected rows at 6 in the resting redesign panel", () => {
+    render(<MethodsSection families={makeFamilies(11)} selectedFamilyIds={[]} {...redesignProps} />);
+    for (let i = 1; i <= 6; i++) expect(screen.getByText(`Family ${i}`)).toBeTruthy();
+    expect(screen.queryByText("Family 7")).toBeNull();
+    expect(screen.getByRole("button", { name: /\+ 5 more method families/ })).toBeTruthy();
+  });
+
+  // #2 — budget unselected INDEPENDENTLY of selected (4 selected => 4 + 6 = 10),
+  //      and selected families are never budgeted out even at low rank.
+  it("#2 budgets unselected independently of selected (low-rank selected stay pinned)", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(20)}
+        selectedFamilyIds={["fam_17", "fam_18", "fam_19", "fam_20"]}
+        {...redesignProps}
+      />,
+    );
+    // The 4 low-rank selected families render despite their rank...
+    for (const i of [17, 18, 19, 20]) expect(screen.getByText(`Family ${i}`)).toBeTruthy();
+    // ...plus the top 6 unselected.
+    for (let i = 1; i <= 6; i++) expect(screen.getByText(`Family ${i}`)).toBeTruthy();
+    expect(screen.queryByText("Family 7")).toBeNull();
+    expect(rowsUl().querySelectorAll(":scope > li").length).toBe(10);
+    // N counts unselected-AND-hidden only: 20 - 4 selected - 6 shown = 10.
+    expect(screen.getByRole("button", { name: /\+ 10 more method families/ })).toBeTruthy();
+  });
+
+  // #3/#4 — "+N more" EXPANDS INLINE (a button, never a navigating link), and
+  //         "Show fewer" appears once expanded.
+  it("#3 the +N more control expands inline and never navigates", () => {
+    render(<MethodsSection families={makeFamilies(20)} selectedFamilyIds={[]} {...redesignProps} />);
+    expect(screen.queryByRole("link", { name: /more method families/ })).toBeNull();
+    const more = screen.getByRole("button", { name: /\+ 14 more method families/ });
+    fireEvent.click(more);
+    // 6 + UNSELECTED_STEP(10) = 16 visible; 20 - 16 = 4 hidden.
+    expect(screen.getByText("Family 16")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /\+ 4 more method families/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show fewer" })).toBeTruthy();
+  });
+
+  it("#4 pagesEnabled adds no second navigating control in the redesign footer", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(11)}
+        selectedFamilyIds={[]}
+        pagesEnabled
+        {...redesignProps}
+      />,
+    );
+    // The footer disclosure is a button, not a link — the only navigate-away
+    // affordance is the heading's "Browse all methods", not the row footer.
+    expect(screen.queryByRole("link", { name: /more method families/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /\+ 5 more method families/ })).toBeTruthy();
+  });
+
+  it("#5 introduces no nested scroll region on the rows", () => {
+    render(<MethodsSection families={makeFamilies(11)} selectedFamilyIds={[]} {...redesignProps} />);
+    expect(rowsUl().className).not.toMatch(/overflow-y-auto|overflow-scroll|max-h-/);
+  });
+
+  // #11 — a singleton (pubCount: 1) family must still render (no min-2 floor).
+  it("#11 renders a single-publication family (no display floor)", () => {
+    render(
+      <MethodsSection
+        families={[
+          {
+            familyId: "fam_solo",
+            familyLabel: "Single-pub method",
+            supercategory: "imaging_microscopy",
+            pubCount: 1,
+            exemplarTools: ["Tool X"],
+            pmids: ["9001"],
+          },
+        ]}
+        selectedFamilyIds={[]}
+        {...redesignProps}
+      />,
+    );
+    expect(screen.getByText("Single-pub method")).toBeTruthy();
+  });
+
+  // #7 — a SELECTED zero-count row is a deliberate, non-dimmed state, distinct
+  //      from the dimmed (#14) UNSELECTED zero-count row.
+  it("#7 selected-zero is a deliberate non-dimmed state, distinct from the #14 dim-zero", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        selectedFamilyIds={["fam_1"]}
+        familyCounts={
+          new Map<string, number>([
+            ["fam_1", 0],
+            ["fam_2", 0],
+          ])
+        }
+        {...redesignProps}
+      />,
+    );
+    // fam_1: selected + 0 → deliberate selected-zero (filled, ringed, full opacity).
+    const selZero = screen.getByText("Family 1").closest("li") as HTMLElement;
+    expect(selZero.getAttribute("data-selected-zero")).toBe("true");
+    expect(selZero.className).toContain("bg-[var(--color-facet-method-fill)]");
+    expect(selZero.className).toContain("ring-[var(--color-facet-method-border)]");
+    expect(selZero.innerHTML).not.toContain("opacity-45");
+    expect(within(selZero).getByRole("button", { name: /Remove Family 1 filter/ })).toBeTruthy();
+    expect(
+      within(selZero).getByLabelText(/No publications match Family 1 under the current filters/),
+    ).toBeTruthy();
+    // fam_2: unselected + 0 → the dimmed inert state (#14), NOT selected-zero.
+    const dimZero = screen.getByText("Family 2").closest("li") as HTMLElement;
+    expect(dimZero.getAttribute("data-selected-zero")).toBeNull();
+    expect(dimZero.innerHTML).toContain("opacity-45");
+  });
+
+  // #17 — redesign rows carry the chip-fill transition; flag-off rows do not.
+  it("#17 redesign rows carry facet-chip-transition (and flag-off rows do not)", () => {
+    const { rerender } = render(
+      <MethodsSection families={makeFamilies(2)} selectedFamilyIds={["fam_1"]} {...redesignProps} />,
+    );
+    const sel = screen.getByText("Family 1").closest("li") as HTMLElement;
+    const unsel = screen.getByText("Family 2").closest("li") as HTMLElement;
+    expect(sel.className).toContain("facet-chip-transition");
+    expect(unsel.className).toContain("facet-chip-transition");
+
+    rerender(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+      />,
+    );
+    const offRow = screen.getByText("Family 2").closest("li") as HTMLElement;
+    expect(offRow.className).not.toContain("facet-chip-transition");
+  });
+});

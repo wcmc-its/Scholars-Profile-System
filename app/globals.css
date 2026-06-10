@@ -90,17 +90,26 @@
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
-  /* Facet-filter redesign (PROFILE_FACET_REDESIGN, default OFF) — chip colors for
-     the unified filter bar + Topics/Methods facets, from the signed-off mockups.
-     Topic facet = slate-blue family; Method facet = indigo family. The app is
-     light-only in practice, so no .dark overrides are needed here. */
+  /* Facet-filter redesign (PROFILE_FACET_REDESIGN) — three facet hues, each a
+     4-value semantic group (fill / border / text / count-subtext), theme-aware
+     (#16). Topic = slate-blue, Method = indigo, Position = warm amber (the
+     distinct third hue, #12 — exact amber signed off on staging). Every
+     count-subtext clears WCAG-AA 4.5:1 small-text on its fill, and every border
+     clears the 3:1 non-text (1.4.11) threshold, in BOTH light and .dark. The
+     app's .dark variant is never applied today (no toggle); the dark values
+     under .dark below are future-proofing. */
   --color-facet-topic-fill: #E6F1FB;
   --color-facet-topic-border: #378ADD;
   --color-facet-topic-text: #0C447C;
   --color-facet-topic-count: #185FA5;
   --color-facet-method-fill: #EEEDFE;
+  --color-facet-method-border: #7A72D6;
   --color-facet-method-text: #3C3489;
-  --color-facet-method-accent: #534AB7;
+  --color-facet-method-count: #534AB7;
+  --color-facet-position-fill: #FBF1DC;
+  --color-facet-position-border: #A67012;
+  --color-facet-position-text: #6B4310;
+  --color-facet-position-count: #8A5A06;
   /* Semantic green — success banners. */
   --apollo-green: #2e7d5b;
   --apollo-green-tint: #e7f3ee;
@@ -145,6 +154,23 @@
   --border: oklch(0.269 0 0);
   --input: oklch(0.269 0 0);
   --ring: oklch(0.439 0 0);
+
+  /* Facet chips/rows on a dark surface (#16) — fills darken to a muted tint;
+     text/border/count lighten so each stays legible; the count-subtext (the
+     AA-risk value) is pulled brighter than text. Future-proofing — the .dark
+     variant is never applied today (no toggle). */
+  --color-facet-topic-fill: #16304D;
+  --color-facet-topic-border: #4A93D8;
+  --color-facet-topic-text: #C2E0FA;
+  --color-facet-topic-count: #7FB6EC;
+  --color-facet-method-fill: #2A2650;
+  --color-facet-method-border: #756BD6;
+  --color-facet-method-text: #D2CDF8;
+  --color-facet-method-count: #A79DF0;
+  --color-facet-position-fill: #3A2E10;
+  --color-facet-position-border: #C79A33;
+  --color-facet-position-text: #F2E2BC;
+  --color-facet-position-count: #EFD389;
 }
 
 @theme inline {
@@ -324,6 +350,62 @@
   .skeleton-shimmer {
     background-image: none;
     animation: none;
+  }
+}
+
+/* Facet-filter redesign (PROFILE_FACET_REDESIGN) — #17 instant + local filter
+   confirmation. Net-new in v2. All three treatments are one-shot CSS that
+   self-completes; there is NO injected latency anywhere (filtering is a
+   synchronous client-side useMemo). The React side bumps a generation counter
+   used as a key so the wrapper remounts and the keyframe plays exactly once.
+   prefers-reduced-motion zeroes every animation AND transition below, so a
+   reduced-motion viewer gets the new state with zero delay and no movement. */
+@keyframes facet-list-pulse {
+  /* A brief, low-amplitude wash so a re-filtered list reads as "just updated"
+     without a layout shift. Background tint only — no transform, no opacity
+     collapse (which would hide content mid-frame). */
+  0% {
+    background-color: var(--color-facet-topic-fill);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.facet-list-pulse {
+  animation: facet-list-pulse 420ms ease-out;
+  border-radius: var(--radius-md);
+}
+@keyframes facet-count-bump {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+.facet-count-bump {
+  display: inline-block; /* transform needs a non-inline box */
+  animation: facet-count-bump 260ms ease-out;
+}
+/* Chip-fill / row-fill transition on select. Color-only so it never animates
+   layout; applied to the Topics chips and Methods checkbox rows via the
+   .facet-chip-transition utility added on those elements. */
+.facet-chip-transition {
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out,
+    color 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .facet-list-pulse,
+  .facet-count-bump {
+    animation: none;
+  }
+  .facet-chip-transition {
+    transition: none;
   }
 }
 

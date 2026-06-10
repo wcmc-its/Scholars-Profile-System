@@ -244,6 +244,33 @@ describe("computeFacetCounts", () => {
     expect(res.topic.get("T3")).toBe(1);
   });
 
+  // (g) Multi-family + active topic (the Prigerson shape) ---------------------
+  it("(g) two selected families AND a selected topic compose correctly", () => {
+    // Select BOTH F1{p1,p2,p4} and F2{p2,p4,p5} AND topic T1.
+    //   family union = {p1,p2,p4,p5}; T1 pubs = {p1,p2,p3,p5}.
+    //   barTotal = union ∩ T1 = {p1,p2,p5} -> 3.
+    const res = computeFacetCounts({
+      publications: baseFixture(),
+      selectedUis: ["T1"],
+      selectedFamilyIds: ["F1", "F2"],
+      familyPmids: baseFamilyPmids(),
+      matchesPosition: ALWAYS,
+    });
+
+    expect(res.barTotal).toBe(3);
+
+    // The selected topic T1 converges on barTotal (its count excludes only the
+    // Topics facet, so it is computed over the family union {p1,p2,p4,p5}):
+    //   T1 on p1,p2,p5 -> 3.
+    expect(res.topic.get("T1")).toBe(3);
+
+    // Each selected family's per-row count EXCLUDES the whole Methods facet, so
+    // it is its membership ∩ the T1-pubs {p1,p2,p3,p5} (NOT the union, NOT
+    // barTotal): F1{p1,p2,p4}∩T1 = {p1,p2} = 2; F2{p2,p4,p5}∩T1 = {p2,p5} = 2.
+    expect(res.family.get("F1")).toBe(2);
+    expect(res.family.get("F2")).toBe(2);
+  });
+
   // (f) Clamp + mismatch ------------------------------------------------------
   it("(f) clamps a numerator above its aggregate denominator and fires onClampMismatch", () => {
     // No filters: live T1 count over all pubs = p1,p2,p3,p5 = 4.
