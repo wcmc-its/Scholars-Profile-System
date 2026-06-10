@@ -29,6 +29,7 @@ import {
 } from "@/lib/api/topics";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 
 const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyof TopicScholarsResult["roleCounts"] }> = [
   { id: "all", label: "All", countKey: "all" },
@@ -125,12 +126,15 @@ export function TopicAllScholars({
   selectedRole,
   query,
   page,
+  exportEnabled = false,
 }: {
   topicSlug: string;
   result: TopicScholarsResult;
   selectedRole: TopicAllScholarRole;
   query: string;
   page: number;
+  /** When true (#847 flag on), render the internal CSV download island. */
+  exportEnabled?: boolean;
 }) {
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const pages = paginationPages(page, totalPages);
@@ -143,9 +147,17 @@ export function TopicAllScholars({
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           All scholars in this area · {result.roleCounts.all.toLocaleString()}
         </h2>
-        <p className="hidden text-xs italic text-muted-foreground sm:block">
-          Anyone with at least one publication in this area, sorted alphabetically.
-        </p>
+        <div className="flex items-baseline gap-4">
+          <p className="hidden text-xs italic text-muted-foreground sm:block">
+            Anyone with at least one publication in this area, sorted alphabetically.
+          </p>
+          {exportEnabled ? (
+            <ScholarListExportButton
+              scope="topic"
+              params={{ slug: topicSlug, role: selectedRole, q: query }}
+            />
+          ) : null}
+        </div>
       </div>
 
       <form

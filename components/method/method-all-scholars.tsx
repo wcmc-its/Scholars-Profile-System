@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/methods";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 
 const ROLE_CHIPS: Array<{
   id: MethodScholarRole;
@@ -113,6 +114,9 @@ export function MethodAllScholars({
   query,
   page,
   familyLabel,
+  supercategorySlug,
+  familySlug,
+  exportEnabled = false,
 }: {
   /** `/methods/[sc]/[fam]/scholars` — the GET-form action + chip/pagination base. */
   basePath: string;
@@ -121,6 +125,11 @@ export function MethodAllScholars({
   query: string;
   page: number;
   familyLabel: string;
+  /** Supercategory + family URL slugs — the export route's body params. */
+  supercategorySlug: string;
+  familySlug: string;
+  /** When true (#847 flag on), render the internal CSV download island. */
+  exportEnabled?: boolean;
 }) {
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const pages = paginationPages(page, totalPages);
@@ -131,9 +140,22 @@ export function MethodAllScholars({
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           All scholars using this method · {result.roleCounts.all.toLocaleString()}
         </h2>
-        <p className="hidden text-xs italic text-muted-foreground sm:block">
-          Anyone with at least one publication using {familyLabel}, sorted alphabetically.
-        </p>
+        <div className="flex items-baseline gap-4">
+          <p className="hidden text-xs italic text-muted-foreground sm:block">
+            Anyone with at least one publication using {familyLabel}, sorted alphabetically.
+          </p>
+          {exportEnabled ? (
+            <ScholarListExportButton
+              scope="method-family"
+              params={{
+                supercategory: supercategorySlug,
+                family: familySlug,
+                role: selectedRole,
+                q: query,
+              }}
+            />
+          ) : null}
+        </div>
       </div>
 
       <form method="get" action={basePath} className="mt-4 flex flex-wrap items-center gap-3">

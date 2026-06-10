@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
 import { MethodAllScholars } from "@/components/method/method-all-scholars";
 import {
   Breadcrumb,
@@ -149,6 +150,9 @@ export default async function FamilyScholarsPage({
         query={q}
         page={page}
         familyLabel={resolved.familyLabel}
+        supercategorySlug={resolved.supercategorySlug}
+        familySlug={resolved.familySlug}
+        exportEnabled={isScholarListExportEnabled()}
       />
     </main>
   );
