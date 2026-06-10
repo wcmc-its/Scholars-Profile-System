@@ -179,6 +179,21 @@ export interface SpsEnvConfig {
    */
   readonly reconcileScheduleEnabled: boolean;
   /**
+   * Whether the EventBridge rule that fires the #353 durable
+   * CloudFront-invalidation reconciler (ADR-005 layer 3, the CDN analogue of the
+   * #393 search-index reconciler) is enabled at deploy time. A SEPARATE flag from
+   * {@link reconcileScheduleEnabled} on purpose: the two reconcilers cover
+   * different durability paths (edge-cache purge vs search-index suppression) and
+   * must be independently controllable -- flipping one off must never silence the
+   * other. Like its sibling it is a CONTINUOUS durability backstop that must run
+   * in prod from launch, unlike the runbook-gated nightly / weekly / annual
+   * cadences. `true` in both envs; safe to enable in prod pre-launch because the
+   * task is empty-queue-safe: the worker no-ops without touching the DB while
+   * SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID is unset (the operator supplies it at
+   * enable time), and the `cdn_invalidation` outbox is never written until then.
+   */
+  readonly cdnReconcileScheduleEnabled: boolean;
+  /**
    * Fargate CPU units for the ETL task family. Tunable per-step via
    * `Overrides.ContainerOverrides[].Cpu`; this is the base allocation.
    */
@@ -276,6 +291,9 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     etlSchedulesEnabled: true,
     // #393 — continuous reconciler backstop; enabled both envs (see flag JSDoc).
     reconcileScheduleEnabled: true,
+    // #353 -- continuous CloudFront-invalidation reconciler backstop; enabled
+    // both envs (empty-queue-safe pre-launch). See flag JSDoc.
+    cdnReconcileScheduleEnabled: true,
     // #485 — search:index OOM-killed at 2048 MiB building the full corpus
     // (178k+ pubs). 8 GB + the NODE_OPTIONS heap cap (EtlStack) clears it;
     // 2 vCPU also speeds the build, easing throttle pressure on the node.
@@ -338,6 +356,10 @@ const ENV_CONFIG: Record<EnvName, SpsEnvConfig> = {
     // #393 — the reconciler backstop runs in prod from launch (empty-queue-safe
     // pre-launch), unlike the runbook-gated cadences above. See flag JSDoc.
     reconcileScheduleEnabled: true,
+    // #353 -- the CloudFront-invalidation reconciler backstop runs in prod from
+    // launch too (empty-queue-safe; no-ops until SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID
+    // is set). See flag JSDoc.
+    cdnReconcileScheduleEnabled: true,
     // #485 — match staging's 8 GB headroom for the search:index corpus build
     // (paired with the NODE_OPTIONS heap cap in EtlStack). Prod's 2-node
     // m6g.large.search domain already handles the bulk write rate.

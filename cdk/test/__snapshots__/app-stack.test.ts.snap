@@ -2691,6 +2691,27 @@ service:
       },
       "Type": "AWS::IAM::Policy",
     },
+    "TaskRoleCloudFrontPolicy1C86BE7A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cloudfront:CreateInvalidation",
+              "Effect": "Allow",
+              "Resource": "arn:aws:cloudfront::123456789012:distribution/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-prod-cloudfront",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
     "TaskRoleSesPolicy94AACEAC": {
       "Properties": {
         "PolicyDocument": {
@@ -5752,6 +5773,27 @@ service:
           "Version": "2012-10-17",
         },
         "PolicyName": "sps-task-staging-bedrock",
+        "Roles": [
+          {
+            "Ref": "TaskRole30FC0FBB",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "TaskRoleCloudFrontPolicy1C86BE7A": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "cloudfront:CreateInvalidation",
+              "Effect": "Allow",
+              "Resource": "arn:aws:cloudfront::123456789012:distribution/*",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "sps-task-staging-cloudfront",
         "Roles": [
           {
             "Ref": "TaskRole30FC0FBB",

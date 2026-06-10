@@ -141,23 +141,25 @@ describe("EtlStack", () => {
     });
 
     describe("Resource counts (B08 / B20 acceptance)", () => {
-      it("creates five state machines (3 cadence + #595 heartbeat + #393 reconciler), five EventBridge rules, one SNS topic", () => {
-        // 3 cadence machines + the #595 heartbeat + the #393 reconciler (PR-2).
-        template.resourceCountIs("AWS::StepFunctions::StateMachine", 5);
-        template.resourceCountIs("AWS::Events::Rule", 5);
-        // The heartbeat + reconciler reuse the cadence failure topic -- still one.
+      it("creates six state machines (3 cadence + #595 heartbeat + #393 reconciler + #353 cdn reconciler), six EventBridge rules, one SNS topic", () => {
+        // 3 cadence machines + the #595 heartbeat + the #393 reconciler +
+        // the #353 cdn reconciler (PR-2).
+        template.resourceCountIs("AWS::StepFunctions::StateMachine", 6);
+        template.resourceCountIs("AWS::Events::Rule", 6);
+        // The heartbeat + both reconcilers reuse the cadence failure topic -- still one.
         template.resourceCountIs("AWS::SNS::Topic", 1);
       });
 
-      it("creates nine CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence)", () => {
+      it("creates eleven CloudWatch alarms (4 status + nightly/weekly/heartbeat cadence + reconciler status/cadence + cdn reconciler status/cadence)", () => {
         // 7 cadence-machine alarms (4 status + 3 cadence: nightly/weekly/heartbeat)
-        // + 2 reconciler alarms (#393).
-        template.resourceCountIs("AWS::CloudWatch::Alarm", 9);
+        // + 2 reconciler alarms (#393) + 2 cdn reconciler alarms (#353).
+        template.resourceCountIs("AWS::CloudWatch::Alarm", 11);
       });
 
-      it("creates two ECS task definitions (ETL + lean reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
-        // The fat ETL task def + the lean #393 reconcile task def.
-        template.resourceCountIs("AWS::ECS::TaskDefinition", 2);
+      it("creates three ECS task definitions (ETL + lean reconciler + lean cdn reconciler) and one SG-to-SG ingress rule on the internal ALB SG", () => {
+        // The fat ETL task def + the lean #393 reconcile task def + the lean
+        // #353 cdn reconcile task def.
+        template.resourceCountIs("AWS::ECS::TaskDefinition", 3);
         template.resourceCountIs("AWS::EC2::SecurityGroupIngress", 1);
       });
 
@@ -410,8 +412,8 @@ describe("EtlStack", () => {
       it("every alarm publishes to the etl-failures-${env} SNS topic", () => {
         const alarms = template.findResources("AWS::CloudWatch::Alarm");
         // 7 cadence-machine alarms (4 status + 3 cadence) + 2 reconciler alarms
-        // (#393); all share the topic.
-        expect(Object.keys(alarms)).toHaveLength(9);
+        // (#393) + 2 cdn reconciler alarms (#353); all share the topic.
+        expect(Object.keys(alarms)).toHaveLength(11);
         for (const [id, alarm] of Object.entries(alarms)) {
           const actions = (alarm.Properties?.AlarmActions ?? []) as unknown[];
           expect({ id, hasAction: actions.length > 0 }).toEqual({
@@ -571,6 +573,9 @@ describe("EtlStack", () => {
           return roles?.some(
             (r) =>
               typeof r.Ref === "string" &&
+              // Exclude the #353 CdnReconcileTaskExecutionRole, whose Ref also
+              // contains the "ReconcileTaskExecutionRole" substring.
+              !r.Ref.includes("CdnReconcile") &&
               r.Ref.includes("ReconcileTaskExecutionRole"),
           );
         });
@@ -602,6 +607,9 @@ describe("EtlStack", () => {
           return roles?.some(
             (r) =>
               typeof r.Ref === "string" &&
+              // Exclude the #353 CdnReconcileTaskRole, whose Ref also contains
+              // the "ReconcileTaskRole" substring.
+              !r.Ref.includes("CdnReconcile") &&
               r.Ref.includes("ReconcileTaskRole") &&
               !r.Ref.includes("ReconcileTaskExecutionRole"),
           );
@@ -628,6 +636,160 @@ describe("EtlStack", () => {
       it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
         template.hasResourceProperties("AWS::CloudWatch::Alarm", {
           AlarmName: "sps-reconcile-cadence-prod",
+          MetricName: "ExecutionsStarted",
+          Statistic: "Sum",
+          ComparisonOperator: "LessThanThreshold",
+          Threshold: 1,
+          TreatMissingData: "breaching",
+          Period: 900,
+        });
+      });
+    });
+
+    describe("#353 cdn reconciler (PR-2 -- schedule + lean task + alarms)", () => {
+      it("fires the cdn reconciler on a rate(5 minutes) EventBridge rule, ENABLED in prod (continuous backstop, not runbook-gated)", () => {
+        template.hasResourceProperties("AWS::Events::Rule", {
+          Name: "sps-cdn-reconcile-prod",
+          ScheduleExpression: "rate(5 minutes)",
+          State: "ENABLED",
+        });
+      });
+
+      it("the cdn reconcile state machine runs `npm run cdn:reconcile` (single-step, no cadence/search steps)", () => {
+        const text = getStateMachineDefinitionText(
+          template,
+          "scholars-cdn-reconcile-prod",
+        );
+        expect(text).toMatch(/"cdn:reconcile"/);
+        // Single-step machine: no $.startFrom Choice, no cadence/search steps.
+        expect(text).not.toMatch(/"etl:ed"/);
+        expect(text).not.toMatch(/search:index/);
+        expect(text).not.toMatch(/"search:reconcile"/);
+      });
+
+      function cdnReconcileTaskDef() {
+        const tds = template.findResources("AWS::ECS::TaskDefinition");
+        const td = Object.values(tds).find(
+          (t) => t.Properties?.Family === "sps-cdn-reconcile-prod",
+        );
+        expect(td).toBeDefined();
+        return td!;
+      }
+
+      it("uses a lean 256/512 task def (not the 8 GB ETL task def)", () => {
+        const td = cdnReconcileTaskDef();
+        expect(td.Properties?.Cpu).toBe("256");
+        expect(td.Properties?.Memory).toBe("512");
+      });
+
+      it("injects ONLY the DATABASE_URL secret (no OPENSEARCH_*, no SCHOLARS_*) and omits SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID (dormant-safe)", () => {
+        const td = cdnReconcileTaskDef();
+        const container = (
+          td.Properties?.ContainerDefinitions as
+            | Array<Record<string, unknown>>
+            | undefined
+        )?.find((c) => c.Name === "cdn-reconcile");
+        expect(container).toBeDefined();
+        const secretNames = (
+          container?.Secrets as Array<{ Name?: string }> | undefined
+        )?.map((s) => s.Name);
+        // The cdn worker reads only DATABASE_URL -- never OpenSearch.
+        expect((secretNames ?? []).sort()).toEqual(["DATABASE_URL"]);
+        // No per-source ETL credentials, and no OpenSearch creds leak on.
+        const leaked = (secretNames ?? []).filter(
+          (n) =>
+            /^SCHOLARS_/.test(n ?? "") ||
+            /^ETL_.*_SECRET$/.test(n ?? "") ||
+            /^OPENSEARCH_/.test(n ?? ""),
+        );
+        expect(leaked).toEqual([]);
+        // Dormant-safe: no distribution id is hardcoded onto the task; the
+        // worker no-ops until the operator supplies it at enable time.
+        const envNames = (
+          container?.Environment as Array<{ Name?: string }> | undefined
+        )?.map((e) => e.Name);
+        expect(envNames ?? []).not.toContain(
+          "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+        );
+        // No OpenSearch endpoint either.
+        expect(envNames ?? []).not.toContain("OPENSEARCH_NODE");
+      });
+
+      it("the cdn reconcile exec role lists EXACTLY ONE secret ARN (db/etl; no opensearch, no *)", () => {
+        const policies = template.findResources("AWS::IAM::Policy");
+        const execPolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("CdnReconcileTaskExecutionRole"),
+          );
+        });
+        expect(execPolicy).toBeDefined();
+        const statements = execPolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        const secretsStmt = statements?.find((s) => {
+          const action = s.Action;
+          return Array.isArray(action)
+            ? action.includes("secretsmanager:GetSecretValue")
+            : action === "secretsmanager:GetSecretValue";
+        });
+        expect(secretsStmt).toBeDefined();
+        const resourceList = Array.isArray(secretsStmt?.Resource)
+          ? (secretsStmt?.Resource as unknown[])
+          : [secretsStmt?.Resource];
+        // Exactly one ARN (db/etl) -- tighter than #393's two.
+        expect(resourceList).toHaveLength(1);
+        for (const r of resourceList) {
+          expect(JSON.stringify(r)).not.toMatch(/^"\*"$/);
+        }
+      });
+
+      it("the cdn reconcile TASK role grants cloudfront:CreateInvalidation scoped to a distribution ARN (NOT *), and zero secretsmanager", () => {
+        // Synth-time guard for the deploy-only grant: this is the one permission
+        // #393 lacked. CreateInvalidation only, distribution-scoped, never *.
+        const policies = template.findResources("AWS::IAM::Policy");
+        const taskRolePolicy = Object.values(policies).find((p) => {
+          const roles = p.Properties?.Roles as
+            | Array<{ Ref?: string }>
+            | undefined;
+          return roles?.some(
+            (r) =>
+              typeof r.Ref === "string" &&
+              r.Ref.includes("CdnReconcileTaskRole") &&
+              !r.Ref.includes("CdnReconcileTaskExecutionRole"),
+          );
+        });
+        expect(taskRolePolicy).toBeDefined();
+        const statements = taskRolePolicy?.Properties?.PolicyDocument
+          ?.Statement as Array<Record<string, unknown>> | undefined;
+        expect(statements).toHaveLength(1);
+        const stmt = statements![0];
+        expect(stmt.Action).toBe("cloudfront:CreateInvalidation");
+        const resource = stmt.Resource as string;
+        expect(JSON.stringify(resource)).not.toMatch(/^"\*"$/);
+        expect(JSON.stringify(resource)).toContain(":distribution/");
+        // The runtime identity carries no secret-reading grant.
+        const serialized = JSON.stringify(taskRolePolicy?.Properties?.PolicyDocument);
+        expect(serialized).not.toMatch(/secretsmanager:/);
+      });
+
+      it("the status alarm watches ExecutionsFailed sum > 0 (idle window not breaching)", () => {
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+          AlarmName: "sps-cdn-reconcile-status-prod",
+          MetricName: "ExecutionsFailed",
+          Statistic: "Sum",
+          ComparisonOperator: "GreaterThanThreshold",
+          Threshold: 0,
+          TreatMissingData: "notBreaching",
+        });
+      });
+
+      it("the cadence alarm watches ExecutionsStarted sum < 1 with treatMissingData=breaching (silent schedule death)", () => {
+        template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+          AlarmName: "sps-cdn-reconcile-cadence-prod",
           MetricName: "ExecutionsStarted",
           Statistic: "Sum",
           ComparisonOperator: "LessThanThreshold",
@@ -999,11 +1161,11 @@ describe("EtlStack", () => {
       expect(template.toJSON()).toMatchSnapshot();
     });
 
-    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled both true)", () => {
+    it("staging EventBridge rules ship enabled (etlSchedulesEnabled + reconcileScheduleEnabled + cdnReconcileScheduleEnabled all true)", () => {
       const rules = template.findResources("AWS::Events::Rule");
-      // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule;
-      // all enabled in staging.
-      expect(Object.keys(rules)).toHaveLength(5);
+      // 3 cadence rules + the #595 heartbeat rule + the #393 reconciler rule +
+      // the #353 cdn reconciler rule; all enabled in staging.
+      expect(Object.keys(rules)).toHaveLength(6);
       for (const [id, rule] of Object.entries(rules)) {
         const state = rule.Properties?.State as string | undefined;
         expect({ id, state }).toEqual({ id, state: "ENABLED" });
@@ -1012,7 +1174,8 @@ describe("EtlStack", () => {
 
     it("staging ETL task definition uses 2048 cpu / 8192 MiB (#485 search:index OOM)", () => {
       const tds = template.findResources("AWS::ECS::TaskDefinition");
-      // Two task defs now (ETL + lean #393 reconcile); select the ETL one.
+      // Three task defs now (ETL + lean #393 reconcile + lean #353 cdn
+      // reconcile); select the ETL one.
       const td = Object.values(tds).find(
         (t) => t.Properties?.Family === "sps-etl-staging",
       );
@@ -1031,6 +1194,21 @@ describe("EtlStack", () => {
       expect(td?.Properties?.Memory).toBe("512");
       template.hasResourceProperties("AWS::Events::Rule", {
         Name: "sps-reconcile-staging",
+        ScheduleExpression: "rate(5 minutes)",
+        State: "ENABLED",
+      });
+    });
+
+    it("staging lean cdn reconcile task definition uses 256 cpu / 512 MiB and ships its rule enabled", () => {
+      const tds = template.findResources("AWS::ECS::TaskDefinition");
+      const td = Object.values(tds).find(
+        (t) => t.Properties?.Family === "sps-cdn-reconcile-staging",
+      );
+      expect(td).toBeDefined();
+      expect(td?.Properties?.Cpu).toBe("256");
+      expect(td?.Properties?.Memory).toBe("512");
+      template.hasResourceProperties("AWS::Events::Rule", {
+        Name: "sps-cdn-reconcile-staging",
         ScheduleExpression: "rate(5 minutes)",
         State: "ENABLED",
       });

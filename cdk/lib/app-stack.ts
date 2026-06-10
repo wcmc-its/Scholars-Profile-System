@@ -703,6 +703,37 @@ export class AppStack extends Stack {
     });
 
     // ------------------------------------------------------------------
+    // CloudFront CreateInvalidation grant (#353 -- synchronous edge purge).
+    //
+    // The suppress / rename / revoke write paths call
+    // sendCloudFrontInvalidation (lib/edit/revalidation.ts) inline post-commit
+    // to purge the edge copy of the affected page (ADR-005 layer 1). That SDK
+    // call runs under THIS task role and, once SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID
+    // is set, would AccessDenied without an explicit grant. A custom *inline*
+    // policy with the single action cloudfront:CreateInvalidation, scoped to a
+    // distribution ARN -- never a bare `*` -- the same scope the EtlStack
+    // background-reconciler task role (#353 PR-2) carries. CloudFront is global,
+    // so the ARN has no region segment.
+    //
+    // Dormant until SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID is set: the invalidation
+    // helper no-ops while it is unset, so the grant sits unused pre-launch.
+    // Contains no secretsmanager reference, so the "zero secretsmanager on the
+    // task role" assertion still holds; app-stack.test.ts adds the CloudFront-
+    // scope assertions (single action, distribution-scoped resource, no `*`).
+    // ------------------------------------------------------------------
+    new iam.Policy(this, "TaskRoleCloudFrontPolicy", {
+      policyName: `sps-task-${env}-cloudfront`,
+      roles: [taskRole],
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ["cloudfront:CreateInvalidation"],
+          resources: [`arn:aws:cloudfront::${this.account}:distribution/*`],
+        }),
+      ],
+    });
+
+    // ------------------------------------------------------------------
     // Internal ALB security group.
     //
     // The public ALB's SG (albSecurityGroup) is owned by NetworkStack;
