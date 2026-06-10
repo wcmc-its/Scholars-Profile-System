@@ -345,7 +345,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_MANUAL_HIGHLIGHTS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
@@ -397,7 +397,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PUB_DEPARTMENT_FILTER",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SEARCH_FUNDING_TAB_CONCEPT",
