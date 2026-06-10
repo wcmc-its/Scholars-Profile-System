@@ -137,3 +137,85 @@ describe("ActiveFilterBanner", () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+describe("ActiveFilterBanner — #819 family segment", () => {
+  it("renders family-only filter as 'in <family>' with no orphan leading dot", () => {
+    render(
+      <ActiveFilterBanner
+        count={13}
+        selected={[]}
+        families={[{ familyId: "fam_1", familyLabel: "Qualitative research methods" }]}
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/Filtered to\s*13\s*publications\s*in\s*Qualitative research methods/);
+    // Family carries its own preposition, so with no preceding segment there is
+    // NO separator dot anywhere in the banner.
+    expect(text).not.toMatch(/·/);
+    expect(text).not.toMatch(/using/);
+    expect(screen.getByRole("button", { name: "Clear filter" })).toBeTruthy();
+  });
+
+  it("uses 'A or B' for two families", () => {
+    render(
+      <ActiveFilterBanner
+        count={20}
+        selected={[]}
+        families={[
+          { familyId: "fam_1", familyLabel: "Alpha methods" },
+          { familyId: "fam_2", familyLabel: "Beta methods" },
+        ]}
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/in\s*Alpha methods\s*or\s*Beta methods/);
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+  });
+
+  it("uses 'in any of: A, B, C' for three+ families", () => {
+    render(
+      <ActiveFilterBanner
+        count={30}
+        selected={[]}
+        families={[
+          { familyId: "f1", familyLabel: "Alpha" },
+          { familyId: "f2", familyLabel: "Beta" },
+          { familyId: "f3", familyLabel: "Gamma" },
+        ]}
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/in\s*any of:\s*Alpha,\s*Beta,\s*Gamma/);
+  });
+
+  it("composes one topic + family into 'using <kw> · in <family>'", () => {
+    render(
+      <ActiveFilterBanner
+        count={9}
+        selected={[k("D015316", "Genetic Therapy")]}
+        families={[{ familyId: "fam_1", familyLabel: "Genome editing" }]}
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/using\s*Genetic Therapy\s*·\s*in\s*Genome editing/);
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+  });
+
+  it("composes position + family into '· <pos> · in <family>'", () => {
+    render(
+      <ActiveFilterBanner
+        count={4}
+        selected={[]}
+        positions={["senior"]}
+        families={[{ familyId: "fam_1", familyLabel: "Genome editing" }]}
+        onClearAll={() => {}}
+      />,
+    );
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toMatch(/·\s*Senior author\s*·\s*in\s*Genome editing/);
+  });
+});

@@ -117,7 +117,17 @@ export function MethodsSection({
       <TooltipProvider>
         <ul className="divide-border border-border divide-y border-t">
           {visible.map((f) => (
-            <li key={f.familyId} className="flex items-start gap-3 py-2.5">
+            <li
+              key={f.familyId}
+              className={
+                // #819 — when the row is a filter toggle, `relative` anchors the
+                // button's `after:inset-0` overlay so the WHOLE row is the click
+                // target (the interactive children below opt out via `z-10`).
+                filterable
+                  ? "relative flex items-start gap-3 py-2.5"
+                  : "flex items-start gap-3 py-2.5"
+              }
+            >
               <div className="min-w-0 flex-1">
                 <div className="text-foreground flex items-center gap-1.5 text-sm">
                   {filterable ? (
@@ -126,19 +136,28 @@ export function MethodsSection({
                       aria-pressed={selectedSet.has(f.familyId)}
                       onClick={() => onFamilyToggle?.(f.familyId)}
                       className={
+                        // Selected: a filled accent-slate pill (mirrors a selected
+                        // Topics chip) with the count badge pulled in. Unselected:
+                        // plain label that underlines on (whole-row) hover. Both
+                        // stretch their hit area across the row via `after:inset-0`.
                         selectedSet.has(f.familyId)
-                          ? "inline-flex items-center gap-1 text-left font-medium text-[var(--color-accent-slate)]"
-                          : "inline-flex items-center gap-1 text-left underline-offset-4 hover:text-[var(--color-accent-slate)] hover:underline"
+                          ? "inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-slate)] px-2.5 py-0.5 text-left text-sm font-medium text-white after:absolute after:inset-0 after:content-['']"
+                          : "inline-flex items-center gap-1 text-left underline-offset-4 after:absolute after:inset-0 after:content-[''] hover:text-[var(--color-accent-slate)] hover:underline"
                       }
                     >
                       <span>{f.familyLabel}</span>
                       {selectedSet.has(f.familyId) ? (
-                        <span
-                          aria-hidden="true"
-                          className="-mr-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[var(--color-accent-slate)]/15 text-[11px] leading-none"
-                        >
-                          ×
-                        </span>
+                        <>
+                          <span className="rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">
+                            {f.pubCount}
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className="-mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-white/20 text-[11px] leading-none"
+                          >
+                            ×
+                          </span>
+                        </>
                       ) : null}
                     </button>
                   ) : (
@@ -148,7 +167,7 @@ export function MethodsSection({
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span
-                          className="text-muted-foreground inline-flex items-center"
+                          className="text-muted-foreground relative z-10 inline-flex items-center"
                           aria-label="Hidden from the public profile"
                         >
                           <EyeOff className="size-3.5" aria-hidden="true" />
@@ -167,18 +186,24 @@ export function MethodsSection({
                   </div>
                 ) : null}
               </div>
-              <span className="text-muted-foreground shrink-0 pt-0.5 text-sm tabular-nums">
-                {f.pubCount}
-              </span>
+              {/* #819 — the count sits in the right-hand column, EXCEPT when this
+                  family is the active filter: then it rides inside the pill (like
+                  a Topics chip) and the column is blank for that row. */}
+              {filterable && selectedSet.has(f.familyId) ? null : (
+                <span className="text-muted-foreground shrink-0 pt-0.5 text-sm tabular-nums">
+                  {f.pubCount}
+                </span>
+              )}
               {/* METHODS_LENS_PAGES — a SEPARATE trailing outbound link to the
                   cross-scholar family page (NOT the label: that stays the #819
                   filter button). Suppressed for sensitive families, which have
-                  no public cross-scholar page. */}
+                  no public cross-scholar page. `z-10` lifts it above the #819
+                  whole-row click overlay so it stays independently clickable. */}
               {pagesEnabled && !f.sensitive ? (
                 <Link
                   href={methodFamilyPath(f.supercategory, f.familyId, f.familyLabel)}
                   aria-label={`Researchers using ${f.familyLabel}`}
-                  className="text-muted-foreground inline-flex shrink-0 items-center pt-0.5 hover:text-[var(--color-accent-slate)]"
+                  className="text-muted-foreground relative z-10 inline-flex shrink-0 items-center pt-0.5 hover:text-[var(--color-accent-slate)]"
                 >
                   <ArrowUpRight className="size-4" aria-hidden="true" />
                 </Link>

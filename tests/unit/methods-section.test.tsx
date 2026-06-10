@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MethodsSection } from "@/components/profile/methods-section";
 import type { ScholarFamilyView } from "@/lib/api/profile";
 
@@ -156,5 +156,24 @@ describe("MethodsSection — #819 family click-to-filter", () => {
     expect(screen.getByRole("button", { name: /Family 1/ }).getAttribute("aria-pressed")).toBe(
       "false",
     );
+  });
+
+  it("pulls the count into the selected pill and out of the row's count column", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+      />,
+    );
+    // fam_1's count (100) rides INSIDE the selected pill (the toggle button)...
+    const selected = screen.getByRole("button", { name: /Family 1/ });
+    expect(within(selected).getByText("100")).toBeTruthy();
+    // ...while the unselected fam_2 keeps its count in the right-hand column, not
+    // inside its button.
+    const unselected = screen.getByRole("button", { name: /Family 2/ });
+    expect(within(unselected).queryByText("99")).toBeNull();
+    expect(screen.getByText("99")).toBeTruthy();
   });
 });
