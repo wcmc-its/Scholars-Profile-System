@@ -3453,7 +3453,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
