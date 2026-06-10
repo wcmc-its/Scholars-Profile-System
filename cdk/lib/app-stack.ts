@@ -946,11 +946,12 @@ export class AppStack extends Stack {
         // isManualHighlightsEnabled() (=== "on"); when off the route rejects a
         // selectedHighlightPmids write, the read path ignores any stored override,
         // and the /edit Highlights rail item / card are not surfaced — the whole
-        // feature ships dark. ON in staging for rollout/QA, OFF in prod pending
-        // product sign-off; flip prod with a manual `cdk deploy Sps-App-prod` (CD
-        // only re-rolls the image, never CDK). No data migration — the JSON value
-        // rides the existing field_override Text column.
-        SELF_EDIT_MANUAL_HIGHLIGHTS: env === "staging" ? "on" : "off",
+        // feature ships dark. ON in both envs: live on staging; prod is ARMED but
+        // NOT yet live — prod still runs the pre-arm task def and activates only on
+        // the next `cdk deploy --exclusively Sps-App-prod` (CD only re-rolls the
+        // image, never CDK). No data migration — the JSON value rides the existing
+        // field_override Text column.
+        SELF_EDIT_MANUAL_HIGHLIGHTS: "on",
         // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
         // (relationships named in a scholar's own PubMed competing-interest
         // statements that aren't in their current WRG disclosures) + its disavow
@@ -1045,9 +1046,12 @@ export class AppStack extends Stack {
         // has a REINDEX prereq: the publications index must be rebuilt so docs
         // carry `wcmAuthorDepartments` before the flag serves (resolvePublication-
         // DepartmentFilter reads === "on"; a not-yet-reindexed cluster degrades to
-        // no Department facet, never a 500). ON in staging post-reindex, OFF in
-        // prod pending its own reindex-then-flip.
-        SEARCH_PUB_DEPARTMENT_FILTER: env === "staging" ? "on" : "off",
+        // no Department facet, never a 500). ON in both envs: live on staging
+        // (reindexed). Prod is ARMED but NOT yet live (still on the pre-arm task
+        // def) AND not yet reindexed — so even once the next `cdk deploy
+        // --exclusively Sps-App-prod` activates it, the facet stays invisible until
+        // the prod publications index is reindexed (search:index:publications).
+        SEARCH_PUB_DEPARTMENT_FILTER: "on",
         // #295 / #723 -- funding-tab concept clause + result-SET gate field.
         // Enabled in both envs now that the funding index carries the descriptor
         // rollup. `fundedPubMeshUi` is the higher-fidelity gate (funded-pub MeSH)

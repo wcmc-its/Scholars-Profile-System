@@ -33,6 +33,7 @@ import {
   isMethodsLensFamilyFilterOn,
   isMethodsLensSensitiveGateOn,
 } from "@/lib/profile/methods-lens-flags";
+import { isProfileFacetRedesignEnabled } from "@/lib/profile/facet-redesign-flag";
 import { nihReporterPiUrl } from "@/lib/nih-reporter";
 import { profilePath } from "@/lib/profile-url";
 
@@ -399,6 +400,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   sensitiveGateActive={isMethodsLensSensitiveGateOn()}
                   familyFilterEnabled={isMethodsLensFamilyFilterOn()}
                   methodPagesEnabled={isMethodPagesEnabled()}
+                  facetRedesignEnabled={isProfileFacetRedesignEnabled()}
                   totalAcceptedPubs={profile.keywords.totalAcceptedPubs}
                   scholarCwid={profile.cwid}
                 />

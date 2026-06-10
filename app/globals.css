@@ -90,6 +90,17 @@
   --apollo-slate: #34506e;
   --apollo-slate-tint: #ecf1f6;
   --apollo-slate-tint-border: #d5e0ec;
+  /* Facet-filter redesign (PROFILE_FACET_REDESIGN, default OFF) — chip colors for
+     the unified filter bar + Topics/Methods facets, from the signed-off mockups.
+     Topic facet = slate-blue family; Method facet = indigo family. The app is
+     light-only in practice, so no .dark overrides are needed here. */
+  --color-facet-topic-fill: #E6F1FB;
+  --color-facet-topic-border: #378ADD;
+  --color-facet-topic-text: #0C447C;
+  --color-facet-topic-count: #185FA5;
+  --color-facet-method-fill: #EEEDFE;
+  --color-facet-method-text: #3C3489;
+  --color-facet-method-accent: #534AB7;
   /* Semantic green — success banners. */
   --apollo-green: #2e7d5b;
   --apollo-green-tint: #e7f3ee;
