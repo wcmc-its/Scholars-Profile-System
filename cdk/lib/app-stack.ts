@@ -1086,12 +1086,13 @@ export class AppStack extends Stack {
         METHODS_LENS_FAMILY_FILTER: env === "staging" ? "on" : "off",
         //   METHODS_LENS_PAGES -- standalone cross-scholar Method pages
         //     (/methods/**), search surfacing, and the per-scholar inbound
-        //     links. Default OFF in BOTH envs -- the page surface ships dark
-        //     independent of the data substrate, so a /methods/** route
-        //     notFound()s and no search candidate/badge or inbound link renders
-        //     until this is deliberately flipped on (after the master lens has
-        //     soaked). A Method page ALSO requires METHODS_LENS_ENABLED.
-        METHODS_LENS_PAGES: "off",
+        //     links. STAGING-ON (the master lens + sensitive gate above are
+        //     already staging-on and have soaked, and the scholar_family rollup
+        //     incl. pmids is loaded on staging via #819/#820); PROD stays off
+        //     until go-live. When off, a /methods/** route notFound()s and no
+        //     search candidate/badge or inbound link renders. A Method page ALSO
+        //     requires METHODS_LENS_ENABLED.
+        METHODS_LENS_PAGES: env === "staging" ? "on" : "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment

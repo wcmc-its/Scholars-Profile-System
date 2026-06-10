@@ -3421,7 +3421,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_PAGES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
