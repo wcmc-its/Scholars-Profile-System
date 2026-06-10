@@ -190,6 +190,12 @@ describe("ANALYTICS-02 (server) — search_query structured log (publications br
     // Issue #645 — recency tilt telemetry rides on the publications log line.
     expect(parsed.recencyMode).toBe("gentle");
     expect(parsed.recencyOriginYear).toBe(2026);
+    // Issue #298 §9.1 — concept-fallback telemetry is emitted unconditionally so
+    // the per-request log schema is stable. Here total=17 (> the sparse window)
+    // so the decision is not-shown; the fields carry their null/false defaults.
+    expect(parsed.conceptFallbackShown).toBe(false);
+    expect(parsed.conceptFallbackTrigger).toBeNull();
+    expect(parsed.conceptFallbackHits).toBeNull();
     expect(parsed.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 

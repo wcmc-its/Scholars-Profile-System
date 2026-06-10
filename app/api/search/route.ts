@@ -29,6 +29,10 @@ import {
   resolveGenericTermMode,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolveConceptFallbackSparseEnabled,
+  computeConceptFallback,
+  CONCEPT_FALLBACK_CAP,
+  CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
 import { getPeopleClassifierSets } from "@/lib/api/people-classifier-sets";
@@ -235,6 +239,57 @@ export async function GET(request: NextRequest) {
       matchProvenance: resolvePublicationMatchProvenance(),
     });
     const searchLatencyMs = Date.now() - searchStart;
+    // Issue #298 — concept-fallback co-render telemetry. The SSR page renders
+    // the broad-text fallback block inline; this branch logs whether the same
+    // decision WOULD fire so the post-ship fire-rate (§9.3) is observable on the
+    // JSON API too. `chipMode` is derived the same way the page derives it
+    // (conceptMode + meshStrict). The broad-count round-trip is paid only on
+    // candidate pages (resolved descriptor, non-expanded shape, first page,
+    // primary count within the sparse window) — same cost gate as the page.
+    const chipMode: "strict" | "expanded_default" | "expanded_narrow" =
+      conceptMode === "expanded" && !meshStrict
+        ? "expanded_default"
+        : conceptMode === "expanded" && meshStrict
+          ? "expanded_narrow"
+          : "strict";
+    const conceptShape =
+      result.queryShape === "concept_filtered" ||
+      result.queryShape === "concept_fallback";
+    let conceptFallbackBroadCount: number | null = null;
+    if (
+      effectiveMeshResolution !== null &&
+      chipMode !== "expanded_default" &&
+      conceptShape &&
+      page === 0 &&
+      result.total <= CONCEPT_FALLBACK_SPARSE_THRESHOLD
+    ) {
+      const broad = await searchPublications({
+        q,
+        page: 0,
+        sort: "relevance",
+        filters: {
+          yearMin,
+          yearMax,
+          publicationType,
+          journal: journal.length > 0 ? journal : undefined,
+          wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+        },
+        meshResolution: null,
+      });
+      conceptFallbackBroadCount = broad.total;
+    }
+    const conceptFallbackDecision = computeConceptFallback({
+      meshResolved: effectiveMeshResolution !== null,
+      meshOff,
+      chipMode,
+      total: result.total,
+      broadCount: conceptFallbackBroadCount ?? 0,
+      page,
+      sparseEnabled: resolveConceptFallbackSparseEnabled(),
+    });
+    const conceptFallbackHits = conceptFallbackDecision.shown
+      ? Math.min(conceptFallbackBroadCount ?? 0, CONCEPT_FALLBACK_CAP)
+      : null;
     // ANALYTICS-02 (D-02): structured search-query log (publications branch).
     // Issue #259 §1.2 — queryShape attributes result-count and ranking
     // changes to the code path that served the request. Same enum and
@@ -272,6 +327,13 @@ export async function GET(request: NextRequest) {
         // §6.2 — chip-engaged narrow-mode opt-in. True when `?mesh=strict`
         // present (and `?mesh=off` absent).
         meshStrict,
+        // Issue #298 §9.1 — concept-fallback co-render telemetry. `Shown` is
+        // true on either trigger; `Trigger` names which arm fired (null when
+        // not shown); `Hits` is the capped count of broad rows previewed (null
+        // when not shown). Lets §9.3 monitor the fire rate post-ship.
+        conceptFallbackShown: conceptFallbackDecision.shown,
+        conceptFallbackTrigger: conceptFallbackDecision.trigger,
+        conceptFallbackHits,
         // Issue #645 — recency tilt on the Relevance sort. `recencyMode` is the
         // resolved SEARCH_PUB_RELEVANCE_RECENCY value; `recencyOriginYear` is
         // the gauss origin actually used (null when the tilt wasn't applied —

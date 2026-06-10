@@ -330,6 +330,107 @@ export function resolvePublicationHighlight(): boolean {
 }
 
 /**
+ * Issue #298 §6 — sparse-trigger arm of the concept-fallback co-render. When a
+ * resolved-concept pub query returns a small handful of tagged hits (1..N) while
+ * a broad-text search would return many more, the page co-renders the broad-text
+ * results below the primary list (a divider band + a top-10 preview). This flag
+ * gates ONLY the sparse-trigger arm; the zero-trigger arm (acceptance #1 — a
+ * concept query with zero hits but a non-zero broad count) is unconditional, so
+ * an operator can disable the sparser sparse path without losing the dead-end
+ * escape on a truly empty concept page.
+ *
+ * Default on (`SEARCH_PUB_TAB_FALLBACK_SPARSE_OFF=1` rolls back the sparse arm
+ * only — any other value, including unset, leaves it on). A separate lever from
+ * the `SEARCH_PUB_TAB_*` ranking flags, with an independent rollback trigger.
+ */
+export function resolveConceptFallbackSparseEnabled(): boolean {
+  const v = process.env.SEARCH_PUB_TAB_FALLBACK_SPARSE_OFF;
+  if (v !== undefined && v !== "1" && v !== "0") {
+    console.warn(
+      `[search] ignoring unrecognized SEARCH_PUB_TAB_FALLBACK_SPARSE_OFF="${v}"; using "0" (sparse arm on)`,
+    );
+  }
+  return v !== "1";
+}
+
+/**
+ * Issue #298 §5 — inline cap on the broad-text fallback preview. Less than
+ * `PAGE_SIZE` (the fallback is a preview, not a working result set); a future
+ * redesign tunes it via the `ConceptFallbackResults` `cap` prop, but this is the
+ * page-render default.
+ */
+export const CONCEPT_FALLBACK_CAP = 10;
+
+/**
+ * Issue #298 §6 — sparse-trigger knobs. A resolved-concept pub query with
+ * `primaryTotal` in `1..SPARSE_THRESHOLD` triggers the sparse co-render only when
+ * the broad-text count is at least `SPARSE_RATIO ×` the primary count (so a
+ * fallback that wouldn't add much doesn't fire). Inline literals per the
+ * no-speculative-fields pattern — re-tunable only by SPEC change with paired
+ * test updates.
+ */
+export const CONCEPT_FALLBACK_SPARSE_THRESHOLD = 5;
+export const CONCEPT_FALLBACK_SPARSE_RATIO = 5;
+
+export type ConceptFallbackDecision = {
+  /** True on either the zero-trigger or the sparse-trigger render path. */
+  shown: boolean;
+  /** Which arm fired (`null` when not shown) — telemetry + render branch. */
+  trigger: "zero" | "sparse" | null;
+};
+
+/**
+ * Issue #298 §3 — the single co-render decision shared by the SSR page (render
+ * branch) and the route handler (telemetry). Pure: no DB/OpenSearch. Both the
+ * primary `total` and the broad-text `broadCount` are already computed by the
+ * existing #274 empty-state pre-compute; this only classifies them.
+ *
+ * The fallback block is suppressed (returns `shown: false`) when:
+ *   - no descriptor resolved (`meshResolved` false) — nothing to fall back FROM;
+ *   - the user opted out of concept admission (`meshOff`, scope=exact / §8 #1+#7)
+ *     — the broad results ARE the primary list;
+ *   - `concept_expanded` admission is active (`chipMode === "expanded_default"`,
+ *     acceptance #3) — the OR-of-evidence shape already includes the broad signal;
+ *   - the broad-text count is zero (§4.3 — nothing useful to co-render);
+ *   - we're past the first page of the primary list (`page > 0`, §8 #10) — the
+ *     fallback is a once-per-search affordance, not a per-page footer.
+ *
+ * Otherwise:
+ *   - `total === 0` → zero-trigger (acceptance #1), regardless of the ratio;
+ *   - `1 <= total <= SPARSE_THRESHOLD` AND `broadCount >= total * SPARSE_RATIO`
+ *     AND `sparseEnabled` → sparse-trigger (acceptance #2 / §8 #5,#9);
+ *   - anything else (a real primary result set, or a below-ratio sparse page) →
+ *     not shown.
+ */
+export function computeConceptFallback(input: {
+  meshResolved: boolean;
+  meshOff: boolean;
+  chipMode: "strict" | "expanded_default" | "expanded_narrow";
+  total: number;
+  broadCount: number;
+  page: number;
+  sparseEnabled: boolean;
+}): ConceptFallbackDecision {
+  const { meshResolved, meshOff, chipMode, total, broadCount, page, sparseEnabled } = input;
+  const notShown: ConceptFallbackDecision = { shown: false, trigger: null };
+  if (!meshResolved || meshOff) return notShown;
+  // §3 acceptance #3 — never under the default-expanded (OR-of-evidence) shape.
+  if (chipMode === "expanded_default") return notShown;
+  if (broadCount <= 0) return notShown;
+  // §8 #10 — fire once, on the first page only.
+  if (page > 0) return notShown;
+  if (total === 0) return { shown: true, trigger: "zero" };
+  if (
+    sparseEnabled &&
+    total <= CONCEPT_FALLBACK_SPARSE_THRESHOLD &&
+    broadCount >= total * CONCEPT_FALLBACK_SPARSE_RATIO
+  ) {
+    return { shown: true, trigger: "sparse" };
+  }
+  return notShown;
+}
+
+/**
  * Publications-tab MeSH match provenance — the publications twin of the People
  * tab's `SEARCH_PEOPLE_MATCH_PROVENANCE` (#688). When a topic query resolves to
  * a descriptor, the concept-mode admission/boost (`terms { meshDescriptorUi:
