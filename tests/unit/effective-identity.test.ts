@@ -14,8 +14,10 @@
  * §3 contract ("edit authorization reads the effective identity"). The SPEC's
  * `authorizeForRoute` helper does not yet exist in the tree, so the matrix uses
  * the live predicates directly (the documented §9 fallback); the load-bearing
- * unlock it proves is E3: a superuser impersonating a scholar may edit that
- * scholar's self-only `overview` — impossible for the superuser directly.
+ * unlock it proves is E3: a superuser impersonating a scholar edits that
+ * scholar's `overview` AS the scholar (the override + audit attribute the
+ * scholar's identity). Since #844 a superuser may also edit any `overview`
+ * directly (attributed to the admin) — impersonation is no longer the only path.
  *
  * `IMPERSONATION_ENABLED` / `IMPERSONATION_TTL_SECONDS` are read at call time by
  * `effective-identity.ts`, so each block sets exactly the env it needs and
@@ -361,8 +363,8 @@ describe("role × route matrix — overview edit authorization on the effective 
   );
 
   it("E3 — a superuser impersonating a scholar CAN edit that scholar's overview", () => {
-    // The unlock: the effective session is the scholar's (self), so the
-    // self-only `overview` predicate ALLOWS it — on the target's behalf.
+    // The unlock: the effective session is the scholar's (self), so the `overview`
+    // predicate ALLOWS it via the self branch — the edit is made AS the scholar.
     const effective: EditSession = { cwid: ROLE_FIXTURES.scholar, isSuperuser: false };
     expect(
       authorizeFieldEdit(effective, {
@@ -372,12 +374,15 @@ describe("role × route matrix — overview edit authorization on the effective 
     ).toEqual({ ok: true });
   });
 
-  it("E3 — a superuser acting as THEMSELVES cannot edit another scholar's overview directly", () => {
-    // The same superuser, NOT impersonating, has no path to the field — proving
-    // impersonation is the only way to make this self-only edit on their behalf.
+  it("#844 — a superuser acting as THEMSELVES may NOW edit another scholar's overview directly", () => {
+    // #844 widened `overview` to self-OR-superuser. The same superuser, NOT
+    // impersonating, can edit the bio directly — the audit attributes the
+    // superuser (no impersonated_cwid). Impersonation (E3 above) is no longer the
+    // ONLY path; its distinct effect is attributing the edit to the scholar's
+    // identity rather than the admin's.
     const real: EditSession = { cwid: SUPERUSER_FIXTURE, isSuperuser: true };
     expect(
       authorizeFieldEdit(real, { entityId: ROLE_FIXTURES.scholar, fieldName: "overview" }),
-    ).toEqual({ ok: false, reason: "not_self" });
+    ).toEqual({ ok: true });
   });
 });

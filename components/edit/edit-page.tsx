@@ -389,9 +389,9 @@ function renderPanel(
       const isHidden =
         ctx.scholar.suppression.ownRow !== null || ctx.scholar.suppression.adminRow !== null;
       // A superuser editing another scholar gets the same board reframed as a
-      // read-only completeness overview: copy shifts from "you" to the scholar's
-      // name, the Overview CTA is View-only (read-only for them), the
-      // Publications row drops its CTA (no superuser pubs tab), and the "Units
+      // completeness overview: copy shifts from "you" to the scholar's name, the
+      // Overview CTA edits the bio (#844 — admins may now author any overview),
+      // the Publications row drops its CTA (no superuser pubs tab), and the "Units
       // you manage" section is omitted — it's the viewer's units, not the
       // target's. (When a superuser edits their OWN profile this is mode='self'.)
       return (
@@ -446,15 +446,19 @@ function renderPanel(
         />
       );
     case "overview":
+      // #844 — a superuser may now edit any scholar's Overview on the superuser
+      // surface (previously read-only). The manual editor renders for every mode
+      // that reaches this case (self / proxy / unit-admin / superuser); the
+      // server re-authorizes the write per field (overview only for admins). The
+      // "View it →" link points at the target scholar's public profile in every
+      // mode so the edit → preview → live loop closes for the superuser too.
       return (
         <OverviewCard
           cwid={cwid}
           initialHtml={ctx.scholar.overview}
-          previewHref={mode === "self" ? profilePath(ctx.scholar.slug) : undefined}
-          readOnly={mode === "superuser"}
-          // The generator is an owner-self affordance only — a superuser viewing
-          // another scholar's bio gets the read-only arm with no Generate button
-          // (#742, spec § Authorization resolution A: admins stage, not edit here).
+          previewHref={profilePath(ctx.scholar.slug)}
+          // The generator stays an owner-self beta (#742) — a superuser editing
+          // another scholar's bio gets the plain manual editor, no Generate tab.
           generateEnabled={mode === "self" && isOverviewGenerateEnabled()}
         />
       );

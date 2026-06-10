@@ -117,7 +117,9 @@ describe("POST /api/edit/overview/generate", () => {
     expect(mockGenerateDraft).not.toHaveBeenCalled();
   });
 
-  it("403 not_self even for a superuser (overview is self-only, not inherited)", async () => {
+  it("403 not_self even for a superuser (the generator stays self-only after #844)", async () => {
+    // #844 widened the overview WRITE path to admins, but the generator keeps its
+    // explicit self-only check — a superuser cannot generate for another scholar.
     mockGetEditSession.mockResolvedValue(ADMIN);
     const res = await POST(post({ entityId: "self01" }));
     expect(res.status).toBe(403);

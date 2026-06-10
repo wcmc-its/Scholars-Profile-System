@@ -432,14 +432,14 @@ describe("EditPage router — superuser mode", () => {
     ).toBeTruthy();
   });
 
-  it("Home (superuser): third-person header, Overview is View-only, Publications has no CTA, no units section", () => {
+  it("Home (superuser): third-person header, Overview is editable (#844), Publications has no CTA, no units section", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="home" />);
     // Reframed, third-person heading.
     expect(screen.getByText("Profile completeness")).toBeTruthy();
-    // Overview is read-only for superusers → a "View" CTA (not Edit/Write) that
-    // hangs off the superuser base path.
+    // #844 — the Overview is now editable by a superuser → an "Edit" CTA (not the
+    // pre-#844 read-only "View") that hangs off the superuser base path.
     const overviewCta = screen.getByTestId("home-card-overview");
-    expect(overviewCta.textContent).toContain("View");
+    expect(overviewCta.textContent).toContain("Edit");
     expect(overviewCta.getAttribute("href")).toBe("/edit/scholar/other7?attr=overview");
     // Publications row is informational only — no deep link (no superuser pubs tab).
     expect(screen.getByTestId("home-item-publications")).toBeTruthy();
@@ -448,10 +448,26 @@ describe("EditPage router — superuser mode", () => {
     expect(screen.queryByTestId("home-units")).toBeNull();
   });
 
-  it("?attr=overview renders Overview read-only (no editor)", () => {
+  it("Home (superuser): no bio shows the actionable 'Write' CTA (#844 — admins author the bio)", () => {
+    const noBio: EditContext = {
+      ...superuserCtx,
+      scholar: { ...superuserCtx.scholar, overview: "   " },
+    };
+    render(<EditPage ctx={noBio} mode="superuser" attr="home" />);
+    const overview = screen.getByTestId("home-item-overview");
+    expect(overview.textContent).toContain("No overview yet");
+    const cta = screen.getByTestId("home-card-overview");
+    expect(cta.textContent).toContain("Write");
+    expect(cta.getAttribute("href")).toBe("/edit/scholar/other7?attr=overview");
+  });
+
+  it("?attr=overview renders the editable Overview editor for a superuser (#844)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="overview" />);
-    expect(screen.queryByTestId("mock-editor")).toBeNull();
-    expect(document.querySelector('[data-slot="overview-readonly"]')).not.toBeNull();
+    // The manual editor mounts (no longer the read-only arm) and a Save button is
+    // present; the previewHref points at the target scholar's public profile.
+    expect(screen.getByTestId("mock-editor")).toBeTruthy();
+    expect(screen.getByTestId("overview-save")).toBeTruthy();
+    expect(document.querySelector('[data-slot="overview-readonly"]')).toBeNull();
   });
 
   it("?attr=profile-url renders the SlugCard pre-filled with the override", () => {

@@ -4,11 +4,12 @@
  *
  * Assembles the scholar's facts payload, calls the AI Gateway, and returns a
  * grounded, sanitized HTML draft. It NEVER writes the DB — the draft lands in
- * the `/edit` Tiptap editor as unsaved local state, and the existing owner-gated
+ * the `/edit` Tiptap editor as unsaved local state, and the existing
  * `POST /api/edit/field` is the only write path (SPEC § The generate flow). The
- * single-scholar flow is owner-only: the actor may generate only for THEIR OWN
- * profile (`authorizeFieldEdit(..., fieldName:"overview")`), mirroring the
- * self-only overview edit; the bulk/admin staging path is a separate SPEC slice.
+ * single-scholar flow is self-only: the actor may generate only for THEIR OWN
+ * profile (a direct `session.cwid === entityId` check). This generator stays
+ * self-only even though #844 widened the OVERVIEW WRITE path to superusers — the
+ * bulk/admin staging path is a separate SPEC slice.
  *
  * Flag-gated behind `SELF_EDIT_OVERVIEW_GENERATE` (off ⇒ 404), mirroring the
  * slug-request route's dormancy.
@@ -16,7 +17,7 @@
 import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
-import { authorizeFieldEdit, logEditDenial } from "@/lib/edit/authz";
+import { logEditDenial } from "@/lib/edit/authz";
 import { assembleOverviewFacts, hasSufficientFacts } from "@/lib/edit/overview-facts";
 import { generateOverviewDraft, isOverviewGenerateEnabled } from "@/lib/edit/overview-generator";
 import { normalizeOverviewParams, normalizeOverviewSelection } from "@/lib/edit/overview-params";
@@ -55,17 +56,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // inside the facts queries. An empty selection ⇒ the facts assembler's default.
   const selection = normalizeOverviewSelection(req.ctx.body.selection);
 
-  // --- authorization: owner-only (overview is self-only — a superuser does not
-  //     inherit it, matching authorizeFieldEdit). ---
-  const authz = authorizeFieldEdit(session, { entityId, fieldName: "overview" });
-  if (!authz.ok) {
+  // --- authorization: owner-only. The single-scholar generator is a self-only
+  //     #742 beta — a superuser does NOT inherit it (#844 widened the OVERVIEW
+  //     WRITE path to admins, but deliberately left the generator self-only; the
+  //     bulk/admin staging path is a separate SPEC slice). So this checks
+  //     self-identity directly rather than the now-widened `authorizeFieldEdit`. ---
+  if (session.cwid !== entityId) {
     logEditDenial({
       actorCwid: session.cwid,
       targetCwid: entityId,
       path: PATH,
-      reason: authz.reason,
+      reason: "not_self",
     });
-    return editError(403, authz.reason);
+    return editError(403, "not_self");
   }
 
   // --- per-cwid rate limit (DB write) + facts assembly (DB read). Both touch

@@ -392,6 +392,103 @@ describe("POST /api/edit/field", () => {
   });
 });
 
+// #844 — a superuser may edit ANY scholar's overview (previously owner-only).
+// The widening is scoped to `overview`; the audit row attributes the acting
+// superuser (not the target scholar) and records no impersonation.
+describe("POST /api/edit/field — superuser cross-scholar overview (#844)", () => {
+  it("allows a superuser editing another scholar's overview — 200, one tx + audit row", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "overview", value: "<p>Admin-authored bio.</p>" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.fieldName).toBe("overview");
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
+    expect(mockReflectOverviewEdit).toHaveBeenCalled();
+  });
+
+  it("attributes the acting SUPERUSER (not the target scholar) in the audit row, no impersonation", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "overview", value: "<p>bio</p>" }),
+    );
+    expect(res.status).toBe(200);
+    // appendAuditRow binds the positional template values after the strings
+    // array: [strings, actor_cwid, target_entity_type, target_entity_id, action,
+    //   fields_changed, before_values, after_values, row_hash, ts, request_id,
+    //   impersonated_cwid]. The acting admin is the actor; the target is the
+    //   scholar; impersonated_cwid (last positional value) is null.
+    const args = mockExecuteRaw.mock.calls[0] as unknown[];
+    expect(args[1]).toBe("adm001"); // actor_cwid — the acting superuser
+    expect(args[3]).toBe("other9"); // target_entity_id — the edited scholar
+    expect(args[args.length - 1]).toBeNull(); // impersonated_cwid — not impersonating
+  });
+
+  it("records the override + provenance against the acting superuser ('authored', no generation)", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "overview", value: "<p>bio</p>" }),
+    );
+    expect(res.status).toBe(200);
+    // FieldOverride.actorCwid records the last writer = the acting superuser.
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ entityId: "other9", actorCwid: "adm001" }),
+        update: expect.objectContaining({ actorCwid: "adm001" }),
+      }),
+    );
+    // An admin save is hand-authored — no sourceGenerationId, so provenance is
+    // "authored" and attributed to the superuser; the generation is never read.
+    expect(mockTxGenerationFindUnique).not.toHaveBeenCalled();
+    expect(mockTxProvenanceUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          cwid: "other9",
+          origin: "authored",
+          model: null,
+          sourceGenerationId: null,
+          updatedByCwid: "adm001",
+        }),
+      }),
+    );
+  });
+
+  it("does NOT record a unit-admin/proxy 'edited_via' tag for a superuser overview edit", async () => {
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "overview", value: "<p>bio</p>" }),
+    );
+    expect(res.status).toBe(200);
+    // The superuser passes the primary authz gate, so the proxy / unit-admin
+    // fallback branches never run — no `edited_via` is written to afterValues.
+    const args = mockExecuteRaw.mock.calls[0] as unknown[];
+    const edited = args.find(
+      (v): v is string => typeof v === "string" && v.includes("edited_via"),
+    );
+    expect(edited).toBeUndefined();
+  });
+
+  it("does NOT widen the superuser path to selectedHighlightPmids (overview-only) — 403", async () => {
+    const original = process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    try {
+      const res = await POST(
+        post({ entityType: "scholar", entityId: "other9", fieldName: "selectedHighlightPmids", value: ["100"] }),
+      );
+      expect(res.status).toBe(403);
+      expect(mockTransaction).not.toHaveBeenCalled();
+    } finally {
+      if (original === undefined) delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+      else process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = original;
+    }
+  });
+});
+
 // Amendment 4 — org-unit administrator as profile editor (scholar-proxy-unit-
 // admin-amendment.md). The route-level WIRING of the unit-admin branch beside
 // the #779 proxy branch (membership + cascade correctness is unit-tested in

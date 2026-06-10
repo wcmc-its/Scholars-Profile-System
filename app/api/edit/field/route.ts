@@ -5,9 +5,10 @@
  * Two write surfaces share this endpoint:
  *
  *  - **Scholar** (#356, `self-edit-spec.md`) — `entityType: "scholar"`, fields
- *    `overview` (self-only, sanitized) and `slug` (superuser-only, format-
- *    validated, collision-checked). The override row commits with a B03 audit
- *    row in one transaction; a `slug` override also reconciles `Scholar.slug`
+ *    `overview` (self OR superuser — #844 widened the bio to admins; also editable
+ *    by a granted proxy / unit admin, sanitized) and `slug` (superuser-only,
+ *    format-validated, collision-checked). The override row commits with a B03
+ *    audit row in one transaction; a `slug` override also reconciles `Scholar.slug`
  *    in-transaction (#497 §5.1, Option B).
  *
  *  - **Department / Division** (#540 Phase 5, ADR-005 Amendment 1 § A1.1) —

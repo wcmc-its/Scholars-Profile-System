@@ -155,12 +155,20 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
   // re-sanitises the stored override on read via `sanitizeOverviewHtml`
   // (DOMPurify). This is the same render path the public profile uses; the
   // dangerouslySetInnerHTML below is the documented trust boundary.
+  //
+  // #844 — this arm is no longer reached from the live `/edit` surface: a
+  // superuser now gets the editable manual editor on another scholar's bio
+  // (`edit-page.tsx` stopped forcing `readOnly` for the superuser mode), and the
+  // self / proxy / unit-admin surfaces were always editable. The component (and
+  // its `readOnly` prop) are retained as a defensive, genuinely-read-only render
+  // for any future caller; the copy no longer claims ONLY the owner can edit,
+  // since superusers can.
   const hasBio = initialHtml.trim().length > 0;
   return (
     <EditPanel
       slot="overview-card"
       heading="Overview"
-      description="Only the profile owner can edit the bio."
+      description="This bio is shown read-only here."
     >
       {hasBio ? (
         <div
