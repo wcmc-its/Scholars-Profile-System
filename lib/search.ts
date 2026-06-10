@@ -327,6 +327,16 @@ export const publicationsIndexMapping = {
       // semantics, identical to the wcmAuthorPositions pattern. The nested
       // `wcmAuthors` field stays for chip rendering on result rows.
       wcmAuthorCwids: { type: "keyword" },
+      // Issue #837 — keyword array of the department key(s) of this pub's
+      // displayable WCM authors (FK `deptCode`, or a `name:<deptName>`
+      // long-tail key), denormalized from the per-author Scholar.deptCode the
+      // indexer joins. Powers the Publications-tab Department facet's
+      // `terms` filter + bucket aggregation, the same shape as
+      // `wcmAuthorCwids`. OMITTED on pubs whose WCM authors carry no
+      // department (omit-on-empty). Only consumed under
+      // `SEARCH_PUB_DEPARTMENT_FILTER`; populated on every reindex so the
+      // flag flip needs no second reindex.
+      wcmAuthorDepartments: { type: "keyword" },
       // Pre-rendered author chips for the WCM-coauthor stack on results.
       wcmAuthors: {
         type: "nested",

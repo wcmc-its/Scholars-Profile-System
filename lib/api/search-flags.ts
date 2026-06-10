@@ -447,3 +447,26 @@ export function computeConceptFallback(input: {
 export function resolvePublicationMatchProvenance(): boolean {
   return process.env.SEARCH_PUB_MATCH_PROVENANCE !== "off";
 }
+
+/**
+ * Issue #837 — Publications-tab Department facet. When on, `searchPublications`
+ * adds (a) a `terms { wcmAuthorDepartments }` post-filter for the user's
+ * selected department key(s) and (b) a department bucket aggregation, and the
+ * /search page renders a Department `FacetGroup` in the Publications sidebar.
+ * Attribution is union: a publication appears under EVERY department any of its
+ * displayable WCM authors belongs to.
+ *
+ * Default OFF (`SEARCH_PUB_DEPARTMENT_FILTER=on` enables). This is a
+ * reindex-then-flip rollout like the other search-index features here: the
+ * `wcmAuthorDepartments` field the filter/agg read is populated by the
+ * search-index ETL (`buildPublicationDoc`), so the publications index must be
+ * reindexed with the new field BEFORE flipping the flag on — flipping first
+ * would filter/aggregate an absent field and surface an empty facet.
+ *
+ * Deliberately a `=== "on"` default-off gate (not the `!== "off"` default-on
+ * shape of the presentation flags above) so the feature ships inert until the
+ * reindex lands.
+ */
+export function resolvePublicationDepartmentFilter(): boolean {
+  return process.env.SEARCH_PUB_DEPARTMENT_FILTER === "on";
+}

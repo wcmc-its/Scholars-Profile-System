@@ -34,6 +34,7 @@ import {
   resolvePeopleMatchExplain,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolvePublicationDepartmentFilter,
   resolveConceptFallbackSparseEnabled,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
@@ -251,6 +252,11 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
     (r): r is "first" | "senior" | "middle" => r === "first" || r === "senior" || r === "middle",
   );
   const wcmAuthor = parseList(sp.wcmAuthor);
+  // Issue #837 — Publications-tab Department facet. Reuses the shared
+  // `?department=` URL param (the funding tab uses it too; only one of the two
+  // tabs is active at a time). Only forwarded to `searchPublications` when the
+  // flag is on; otherwise the array is dropped so a stale URL is inert.
+  const pubDepartment = resolvePublicationDepartmentFilter() ? parseList(sp.department) : [];
   // Mentoring activity facet — multi-select on mentee program at time of
   // mentorship. URL param `mentoringProgram` accepts repeated values from
   // the set {md, mdphd, phd, postdoc, ecr}.
@@ -334,6 +340,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+        department: pubDepartment.length > 0 ? pubDepartment : undefined,
         mentoringPrograms: mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
       // Issue #259 §5 + §1.8 — taxonomyMatch is computed unconditionally
@@ -491,6 +498,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                 journal={journal}
                 wcmAuthorRole={wcmAuthorRole}
                 wcmAuthor={wcmAuthor}
+                department={pubDepartment}
                 mentoringProgram={mentoringProgram}
                 resultPromise={searchPublications({
                   q,
@@ -504,6 +512,8 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
                     wcmAuthorRole:
                       wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                     wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+                    department:
+                      pubDepartment.length > 0 ? pubDepartment : undefined,
                     mentoringPrograms:
                       mentoringProgram.length > 0 ? mentoringProgram : undefined,
                   },
@@ -1032,6 +1042,7 @@ async function PublicationsResults({
   journal,
   wcmAuthorRole,
   wcmAuthor,
+  department,
   mentoringProgram,
   resultPromise,
   meshResolution,
@@ -1050,6 +1061,9 @@ async function PublicationsResults({
   journal: string[];
   wcmAuthorRole: Array<"first" | "senior" | "middle">;
   wcmAuthor: string[];
+  /** Issue #837 — active WCM-author department keys (empty when the flag is
+   *  off; the page drops the param in that case). */
+  department: string[];
   mentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   /** Perf streaming — see PeopleResults.resultPromise. */
   resultPromise: Promise<PubsResultData>;
@@ -1072,6 +1086,13 @@ async function PublicationsResults({
   scopeHrefs: Record<Scope, string>;
 }) {
   const result = await resultPromise;
+  // Issue #837 — resolve WCM-author department keys to display labels for the
+  // Department facet + chips, reusing the People-tab's one-shot resolver.
+  // Loaded only when the facet is live (a department bucket or an active
+  // selection exists), so flag-off renders pay nothing.
+  const departmentLive =
+    result.facets.departments.length > 0 || department.length > 0;
+  const deptLabelMap = departmentLive ? await resolveDeptDivLabels() : new Map<string, string>();
   // Issue #274 — concept-aware empty state (moved here from the page so the
   // broad-count fallback streams with the results). Fires only when a
   // descriptor resolved, the result is empty, and we're not in default-expanded
@@ -1116,6 +1137,7 @@ async function PublicationsResults({
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
         wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+        department: department.length > 0 ? department : undefined,
         mentoringPrograms:
           mentoringProgram.length > 0 ? mentoringProgram : undefined,
       },
@@ -1174,6 +1196,7 @@ async function PublicationsResults({
     for (const v of journal) sp.append("journal", v);
     for (const v of wcmAuthorRole) sp.append("wcmAuthorRole", v);
     for (const v of wcmAuthor) sp.append("wcmAuthor", v);
+    for (const v of department) sp.append("department", v);
     for (const v of mentoringProgram) sp.append("mentoringProgram", v);
     if (scope !== "expanded") sp.set("match", scope);
     if (resetPage) sp.delete("page");
@@ -1252,6 +1275,15 @@ async function PublicationsResults({
   for (const v of journal) {
     chips.push({ label: v, removeHref: removeMulti("journal", v) });
   }
+  // Issue #837 — Department chips. Label resolved via the dept/div map (falls
+  // back to the bare key — e.g. a `name:<dept>` long-tail value — through
+  // `deptDivLabel`).
+  for (const v of department) {
+    chips.push({
+      label: deptDivLabel(v, deptLabelMap),
+      removeHref: removeMulti("department", v),
+    });
+  }
   const MENTORING_PROGRAM_LABEL: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", string> = {
     md: "MD mentee",
     mdphd: "MD-PhD mentee",
@@ -1299,6 +1331,30 @@ async function PublicationsResults({
       toggleHref: toggleHref("wcmAuthor", a.cwid),
     }));
 
+  // Issue #837 — Department facet items. Resolve each bucket's display label
+  // and pull active selections to the head so they survive the collapse
+  // cutoff (the same ordering JournalFacet uses). Empty when the flag is off.
+  const departmentItems: Array<{
+    value: string;
+    label: string;
+    count: number;
+    isActive: boolean;
+    href: string;
+  }> = (() => {
+    const active: typeof result.facets.departments = [];
+    const rest: typeof result.facets.departments = [];
+    for (const d of result.facets.departments) {
+      (department.includes(d.value) ? active : rest).push(d);
+    }
+    return [...active, ...rest].map((d) => ({
+      value: d.value,
+      label: deptDivLabel(d.value, deptLabelMap),
+      count: d.count,
+      isActive: department.includes(d.value),
+      href: toggleHref("department", d.value),
+    }));
+  })();
+
   // PLAN R2/R3 — the unified scope control + quiet explanation line replace the
   // §638 MeSH boost banner and the §265 interpretation popover. Rendered only
   // when a query→MeSH mapping resolved (`concept`).
@@ -1320,6 +1376,7 @@ async function PublicationsResults({
         authorTotalDistinct={result.facets.wcmAuthorsTotal}
         wcmAuthorRoleCounts={result.facets.wcmAuthorRoles}
         activeWcmAuthorRole={wcmAuthorRole}
+        departmentItems={departmentItems}
         activeMentoringProgram={mentoringProgram}
         mentoringProgramCounts={result.facets.mentoringPrograms}
         toggleHref={toggleHref}
@@ -1360,6 +1417,7 @@ async function PublicationsResults({
                 journal: journal.length > 0 ? journal : undefined,
                 wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
                 wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+                department: department.length > 0 ? department : undefined,
               }}
               sort={sort}
               total={result.total}
@@ -2236,6 +2294,7 @@ function FacetSidebarPubs({
   authorTotalDistinct,
   wcmAuthorRoleCounts,
   activeWcmAuthorRole,
+  departmentItems,
   activeMentoringProgram,
   mentoringProgramCounts,
   toggleHref,
@@ -2251,6 +2310,16 @@ function FacetSidebarPubs({
   authorTotalDistinct: number;
   wcmAuthorRoleCounts: { first: number; senior: number; middle: number };
   activeWcmAuthorRole: Array<"first" | "senior" | "middle">;
+  /** Issue #837 — Department facet rows (label-resolved, active-first,
+   *  count-desc). Empty when `SEARCH_PUB_DEPARTMENT_FILTER` is off, so the
+   *  group renders nothing. */
+  departmentItems: Array<{
+    value: string;
+    label: string;
+    count: number;
+    isActive: boolean;
+    href: string;
+  }>;
   activeMentoringProgram: Array<"md" | "mdphd" | "phd" | "postdoc" | "ecr">;
   mentoringProgramCounts: Record<"md" | "mdphd" | "phd" | "postdoc" | "ecr", number>;
   toggleHref: (axis: string, value: string) => string;
@@ -2300,6 +2369,24 @@ function FacetSidebarPubs({
           users combine them ("first-author papers by Wolf"). */}
       {authorItems.length > 0 ? (
         <AuthorFacet items={authorItems} totalDistinct={authorTotalDistinct} />
+      ) : null}
+
+      {/* Issue #837 — Department facet (WCM-author department). Renders only
+          when the flag is on AND the result set has departments (or an active
+          selection); empty `departmentItems` ⇒ no group. Collapses past 6
+          like the People-tab dept facet. */}
+      {departmentItems.length > 0 ? (
+        <FacetGroup label="Department" collapseAfter={6}>
+          {departmentItems.map((d) => (
+            <FacetCheckbox
+              key={d.value}
+              label={d.label}
+              count={d.count}
+              isActive={d.isActive}
+              href={d.href}
+            />
+          ))}
+        </FacetGroup>
       ) : null}
 
       <FacetGroup label="Year (since)">
