@@ -1110,6 +1110,12 @@ export class AppStack extends Stack {
         //     search candidate/badge or inbound link renders. A Method page ALSO
         //     requires METHODS_LENS_ENABLED.
         METHODS_LENS_PAGES: env === "staging" ? "on" : "off",
+        // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
+        // the Topics/Methods facets + a unified filter bar, fully gated. Default
+        // OFF in every env until the redesign soaks; while off the rendered
+        // output is byte-identical to today. Flip to "on" here AND in
+        // `.env.local` together (flag-parity rule), then cdk deploy Sps-App-<env>.
+        PROFILE_FACET_REDESIGN: "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment

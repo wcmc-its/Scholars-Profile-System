@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, EyeOff } from "lucide-react";
+import { ArrowUpRight, EyeOff, Square, SquareCheck, X } from "lucide-react";
 
 import { MethodsHeading } from "@/components/profile/methods-heading";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,6 +42,8 @@ export function MethodsSection({
   selectedFamilyIds,
   onFamilyToggle,
   onRevealedFamilies,
+  facetRedesignEnabled = false,
+  familyCounts = null,
 }: {
   families: ScholarFamilyView[];
   /** Cwid of the profile being viewed; needed for the #801 reveal fetch. */
@@ -65,6 +67,16 @@ export function MethodsSection({
   /** #819 — hands the revealed (#801) families back up to the owner so the family
    *  filter can resolve their PMIDs; fired once when the reveal fetch resolves. */
   onRevealedFamilies?: (families: ScholarFamilyView[]) => void;
+  /** PROFILE_FACET_REDESIGN — when off (default), this section renders EXACTLY
+   *  as today (the #829 selected pill, #801 EyeOff reveal, #824 ArrowUpRight
+   *  browse-out link, whole-row overlay). When on, rows become explicit checkbox
+   *  rows with contextual "{in} of {total}" counts and zero-count dimming.
+   *  Additive: all new UI lives under this flag. */
+  facetRedesignEnabled?: boolean;
+  /** Contextual ("exclude-own-facet") per-family counts keyed by `familyId`,
+   *  supplied by the cluster only when the redesign is on AND a filter is active.
+   *  null = no active filter (or flag off) → render plain `pubCount`. */
+  familyCounts?: Map<string, number> | null;
 }) {
   const [revealed, setRevealed] = useState<ScholarFamilyView[]>([]);
 
@@ -111,24 +123,171 @@ export function MethodsSection({
     <section className="mb-6">
       <MethodsHeading pagesEnabled={pagesEnabled} />
       <p className="text-muted-foreground mb-3 text-sm">
-        Inferred from the datasets, models &amp; methods named in this scholar&apos;s publications
-        {filterable ? " · click to filter publications" : ""}
+        {facetRedesignEnabled && familyCounts
+          ? "Counts shown within current filter"
+          : facetRedesignEnabled
+            ? "Inferred from the datasets, models & methods named in this scholar's publications · select to filter"
+            : `Inferred from the datasets, models & methods named in this scholar's publications${filterable ? " · click to filter publications" : ""}`}
       </p>
       <TooltipProvider>
-        <ul className="divide-border border-border divide-y border-t">
-          {visible.map((f) => (
-            <li
-              key={f.familyId}
-              className={
-                // #819 — when the row is a filter toggle, `relative` anchors the
-                // button's `after:inset-0` overlay so the WHOLE row is the click
-                // target (the interactive children below opt out via `z-10`).
-                filterable
-                  ? "relative flex items-start gap-3 py-2.5"
-                  : "flex items-start gap-3 py-2.5"
-              }
-            >
-              <div className="min-w-0 flex-1">
+        <ul
+          className={
+            facetRedesignEnabled
+              ? "border-border-strong divide-border-strong divide-y overflow-hidden rounded-lg border bg-background"
+              : "divide-border border-border divide-y border-t"
+          }
+        >
+          {visible.map((f) => {
+            // PROFILE_FACET_REDESIGN — explicit checkbox rows (translated from the
+            // signed-off mockups: Tabler ti-square/ti-square-check → lucide
+            // Square/SquareCheck, literal hex → the --color-facet-method-* tokens).
+            // The WHOLE row toggles the family (mirrors today's whole-row overlay);
+            // the #801 EyeOff tooltip and #824 ArrowUpRight browse-out link stay
+            // independently clickable via z-10. Flag-off path below is byte-identical.
+            if (facetRedesignEnabled) {
+              const isSelected = selectedSet.has(f.familyId);
+              const inFilter = familyCounts ? (familyCounts.get(f.familyId) ?? 0) : undefined;
+              const zeroCount = inFilter === 0;
+              return (
+                <li
+                  key={f.familyId}
+                  className={
+                    isSelected
+                      ? "relative flex items-center gap-3 bg-[var(--color-facet-method-fill)] px-3.5 py-3"
+                      : "relative flex items-center gap-3 px-3.5 py-3"
+                  }
+                >
+                  {/* Whole-row toggle: a full-bleed transparent button so any click
+                      on the row toggles the family. Interactive children (EyeOff,
+                      ArrowUpRight) sit above it via z-10. */}
+                  {filterable ? (
+                    <button
+                      type="button"
+                      aria-pressed={isSelected}
+                      aria-label={f.familyLabel}
+                      onClick={() => onFamilyToggle?.(f.familyId)}
+                      className="absolute inset-0"
+                    />
+                  ) : null}
+                  {isSelected ? (
+                    <SquareCheck
+                      className="size-[18px] shrink-0 text-[var(--color-facet-method-accent)]"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Square
+                      className={
+                        zeroCount
+                          ? "text-muted-foreground size-[18px] shrink-0 opacity-45"
+                          : "text-muted-foreground size-[18px] shrink-0"
+                      }
+                      aria-hidden="true"
+                    />
+                  )}
+                  <div className={zeroCount ? "min-w-0 flex-1 opacity-45" : "min-w-0 flex-1"}>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={
+                          isSelected
+                            ? "text-sm font-medium text-[var(--color-facet-method-text)]"
+                            : "text-foreground text-sm font-medium"
+                        }
+                      >
+                        {f.familyLabel}
+                      </span>
+                      {f.sensitive ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className="text-muted-foreground relative z-10 inline-flex items-center"
+                              aria-label="Hidden from the public profile"
+                            >
+                              <EyeOff className="size-3.5" aria-hidden="true" />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-xs text-sm leading-relaxed">
+                            Hidden from the public profile — shown only to the scholar and site
+                            admins (audience-gated family).
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                    </div>
+                    {f.exemplarTools.length > 0 ? (
+                      <div
+                        className={
+                          isSelected
+                            ? "mt-0.5 truncate font-mono text-xs text-[var(--color-facet-method-accent)]"
+                            : "text-muted-foreground mt-0.5 truncate font-mono text-xs"
+                        }
+                      >
+                        {f.exemplarTools.join(" · ")}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span
+                    className={
+                      zeroCount
+                        ? "shrink-0 text-sm font-medium tabular-nums opacity-45"
+                        : isSelected
+                          ? "shrink-0 text-sm font-medium tabular-nums text-[var(--color-facet-method-text)]"
+                          : "text-foreground shrink-0 text-sm font-medium tabular-nums"
+                    }
+                  >
+                    {inFilter !== undefined ? (
+                      <>
+                        {inFilter}{" "}
+                        <span
+                          className={
+                            isSelected ? "font-normal text-[var(--color-facet-method-accent)]" : ""
+                          }
+                        >
+                          of {f.pubCount}
+                        </span>
+                      </>
+                    ) : (
+                      f.pubCount
+                    )}
+                  </span>
+                  {/* Selected: a trailing remove (X) target. z-10 so it stays
+                      clickable above the whole-row toggle overlay. */}
+                  {isSelected && filterable ? (
+                    <button
+                      type="button"
+                      aria-label={`Remove ${f.familyLabel} filter`}
+                      onClick={() => onFamilyToggle?.(f.familyId)}
+                      className="relative z-10 inline-flex shrink-0 items-center text-[var(--color-facet-method-accent)]"
+                    >
+                      <X className="size-3.5" aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  {/* METHODS_LENS_PAGES — SEPARATE trailing browse-out link (#824),
+                      independently clickable above the row toggle via z-10. */}
+                  {pagesEnabled && !f.sensitive ? (
+                    <Link
+                      href={methodFamilyPath(f.supercategory, f.familyId, f.familyLabel)}
+                      aria-label={`Researchers using ${f.familyLabel}`}
+                      className="text-muted-foreground relative z-10 inline-flex shrink-0 items-center hover:text-[var(--color-accent-slate)]"
+                    >
+                      <ArrowUpRight className="size-4" aria-hidden="true" />
+                    </Link>
+                  ) : null}
+                </li>
+              );
+            }
+
+            return (
+              <li
+                key={f.familyId}
+                className={
+                  // #819 — when the row is a filter toggle, `relative` anchors the
+                  // button's `after:inset-0` overlay so the WHOLE row is the click
+                  // target (the interactive children below opt out via `z-10`).
+                  filterable
+                    ? "relative flex items-start gap-3 py-2.5"
+                    : "flex items-start gap-3 py-2.5"
+                }
+              >
+                <div className="min-w-0 flex-1">
                 <div className="text-foreground flex items-center gap-1.5 text-sm">
                   {filterable ? (
                     <button
@@ -208,8 +367,9 @@ export function MethodsSection({
                   <ArrowUpRight className="size-4" aria-hidden="true" />
                 </Link>
               ) : null}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </TooltipProvider>
       {remaining > 0 ? (

@@ -10,6 +10,8 @@ import {
   type PositionFilter,
   type SelectedPositions,
 } from "@/components/profile/author-position-badge";
+import { FilterBar } from "@/components/profile/filter-bar";
+import { computeFacetCounts } from "@/lib/profile/facet-counts";
 import { MethodsSection } from "@/components/profile/methods-section";
 import { PublicationsSection } from "@/components/profile/publications-section";
 import { TopicsSection } from "@/components/profile/topics-section";
@@ -44,6 +46,11 @@ type ProfilePubsClusterProps = {
    *  link to the cross-scholar `/methods/**` pages. Distinct from the #819 filter:
    *  a separate trailing affordance that navigates, never the label button. */
   methodPagesEnabled: boolean;
+  /** PROFILE_FACET_REDESIGN — the facet-filter redesign gate. When off, the
+   *  rendered output is byte-identical to today (prose ActiveFilterBanner, plain
+   *  counts). When on, the unified FilterBar, contextual facet counts, and the
+   *  explicit empty state turn on. Additive: all new UI lives under this branch. */
+  facetRedesignEnabled: boolean;
   totalAcceptedPubs: number;
   /** Cwid of the scholar whose profile is being rendered. Threaded down
    *  to <PublicationsSection> → <PublicationRow> → <AuthorChipRow> so
@@ -68,6 +75,7 @@ function ProfilePubsClusterInner({
   sensitiveGateActive,
   familyFilterEnabled,
   methodPagesEnabled,
+  facetRedesignEnabled,
   totalAcceptedPubs,
   scholarCwid,
 }: ProfilePubsClusterProps) {
@@ -258,6 +266,57 @@ function ProfilePubsClusterInner({
       .map((f) => ({ familyId: f.familyId, familyLabel: f.familyLabel }));
   }, [allFamilies, selectedFamilyIds]);
 
+  // PROFILE_FACET_REDESIGN — contextual ("exclude-own-facet") counts for the
+  // Topics chips and Methods rows, so each option shows how many in-context pubs
+  // it covers under the OTHER active facets. Only computed when the redesign is
+  // on AND a filter is active (the default state shows plain profile-wide
+  // counts); null otherwise so the sections fall back to their existing counts.
+  // Author-position composes as a hidden facet here (no chip in the bar) by
+  // feeding `matchesPosition` — it narrows every count but is never displayed.
+  const facetCounts = useMemo(
+    () =>
+      facetRedesignEnabled && filterActive
+        ? computeFacetCounts({
+            publications,
+            selectedUis,
+            selectedFamilyIds,
+            familyPmids,
+            matchesPosition: (pub) =>
+              positions.length === 0 ||
+              matchesAnyPosition(
+                deriveAuthorPositionRole(pub.authorship, pub.wcmAuthors),
+                positions,
+              ),
+            topicTotals: new Map(
+              keywords
+                .filter((k) => k.descriptorUi)
+                .map((k) => [k.descriptorUi as string, k.pubCount]),
+            ),
+            familyTotals: new Map(allFamilies.map((f) => [f.familyId, f.pubCount])),
+          })
+        : null,
+    [
+      facetRedesignEnabled,
+      filterActive,
+      publications,
+      selectedUis,
+      selectedFamilyIds,
+      positions,
+      familyPmids,
+      keywords,
+      allFamilies,
+    ],
+  );
+
+  // The selected topics, mapped to the FilterBar's {ui, label} chip shape.
+  const selectedTopicChips = useMemo(
+    () =>
+      selectedKeywords
+        .filter((k) => k.descriptorUi)
+        .map((k) => ({ ui: k.descriptorUi as string, label: k.displayLabel })),
+    [selectedKeywords],
+  );
+
   // #118 — the reciter→dynamodb consistency window. Fetched client-side
   // because the 30-min window can't be baked into the 24h-ISR profile page.
   // While open, the Topics pills would be transiently incomplete, so the
@@ -288,6 +347,8 @@ function ProfilePubsClusterInner({
           selectedUis={selectedUis}
           onToggle={onToggle}
           onClearAll={onClearAll}
+          facetRedesignEnabled={facetRedesignEnabled}
+          topicCounts={facetCounts?.topic ?? null}
         />
       ) : null}
 
@@ -302,15 +363,52 @@ function ProfilePubsClusterInner({
         selectedFamilyIds={selectedFamilyIds}
         onFamilyToggle={onFamilyToggle}
         onRevealedFamilies={setRevealedFamilies}
+        facetRedesignEnabled={facetRedesignEnabled}
+        familyCounts={facetCounts?.family ?? null}
       />
 
-      <ActiveFilterBanner
-        count={filteredPublications.length}
-        selected={selectedKeywords}
-        positions={positions}
-        families={selectedFamilies}
-        onClearAll={onClearAll}
-      />
+      {/* PROFILE_FACET_REDESIGN — the unified chip bar replaces the prose banner
+          when the redesign is on; otherwise the existing banner renders verbatim.
+          FilterBar returns null when nothing is selected. */}
+      {facetRedesignEnabled ? (
+        <FilterBar
+          topics={selectedTopicChips}
+          families={selectedFamilies}
+          count={filteredPublications.length}
+          onRemoveTopic={onToggle}
+          onRemoveFamily={onFamilyToggle}
+          onClearAll={onClearAll}
+        />
+      ) : (
+        <ActiveFilterBanner
+          count={filteredPublications.length}
+          selected={selectedKeywords}
+          positions={positions}
+          families={selectedFamilies}
+          onClearAll={onClearAll}
+        />
+      )}
+
+      {/* PROFILE_FACET_REDESIGN — an explicit "nothing matches" block with a
+          one-tap reset when an active filter empties the list. Flag-on only; the
+          PublicationsSection panel still renders below (its position controls and
+          chrome stay put). When off, behavior is byte-identical to today. */}
+      {facetRedesignEnabled && filterActive && filteredPublications.length === 0 ? (
+        <div
+          role="status"
+          className="border-border-strong mb-5 rounded-lg border bg-background px-4 py-6 text-center"
+        >
+          <p className="text-sm font-medium">No publications match these filters</p>
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="mt-2 text-sm font-medium underline-offset-4 hover:underline"
+            style={{ color: "var(--color-accent-slate)" }}
+          >
+            Clear all
+          </button>
+        </div>
+      ) : null}
 
       <PublicationsSection
         publications={filteredPublications}
