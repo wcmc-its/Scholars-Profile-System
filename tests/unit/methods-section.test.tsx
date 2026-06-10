@@ -177,3 +177,104 @@ describe("MethodsSection — #819 family click-to-filter", () => {
     expect(screen.getByText("99")).toBeTruthy();
   });
 });
+
+describe("MethodsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
+  it("renders an unchecked Square + plain count when nothing is selected and no familyCounts", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={[]}
+        onFamilyToggle={() => {}}
+        facetRedesignEnabled
+      />,
+    );
+    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
+    // The whole row is a toggle button (aria-label = family label).
+    expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
+    expect(within(row).getByText("100")).toBeTruthy();
+    // Lucide Square (unchecked) is an <svg> in the row; no SquareCheck class.
+    expect(row.querySelector("svg")).toBeTruthy();
+  });
+
+  it("shows a SquareCheck and a trailing remove (X) on the selected row", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+        facetRedesignEnabled
+      />,
+    );
+    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
+    // Selected row carries the method-fill token and a remove control.
+    expect(row.className).toContain("bg-[var(--color-facet-method-fill)]");
+    expect(within(row).getByRole("button", { name: /Remove Family 1 filter/ })).toBeTruthy();
+    // At least two svgs: the SquareCheck indicator + the trailing X.
+    expect(row.querySelectorAll("svg").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("renders contextual '{in} of {total}' counts from familyCounts", () => {
+    const familyCounts = new Map<string, number>([
+      ["fam_1", 6],
+      ["fam_2", 5],
+    ]);
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+        facetRedesignEnabled
+        familyCounts={familyCounts}
+      />,
+    );
+    expect(screen.getByText("Counts shown within current filter")).toBeTruthy();
+    const selected = screen.getByText("Family 1").closest("li") as HTMLElement;
+    expect(within(selected).getByText("6")).toBeTruthy();
+    expect(within(selected).getByText(/of 100/)).toBeTruthy();
+    const unselected = screen.getByText("Family 2").closest("li") as HTMLElement;
+    expect(within(unselected).getByText("5")).toBeTruthy();
+    expect(within(unselected).getByText(/of 99/)).toBeTruthy();
+  });
+
+  it("dims a zero-count row (familyCounts present and the family count is 0)", () => {
+    const familyCounts = new Map<string, number>([
+      ["fam_1", 6],
+      ["fam_2", 0],
+    ]);
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={["fam_1"]}
+        onFamilyToggle={() => {}}
+        facetRedesignEnabled
+        familyCounts={familyCounts}
+      />,
+    );
+    const zeroRow = screen.getByText("Family 2").closest("li") as HTMLElement;
+    // The row's content + count carry the ~45% dim.
+    expect(zeroRow.innerHTML).toContain("opacity-45");
+    expect(within(zeroRow).getByText(/of 99/)).toBeTruthy();
+  });
+
+  it("keeps the #824 browse-out link independently present on a flag-on row", () => {
+    render(
+      <MethodsSection
+        families={makeFamilies(2)}
+        filterEnabled
+        selectedFamilyIds={[]}
+        onFamilyToggle={() => {}}
+        pagesEnabled
+        facetRedesignEnabled
+      />,
+    );
+    const row = screen.getByText("Family 1").closest("li") as HTMLElement;
+    // The browse-out target is a separate link (the row toggle is a button), so
+    // it coexists with the whole-row toggle and stays its own click target.
+    expect(within(row).getByRole("link", { name: /Researchers using Family 1/ })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Family 1" })).toBeTruthy();
+  });
+});

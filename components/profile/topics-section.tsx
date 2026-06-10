@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Check, X } from "lucide-react";
 import { TopicsHeading } from "@/components/profile/topics-heading";
 import type { ScholarKeyword } from "@/lib/api/profile";
 
@@ -13,12 +14,23 @@ export function TopicsSection({
   selectedUis,
   onToggle,
   onClearAll: _onClearAll,
+  facetRedesignEnabled = false,
+  topicCounts = null,
 }: {
   keywords: ScholarKeyword[];
   totalAcceptedPubs: number;
   selectedUis: string[];
   onToggle: (descriptorUi: string) => void;
   onClearAll: () => void;
+  /** PROFILE_FACET_REDESIGN — when off (default), this section renders exactly
+   *  as today (plain integer counts, accent-slate selected pill). When on, the
+   *  chips show contextual "{in} of {total}" counts, a blue selected state, and
+   *  dim zero-count topics. Additive: all new UI lives under this flag. */
+  facetRedesignEnabled?: boolean;
+  /** Contextual ("exclude-own-facet") per-topic counts keyed by `descriptorUi`,
+   *  supplied by the cluster only when the redesign is on AND a filter is active.
+   *  null = no active filter (or flag off) → render plain `pubCount`. */
+  topicCounts?: Map<string, number> | null;
 }) {
   const [revealed, setRevealed] = useState(INITIAL_VISIBLE);
 
@@ -50,18 +62,68 @@ export function TopicsSection({
     <section className="mb-6">
       <TopicsHeading />
       <p className="text-muted-foreground mb-3 text-sm">
-        From {totalAcceptedPubs} accepted publications · click to filter publications
+        {facetRedesignEnabled
+          ? topicCounts
+            ? "Counts shown within current filter"
+            : `From ${totalAcceptedPubs} accepted publications · select to filter`
+          : `From ${totalAcceptedPubs} accepted publications · click to filter publications`}
       </p>
       <ul className="flex flex-wrap gap-2">
         {visible.map((k) => {
           const ui = k.descriptorUi;
           const isSelected = ui ? selectedSet.has(ui) : false;
-          const disabled = ui === null;
+          // PROFILE_FACET_REDESIGN — contextual count for this topic under the
+          // OTHER active facets. undefined when topicCounts is null (no filter /
+          // flag off) → render plain pubCount. 0 → zero-count: dim + inert.
+          const inFilter =
+            facetRedesignEnabled && topicCounts ? (topicCounts.get(ui ?? "") ?? 0) : undefined;
+          const zeroCount = inFilter === 0;
+          const disabled = ui === null || zeroCount;
+
+          if (facetRedesignEnabled) {
+            return (
+              <li key={ui ?? `__nolabel:${k.displayLabel}`}>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={isSelected}
+                  onClick={() => ui && onToggle(ui)}
+                  data-mesh-ui={ui ?? ""}
+                  className={
+                    isSelected
+                      ? "inline-flex h-[26px] items-center gap-1.5 rounded-full border border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] px-3 text-sm text-[var(--color-facet-topic-text)]"
+                      : zeroCount
+                        ? "border-border-strong inline-flex h-[26px] cursor-default items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 opacity-45 dark:text-zinc-200"
+                        : "border-border-strong inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] disabled:cursor-default disabled:hover:border-border-strong disabled:hover:text-zinc-700 dark:text-zinc-200"
+                  }
+                >
+                  {isSelected ? <Check className="size-3.5" aria-hidden="true" /> : null}
+                  <span>{k.displayLabel}</span>
+                  <span
+                    className={
+                      isSelected
+                        ? "text-[11px] tabular-nums text-[var(--color-facet-topic-count)]"
+                        : "text-[11px] tabular-nums opacity-55"
+                    }
+                  >
+                    {inFilter !== undefined ? `${inFilter} of ${k.pubCount}` : k.pubCount}
+                  </span>
+                  {isSelected ? (
+                    <X
+                      aria-hidden="true"
+                      className="-mr-1 size-3.5 text-[var(--color-facet-topic-text)]"
+                    />
+                  ) : null}
+                </button>
+              </li>
+            );
+          }
+
           return (
             <li key={ui ?? `__nolabel:${k.displayLabel}`}>
               <button
                 type="button"
-                disabled={disabled}
+                disabled={ui === null}
                 aria-pressed={isSelected}
                 onClick={() => ui && onToggle(ui)}
                 data-mesh-ui={ui ?? ""}

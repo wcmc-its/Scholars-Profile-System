@@ -100,3 +100,93 @@ describe("TopicsSection", () => {
     expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 });
+
+describe("TopicsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
+  it("renders contextual '{in} of {total}' counts when topicCounts is supplied", () => {
+    const keywords = makeKeywords(3); // counts 100, 99, 98
+    const topicCounts = new Map<string, number>([
+      [keywords[0].descriptorUi as string, 6],
+      [keywords[1].descriptorUi as string, 4],
+    ]);
+    render(
+      <TopicsSection
+        keywords={keywords}
+        totalAcceptedPubs={500}
+        selectedUis={[]}
+        onToggle={noop}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={topicCounts}
+      />,
+    );
+    expect(screen.getByText("Counts shown within current filter")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Topic 1\s*6 of 100/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Topic 2\s*4 of 99/ })).toBeTruthy();
+  });
+
+  it("shows the select-to-filter helper (no filter) and plain counts when topicCounts is null", () => {
+    render(
+      <TopicsSection
+        keywords={makeKeywords(2)}
+        totalAcceptedPubs={434}
+        selectedUis={[]}
+        onToggle={noop}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={null}
+      />,
+    );
+    expect(screen.getByText("From 434 accepted publications · select to filter")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Topic 1\s*100/ })).toBeTruthy();
+  });
+
+  it("gives a selected chip the blue facet state with a leading Check and trailing X", () => {
+    const keywords = makeKeywords(3);
+    const selectedUi = keywords[0].descriptorUi as string;
+    const topicCounts = new Map<string, number>([[selectedUi, 6]]);
+    render(
+      <TopicsSection
+        keywords={keywords}
+        totalAcceptedPubs={500}
+        selectedUis={[selectedUi]}
+        onToggle={noop}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={topicCounts}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /Topic 1\s*6 of 100/ });
+    expect(btn.getAttribute("aria-pressed")).toBe("true");
+    // Blue facet-topic token fill (not the accent-slate flag-off pill).
+    expect(btn.className).toContain("bg-[var(--color-facet-topic-fill)]");
+    expect(btn.className).toContain("border-[var(--color-facet-topic-border)]");
+    // Leading Check + trailing X icons (both lucide <svg>).
+    expect(btn.querySelectorAll("svg").length).toBe(2);
+  });
+
+  it("dims a zero-count chip and makes it non-interactive", () => {
+    const onToggle = vi.fn();
+    const keywords = makeKeywords(3);
+    const zeroUi = keywords[2].descriptorUi as string; // Topic 3, pubCount 98
+    const topicCounts = new Map<string, number>([
+      [keywords[0].descriptorUi as string, 6],
+      [zeroUi, 0],
+    ]);
+    render(
+      <TopicsSection
+        keywords={keywords}
+        totalAcceptedPubs={500}
+        selectedUis={[]}
+        onToggle={onToggle}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={topicCounts}
+      />,
+    );
+    const zeroBtn = screen.getByRole("button", { name: /Topic 3\s*0 of 98/ });
+    expect(zeroBtn).toHaveProperty("disabled", true);
+    expect(zeroBtn.className).toContain("opacity-45");
+    fireEvent.click(zeroBtn);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+});
