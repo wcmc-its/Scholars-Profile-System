@@ -189,4 +189,41 @@ describe("TopicsSection — PROFILE_FACET_REDESIGN (flag on)", () => {
     fireEvent.click(zeroBtn);
     expect(onToggle).not.toHaveBeenCalled();
   });
+
+  // #17 — redesign chips carry the chip-fill transition; flag-off chips do not.
+  it("redesign chips carry facet-chip-transition (and flag-off chips do not)", () => {
+    const keywords = makeKeywords(2);
+    const selectedUi = keywords[0].descriptorUi as string;
+    const { rerender } = render(
+      <TopicsSection
+        keywords={keywords}
+        totalAcceptedPubs={500}
+        selectedUis={[selectedUi]}
+        onToggle={noop}
+        onClearAll={noop}
+        facetRedesignEnabled
+        topicCounts={new Map([[selectedUi, 6]])}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Topic 1/ }).className).toContain(
+      "facet-chip-transition",
+    );
+    expect(screen.getByRole("button", { name: /Topic 2/ }).className).toContain(
+      "facet-chip-transition",
+    );
+
+    // Flag-off path stays byte-identical (no transition class).
+    rerender(
+      <TopicsSection
+        keywords={keywords}
+        totalAcceptedPubs={500}
+        selectedUis={[selectedUi]}
+        onToggle={noop}
+        onClearAll={noop}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Topic 2/ }).className).not.toContain(
+      "facet-chip-transition",
+    );
+  });
 });

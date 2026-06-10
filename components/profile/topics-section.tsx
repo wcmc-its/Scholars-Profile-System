@@ -91,10 +91,10 @@ export function TopicsSection({
                   data-mesh-ui={ui ?? ""}
                   className={
                     isSelected
-                      ? "inline-flex h-[26px] items-center gap-1.5 rounded-full border border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] px-3 text-sm text-[var(--color-facet-topic-text)]"
+                      ? "facet-chip-transition inline-flex h-[26px] items-center gap-1.5 rounded-full border border-[var(--color-facet-topic-border)] bg-[var(--color-facet-topic-fill)] px-3 text-sm text-[var(--color-facet-topic-text)]"
                       : zeroCount
-                        ? "border-border-strong inline-flex h-[26px] cursor-default items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 opacity-45 dark:text-zinc-200"
-                        : "border-border-strong inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] disabled:cursor-default disabled:hover:border-border-strong disabled:hover:text-zinc-700 dark:text-zinc-200"
+                        ? "facet-chip-transition border-border-strong inline-flex h-[26px] cursor-default items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 opacity-45 dark:text-zinc-200"
+                        : "facet-chip-transition border-border-strong inline-flex h-[26px] items-center gap-1.5 rounded-full border bg-background px-3 text-sm text-zinc-700 hover:border-[var(--color-accent-slate)] hover:text-[var(--color-accent-slate)] disabled:cursor-default disabled:hover:border-border-strong disabled:hover:text-zinc-700 dark:text-zinc-200"
                   }
                 >
                   {isSelected ? <Check className="size-3.5" aria-hidden="true" /> : null}
