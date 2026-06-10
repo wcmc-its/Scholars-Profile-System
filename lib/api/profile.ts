@@ -22,6 +22,7 @@ import {
   isMethodsLensEnabled,
   isMethodsLensSensitiveGateOn,
 } from "@/lib/profile/methods-lens-flags";
+import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
   rankForSelectedHighlights,
   type ScoredPublication,
@@ -134,10 +135,10 @@ export function aggregateKeywords(
   return { totalAcceptedPubs, keywords };
 }
 
-// Stable composite key for the #800/#801 overlays; "::" is collision-proof
-// because A2 supercategory ids are snake_case and never contain a colon.
-const familyOverlayKey = (supercategory: string, familyLabel: string) =>
-  `${supercategory}::${familyLabel}`;
+// The stable composite overlay key (`${supercategory}::${familyLabel}`) now lives
+// in `lib/api/methods-overlay.ts`, shared with the cross-scholar Method pages so
+// the per-profile lens and the standalone pages apply ONE suppression/sensitivity
+// implementation. Imported above; behavior here is unchanged.
 
 function toScholarFamilyView(r: {
   familyId: string;

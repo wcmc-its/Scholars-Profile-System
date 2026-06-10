@@ -1,0 +1,183 @@
+"use client";
+
+/**
+ * Family researcher list for the supercategory page's right panel (the
+ * `subtopic-scholars-row` analog, #172). Renders the researchers attributed to
+ * the currently selected family as a single inline middot-separated text list;
+ * each name is a profile link with a hover/focus preview popover showing the
+ * headshot, title, department, and the in-family vs. total publication counts.
+ *
+ * Fetches `/api/methods/[supercategory]/families/[familyId]/scholars`. The data
+ * shape (`SubtopicScholarRowData`, re-exported from `lib/api/methods.ts`) is the
+ * same one the subtopic row uses, so the popover renders verbatim. Lower visual
+ * weight than the page-level "Top scholars" chip row (a filtered slice).
+ */
+import { useEffect, useId, useState } from "react";
+import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
+import { profilePath } from "@/lib/profile-url";
+import type { SubtopicScholarRowData } from "@/lib/api/methods";
+
+const INLINE_CAP = 10;
+
+export function FamilyScholarsRow({
+  supercategorySlug,
+  familyId,
+  familyLabel,
+}: {
+  supercategorySlug: string;
+  familyId: string;
+  familyLabel: string | null;
+}) {
+  const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setScholars(null);
+    setExpanded(false);
+    fetch(
+      `/api/methods/${encodeURIComponent(supercategorySlug)}/families/${encodeURIComponent(
+        familyId,
+      )}/scholars`,
+    )
+      .then((r) => (r.ok ? r.json() : { scholars: [] }))
+      .then((data: { scholars: SubtopicScholarRowData[] }) => {
+        if (!cancelled) {
+          setScholars(data.scholars ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setScholars([]);
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supercategorySlug, familyId]);
+
+  if (loading || !scholars || scholars.length === 0) return null;
+
+  const visible = expanded ? scholars : scholars.slice(0, INLINE_CAP);
+  const overflow = scholars.length - visible.length;
+
+  return (
+    <div className="mb-6">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {familyLabel
+          ? `Researchers using ${familyLabel} · ${scholars.length}`
+          : `Researchers using this method · ${scholars.length}`}
+      </div>
+      <div className="text-[14px] leading-loose">
+        {visible.flatMap((s, i) => {
+          const nodes: React.ReactNode[] = [
+            <ResearcherNameLink key={s.cwid} scholar={s} />,
+          ];
+          if (i < visible.length - 1) {
+            nodes.push(
+              <span
+                key={`mid-${s.cwid}`}
+                aria-hidden="true"
+                className="mx-2 select-none text-border"
+              >
+                ·
+              </span>,
+            );
+          }
+          return nodes;
+        })}
+        {overflow > 0 && (
+          <>
+            <span aria-hidden="true" className="mx-2 select-none text-border">
+              ·
+            </span>
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="text-[13.5px] text-[var(--color-accent-slate)] underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)]"
+            >
+              + {overflow} more →
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Profile link with hover/focus preview popover (CSS-only open/close on
+ * `:hover` / `:focus-within`). Verbatim from the subtopic researcher row, with
+ * the in-family vs. total publication counts.
+ */
+function ResearcherNameLink({ scholar }: { scholar: SubtopicScholarRowData }) {
+  const id = useId();
+  return (
+    <span className="group relative inline-block">
+      <a
+        href={profilePath(scholar.slug)}
+        aria-describedby={id}
+        className="font-medium text-foreground underline-offset-4 decoration-border hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-slate)] focus-visible:no-underline"
+      >
+        {scholar.preferredName}
+      </a>
+      <span
+        id={id}
+        role="tooltip"
+        className="
+          pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-72
+          opacity-0 transition-opacity duration-150 ease-out
+          group-hover:opacity-100 group-focus-within:opacity-100
+          group-hover:pointer-events-auto group-focus-within:pointer-events-auto
+          md:block
+        "
+        style={{ transitionDelay: "var(--popover-delay, 180ms)" }}
+      >
+        <a
+          href={profilePath(scholar.slug)}
+          tabIndex={-1}
+          className="block rounded-md border border-border bg-popover p-3.5 shadow-lg ring-1 ring-black/5"
+        >
+          <div className="flex items-start gap-3">
+            <HeadshotAvatar
+              size="md"
+              cwid={scholar.cwid}
+              preferredName={scholar.preferredName}
+              identityImageEndpoint={scholar.identityImageEndpoint}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-foreground">
+                {scholar.preferredName}
+              </div>
+              {scholar.primaryTitle ? (
+                <div className="text-xs text-muted-foreground">
+                  {scholar.primaryTitle}
+                </div>
+              ) : null}
+              {scholar.primaryDepartment ? (
+                <div className="text-xs text-muted-foreground">
+                  {scholar.primaryDepartment}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed">
+            <div className="text-foreground">
+              {scholar.pubCountInSubtopic.toLocaleString()} publications using this method
+            </div>
+            <div className="text-muted-foreground">
+              {scholar.pubCountTotal.toLocaleString()} publications total
+            </div>
+          </div>
+          <div className="mt-2 text-xs font-medium text-[var(--color-accent-slate)]">
+            View profile →
+          </div>
+        </a>
+      </span>
+    </span>
+  );
+}

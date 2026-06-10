@@ -416,6 +416,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHODS_LENS_PAGES",
+                "Value": "off",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
               },
@@ -3393,6 +3397,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "METHODS_LENS_FAMILY_FILTER",
                 "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_PAGES",
+                "Value": "off",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",

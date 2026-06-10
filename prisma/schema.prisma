@@ -1535,6 +1535,10 @@ model ScholarFamily {
   @@unique([cwid, familyId])
   @@index([cwid, pmidCount(sort: Desc)])
   @@index([supercategory])
+  /// Backs the cross-scholar Method family page WHERE (the stable
+  /// (supercategory, family_label) identity) without a full scan — see the
+  /// standalone Method pages plan (`getFamilyScholars` / `getFamiliesForSupercategory`).
+  @@index([supercategory, familyLabel])
   @@map("scholar_family")
 }
 

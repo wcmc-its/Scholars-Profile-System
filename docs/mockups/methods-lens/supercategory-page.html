@@ -1,0 +1,210 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Genomics &amp; sequencing — Methods &amp; tools supercategory · WCM Scholars</title>
+<style>
+/* ── Reused verbatim from the methods-lens mock bundle ─────────────────────
+   • shell/header/section recipe + WCM maroon  ← tools-display-mock-canonicalized.html
+   • --c per-kind colour custom property + .chip ← tools-display-mock-canonicalized.html
+   • .mrow / .mn / .me (mono exemplars) / .mc    ← two-lens-compact.html
+   • .rrow / .rrank / .rn / .rb / .rc ranked list ← tools-display-mock-canonicalized.html
+   ─────────────────────────────────────────────────────────────────────────── */
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#f8fafc}
+header.top{background:#b31b1b;color:#fff;padding:14px 24px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:20}
+header.top b{font-weight:700;letter-spacing:.3px}
+.sub{opacity:.85;font-size:13px}
+nav.crumbs{background:#fff;border-bottom:1px solid #e5e7eb;padding:8px 24px;font-size:12.5px;color:#6b7280}
+nav.crumbs a{color:#374151;text-decoration:none}
+nav.crumbs a:hover{text-decoration:underline}
+nav.crumbs .sep{color:#cbd5e1;margin:0 7px}
+main{max-width:1080px;margin:0 auto;padding:26px 24px 80px}
+section{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:22px;margin:0 0 26px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+
+/* page header */
+.phead{display:flex;align-items:flex-start;gap:14px;margin-bottom:20px}
+.psw{width:48px;height:48px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;background:#0891b2}
+h1{margin:0 0 4px;font-size:24px;letter-spacing:-.2px}
+.caption{font-size:13.5px;color:#6b7280;margin:0}
+.stats{display:flex;gap:0;margin-top:16px;border:1px solid #eceef1;border-radius:11px;overflow:hidden}
+.stat{flex:1;padding:13px 16px;border-left:1px solid #eceef1}
+.stat:first-child{border-left:none}
+.stat .v{font-size:21px;font-weight:700;color:#111827;line-height:1.1}
+.stat .l{font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;margin-top:3px}
+
+/* section heads */
+h2{margin:0 0 4px;font-size:19px}
+.opt{font-size:12px;color:#6b7280;margin-bottom:16px}
+
+/* ── families list — the .mrow recipe ─────────────────────────────────── */
+.flist{margin-top:2px}
+.mrow{display:flex;align-items:center;gap:9px;padding:13px 4px;border-top:1px solid #f3f4f6;font-size:13px;text-decoration:none;color:inherit;cursor:pointer;border-radius:8px}
+.mrow:first-of-type{border-top:none}
+.mrow:hover{background:#f8fafc}
+.mrow .kdot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c)}
+.ml{flex:1;min-width:0}
+.mn{font-weight:600;color:#1f2937;font-size:14.5px}
+.me{color:#aab0ba;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
+.mc{flex:none;color:#6b7280;font-size:12.5px;text-align:right;white-space:nowrap}
+.mc b{color:#111827;font-weight:600}
+.mrow .arr{flex:none;color:#cbd5e1;font-size:16px;width:14px;text-align:center}
+
+/* ── ranked "top scholars" — the .rrow recipe ─────────────────────────── */
+.rrow{display:flex;align-items:center;gap:11px;font-size:13px;padding:7px 4px;border-top:1px solid #f7f8fa}
+.rrow:first-of-type{border-top:none}
+.rrank{width:18px;color:#cbd5e1;font-size:11px;text-align:right;flex:none}
+.rav{width:26px;height:26px;border-radius:50%;background:#b31b1b;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex:none}
+.rn{flex:0 0 200px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rn a{color:#1f2937;text-decoration:none}
+.rn a:hover{color:#b31b1b}
+.rn .rd{color:#9ca3af;font-weight:400;font-size:11.5px;display:block;overflow:hidden;text-overflow:ellipsis}
+.rb{flex:1;height:7px;background:#f1f5f9;border-radius:4px;overflow:hidden;min-width:60px}
+.rb span{display:block;height:100%;background:#7c3aed}
+.rc{width:74px;text-align:right;color:#6b7280;font-size:12px;flex:none}
+.rc b{color:#111827;font-weight:600}
+
+.foot{font-size:12px;color:#9ca3af;margin-top:14px}
+.foot code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;background:#f3f4f6;padding:1px 5px;border-radius:5px;color:#6b7280}
+@media(max-width:680px){.stats{flex-wrap:wrap}.stat{flex:1 1 33%}.rn{flex:0 0 130px}}
+</style></head>
+<body>
+<header class="top"><b>WCM Scholars</b><span class="sub">Methods &amp; tools — supercategory</span></header>
+<nav class="crumbs"><a href="#">Methods &amp; tools</a><span class="sep">›</span><a href="#">Supercategories</a><span class="sep">›</span>Genomics &amp; sequencing</nav>
+<main>
+
+<!-- ── PAGE HEADER ─────────────────────────────────────────────────────── -->
+<section>
+  <div class="phead">
+    <div class="psw" style="background:#ea580c">⌬</div>
+    <div>
+      <h1>Genomics &amp; sequencing</h1>
+      <p class="caption">Sequencing assays, variant-calling pipelines, reference panels and the genomic datasets WCM investigators build on.</p>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="v">9</div><div class="l">Method families</div></div>
+    <div class="stat"><div class="v">214</div><div class="l">Scholars</div></div>
+    <div class="stat"><div class="v">1,038</div><div class="l">Publications</div></div>
+  </div>
+</section>
+
+<!-- ── FAMILIES IN THIS SUPERCATEGORY (.mrow recipe) ───────────────────── -->
+<section>
+  <h2>Method families in Genomics &amp; sequencing</h2>
+  <div class="opt">9 families · ranked by publications · click a family to see its tools, scholars and papers</div>
+  <div class="flist">
+
+    <a class="mrow" href="#" style="--c:#ea580c">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Bulk &amp; targeted next-generation sequencing</div>
+        <div class="me">Next-generation sequencing (NGS) · Illumina NovaSeq 6000 · Whole-exome sequencing (WES)</div></div>
+      <span class="mc"><b>96</b> scholars · <b>241</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#ea580c">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Single-cell &amp; spatial transcriptomics</div>
+        <div class="me">Single-cell RNA sequencing (scRNA-seq) · 10x Genomics Chromium · Visium spatial transcriptomics</div></div>
+      <span class="mc"><b>61</b> scholars · <b>178</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#7c3aed">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Variant calling &amp; genome-analysis pipelines</div>
+        <div class="me">GATK · BWA-MEM · Variant Effect Predictor (VEP)</div></div>
+      <span class="mc"><b>54</b> scholars · <b>147</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#d97706">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Cancer-genomics reference datasets</div>
+        <div class="me">The Cancer Genome Atlas (TCGA) · cBioPortal · COSMIC mutation database</div></div>
+      <span class="mc"><b>48</b> scholars · <b>132</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#ea580c">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Epigenomic &amp; chromatin profiling</div>
+        <div class="me">ATAC-seq · Chromatin immunoprecipitation sequencing (ChIP-seq) · Whole-genome bisulfite sequencing</div></div>
+      <span class="mc"><b>33</b> scholars · <b>97</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#2563eb">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Long-read &amp; nanopore sequencing</div>
+        <div class="me">Oxford Nanopore Technologies (ONT) sequencer · PacBio HiFi sequencing · Whole-genome long-read assembly</div></div>
+      <span class="mc"><b>27</b> scholars · <b>71</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#0891b2">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Reference-panel &amp; population-genomics resources</div>
+        <div class="me">gnomAD · 1000 Genomes Project · UK Biobank genotype data</div></div>
+      <span class="mc"><b>29</b> scholars · <b>68</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#7c3aed">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Genome-wide association &amp; polygenic scoring</div>
+        <div class="me">PLINK · Genome-wide association study (GWAS) · Polygenic risk score (PRS) modeling</div></div>
+      <span class="mc"><b>22</b> scholars · <b>61</b> papers</span><span class="arr">›</span>
+    </a>
+
+    <a class="mrow" href="#" style="--c:#0891b2">
+      <span class="kdot"></span>
+      <div class="ml"><div class="mn">Sequence alignment &amp; assembly software</div>
+        <div class="me">STAR aligner · SAMtools · Trinity de novo assembler</div></div>
+      <span class="mc"><b>24</b> scholars · <b>53</b> papers</span><span class="arr">›</span>
+    </a>
+
+  </div>
+</section>
+
+<!-- ── TOP SCHOLARS ACROSS THIS SUPERCATEGORY (.rrow recipe) ───────────── -->
+<section>
+  <h2>Top scholars across Genomics &amp; sequencing</h2>
+  <div class="opt">ranked by publications using a method family in this supercategory · lead/senior-authored corpus</div>
+
+  <div class="rrow"><span class="rrank">1</span><span class="rav">C</span>
+    <span class="rn"><a href="#">Christopher Mason</a><span class="rd">Physiology &amp; Biophysics</span></span>
+    <span class="rb"><span style="width:100%"></span></span><span class="rc"><b>34</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">2</span><span class="rav">O</span>
+    <span class="rn"><a href="#">Olivier Elemento</a><span class="rd">Computational Biomedicine</span></span>
+    <span class="rb"><span style="width:85%"></span></span><span class="rc"><b>29</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">3</span><span class="rav">A</span>
+    <span class="rn"><a href="#">Ari Melnick</a><span class="rd">Medicine — Hematology &amp; Oncology</span></span>
+    <span class="rb"><span style="width:71%"></span></span><span class="rc"><b>24</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">4</span><span class="rav">D</span>
+    <span class="rn"><a href="#">Doron Betel</a><span class="rd">Medicine — Computational</span></span>
+    <span class="rb"><span style="width:62%"></span></span><span class="rc"><b>21</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">5</span><span class="rav">S</span>
+    <span class="rn"><a href="#">Steven Lipkin</a><span class="rd">Medicine — Clinical Genetics</span></span>
+    <span class="rb"><span style="width:53%"></span></span><span class="rc"><b>18</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">6</span><span class="rav">N</span>
+    <span class="rn"><a href="#">Nasser Altorki</a><span class="rd">Cardiothoracic Surgery</span></span>
+    <span class="rb"><span style="width:47%"></span></span><span class="rc"><b>16</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">7</span><span class="rav">J</span>
+    <span class="rn"><a href="#">Juan Cubillos-Ruiz</a><span class="rd">Obstetrics &amp; Gynecology</span></span>
+    <span class="rb"><span style="width:41%"></span></span><span class="rc"><b>14</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">8</span><span class="rav">M</span>
+    <span class="rn"><a href="#">Marcin Imielinski</a><span class="rd">Pathology &amp; Laboratory Medicine</span></span>
+    <span class="rb"><span style="width:38%"></span></span><span class="rc"><b>13</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">9</span><span class="rav">L</span>
+    <span class="rn"><a href="#">Lukas Dow</a><span class="rd">Medicine — Oncology</span></span>
+    <span class="rb"><span style="width:32%"></span></span><span class="rc"><b>11</b> papers</span></div>
+
+  <div class="rrow"><span class="rrank">10</span><span class="rav">P</span>
+    <span class="rn"><a href="#">Pengbo Zhou</a><span class="rd">Pathology &amp; Laboratory Medicine</span></span>
+    <span class="rb"><span style="width:29%"></span></span><span class="rc"><b>10</b> papers</span></div>
+
+  <p class="foot">Counts roll up from the <code>scholar_family</code> rollup · supercategory <code>genomics_sequencing</code> · families auto-discovered per scholar (A2 pass). Display-only mock.</p>
+</section>
+
+</main>
+</body></html>
