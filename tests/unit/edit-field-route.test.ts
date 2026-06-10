@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
@@ -445,5 +445,75 @@ describe("POST /api/edit/field — unit-admin branch (Amendment 4)", () => {
     );
     expect(res.status).toBe(403);
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #836 — selectedHighlightPmids (opt-in manual Highlights override)
+// ---------------------------------------------------------------------------
+
+describe("POST /api/edit/field — selectedHighlightPmids (#836)", () => {
+  const ORIGINAL_FLAG = process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+  afterEach(() => {
+    if (ORIGINAL_FLAG === undefined) delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+    else process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = ORIGINAL_FLAG;
+  });
+
+  it("rejects with 400 (invalid_field) when the flag is off — feature is dark", async () => {
+    delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "selectedHighlightPmids", value: ["100"] }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-scholar manual-highlights edit with 403", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "selectedHighlightPmids", value: ["100"] }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an over-the-cap array with 400 (too_many)", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "selectedHighlightPmids",
+        value: ["1", "2", "3", "4"],
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("too_many");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("stores the normalized JSON array, writes one tx + audit row, revalidates the profile", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    const res = await POST(
+      post({
+        entityType: "scholar",
+        entityId: "self01",
+        fieldName: "selectedHighlightPmids",
+        value: ["300", "100"],
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.fieldName).toBe("selectedHighlightPmids");
+    // the stored value is the JSON-serialized array in pick order
+    expect(body.value).toBe('["300","100"]');
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+    expect(mockFieldOverrideUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ value: '["300","100"]' }) }),
+    );
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
+    expect(mockReflectOverviewEdit).toHaveBeenCalled(); // the Highlights surface lives on the profile
   });
 });

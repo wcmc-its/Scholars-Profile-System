@@ -9,10 +9,14 @@
 import { prisma } from "@/lib/db";
 import {
   getEffectiveOverview,
+  getSelectedHighlightPmids,
   isAuthorHidden,
   loadEntitySuppressions,
   loadPublicationSuppressions,
+  pickManualHighlights,
 } from "@/lib/api/manual-layer";
+import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { coreProjectNum } from "@/lib/award-number";
@@ -25,6 +29,7 @@ import {
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
   rankForSelectedHighlights,
+  scorePublication,
   type ScoredPublication,
 } from "@/lib/ranking";
 
@@ -741,7 +746,40 @@ export async function getScholarFullProfileBySlug(
     };
   });
 
-  const highlights = rankForSelectedHighlights(rankablePubs, now).slice(0, 3);
+  // AI-selected Highlights — the top-N first/senior pubs by the
+  // `selected_highlights` curve. `rankablePubs` is already suppression-filtered
+  // (it derives from `visibleAuthorships`), so neither these nor any manual
+  // override below can resurface a hidden publication.
+  const aiHighlights = rankForSelectedHighlights(rankablePubs, now).slice(
+    0,
+    MAX_SELECTED_HIGHLIGHTS,
+  );
+  // #836 — a scholar who opted in to choosing their own Highlights manually has
+  // a `field_override(selectedHighlightPmids)` row; when the flag is on it takes
+  // precedence over the AI selection, in stored order, restricted to their still-
+  // visible publications (`pickManualHighlights` drops any suppressed/out-of-set
+  // pmid and falls back to the AI set if none survive). Flag off ⇒ never read the
+  // override, so the feature is fully dark.
+  const manualHighlightPmids = isManualHighlightsEnabled()
+    ? await getSelectedHighlightPmids(scholar.cwid, prisma)
+    : null;
+  let highlights: ProfilePublication[];
+  if (manualHighlightPmids && manualHighlightPmids.length > 0) {
+    // Only when a manual override is actually present do we build the pickable
+    // pool — every visible pub (not just the AI-positive ones), carrying its
+    // `selected_highlights` score so the picked `ProfilePublication` has the same
+    // `score` shape the AI highlights do. A manual pick the AI filter would have
+    // scored 0 (e.g. a 2nd-author paper) is still honoured — the scholar chose it
+    // deliberately. Skipping this map on the (overwhelmingly common) no-override
+    // path keeps the hot profile render off an O(pubs) re-score.
+    const scoredPool: ProfilePublication[] = rankablePubs.map((p) => ({
+      ...p,
+      score: scorePublication(p, "selected_highlights", true, now),
+    }));
+    highlights = pickManualHighlights(scoredPool, aiHighlights, manualHighlightPmids);
+  } else {
+    highlights = aiHighlights;
+  }
 
   // Issue #73 — aggregate keywords from this scholar's accepted publications.
   // Operates over `visibleAuthorships` (which includes `publication.meshTerms`

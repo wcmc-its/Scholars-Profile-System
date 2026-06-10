@@ -18,8 +18,10 @@ import { type NextRequest, type NextResponse } from "next/server";
 
 import { db } from "@/lib/db";
 import { appendAuditRow } from "@/lib/edit/audit";
-import { logEditDenial } from "@/lib/edit/authz";
+import { authorizeFieldEdit, logEditDenial } from "@/lib/edit/authz";
+import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { editError, editOk, logEditFailure, readEditRequest } from "@/lib/edit/request";
+import { reflectOverviewEdit, resolveAffectedProfiles } from "@/lib/edit/revalidation";
 import { isEditableField } from "@/lib/edit/validators";
 import { deriveSlug, nextAvailableSlug, reconcileScholarSlug } from "@/lib/slug";
 
@@ -41,7 +43,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (typeof fieldName !== "string" || !isEditableField(fieldName)) {
     return editError(400, "invalid_field", "fieldName");
   }
-  // v1: only `slug` is clearable via this endpoint. Clearing `overview` runs
+  // #836 — `selectedHighlightPmids` is clearable here (the opt-out path: the
+  // scholar reverts to AI-selected Highlights). Self-only and flag-gated. It is
+  // a plain delete — no slug reconciliation — so it takes a dedicated handler.
+  if (fieldName === "selectedHighlightPmids") {
+    return clearSelectedHighlights({
+      session,
+      realCwid,
+      impersonatedCwid,
+      requestId,
+      entityId,
+    });
+  }
+  // Only `slug` is clearable via the slug arm below. Clearing `overview` runs
   // through the existing field route with `value: ""` (sanitize emits "").
   if (fieldName !== "slug") {
     return editError(400, "unclearable_field", "fieldName");
@@ -130,4 +144,86 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // revalidate at write time (matches `POST /api/edit/field` for `slug`).
 
   return editOk({ fieldName, cleared });
+}
+
+/**
+ * #836 — clear a `selectedHighlightPmids` override (the opt-out: the scholar
+ * reverts from manually-chosen Highlights to the AI selection). Self-only and
+ * gated by `SELF_EDIT_MANUAL_HIGHLIGHTS` (with the flag off the field is treated
+ * as not-editable, mirroring the field route). Delete-if-exists + a B03
+ * field_override_clear audit row in one transaction, then revalidate the public
+ * profile so the Highlights section re-renders from the AI ranking. Idempotent:
+ * a clear with no override returns `200 { cleared: false }`.
+ */
+async function clearSelectedHighlights(params: {
+  session: { cwid: string; isSuperuser: boolean };
+  realCwid: string;
+  impersonatedCwid: string | null;
+  requestId: string | null;
+  entityId: string;
+}): Promise<NextResponse> {
+  const { session, realCwid, impersonatedCwid, requestId, entityId } = params;
+
+  if (!isManualHighlightsEnabled()) {
+    return editError(400, "invalid_field", "fieldName");
+  }
+
+  const authz = authorizeFieldEdit(session, {
+    entityId,
+    fieldName: "selectedHighlightPmids",
+  });
+  if (!authz.ok) {
+    logEditDenial({
+      actorCwid: session.cwid,
+      targetCwid: entityId,
+      path: PATH,
+      reason: authz.reason,
+    });
+    return editError(403, authz.reason);
+  }
+
+  let cleared: boolean;
+  try {
+    cleared = await db.write.$transaction(async (tx) => {
+      const key = {
+        entityType_entityId_fieldName: {
+          entityType: "scholar" as const,
+          entityId,
+          fieldName: "selectedHighlightPmids" as const,
+        },
+      };
+      const existing = await tx.fieldOverride.findUnique({
+        where: key,
+        select: { value: true },
+      });
+      // Idempotent: no row → 200 cleared:false, no audit row for a no-op.
+      if (!existing) return false;
+      await tx.fieldOverride.delete({ where: key });
+      await appendAuditRow(tx, {
+        actorCwid: realCwid,
+        impersonatedCwid,
+        targetEntityType: "scholar",
+        targetEntityId: entityId,
+        action: "field_override_clear",
+        fieldsChanged: ["selectedHighlightPmids"],
+        beforeValues: { selectedHighlightPmids: existing.value },
+        afterValues: { selectedHighlightPmids: null },
+        ts: new Date(),
+        requestId,
+      });
+      return true;
+    });
+  } catch (err) {
+    logEditFailure(PATH, err);
+    return editError(500, "write_failed");
+  }
+
+  // The Highlights surface lives on the public profile, so a clear must
+  // revalidate it (unlike the slug clear, which only flips on the next etl/ed).
+  if (cleared) {
+    const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
+    if (profile) reflectOverviewEdit(profile.slug);
+  }
+
+  return editOk({ fieldName: "selectedHighlightPmids", cleared });
 }

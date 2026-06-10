@@ -15,6 +15,7 @@ import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
 import { FundingCard } from "@/components/edit/funding-card";
+import { HighlightsCard } from "@/components/edit/highlights-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
 import { HomePanel } from "@/components/edit/home-panel";
 import { OverviewCard } from "@/components/edit/overview-card";
@@ -43,6 +44,7 @@ type AttrKey =
   | "name-title"
   | "photo"
   | "overview"
+  | "highlights"
   | "visibility"
   | "publications"
   | "funding"
@@ -69,6 +71,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
+  // Highlights (#836, SELF_EDIT_MANUAL_HIGHLIGHTS) — the opt-in manual override
+  // of the AI-chosen featured publications. Self-only; the rail item appears only
+  // when the loader populated `ctx.highlights` (flag on + genuine self).
+  { key: "highlights", label: "Highlights", modes: ["self"] },
   { key: "visibility", label: "Visibility", modes: ["self", "superuser"] },
   { key: "publications", label: "Publications", modes: ["self"] },
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
@@ -138,6 +144,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // "Yours to edit" group (owned).
   "home",
   "overview",
+  "highlights",
   "visibility",
   "proxy-editors",
   // "From WCM systems" group — ordered per operator request. (Profile URL is
@@ -157,6 +164,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
 const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   home: "owned",
   overview: "owned",
+  highlights: "owned",
   visibility: "owned",
   "proxy-editors": "owned",
   "profile-url": "owned",
@@ -244,6 +252,7 @@ export function visibleAttrKeys(
   mode: EditMode,
   slugRequestEnabled: boolean,
   hasCoiGap = false,
+  hasHighlights = false,
 ): AttrKey[] {
   void slugRequestEnabled; // Profile URL is always present now (read-only when off).
   return attrsForMode(mode)
@@ -252,6 +261,10 @@ export function visibleAttrKeys(
     // candidates canonicalizes away (the page redirects to bare /edit) rather
     // than rendering an empty panel or 404-looping. (proxy drops it outright.)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+    // #836 — Highlights appears only when the loader populated `ctx.highlights`
+    // (flag on + genuine self). Off ⇒ dropped from both the rail and the valid-
+    // attr set, so the feature is fully dark.
+    .filter((a) => a.key !== "highlights" || hasHighlights)
     .map((a) => a.key);
 }
 
@@ -273,7 +286,13 @@ export function EditPage({
   // it from the visible set otherwise so it appears in neither the rail nor the
   // valid-attr set — an empty panel is never surfaced.
   const hasCoiGap = mode === "self" && ctx.unmatchedPubmedCoi.length > 0;
-  const visible = attrsForMode(mode).filter((a) => a.key !== "coi-gap" || hasCoiGap);
+  // #836 — Highlights is present only when the loader populated `ctx.highlights`
+  // (flag on + genuine self). The loader already enforces the self-only + flag
+  // gate, so a non-null value here implies both.
+  const hasHighlights = mode === "self" && ctx.highlights !== null;
+  const visible = attrsForMode(mode)
+    .filter((a) => a.key !== "coi-gap" || hasCoiGap)
+    .filter((a) => a.key !== "highlights" || hasHighlights);
   // A proxy (#779) and a unit admin (Amendment 4) reuse the SELF rail/cards on
   // the scholar's route (D4). Treated like self for layout; the distinct chrome
   // (banner, breadcrumb, no account menu) is the shell's job.
@@ -439,6 +458,13 @@ function renderPanel(
           generateEnabled={mode === "self" && isOverviewGenerateEnabled()}
         />
       );
+    case "highlights":
+      // Self-only by construction — the loader only populates `ctx.highlights`
+      // for a genuine self viewer behind the flag, and the rail item is dropped
+      // when it is null. No `mode` prop: there is no superuser variant.
+      return ctx.highlights ? (
+        <HighlightsCard cwid={cwid} highlights={ctx.highlights} />
+      ) : null;
     case "visibility":
       return (
         <VisibilityCard

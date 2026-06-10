@@ -61,9 +61,11 @@ import {
   isEditableField,
   isEditableUnitField,
   sanitizeOverview,
+  validateSelectedHighlightPmids,
   validateSlugFormat,
   validateUnitFieldValue,
 } from "@/lib/edit/validators";
+import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isNameBasedSlug, reconcileScholarSlug } from "@/lib/slug";
 
 const PATH = "/api/edit/field";
@@ -164,7 +166,15 @@ async function handleScholarFieldEdit(params: {
   if (!isEditableField(fieldName)) {
     return editError(400, "invalid_field", "fieldName");
   }
-  if (typeof value !== "string") {
+  // #836 — the manual-Highlights override is gated by SELF_EDIT_MANUAL_HIGHLIGHTS.
+  // With the flag off the field is treated as not-editable (the same shape as an
+  // unknown field), so the whole surface is dark.
+  if (fieldName === "selectedHighlightPmids" && !isManualHighlightsEnabled()) {
+    return editError(400, "invalid_field", "fieldName");
+  }
+  // `selectedHighlightPmids` carries a JSON array value; every other scholar
+  // field is a string. The per-field validation below enforces the precise shape.
+  if (fieldName !== "selectedHighlightPmids" && typeof value !== "string") {
     return editError(400, "invalid_value", "value");
   }
 
@@ -226,11 +236,21 @@ async function handleScholarFieldEdit(params: {
 
   let storedValue: string;
   if (fieldName === "overview") {
-    const sanitized = sanitizeOverview(value);
+    const sanitized = sanitizeOverview(value as string);
     if (!sanitized.ok) return editError(400, sanitized.error, "value");
     storedValue = sanitized.value;
+  } else if (fieldName === "selectedHighlightPmids") {
+    // #836 — validate shape (JSON array of ≤ MAX numeric PMIDs, no dupes) and
+    // store the normalized array as JSON. Membership-in-the-scholar's-pubs is
+    // not enforced here (needs a DB read of confirmed authorships); the read
+    // path silently drops any stored pmid the scholar is not a confirmed author
+    // of (`pickManualHighlights`), and the edit UI only offers the scholar's own
+    // publications, so a well-behaved client never sends an out-of-set pmid.
+    const result = validateSelectedHighlightPmids(value);
+    if (!result.ok) return editError(400, result.error, "value");
+    storedValue = JSON.stringify(result.value);
   } else {
-    const format = validateSlugFormat(value);
+    const format = validateSlugFormat(value as string);
     if (!format.ok) return editError(400, format.error, "value");
     const collision = await checkSlugCollision(format.value, entityId, db.read);
     if (!collision.ok) return editError(400, collision.error, "value");
@@ -362,7 +382,10 @@ async function handleScholarFieldEdit(params: {
     );
   }
 
-  if (fieldName === "overview") {
+  // A changed `overview` or `selectedHighlightPmids` (#836) both alter the public
+  // profile page, so revalidate its canonical path. `slug` changes don't flip the
+  // URL until the next etl/ed run, so they need no revalidation here.
+  if (fieldName === "overview" || fieldName === "selectedHighlightPmids") {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
     if (profile) reflectOverviewEdit(profile.slug);
   }

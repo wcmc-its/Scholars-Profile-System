@@ -23,6 +23,7 @@ import {
   type UnitAdminEditorsLookup,
 } from "@/lib/edit/unit-scholar-authz";
 import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
+import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
 import { loadManageableUnits } from "@/lib/edit/manageable-units";
 
@@ -61,8 +62,13 @@ export default async function EditSelfPage({
   // `includeCoiGap` is true, so a false here means they are never even read.
   const genuineSelf = editCwid === session.cwid;
   const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
+  // #836 — the manual-Highlights editor is self-only (a scholar curates their
+  // OWN highlights; broad admin highlight-editing is deferred), so it loads only
+  // for a genuine self viewer with the flag on — never under a "View as" overlay.
+  const includeHighlights = isManualHighlightsEnabled() && genuineSelf;
   const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
     includeCoiGap,
+    includeHighlights,
   });
   if (!ctx) {
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
@@ -111,6 +117,7 @@ export default async function EditSelfPage({
     "self",
     slugRequestEnabled,
     ctx.unmatchedPubmedCoi.length > 0,
+    ctx.highlights !== null,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect("/edit");
