@@ -73,11 +73,27 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// getHomeMethodCategories imports getSupercategoryHubEntries (which hits
+// prisma.scholarFamily.groupBy + overlay/topics modules NOT in the @/lib/db
+// mock) and the methods-lens page flag. Mock both directly so the test exercises
+// only the loader's mapping logic, never the real taxonomy query path.
+const methodMocks = vi.hoisted(() => ({
+  getSupercategoryHubEntries: vi.fn(),
+  isMethodPagesEnabled: vi.fn(),
+}));
+vi.mock("@/lib/api/methods", () => ({
+  getSupercategoryHubEntries: methodMocks.getSupercategoryHubEntries,
+}));
+vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodPagesEnabled: methodMocks.isMethodPagesEnabled,
+}));
+
 import {
   getRecentContributions,
   getSelectedResearch,
   getSpotlights,
   getBrowseAllResearchAreas,
+  getHomeMethodCategories,
 } from "@/lib/api/home";
 
 const NOW = new Date("2026-04-01");
@@ -169,6 +185,10 @@ beforeEach(() => {
   mockScholarFindMany.mockReset();
   mockPublicationAuthorFindMany.mockReset();
   mockQueryRaw.mockReset();
+  methodMocks.getSupercategoryHubEntries.mockReset();
+  methodMocks.isMethodPagesEnabled.mockReset();
+  // Default the page flag on so most cases exercise the happy path.
+  methodMocks.isMethodPagesEnabled.mockReturnValue(true);
 });
 
 // ---------- helpers for spotlight fixtures ----------
@@ -710,5 +730,141 @@ describe("getBrowseAllResearchAreas (HOME-03)", () => {
       { slug: "cancer_genomics", name: "Cancer Genomics", scholarCount: 42, publicationCount: 312 },
       { slug: "neuroscience", name: "Neuroscience", scholarCount: 17, publicationCount: 89 },
     ]);
+  });
+});
+
+describe("getHomeMethodCategories (home Browse by research method)", () => {
+  // Builds a SupercategoryHubEntry-shaped fixture. `slug` mirrors the real
+  // loader (`id` with underscores → hyphens); `familyCount` derives from the
+  // families array. `families` order is intentionally arbitrary so the
+  // representative-family sort is exercised.
+  function makeHubEntry(over: {
+    id: string;
+    label: string;
+    families: Array<{ familyId: string; familyLabel: string; scholarCount: number }>;
+  }) {
+    return {
+      id: over.id,
+      slug: over.id.replace(/_/g, "-"),
+      label: over.label,
+      description: "desc",
+      familyCount: over.families.length,
+      families: over.families,
+    };
+  }
+
+  it("returns null when the page flag is off (and never queries the taxonomy)", async () => {
+    methodMocks.isMethodPagesEnabled.mockReturnValue(false);
+    const result = await getHomeMethodCategories();
+    expect(result).toBeNull();
+    expect(methodMocks.getSupercategoryHubEntries).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the taxonomy is empty", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([]);
+    const result = await getHomeMethodCategories();
+    expect(result).toBeNull();
+  });
+
+  it("sorts categories alphabetically by label", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([
+      makeHubEntry({
+        id: "zebrafish_models",
+        label: "Zebrafish models",
+        families: [{ familyId: "f1", familyLabel: "Larval imaging", scholarCount: 3 }],
+      }),
+      makeHubEntry({
+        id: "animal_cell_models",
+        label: "Animal & Cell Models",
+        families: [{ familyId: "f2", familyLabel: "Mouse models", scholarCount: 5 }],
+      }),
+      makeHubEntry({
+        id: "genomics_sequencing",
+        label: "Genomics & Sequencing",
+        families: [{ familyId: "f3", familyLabel: "WGS", scholarCount: 4 }],
+      }),
+    ]);
+    const result = await getHomeMethodCategories();
+    expect(result).not.toBeNull();
+    expect(result!.categories.map((c) => c.label)).toEqual([
+      "Animal & Cell Models",
+      "Genomics & Sequencing",
+      "Zebrafish models",
+    ]);
+  });
+
+  it("computes categoryCount and totalFamilyCount from the taxonomy", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([
+      makeHubEntry({
+        id: "a_cat",
+        label: "A cat",
+        families: [
+          { familyId: "f1", familyLabel: "One", scholarCount: 1 },
+          { familyId: "f2", familyLabel: "Two", scholarCount: 2 },
+        ],
+      }),
+      makeHubEntry({
+        id: "b_cat",
+        label: "B cat",
+        families: [{ familyId: "f3", familyLabel: "Three", scholarCount: 3 }],
+      }),
+    ]);
+    const result = await getHomeMethodCategories();
+    expect(result!.categoryCount).toBe(2);
+    expect(result!.totalFamilyCount).toBe(3);
+    expect(result!.categories.find((c) => c.label === "A cat")!.familyCount).toBe(2);
+  });
+
+  it("emits up to 3 representative families, top-by-scholarCount desc", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([
+      makeHubEntry({
+        id: "genomics_sequencing",
+        label: "Genomics & Sequencing",
+        families: [
+          { familyId: "f1", familyLabel: "Low", scholarCount: 1 },
+          { familyId: "f2", familyLabel: "Top", scholarCount: 50 },
+          { familyId: "f3", familyLabel: "Mid", scholarCount: 20 },
+          { familyId: "f4", familyLabel: "High", scholarCount: 40 },
+          { familyId: "f5", familyLabel: "Bottom", scholarCount: 2 },
+        ],
+      }),
+    ]);
+    const result = await getHomeMethodCategories();
+    const rep = result!.categories[0].representativeFamilies;
+    expect(rep).toEqual(["Top", "High", "Mid"]);
+    expect(rep.length).toBeLessThanOrEqual(3);
+  });
+
+  it("excludes generic catch-all (General*) families from the scent line", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([
+      makeHubEntry({
+        id: "molecular_reagents",
+        label: "Molecular reagents",
+        families: [
+          { familyId: "f1", familyLabel: "General molecular biology methods", scholarCount: 99 },
+          { familyId: "f2", familyLabel: "CRISPR screens", scholarCount: 30 },
+          { familyId: "f3", familyLabel: "Western blotting", scholarCount: 20 },
+        ],
+      }),
+    ]);
+    const result = await getHomeMethodCategories();
+    const rep = result!.categories[0].representativeFamilies;
+    expect(rep).not.toContain("General molecular biology methods");
+    expect(rep).toEqual(["CRISPR screens", "Western blotting"]);
+  });
+
+  it("yields an empty scent line when every family is generic", async () => {
+    methodMocks.getSupercategoryHubEntries.mockResolvedValue([
+      makeHubEntry({
+        id: "misc",
+        label: "Miscellaneous",
+        families: [
+          { familyId: "f1", familyLabel: "General methods", scholarCount: 10 },
+          { familyId: "f2", familyLabel: "General assays", scholarCount: 5 },
+        ],
+      }),
+    ]);
+    const result = await getHomeMethodCategories();
+    expect(result!.categories[0].representativeFamilies).toEqual([]);
   });
 });

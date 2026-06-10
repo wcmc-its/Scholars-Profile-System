@@ -38,6 +38,8 @@ import {
 import { ELIGIBLE_ROLES } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES, NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import { sampleSpotlightPapers } from "@/lib/spotlight-sampling";
+import { getSupercategoryHubEntries } from "@/lib/api/methods";
+import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 
 // ---------------------------------------------------------------------------
 // Per-surface floors per UI-SPEC §States and CONTEXT.md D-12
@@ -186,6 +188,23 @@ export type ParentTopic = {
   name: string;
   scholarCount: number;
   publicationCount: number;
+};
+
+export type HomeMethodCategory = {
+  /** /methods/<slug> path segment (SupercategoryHubEntry.slug). */
+  slug: string;
+  /** Display label (SupercategoryHubEntry.label). */
+  label: string;
+  /** Count of publicly-visible families in this category. */
+  familyCount: number;
+  /** Up to 3 representative family labels (top by scholarCount, "General*" excluded). */
+  representativeFamilies: string[];
+};
+
+export type HomeMethodCategories = {
+  categories: HomeMethodCategory[]; // alphabetical by label
+  categoryCount: number; // categories.length
+  totalFamilyCount: number; // sum of familyCount
 };
 
 // ---------------------------------------------------------------------------
@@ -809,4 +828,48 @@ export async function getHomeStats(): Promise<HomeStats> {
     prisma.topic.count(),
   ]);
   return { scholarCount, publicationCount, researchAreaCount };
+}
+
+// ---------------------------------------------------------------------------
+// getHomeMethodCategories — home "Browse by research method" section + stat
+// ---------------------------------------------------------------------------
+
+const HOME_METHOD_REPRESENTATIVE_LIMIT = 3;
+
+/**
+ * Home-page "Browse by research method" data. Reuses the SAME taxonomy source
+ * `/methods` consumes (getSupercategoryHubEntries) — no heavier query.
+ *
+ * Gated on METHODS_LENS_PAGES (isMethodPagesEnabled) so the home section + the
+ * "N methods" stat share the page-surface gate already governing /methods.
+ * Returns null when the flag is off OR the taxonomy returns nothing, so the
+ * caller hides BOTH the section and the stat (spec §7 empty state, §11).
+ */
+export async function getHomeMethodCategories(): Promise<HomeMethodCategories | null> {
+  if (!isMethodPagesEnabled()) return null;
+
+  const entries = await getSupercategoryHubEntries();
+  if (entries.length === 0) return null;
+
+  const categories: HomeMethodCategory[] = entries
+    .map((sc) => {
+      const representativeFamilies = [...sc.families]
+        .filter((f) => !f.familyLabel.startsWith("General"))
+        .sort((a, b) => b.scholarCount - a.scholarCount)
+        .slice(0, HOME_METHOD_REPRESENTATIVE_LIMIT)
+        .map((f) => f.familyLabel);
+      return {
+        slug: sc.slug,
+        label: sc.label,
+        familyCount: sc.familyCount,
+        representativeFamilies,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    categories,
+    categoryCount: categories.length,
+    totalFamilyCount: categories.reduce((sum, c) => sum + c.familyCount, 0),
+  };
 }

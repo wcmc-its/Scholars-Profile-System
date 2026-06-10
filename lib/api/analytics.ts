@@ -18,7 +18,11 @@
  *    section, carrying PMID + publish-cycle ID so the #286 CTR success metric
  *    can be attributed across rotation cycles (#343).
  *  - search_popover_opened / search_popover_mesh_browser_clicked: Search
- *    interpretation popover open + NLM-browser-link click events (#265). */
+ *    interpretation popover open + NLM-browser-link click events (#265).
+ *  - home_methods_stat_click / home_method_category_click /
+ *    home_methods_explore_all_click: clicks on the home "Browse by research
+ *    method" stat anchor, a category card (carries `slug`), and the "Explore
+ *    all" footer link (spec §10). */
 export const VALID_EVENTS = new Set<string>([
   "search_click",
   "mentoring_copubs_open",
@@ -27,6 +31,9 @@ export const VALID_EVENTS = new Set<string>([
   "spotlight_paper_click",
   "search_popover_opened",
   "search_popover_mesh_browser_clicked",
+  "home_methods_stat_click",
+  "home_method_category_click",
+  "home_methods_explore_all_click",
 ]);
 
 /**
@@ -93,6 +100,8 @@ export function handleAnalyticsBeacon(payload: unknown): void {
       // search_popover_* fields (#265). Null for other events.
       mode: typeof p.mode === "string" ? p.mode : null,
       descriptorId: typeof p.descriptorId === "string" ? p.descriptorId : null,
+      // home_method_category_click — carries the category slug. Null otherwise.
+      slug: typeof p.slug === "string" ? p.slug : null,
       filters,
       ts: typeof p.ts === "number" ? p.ts : Date.now(),
     }),

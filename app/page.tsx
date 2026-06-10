@@ -13,14 +13,16 @@ import {
   getSpotlights,
   getBrowseAllResearchAreas,
   getHomeStats,
+  getHomeMethodCategories,
 } from "@/lib/api/home";
 import { SpotlightSection } from "@/components/home/spotlight-section";
 import { BrowseAllResearchAreasGrid } from "@/components/home/browse-all-research-areas-grid";
+import { BrowseByMethodSection } from "@/components/home/browse-by-method-section";
+import { MethodBeaconLink } from "@/components/home/method-beacon-link";
 import { TrySuggestionsChips } from "@/components/home/try-suggestions-chips";
 import { SearchAutocomplete } from "@/components/search/autocomplete";
 import { SiteHeader } from "@/components/site/header";
 import { SiteFooter } from "@/components/site/footer";
-import Link from "next/link";
 
 export const revalidate = 21600; // 6 hours
 export const dynamicParams = true;
@@ -31,14 +33,15 @@ export default async function HomePage() {
   // spotlight section replaces both Selected research and Recent contributions
   // (the latter is suppressed; existing files are kept until Plan 09-07
   // cleanup removes them).
-  const [spotlights, browse, stats] = await Promise.all([
+  const [spotlights, browse, stats, methodCategories] = await Promise.all([
     getSpotlights().catch(() => null),
     getBrowseAllResearchAreas().catch(() => [] as Awaited<ReturnType<typeof getBrowseAllResearchAreas>>),
     getHomeStats().catch(() => null),
+    getHomeMethodCategories().catch(() => null),
   ]);
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="home-page-root flex min-h-screen flex-col">
       {/*
         Skip link — the home page renders its own header/main outside the
         app/(public) layout, so it needs its own copy (WCAG 2.4.1 Bypass
@@ -70,20 +73,12 @@ export default async function HomePage() {
         {stats ? (
           <div className="border-border border-b">
             <div className="mx-auto flex max-w-[1100px] flex-wrap justify-center gap-8 px-6 py-5 text-sm text-zinc-500">
-              <Link
-                href="/search?type=people"
-                aria-label={`Browse ${stats.scholarCount.toLocaleString()} scholars`}
-                className="no-underline hover:underline underline-offset-4 decoration-1"
-              >
+              <span>
                 <strong className="text-zinc-700">{stats.scholarCount.toLocaleString()}</strong> scholars
-              </Link>
-              <Link
-                href="/search?type=publications"
-                aria-label={`Browse ${stats.publicationCount.toLocaleString()} publications`}
-                className="no-underline hover:underline underline-offset-4 decoration-1"
-              >
+              </span>
+              <span>
                 <strong className="text-zinc-700">{stats.publicationCount.toLocaleString()}</strong> publications
-              </Link>
+              </span>
               <a
                 href="#browse-all-research-areas"
                 aria-label={`Browse ${stats.researchAreaCount} research areas`}
@@ -91,15 +86,30 @@ export default async function HomePage() {
               >
                 <strong className="text-zinc-700">{stats.researchAreaCount}</strong> research areas
               </a>
+              {methodCategories ? (
+                <MethodBeaconLink
+                  href="#browse-by-method"
+                  event="home_methods_stat_click"
+                  aria-label={`Browse ${methodCategories.totalFamilyCount} methods`}
+                  className="no-underline hover:underline underline-offset-4 decoration-1"
+                >
+                  <strong className="text-zinc-700">{methodCategories.totalFamilyCount}</strong> methods
+                </MethodBeaconLink>
+              ) : null}
             </div>
           </div>
         ) : null}
 
         <div className="mx-auto max-w-[1100px] px-6 py-12">
           {spotlights ? <SpotlightSection items={spotlights} /> : null}
-          <div id="browse-all-research-areas" className="scroll-mt-16">
+          <div id="browse-all-research-areas" tabIndex={-1} className="scroll-mt-16 outline-none">
             <BrowseAllResearchAreasGrid items={browse ?? []} />
           </div>
+          {methodCategories ? (
+            <div id="browse-by-method" tabIndex={-1} className="scroll-mt-16 outline-none">
+              <BrowseByMethodSection data={methodCategories} />
+            </div>
+          ) : null}
         </div>
       </main>
       <SiteFooter />
