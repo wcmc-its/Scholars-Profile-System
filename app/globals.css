@@ -259,6 +259,9 @@
 .entity-badge--division   { background: #eef4ee; color: #52755a; }
 .entity-badge--center     { background: #ede8f1; color: #4d3d6b; }
 .entity-badge--institute  { background: #e0eded; color: #2c5862; }
+/* #824 — Method family (rust). New color family distinct from the topic yellow,
+   matching the Methods-lens search callout mockup. */
+.entity-badge--method     { background: #f6e3d4; color: #8a4a1f; }
 
 /* Author-position badges per issue #72. Reuses the same sizing/typography
    conventions as `.entity-badge` (#71), and the same blue (Person) and green

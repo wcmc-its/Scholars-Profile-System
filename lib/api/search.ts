@@ -22,6 +22,13 @@ import { identityImageEndpoint } from "@/lib/headshot";
 import { prisma } from "@/lib/db";
 import { profilePath } from "@/lib/profile-url";
 import { fetchAuthorBylineForPmids, fetchWcmAuthorsForPmids } from "@/lib/api/topics";
+import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import {
+  loadFamilyOverlayGate,
+  isFamilyPubliclyVisible,
+} from "@/lib/api/methods-overlay";
+import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
+import { methodFamilyPath } from "@/lib/method-url";
 import {
   getMentoringPmidBuckets,
   EMPTY_MENTORING_BUCKETS,
@@ -2685,7 +2692,11 @@ export type EntityKind =
   | "department"
   | "division"
   | "center"
-  | "institute";
+  | "institute"
+  // #824 — a method-family suggestion (rust "Method" badge) linking to the
+  // cross-scholar family page. Gated behind `isMethodPagesEnabled()` AND the
+  // #800/#801 overlay gate, so suppressed/sensitive families never suggest.
+  | "method";
 
 export type EntitySuggestion = {
   kind: EntityKind;
@@ -2701,8 +2712,71 @@ export type EntitySuggestion = {
 };
 
 /**
+ * #824 — a resolved method-family autocomplete candidate. Carries the stable
+ * `(supercategory, familyLabel)` identity plus the latest `familyId` (for the URL
+ * suffix) and a distinct-scholar count for the subtitle.
+ */
+type MethodFamilyCandidate = {
+  supercategory: string;
+  familyId: string;
+  familyLabel: string;
+  scholarCount: number;
+};
+
+/**
+ * #824 — method-family autocomplete candidates. Returns `[]` UNLESS the Method
+ * pages flag (`isMethodPagesEnabled()`) is on, so when off this contributes
+ * NOTHING — no candidates, no `"method"` plausibility hit, no badge.
+ *
+ * SECURITY: every candidate passes the shared #800/#801 overlay gate
+ * (`loadFamilyOverlayGate` + `isFamilyPubliclyVisible`), so #800-suppressed and
+ * #801-sensitive families are removed BEFORE they can surface in search. Distinct
+ * by the stable `(supercategory, familyLabel)` identity (one row per family),
+ * with the latest `familyId` for the URL suffix and a distinct-scholar count for
+ * the subtitle — both cheap groupBys bounded by the contains-match fetch size.
+ */
+async function loadMethodFamilyCandidates(
+  trimmed: string,
+  fetchN: number,
+): Promise<MethodFamilyCandidate[]> {
+  if (!isMethodPagesEnabled()) return [];
+
+  // One row per stable (supercategory, familyLabel) family; latest familyId for
+  // the URL suffix; distinct-scholar count for the subtitle. `_count.cwid` over a
+  // `(supercategory, familyLabel)` groupBy = distinct scholars (the table is
+  // `@@unique([cwid, familyId])`, one row per (cwid, family)). Over-fetch a little
+  // (fetchN * 4) before the overlay gate so a suppressed/sensitive family doesn't
+  // starve the visible set below `fetchN`.
+  const groups = await prisma.scholarFamily.groupBy({
+    by: ["supercategory", "familyLabel"],
+    where: { familyLabel: { contains: trimmed } },
+    _max: { familyId: true },
+    _count: { cwid: true },
+    orderBy: { _count: { cwid: "desc" } },
+    take: Math.max(fetchN * 4, fetchN),
+  });
+  if (groups.length === 0) return [];
+
+  // Shared overlay gate — drop suppressed/sensitive families before they suggest.
+  const gate = await loadFamilyOverlayGate();
+  const out: MethodFamilyCandidate[] = [];
+  for (const g of groups) {
+    if (!isFamilyPubliclyVisible(g.supercategory, g.familyLabel, gate)) continue;
+    out.push({
+      supercategory: g.supercategory,
+      familyId: g._max.familyId ?? "",
+      familyLabel: g.familyLabel,
+      scholarCount: g._count.cwid,
+    });
+    if (out.length >= fetchN) break;
+  }
+  return out;
+}
+
+/**
  * Mixed-entity autocomplete: returns people, topics, subtopics, departments,
- * divisions, and centers in a single ranked list.
+ * divisions, centers, and (flag-gated, #824) method families in a single ranked
+ * list.
  *
  * Two paths, gated by `SEARCH_RANKING_V2`:
  *   - `on` (default): #231 v1 algorithm — plausibility predicates, query-shape
@@ -2724,7 +2798,7 @@ export async function suggestEntities(
   const useV2 = (process.env.SEARCH_RANKING_V2 ?? "on") !== "off";
   const fetchN = useV2 ? 5 : perKind;
 
-  const [peopleR, topicsR, subtopicsR, departmentsR, divisionsR, centersR] =
+  const [peopleR, topicsR, subtopicsR, departmentsR, divisionsR, centersR, methodsR] =
     await Promise.allSettled([
       suggestNames(trimmed, fetchN),
       prisma.topic.findMany({
@@ -2780,6 +2854,9 @@ export async function suggestEntities(
           centerType: true,
         },
       }),
+      // #824 — method-family candidates, flag-gated + overlay-gated inside the
+      // helper (off ⇒ `[]`, so no slot leaks when the Method pages flag is off).
+      loadMethodFamilyCandidates(trimmed, fetchN),
     ]);
 
   // §7 — allSettled means one slow/broken source contributes zero rows
@@ -2821,6 +2898,9 @@ export async function suggestEntities(
       centerType: string;
     }>,
   );
+  // #824 — method families. Empty when the Method pages flag is off (the helper
+  // returns `[]`) or the source rejected — no candidates contributed either way.
+  const methods = unwrap(methodsR, [] as MethodFamilyCandidate[]);
 
   type PersonRow = Awaited<ReturnType<typeof suggestNames>>[number];
   type TopicRow = (typeof topics)[number];
@@ -2828,6 +2908,7 @@ export async function suggestEntities(
   type DeptRow = (typeof departments)[number];
   type DivisionRow = (typeof divisions)[number];
   type CenterRow = (typeof centers)[number];
+  type MethodRow = (typeof methods)[number];
 
   const personToSuggestion = (p: PersonRow): EntitySuggestion | null => {
     if (!p.slug) return null;
@@ -2899,6 +2980,22 @@ export async function suggestEntities(
       href: `/centers/${c.slug}`,
     };
   };
+  // #824 — method-family row. Title = the family label; subtitle = the
+  // supercategory display label (+ distinct-scholar count when present); href =
+  // the cross-scholar family page. The candidate already passed the flag + overlay
+  // gate in `loadMethodFamilyCandidates`, so this builder is render-only.
+  const familyToSuggestion = (m: MethodRow): EntitySuggestion => {
+    const sc = supercategoryLabel(m.supercategory);
+    const subtitle = m.scholarCount
+      ? `${sc} · ${m.scholarCount.toLocaleString()} ${m.scholarCount === 1 ? "scholar" : "scholars"}`
+      : sc;
+    return {
+      kind: "method",
+      title: m.familyLabel,
+      subtitle,
+      href: methodFamilyPath(m.supercategory, m.familyId, m.familyLabel),
+    };
+  };
 
   if (!useV2) {
     // Legacy path — fixed order, per-source `perKind` cap. Kept reachable via
@@ -2916,6 +3013,9 @@ export async function suggestEntities(
       if (s) out.push(s);
     }
     for (const c of centers.slice(0, perKind)) out.push(centerToSuggestion(c));
+    // #824 — method families (empty when the flag is off). Appended after the
+    // base kinds in the legacy fixed-order path.
+    for (const m of methods.slice(0, perKind)) out.push(familyToSuggestion(m));
     return out;
   }
 
@@ -2940,6 +3040,14 @@ export async function suggestEntities(
   const departmentsPromoted = promoteStartsWith(departments, trimmed, (r) => r.name, "tokenwise");
   const divisionsPromoted = promoteStartsWith(divisions, trimmed, (r) => r.name, "tokenwise");
   const centersPromoted = promoteStartsWith(centers, trimmed, (r) => r.name, "tokenwise");
+  // #824 — promote prefix-matching family labels to the front (same tokenwise
+  // lead rule as the named entities). Empty when the Method pages flag is off.
+  const methodsPromoted = promoteStartsWith(
+    methods,
+    trimmed,
+    (r) => r.familyLabel,
+    "tokenwise",
+  );
 
   const sources: RankingSources = {
     person: peopleSorted,
@@ -2948,6 +3056,9 @@ export async function suggestEntities(
     department: departmentsPromoted,
     division: divisionsPromoted,
     center: centersPromoted,
+    // #824 — only populated when the flag is on; an empty array yields no
+    // `"method"` plausibility hit and no ordering slot.
+    method: methodsPromoted.map((m) => ({ familyLabel: m.familyLabel })),
   };
 
   const shape = classifyQueryShape(trimmed);
@@ -2964,6 +3075,9 @@ export async function suggestEntities(
     department: departmentsPromoted,
     division: divisionsPromoted,
     center: centersPromoted,
+    // #824 — the full candidate rows (with supercategory/familyId/count) so the
+    // switch below can build the suggestion. Empty when the flag is off.
+    method: methodsPromoted,
   };
 
   const filled = capFill<unknown>(order, rowsByKind);
@@ -2995,6 +3109,10 @@ export async function suggestEntities(
       case "center":
       case "institute":
         for (const c of rows as CenterRow[]) out.push(centerToSuggestion(c));
+        break;
+      case "method":
+        // #824 — only reachable when the flag-gated source produced rows.
+        for (const m of rows as MethodRow[]) out.push(familyToSuggestion(m));
         break;
     }
   }

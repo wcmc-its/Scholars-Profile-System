@@ -408,3 +408,63 @@ describe("capFill (§5)", () => {
     expect(filled[0]!.rows.length).toBe(5); // cap, not budget
   });
 });
+
+describe("#824 method-family routing", () => {
+  it("absent method source contributes no 'method' hit", () => {
+    const s = emptySources();
+    s.topic.push({ id: "t1", label: "CRISPR" });
+    // No `method` source present (flag-off shape) → no method hit.
+    const hits = plausibilityHits("crispr", s);
+    expect(hits.has("method")).toBe(false);
+  });
+
+  it("empty method source contributes no 'method' hit and no ordering slot", () => {
+    const s = emptySources();
+    s.method = [];
+    const hits = plausibilityHits("crispr", s);
+    expect(hits.has("method")).toBe(false);
+    // method must never appear in the order when it has no hit (no empty slot).
+    expect(chooseKindOrder("topic-like", hits)).not.toContain("method");
+  });
+
+  it("a family-label tokenwise prefix match hits 'method'", () => {
+    const s = emptySources();
+    s.method = [{ familyLabel: "Flow Cytometry" }];
+    // tokenwise: 'cyto' starts the second token.
+    expect(plausibilityHits("cyto", s).has("method")).toBe(true);
+    // in-token-but-not-startsWith → no hit.
+    expect(plausibilityHits("ytom", s).has("method")).toBe(false);
+  });
+
+  it("method leads a topic-like query when only the method source hits", () => {
+    const s = emptySources();
+    s.method = [{ familyLabel: "CRISPR-Cas9 Editing" }];
+    const shape = classifyQueryShape("crispr");
+    const hits = plausibilityHits("crispr", s);
+    expect(hits.has("method")).toBe(true);
+    // Sole hit → method leads.
+    expect(chooseKindOrder(shape, hits)[0]).toBe("method");
+  });
+
+  it("topic outranks method as lead when both hit a topic-like query", () => {
+    const s = emptySources();
+    s.topic.push({ id: "t1", label: "CRISPR" });
+    s.method = [{ familyLabel: "CRISPR-Cas9 Editing" }];
+    const shape = classifyQueryShape("crispr");
+    const hits = plausibilityHits("crispr", s);
+    expect(hits.has("topic") && hits.has("method")).toBe(true);
+    const order = chooseKindOrder(shape, hits);
+    expect(order[0]).toBe("topic");
+    // method still appears in the order (slotted after subtopic, before person).
+    expect(order).toContain("method");
+    expect(order.indexOf("method")).toBeLessThan(order.indexOf("person"));
+  });
+
+  it("method is appended to the order when it co-hits but isn't the lead", () => {
+    // Ambiguous multi-hit (person + method): person leads in default order, and
+    // method is still placed (so its rows aren't dropped by cap fill).
+    const order = chooseKindOrder("ambiguous", new Set(["person", "method"]));
+    expect(order).toContain("method");
+    expect(order).toContain("person");
+  });
+});
