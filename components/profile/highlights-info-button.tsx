@@ -62,7 +62,9 @@ export function HighlightsInfoButton() {
           <p className="m-0">
             Highlights are selected by ReCiterAI from the scholar&apos;s
             first- or senior-author publications, weighted by impact and
-            recency.{" "}
+            recency. A scholar may instead choose their highlights manually; a
+            manually selected set is fixed and does not change when the ranking
+            updates.{" "}
             <Link
               href={methodologyHref("selectedHighlights")}
               className="font-medium text-[var(--color-accent-slate)] underline-offset-4 hover:underline"

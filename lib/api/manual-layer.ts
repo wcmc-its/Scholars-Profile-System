@@ -19,7 +19,7 @@
  *    Prisma `where`; it is loaded per request, scoped to the pmids in hand, and
  *    applied in code.
  */
-import { sanitizeOverviewHtml } from "@/lib/edit/validators";
+import { sanitizeOverviewHtml, validateSelectedHighlightPmids } from "@/lib/edit/validators";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 import { sanitizeVIVOHtml } from "@/lib/utils";
 
@@ -67,6 +67,84 @@ export async function getEffectiveOverview(
     return clean === "" ? null : clean;
   }
   return etlOverview ? sanitizeVIVOHtml(etlOverview) : null;
+}
+
+// ---------------------------------------------------------------------------
+// selectedHighlightPmids — #836 opt-in manual Highlights override (read side)
+// ---------------------------------------------------------------------------
+
+/**
+ * The scholar's hand-picked Highlights PMIDs, in display order, or `null` when
+ * no manual override exists (the AI selection then stands).
+ *
+ * Reads the `field_override(scholar, cwid, 'selectedHighlightPmids')` row and
+ * parses its stored JSON array via {@link validateSelectedHighlightPmids}. A
+ * malformed stored value (should never happen — the write path validates) is
+ * treated as "no override" rather than throwing, so a corrupt row can never
+ * 500 a public profile; it just falls back to the AI selection.
+ *
+ * Membership-in-the-scholar's-pubs is NOT enforced here — that needs the
+ * scholar's visible publication set, which the caller already has. Apply
+ * {@link pickManualHighlights} over the parsed PMIDs and the visible set to get
+ * the final, suppression-respecting Highlights list.
+ */
+export async function getSelectedHighlightPmids(
+  cwid: string,
+  client: OverrideReadClient,
+): Promise<readonly string[] | null> {
+  const override = await client.fieldOverride.findUnique({
+    where: {
+      entityType_entityId_fieldName: {
+        entityType: "scholar",
+        entityId: cwid,
+        fieldName: "selectedHighlightPmids",
+      },
+    },
+    select: { value: true },
+  });
+  if (!override) return null;
+  const parsed = validateSelectedHighlightPmids(override.value);
+  if (!parsed.ok) return null;
+  return parsed.value;
+}
+
+/**
+ * Resolve the effective Highlights for a profile (#836), pure and DB-free so it
+ * is unit-testable in isolation.
+ *
+ * `visible` is the scholar's already-suppression-filtered, rankable publication
+ * pool (every confirmed, non-hidden authorship — `lib/api/profile.ts`
+ * `rankablePubs`). `aiHighlights` is the AI-ranked top-N slice computed from
+ * that same pool. `manualPmids` is the stored override (or `null`).
+ *
+ * Precedence:
+ *   - no override (`null`) → the AI selection, unchanged (default behavior);
+ *   - an override → the publications named by `manualPmids`, IN THAT ORDER,
+ *     looked up in `visible`. Any PMID not in `visible` (suppressed since the
+ *     pick, or never the scholar's) is silently dropped — so a manual set can
+ *     never resurface a suppressed publication, and a stale pick degrades
+ *     gracefully. If every manual PMID drops out (e.g. all suppressed), the
+ *     result is the AI selection again, never an empty Highlights surface from a
+ *     stale override.
+ *
+ * Returns publications drawn from `visible` (full `T`), so the caller's render
+ * shape is identical whether the highlights are AI- or manually-chosen.
+ */
+export function pickManualHighlights<T extends { pmid: string }>(
+  visible: readonly T[],
+  aiHighlights: readonly T[],
+  manualPmids: readonly string[] | null,
+): T[] {
+  if (manualPmids === null || manualPmids.length === 0) return [...aiHighlights];
+  const byPmid = new Map(visible.map((p) => [p.pmid, p]));
+  const picked: T[] = [];
+  for (const pmid of manualPmids) {
+    const pub = byPmid.get(pmid);
+    if (pub) picked.push(pub);
+  }
+  // Every manual pick dropped out (all suppressed / out-of-set) → fall back to
+  // the AI selection rather than render an empty Highlights section.
+  return picked.length > 0 ? picked : [...aiHighlights];
 }
 
 // ---------------------------------------------------------------------------

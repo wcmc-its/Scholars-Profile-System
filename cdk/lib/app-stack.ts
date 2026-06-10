@@ -940,6 +940,17 @@ export class AppStack extends Stack {
         // the etl:reciter-refresh scanner propagates it to the gold standard +
         // fires the delayed re-score.
         RECITER_REJECT_SEND: env === "staging" ? "on" : "off",
+        // #836 — SELF_EDIT_MANUAL_HIGHLIGHTS: the self-only opt-in to choose
+        // profile Highlights manually (a frozen `field_override(selectedHighlightPmids)`
+        // set that overrides the AI ranking at read time). Read via
+        // isManualHighlightsEnabled() (=== "on"); when off the route rejects a
+        // selectedHighlightPmids write, the read path ignores any stored override,
+        // and the /edit Highlights rail item / card are not surfaced — the whole
+        // feature ships dark. OFF in BOTH envs pending product sign-off; flip with
+        // a manual `cdk deploy --exclusively Sps-App-<env>` (CD only re-rolls the
+        // image, never CDK). No data migration — the JSON value rides the existing
+        // field_override Text column.
+        SELF_EDIT_MANUAL_HIGHLIGHTS: "off",
         // SELF_EDIT_COI_GAP_HINT — the self-only "From your publications" panel
         // (relationships named in a scholar's own PubMed competing-interest
         // statements that aren't in their current WRG disclosures) + its disavow

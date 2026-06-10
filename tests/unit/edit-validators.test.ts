@@ -15,9 +15,12 @@ import {
 // ---------------------------------------------------------------------------
 
 describe("isEditableField", () => {
-  it("admits exactly the v1 allowlist", () => {
+  it("admits exactly the allowlist", () => {
     expect(isEditableField("overview")).toBe(true);
     expect(isEditableField("slug")).toBe(true);
+    // #836 — the manual-Highlights override field name (the route additionally
+    // gates it behind SELF_EDIT_MANUAL_HIGHLIGHTS).
+    expect(isEditableField("selectedHighlightPmids")).toBe(true);
   });
 
   it("rejects every other field name", () => {

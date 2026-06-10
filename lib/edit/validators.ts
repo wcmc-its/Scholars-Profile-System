@@ -30,11 +30,17 @@ import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
 
-/** The v1 `field_override.fieldName` allowlist (`self-edit-spec.md`). */
-export const EDITABLE_FIELDS = ["overview", "slug"] as const;
+/**
+ * The scholar `field_override.fieldName` allowlist. `overview` + `slug` are the
+ * v1 set (`self-edit-spec.md`); `selectedHighlightPmids` is the #836 opt-in
+ * manual Highlights override (a JSON array of PMIDs), gated by the
+ * `SELF_EDIT_MANUAL_HIGHLIGHTS` flag at the route — the allowlist only narrows
+ * the field name; the flag governs whether the write is accepted.
+ */
+export const EDITABLE_FIELDS = ["overview", "slug", "selectedHighlightPmids"] as const;
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
 
-/** Narrow an untrusted `fieldName` to the v1 allowlist. */
+/** Narrow an untrusted `fieldName` to the allowlist. */
 export function isEditableField(value: string): value is EditableField {
   return (EDITABLE_FIELDS as readonly string[]).includes(value);
 }
@@ -306,6 +312,76 @@ export async function checkSlugCollision(
   if (formerSlug) return { ok: false, error: "collision" };
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// selectedHighlightPmids — #836 opt-in manual Highlights override
+// ---------------------------------------------------------------------------
+
+/**
+ * The number of Highlights the profile shows — the manual set is bounded to the
+ * same count the read path slices the AI ranking to (`lib/api/profile.ts`,
+ * `rankForSelectedHighlights(...).slice(0, MAX_SELECTED_HIGHLIGHTS)`). Keep the
+ * two in lockstep: a manual array longer than this would surface more cards than
+ * the AI default and break the surface's fixed shape.
+ */
+export const MAX_SELECTED_HIGHLIGHTS = 3;
+
+/** A PMID is a non-empty run of digits, no leading zero (PubMed never mints one). */
+const PMID_PATTERN = /^[1-9][0-9]*$/;
+
+export type SelectedHighlightsResult =
+  | { ok: true; value: string[] }
+  | { ok: false; error: "invalid_value" | "too_many" | "duplicate" | "invalid_pmid" };
+
+/**
+ * Validate a `selectedHighlightPmids` payload — the scholar's hand-picked,
+ * ordered Highlights set (#836). The stored shape is a JSON array of PMID
+ * strings; the array's ORDER is meaningful (it is the display order).
+ *
+ * Shape rules, in order:
+ *   - the parsed value must be a JSON array of strings (anything else →
+ *     `invalid_value`); an empty array is accepted and means "I have no manual
+ *     picks" — the read path then falls back to the AI selection, identical to
+ *     having no override row at all (the UI clears via the clear path instead,
+ *     but an empty array is a benign no-op, not an error);
+ *   - at most {@link MAX_SELECTED_HIGHLIGHTS} entries (`too_many`);
+ *   - each entry a numeric PMID string (`invalid_pmid`);
+ *   - no duplicate PMIDs (`duplicate`).
+ *
+ * Membership-in-the-scholar's-publication-set is NOT checked here (it needs a
+ * DB read of the scholar's confirmed authorships); the read path
+ * (`pickManualHighlights`) enforces it by silently dropping any stored PMID the
+ * scholar is not a confirmed author of, so a stale or out-of-set PMID can never
+ * surface. The edit UI only offers the scholar's own publications, so a
+ * well-behaved client never sends an out-of-set PMID.
+ *
+ * Accepts either an already-parsed array (the route hands the raw body value) or
+ * a JSON string. Returns the normalized `string[]` on success.
+ */
+export function validateSelectedHighlightPmids(input: unknown): SelectedHighlightsResult {
+  let parsed: unknown = input;
+  if (typeof input === "string") {
+    try {
+      parsed = JSON.parse(input);
+    } catch {
+      return { ok: false, error: "invalid_value" };
+    }
+  }
+  if (!Array.isArray(parsed)) return { ok: false, error: "invalid_value" };
+  if (parsed.length > MAX_SELECTED_HIGHLIGHTS) return { ok: false, error: "too_many" };
+
+  const seen = new Set<string>();
+  const value: string[] = [];
+  for (const entry of parsed) {
+    if (typeof entry !== "string" || !PMID_PATTERN.test(entry)) {
+      return { ok: false, error: "invalid_pmid" };
+    }
+    if (seen.has(entry)) return { ok: false, error: "duplicate" };
+    seen.add(entry);
+    value.push(entry);
+  }
+  return { ok: true, value };
 }
 
 // ---------------------------------------------------------------------------

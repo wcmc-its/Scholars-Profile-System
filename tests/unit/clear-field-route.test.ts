@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const {
@@ -11,6 +11,8 @@ const {
   mockScholarFindMany,
   mockScholarUpdate,
   mockSlugHistoryUpsert,
+  mockReflectOverviewEdit,
+  mockResolveProfiles,
 } = vi.hoisted(() => ({
   mockGetEditSession: vi.fn(),
   mockTransaction: vi.fn(),
@@ -21,6 +23,8 @@ const {
   mockScholarFindMany: vi.fn(),
   mockScholarUpdate: vi.fn(),
   mockSlugHistoryUpsert: vi.fn(),
+  mockReflectOverviewEdit: vi.fn(),
+  mockResolveProfiles: vi.fn(),
 }));
 
 // `readEditRequest` resolves identity through the #637 effective-identity seam.
@@ -42,6 +46,10 @@ vi.mock("@/lib/db", () => ({
     read: {},
     write: { $transaction: mockTransaction },
   },
+}));
+vi.mock("@/lib/edit/revalidation", () => ({
+  reflectOverviewEdit: mockReflectOverviewEdit,
+  resolveAffectedProfiles: mockResolveProfiles,
 }));
 
 import { POST } from "@/app/api/edit/clear-field/route";
@@ -87,6 +95,7 @@ beforeEach(() => {
   mockScholarFindMany.mockResolvedValue([]); // no other scholars hold a slug
   mockScholarUpdate.mockResolvedValue({});
   mockSlugHistoryUpsert.mockResolvedValue({});
+  mockResolveProfiles.mockResolvedValue([{ slug: "self01-slug", cwid: "self01" }]);
 });
 
 describe("POST /api/edit/clear-field", () => {
@@ -208,5 +217,72 @@ describe("POST /api/edit/clear-field", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toBe("write_failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #836 — clearing selectedHighlightPmids (the opt-out: revert to AI highlights)
+// ---------------------------------------------------------------------------
+
+describe("POST /api/edit/clear-field — selectedHighlightPmids (#836)", () => {
+  const ORIGINAL_FLAG = process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+  afterEach(() => {
+    if (ORIGINAL_FLAG === undefined) delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+    else process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = ORIGINAL_FLAG;
+  });
+
+  it("rejects with 400 (invalid_field) when the flag is off", async () => {
+    delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
+    mockGetEditSession.mockResolvedValue(SELF);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "selectedHighlightPmids" }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_field");
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-scholar clear with 403 (self-only)", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    mockGetEditSession.mockResolvedValue(SELF);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    );
+    expect(res.status).toBe(403);
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("deletes the override + writes a clear audit row, revalidates the profile, cleared:true", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    mockGetEditSession.mockResolvedValue(SELF);
+    mockFieldOverrideFindUnique.mockResolvedValue({ value: '["100","200"]' });
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "selectedHighlightPmids" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.fieldName).toBe("selectedHighlightPmids");
+    expect(body.cleared).toBe(true);
+    expect(mockFieldOverrideDelete).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw.mock.calls[0][4]).toBe("field_override_clear");
+    expect(mockReflectOverviewEdit).toHaveBeenCalled();
+  });
+
+  it("is idempotent — no override yields cleared:false, no delete / audit / revalidate", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    mockGetEditSession.mockResolvedValue(SELF);
+    mockFieldOverrideFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "self01", fieldName: "selectedHighlightPmids" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cleared).toBe(false);
+    expect(mockFieldOverrideDelete).not.toHaveBeenCalled();
+    expect(mockExecuteRaw).not.toHaveBeenCalled();
+    expect(mockReflectOverviewEdit).not.toHaveBeenCalled();
   });
 });

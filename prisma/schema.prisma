@@ -1266,8 +1266,8 @@ model FieldOverride {
   id         String     @id @default(uuid()) @db.VarChar(64)
   entityType EntityType @map("entity_type")
   entityId   String     @map("entity_id") @db.VarChar(64) // Scholar.cwid for v1
-  fieldName  String     @map("field_name") @db.VarChar(64) // 'overview' | 'slug' — self-edit SPEC allowlist
-  value      String     @db.Text // scalar text; structured values are an ADR-005 non-goal
+  fieldName  String     @map("field_name") @db.VarChar(64) // 'overview' | 'slug' | 'selectedHighlightPmids' (#836) — EDITABLE_FIELDS allowlist
+  value      String     @db.Text // scalar text for overview/slug; #836 stores a JSON array of PMID strings for selectedHighlightPmids
   actorCwid  String     @map("actor_cwid") @db.VarChar(32)
   createdAt  DateTime   @default(now()) @map("created_at")
   updatedAt  DateTime   @updatedAt @map("updated_at")

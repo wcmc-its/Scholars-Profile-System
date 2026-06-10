@@ -173,7 +173,12 @@ export default async function EditScholarPage({
   // depends on `mode` (superuser has no Publications), so derive it here.
   // The redirect target carries no `?attr`, so the re-load never loops.
   const basePath = `/edit/scholar/${targetCwid}`;
-  const validAttrs: readonly string[] = visibleAttrKeys(mode, slugRequestEnabled);
+  const validAttrs: readonly string[] = visibleAttrKeys(
+    mode,
+    slugRequestEnabled,
+    false,
+    ctx.highlights !== null,
+  );
   if (attr !== undefined && !validAttrs.includes(attr)) {
     redirect(basePath);
   }

@@ -55,14 +55,15 @@ const ALLOW: AuthzResult = { ok: true };
 // ---------------------------------------------------------------------------
 
 /**
- * `POST /api/edit/field`. `overview` is **self only** — a superuser does not
- * inherit it (broad admin field-editing is deferred). `slug` is superuser-only.
+ * `POST /api/edit/field`. `overview` and `selectedHighlightPmids` (#836) are
+ * **self only** — a superuser does not inherit them (broad admin field-editing
+ * is deferred). `slug` is superuser-only.
  */
 export function authorizeFieldEdit(
   session: EditSession,
-  target: { entityId: string; fieldName: "overview" | "slug" },
+  target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
 ): AuthzResult {
-  if (target.fieldName === "overview") {
+  if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
     return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
   }
   return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };

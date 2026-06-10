@@ -28,8 +28,10 @@
  * Server-only by construction (uses Prisma) — no explicit `server-only` import
  * so the module loads under vitest without a stub, matching `manual-layer.ts`.
  */
-import { getEffectiveOverview } from "@/lib/api/manual-layer";
+import { getEffectiveOverview, getSelectedHighlightPmids } from "@/lib/api/manual-layer";
 import { getMenteesForMentor } from "@/lib/api/mentoring";
+import { rankForSelectedHighlights } from "@/lib/ranking";
+import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 import { isFundingActive } from "@/lib/funding-active";
 import { isChairTitleFor } from "@/lib/leadership";
@@ -224,6 +226,25 @@ export type EditContextMentee = {
   suppressionId: string | null;
 };
 
+/**
+ * The Highlights-editor state (#836). Surfaced ONLY when `loadEditContext` is
+ * called with `opts.includeHighlights === true`, which the self page sets behind
+ * `SELF_EDIT_MANUAL_HIGHLIGHTS` for a genuine self viewer. `null` for every
+ * other caller (and when the flag is off), so the rail item / card never appear.
+ */
+export type EditContextHighlights = {
+  /** Whether the scholar has opted in (a `selectedHighlightPmids` override exists). */
+  manualEnabled: boolean;
+  /** The scholar's stored manual picks, in order — empty when not opted in. */
+  manualPmids: ReadonlyArray<string>;
+  /** The AI-selected Highlights PMIDs (the default), to seed the picker when the
+   *  scholar opts in. Same ranking + count the public profile shows. */
+  aiPmids: ReadonlyArray<string>;
+  /** The scholar's shown (non-suppressed) confirmed publications, the pickable
+   *  pool. Ordered most-recent-first so the picker reads sensibly. */
+  pickable: ReadonlyArray<{ pmid: string; title: string; journal: string | null; year: number | null }>;
+};
+
 export type EditContext = {
   scholar: EditContextScholar;
   publications: ReadonlyArray<EditContextPublication>;
@@ -242,6 +263,12 @@ export type EditContext = {
    * is a suggestion surface, never a verdict — see `EditContextCoiGapCandidate`.
    */
   unmatchedPubmedCoi: ReadonlyArray<EditContextCoiGapCandidate>;
+  /**
+   * The manual-Highlights editor state (#836), or `null` when the surface is not
+   * available (flag off, or a non-self caller). Populated only when
+   * `loadEditContext` is called with `opts.includeHighlights === true`.
+   */
+  highlights: EditContextHighlights | null;
 };
 
 /**
@@ -303,7 +330,7 @@ export async function loadEditContext(
   client: EditContextReadClient,
   now: Date = new Date(),
   loadMentees: LoadMentees = defaultLoadMentees,
-  opts?: { includeCoiGap?: boolean },
+  opts?: { includeCoiGap?: boolean; includeHighlights?: boolean },
 ): Promise<EditContext | null> {
   const scholar = await client.scholar.findUnique({
     where: { cwid },
@@ -590,11 +617,33 @@ export async function loadEditContext(
     };
   });
 
+  // #836 — only the manual-Highlights editor needs the ranking fields
+  // (publicationType / dateAddedToEntrez / impactScore / per-scholar score) to
+  // compute the AI default. Pull them only when that surface is requested so the
+  // common /edit load stays lean.
+  const includeHighlights = opts?.includeHighlights === true;
   const authorships = await client.publicationAuthor.findMany({
     where: { cwid, isConfirmed: true },
     select: {
+      isFirst: true,
+      isLast: true,
+      isPenultimate: true,
+      isConfirmed: true,
       publication: {
-        select: { pmid: true, title: true, journal: true, year: true },
+        select: {
+          pmid: true,
+          title: true,
+          journal: true,
+          year: true,
+          ...(includeHighlights
+            ? {
+                publicationType: true,
+                dateAddedToEntrez: true,
+                impactScore: true,
+                publicationScores: { where: { cwid }, select: { score: true } },
+              }
+            : {}),
+        },
       },
     },
   });
@@ -602,6 +651,7 @@ export async function loadEditContext(
 
   const publications: EditContextPublication[] = [];
   if (pmids.length === 0) {
+    const noPubManual = includeHighlights ? await getSelectedHighlightPmids(cwid, client) : null;
     return {
       scholar: {
         cwid: scholar.cwid,
@@ -630,6 +680,11 @@ export async function loadEditContext(
       coiDisclosures,
       mentees,
       unmatchedPubmedCoi,
+      // No confirmed publications → nothing to pick or rank. Surface an empty
+      // editor state (still reading any stored override) when requested.
+      highlights: includeHighlights
+        ? { manualEnabled: noPubManual !== null, manualPmids: noPubManual ?? [], aiPmids: [], pickable: [] }
+        : null,
     };
   }
 
@@ -744,6 +799,16 @@ export async function loadEditContext(
     });
   }
 
+  // #836 — the manual-Highlights editor state. Built only when requested
+  // (self + flag on). The pickable pool and the AI default mirror the public
+  // profile: the same `shown` (non-suppressed) confirmed authorships, ranked by
+  // the `selected_highlights` curve to the same count the profile slices to. A
+  // suppressed pub never enters the pool, so it can neither be picked nor seed
+  // the AI default — keeping the editor in lockstep with the read path.
+  const highlights = includeHighlights
+    ? await buildHighlightsContext(cwid, authorships, publications, client, now)
+    : null;
+
   return {
     scholar: {
       cwid: scholar.cwid,
@@ -772,5 +837,82 @@ export async function loadEditContext(
     coiDisclosures,
     mentees,
     unmatchedPubmedCoi,
+    highlights,
+  };
+}
+
+/** The Prisma surface `buildHighlightsContext` needs (the override read). */
+type HighlightsReadClient = Pick<PrismaClient, "fieldOverride">;
+
+/** The authorship row shape `buildHighlightsContext` consumes — the ranking
+ *  fields are present only when `includeHighlights` widened the select. */
+type HighlightsAuthorship = {
+  isFirst: boolean;
+  isLast: boolean;
+  isPenultimate: boolean;
+  isConfirmed: boolean;
+  publication: {
+    pmid: string;
+    title: string;
+    journal: string | null;
+    year: number | null;
+    publicationType?: string | null;
+    dateAddedToEntrez?: Date | null;
+    impactScore?: { toString(): string } | null;
+    publicationScores?: ReadonlyArray<{ score: number }>;
+  };
+};
+
+/**
+ * Compute the #836 Highlights-editor state for one scholar: the stored manual
+ * picks, the AI default (same ranking the profile shows), and the pickable
+ * publication pool. Pure-ish (one override read), kept out of the main loader
+ * body so the ranking import only matters on the gated path.
+ */
+async function buildHighlightsContext(
+  cwid: string,
+  authorships: ReadonlyArray<HighlightsAuthorship>,
+  publications: ReadonlyArray<EditContextPublication>,
+  client: HighlightsReadClient,
+  now: Date,
+): Promise<EditContextHighlights> {
+  const shown = new Set(publications.filter((p) => p.state === "shown").map((p) => p.pmid));
+
+  // Rank the shown pubs by the same curve + impact source the profile uses
+  // (`lib/api/profile.ts`), then take the same top-N slice.
+  const rankable = authorships
+    .filter((a) => shown.has(a.publication.pmid))
+    .map((a) => {
+      const pub = a.publication;
+      const globalImpact =
+        pub.impactScore !== null && pub.impactScore !== undefined
+          ? Number(pub.impactScore.toString())
+          : 0;
+      return {
+        pmid: pub.pmid,
+        publicationType: pub.publicationType ?? null,
+        reciteraiImpact: pub.publicationScores?.[0]?.score ?? globalImpact,
+        dateAddedToEntrez: pub.dateAddedToEntrez ?? null,
+        authorship: { isFirst: a.isFirst, isLast: a.isLast, isPenultimate: a.isPenultimate },
+        isConfirmed: a.isConfirmed,
+      };
+    });
+  const aiPmids = rankForSelectedHighlights(rankable, now)
+    .slice(0, MAX_SELECTED_HIGHLIGHTS)
+    .map((p) => p.pmid);
+
+  const manual = await getSelectedHighlightPmids(cwid, client);
+  // The pickable pool: shown pubs, most-recent-first (year desc), so the picker
+  // reads top-to-bottom newest-first like the profile's publications list.
+  const pickable = publications
+    .filter((p) => p.state === "shown")
+    .map((p) => ({ pmid: p.pmid, title: p.title, journal: p.journal, year: p.year }))
+    .sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+
+  return {
+    manualEnabled: manual !== null,
+    manualPmids: manual ?? [],
+    aiPmids,
+    pickable,
   };
 }

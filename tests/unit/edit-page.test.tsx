@@ -100,6 +100,8 @@ const ctx: EditContext = {
   // flag is on AND the viewer is genuine self); a dedicated describe block below
   // exercises the populated case.
   unmatchedPubmedCoi: [],
+  // #836 — null unless SELF_EDIT_MANUAL_HIGHLIGHTS is on AND the viewer is self.
+  highlights: null,
 };
 
 const superuserCtx: EditContext = {

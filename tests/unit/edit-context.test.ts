@@ -914,3 +914,107 @@ describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
     expect(ctx!.unmatchedPubmedCoi[0].tier).toBe("Medium");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #836 — manual-Highlights editor context (opt-in gate)
+// ---------------------------------------------------------------------------
+
+describe("loadEditContext — highlights (#836)", () => {
+  // A fixed "now" two years on so the test pubs (dated ~2 years back) sit in the
+  // selected_highlights peak (18mo–10yr, weight 1.0) — ranking by impact alone.
+  const NOW = new Date("2026-01-01T00:00:00Z");
+  const TWO_YEARS_AGO = new Date("2024-01-01T00:00:00Z");
+
+  /** A first-author, confirmed, Academic Article authorship with a given impact. */
+  function authorship(pmid: string, impact: number, title = `T-${pmid}`) {
+    return {
+      isFirst: true,
+      isLast: false,
+      isPenultimate: false,
+      isConfirmed: true,
+      publication: {
+        pmid,
+        title,
+        journal: "J",
+        year: 2024,
+        publicationType: "Academic Article",
+        dateAddedToEntrez: TWO_YEARS_AGO,
+        impactScore: impact, // Prisma Decimal stringifies; a number has .toString()
+        publicationScores: [],
+      },
+    };
+  }
+
+  function highlightsClient(overrideValue: string | null, authorshipRows: unknown[]) {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    // The override read (selectedHighlightPmids) + the overview/slug reads all go
+    // through fieldOverride.findUnique; key on the requested fieldName.
+    c.fieldOverride.findUnique.mockImplementation((args: {
+      where: { entityType_entityId_fieldName: { fieldName: string } };
+    }) => {
+      const field = args.where.entityType_entityId_fieldName.fieldName;
+      if (field === "selectedHighlightPmids") {
+        return Promise.resolve(overrideValue === null ? null : { value: overrideValue });
+      }
+      return Promise.resolve(null);
+    });
+    c.publicationAuthor.findMany
+      .mockResolvedValueOnce(authorshipRows) // authorships for the scholar
+      .mockResolvedValueOnce(
+        (authorshipRows as Array<{ publication: { pmid: string } }>).map((a) => ({
+          pmid: a.publication.pmid,
+          cwid: SELF,
+        })),
+      ); // confirmed displayed authors
+    // scholar-level suppression [], then pub-level suppression [].
+    c.suppression.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    return c;
+  }
+
+  it("is null when includeHighlights is not requested (the dark default)", async () => {
+    const c = highlightsClient(null, [authorship("100", 9)]);
+    const ctx = await loadEditContext(SELF, asClient(c), NOW);
+    expect(ctx!.highlights).toBeNull();
+  });
+
+  it("computes the AI default (top-N by impact) and an empty manual set when no override", async () => {
+    const rows = [authorship("100", 5), authorship("200", 9), authorship("300", 7), authorship("400", 1)];
+    const c = highlightsClient(null, rows);
+    const ctx = await loadEditContext(SELF, asClient(c), NOW, undefined, { includeHighlights: true });
+    expect(ctx!.highlights).not.toBeNull();
+    expect(ctx!.highlights!.manualEnabled).toBe(false);
+    expect(ctx!.highlights!.manualPmids).toEqual([]);
+    // top 3 by impact: 200 (9), 300 (7), 100 (5).
+    expect(ctx!.highlights!.aiPmids).toEqual(["200", "300", "100"]);
+    // pickable = all shown pubs.
+    expect(ctx!.highlights!.pickable.map((p) => p.pmid).sort()).toEqual(["100", "200", "300", "400"]);
+  });
+
+  it("surfaces the stored manual override (opted in) alongside the AI default", async () => {
+    const rows = [authorship("100", 5), authorship("200", 9), authorship("300", 7)];
+    const c = highlightsClient('["300","100"]', rows);
+    const ctx = await loadEditContext(SELF, asClient(c), NOW, undefined, { includeHighlights: true });
+    expect(ctx!.highlights!.manualEnabled).toBe(true);
+    expect(ctx!.highlights!.manualPmids).toEqual(["300", "100"]);
+    expect(ctx!.highlights!.aiPmids).toEqual(["200", "300", "100"]);
+  });
+
+  it("excludes a suppressed pub from both the pickable pool and the AI default", async () => {
+    const rows = [authorship("100", 5), authorship("200", 9), authorship("300", 7)];
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.fieldOverride.findUnique.mockResolvedValue(null);
+    c.publicationAuthor.findMany
+      .mockResolvedValueOnce(rows)
+      .mockResolvedValueOnce(rows.map((a) => ({ pmid: a.publication.pmid, cwid: SELF })));
+    // pmid 200 (the top-impact pub) is hidden by the scholar → drops out.
+    c.suppression.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "s1", entityId: "200", contributorCwid: SELF }]);
+    const ctx = await loadEditContext(SELF, asClient(c), NOW, undefined, { includeHighlights: true });
+    expect(ctx!.highlights!.pickable.map((p) => p.pmid).sort()).toEqual(["100", "300"]);
+    // 200 is gone, so the AI default is 300 (7), 100 (5).
+    expect(ctx!.highlights!.aiPmids).toEqual(["300", "100"]);
+  });
+});
