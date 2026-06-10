@@ -18,6 +18,7 @@ export function ConceptEmptyState({
   descriptorName,
   broadCount,
   broadenHref,
+  omitCta = false,
 }: {
   /** Original query string, shown in the heading verbatim. */
   query: string;
@@ -33,6 +34,13 @@ export function ConceptEmptyState({
   broadCount: number | null;
   /** Href for the "Search broadly instead" link — same target as the chip. */
   broadenHref: string;
+  /**
+   * Issue #298 §4.1 — when the `ConceptFallbackResults` block renders below this
+   * header (zero-trigger co-render), suppress this CTA: the block's own "View all
+   * N broad results →" link replaces it. The CTA stays (graceful degradation)
+   * when the fallback is empty or suppressed.
+   */
+  omitCta?: boolean;
 }) {
   const headingTail = query ? ` for "${query}"` : "";
 
@@ -48,7 +56,7 @@ export function ConceptEmptyState({
           <> A broad-text search for the phrase also returns nothing — try a different term.</>
         ) : null}
       </div>
-      {broadCount !== 0 ? (
+      {broadCount !== 0 && !omitCta ? (
         <Link
           href={broadenHref}
           className="mt-4 inline-flex items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-3 py-1.5 text-[13px] text-[#1a1a1a] hover:border-[#2c4f6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)] focus-visible:ring-offset-1"

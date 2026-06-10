@@ -15,6 +15,7 @@ import { ResultsGridFallback } from "@/components/search/result-skeletons";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
+import { ConceptFallbackResults } from "@/components/search/concept-fallback-results";
 import {
   ScopeControl,
   ScopeNote,
@@ -33,6 +34,10 @@ import {
   resolvePeopleMatchExplain,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolveConceptFallbackSparseEnabled,
+  computeConceptFallback,
+  CONCEPT_FALLBACK_CAP,
+  CONCEPT_FALLBACK_SPARSE_THRESHOLD,
 } from "@/lib/api/search-flags";
 import { stripDeprioritized } from "@/lib/api/deprioritized-terms";
 import { classifyPeopleQuery } from "@/lib/api/people-query-shape";
@@ -1073,36 +1078,82 @@ async function PublicationsResults({
   // mode (which admits via the top-level should and so doesn't gate on the
   // concept). The broad-count CTA runs one extra text-only search, paid only on
   // these dead-end pages.
+  //
+  // Issue #298 — the same broad search now also feeds the co-render: when a
+  // resolved-concept page is empty (zero-trigger) or sparse (1..5 tagged hits
+  // while broad ≥ 5×), `ConceptFallbackResults` previews the top-N broad hits
+  // inline (§3/§5). The broad search runs once and supplies BOTH the empty-state
+  // count and the fallback hits; the decision (`computeConceptFallback`) is the
+  // pure shared rule, gated so we only pay the extra round-trip on candidate
+  // pages.
+  const sparseEnabled = resolveConceptFallbackSparseEnabled();
+  const conceptShape =
+    result.queryShape === "concept_filtered" ||
+    result.queryShape === "concept_fallback";
+  // Cheap pre-gate before paying for the broad search: a resolved descriptor,
+  // not the default-expanded (OR-of-evidence) shape, on the first page, with a
+  // primary count low enough to ever co-render (zero, or within the sparse
+  // window). This mirrors the conditions `computeConceptFallback` checks against
+  // the un-yet-known broadCount.
+  const fallbackCandidate =
+    meshResolution !== null &&
+    chipMode !== "expanded_default" &&
+    conceptShape &&
+    page === 0 &&
+    result.total <= CONCEPT_FALLBACK_SPARSE_THRESHOLD;
+
+  let broadCount: number | null = null;
+  let broadHits: typeof result.hits = [];
+  if (fallbackCandidate) {
+    const broad = await searchPublications({
+      q,
+      page: 0,
+      sort: "relevance",
+      filters: {
+        yearMin,
+        yearMax,
+        publicationType: publicationType || undefined,
+        journal: journal.length > 0 ? journal : undefined,
+        wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+        wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+        mentoringPrograms:
+          mentoringProgram.length > 0 ? mentoringProgram : undefined,
+      },
+      // Suppress the resolution → §1.2 shape, same as "Search broadly instead".
+      // §8 #6 — the user's year/journal/author filters DO carry into the broad
+      // call (broadening is about the concept gate, not the other filters).
+      meshResolution: null,
+      // SEARCH_PUB_HIGHLIGHT — keep the fallback rows' highlighting consistent
+      // with the primary list.
+      highlightMatches: resolvePublicationHighlight(),
+    });
+    broadCount = broad.total;
+    broadHits = broad.hits;
+  }
+
+  // Issue #298 §3 — the co-render decision (zero | sparse | none), shared with
+  // the route handler's telemetry. `meshOff` is encoded by `meshResolution`
+  // already being null (effectiveMeshResolution), so `scope === "exact"` need
+  // not be threaded separately here.
+  const fallbackDecision = computeConceptFallback({
+    meshResolved: meshResolution !== null,
+    meshOff: false,
+    chipMode,
+    total: result.total,
+    broadCount: broadCount ?? 0,
+    page,
+    sparseEnabled,
+  });
+  const conceptFallback = fallbackDecision.shown
+    ? { hits: broadHits, total: broadCount ?? 0 }
+    : null;
+
   let conceptEmpty: {
     descriptorName: string;
     broadCount: number | null;
     broadenHref: string;
   } | null = null;
   if (meshResolution && result.total === 0 && chipMode !== "expanded_default") {
-    let broadCount: number | null = null;
-    if (
-      result.queryShape === "concept_filtered" ||
-      result.queryShape === "concept_fallback"
-    ) {
-      const broad = await searchPublications({
-        q,
-        page: 0,
-        sort: "relevance",
-        filters: {
-          yearMin,
-          yearMax,
-          publicationType: publicationType || undefined,
-          journal: journal.length > 0 ? journal : undefined,
-          wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
-          wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
-          mentoringPrograms:
-            mentoringProgram.length > 0 ? mentoringProgram : undefined,
-        },
-        // Suppress the resolution → §1.2 shape, same as "Search broadly instead".
-        meshResolution: null,
-      });
-      broadCount = broad.total;
-    }
     conceptEmpty = {
       descriptorName: meshResolution.name,
       broadCount,
@@ -1322,6 +1373,9 @@ async function PublicationsResults({
               descriptorName={conceptEmpty.descriptorName}
               broadCount={conceptEmpty.broadCount}
               broadenHref={conceptEmpty.broadenHref}
+              // §4.1 — the fallback block's "View all N" replaces the CTA when
+              // the zero-trigger co-render renders below.
+              omitCta={conceptFallback !== null}
             />
           ) : (
             <EmptyState
@@ -1336,6 +1390,18 @@ async function PublicationsResults({
             ))}
           </ul>
         )}
+        {/* Issue #298 — broad-text co-render (zero or sparse trigger). The
+            facet rail + Pagination above stay primary-only (§7); this block is
+            an unfilterable discovery preview. */}
+        {conceptFallback ? (
+          <ConceptFallbackResults
+            query={q}
+            hits={conceptFallback.hits}
+            total={conceptFallback.total}
+            viewAllHref={broadenHref}
+            cap={CONCEPT_FALLBACK_CAP}
+          />
+        ) : null}
         <Pagination
           page={result.page}
           total={result.total}
