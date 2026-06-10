@@ -103,7 +103,16 @@ export function ActiveFilterBanner({
         {familyActive ? (
           <>
             {" "}
-            <span aria-hidden="true">·</span> in{" "}
+            {/* #819 — the family segment carries its own preposition ("in"), so the
+                leading "·" is a SEPARATOR: render it only when a topic or position
+                segment precedes this one. Family-only then reads "… publications in
+                X" instead of an orphaned "… publications · in X". */}
+            {labels.length > 0 || positionActive ? (
+              <>
+                <span aria-hidden="true">·</span>{" "}
+              </>
+            ) : null}
+            in{" "}
             {familyLabels.length === 1 ? (
               <strong className="font-semibold">{familyLabels[0]}</strong>
             ) : familyLabels.length === 2 ? (
