@@ -272,6 +272,17 @@ export const PUBLICATION_INDEX_INCLUDE = {
           // `affiliate_alumni` is retained even though that author is hidden
           // (soft-deleted) and so contributes no displayable chip.
           roleCategory: true,
+          // #837 — per-author department, used to build the publications-tab
+          // Department facet (`wcmAuthorDepartments`). The FK `deptCode` is the
+          // stable facet key (same convention as the People-tab bare-dept key);
+          // `department.name` is the long-tail free-text fallback for scholars
+          // without an FK-resolved code (`name:<deptName>`), mirroring
+          // `buildPeopleDoc`'s `deptDivKeys`. Only consumed under
+          // `SEARCH_PUB_DEPARTMENT_FILTER`; emitted unconditionally (omit-on-
+          // empty), so a reindex populates the field for the eventual flip.
+          deptCode: true,
+          primaryDepartment: true,
+          department: { select: { name: true } },
         },
       },
     },
@@ -462,6 +473,29 @@ export function buildPublicationDoc(
     if (!a.isFirst && !a.isLast) wcmAuthorPositions.add("middle");
   }
 
+  // #837 — union of the departments of this pub's displayable WCM authors.
+  // A paper appears under EVERY department any of its WCM authors belongs to
+  // (multiple co-authors in different departments → multiple keys), so a
+  // single `terms` aggregation/filter on this keyword array OR's within the
+  // axis cleanly — the same denormalized-keyword pattern as
+  // `wcmAuthorCwids` / `wcmAuthorPositions`. Keys mirror `buildPeopleDoc`'s
+  // dept facet: the FK `deptCode` when present, else a `name:<deptName>`
+  // long-tail key for scholars without an FK-resolved code, so the existing
+  // `resolveDeptDivLabels()` map renders bucket labels with no new lookup.
+  // Derived from `wcmAuthorRows` (the rendered chip set), so a suppressed /
+  // hidden author never contributes a department. Default empty → field
+  // omitted (omit-on-empty), so `_source` consumers distinguish "no signal"
+  // from "[]" and the index size is unchanged for pubs with no WCM dept.
+  const wcmAuthorDepartments = new Set<string>();
+  for (const a of wcmAuthorRows) {
+    if (a.scholar!.deptCode) {
+      wcmAuthorDepartments.add(a.scholar!.deptCode);
+    } else {
+      const deptName = a.scholar!.department?.name ?? a.scholar!.primaryDepartment;
+      if (deptName) wcmAuthorDepartments.add(`name:${deptName}`);
+    }
+  }
+
   const mesh = extractMeshLabels(p.meshTerms);
   const meshUis = extractMeshDescriptorUis(p.meshTerms);
 
@@ -503,6 +537,12 @@ export function buildPublicationDoc(
     wcmAuthorPositions: Array.from(wcmAuthorPositions),
     // Issue #88 — flat CWID array for the Author facet aggregation.
     wcmAuthorCwids: wcmAuthors.map((a) => a.cwid),
+    // #837 — OMIT-on-empty keyword array of the displayable WCM authors'
+    // department keys for the Publications-tab Department facet. Pubs whose
+    // WCM authors carry no department write nothing for this field.
+    ...(wcmAuthorDepartments.size > 0
+      ? { wcmAuthorDepartments: Array.from(wcmAuthorDepartments) }
+      : {}),
     // Issue #259 §1.6 — OMIT-on-empty: pubs with zero publication_topic
     // rows write nothing for this field, not an empty array. Lets `_source`
     // consumers distinguish "no signal" from "[]".

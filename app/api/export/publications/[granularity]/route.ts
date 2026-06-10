@@ -92,6 +92,10 @@ function parseBody(body: unknown): ExportRequest | null {
     if (roles.length > 0) filters.wcmAuthorRole = roles;
   }
   if (isStringArray(f.wcmAuthor)) filters.wcmAuthor = f.wcmAuthor;
+  // Issue #837 — WCM-author department keys. `searchPublications` gates the
+  // department clause on `SEARCH_PUB_DEPARTMENT_FILTER`, so passing these
+  // through is inert when the flag is off.
+  if (isStringArray(f.department)) filters.department = f.department;
 
   // limit clamp happens per-granularity inside the fetcher (CSVs cap at
   // 5,000; Word at 1,000). Pass the raw user value through; the fetcher

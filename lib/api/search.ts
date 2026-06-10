@@ -77,6 +77,7 @@ import {
 import {
   resolveConceptMode,
   resolvePubRecencyMode,
+  resolvePublicationDepartmentFilter,
   type PubRecencyMode,
   type Scope,
 } from "@/lib/api/search-flags";
@@ -166,6 +167,12 @@ export type PublicationsFilters = {
   wcmAuthorRole?: WcmAuthorRole[];
   /** Issue #88 — multi-select WCM author CWID. OR within group. */
   wcmAuthor?: string[];
+  /** Issue #837 — multi-select WCM-author department key. OR within group.
+   *  Values are the composite key emitted by the search-index ETL onto
+   *  `wcmAuthorDepartments`: a bare `${deptCode}` (FK-resolved), or a
+   *  `name:${deptName}` long-tail key for scholars without an FK code.
+   *  Only honored when `SEARCH_PUB_DEPARTMENT_FILTER` is on. */
+  department?: string[];
   /** Mentoring activity facet. Multi-select on the mentee's program at time
    *  of mentorship: 'md' (AOC + AOC-2025), 'mdphd' (MD-PhD), 'ecr' (Early
    *  Career Researcher). Selecting one or more buckets restricts results to
@@ -416,6 +423,12 @@ export type PublicationsSearchResult = {
      *  user ticked just that checkbox, holding all other filters constant
      *  (i.e. matches the filtersExcept pattern used by the other facets). */
     mentoringPrograms: Record<MentoringProgramKey, number>;
+    /** Issue #837 — Department facet buckets (WCM-author department key →
+     *  count) in the current result set, computed excluding the department
+     *  axis itself (the `filtersExcept` pattern). Empty when
+     *  `SEARCH_PUB_DEPARTMENT_FILTER` is off. The /search page resolves each
+     *  `value` key to a display label via `resolveDeptDivLabels()`. */
+    departments: SearchFacetBucket[];
   };
 };
 
@@ -1758,6 +1771,13 @@ export async function searchPublications(opts: {
   const usePubMsm =
     (process.env.SEARCH_PUB_TAB_MSM ?? "on") === "on";
 
+  // Issue #837 — Department facet. Default OFF; flipping requires the
+  // publications index to have been reindexed with `wcmAuthorDepartments`
+  // (reindex-then-flip). When off, the department filter is ignored and the
+  // department facet aggregation is skipped (empty buckets), so a stale URL
+  // param or a not-yet-reindexed cluster can't surface an empty rail.
+  const useDepartmentFilter = resolvePublicationDepartmentFilter();
+
   // Issue #259 §5 / §7.1 — pub-tab concept mode. Three values:
   //   `strict`   — pre-PR-3 `concept_filtered` / `concept_fallback` admission
   //                shape (rollback target).
@@ -2003,6 +2023,14 @@ export async function searchPublications(opts: {
   const wcmAuthorClause = filters.wcmAuthor && filters.wcmAuthor.length > 0
     ? { terms: { wcmAuthorCwids: filters.wcmAuthor } }
     : null;
+  // Issue #837 — WCM-author department filter (union attribution). Gated on
+  // the flag so the field's absence pre-reindex can never empty the result
+  // set: off → null clause (axis ignored) even if a stale `?department=` URL
+  // is present.
+  const departmentClause =
+    useDepartmentFilter && filters.department && filters.department.length > 0
+      ? { terms: { wcmAuthorDepartments: filters.department } }
+      : null;
   // Mentoring activity facet — union the precomputed pmid sets for the
   // selected program buckets. Empty union (e.g. all programs empty) becomes
   // a match_none clause so a stale-cache state returns zero rows rather
@@ -2043,10 +2071,18 @@ export async function searchPublications(opts: {
   if (journalClause) userAxisFilters.push(journalClause);
   if (wcmRoleClause) userAxisFilters.push(wcmRoleClause);
   if (wcmAuthorClause) userAxisFilters.push(wcmAuthorClause);
+  if (departmentClause) userAxisFilters.push(departmentClause);
   if (mentoringClause) userAxisFilters.push(mentoringClause);
 
   const filtersExcept = (
-    axis: "year" | "publicationType" | "journal" | "wcmAuthorRole" | "wcmAuthor" | "mentoring",
+    axis:
+      | "year"
+      | "publicationType"
+      | "journal"
+      | "wcmAuthorRole"
+      | "wcmAuthor"
+      | "department"
+      | "mentoring",
   ) => {
     const out: Record<string, unknown>[] = [];
     if (axis !== "year" && yearClause) out.push(yearClause);
@@ -2054,6 +2090,7 @@ export async function searchPublications(opts: {
     if (axis !== "journal" && journalClause) out.push(journalClause);
     if (axis !== "wcmAuthorRole" && wcmRoleClause) out.push(wcmRoleClause);
     if (axis !== "wcmAuthor" && wcmAuthorClause) out.push(wcmAuthorClause);
+    if (axis !== "department" && departmentClause) out.push(departmentClause);
     if (axis !== "mentoring" && mentoringClause) out.push(mentoringClause);
     return out;
   };
@@ -2169,6 +2206,7 @@ export async function searchPublications(opts: {
         wcmAuthors: [],
         wcmAuthorsTotal: 0,
         mentoringPrograms: { md: 0, mdphd: 0, phd: 0, postdoc: 0, ecr: 0 },
+        departments: [],
       },
     };
   }
@@ -2323,6 +2361,19 @@ export async function searchPublications(opts: {
           total: { cardinality: { field: "wcmAuthorCwids", precision_threshold: 4000 } },
         },
       },
+      // Issue #837 — Department facet. Top 200 mirrors the People-tab dept
+      // facet cap (WCM has well under 200 departments). Gated on the flag: a
+      // no-op `match_none` keeps the agg key present (so the response shape is
+      // stable) while contributing zero buckets when the field isn't indexed
+      // yet — the page renders no Department group, same as flag-off.
+      ...(useDepartmentFilter
+        ? {
+            departments: {
+              filter: aggBoolFor(filtersExcept("department")),
+              aggs: { keys: { terms: { field: "wcmAuthorDepartments", size: 200 } } },
+            },
+          }
+        : {}),
       // Mentoring activity facet — contextual counts per program bucket.
       // One named filters-of-filters agg with 5 sub-buckets, each scoped to
       // the bucket's pmids + filtersExcept("mentoring") + the q-bound must.
@@ -2394,6 +2445,8 @@ export async function searchPublications(opts: {
         keys: { buckets: Bucket[] };
         total: { value: number };
       };
+      // Issue #837 — present only when SEARCH_PUB_DEPARTMENT_FILTER is on.
+      departments?: { keys: { buckets: Bucket[] } };
       mentoringPrograms?: {
         buckets: Record<MentoringProgramKey, { doc_count: number }>;
       };
@@ -2596,6 +2649,12 @@ export async function searchPublications(opts: {
         postdoc: r.aggregations?.mentoringPrograms?.buckets.postdoc.doc_count ?? 0,
         ecr: r.aggregations?.mentoringPrograms?.buckets.ecr.doc_count ?? 0,
       },
+      // Issue #837 — Department buckets (empty when the flag is off, so the
+      // page renders no Department group).
+      departments: (r.aggregations?.departments?.keys.buckets ?? []).map((b) => ({
+        value: b.key,
+        count: b.doc_count,
+      })),
     },
   };
 }

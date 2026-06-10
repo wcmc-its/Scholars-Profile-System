@@ -29,6 +29,7 @@ import {
   resolveGenericTermMode,
   resolvePublicationHighlight,
   resolvePublicationMatchProvenance,
+  resolvePublicationDepartmentFilter,
   resolveConceptFallbackSparseEnabled,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
@@ -200,6 +201,12 @@ export async function GET(request: NextRequest) {
       (r): r is "first" | "senior" | "middle" =>
         r === "first" || r === "senior" || r === "middle",
     );
+    // Issue #837 — WCM-author department filter. Only honored when the flag is
+    // on (otherwise dropped so a stale `?department=` is inert), matching the
+    // SSR page's gating.
+    const department = resolvePublicationDepartmentFilter()
+      ? params.getAll("department")
+      : [];
     // Issue #259 SPEC §7.5 — `searchLatencyMs` covers the body construction
     // + OpenSearch round-trip + Prisma hydration. Excludes the resolver
     // (captured separately as `taxonomyMatchMs`) so the §3.1 (c) guardrail
@@ -216,6 +223,7 @@ export async function GET(request: NextRequest) {
         publicationType,
         journal: journal.length > 0 ? journal : undefined,
         wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+        department: department.length > 0 ? department : undefined,
       },
       // Issue #259 §5 — pass the MeSH resolution computed at the top of
       // the handler. Under `SEARCH_PUB_TAB_CONCEPT_MODE=expanded` and this
@@ -273,6 +281,7 @@ export async function GET(request: NextRequest) {
           publicationType,
           journal: journal.length > 0 ? journal : undefined,
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+          department: department.length > 0 ? department : undefined,
         },
         meshResolution: null,
       });
@@ -306,7 +315,7 @@ export async function GET(request: NextRequest) {
         // fallback). Captures the per-request shape without analysts
         // having to know which env mapping was active.
         conceptMode,
-        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole },
+        filters: { yearMin, yearMax, publicationType, journal, wcmAuthorRole, department },
         meshResolutionDescriptorUi,
         meshResolutionConfidence,
         // Issue #259 §5.4.2 / SPEC §7.5. Bucketed in the post-flip retro plot
