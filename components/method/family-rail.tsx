@@ -115,7 +115,14 @@ export function FamilyRail({
                         {f.familyLabel}
                       </div>
                       {f.exemplarTools.length > 0 && (
-                        <div className="mt-0.5 truncate text-xs font-normal text-muted-foreground">
+                        // line-clamp-1 (NOT `truncate`): clips to one line with an
+                        // ellipsis but does NOT set white-space:nowrap. Inside the
+                        // rail's Radix ScrollArea (a shrink-to-fit `display:table`
+                        // viewport), a nowrap line expands the row to the full
+                        // un-truncated width and pushes the pubs count off the right
+                        // edge — the original "count clipped" bug. Wrappable content
+                        // keeps the row capped at the rail width so the count shows.
+                        <div className="mt-0.5 line-clamp-1 text-xs font-normal text-muted-foreground">
                           {f.exemplarTools.join(" · ")}
                         </div>
                       )}
