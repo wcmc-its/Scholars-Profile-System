@@ -22,6 +22,7 @@ export function TopScholarChip({
   topicSlug,
   topicLabel,
   enablePopover,
+  contextMethods,
 }: {
   scholar: TopScholarChipData;
   topicSlug?: string;
@@ -30,6 +31,9 @@ export function TopScholarChip({
    *  `topicSlug`. Wraps the chip in a generic `top-scholar` popover (totals +
    *  recent work, no topic-rank line). Ignored when `topicSlug` is present. */
   enablePopover?: boolean;
+  /** #853 — on /methods surfaces, also request the "Prominent method families"
+   *  section in the popover. Only meaningful with `enablePopover` (no topicSlug). */
+  contextMethods?: boolean;
 }) {
   const anchor = (
     <a
@@ -68,7 +72,11 @@ export function TopScholarChip({
   }
   if (enablePopover) {
     return (
-      <PersonPopover cwid={scholar.cwid} surface="top-scholar">
+      <PersonPopover
+        cwid={scholar.cwid}
+        surface="top-scholar"
+        contextMethods={contextMethods}
+      >
         {anchor}
       </PersonPopover>
     );

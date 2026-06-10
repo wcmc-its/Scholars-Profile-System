@@ -118,7 +118,12 @@ export default async function SupercategoryPage({
             per-family), so no scholarCount / "+ N more" affordance is passed. */}
         {topScholars && (
           <div id="top-scholars" className="scroll-mt-20">
-            <TopScholarsChipRow scholars={topScholars} topicLabel={sc.label} enablePopover />
+            <TopScholarsChipRow
+              scholars={topScholars}
+              topicLabel={sc.label}
+              enablePopover
+              contextMethods
+            />
           </div>
         )}
 

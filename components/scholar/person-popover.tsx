@@ -82,6 +82,16 @@ type ApiResponse = {
     endYear: number;
   }>;
   topSponsor: string | null;
+  /** #853 — the hovered scholar's most-prominent method families. Populated only
+   *  for /methods top-scholar popovers (`contextMethods=1`) when METHODS_LENS_PAGES
+   *  is on; `[]` everywhere else, so topic/pub/grant surfaces are unaffected. */
+  methodFamilies: Array<{
+    supercategory: string;
+    familyLabel: string;
+    familyId: string;
+    pmidCount: number;
+    href: string;
+  }>;
 };
 
 export type PersonPopoverProps = {
@@ -122,6 +132,11 @@ export type PersonPopoverProps = {
   primaryActionHref?: string;
   /** Optional label for the primary action; if omitted, derived from surface. */
   primaryActionLabel?: string;
+  /** #853 — on /methods top-scholar chips, request the hovered scholar's
+   *  "Prominent method families" section (adds `contextMethods=1` to the fetch).
+   *  Topic/pub/grant surfaces never set this, so the section can't leak onto them;
+   *  the server still re-checks `surface==="top-scholar"` + METHODS_LENS_PAGES. */
+  contextMethods?: boolean;
   /** Grant context for the grant-investigator surface — drives the role pill
    *  and the "Funded …" line, and excludes the hovered grant from the recent
    *  list. All values are already on the FundingHit (no API round-trip). */
@@ -157,6 +172,7 @@ export function PersonPopover({
   filterTopTopic,
   primaryActionHref,
   primaryActionLabel,
+  contextMethods,
   contextGrant,
 }: PersonPopoverProps) {
   const [data, setData] = React.useState<ApiResponse | null>(null);
@@ -165,7 +181,7 @@ export function PersonPopover({
   const abortRef = React.useRef<AbortController | null>(null);
   const fetchedKeyRef = React.useRef<string | null>(null);
 
-  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}`;
+  const fetchKey = `${cwid}|${surface}|${contextScholarCwid ?? ""}|${contextPubPmid ?? ""}|${contextTopicSlug ?? ""}|${contextGrant?.projectId ?? ""}|${contextMethods ? "1" : ""}`;
 
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
@@ -207,6 +223,7 @@ export function PersonPopover({
       if (contextTopicSlug) params.set("contextTopicSlug", contextTopicSlug);
       if (contextGrant?.projectId)
         params.set("contextGrantProjectId", contextGrant.projectId);
+      if (contextMethods) params.set("contextMethods", "1");
 
       fetch(`/api/scholars/${cwid}/popover-context?${params.toString()}`, {
         signal: ctl.signal,
@@ -232,6 +249,7 @@ export function PersonPopover({
       contextPubPmid,
       contextTopicSlug,
       contextGrant?.projectId,
+      contextMethods,
       fetchKey,
       data,
     ],
@@ -346,14 +364,23 @@ function PersonPopoverBody({
     />
   );
 
-  // Recent pubs list — varies by surface and self-hover state.
-  const recentList = isSelf ? null : (
-    <SurfaceRecentList
-      surface={surface}
-      data={data}
-      contextTopicLabel={contextTopicLabel}
-    />
-  );
+  // #853 — the hovered scholar's prominent method families (populated only for
+  // /methods top-scholar popovers; `[]` on every other surface). Suppressed on
+  // self-hover, matching the rest of the contextual body.
+  const methodFamilies = isSelf ? [] : data.methodFamilies ?? [];
+  const hasMethodFamilies = methodFamilies.length > 0;
+
+  // Recent pubs list — varies by surface and self-hover state. When the
+  // method-families section is showing, it replaces the generic recent-pubs list
+  // so the /methods card stays focused (and not over-tall).
+  const recentList =
+    isSelf || hasMethodFamilies ? null : (
+      <SurfaceRecentList
+        surface={surface}
+        data={data}
+        contextTopicLabel={contextTopicLabel}
+      />
+    );
 
   // Actions row. View profile only when the scholar has an active slug; for
   // unlinked WCM authors (alumni) we drop "View profile" but keep any
@@ -383,6 +410,9 @@ function PersonPopoverBody({
       />
       {rolePill}
       {contextLine}
+      {hasMethodFamilies ? (
+        <MethodFamiliesSection families={methodFamilies} />
+      ) : null}
       {recentList}
       {(primary || showViewProfile) && (
         <div className="mt-3 flex gap-1.5">
@@ -412,7 +442,11 @@ function PersonPopoverBody({
           ) : null}
         </div>
       )}
-      {!primary && !showViewProfile && !contextLine && !recentList ? (
+      {!primary &&
+      !showViewProfile &&
+      !contextLine &&
+      !recentList &&
+      !hasMethodFamilies ? (
         <PersonCardStats
           pubCount={header.totalPubCount}
           grantCount={header.totalGrantCount}
@@ -675,6 +709,44 @@ function SurfaceRecentList({
             {r.year ? (
               <span className="ml-1 text-[11px] text-muted-foreground">{r.year}</span>
             ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * #853 — "Prominent method families" section for /methods top-scholar popovers.
+ * Lists the hovered scholar's most-prominent method families (already overlay-
+ * filtered + ranked by per-scholar pub count + capped server-side), each linking
+ * to its `/methods` family page. Mirrors the recent-pubs list's visual frame.
+ */
+function MethodFamiliesSection({
+  families,
+}: {
+  families: ApiResponse["methodFamilies"];
+}) {
+  if (families.length === 0) return null;
+  return (
+    <div className="mt-3 border-t border-border pt-2.5">
+      <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+        Prominent method families
+      </div>
+      <ul className="m-0 list-none space-y-0.5 p-0">
+        {families.map((f) => (
+          <li key={`${f.supercategory}|${f.familyId}`}>
+            <a
+              href={f.href}
+              className="-mx-1.5 flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-[12px] leading-snug transition-colors hover:bg-muted"
+            >
+              <span className="line-clamp-1 font-medium text-foreground">
+                {f.familyLabel}
+              </span>
+              <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+                {f.pmidCount} pub{f.pmidCount === 1 ? "" : "s"}
+              </span>
+            </a>
           </li>
         ))}
       </ul>
