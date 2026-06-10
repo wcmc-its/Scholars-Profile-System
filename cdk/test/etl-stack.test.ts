@@ -682,7 +682,7 @@ describe("EtlStack", () => {
         expect(td.Properties?.Memory).toBe("512");
       });
 
-      it("injects ONLY the DATABASE_URL secret (no OPENSEARCH_*, no SCHOLARS_*) and omits SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID (dormant-safe)", () => {
+      it("injects ONLY the DATABASE_URL secret (no OPENSEARCH_*/SCHOLARS_* secrets) and wires the SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID env to the distribution id (#353 enabled)", () => {
         const td = cdnReconcileTaskDef();
         const container = (
           td.Properties?.ContainerDefinitions as
@@ -703,16 +703,21 @@ describe("EtlStack", () => {
             /^OPENSEARCH_/.test(n ?? ""),
         );
         expect(leaked).toEqual([]);
-        // Dormant-safe: no distribution id is hardcoded onto the task; the
-        // worker no-ops until the operator supplies it at enable time.
-        const envNames = (
-          container?.Environment as Array<{ Name?: string }> | undefined
-        )?.map((e) => e.Name);
-        expect(envNames ?? []).not.toContain(
-          "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
+        // #353 enabled: the distribution id is wired (plaintext env, not a
+        // secret) so the reconciler drains the outbox; the prod template gets
+        // the prod EdgeStack distribution. Was omitted while the path was dormant.
+        const envEntries =
+          (container?.Environment as
+            | Array<{ Name?: string; Value?: string }>
+            | undefined) ?? [];
+        const distEntry = envEntries.find(
+          (e) => e.Name === "SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID",
         );
-        // No OpenSearch endpoint either.
-        expect(envNames ?? []).not.toContain("OPENSEARCH_NODE");
+        // Prod EdgeStack distribution (config.ts prod.cloudFrontDistributionId);
+        // staging's is E17NRWINXLP3B3.
+        expect(distEntry?.Value).toBe("E28NKDFXC7K2ZL");
+        // No OpenSearch endpoint either -- this worker never reads it.
+        expect(envEntries.map((e) => e.Name)).not.toContain("OPENSEARCH_NODE");
       });
 
       it("the cdn reconcile exec role lists EXACTLY ONE secret ARN (db/etl; no opensearch, no *)", () => {

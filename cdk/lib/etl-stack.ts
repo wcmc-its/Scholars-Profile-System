@@ -1295,11 +1295,12 @@ export class EtlStack extends Stack {
     // outage / SDK error; the ~5 min SLA is that recovery floor, not everyday
     // edge-cache purge latency.
     //
-    // Dormant-safe: the task injects NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID, so
-    // the worker no-ops without touching the DB (empty-queue-safe) until the
-    // operator supplies the distribution id at enable time -- exactly as the
-    // synchronous invalidation path is dormant pre-launch. This keeps the
-    // reconciler decoupled from the #502-frozen EdgeStack distribution.
+    // #353 enabled: the task injects SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID from
+    // envConfig.cloudFrontDistributionId so the reconciler drains the
+    // cdn_invalidation outbox against the EdgeStack distribution. Empty-queue-
+    // safe, so it stays a no-op whenever the outbox is empty. Enable lands with
+    // the #502 prod edge cutover (CloudFront stays as CDN); deploy via
+    // `cdk deploy Sps-Etl-<env>` (the env var needs CDK, not just an image roll).
     // ------------------------------------------------------------------
     const cdnReconcileLogGroup = new logs.LogGroup(
       this,
@@ -1402,9 +1403,11 @@ export class EtlStack extends Stack {
         }),
         environment: {
           NODE_ENV: "production",
-          // NO SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: dormant-safe -- the worker
-          // no-ops without touching the DB until the operator supplies it at
-          // enable time. No OPENSEARCH_* either (this worker never reads it).
+          // #353 enable -- wire the EdgeStack distribution id so the reconciler
+          // drains the cdn_invalidation outbox. envConfig.cloudFrontDistributionId
+          // is populated in both envs; this was omitted while the path was
+          // dormant. No OPENSEARCH_* (this worker never reads it).
+          SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID: envConfig.cloudFrontDistributionId,
         },
         secrets: {
           // db.read + db.write collapse onto this single DSN (no
