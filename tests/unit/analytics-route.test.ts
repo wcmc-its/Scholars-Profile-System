@@ -149,7 +149,10 @@ describe("VALID_EVENTS allow-list", () => {
     expect(VALID_EVENTS.has("spotlight_paper_click")).toBe(true);
     expect(VALID_EVENTS.has("search_popover_opened")).toBe(true);
     expect(VALID_EVENTS.has("search_popover_mesh_browser_clicked")).toBe(true);
-    expect(VALID_EVENTS.size).toBe(7);
+    expect(VALID_EVENTS.has("home_methods_stat_click")).toBe(true);
+    expect(VALID_EVENTS.has("home_method_category_click")).toBe(true);
+    expect(VALID_EVENTS.has("home_methods_explore_all_click")).toBe(true);
+    expect(VALID_EVENTS.size).toBe(10);
   });
 });
 

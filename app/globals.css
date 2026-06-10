@@ -326,3 +326,18 @@
     animation: none;
   }
 }
+
+/* In-page anchor jumps (home stat strip → #browse-by-method /
+   #browse-all-research-areas) scroll smoothly. Scoped to the home page only
+   (via :has on the home-page-root wrapper) so other surfaces — e.g. the
+   About-page anchor TOC — keep their instant jumps. Honors reduced-motion.
+   The root scrolling element (html/:root) is what actually scrolls for in-page
+   anchors, so scroll-behavior must live on :root, conditioned on the home page. */
+:root:has(.home-page-root) {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:has(.home-page-root) {
+    scroll-behavior: auto;
+  }
+}
