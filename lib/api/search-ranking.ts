@@ -30,6 +30,9 @@ export type PersonRanking = {
 export type TopicRanking = { id: string; label: string };
 export type SubtopicRanking = { id: string; label: string; displayName: string | null };
 export type NamedRanking = { name: string };
+/** #824 — a method-family candidate for the autocomplete "Method" badge. Ranked
+ *  on `familyLabel`, the same tokenwise/startsWith signal as the named entities. */
+export type MethodRanking = { familyLabel: string };
 
 export type RankingSources = {
   person: PersonRanking[];
@@ -38,15 +41,38 @@ export type RankingSources = {
   department: NamedRanking[];
   division: NamedRanking[];
   center: NamedRanking[];
+  /** #824 — OPTIONAL: present only when the Method pages flag is on (off ⇒ no
+   *  candidates, no `"method"` plausibility hit, no ordering slot). Kept optional
+   *  so the six-base-kind callers/tests are unaffected. */
+  method?: MethodRanking[];
 };
 
-/** Default fallback order when shape doesn't pin a lead. */
+/** Default fallback order when shape doesn't pin a lead. EXCLUDES `method`: the
+ *  Method source is optional (flag-gated) and an absent/empty source must never
+ *  claim an ordering slot, so `method` is placed only via the hits-guarded
+ *  {@link KIND_ORDER_WITH_METHOD} passes — never as a default filler. */
 const DEFAULT_KIND_ORDER: EntityKind[] = [
   "department",
   "division",
   "center",
   "topic",
   "subtopic",
+  "person",
+];
+
+/** Placement order used for the hits-guarded passes (#824). Identical to
+ *  {@link DEFAULT_KIND_ORDER} with `method` slotted just after `subtopic` — a
+ *  method family is a research-concept-grade entity, so it ranks alongside
+ *  topics/subtopics and ahead of `person` when both co-hit. Only ever consulted
+ *  with `hits.has(k)` guards, so `method` appears only when the flag-gated source
+ *  produced a hit. */
+const KIND_ORDER_WITH_METHOD: EntityKind[] = [
+  "department",
+  "division",
+  "center",
+  "topic",
+  "subtopic",
+  "method",
   "person",
 ];
 
@@ -157,6 +183,17 @@ export function plausibilityHits(
     }
   }
 
+  // #824 Method — any fetched family whose label has a tokenwise startsWith.
+  // Only present when the Method pages flag is on (the source is otherwise
+  // undefined / empty), so an off flag contributes no `"method"` hit.
+  if (
+    (sources.method ?? []).some((r) =>
+      tokenizeEntityName(r.familyLabel).some((tok) => tok.startsWith(p)),
+    )
+  ) {
+    hits.add("method");
+  }
+
   return hits;
 }
 
@@ -194,9 +231,12 @@ export function chooseKindOrder(
     if (shape === "name-like" && hits.has("person")) lead = "person";
     else if (shape === "topic-like" && hits.has("topic")) lead = "topic";
     else if (shape === "topic-like" && hits.has("subtopic")) lead = "subtopic";
+    // #824 — a method-family query is topic-like in shape; once topics/subtopics
+    // are exhausted as leads, prefer the Method family over named org units.
+    else if (shape === "topic-like" && hits.has("method")) lead = "method";
     else {
-      // Ambiguous / fallthrough: first plausibility hit in default order.
-      for (const k of DEFAULT_KIND_ORDER) if (hits.has(k)) { lead = k; break; }
+      // Ambiguous / fallthrough: first plausibility hit in placement order.
+      for (const k of KIND_ORDER_WITH_METHOD) if (hits.has(k)) { lead = k; break; }
     }
   } else {
     // Zero hits.
@@ -207,10 +247,14 @@ export function chooseKindOrder(
 
   if (lead) push(lead);
 
-  // Strong-hit kinds next (not yet placed), in default order.
-  for (const k of DEFAULT_KIND_ORDER) if (hits.has(k)) push(k);
+  // Strong-hit kinds next (not yet placed), in placement order. `method` is only
+  // ever in `hits` when the Method pages flag is on, so it is appended only then;
+  // it is never a default filler (it is absent from the no-hit tail pass below).
+  for (const k of KIND_ORDER_WITH_METHOD) if (hits.has(k)) push(k);
 
-  // Then the rest in default order.
+  // Then the rest in default order (the six base kinds — `method` excluded so an
+  // empty method source never claims an ordering slot or breaks the
+  // base-kind-permutation invariant).
   for (const k of DEFAULT_KIND_ORDER) push(k);
 
   return out;

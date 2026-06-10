@@ -22,6 +22,8 @@ const KIND_LABEL: Record<EntityKind, string> = {
   division: "Division",
   center: "Center",
   institute: "Institute",
+  // #824 — method-family suggestion (rust hue; see `.entity-badge--method`).
+  method: "Method",
 };
 
 export function EntityBadge({

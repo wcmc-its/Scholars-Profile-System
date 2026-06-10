@@ -40,6 +40,19 @@
  */
 import { prisma } from "@/lib/db";
 import { normalizeForMatch } from "@/lib/api/normalize";
+import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
+import {
+  loadFamilyOverlayGate,
+  isFamilyPubliclyVisible,
+  familyOverlayKey,
+  type FamilyOverlayGate,
+} from "@/lib/api/methods-overlay";
+import {
+  supercategoryLabel,
+  supercategoryDescription,
+} from "@/lib/methods/supercategory-labels";
+import { methodFamilyPath, methodSupercategoryPath } from "@/lib/method-url";
+import { loadPublicationSuppressions, resolveDarkPmids } from "@/lib/api/manual-layer";
 
 const MIN_QUERY_LEN = 3;
 const SECONDARY_CAP = 4;
@@ -50,8 +63,20 @@ const ROW_AREA_CAP = 12;
  *  into the overflow count without being individually counted/ranked. */
 const MATCH_HARD_CAP = 1 + SECONDARY_CAP + 20;
 
+/**
+ * Entity types the taxonomy-match callout can surface. `parentTopic` / `subtopic`
+ * are the curated Topic taxonomy (chip row, #709); `methodFamily` / `supercategory`
+ * are the cross-scholar Method taxonomy (#824 PR-2 — rendered as a method-tinted
+ * callout card, NOT a chip, and gated behind `isMethodPagesEnabled()`).
+ */
+export type TaxonomyEntityType =
+  | "parentTopic"
+  | "subtopic"
+  | "methodFamily"
+  | "supercategory";
+
 export type TaxonomyMatch = {
-  entityType: "parentTopic" | "subtopic";
+  entityType: TaxonomyEntityType;
   id: string;
   name: string;
   parentTopicId: string | null;
@@ -64,6 +89,8 @@ export type TaxonomyMatch = {
   /**
    * Issue #709 — one-line area description for the chip hover preview (same
    * text as the topic page). Null when the topic/subtopic has no description.
+   * For a Method match (#824), the supercategory's SEO description (family
+   * matches carry their supercategory's description as the one-liner).
    */
   description: string | null;
   /**
@@ -131,6 +158,15 @@ export type TaxonomyMatchResult =
        */
       areas: TaxonomyMatch[];
       totalMatched: number;
+      /**
+       * #824 PR-2 — matched Method taxonomy entities (families + supercategories),
+       * ranked, for the method-tinted callout card in `research-areas-row.tsx`.
+       * SEPARATE from `areas` (the Topic/Subtopic chip row) so topic rendering is
+       * untouched. Empty when `METHODS_LENS_PAGES` is off or nothing matched. Every
+       * entry has already passed the §3.4 overlay gate (suppressed/sensitive families
+       * never appear). At most ONE supercategory + a small set of families render.
+       */
+      methodMatches: TaxonomyMatch[];
     };
 
 // `normalizeForMatch` now lives in the dependency-free `@/lib/api/normalize`
@@ -140,7 +176,7 @@ export type TaxonomyMatchResult =
 export { normalizeForMatch };
 
 type EntityCandidate = {
-  entityType: "parentTopic" | "subtopic";
+  entityType: TaxonomyEntityType;
   id: string;
   /** Visible name. Topics use label; subtopics use displayName ?? label. */
   name: string;
@@ -152,6 +188,16 @@ type EntityCandidate = {
   description: string | null;
   /** Issue #709 — child-subtopic count (parentTopic only; 0 for a subtopic). */
   subtopicCount: number;
+  /**
+   * #824 — Method-candidate routing fields, set ONLY on `methodFamily` /
+   * `supercategory` candidates (null on Topic candidates). `supercategory` is the
+   * A2 supercategory id; `familyId` / `familyLabel` are the representative family
+   * for a `methodFamily` candidate (used to build the `/methods/.../[family]` href
+   * and to recompute counts from `scholar_family`).
+   */
+  supercategory: string | null;
+  familyId: string | null;
+  familyLabel: string | null;
 };
 
 async function loadEntityCandidates(): Promise<EntityCandidate[]> {
@@ -188,6 +234,9 @@ async function loadEntityCandidates(): Promise<EntityCandidate[]> {
       parentTopicLabel: null,
       description: t.description ?? null,
       subtopicCount: subtopicCountByParent.get(t.id) ?? 0,
+      supercategory: null,
+      familyId: null,
+      familyLabel: null,
     });
   }
   for (const s of subtopics) {
@@ -203,14 +252,113 @@ async function loadEntityCandidates(): Promise<EntityCandidate[]> {
       parentTopicLabel: s.parentTopic?.label ?? null,
       description: s.description ?? null,
       subtopicCount: 0,
+      supercategory: null,
+      familyId: null,
+      familyLabel: null,
     });
   }
+
+  // #824 PR-2 — Method taxonomy candidates (families + supercategories), gated
+  // behind METHODS_LENS_PAGES. Off ⇒ add NOTHING (no candidates), so search is
+  // byte-identical to pre-#824 when the flag is off. Every candidate passes the
+  // §3.4 overlay gate so #800-suppressed / #801-sensitive families never surface.
+  if (isMethodPagesEnabled()) {
+    out.push(...(await loadMethodCandidates()));
+  }
+  return out;
+}
+
+/**
+ * #824 PR-2 — Method-taxonomy candidates from `scholar_family`, overlay-gated.
+ *
+ * Two candidate kinds:
+ *   - `methodFamily`: one per DISTINCT publicly-visible `(supercategory, familyLabel)`.
+ *     `matchKey`/`name` = the family label; `familyId` = a representative id (the
+ *     min) for the `/methods/[sc]/[family]` href. A family that fails
+ *     {@link isFamilyPubliclyVisible} is dropped.
+ *   - `supercategory`: one per DISTINCT supercategory that has ≥1 publicly-visible
+ *     family. `matchKey`/`name` = `supercategoryLabel(id)`; `description` =
+ *     `supercategoryDescription(id)`.
+ *
+ * The overlay gate is loaded ONCE here and applied to both kinds.
+ */
+async function loadMethodCandidates(): Promise<EntityCandidate[]> {
+  const [rows, gate] = await Promise.all([
+    // Distinct (supercategory, familyLabel) with a representative familyId. `_min`
+    // gives a stable representative id within a load (familyId re-mints per
+    // rebuild, but the page resolves by (sc,label) and uses the suffix only to
+    // disambiguate — any live id under the pair routes correctly).
+    prisma.scholarFamily.groupBy({
+      by: ["supercategory", "familyLabel"],
+      _min: { familyId: true },
+    }),
+    loadFamilyOverlayGate(),
+  ]);
+
+  const out: EntityCandidate[] = [];
+  // Track which supercategories have ≥1 visible family, so a supercategory becomes
+  // a candidate ONLY if it survives the gate via at least one family.
+  const visibleSupercategories = new Set<string>();
+
+  for (const r of rows) {
+    if (!isFamilyPubliclyVisible(r.supercategory, r.familyLabel, gate)) continue;
+    visibleSupercategories.add(r.supercategory);
+
+    const matchKey = normalizeForMatch(r.familyLabel);
+    if (!matchKey) continue;
+    const familyId = r._min.familyId ?? "";
+    out.push({
+      entityType: "methodFamily",
+      // Stable composite identity for the chip key + dedupe; not a DB id.
+      id: `family:${familyOverlayKey(r.supercategory, r.familyLabel)}`,
+      name: r.familyLabel,
+      matchKey,
+      parentTopicId: null,
+      parentTopicLabel: null,
+      // The family's supercategory description doubles as the one-line descriptor.
+      description: supercategoryDescription(r.supercategory),
+      subtopicCount: 0,
+      supercategory: r.supercategory,
+      familyId,
+      familyLabel: r.familyLabel,
+    });
+  }
+
+  for (const sc of visibleSupercategories) {
+    const label = supercategoryLabel(sc);
+    const matchKey = normalizeForMatch(label);
+    if (!matchKey) continue;
+    out.push({
+      entityType: "supercategory",
+      id: `supercategory:${sc}`,
+      name: label,
+      matchKey,
+      parentTopicId: null,
+      parentTopicLabel: null,
+      description: supercategoryDescription(sc),
+      subtopicCount: 0,
+      supercategory: sc,
+      familyId: null,
+      familyLabel: null,
+    });
+  }
+
   return out;
 }
 
 async function getCounts(
   candidate: EntityCandidate,
+  methodGate: FamilyOverlayGate | null,
 ): Promise<{ scholarCount: number; publicationCount: number }> {
+  if (candidate.entityType === "methodFamily" || candidate.entityType === "supercategory") {
+    // The candidate already passed the overlay gate in loadMethodCandidates, but
+    // the supercategory rollup still needs the gate to exclude suppressed/sensitive
+    // families when counting. `methodGate` is always non-null for a method candidate.
+    const gate = methodGate ?? (await loadFamilyOverlayGate());
+    return candidate.entityType === "methodFamily"
+      ? getFamilyCandidateCounts(candidate, gate)
+      : getSupercategoryCandidateCounts(candidate, gate);
+  }
   if (candidate.entityType === "parentTopic") {
     const [scholars, pubs] = await Promise.all([
       prisma.publicationTopic.groupBy({
@@ -243,7 +391,100 @@ async function getCounts(
   return { scholarCount: scholars.length, publicationCount: pubs.length };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// #824 PR-2 — Method-candidate counts (consistent with the /methods page loaders)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a deduped, dark-filtered PMID set from a list of `scholar_family.pmids`
+ * JSON arrays (the same union the page loaders perform). `#356` whole-pub
+ * takedowns / derived-dark PMIDs are removed. Empty when no rows carry pmids
+ * (pre-#175 rollup — counts then report 0 publications, no crash).
+ */
+async function collectDistinctPmids(
+  rows: Array<{ pmids: unknown }>,
+): Promise<string[]> {
+  const set = new Set<string>();
+  for (const r of rows) {
+    if (Array.isArray(r.pmids)) {
+      for (const p of r.pmids as unknown[]) set.add(String(p));
+    }
+  }
+  const pmids = [...set];
+  if (pmids.length === 0) return [];
+  const suppressions = await loadPublicationSuppressions(pmids, prisma);
+  const dark = await resolveDarkPmids(pmids, suppressions, prisma);
+  return pmids.filter((p) => !dark.has(p));
+}
+
+/**
+ * Family candidate counts: distinct ACTIVE scholars in `(supercategory, familyLabel)`
+ * (one row per `(cwid, family)` via the unique, so distinct-cwid groupBy length IS
+ * the scholar count) + the distinct, dark-filtered publication count (union of the
+ * member `pmids`). Mirrors `getDistinctScholarCountForFamily` + the page pub feed.
+ */
+async function getFamilyCandidateCounts(
+  candidate: EntityCandidate,
+  gate: FamilyOverlayGate,
+): Promise<{ scholarCount: number; publicationCount: number }> {
+  const supercategory = candidate.supercategory!;
+  const familyLabel = candidate.familyLabel!;
+  // Defense-in-depth: the candidate already passed the gate, but never count a
+  // suppressed/sensitive family even if reached.
+  if (!isFamilyPubliclyVisible(supercategory, familyLabel, gate)) {
+    return { scholarCount: 0, publicationCount: 0 };
+  }
+  const rows = await prisma.scholarFamily.findMany({
+    where: {
+      supercategory,
+      familyLabel,
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: { cwid: true, pmids: true },
+  });
+  const scholarCount = new Set(rows.map((r) => r.cwid)).size;
+  const pmids = await collectDistinctPmids(rows);
+  return { scholarCount, publicationCount: pmids.length };
+}
+
+/**
+ * Supercategory candidate counts: rolled up across the supercategory's
+ * PUBLICLY-VISIBLE families. `scholarCount` = distinct active scholars across those
+ * families (the safe additive number — a scholar in two families counts once);
+ * `publicationCount` = distinct, dark-filtered union of member `pmids` across the
+ * visible families. Suppressed/sensitive families never contribute.
+ */
+async function getSupercategoryCandidateCounts(
+  candidate: EntityCandidate,
+  gate: FamilyOverlayGate,
+): Promise<{ scholarCount: number; publicationCount: number }> {
+  const supercategory = candidate.supercategory!;
+  const rows = await prisma.scholarFamily.findMany({
+    where: {
+      supercategory,
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: { cwid: true, familyLabel: true, pmids: true },
+  });
+  const visible = rows.filter((r) =>
+    isFamilyPubliclyVisible(supercategory, r.familyLabel, gate),
+  );
+  const scholarCount = new Set(visible.map((r) => r.cwid)).size;
+  const pmids = await collectDistinctPmids(visible);
+  return { scholarCount, publicationCount: pmids.length };
+}
+
 function buildHref(candidate: EntityCandidate): string {
+  if (candidate.entityType === "methodFamily") {
+    return methodFamilyPath(
+      candidate.supercategory!,
+      candidate.familyId ?? "",
+      candidate.familyLabel ?? candidate.name,
+    );
+  }
+  if (candidate.entityType === "supercategory") {
+    return methodSupercategoryPath(candidate.supercategory!);
+  }
   if (candidate.entityType === "parentTopic") {
     return `/topics/${candidate.id}`;
   }
@@ -251,9 +492,27 @@ function buildHref(candidate: EntityCandidate): string {
   return `/topics/${candidate.parentTopicId}?${params.toString()}`;
 }
 
+/**
+ * Type priority for ranking taxonomy matches. parentTopic first, then subtopic,
+ * then the Method taxonomy (#824 — supercategory before methodFamily, mirroring
+ * parent-before-child). Methods land AFTER topics/subtopics so a topic match always
+ * leads the callout when both kinds match the same query.
+ */
+function typePriorityFor(t: TaxonomyEntityType): number {
+  switch (t) {
+    case "parentTopic":
+      return 0;
+    case "subtopic":
+      return 1;
+    case "supercategory":
+      return 2;
+    case "methodFamily":
+      return 3;
+  }
+}
+
 function rank(matches: TaxonomyMatch[]): TaxonomyMatch[] {
-  const typePriority = (t: TaxonomyMatch["entityType"]) =>
-    t === "parentTopic" ? 0 : 1;
+  const typePriority = typePriorityFor;
   return matches.slice().sort((a, b) => {
     const t = typePriority(a.entityType) - typePriority(b.entityType);
     if (t !== 0) return t;
@@ -285,21 +544,36 @@ export async function matchQueryToTaxonomy(
     loadEntityCandidates(),
     resolveMeshDescriptor(trimmed),
   ]);
-  const matched = all
+  const matchedAll = all
     .filter((c) => c.matchKey.includes(normalized))
     .map((c) => ({
       ...c,
       similarity: normalized.length / c.matchKey.length,
     }));
-  if (matched.length === 0) return { state: "none", meshResolution };
+  if (matchedAll.length === 0) return { state: "none", meshResolution };
+
+  // #824 PR-2 — partition Topic-taxonomy matches (the #709 chip row + the existing
+  // primary/secondary/overflow affordances) from Method-taxonomy matches (the new
+  // method-tinted callout card). They are surfaced through DIFFERENT result fields,
+  // so the Topic chip-row counts (`totalMatched`/`overflowCount`) never change shape
+  // when the Method flag is off (no method candidates), and never include methods
+  // when it's on.
+  const isMethodKind = (t: TaxonomyEntityType) =>
+    t === "methodFamily" || t === "supercategory";
+  const matched = matchedAll.filter((c) => !isMethodKind(c.entityType));
+  const matchedMethods = matchedAll.filter((c) => isMethodKind(c.entityType));
+
+  // The overlay gate is loaded ONCE per request inside loadEntityCandidates; load
+  // it again here only when there are method matches to enrich (the supercategory
+  // rollup count needs it). Off-flag / no-method-match ⇒ never loaded.
+  const methodGate: FamilyOverlayGate | null =
+    matchedMethods.length > 0 ? await loadFamilyOverlayGate() : null;
 
   // Pre-rank by [type priority, similarity desc] before the hard cap so the
   // best candidates make it through to count enrichment regardless of how
   // many low-similarity matches the query produced.
-  const typePriority = (t: EntityCandidate["entityType"]) =>
-    t === "parentTopic" ? 0 : 1;
   matched.sort((a, b) => {
-    const t = typePriority(a.entityType) - typePriority(b.entityType);
+    const t = typePriorityFor(a.entityType) - typePriorityFor(b.entityType);
     if (t !== 0) return t;
     return b.similarity - a.similarity;
   });
@@ -309,28 +583,47 @@ export async function matchQueryToTaxonomy(
   const considered = matched.slice(0, MATCH_HARD_CAP);
   const cappedExtra = matched.length - considered.length;
 
-  const enriched = await Promise.all(
-    considered.map(async (c) => {
-      const counts = await getCounts(c);
-      const match: TaxonomyMatch = {
-        entityType: c.entityType,
-        id: c.id,
-        name: c.name,
-        parentTopicId: c.parentTopicId,
-        parentTopicLabel: c.parentTopicLabel,
-        href: buildHref(c),
-        scholarCount: counts.scholarCount,
-        publicationCount: counts.publicationCount,
-        similarity: c.similarity,
-        description: c.description,
-        subtopicCount: c.subtopicCount,
-      };
-      return match;
-    }),
+  const enrich = async (c: (typeof matchedAll)[number]): Promise<TaxonomyMatch> => {
+    const counts = await getCounts(c, methodGate);
+    return {
+      entityType: c.entityType,
+      id: c.id,
+      name: c.name,
+      parentTopicId: c.parentTopicId,
+      parentTopicLabel: c.parentTopicLabel,
+      href: buildHref(c),
+      scholarCount: counts.scholarCount,
+      publicationCount: counts.publicationCount,
+      similarity: c.similarity,
+      description: c.description,
+      subtopicCount: c.subtopicCount,
+    };
+  };
+
+  const enriched = await Promise.all(considered.map(enrich));
+
+  // #824 — enrich + rank the Method matches independently. Supercategory before
+  // family (typePriorityFor), then scholarCount desc, then similarity, then name —
+  // so the broadest, densest method lands first in the callout. Capped at
+  // SECONDARY_CAP+1 so an over-broad family-label substring never floods the card.
+  const enrichedMethods = (
+    await Promise.all(matchedMethods.map(enrich))
+  ).sort(
+    (a, b) =>
+      typePriorityFor(a.entityType) - typePriorityFor(b.entityType) ||
+      b.scholarCount - a.scholarCount ||
+      b.similarity - a.similarity ||
+      a.name.localeCompare(b.name),
   );
+  const methodMatches = enrichedMethods.slice(0, SECONDARY_CAP + 1);
 
   const ranked = rank(enriched);
-  const [primary, ...rest] = ranked;
+  // When ONLY Method matches exist (no Topic/Subtopic), there is no topic primary —
+  // fall back to the top method as `primary` to satisfy the `matches`-state contract
+  // (it does NOT render in the Topic chip row: `areas` is topic-only and empty, so
+  // ResearchAreasRow renders nothing; the method renders via `methodMatches`).
+  const primary = ranked[0] ?? methodMatches[0];
+  const rest = ranked.slice(1);
   const visibleSecondary = rest.slice(0, SECONDARY_CAP);
   const overflowCount =
     Math.max(0, rest.length - SECONDARY_CAP) + cappedExtra;
@@ -338,7 +631,7 @@ export async function matchQueryToTaxonomy(
   // Issue #709 — chip row, ordered by match relevance (RA-18): similarity desc,
   // then scholarCount desc, then name. Distinct from the card's `primary`
   // (scholarCount-first, #74). Capped at the inline-expand ceiling; totalMatched
-  // is the full substring-match count for the "+N more" affordance.
+  // is the full substring-match count for the "+N more" affordance. Topic-kind only.
   const areas = enriched
     .slice()
     .sort(
@@ -359,6 +652,7 @@ export async function matchQueryToTaxonomy(
     meshResolution,
     areas,
     totalMatched,
+    methodMatches,
   };
 }
 
