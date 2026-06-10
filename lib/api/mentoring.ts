@@ -148,6 +148,21 @@ import { formatPublishedName } from "@/lib/postnominal";
  *  selector is rendered. */
 export type MenteeSort = "copubs" | "class-year";
 
+/** Return shape for {@link getMenteesForMentor}. Issue #843 — the per-mentee
+ *  `copublicationCount` is derived from a LIVE ReciterDB query (WCM-side, and
+ *  the SPS→WCM path can be down). When that query fails, EVERY mentee's count
+ *  silently falls back to 0, which is indistinguishable from a genuine zero
+ *  unless callers know the source was unavailable. `copubSourceAvailable` is
+ *  `true` only when the co-pub query completed without throwing; callers use it
+ *  to suppress the misleading "no co-pubs" affordances (the rollup link, the
+ *  per-chip badges) on an outage rather than presenting an outage as fact. */
+export type MenteesResult = {
+  mentees: MenteeChip[];
+  /** `false` when the ReciterDB co-pub query threw — the `copublicationCount`
+   *  on every mentee is then a fallback zero, NOT a real count. */
+  copubSourceAvailable: boolean;
+};
+
 /**
  * Returns all known mentees for the given mentor CWID. Multiple AOC project
  * rows for the same student are collapsed to a single chip.
@@ -168,13 +183,18 @@ export type MenteeSort = "copubs" | "class-year";
  * types is intentional — a profile with both current postdocs and
  * recent graduates surfaces both together.
  *
- * Returns an empty array if the mentor has no recorded relationships.
+ * Returns an empty `mentees` array if the mentor has no recorded
+ * relationships. Issue #843 — also reports `copubSourceAvailable`: `false`
+ * when the live ReciterDB co-pub query threw (so every mentee's
+ * `copublicationCount` is a fallback zero, not a real count). The early-return
+ * paths (no mentor cwid / no recorded mentees) never reach the co-pub query,
+ * so they report `copubSourceAvailable: true`.
  */
 export async function getMenteesForMentor(
   mentorCwid: string,
   options?: { sort?: MenteeSort },
-): Promise<MenteeChip[]> {
-  if (!mentorCwid) return [];
+): Promise<MenteesResult> {
+  if (!mentorCwid) return { mentees: [], copubSourceAvailable: true };
 
   const [aocRows, jenzabarRows, postdocRows] = await Promise.all([
     withReciterConnection(async (conn) => {
@@ -211,7 +231,7 @@ export async function getMenteesForMentor(
   ]);
 
   if (aocRows.length === 0 && jenzabarRows.length === 0 && postdocRows.length === 0)
-    return [];
+    return { mentees: [], copubSourceAvailable: true };
 
   // Collapse to one row per mentee CWID across all three sources. Preserve
   // the most recent graduationYear and the most specific programType seen
@@ -344,6 +364,11 @@ export async function getMenteesForMentor(
   // the dedicated /co-pubs/<menteeCwid> page (#184).
   const copubCountByCwid = new Map<string, number>();
   const copubPreviewByCwid = new Map<string, CoPublication[]>();
+  // Issue #843 — track whether the co-pub query actually ran. Set true only
+  // after the query completes without throwing; a thrown error leaves it false
+  // so callers can tell "ReciterDB was down" apart from "this mentor genuinely
+  // has zero co-pubs" and stop silently dropping the rollup link / badges.
+  let copubSourceAvailable = false;
   await withReciterConnection(async (conn) => {
     const rows = (await conn.query(
       `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
@@ -383,7 +408,18 @@ export async function getMenteesForMentor(
         copubPreviewByCwid.set(r.mentee_cwid, preview);
       }
     }
-  }).catch(() => {});
+    copubSourceAvailable = true;
+  }).catch((err) => {
+    // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
+    // gave operators zero visibility when ReciterDB was unreachable and left
+    // every mentee's co-pub count a misleading zero. Log with the mentor cwid
+    // and that this is the co-pub source so the cause is diagnosable;
+    // `copubSourceAvailable` stays false so the UI degrades honestly.
+    console.error(
+      `[mentoring] reciterdb co-pub count query failed for mentor ${mentorCwid}`,
+      err,
+    );
+  });
 
   // Scholar-table presence — drives linkability. Non-deleted, active rows only.
   // Only `status='active'` rows can be linked. Suppressed scholars (alumni
@@ -448,7 +484,7 @@ export async function getMenteesForMentor(
     return a.fullName.localeCompare(b.fullName);
   });
 
-  return chips;
+  return { mentees: chips, copubSourceAvailable };
 }
 
 /**
@@ -735,7 +771,7 @@ export async function getAllMentorCoPublications(
   // AOC + Jenzabar sources, the scholar-row hydration, and graduationYear.
   // We then drop mentees with copublicationCount=0 since they don't
   // contribute to this view.
-  const allMentees = await getMenteesForMentor(mentorCwid);
+  const { mentees: allMentees } = await getMenteesForMentor(mentorCwid);
   const menteesWithCopubs = allMentees.filter((m) => m.copublicationCount > 0);
 
   if (menteesWithCopubs.length === 0) {

@@ -294,7 +294,7 @@ export type LoadMentees = (mentorCwid: string) => Promise<EditContextMenteeSourc
  * reporting connection; `loadEditContext` still wraps the call in try/catch.
  */
 const defaultLoadMentees: LoadMentees = async (mentorCwid) => {
-  const mentees = await getMenteesForMentor(mentorCwid);
+  const { mentees } = await getMenteesForMentor(mentorCwid);
   return mentees.map((m) => ({
     cwid: m.cwid,
     fullName: m.fullName,

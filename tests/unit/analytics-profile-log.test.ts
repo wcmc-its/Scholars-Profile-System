@@ -67,7 +67,8 @@ vi.mock("@/lib/seo/jsonld", () => ({
 // page. Without this the underlying ReCiterDB pool init throws because
 // SCHOLARS_RECITERDB_* env vars are absent in CI.
 vi.mock("@/lib/api/mentoring", () => ({
-  getMenteesForMentor: vi.fn(async () => []),
+  // #843 — getMenteesForMentor now returns { mentees, copubSourceAvailable }.
+  getMenteesForMentor: vi.fn(async () => ({ mentees: [], copubSourceAvailable: true })),
 }));
 
 // Mock @/lib/db — <ProfileView> reads the suppression layer directly to drop a
