@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- target, and the unit `code` for a department/division/center target; a
   -- per-author publication suppression carries the contributor CWID in the
   -- JSON payload.
-  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate') NOT NULL,
+  `target_entity_type` ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family') NOT NULL,
   `target_entity_id`   VARCHAR(64)  NOT NULL,
 
   -- WHICH -- the action discriminator (#354). `field_override` is a scalar-field
@@ -95,8 +95,12 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
   -- `grant_change` (a UnitAdmin INSERT or hard-DELETE). #637 adds two "View as"
   -- session events: `impersonation_start` / `impersonation_end` (R5 -- audit
   -- enter AND exit; `target_entity_type='scholar'`, `target_entity_id` the
-  -- impersonated CWID).
-  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke') NOT NULL,
+  -- impersonated CWID). The comms-steward Method-Family surface adds two:
+  -- `family_tier_set` (a steward set a family's tier via the overlay) and
+  -- `family_review` (a steward cleared the review nag without changing tier);
+  -- both carry `target_entity_type='method_family'`, `target_entity_id` the
+  -- `supercategory:family_label` pair.
+  `action`             ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review') NOT NULL,
 
   -- THE CHANGE.
   --   fields_changed -- JSON array of field names for a `field_override`
@@ -173,11 +177,17 @@ CREATE TABLE IF NOT EXISTS `scholars_audit`.`manual_edit_audit` (
 --                         Amendment 3; target_entity_type='scholar',
 --                         target_entity_id is the granted scholar cwid). Appended
 --                         LAST to preserve existing ENUM ordinals.
+--   COMMS_STEWARD_ENABLED: + family_tier_set · family_review  (comms-steward
+--                         Method-Family surface; docs/comms-steward-methods-
+--                         visibility-spec.md §5/§7; target_entity_type=
+--                         'method_family', target_entity_id is the
+--                         `supercategory:family_label` pair). Appended LAST to
+--                         preserve existing ENUM ordinals.
 -- =============================================================================
 
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `action`
-    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke')
+    ENUM('field_override','field_override_clear','suppression_create','suppression_revoke','request_change','slug_request','slug_request_approved','slug_request_rejected','slug_request_withdrawn','unit_create','roster_change','grant_change','impersonation_start','impersonation_end','publication_reject','coi_gap_dismiss','coi_gap_restore','proxy_grant','proxy_revoke','family_tier_set','family_review')
     NOT NULL;
 
 -- target_entity_type history:
@@ -188,9 +198,13 @@ ALTER TABLE `scholars_audit`.`manual_edit_audit`
 --   SELF_EDIT_COI_GAP_HINT: + coi_gap_candidate  (dismissed publication-derived
 --                    COI-gap candidate; target_entity_id is the candidate id).
 --                    Appended LAST to preserve existing ENUM ordinals.
+--   COMMS_STEWARD_ENABLED: + method_family  (comms-steward Method-Family tier /
+--                    review actions; target_entity_id is the
+--                    `supercategory:family_label` pair). Appended LAST to
+--                    preserve existing ENUM ordinals.
 ALTER TABLE `scholars_audit`.`manual_edit_audit`
   MODIFY COLUMN `target_entity_type`
-    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate')
+    ENUM('scholar','publication','grant','education','appointment','department','division','center','mentee','coi_gap_candidate','method_family')
     NOT NULL;
 
 -- #637 (View-as impersonation): the `impersonated_cwid` attribution column for
