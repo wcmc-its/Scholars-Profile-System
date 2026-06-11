@@ -97,7 +97,17 @@ async function main() {
     let processed = 0;
     let upserted = 0;
     let resolved = 0;
-    for (const cwid of cwids) {
+
+    // Each scholar's compute → reconcile → write is independent, and the wall
+    // clock is dominated by per-scholar Aurora round-trips (most scholars have no
+    // gaps but still pay the read latency). Running a bounded pool of scholars in
+    // parallel cuts wall-clock ~CONCURRENCY×. The cap stays below the mariadb pool
+    // (connectionLimit 15, lib/db-url.ts) so workers don't starve each other on
+    // connections. The shared counters mutate only synchronously between awaits
+    // (JS is single-threaded), so there is no data race.
+    const CONCURRENCY = 10;
+
+    async function processScholar(cwid: string): Promise<void> {
       const fresh = await computeScholarGaps(cwid);
       const existingRows = await db.write.coiGapCandidate.findMany({
         where: { cwid },
@@ -152,7 +162,11 @@ async function main() {
       processed++;
       upserted += upserts.length;
       resolved += resolve.length;
-      if (processed % 200 === 0) console.log(`  ...${processed}/${cwids.length}`);
+      if (processed % 500 === 0) console.log(`  ...${processed}/${cwids.length}`);
+    }
+
+    for (const batch of chunks(cwids, CONCURRENCY)) {
+      await Promise.all(batch.map((cwid) => processScholar(cwid)));
     }
 
     await db.write.etlRun.update({
