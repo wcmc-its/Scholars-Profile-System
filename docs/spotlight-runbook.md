@@ -4,7 +4,7 @@ How the home-page **Selected research** section gets its data, how to re-publish
 
 ## What you're looking at
 
-The home page Selected research section is driven by an **editorial spotlight artifact** generated weekly in the `wcmc-its/ReCiterAI` pipeline and consumed by SPS via S3 + a sha256-gated ETL. Each spotlight is one subtopic with a 25–35 word LLM-authored lede and 2–3 representative WCM publications.
+The home page Selected research section is driven by an **editorial spotlight artifact** generated weekly in the `wcmc-its/ReCiterAI` pipeline and consumed by SPS via S3 + a sha256-gated ETL. Each spotlight is one subtopic with a 25–35 word LLM-authored lede and up to 3 representative WCM publications (seeded-sampled from a larger artifact pool — see [issue #286](https://github.com/wcmc-its/Scholars-Profile-System/issues/286)). The producer ships one spotlight per parent topic — up to **25 cards** per publish since the ReciterAI 25-card bump (it previously pre-truncated to a top-9).
 
 Two repos, two halves:
 
@@ -106,8 +106,9 @@ The home-page section is in `components/home/spotlight-section.tsx`, fed by `get
 - **Author resolution**: SPS does NOT trust the artifact's `first_author` / `last_author` payload. The DAL joins `PublicationAuthor` to `Scholar` (where `cwid IS NOT NULL` and `scholar.deletedAt IS NULL` and `status = 'active'`) and renders WCM-resolved authors only, sorted by byline `position`. Reason: upstream's WCM-author check sometimes mislabels (e.g. PMID 37931288 shipped Tammela T at MSK as a "WCM last author"; SPS now correctly surfaces Charles Rudin as the middle-position WCM author instead).
 - **Per-paper drop**: papers with zero WCM-resolved authors are hidden.
 - **Per-spotlight drop**: spotlights whose papers all dropped are hidden.
-- **Sparse-state hide**: if fewer than `SPOTLIGHT_FLOOR` (= 6) spotlights survive, the entire section hides. Floor and target constants live in `lib/api/home.ts`.
-- **Display sampling**: the component renders a random `DISPLAY_LIMIT_SPOTLIGHTS` (8) of N spotlights on each pageload, auto-advancing every 10 s (pauses on hover/focus). The 3 papers shown per spotlight are **not** random per pageload — `getSpotlights()` seeded-samples them from the artifact pool (issue #286), keyed on `artifactVersion` + `subtopicId`, so the choice is stable within a publish cycle and rotates across cycles. See `lib/spotlight-sampling.ts`.
+- **Sparse-state hide**: if fewer than `SPOTLIGHT_FLOOR` (= 6) spotlights survive, the entire section hides. Floor and target constants live in `lib/api/home.ts`. The floor is an absolute minimum, **not** half of the (now variable, up to 25) producer count — `getSpotlights()` returns every surviving card with no row cap.
+- **Display sampling**: the component renders a random `DISPLAY_LIMIT_SPOTLIGHTS` (8) of the N spotlights (now up to ~25) on each pageload, auto-advancing every 10 s (pauses on hover/focus). The 3 papers shown per spotlight are **not** random per pageload — `getSpotlights()` seeded-samples them from the artifact pool (issue #286), keyed on `artifactVersion` + `subtopicId`, so the choice is stable within a publish cycle and rotates across cycles. See `lib/spotlight-sampling.ts`.
+- **Near-duplicate-card guard**: a few parent topics are containment-nested near-duplicates the producer's clone gate exempts (e.g. *Cancer Genomics & Molecular Oncology* vs *Genomics & Multi-Omic Profiling* share ~78% of their papers). When the random 8-of-25 draw would place two such cards together, `randomSample` re-rolls the draw — up to `MAX_CARD_REDRAWS` times — so one pageload never shows the same work under two near-identical topics. The signal is **article (PMID) overlap** at/above `CARD_OVERLAP_THRESHOLD` (min-cardinality coefficient over `papers[].pmid`), not author overlap. See `cardPaperOverlap` / `sampleDistinctCards` in `lib/spotlight-sampling.ts`. Rare at top-9; introduced with the 25-card bump because a random-8 can now draw both members of a near-dup pair.
 - **Counts**: `publicationCount` and `scholarCount` per spotlight are aggregated in the DAL via raw SQL over `publication_topic` JOIN `scholar` (year ≥ 2020 floor, active non-deleted scholars). Grants are intentionally absent (no topic linkage in the schema).
 - **Link layout (Plan 09-04 spec)**: subtopic name → `/topics/{parent}?subtopic={sub}`, parent kicker → `/topics/{parent}`, publications count → `…#publications`, scholars count → `…#top-scholars`. The topic page has matching id anchors with `scroll-mt-20`.
 
@@ -126,7 +127,7 @@ Open issue tracking voice rules: [wcmc-its/ReciterAI#2](https://github.com/wcmc-
 | Symptom | First place to look |
 |---|---|
 | Section doesn't render | `EtlRun` table (most recent `Spotlight` row): is `status = "success"` and `rows_processed > 0`? If `rows_processed = 0` it short-circuited (sha256 unchanged from prior run, expected). |
-| Section renders but no cards | `SELECT COUNT(*) FROM spotlight` — should be 10 after each publish. |
+| Section renders but no cards | `SELECT COUNT(*) FROM spotlight` — should be up to 25 after each publish (one per cleared parent topic; was ~10 before the 25-card bump). |
 | Section hides (floor) | Check sparse-hide log: `home_spotlights` line in server logs. Floor is `SPOTLIGHT_FLOOR` in `lib/api/home.ts`. |
 | Authors look wrong | Check `publication_author` for the PMID. SPS only renders `cwid IS NOT NULL` rows; if the WCM author is in a middle position the upstream artifact's first/last labels may diverge from what we render. |
 | Counts wrong | Raw aggregation in `getSpotlights()` queries `publication_topic` with `year >= 2020` (D-15 floor). If counts seem low, verify the year floor isn't masking older work the user is expecting to see. |
@@ -165,11 +166,13 @@ Drill down by adding `subtopicId` (per-spotlight) or `pmid` (which paper drew th
 | Constant | Value | Lives in |
 |---|---|---|
 | `SPOTLIGHT_FLOOR` | 6 | `lib/api/home.ts` |
-| `SPOTLIGHT_TARGET` | 10 | `lib/api/home.ts` |
+| `SPOTLIGHT_TARGET` (producer ceiling; up to 25/publish) | 25 | `lib/api/home.ts` |
 | `RECITERAI_YEAR_FLOOR` | 2020 (D-15) | `lib/api/home.ts` |
 | `DISPLAY_LIMIT_SPOTLIGHTS` | 8 | `components/home/spotlight-section.tsx` |
 | `SAMPLE_SIZE` (papers shown per spotlight) | 3 | `lib/spotlight-sampling.ts` |
 | `MAX_REROLLS` (author-collision re-roll cap) | 3 | `lib/spotlight-sampling.ts` |
+| `CARD_OVERLAP_THRESHOLD` (near-dup-card PMID-overlap re-roll trigger) | 0.4 | `lib/spotlight-sampling.ts` |
+| `MAX_CARD_REDRAWS` (near-dup-card re-draw cap) | 3 | `lib/spotlight-sampling.ts` |
 | `AUTHOR_DISPLAY_CAP` | 4 (then "+N more") | `components/home/spotlight-section.tsx` |
 | `AUTO_ADVANCE_MS` | 10 000 | `components/home/spotlight-section.tsx` |
 

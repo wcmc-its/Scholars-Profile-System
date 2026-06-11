@@ -48,10 +48,13 @@ const RECENT_CONTRIBUTIONS_TARGET = 6;
 const RECENT_CONTRIBUTIONS_FLOOR = 3;
 const SELECTED_RESEARCH_TARGET = 8;
 const SELECTED_RESEARCH_FLOOR = 4;
-// Phase 9 SPOTLIGHT-03 — upstream rotation pipeline targets 10/10 spotlights
-// (one per parent area). Floor is generous: hide the section only if the
-// publish degraded below half-coverage.
-const SPOTLIGHT_TARGET = 10;
+// Phase 9 SPOTLIGHT-03 — the producer ships one spotlight per parent topic.
+// Since the ReciterAI 25-card bump it publishes every cleared candidate, up to
+// SPOTLIGHT_TARGET cards (was a pre-truncated 10); the actual count varies per
+// publish. SPOTLIGHT_FLOOR is an absolute defensive minimum — NOT half of the
+// (now variable) producer count: hide the section only if a publish degrades to
+// fewer than this many surviving cards.
+const SPOTLIGHT_TARGET = 25;
 const SPOTLIGHT_FLOOR = 6;
 
 // Hard-excluded publication types — see lib/publication-types.ts.
@@ -554,16 +557,22 @@ export async function getSelectedResearch(
 // ---------------------------------------------------------------------------
 
 /**
- * 10 editorial spotlights from the ReciterAI rotation pipeline (`Spotlight`
- * table, sole-written by `etl/spotlight/index.ts`). Each card pairs a 25-35
- * word lede with up to 3 representative WCM publications — seeded-sampled per
- * publish cycle from the artifact pool (#286) — with author photos resolved
- * against the existing Scholar table.
+ * Up to 25 editorial spotlights from the ReciterAI rotation pipeline
+ * (`Spotlight` table, sole-written by `etl/spotlight/index.ts`), one per parent
+ * topic. Each card pairs a 25-35 word lede with up to 3 representative WCM
+ * publications — seeded-sampled per publish cycle from the artifact pool (#286)
+ * — with author photos resolved against the existing Scholar table.
  *
- * Sparse-state hide: returns null if fewer than `SPOTLIGHT_FLOOR` rows exist
- * (publish degraded; section hides rather than render a half-empty layout).
- * The upstream pipeline targets a steady 10/10; the floor is a defensive
- * cushion, not the expected case.
+ * Returns every surviving card with no row cap; the home component
+ * random-samples DISPLAY_LIMIT_SPOTLIGHTS (8) of them per page load and de-dups
+ * paper-level near-identical cards there (`lib/spotlight-sampling.ts`). The
+ * producer used to pre-truncate to ~10 before the ReciterAI 25-card bump; this
+ * DAL never capped, so passing the larger set through needs no change here.
+ *
+ * Sparse-state hide: returns null if fewer than `SPOTLIGHT_FLOOR` rows survive
+ * (publish degraded; section hides rather than render a half-empty layout). The
+ * floor is an absolute defensive minimum, independent of the (now variable, up
+ * to 25) producer card count.
  *
  * Render-order: deterministic alphabetical by `parentTopicId`. The artifact
  * does not ship a position field; if editorial-priority ordering is ever
@@ -751,7 +760,7 @@ export async function getSpotlights(): Promise<SpotlightCard[] | null> {
   return cards;
 }
 
-void SPOTLIGHT_TARGET; // reserved for upstream consistency assertion in 09-04
+void SPOTLIGHT_TARGET; // producer ceiling (max cards per publish); documented, not asserted
 
 // ---------------------------------------------------------------------------
 // getBrowseAllResearchAreas — HOME-03

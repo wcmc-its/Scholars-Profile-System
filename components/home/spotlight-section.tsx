@@ -35,6 +35,7 @@ import { SectionInfoButton } from "@/components/shared/section-info-button";
 import { sanitizePubmedHtml } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
+import { sampleDistinctCards } from "@/lib/spotlight-sampling";
 import type { SpotlightAuthor, SpotlightCard } from "@/lib/api/home";
 
 const AUTO_ADVANCE_MS = 10_000;
@@ -54,15 +55,23 @@ function shuffle<T>(arr: readonly T[]): T[] {
  * Stable, deterministic SSR slice — first DISPLAY_LIMIT_SPOTLIGHTS spotlights.
  * Papers within each spotlight arrive already seeded-sampled to 3 from
  * `getSpotlights()` (#286), so this slices only at the spotlight level.
- * Picked at server render to avoid a hydration mismatch; replaced with a
- * random spotlight sample on mount via useEffect.
+ * Picked at server render to avoid a hydration mismatch; replaced on mount with
+ * `randomSample`, which is where the near-duplicate-card guard runs.
  */
 function ssrSlice(items: SpotlightCard[]): SpotlightCard[] {
   return items.slice(0, DISPLAY_LIMIT_SPOTLIGHTS);
 }
 
+/**
+ * Per-page-load selection of DISPLAY_LIMIT_SPOTLIGHTS spotlights. The artifact
+ * now ships up to ~25 cards (ReciterAI 25-card bump), so this shuffles the full
+ * set and draws 8, re-rolling when two drawn cards are paper-level
+ * near-duplicates — a single page never shows the same work under two
+ * near-identical topics (see `lib/spotlight-sampling.ts`). Runs only after
+ * mount (SSR uses the deterministic `ssrSlice`), so the unseeded shuffle is safe.
+ */
 function randomSample(items: SpotlightCard[]): SpotlightCard[] {
-  return shuffle(items).slice(0, DISPLAY_LIMIT_SPOTLIGHTS);
+  return sampleDistinctCards(items, DISPLAY_LIMIT_SPOTLIGHTS, shuffle);
 }
 
 export function SpotlightSection({ items }: { items: SpotlightCard[] }) {

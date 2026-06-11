@@ -5,8 +5,9 @@
  * s3://wcmc-reciterai-artifacts/spotlight/latest/manifest.json, short-circuits
  * on unchanged sha256, otherwise fetches the version-pinned
  * spotlight.schema.json + spotlight.json, validates with ajv 2020-12 (D-11
- * additive-fields tolerant), upserts the 10 spotlight rows, and deletes any
- * stale rows from prior publishes (full-replacement semantics).
+ * additive-fields tolerant), upserts the spotlight rows (up to 25 since the
+ * ReciterAI 25-card bump; the co-published schema's maxItems was raised 10→25),
+ * and deletes any stale rows from prior publishes (full-replacement semantics).
  *
  * Source-of-truth contract: ~/Dropbox/GitHub/ReciterAI/docs/spotlight-contract.md
  * SPS coding-agent brief:   ~/Dropbox/GitHub/ReciterAI/docs/sps-spotlight-handoff.md
@@ -86,7 +87,7 @@ interface SpotlightArtifact {
   version: string;                // e.g. "spotlight_v1"
   generated_at: string;
   taxonomy_version: string;
-  spotlights: Spotlight[];        // 1-10 active spotlights
+  spotlights: Spotlight[];        // 1-25 active spotlights (producer schema maxItems; was 10 pre-25-card bump)
   pool_snapshot: PoolSnapshotEntry[]; // up to 50 candidates (transparency only)
 }
 
@@ -221,8 +222,8 @@ async function main(): Promise<void> {
     })}`
   );
 
-  // Step 7: Project the 10 active spotlights into MySQL. Each publish is a
-  // FULL replacement (D-06 ID instability + contract §Subtopic ID Stability):
+  // Step 7: Project the active spotlights (up to 25) into MySQL. Each publish is
+  // a FULL replacement (D-06 ID instability + contract §Subtopic ID Stability):
   // every artifact subtopic gets upserted, then any rows tagged with a
   // different artifact_version are deleted at the end of the loop.
   //

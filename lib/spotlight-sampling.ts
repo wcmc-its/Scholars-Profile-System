@@ -1,5 +1,11 @@
 /**
- * Seeded, deterministic publication sampling for the home-page Spotlight (#286).
+ * Seeded publication sampling AND card-level near-duplicate guarding for the
+ * home-page Spotlight (#286).
+ *
+ * Two concerns, two halves:
+ *   1. `sampleSpotlightPapers` — which 3 papers a single spotlight renders.
+ *   2. `sampleDistinctCards` — which spotlights a page load shows, avoiding two
+ *      paper-level near-duplicate cards side by side (ReciterAI 25-card bump).
  *
  * Each home-page spotlight ships a pool of representative WCM publications in
  * the ReciterAI artifact — up to 7 per spotlight since ReciterAI #49. The
@@ -125,4 +131,92 @@ export function sampleSpotlightPapers<T extends AuthoredPaper>(
     if (!hasKeyAuthorCollision(triple)) break;
   }
   return triple;
+}
+
+// ---------------------------------------------------------------------------
+// Card-level near-duplicate guard (ReciterAI 25-card spotlight bump)
+// ---------------------------------------------------------------------------
+//
+// The producer used to pre-truncate the spotlight artifact to a top-9; it now
+// publishes every cleared candidate — up to 25 cards, one per parent topic. The
+// home-page section random-samples DISPLAY_LIMIT_SPOTLIGHTS (8) of those per
+// page load. Across the 25-card set cross-card paper overlap is low (~88% of
+// candidate pairs share no papers), but a couple of parent topics are
+// containment-nested near-duplicates the producer's clone gate intentionally
+// exempts — e.g. "Cancer Genomics & Molecular Oncology" vs "Genomics &
+// Multi-Omic Profiling" share ~78% of their papers. At top-9 these rarely
+// co-occurred; drawing 8 of 25 can surface both, which reads as a duplicate.
+//
+// This is the card-level analogue of `hasKeyAuthorCollision`: if a drawn set
+// contains two cards whose displayed papers overlap by at least
+// CARD_OVERLAP_THRESHOLD (min-cardinality / overlap coefficient over
+// papers[].pmid), re-draw — up to MAX_CARD_REDRAWS times — then accept the
+// final draw. The signal is article (PMID) overlap, not author overlap: author
+// overlap stays low across the set, while the near-dup pairs collide at the
+// paper level. The component injects the (unseeded, per-page-load) shuffle so
+// the selection still rotates on every visit.
+
+/** Overlap coefficient at/above which two drawn cards read as near-duplicates. */
+const CARD_OVERLAP_THRESHOLD = 0.4;
+/** Re-draw attempts after the initial draw before accepting a colliding set. */
+const MAX_CARD_REDRAWS = 3;
+
+/** Minimal shape the card guard needs: a card's displayed papers, by PMID. */
+type PaperedCard = { papers: ReadonlyArray<{ pmid: string }> };
+
+/**
+ * Min-cardinality (overlap) coefficient of two cards' displayed PMIDs:
+ * `|A ∩ B| / min(|A|, |B|)`. 1.0 means one card's papers are a subset of the
+ * other's; 0 means disjoint. A card with no papers yields 0 (nothing to
+ * compare). Min-cardinality, not Jaccard, so a small card fully contained in a
+ * larger one still scores 1.0 and is caught.
+ */
+export function cardPaperOverlap(a: PaperedCard, b: PaperedCard): number {
+  const aPmids = new Set(a.papers.map((p) => p.pmid));
+  const bPmids = new Set(b.papers.map((p) => p.pmid));
+  if (aPmids.size === 0 || bPmids.size === 0) return 0;
+  let shared = 0;
+  for (const pmid of aPmids) if (bPmids.has(pmid)) shared++;
+  return shared / Math.min(aPmids.size, bPmids.size);
+}
+
+/**
+ * True when any two cards in the set share at least `threshold` of their
+ * displayed papers — i.e. the set contains a near-duplicate pair the visitor
+ * would read as the same work surfaced under two near-identical topics.
+ */
+export function hasNearDuplicateCardPair(
+  cards: readonly PaperedCard[],
+  threshold: number = CARD_OVERLAP_THRESHOLD,
+): boolean {
+  for (let i = 0; i < cards.length; i++) {
+    for (let j = i + 1; j < cards.length; j++) {
+      if (cardPaperOverlap(cards[i], cards[j]) >= threshold) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Draw `count` cards from `pool` using the supplied `shuffle`, re-drawing up to
+ * `MAX_CARD_REDRAWS` times if the drawn set contains a near-duplicate pair (two
+ * cards overlapping by ≥ `CARD_OVERLAP_THRESHOLD` of their displayed PMIDs). The
+ * final draw is accepted unconditionally, so the work is bounded when the pool
+ * is small or genuinely dup-dense.
+ *
+ * `shuffle` is injected — the home component passes an unseeded Math.random
+ * shuffle so the selection re-rotates per page load; passing a seeded shuffle
+ * makes the guard deterministically testable.
+ */
+export function sampleDistinctCards<T extends PaperedCard>(
+  pool: readonly T[],
+  count: number,
+  shuffle: (arr: readonly T[]) => T[],
+): T[] {
+  let draw: T[] = [];
+  for (let attempt = 0; attempt <= MAX_CARD_REDRAWS; attempt++) {
+    draw = shuffle(pool).slice(0, count);
+    if (!hasNearDuplicateCardPair(draw)) break;
+  }
+  return draw;
 }

@@ -1,10 +1,12 @@
 /**
  * Unit tests for lib/spotlight-sampling.ts — the seeded 3-of-N publication
- * sampler for the home-page Spotlight (#286).
+ * sampler for the home-page Spotlight (#286) AND the card-level near-duplicate
+ * guard added with the ReciterAI 25-card bump.
  *
  * Covers: PRNG determinism, distinct-item sampling, pool-size edge cases,
  * per-cycle stability + cross-cycle rotation, the lead/senior-author collision
- * check, and the soft re-roll (including the cap when one author dominates).
+ * check, the soft re-roll (including the cap when one author dominates), and the
+ * card-level paper-overlap guard + re-draw used by the home component.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -13,6 +15,9 @@ import {
   seededSample,
   hasKeyAuthorCollision,
   sampleSpotlightPapers,
+  cardPaperOverlap,
+  hasNearDuplicateCardPair,
+  sampleDistinctCards,
 } from "@/lib/spotlight-sampling";
 
 /** Minimal paper fixture: a pmid and a byline-ordered list of WCM author cwids. */
@@ -26,6 +31,23 @@ function distinctPool(n: number) {
 }
 
 const pmidsOf = (papers: { pmid: string }[]) => papers.map((p) => p.pmid);
+
+/** Minimal card fixture: an id and the PMIDs it would display. */
+function card(id: string, pmids: string[]) {
+  return { subtopicId: id, papers: pmids.map((pmid) => ({ pmid })) };
+}
+
+/** A full deterministic Fisher–Yates shuffle driven by an injected rng. */
+function seededShuffle(rng: () => number) {
+  return <T>(arr: readonly T[]): T[] => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+}
 
 describe("hashSeed", () => {
   it("is deterministic", () => {
@@ -237,5 +259,125 @@ describe("sampleSpotlightPapers — soft re-roll", () => {
     expect(out).toHaveLength(3);
     expect(new Set(pmidsOf(out)).size).toBe(3);
     expect(hasKeyAuthorCollision(out)).toBe(true); // cap reached — collision accepted
+  });
+});
+
+describe("cardPaperOverlap", () => {
+  it("is 0 for cards with no shared papers", () => {
+    expect(cardPaperOverlap(card("a", ["1", "2", "3"]), card("b", ["4", "5", "6"]))).toBe(0);
+  });
+
+  it("is 1.0 when two single-paper cards show the same paper", () => {
+    expect(cardPaperOverlap(card("a", ["1"]), card("b", ["1"]))).toBe(1);
+  });
+
+  it("uses min-cardinality so a contained card scores 1.0", () => {
+    // a's single paper is a subset of b's three — fully contained.
+    expect(cardPaperOverlap(card("a", ["2"]), card("b", ["1", "2", "3"]))).toBe(1);
+  });
+
+  it("is 2/3 when two 3-paper cards share two papers", () => {
+    expect(
+      cardPaperOverlap(card("a", ["1", "2", "3"]), card("b", ["2", "3", "9"])),
+    ).toBeCloseTo(2 / 3, 10);
+  });
+
+  it("is 1/3 when two 3-paper cards share one paper", () => {
+    expect(
+      cardPaperOverlap(card("a", ["1", "2", "3"]), card("b", ["3", "8", "9"])),
+    ).toBeCloseTo(1 / 3, 10);
+  });
+
+  it("is 0 when either card has no papers", () => {
+    expect(cardPaperOverlap(card("a", []), card("b", ["1", "2"]))).toBe(0);
+  });
+});
+
+describe("hasNearDuplicateCardPair", () => {
+  it("is false when every card pair is disjoint", () => {
+    expect(
+      hasNearDuplicateCardPair([
+        card("a", ["1", "2", "3"]),
+        card("b", ["4", "5", "6"]),
+        card("c", ["7", "8", "9"]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is true when one pair overlaps at or above the threshold (2 of 3)", () => {
+    expect(
+      hasNearDuplicateCardPair([
+        card("a", ["1", "2", "3"]),
+        card("b", ["7", "8", "9"]),
+        card("c", ["2", "3", "8"]), // shares 2/3 with a
+      ]),
+    ).toBe(true);
+  });
+
+  it("ignores a single shared paper (1 of 3 = 0.33 < 0.40)", () => {
+    expect(
+      hasNearDuplicateCardPair([
+        card("a", ["1", "2", "3"]),
+        card("b", ["3", "8", "9"]), // shares 1/3 with a
+        card("c", ["4", "5", "6"]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("respects a caller-supplied threshold", () => {
+    const cards = [card("a", ["1", "2", "3"]), card("b", ["3", "8", "9"])]; // 1/3 overlap
+    expect(hasNearDuplicateCardPair(cards, 0.3)).toBe(true);
+    expect(hasNearDuplicateCardPair(cards, 0.5)).toBe(false);
+  });
+});
+
+describe("sampleDistinctCards", () => {
+  it("draws exactly `count` distinct cards", () => {
+    const pool = Array.from({ length: 25 }, (_, i) => card(`s${i}`, [`${i}`]));
+    const out = sampleDistinctCards(pool, 8, seededShuffle(mulberry32(hashSeed("k"))));
+    expect(out).toHaveLength(8);
+    expect(new Set(out.map((c) => c.subtopicId)).size).toBe(8);
+  });
+
+  it("returns the whole pool when count exceeds pool size", () => {
+    const pool = [card("a", ["1"]), card("b", ["2"])];
+    const out = sampleDistinctCards(pool, 8, seededShuffle(mulberry32(hashSeed("k"))));
+    expect(out).toHaveLength(2);
+  });
+
+  it("re-draws away from near-duplicate pairs across many page loads", () => {
+    // 25 cards. Two of them (dupA / dupB) are containment-nested near-duplicates
+    // sharing all three displayed papers; the other 23 are disjoint. A no-guard
+    // shuffle-and-slice-8 would surface both dups together with non-trivial
+    // probability; the guard should drive co-occurrence far down.
+    const shared = ["x1", "x2", "x3"];
+    const pool = [
+      card("dupA", shared),
+      card("dupB", shared),
+      ...Array.from({ length: 23 }, (_, i) => card(`s${i}`, [`p${i}`])),
+    ];
+    const DRAWS = 200;
+    let withDupPair = 0;
+    for (let i = 0; i < DRAWS; i++) {
+      const out = sampleDistinctCards(pool, 8, seededShuffle(mulberry32(hashSeed(`load${i}`))));
+      expect(out).toHaveLength(8);
+      const ids = new Set(out.map((c) => c.subtopicId));
+      if (ids.has("dupA") && ids.has("dupB")) withDupPair++;
+    }
+    // Both members of the lone near-dup pair landing in the same 8-of-25 draw
+    // should be rare after the guard's re-rolls — comfortably under 5%. (An
+    // unguarded draw co-occurs them ~9% of the time: C(23,6)/C(25,8) ≈ 0.093.)
+    expect(withDupPair).toBeLessThan(DRAWS * 0.05);
+  });
+
+  it("accepts the final draw when a near-duplicate pair is unavoidable", () => {
+    // Pool of 3 cards that all share the same papers; any draw of 2 collides.
+    // The re-draw cap must terminate and still return `count` distinct cards.
+    const shared = ["x1", "x2", "x3"];
+    const pool = [card("a", shared), card("b", shared), card("c", shared)];
+    const out = sampleDistinctCards(pool, 2, seededShuffle(mulberry32(hashSeed("k"))));
+    expect(out).toHaveLength(2);
+    expect(new Set(out.map((c) => c.subtopicId)).size).toBe(2);
+    expect(hasNearDuplicateCardPair(out)).toBe(true); // cap reached — collision accepted
   });
 });
