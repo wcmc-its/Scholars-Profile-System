@@ -117,6 +117,18 @@ describe("POST /api/edit/coi-gap/[id]/restore", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it("200 — a genuine (non-impersonating) superuser may restore another scholar's candidate (operator decision)", async () => {
+    asGenuine(ADMIN); // { cwid: ADMIN, isSuperuser: true }, no impersonation
+    mockCandidateFindUnique.mockResolvedValue({ id: "gap-1", cwid: OTHER, status: "dismissed" });
+    const res = await POST(post("gap-1"), ctx("gap-1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: "new" });
+    const row = mockAppendAuditRow.mock.calls[0][1];
+    expect(row.action).toBe("coi_gap_restore");
+    expect(row.actorCwid).toBe(ADMIN);
+    expect(row.impersonatedCwid).toBeNull();
+  });
+
   it("404 when the candidate does not exist", async () => {
     mockCandidateFindUnique.mockResolvedValue(null);
     const res = await POST(post("nope"), ctx("nope"));

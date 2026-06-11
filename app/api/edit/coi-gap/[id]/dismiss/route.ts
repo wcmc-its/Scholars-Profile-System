@@ -9,14 +9,15 @@
  * respects a dismissal durably and never re-nags. A B03 audit row records the
  * scholar's own action (self-scoped, like `scholars_audit`), not an accusation.
  *
- * Authorization is GENUINE-self, stricter than the rest of `/api/edit/*`: the
- * candidate's `cwid` must equal the REAL signed-in human, AND no impersonation
- * overlay may be live. A superuser, a curator, and a superuser impersonating the
- * scholar via "View as" (#637) are ALL refused 403 — these candidates are an
- * inference more sensitive than either of their inputs and have no authorized
- * viewer but the scholar themselves. (`authorizeSuppress` would let a superuser
- * act on another's behalf; that is exactly what must NOT happen here, so this
- * route does its own genuine-self check instead.)
+ * Authorization (operator decision, #836 follow-on — "superusers can do anything,
+ * trusted to act responsibly; nag in the UI"): the actor must be EITHER the
+ * genuine self (candidate's `cwid` == the REAL signed-in human, no impersonation)
+ * OR a genuine (non-impersonating) superuser. A superuser impersonating the
+ * scholar via "View as" (#637) is STILL refused — a View-as overlay must never
+ * confer write power on this sensitive surface (the same IS-1 rule the rest of
+ * /api/edit honors). A curator / proxy with no superuser bit is also refused.
+ * The UI shows superusers a confirmation ("nag") before this action; the audit
+ * row records the real admin as the actor.
  *
  * Dormant behind `SELF_EDIT_COI_GAP_HINT` (default off): when off the endpoint
  * 503s after authz, before any write — mirroring the reject route's ordering, so
@@ -39,7 +40,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { realCwid, impersonatedCwid, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, requestId } = req.ctx;
 
   const { id } = await params;
   if (typeof id !== "string" || id.length === 0) {
@@ -54,12 +55,13 @@ export async function POST(
   });
   if (!candidate) return editError(404, "not_found");
 
-  // --- authorization (403): GENUINE self only. The candidate must belong to the
-  //     REAL signed-in human, and no "View as" overlay may be live. A superuser,
-  //     a curator, and an impersonating superuser are all refused — these rows
-  //     have no authorized viewer but the scholar themselves. ---
+  // --- authorization (403): genuine self OR a genuine (non-impersonating)
+  //     superuser. A "View as" overlay never confers it (IS-1), so an
+  //     impersonating superuser and a non-superuser curator/proxy are both
+  //     refused. The UI nags superusers before they get here. ---
   const isGenuineSelf = impersonatedCwid === null && candidate.cwid === realCwid;
-  if (!isGenuineSelf) {
+  const isGenuineSuperuser = impersonatedCwid === null && session.isSuperuser;
+  if (!isGenuineSelf && !isGenuineSuperuser) {
     logEditDenial({
       actorCwid: realCwid,
       targetCwid: candidate.cwid,
@@ -89,7 +91,7 @@ export async function POST(
       });
       await appendAuditRow(tx, {
         actorCwid: realCwid,
-        impersonatedCwid, // always null here (genuine-self gate above)
+        impersonatedCwid, // always null — both allowed paths require no impersonation
         targetEntityType: "coi_gap_candidate",
         targetEntityId: candidate.id,
         action: "coi_gap_dismiss",

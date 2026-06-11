@@ -33,6 +33,11 @@ import type { EditContextPublication } from "@/lib/api/edit-context";
 
 export type PublicationsCardProps = {
   cwid: string;
+  /** `superuser` reframes the first-person copy to the scholar's name — a
+   *  superuser managing another scholar's publications on their behalf. The
+   *  write paths already authorize a superuser (suppress / revoke / reject). */
+  mode?: "self" | "superuser";
+  scholarName?: string;
   publications: ReadonlyArray<EditContextPublication>;
   /**
    * Whether the in-app "Not mine" reject is enabled (`RECITER_REJECT_SEND`,
@@ -89,9 +94,16 @@ function applyOptimistic(state: Pub[], update: OptimisticUpdate): Pub[] {
 
 export function PublicationsCard({
   cwid,
+  mode = "self",
+  scholarName = "",
   publications,
   rejectEnabled = false,
 }: PublicationsCardProps) {
+  // Copy reframes for a superuser acting on the scholar's behalf (mirrors the
+  // Mentees / Highlights cards): "yourself" → "{Name}", "your profile" →
+  // "{Name}'s profile". `possessive` is mid-sentence.
+  const su = mode === "superuser";
+  const possessive = su ? `${scholarName}’s` : "your";
   const [list, setList] = React.useState<Pub[]>([...publications]);
   const [, startTransition] = React.useTransition();
   const [optimistic, addOptimistic] = React.useOptimistic(list, applyOptimistic);
@@ -260,12 +272,12 @@ export function PublicationsCard({
     <EditPanel
       slot="publications-card"
       attribute="publications"
-      heading="My publications"
+      heading={su ? "Publications" : "My publications"}
       description={
         <>
-          Hide a publication to remove yourself from it on this site. Hiding affects this profile
-          only. A paper that isn&apos;t yours keeps appearing on internal reports and the Faculty
-          Review Tool until it&apos;s corrected in{" "}
+          Hide a publication to remove {su ? scholarName : "yourself"} from it on this site. Hiding
+          affects this profile only. A paper that isn&apos;t {possessive} keeps appearing on
+          internal reports and the Faculty Review Tool until it&apos;s corrected in{" "}
           <a href={PUBLICATION_MANAGER_URL} target="_blank" rel="noreferrer" className="underline">
             Publication Manager
           </a>
@@ -300,7 +312,7 @@ export function PublicationsCard({
 
         {totalCount === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No publications are currently associated with your profile.
+            No publications are currently associated with {possessive} profile.
           </p>
         ) : filtered.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -322,6 +334,8 @@ export function PublicationsCard({
                       <PublicationRow
                         key={p.pmid}
                         cwid={cwid}
+                        su={su}
+                        scholarName={scholarName}
                         pub={p}
                         error={errors.get(p.pmid) ?? null}
                         onHide={() => startHide(p)}
@@ -368,7 +382,11 @@ export function PublicationsCard({
           if (!open) setConfirmPmid(null);
         }}
         title="Hide this publication?"
-        description="You are the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until you restore it, or another WCM author is added."
+        description={
+          su
+            ? `${scholarName} is the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until it is restored, or another WCM author is added.`
+            : "You are the only Weill Cornell author shown on this publication. Hiding it removes the publication from the site entirely until you restore it, or another WCM author is added."
+        }
         reasonMode="none"
         confirmLabel="Hide it anyway"
         confirmVariant="destructive"
@@ -384,6 +402,8 @@ export function PublicationsCard({
         onOpenChange={(open) => {
           if (!open) setRejectPmid(null);
         }}
+        mode={mode}
+        scholarName={scholarName}
         pubTitle={rejectingPub?.title ?? ""}
         onReject={async () => {
           if (!rejectingPub) return;
@@ -406,6 +426,8 @@ export function PublicationsCard({
 
 function PublicationRow({
   cwid,
+  su,
+  scholarName,
   pub,
   error,
   onHide,
@@ -414,6 +436,9 @@ function PublicationRow({
   onNotMine,
 }: {
   cwid: string;
+  /** Superuser acting on the scholar's behalf — reframes the rejected-row note. */
+  su: boolean;
+  scholarName: string;
   pub: Pub;
   error: string | null;
   onHide: () => void;
@@ -508,8 +533,17 @@ function PublicationRow({
               data-testid={`pub-rejected-note-${pub.pmid}`}
             >
               <span className="text-muted-foreground max-w-xs text-right text-sm">
-                You reported this paper as not yours. We&apos;re correcting it at
-                the source; this can&apos;t be undone here.
+                {su ? (
+                  <>
+                    This paper was reported as not {scholarName}&apos;s. We&apos;re correcting it at
+                    the source; this can&apos;t be undone here.
+                  </>
+                ) : (
+                  <>
+                    You reported this paper as not yours. We&apos;re correcting it at the source;
+                    this can&apos;t be undone here.
+                  </>
+                )}
               </span>
             </div>
           )}

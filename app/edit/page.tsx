@@ -62,9 +62,12 @@ export default async function EditSelfPage({
   // `includeCoiGap` is true, so a false here means they are never even read.
   const genuineSelf = editCwid === session.cwid;
   const includeCoiGap = isCoiGapHintEnabled() && genuineSelf;
-  // #836 — the manual-Highlights editor is self-only (a scholar curates their
-  // OWN highlights; broad admin highlight-editing is deferred), so it loads only
-  // for a genuine self viewer with the flag on — never under a "View as" overlay.
+  // #836 — on THIS (self) surface the manual-Highlights editor loads only for a
+  // genuine self viewer with the flag on — never under a "View as" overlay. A
+  // superuser curating another scholar's Highlights does so on the superuser
+  // surface (`/edit/scholar/[cwid]`), which loads it for self OR superuser; this
+  // `/edit` route is only ever the scholar themselves (or an impersonation we
+  // deliberately exclude here).
   const includeHighlights = isManualHighlightsEnabled() && genuineSelf;
   const ctx = await loadEditContext(editCwid, db.read, new Date(), undefined, {
     includeCoiGap,

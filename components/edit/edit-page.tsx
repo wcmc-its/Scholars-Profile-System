@@ -72,11 +72,18 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
   // Highlights (#836, SELF_EDIT_MANUAL_HIGHLIGHTS) — the opt-in manual override
-  // of the AI-chosen featured publications. Self-only; the rail item appears only
-  // when the loader populated `ctx.highlights` (flag on + genuine self).
-  { key: "highlights", label: "Highlights", modes: ["self"] },
+  // of the AI-chosen featured publications. Editable by the scholar OR a
+  // superuser (a superuser is unrestricted on the edit surface); the rail item
+  // appears only when the loader populated `ctx.highlights` (flag on + self or
+  // superuser). Not surfaced to a proxy / unit-admin editor.
+  { key: "highlights", label: "Highlights", modes: ["self", "superuser"] },
   { key: "visibility", label: "Visibility", modes: ["self", "superuser"] },
-  { key: "publications", label: "Publications", modes: ["self"] },
+  // Publications — the scholar's confirmed authorships with hide/show + the
+  // "Not mine" reject. Editable by the scholar, a proxy / unit-admin (via the
+  // self surface), OR a superuser on their behalf (a superuser is unrestricted on
+  // the edit surface); writes carry the scholar's cwid and the suppress / revoke /
+  // reject routes re-authorize the actor.
+  { key: "publications", label: "Publications", modes: ["self", "superuser"] },
   { key: "funding", label: "Funding", modes: ["self", "superuser"] },
   { key: "appointments", label: "Appointments", modes: ["self", "superuser"] },
   { key: "education", label: "Education", modes: ["self", "superuser"] },
@@ -84,12 +91,13 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   { key: "mentees", label: "Mentees", modes: ["self", "superuser"] },
   // Conflicts of interest — read-only; managed in the Weill Research Gateway.
   { key: "coi", label: "Conflicts of Interest", readonly: true, modes: ["self", "superuser"] },
-  // From your publications (#SELF_EDIT_COI_GAP_HINT) — self-only, read-only.
-  // A suggestion surface: relationships named in the scholar's own PubMed
-  // competing-interest statements, shown only to them, never a compliance
-  // verdict. The rail item appears only when there are candidates AND the flag
-  // is on (the loader returns an empty array otherwise).
-  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self"] },
+  // From your publications (#SELF_EDIT_COI_GAP_HINT) — a sensitive advisory:
+  // relationships named in the scholar's own PubMed competing-interest statements,
+  // never a compliance verdict. Originally self-only; now also visible to a
+  // superuser (operator decision — trusted, with a UI nag before any action), but
+  // NOT to a proxy / unit-admin (excluded in `attrsForMode`). The rail item
+  // appears only when there are candidates AND the flag is on.
+  { key: "coi-gap", label: "From your publications", readonly: true, modes: ["self", "superuser"] },
   // Superuser direct-set is always available; the self surface is the request
   // card when `slugRequestEnabled`, else a read-only panel (locked rail item).
   { key: "profile-url", label: "Profile URL", modes: ["self", "superuser"] },
@@ -188,8 +196,9 @@ const SELF_RAIL_GROUP = {
  * Superuser rail order — kept flat (no "Yours to edit" / "From WCM systems"
  * grouping: superuser editability differs from self, so those labels would
  * mislead). Home leads as the completeness landing; Profile URL sits at the top
- * of the attributes per operator request. Publications and the COI-gap surface
- * are self-only, so they are absent here.
+ * of the attributes per operator request. Publications is present (a superuser
+ * manages pubs on the scholar's behalf); the COI-gap advisory remains self-only
+ * (a deliberate privacy carve-out — see the dismiss route), so it is absent here.
  */
 const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "home",
@@ -197,13 +206,22 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "name-title",
   "photo",
   "overview",
+  // Highlights follows Overview (mirrors the self rail); appears only when the
+  // loader populated `ctx.highlights` (#836, flag on).
+  "highlights",
   "visibility",
   "proxy-editors",
   "funding",
   "appointments",
   "education",
+  // Publications — now a superuser surface too (#836 follow-on); the scholar's
+  // authorships with hide/show + reject, acted on the scholar's behalf.
+  "publications",
   "mentees",
   "coi",
+  // COI-gap advisory — superuser-visible too (operator decision), with a UI nag.
+  // Present only when there are candidates AND the flag is on.
+  "coi-gap",
 ];
 
 export type EditPageProps = {
@@ -280,16 +298,19 @@ export function EditPage({
   unitAdminEditors = null,
   unitAdminBanner = null,
 }: EditPageProps) {
-  // "From your publications" is conditionally present: only in self mode and
-  // only when the loader returned candidates (the loader itself enforces the
-  // self-only + flag gate, so a non-empty array here already implies both). Drop
-  // it from the visible set otherwise so it appears in neither the rail nor the
-  // valid-attr set — an empty panel is never surfaced.
-  const hasCoiGap = mode === "self" && ctx.unmatchedPubmedCoi.length > 0;
+  // "From your publications" is conditionally present: self OR superuser, and only
+  // when the loader returned candidates (the loader per surface enforces who may
+  // load them + the flag, so a non-empty array here already implies an allowed
+  // actor). Drop it from the visible set otherwise so it appears in neither the
+  // rail nor the valid-attr set — an empty panel is never surfaced.
+  const hasCoiGap =
+    (mode === "self" || mode === "superuser") && ctx.unmatchedPubmedCoi.length > 0;
   // #836 — Highlights is present only when the loader populated `ctx.highlights`
-  // (flag on + genuine self). The loader already enforces the self-only + flag
-  // gate, so a non-null value here implies both.
-  const hasHighlights = mode === "self" && ctx.highlights !== null;
+  // (flag on + self or superuser). The loader (per surface) enforces who may load
+  // it — self on `/edit`, self or superuser on `/edit/scholar/[cwid]`, never a
+  // proxy / unit-admin — so a non-null value here already implies an allowed actor.
+  const hasHighlights =
+    (mode === "self" || mode === "superuser") && ctx.highlights !== null;
   const visible = attrsForMode(mode)
     .filter((a) => a.key !== "coi-gap" || hasCoiGap)
     .filter((a) => a.key !== "highlights" || hasHighlights);
@@ -329,7 +350,12 @@ export function EditPage({
         })
       : SUPERUSER_RAIL_ORDER.flatMap((k) => {
           const a = visible.find((v) => v.key === k);
-          return a ? [{ key: a.key, label: a.label, readonly: a.readonly }] : [];
+          if (!a) return [];
+          // The COI-gap label is first-person ("From your publications"); reframe
+          // it for a superuser viewing another scholar's advisory.
+          const label =
+            a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
+          return [{ key: a.key, label, readonly: a.readonly }];
         });
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
@@ -463,11 +489,18 @@ function renderPanel(
         />
       );
     case "highlights":
-      // Self-only by construction — the loader only populates `ctx.highlights`
-      // for a genuine self viewer behind the flag, and the rail item is dropped
-      // when it is null. No `mode` prop: there is no superuser variant.
+      // Editable by the scholar (self) or a superuser on their behalf — the
+      // loader only populates `ctx.highlights` for an allowed actor (and the rail
+      // item is dropped when it is null), and the write route re-authorizes self
+      // OR superuser. `childMode` reframes the card's copy from first-person to
+      // the scholar's name for a superuser.
       return ctx.highlights ? (
-        <HighlightsCard cwid={cwid} highlights={ctx.highlights} />
+        <HighlightsCard
+          cwid={cwid}
+          mode={childMode}
+          scholarName={scholarName}
+          highlights={ctx.highlights}
+        />
       ) : null;
     case "visibility":
       return (
@@ -482,6 +515,8 @@ function renderPanel(
       return (
         <PublicationsCard
           cwid={cwid}
+          mode={childMode}
+          scholarName={scholarName}
           publications={ctx.publications}
           rejectEnabled={isReciterRejectEnabled()}
         />
@@ -520,11 +555,19 @@ function renderPanel(
         />
       );
     case "coi-gap":
-      // Self-only by construction — the loader only populates
-      // `unmatchedPubmedCoi` for a genuine self viewer behind the flag, and the
-      // rail item is dropped when the array is empty. No `mode` prop: there is
-      // no superuser variant of this surface.
-      return <CoiGapCard cwid={cwid} candidates={ctx.unmatchedPubmedCoi} />;
+      // Self or superuser — the loader populates `unmatchedPubmedCoi` only for an
+      // allowed actor behind the flag, and the rail item is dropped when the array
+      // is empty. `childMode` reframes the advisory copy + the privacy chip and
+      // turns on the per-action "nag" confirm for a superuser; the dismiss /
+      // restore routes re-authorize genuine-self-or-superuser.
+      return (
+        <CoiGapCard
+          cwid={cwid}
+          mode={childMode}
+          scholarName={scholarName}
+          candidates={ctx.unmatchedPubmedCoi}
+        />
+      );
     case "profile-url":
       // Superuser sets a slug directly; a scholar requests one for approval —
       // but only when the request flag is on. With it off, the scholar still

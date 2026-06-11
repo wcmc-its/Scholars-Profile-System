@@ -140,6 +140,19 @@ describe("POST /api/edit/coi-gap/[id]/dismiss", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
+  it("200 — a genuine (non-impersonating) superuser may dismiss another scholar's candidate (operator decision)", async () => {
+    asGenuine(ADMIN); // { cwid: ADMIN, isSuperuser: true }, no impersonation
+    mockCandidateFindUnique.mockResolvedValue({ id: "gap-1", cwid: OTHER, status: "new" });
+    const res = await POST(post("gap-1"), ctx("gap-1"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, status: "dismissed" });
+    // The audit records the real admin as the actor; no impersonation overlay.
+    const row = mockAppendAuditRow.mock.calls[0][1];
+    expect(row.action).toBe("coi_gap_dismiss");
+    expect(row.actorCwid).toBe(ADMIN);
+    expect(row.impersonatedCwid).toBeNull();
+  });
+
   it("503 coi_gap_disabled when the flag is off (after authz, before any write)", async () => {
     mockIsCoiGapEnabled.mockReturnValue(false);
     const res = await POST(post("gap-1"), ctx("gap-1"));

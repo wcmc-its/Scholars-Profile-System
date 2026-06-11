@@ -6,6 +6,9 @@ import {
   authorizeSuppress,
   canAccessPublicationEditPage,
   canAccessScholarEditPage,
+  canEditUnit,
+  canGrant,
+  canManageAccess,
   requireSuperuserGet,
   verifyRequestOrigin,
   type AuthzDenialReason,
@@ -46,25 +49,29 @@ describe("authorizeFieldEdit — overview is self OR superuser (#844)", () => {
   });
 });
 
-describe("authorizeFieldEdit — selectedHighlightPmids stays self-only (#844 scope)", () => {
+describe("authorizeFieldEdit — selectedHighlightPmids is self OR superuser (#836)", () => {
   it("allows a scholar editing their own highlights", () => {
     expect(
       authorizeFieldEdit(SELF, { entityId: "self01", fieldName: "selectedHighlightPmids" }),
     ).toEqual({ ok: true });
   });
 
-  it("denies a scholar editing another scholar's highlights", () => {
+  it("denies a non-superuser editing another scholar's highlights", () => {
     expect(
       authorizeFieldEdit(SELF, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
     ).toEqual({ ok: false, reason: "not_self" });
   });
 
-  it("does NOT extend the #844 superuser widening to highlights (overview-only)", () => {
-    // The #844 admin widening is scoped strictly to `overview`; a superuser does
-    // not inherit `selectedHighlightPmids` for another scholar.
+  it("allows a superuser editing another scholar's highlights (unrestricted on the edit surface)", () => {
     expect(
       authorizeFieldEdit(ADMIN, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
-    ).toEqual({ ok: false, reason: "not_self" });
+    ).toEqual({ ok: true });
+  });
+
+  it("allows a superuser editing their own highlights", () => {
+    expect(
+      authorizeFieldEdit(ADMIN, { entityId: "adm001", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: true });
   });
 });
 
@@ -349,5 +356,73 @@ describe("AuthzDenialReason — ed_locked is a stable member", () => {
     // assignment would fail typecheck, breaking the grant route's gate.
     const reason: AuthzDenialReason = "ed_locked";
     expect(reason).toBe("ed_locked");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INVARIANT — a superuser is unrestricted across every action-authorization
+// predicate on the edit surface.
+//
+// This is the operator rule "a superuser can do anything." It is encoded as one
+// guard test so a future self-only addition (exactly the regression #836's
+// `selectedHighlightPmids` was — a field that denied a superuser with `not_self`)
+// fails CI here instead of silently locking admins out. Every NEW action-level
+// predicate added to `lib/edit/authz.ts` must be exercised below with a superuser
+// session and asserted to allow. (Pure `verifyRequestOrigin` — a CSRF/content-
+// type guard, not an actor-authorization predicate — is deliberately out of
+// scope: it gates request shape, not who the actor is.)
+//
+// DOCUMENTED EXCEPTION (route-level, not an authz.ts predicate): the COI-gap
+// dismiss/restore routes (`/api/edit/coi-gap/[id]/*`) enforce GENUINE-self and
+// REFUSE a superuser by design — those candidates are a sensitive LLM inference
+// about a scholar's possible undisclosed conflicts, with no authorized viewer but
+// the scholar (and a "Visible only to you" promise on the surface). That guard
+// lives in the route, not here, so it is outside this invariant on purpose.
+// ---------------------------------------------------------------------------
+
+describe("INVARIANT: a superuser is allowed by every edit authorization predicate", () => {
+  // ADMIN is a superuser whose cwid ("adm001") never matches the target entity,
+  // so any allow here comes from the `isSuperuser` arm — not an incidental self
+  // match — which is exactly the property the invariant asserts.
+  const TARGET = "someoneElse";
+
+  it("authorizeFieldEdit — allows a superuser for every editable field on another scholar", () => {
+    for (const fieldName of ["overview", "slug", "selectedHighlightPmids"] as const) {
+      expect(authorizeFieldEdit(ADMIN, { entityId: TARGET, fieldName })).toEqual({ ok: true });
+    }
+  });
+
+  it("authorizeSuppress — allows a superuser for every suppressible entity type", () => {
+    const types = ["scholar", "publication", "grant", "education", "appointment", "mentee"] as const;
+    for (const entityType of types) {
+      expect(authorizeSuppress(ADMIN, { entityType, entityId: TARGET })).toEqual({ ok: true });
+    }
+    // …including a whole-publication takedown (contributorCwid null) and a
+    // per-author hide of a contributor who is NOT the actor.
+    expect(
+      authorizeSuppress(ADMIN, { entityType: "publication", entityId: "9", contributorCwid: null }),
+    ).toEqual({ ok: true });
+    expect(
+      authorizeSuppress(ADMIN, { entityType: "publication", entityId: "9", contributorCwid: TARGET }),
+    ).toEqual({ ok: true });
+  });
+
+  it("authorizeRevoke — allows a superuser to lift a suppression they did not create", () => {
+    expect(authorizeRevoke(ADMIN, { createdBy: TARGET })).toEqual({ ok: true });
+  });
+
+  it("unit-curation predicates — allow a superuser even with no UnitAdmin role (effectiveRole 'none')", () => {
+    expect(canEditUnit(ADMIN, "none")).toEqual({ ok: true });
+    expect(canManageAccess(ADMIN, "none")).toEqual({ ok: true });
+    expect(canGrant(ADMIN, "none", "owner")).toEqual({ ok: true });
+    expect(canGrant(ADMIN, "none", "curator")).toEqual({ ok: true });
+  });
+
+  it("page-access predicates — a superuser reaches any scholar / publication edit page", () => {
+    expect(canAccessScholarEditPage(ADMIN, TARGET)).toBe(true);
+    expect(canAccessPublicationEditPage(ADMIN)).toBe(true);
+    expect(
+      requireSuperuserGet({ session: ADMIN, path: "/edit/scholar/someoneElse", targetId: TARGET }),
+    ).toBeNull();
   });
 });

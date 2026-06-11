@@ -22,8 +22,11 @@
  *   POST /api/edit/field        { fieldName: "selectedHighlightPmids", value: [] }
  *   POST /api/edit/clear-field  { fieldName: "selectedHighlightPmids" }
  *
- * Self-only: the loader populates `ctx.highlights` only for a genuine self viewer
- * behind the flag, so this card never renders for a superuser/proxy/unit-admin.
+ * Editable by the scholar (self) OR a superuser on their behalf — the loader
+ * populates `ctx.highlights` only for an allowed actor behind the flag (self on
+ * `/edit`; self or superuser on `/edit/scholar/[cwid]`; never a proxy / unit
+ * admin), and the write route re-authorizes self OR superuser. A superuser sees
+ * the same controls with the copy reframed to the scholar's name (`mode`).
  */
 "use client";
 
@@ -38,14 +41,25 @@ import { MAX_SELECTED_HIGHLIGHTS as MAX } from "@/lib/edit/validators";
 
 export type HighlightsCardProps = {
   cwid: string;
+  /** `superuser` reframes the first-person copy to the scholar's name — a
+   *  superuser curating another scholar's Highlights on their behalf. */
+  mode: "self" | "superuser";
+  scholarName: string;
   highlights: EditContextHighlights;
 };
 
 const GENERIC_ERROR =
-  "Something went wrong — your highlights weren't saved. Please try again.";
+  "Something went wrong — the highlights weren't saved. Please try again.";
 
-export function HighlightsCard({ cwid, highlights }: HighlightsCardProps) {
+export function HighlightsCard({ cwid, mode, scholarName, highlights }: HighlightsCardProps) {
   const router = useRouter();
+  // Copy reframes for a superuser editing on the scholar's behalf (mirrors the
+  // sibling Mentees / Funding cards): "your" → "{Name}'s", "yourself" → "on
+  // their behalf". `Possessive` is sentence-initial (capitalized); `possessive`
+  // is mid-sentence.
+  const su = mode === "superuser";
+  const possessive = su ? `${scholarName}’s` : "your";
+  const Possessive = su ? `${scholarName}’s` : "Your";
   // The scholar opted in iff a manual override exists. The picker is editable
   // whenever opted in; the opt-in toggle reveals it (seeded with the AI set).
   const [optedIn, setOptedIn] = React.useState(highlights.manualEnabled);
@@ -157,10 +171,11 @@ export function HighlightsCard({ cwid, highlights }: HighlightsCardProps) {
       owned
       description={
         <>
-          Highlights are the publications featured at the top of your profile. By default
-          they&rsquo;re chosen for you by ReCiterAI from your first- and senior-author work,
-          weighted by impact and recency. You can instead choose up to {MAX} yourself &mdash; a
-          manual set stays fixed and won&rsquo;t change when the automatic ranking updates.
+          Highlights are the publications featured at the top of {possessive} profile. By default
+          they&rsquo;re chosen{su ? "" : " for you"} by ReCiterAI from {su ? "their" : "your"}{" "}
+          first- and senior-author work, weighted by impact and recency. You can instead choose up
+          to {MAX} {su ? "on their behalf" : "yourself"} &mdash; a manual set stays fixed and
+          won&rsquo;t change when the automatic ranking updates.
         </>
       }
     >
@@ -173,15 +188,25 @@ export function HighlightsCard({ cwid, highlights }: HighlightsCardProps) {
       {!hasPickable ? (
         <Alert variant="info">
           <AlertDescription>
-            You don&rsquo;t have any displayed publications yet, so there&rsquo;s nothing to
-            highlight. Once your publications appear on your profile you can choose your own
-            highlights here.
+            {su ? (
+              <>
+                {scholarName} doesn&rsquo;t have any displayed publications yet, so there&rsquo;s
+                nothing to highlight. Once their publications appear on the profile you can choose
+                highlights here.
+              </>
+            ) : (
+              <>
+                You don&rsquo;t have any displayed publications yet, so there&rsquo;s nothing to
+                highlight. Once your publications appear on your profile you can choose your own
+                highlights here.
+              </>
+            )}
           </AlertDescription>
         </Alert>
       ) : !optedIn ? (
         <div className="flex flex-col gap-3">
           <p className="text-muted-foreground text-sm">
-            Your highlights are currently selected automatically.
+            {Possessive} highlights are currently selected automatically.
           </p>
           <Button
             type="button"
@@ -191,7 +216,7 @@ export function HighlightsCard({ cwid, highlights }: HighlightsCardProps) {
             onClick={startManual}
             disabled={busy}
           >
-            Choose my highlights manually
+            {su ? "Choose highlights manually" : "Choose my highlights manually"}
           </Button>
         </div>
       ) : (
