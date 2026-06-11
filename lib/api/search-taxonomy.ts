@@ -66,8 +66,9 @@ const MATCH_HARD_CAP = 1 + SECONDARY_CAP + 20;
 /**
  * Entity types the taxonomy-match callout can surface. `parentTopic` / `subtopic`
  * are the curated Topic taxonomy (chip row, #709); `methodFamily` / `supercategory`
- * are the cross-scholar Method taxonomy (#824 PR-2 — rendered as a method-tinted
- * callout card, NOT a chip, and gated behind `isMethodPagesEnabled()`).
+ * are the cross-scholar Method taxonomy (#824 PR-2 / #860 — rendered as a labeled
+ * "Methods and Tools" chip row mirroring the Topic "Research Areas" row, and gated
+ * behind `isMethodPagesEnabled()`).
  */
 export type TaxonomyEntityType =
   | "parentTopic"
