@@ -24,6 +24,7 @@
  */
 import { db } from "@/lib/db";
 import {
+  OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
   type OverviewSelection,
@@ -164,17 +165,19 @@ function isLeadRole(role: string): boolean {
   return /^(pi\b|pi-subaward|co-pi)/i.test(role.trim());
 }
 
+
 /**
  * The default pre-check rule (shared by the assembler's empty-selection path and
  * the Sources drawer so the UI and the server agree). Lead-role active funding
  * is small + high-value, so it's kept first; first/last-author scored
  * publications (impact desc) fill the rest of the combined budget. Tools take
- * the top of their own separate budget. Pure.
+ * the top of their own separate budget, gated by the #765 §2 pmid_count floor.
+ * Pure.
  */
 function pickDefaultSelection(
   pubs: { pmid: string; isFirstOrLast: boolean }[],
   funding: { id: string; isLead: boolean }[],
-  tools: { toolName: string }[] = [],
+  tools: { toolName: string; pmidCount: number }[] = [],
   maxItems = REPRESENTATIVE_LIMIT,
   maxTools = OVERVIEW_SELECTION_MAX_TOOLS,
 ): { pmids: string[]; grantIds: string[]; toolNames: string[] } {
@@ -187,8 +190,12 @@ function pickDefaultSelection(
     .filter((p) => p.isFirstOrLast)
     .map((p) => p.pmid)
     .slice(0, remaining);
-  // Tools arrive pre-sorted (pmidCount desc); take the top of their own budget.
-  const toolNames = tools.map((t) => t.toolName).slice(0, maxTools);
+  // Tools arrive pre-sorted (pmidCount desc); take the top of their own budget,
+  // but only families above the #765 §2 honesty floor (≥ 2 publications).
+  const toolNames = tools
+    .filter((t) => t.pmidCount >= OVERVIEW_METHOD_PMID_FLOOR)
+    .map((t) => t.toolName)
+    .slice(0, maxTools);
   return { pmids, grantIds, toolNames };
 }
 

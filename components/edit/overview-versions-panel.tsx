@@ -125,3 +125,16 @@ export function summarizeParams(params: OverviewParams): string {
     .filter((label): label is string => Boolean(label));
   return labels.length > 0 ? `${head} · ${labels.join(", ")}` : head;
 }
+
+/**
+ * A compact summary for the collapsed Draft-with-AI bar (#875 §3): voice (full
+ * phrase) · tone · length · the COUNT of emphasized themes — not the labels,
+ * which overflow a single-line bar. E.g. "Third person · Formal · Standard ·
+ * 3 emphases". The element segment is omitted when nothing is emphasized.
+ */
+export function summarizeParamsCompact(params: OverviewParams): string {
+  const voice = params.voice === "third" ? "Third person" : "First person";
+  const head = [voice, capitalize(params.tone), capitalize(params.length)].join(" · ");
+  const n = params.elements.length;
+  return n > 0 ? `${head} · ${n} ${n === 1 ? "emphasis" : "emphases"}` : head;
+}

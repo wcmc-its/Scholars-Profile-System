@@ -77,15 +77,31 @@ describe("OverviewGenerateControls — onChange", () => {
   });
 
   it("checking an unchecked element adds it (in display order)", () => {
-    // `methods` is not in the defaults; checking it appends, order preserved.
+    // `clinical_applications` is NOT in the defaults; checking it appends in
+    // canonical order (it sorts between `methods` and `recent_work`).
     const { value, onChange } = renderControls();
-    fireEvent.click(screen.getByTestId("overview-element-methods"));
+    fireEvent.click(screen.getByTestId("overview-element-clinical_applications"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
-    expect(next.elements).toContain("methods");
-    // Canonical display order: research_focus, key_findings, methods, …, recent_work.
-    expect(next.elements).toEqual(["research_focus", "key_findings", "methods", "recent_work"]);
+    expect(next.elements).toContain("clinical_applications");
+    // Canonical display order: research_focus, key_findings,
+    // clinical_applications, recent_work.
+    expect(next.elements).toEqual([
+      "research_focus",
+      "key_findings",
+      "clinical_applications",
+      "recent_work",
+    ]);
     // Other params untouched.
     expect(next.voice).toBe(value.voice);
+  });
+
+  it("Methods is NOT checked by default (source dark until the scholar_family wiring)", () => {
+    // #875 — Methods stays opt-in: the generator's method source (`scholar_tool`)
+    // is dark, so defaulting it on would invite emphasis it can't ground.
+    renderControls();
+    expect(screen.getByTestId("overview-element-methods").getAttribute("aria-checked")).toBe(
+      "false",
+    );
   });
 
   it("unchecking a checked element removes it", () => {
