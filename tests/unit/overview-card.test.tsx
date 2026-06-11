@@ -752,8 +752,10 @@ describe("OverviewCard — Draft-with-AI block", () => {
       "false",
     );
     expect(screen.queryByTestId("overview-draft-block-body")).toBeNull();
-    // The collapsed summary mirrors summarizeParams of the default params.
-    expect(screen.getByTestId("overview-draft-block-summary").textContent).toContain("Third");
+    // The collapsed summary is the compact form: voice/tone/length + emphasis COUNT.
+    const summary = screen.getByTestId("overview-draft-block-summary").textContent ?? "";
+    expect(summary).toContain("Third person");
+    expect(summary).toContain("emphases");
   });
 
   it("toggling expands/collapses the block", () => {

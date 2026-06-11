@@ -44,7 +44,11 @@ import { OverviewEditor } from "@/components/edit/overview-editor";
 import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
 import { OverviewProvenanceNote } from "@/components/edit/overview-provenance-note";
 import { OverviewSourceDrawer } from "@/components/edit/overview-source-drawer";
-import { summarizeParams, type OverviewGenerationItem } from "@/components/edit/overview-versions-panel";
+import {
+  summarizeParams,
+  summarizeParamsCompact,
+  type OverviewGenerationItem,
+} from "@/components/edit/overview-versions-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -705,16 +709,19 @@ function OverviewDraftBlock({
       >
         <span className="flex min-w-0 items-center gap-2">
           <Sparkles className="text-apollo-maroon size-[18px] shrink-0" aria-hidden="true" />
-          <span className="text-sm font-medium">Draft with AI</span>
+          <span className="shrink-0 text-sm font-medium whitespace-nowrap">Draft with AI</span>
           <span
-            className="bg-apollo-maroon/10 text-apollo-maroon rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+            className="bg-apollo-maroon/10 text-apollo-maroon shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
             data-testid="overview-generator-beta"
           >
             Beta
           </span>
           {!open && (
-            <span className="text-muted-foreground truncate text-xs" data-testid="overview-draft-block-summary">
-              {summarizeParams(params)}
+            <span
+              className="text-muted-foreground min-w-0 truncate text-xs"
+              data-testid="overview-draft-block-summary"
+            >
+              {summarizeParamsCompact(params)}
             </span>
           )}
         </span>
