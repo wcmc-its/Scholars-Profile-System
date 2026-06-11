@@ -72,10 +72,9 @@ export default async function FamilyPage({
       SPOTLIGHT_CARDS,
     ).catch(() => []),
     // #879 — curated MeSH definition (null unless METHODS_LENS_MESH_DEFINITIONS
-    // is on AND a curated anchor exists). Consumed by the JSON-LD description
-    // below; the visible on-page definition block is deferred to PR-2 (UI
-    // placement needs design sign-off). `.catch` so a definition failure never
-    // 500s the page.
+    // is on AND a curated anchor exists). Consumed by both the JSON-LD
+    // description below and the visible scope-note block rendered in the header
+    // section. `.catch` so a definition failure never 500s the page.
     getFamilyMeshDefinition(resolved.supercategory, resolved.familyLabel).catch(() => null),
   ]);
 
@@ -107,8 +106,9 @@ export default async function FamilyPage({
     id: resolved.familyId,
     label: resolved.familyLabel,
     // #879 — fill the DefinedTerm description from the curated MeSH scope note
-    // when present (NLM-authored; attribution renders with the PR-2 UI). Null
-    // (flag off / no curated anchor) keeps the JSON-LD byte-identical to today.
+    // when present (NLM-authored; attribution renders in the visible header
+    // block). Null (flag off / no curated anchor) keeps the JSON-LD
+    // byte-identical to today.
     description: meshDefinition?.scopeNote ?? null,
   });
 
@@ -147,6 +147,20 @@ export default async function FamilyPage({
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {resolved.familyLabel}
         </h1>
+
+        {/* #879 — curated NLM MeSH scope note + attribution. Renders only when
+            METHODS_LENS_MESH_DEFINITIONS is on AND a curated anchor resolves
+            (the loader returns null otherwise), so no extra gating is needed. */}
+        {meshDefinition && (
+          <div className="mt-3 max-w-[70ch]">
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {meshDefinition.scopeNote}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground/70">
+              — NLM MeSH: “{meshDefinition.name}”
+            </p>
+          </div>
+        )}
 
         {/* TopScholarsChipRow's built-in "+ N more" link is hardcoded to
             `/topics/{slug}/scholars`; on a method page the enumerative list
