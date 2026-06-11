@@ -129,3 +129,53 @@ describe("summarize", () => {
     for (const v of Object.values(s.surfacedBreakdown)) expect(v).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("diagnoseScholar — extraction-junk sizing (junk suppressed; co-author sized)", () => {
+  const junkInput = (): DiagnoseInput => ({
+    cwid: "smith1",
+    scholar: deriveScholar("John", "Smith"),
+    disclosed: [],
+    statements: [
+      // A bare two-word co-author name + a junk word leak alongside a real org,
+      // all inside one personal-cue clause so all three are captured.
+      {
+        pmid: "j",
+        statementText: "Dr. Smith consults for Acme Robotics, Wei Zhang, and lists Various.",
+      },
+    ],
+  });
+
+  it("SURFACES a bare two-word co-author name but flags it for sizing (not suppressed)", () => {
+    const rows = diagnoseScholar(junkInput());
+    const zhang = rows.find((r) => r.entity === "Wei Zhang");
+    expect(zhang).toBeDefined();
+    expect(zhang!.surfaced).toBe(true); // precision over recall — not dropped
+    expect(zhang!.entityIsPersonName).toBe(true); // …but sized
+  });
+
+  it("keeps the suppressed junk word as a Low row tagged junk-token", () => {
+    const rows = diagnoseScholar(junkInput());
+    const various = rows.find((r) => /various/i.test(r.entity));
+    expect(various).toBeDefined();
+    expect(various!.surfaced).toBe(false);
+    expect(various!.entityIsJunk).toBe(true);
+    expect(various!.failureModeGuess).toBe("junk-token");
+  });
+
+  it("still surfaces the real undisclosed org", () => {
+    const rows = diagnoseScholar(junkInput());
+    const acme = rows.find((r) => /acme/i.test(r.entity));
+    expect(acme).toBeDefined();
+    expect(acme!.surfaced).toBe(true);
+  });
+
+  it("summarize sizes the junk-word bucket and the surfaced co-author leakage", () => {
+    const s = summarize(diagnoseScholar(junkInput()));
+    expect(s.suppressedByReason["junk-word"]).toBeGreaterThanOrEqual(1);
+    // The fixed false-negative: bare First-Last co-author names are now counted
+    // (previously personNameSurfaced read 0 because the detector missed them).
+    expect(s.surfacedBreakdown.personNameSurfaced).toBeGreaterThanOrEqual(1);
+    // …and person-name is NOT a suppression bucket (the names surface).
+    expect(s.suppressedByReason["person-name"]).toBeUndefined();
+  });
+});

@@ -20,6 +20,7 @@ import {
   analyzeStatement,
   countAuthorMentions,
   isMultiAuthorStatement,
+  looksLikeJunkEntity,
   looksLikePersonName,
   normalizeEntity,
   type Scholar,
@@ -54,8 +55,12 @@ export type DiagnosticRow = {
   failureModeGuess: string;
   tierReason: string;
   /** The extracted entity itself looks like a PERSON's name (e.g. a co-author),
-   *  not an organization — a generation-noise signal. */
+   *  not an organization — a generation-noise signal. Now also catches bare
+   *  "First Last" co-author names, not just dotted initials. */
   entityIsPersonName: boolean;
+  /** The extracted entity is a bare junk/boilerplate word ("All", "Various"),
+   *  not an organization — the other extraction-noise signal. */
+  entityIsJunk: boolean;
   /** The SOURCE STATEMENT names ≥2 distinct authors (an ASCO blob or several
    *  "Dr X / First Last … discloses" subjects). On such a shared statement an
    *  `unattributed` surfaced entity is leakage-prone — it may be another author's
@@ -118,6 +123,7 @@ export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
         failureModeGuess: c.failureModeGuess,
         tierReason: c.tierReason,
         entityIsPersonName: looksLikePersonName(c.entity),
+        entityIsJunk: looksLikeJunkEntity(c.entity),
         isMultiAuthor,
         authorMentions,
         sourceSentence: c.sourceSentence,
@@ -148,7 +154,11 @@ export type DiagnoseSummary = {
     /** Unattributed clause in a single-author statement — the lone subject is the
      *  scholar, so probably legitimately theirs. */
     unattributedSingleAuthor: number;
-    /** Surfaced entity that looks like a PERSON's name (a co-author bled through). */
+    /** Surfaced entity that looks like a PERSON's name — a co-author that bled
+     *  through extraction. Now catches bare "First Last" names (not just dotted
+     *  initials), so this is the SIZE of the co-author-name leakage that is
+     *  deliberately surfaced (not suppressed, since the shape collides with
+     *  founder-named orgs); the right fix is a later author-roster cross-check. */
     personNameSurfaced: number;
   };
 };
@@ -179,18 +189,24 @@ export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.
         else surfacedBreakdown.unattributedSingleAuthor++;
       }
     } else {
-      // Low: classify by reason, mirroring tierOf's rule order so the bucket
-      // matches the actual suppression cause.
+      // Low: classify by reason, mirroring analyzeStatement's suppression order so
+      // the bucket matches the actual cause. Junk-word is checked FIRST because it
+      // short-circuits before tierOf in the pipeline and carries an authoritative
+      // failureModeGuess set at suppression time. (Person-name is NOT a suppression
+      // reason: bare First-Last co-author names are surfaced, not dropped — they are
+      // sized via surfacedBreakdown.personNameSurfaced, not here.)
       const reason =
-        r.nearestScore >= nearThreshold
-          ? "matched-disclosed"
-          : r.category !== "personal"
-            ? "non-personal"
-            : r.attribution === "other"
-              ? "co-author"
-              : r.isMultiAuthor && r.attribution === "unattributed"
-                ? "multi-author-leakage"
-                : "weak-signal";
+        r.failureModeGuess === "junk-token"
+          ? "junk-word"
+          : r.nearestScore >= nearThreshold
+            ? "matched-disclosed"
+            : r.category !== "personal"
+              ? "non-personal"
+              : r.attribution === "other"
+                ? "co-author"
+                : r.isMultiAuthor && r.attribution === "unattributed"
+                  ? "multi-author-leakage"
+                  : "weak-signal";
       suppressedByReason[reason] = (suppressedByReason[reason] ?? 0) + 1;
     }
   }
