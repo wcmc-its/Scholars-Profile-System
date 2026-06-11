@@ -12,9 +12,11 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeStatement,
   attribute,
+  countAuthorMentions,
   deriveScholar,
   extractEntities,
   fuzzyScore,
+  isMultiAuthorStatement,
   isPureNegation,
   isStructured,
   looksLikeGrantId,
@@ -255,5 +257,58 @@ describe("extractEntities", () => {
   it("classifies a gazetteer company under a funder cue as funder", () => {
     const ents = extractEntities("received research support from Gilead");
     expect(ents.some((e) => e.raw === "Gilead" && e.cat === "funder")).toBe(true);
+  });
+});
+
+describe("multi-author detection", () => {
+  it("counts distinct named author-subjects", () => {
+    expect(countAuthorMentions("Dr. Smith is a consultant for Pfizer.")).toBe(1);
+    expect(
+      countAuthorMentions(
+        "Scott Kasner has received funding from Bayer. Mitchell Elkind reports honoraria from Merck.",
+      ),
+    ).toBe(2);
+  });
+  it("flags ASCO blobs and ≥2-author statements as multi-author", () => {
+    expect(
+      isMultiAuthorStatement(
+        "Scott Kasner has received funding from Bayer. Mitchell Elkind reports honoraria from Merck.",
+      ),
+    ).toBe(true);
+    expect(isMultiAuthorStatement("Dr. Smith is a consultant for Pfizer.")).toBe(false);
+  });
+});
+
+describe("analyzeStatement — multi-author unattributed suppression", () => {
+  const smith = () => deriveScholar("John", "Smith");
+
+  it("suppresses an unattributed clause when the statement names ≥2 authors", () => {
+    const r = analyzeStatement(
+      "Scott Kasner has received funding from Bayer. Mitchell Elkind reports honoraria from Merck. " +
+        "The authors are consultants for Boston Scientific.",
+      smith(),
+      [],
+    );
+    // Boston Scientific came from an unattributed clause in a multi-author
+    // statement → not confidently the scholar's → suppressed.
+    expect(r.candidates.map((c) => c.entity)).not.toContain("Boston Scientific");
+    expect(r.suppressed.multiAuthor).toBeGreaterThan(0);
+  });
+
+  it("still surfaces an unattributed clause in a SINGLE-author statement", () => {
+    const r = analyzeStatement("The authors are consultants for Boston Scientific.", smith(), []);
+    // One subject ⇒ the lone author is the scholar ⇒ the relationship is theirs.
+    expect(r.candidates.map((c) => c.entity)).toContain("Boston Scientific");
+    expect(r.suppressed.multiAuthor).toBe(0);
+  });
+
+  it("still surfaces a SCHOLAR-attributed clause even in a multi-author statement", () => {
+    const r = analyzeStatement(
+      "Scott Kasner reports fees from Bayer. Dr. Smith is a consultant for Valeant Pharmaceuticals.",
+      smith(),
+      [],
+    );
+    // The scholar is explicitly named → their relationship surfaces.
+    expect(r.candidates.map((c) => c.entity)).toContain("Valeant Pharmaceuticals");
   });
 });

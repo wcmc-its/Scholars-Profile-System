@@ -18,12 +18,15 @@
  */
 import {
   analyzeStatement,
-  isStructured,
+  countAuthorMentions,
+  isMultiAuthorStatement,
   looksLikePersonName,
   normalizeEntity,
   type Scholar,
 } from "./pipeline";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
+
+export { countAuthorMentions } from "./pipeline";
 
 export type DiagnosticRow = {
   cwid: string;
@@ -75,31 +78,6 @@ export type DiagnoseInput = {
 const toks = (s: string): Set<string> =>
   new Set(normalizeEntity(s).split(" ").filter((w) => w.length > 1));
 
-// A disclosure-statement SUBJECT immediately followed by a disclosure verb
-// ("… has received / is a consultant / discloses / serves / reports"), in either
-// form: an honorific + surname ("Dr. Shah discloses") OR a first + last name
-// ("Scott Kasner has received"). The captured surname is group 1 or group 2.
-// Best-effort: a 3-word company in "X Y Z has provided" form can be miscounted as
-// an author, so the count is an upper-ish estimate — fine for SIZING multi-author
-// statements (≥2 subjects), not for production attribution.
-const VERB = "(?:has|have|is\\s+a|was\\s+a|holds?|reports?|disclos\\w*|receiv\\w*|serv\\w*)";
-const AUTHOR_REF = new RegExp(
-  `\\b(?:(?:Drs?|Prof|Mr|Ms|Mrs)\\.?\\s+([A-Z][a-z]+(?:[-‐‑][A-Z][a-z]+)?)` +
-    `|[A-Z][a-z]+\\s+([A-Z][a-z]+(?:[-‐‑][A-Z][a-z]+)?))\\s+${VERB}\\b`,
-  "g",
-);
-
-/** Distinct author subjects named in a statement (best-effort). 1 ⇒ effectively
- *  single-author (the lone subject is the scholar); ≥2 ⇒ a shared/multi-author
- *  disclosure block where unattributed clauses are leakage-prone. */
-export function countAuthorMentions(stmt: string): number {
-  const surnames = new Set<string>();
-  AUTHOR_REF.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = AUTHOR_REF.exec(stmt)) !== null) surnames.add((m[1] ?? m[2]).toLowerCase());
-  return surnames.size;
-}
-
 /** Every extracted entity for a scholar (surfaced + suppressed), flattened to
  *  one diagnostic row per (pmid, entity occurrence). Pure — DB-free. */
 export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
@@ -110,10 +88,11 @@ export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
       includeSuppressed: true,
       nearDisclosedThreshold: input.nearDisclosedThreshold,
     });
-    // Per-statement multi-author signal (stamped on every row of the statement):
-    // an ASCO blob, or ≥2 distinct named author-subjects.
+    // Per-statement multi-author signal (stamped on every row of the statement),
+    // the same signal the production pipeline now uses to suppress unattributed
+    // clauses in multi-author statements.
     const authorMentions = countAuthorMentions(st.statementText);
-    const isMultiAuthor = isStructured(st.statementText) || authorMentions >= 2;
+    const isMultiAuthor = isMultiAuthorStatement(st.statementText);
     for (const c of candidates) {
       const normalizedNearest = c.nearestDisclosed ? normalizeEntity(c.nearestDisclosed) : "";
       const eTok = toks(c.entity);
@@ -200,15 +179,18 @@ export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.
         else surfacedBreakdown.unattributedSingleAuthor++;
       }
     } else {
-      // Low: classify by the dominant reason for the bucket tally.
+      // Low: classify by reason, mirroring tierOf's rule order so the bucket
+      // matches the actual suppression cause.
       const reason =
-        r.attribution === "other"
-          ? "co-author"
-          : r.nearestScore >= nearThreshold
-            ? "matched-disclosed"
-            : r.category !== "personal"
-              ? "non-personal"
-              : "weak-signal";
+        r.nearestScore >= nearThreshold
+          ? "matched-disclosed"
+          : r.category !== "personal"
+            ? "non-personal"
+            : r.attribution === "other"
+              ? "co-author"
+              : r.isMultiAuthor && r.attribution === "unattributed"
+                ? "multi-author-leakage"
+                : "weak-signal";
       suppressedByReason[reason] = (suppressedByReason[reason] ?? 0) + 1;
     }
   }
