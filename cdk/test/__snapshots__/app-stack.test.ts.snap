@@ -412,6 +412,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
+                "Value": "off",
+              },
+              {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
@@ -3454,6 +3458,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_SHELL_STREAMING",
                 "Value": "on",
+              },
+              {
+                "Name": "SEARCH_SUGGEST_MESH_CONCEPT",
+                "Value": "off",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",

@@ -299,6 +299,10 @@
 /* #824 — Method family (rust). New color family distinct from the topic yellow,
    matching the Methods-lens search callout mockup. */
 .entity-badge--method     { background: #f6e3d4; color: #8a4a1f; }
+/* #878 — MeSH concept (indigo). New color family distinct from the slate-blue
+   Person badge and the lavender Center badge; ~7.7:1 contrast (AA). Provisional
+   hue — confirm in the staging visual review (no mockup exists yet). */
+.entity-badge--concept    { background: #e6e8f7; color: #34408a; }
 
 /* Author-position badges per issue #72. Reuses the same sizing/typography
    conventions as `.entity-badge` (#71), and the same blue (Person) and green

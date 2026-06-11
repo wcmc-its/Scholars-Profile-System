@@ -68,8 +68,8 @@ import {
   searchClient,
   type MeshMatchTier,
 } from "@/lib/search";
-import type { MeshResolution } from "@/lib/api/search-taxonomy";
-import { descriptorLabelsForUis } from "@/lib/api/search-taxonomy";
+import type { MeshConceptCandidate, MeshResolution } from "@/lib/api/search-taxonomy";
+import { descriptorLabelsForUis, suggestMeshConcepts } from "@/lib/api/search-taxonomy";
 import {
   computeMatchProvenance,
   type MatchProvenance,
@@ -2755,7 +2755,11 @@ export type EntityKind =
   // #824 — a method-family suggestion (rust "Method" badge) linking to the
   // cross-scholar family page. Gated behind `isMethodPagesEnabled()` AND the
   // #800/#801 overlay gate, so suppressed/sensitive families never suggest.
-  | "method";
+  | "method"
+  // #878 — a MeSH-concept suggestion (indigo "Concept" badge) linking to the
+  // existing concept search. Gated behind `resolveSearchSuggestMeshConcept()`
+  // inside `suggestMeshConcepts`, so when off no concept candidate is produced.
+  | "concept";
 
 export type EntitySuggestion = {
   kind: EntityKind;
@@ -2887,8 +2891,16 @@ export async function suggestEntities(
   const useV2 = (process.env.SEARCH_RANKING_V2 ?? "on") !== "off";
   const fetchN = useV2 ? 5 : perKind;
 
-  const [peopleR, topicsR, subtopicsR, departmentsR, divisionsR, centersR, methodsR] =
-    await Promise.allSettled([
+  const [
+    peopleR,
+    topicsR,
+    subtopicsR,
+    departmentsR,
+    divisionsR,
+    centersR,
+    methodsR,
+    conceptsR,
+  ] = await Promise.allSettled([
       suggestNames(trimmed, fetchN),
       prisma.topic.findMany({
         where: { label: { contains: trimmed } },
@@ -2946,6 +2958,11 @@ export async function suggestEntities(
       // #824 — method-family candidates, flag-gated + overlay-gated inside the
       // helper (off ⇒ `[]`, so no slot leaks when the Method pages flag is off).
       loadMethodFamilyCandidates(trimmed, fetchN),
+      // #878 — MeSH-concept candidates, flag-gated inside the helper (off ⇒ `[]`,
+      // so no slot leaks when `SEARCH_SUGGEST_MESH_CONCEPT` is off). The cold
+      // getMeshMap precompute is contained by allSettled — a slow/cold load
+      // contributes zero rows instead of blocking or 500-ing the dropdown.
+      suggestMeshConcepts(trimmed, fetchN),
     ]);
 
   // §7 — allSettled means one slow/broken source contributes zero rows
@@ -2990,6 +3007,9 @@ export async function suggestEntities(
   // #824 — method families. Empty when the Method pages flag is off (the helper
   // returns `[]`) or the source rejected — no candidates contributed either way.
   const methods = unwrap(methodsR, [] as MethodFamilyCandidate[]);
+  // #878 — MeSH concepts. Empty when the flag is off (the helper returns `[]`)
+  // or the source rejected / map was cold — no candidates contributed either way.
+  const concepts = unwrap(conceptsR, [] as MeshConceptCandidate[]);
 
   type PersonRow = Awaited<ReturnType<typeof suggestNames>>[number];
   type TopicRow = (typeof topics)[number];
@@ -2998,6 +3018,7 @@ export async function suggestEntities(
   type DivisionRow = (typeof divisions)[number];
   type CenterRow = (typeof centers)[number];
   type MethodRow = (typeof methods)[number];
+  type ConceptRow = (typeof concepts)[number];
 
   const personToSuggestion = (p: PersonRow): EntitySuggestion | null => {
     if (!p.slug) return null;
@@ -3085,6 +3106,21 @@ export async function suggestEntities(
       href: methodFamilyPath(m.supercategory, m.familyId, m.familyLabel),
     };
   };
+  // #878 — MeSH-concept row. Title = the canonical descriptor name; subtitle
+  // notes the concept and, for a synonym/entry-term match, the verbatim form the
+  // query hit (so `FACS` reads "MeSH concept · via \"FACS\""); href = a bare
+  // `/search?q=<name>`, which re-runs `resolveMeshDescriptor` on the results page
+  // in default expanded mode (the existing concept search). The candidate already
+  // passed the flag gate in `suggestMeshConcepts`, so this builder is render-only.
+  const conceptToSuggestion = (c: ConceptRow): EntitySuggestion => ({
+    kind: "concept",
+    title: c.name,
+    subtitle:
+      c.confidence === "entry-term"
+        ? `MeSH concept · via "${c.matchedForm}"`
+        : "MeSH concept",
+    href: `/search?q=${encodeURIComponent(c.name)}`,
+  });
 
   if (!useV2) {
     // Legacy path — fixed order, per-source `perKind` cap. Kept reachable via
@@ -3105,6 +3141,9 @@ export async function suggestEntities(
     // #824 — method families (empty when the flag is off). Appended after the
     // base kinds in the legacy fixed-order path.
     for (const m of methods.slice(0, perKind)) out.push(familyToSuggestion(m));
+    // #878 — MeSH concepts (empty when the flag is off). Appended last in the
+    // legacy fixed-order path.
+    for (const c of concepts.slice(0, perKind)) out.push(conceptToSuggestion(c));
     return out;
   }
 
@@ -3137,6 +3176,10 @@ export async function suggestEntities(
     (r) => r.familyLabel,
     "tokenwise",
   );
+  // #878 — promote prefix-matching descriptor names to the front (label mode:
+  // descriptor names are single research phrases, not multi-token org names).
+  // Empty when the flag is off.
+  const conceptsPromoted = promoteStartsWith(concepts, trimmed, (r) => r.name);
 
   const sources: RankingSources = {
     person: peopleSorted,
@@ -3148,6 +3191,9 @@ export async function suggestEntities(
     // #824 — only populated when the flag is on; an empty array yields no
     // `"method"` plausibility hit and no ordering slot.
     method: methodsPromoted.map((m) => ({ familyLabel: m.familyLabel })),
+    // #878 — only populated when the flag is on; an empty array yields no
+    // `"concept"` plausibility hit and no ordering slot.
+    concept: conceptsPromoted.map((c) => ({ name: c.name })),
   };
 
   const shape = classifyQueryShape(trimmed);
@@ -3167,6 +3213,9 @@ export async function suggestEntities(
     // #824 — the full candidate rows (with supercategory/familyId/count) so the
     // switch below can build the suggestion. Empty when the flag is off.
     method: methodsPromoted,
+    // #878 — the full concept candidates (descriptorUi/name/confidence/
+    // matchedForm) so the switch below can build the suggestion. Empty when off.
+    concept: conceptsPromoted,
   };
 
   const filled = capFill<unknown>(order, rowsByKind);
@@ -3203,7 +3252,26 @@ export async function suggestEntities(
         // #824 — only reachable when the flag-gated source produced rows.
         for (const m of rows as MethodRow[]) out.push(familyToSuggestion(m));
         break;
+      case "concept":
+        // #878 — only reachable when the flag-gated source produced rows.
+        for (const c of rows as ConceptRow[]) out.push(conceptToSuggestion(c));
+        break;
     }
   }
-  return out;
+
+  // #878 — dedup a concept row against a same-named curated topic/subtopic: the
+  // curated taxonomy is the preferred destination, so when a resolved descriptor
+  // shares a title with a topic/subtopic already in the list, drop the concept
+  // row. Short-circuits when there are no concept candidates (flag off or no
+  // match) so the flag-off path is unchanged. Runs after cap-fill — at most one
+  // concept row per query, so a dropped row does not reclaim budget.
+  if (concepts.length === 0) return out;
+  const curatedTitles = new Set(
+    out
+      .filter((s) => s.kind === "topic" || s.kind === "subtopic")
+      .map((s) => s.title.toLowerCase()),
+  );
+  return out.filter(
+    (s) => s.kind !== "concept" || !curatedTitles.has(s.title.toLowerCase()),
+  );
 }

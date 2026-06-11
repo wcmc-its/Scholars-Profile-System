@@ -1071,6 +1071,16 @@ export class AppStack extends Stack {
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
         SEARCH_SHELL_STREAMING: env === "staging" ? "on" : "off",
+        // #878 -- MeSH-concept rows in the autocomplete dropdown. Reuses the
+        // results-page MeSH resolver (getMeshMap().byForm: descriptor names + NLM
+        // entry terms + #642 aliases) so the dropdown surfaces a "Flow Cytometry
+        // -- MeSH concept" row and resolves synonyms/acronyms (FACS) as you type.
+        // resolveSearchSuggestMeshConcept reads === "on". Default OFF BOTH envs
+        // (ships dark for a staging soak; flip staging first). No reindex, no new
+        // data (reuse-only); flip is env-only via cdk deploy Sps-App-<env> (CD
+        // re-rolls the image only) -- the flag-parity rule. Orthogonal to
+        // METHODS_LENS_PAGES.
+        SEARCH_SUGGEST_MESH_CONCEPT: "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
