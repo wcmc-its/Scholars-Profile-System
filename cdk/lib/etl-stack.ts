@@ -362,14 +362,17 @@ export class EtlStack extends Stack {
     //   etl:spotlight    (weekly)  s3:GetObject   wcmc-reciterai-artifacts/spotlight/*
     //   etl:scholar-tool (nightly) s3:GetObject   wcmc-reciterai-artifacts/tools/*
     //   etl:hierarchy    (annual)  s3:GetObject   wcmc-reciterai-hierarchy/*
+    //   etl:ed:import-email-visibility (bridge) s3:GetObject wcmc-reciterai-artifacts/ed/*
     //
     // Read-only: the steps Scan the table and GetObject the artifacts; they
     // never write back to ReciterAI's (account-shared) stores. The bucket
     // and table names are the same literals injected in `environment:` below
-    // -- a rename must touch both. Spotlight and tools are prefix-scoped
-    // (`spotlight/*`, `tools/*`) because `wcmc-reciterai-artifacts` is a shared
-    // bucket; hierarchy takes the whole bucket because `wcmc-reciterai-hierarchy`
-    // is dedicated to it.
+    // -- a rename must touch both. Spotlight, tools, and ed are prefix-scoped
+    // (`spotlight/*`, `tools/*`, `ed/*`) because `wcmc-reciterai-artifacts` is a
+    // shared bucket; hierarchy takes the whole bucket because
+    // `wcmc-reciterai-hierarchy` is dedicated to it. The `ed/*` prefix is the
+    // email-visibility bridge artifact (a WCM-side client uploads the release
+    // codes there; the in-VPC import reads them — #443 LDAP workaround).
     // No secretsmanager reference, so the "zero secretsmanager on the ETL
     // task role" assertion (etl-stack.test.ts) still holds.
     // ------------------------------------------------------------------
@@ -390,6 +393,7 @@ export class EtlStack extends Stack {
           resources: [
             "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
             "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
+            "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
         }),
