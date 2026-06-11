@@ -1190,14 +1190,16 @@ export class AppStack extends Stack {
         // respected across both profile-email DISPLAY (table A) and the #847
         // export row-filter (none blanks the cell). While off, email is shown
         // to everyone (legacy fail-open) and the export email column is gated
-        // only by viewer-context + hidden-role. OFF in BOTH envs: email_visibility
-        // is NULL until the ED ETL backfills it, and NULL is treated as `none`
-        // (fail-closed) -- flipping before the backfill would hide every email.
-        // Reindex-then-flip discipline: merge dark -> deploy -> run ED ETL to
-        // backfill -> verify -> `cdk deploy Sps-App-<env>` with the flag on
-        // (staging first). Wire in BOTH .env.local AND here per the flag-parity
-        // rule -- CD re-rolls the image only, never the task-def env.
-        PROFILE_EMAIL_RELEASE_GATE: "off",
+        // only by viewer-context + hidden-role. STAGING ON; PROD OFF.
+        // Reindex-then-flip discipline: email_visibility is NULL until backfilled,
+        // and NULL is treated as `none` (fail-closed), so flipping before the
+        // backfill would hide every email. Staging is now safe to flip: the
+        // backfill landed 2026-06-11 via the LDAP->S3 bridge (#898; the in-VPC ED
+        // ETL can't reach WCM LDAP -- #443), populating email_visibility for 8,895
+        // scholars (verified). PROD stays OFF until its own backfill runs. Wire in
+        // BOTH .env.local AND here per the flag-parity rule -- a manual
+        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only).
+        PROFILE_EMAIL_RELEASE_GATE: env === "staging" ? "on" : "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
