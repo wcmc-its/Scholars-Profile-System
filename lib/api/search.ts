@@ -2787,6 +2787,13 @@ type MethodFamilyCandidate = {
  * pages flag (`isMethodPagesEnabled()`) is on, so when off this contributes
  * NOTHING — no candidates, no `"method"` plausibility hit, no badge.
  *
+ * #863 — a family also surfaces when the typed term matches one of its MEMBER
+ * TOOL names (e.g. "CRISPR" → the family that contains the CRISPR tools, even
+ * when the family label itself doesn't contain the word). `scholar_tool.category`
+ * is the tool's `method_family_label` (etl/tools/scholar-tool-mapper-s3), i.e.
+ * the same string surfaced as `scholar_family.familyLabel` — so a contains-match
+ * over `toolName` resolves to family labels we can OR into the family groupBy.
+ *
  * SECURITY: every candidate passes the shared #800/#801 overlay gate
  * (`loadFamilyOverlayGate` + `isFamilyPubliclyVisible`), so #800-suppressed and
  * #801-sensitive families are removed BEFORE they can surface in search. Distinct
@@ -2794,21 +2801,44 @@ type MethodFamilyCandidate = {
  * with the latest `familyId` for the URL suffix and a distinct-scholar count for
  * the subtitle — both cheap groupBys bounded by the contains-match fetch size.
  */
-async function loadMethodFamilyCandidates(
+export async function loadMethodFamilyCandidates(
   trimmed: string,
   fetchN: number,
 ): Promise<MethodFamilyCandidate[]> {
   if (!isMethodPagesEnabled()) return [];
+
+  // #863 — resolve families via a member-tool-name match. `scholar_tool` has no
+  // family id, but its `category` IS the family label, so a contains-match over
+  // `toolName` yields the family labels to OR into the groupBy below. Distinct on
+  // `category` and bounded by `take` so the worst case is a single capped scan,
+  // not one per matching tool row.
+  const toolMatches = await prisma.scholarTool.findMany({
+    where: { toolName: { contains: trimmed }, category: { not: null } },
+    select: { category: true },
+    distinct: ["category"],
+    take: Math.max(fetchN * 4, fetchN),
+  });
+  const toolFamilyLabels = toolMatches
+    .map((t) => t.category)
+    .filter((c): c is string => Boolean(c));
 
   // One row per stable (supercategory, familyLabel) family; latest familyId for
   // the URL suffix; distinct-scholar count for the subtitle. `_count.cwid` over a
   // `(supercategory, familyLabel)` groupBy = distinct scholars (the table is
   // `@@unique([cwid, familyId])`, one row per (cwid, family)). Over-fetch a little
   // (fetchN * 4) before the overlay gate so a suppressed/sensitive family doesn't
-  // starve the visible set below `fetchN`.
+  // starve the visible set below `fetchN`. The OR adds families matched only by a
+  // member tool name (#863) alongside the label-contains match.
   const groups = await prisma.scholarFamily.groupBy({
     by: ["supercategory", "familyLabel"],
-    where: { familyLabel: { contains: trimmed } },
+    where: {
+      OR: [
+        { familyLabel: { contains: trimmed } },
+        ...(toolFamilyLabels.length > 0
+          ? [{ familyLabel: { in: toolFamilyLabels } }]
+          : []),
+      ],
+    },
     _max: { familyId: true },
     _count: { cwid: true },
     orderBy: { _count: { cwid: "desc" } },
