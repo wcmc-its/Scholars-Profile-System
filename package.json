@@ -62,6 +62,7 @@
     "etl:completeness": "tsx etl/completeness/index.ts",
     "etl:coi": "tsx etl/coi/index.ts",
     "etl:coi-gap": "tsx etl/coi-gap/index.ts",
+    "etl:coi-gap:diagnose": "tsx etl/coi-gap/diagnose.ts",
     "etl:dynamodb:probe-synopsis": "tsx etl/dynamodb/probe-synopsis.ts",
     "etl:dynamodb": "tsx etl/dynamodb/index.ts",
     "etl:identity": "tsx etl/identity/index.ts",

@@ -28,14 +28,25 @@ export function scholarFromDisplayName(preferredName: string | null | undefined,
 
 const RANK = { High: 3, Medium: 2 } as const;
 
-export async function computeScholarGaps(cwid: string): Promise<FreshGap[]> {
+/** The already-ingested inputs a scholar's COI-gap analysis needs, loaded once.
+ *  Shared by `computeScholarGaps` (production) and the diagnostic export so both
+ *  read the disclosed set + statements through one query path. `null` when the
+ *  scholar is unknown or has no usable surname (can't attribute → surface
+ *  nothing); `statements` is empty when they have no confirmed authorships. */
+export type CoiInputs = {
+  scholar: Scholar;
+  disclosed: string[];
+  statements: { pmid: string; statementText: string }[];
+};
+
+export async function loadCoiInputs(cwid: string): Promise<CoiInputs | null> {
   const scholar = await db.read.scholar.findUnique({
     where: { cwid },
     select: { preferredName: true, fullName: true },
   });
-  if (!scholar) return [];
+  if (!scholar) return null;
   const s = scholarFromDisplayName(scholar.preferredName, scholar.fullName);
-  if (!s.surname) return []; // no usable surname → can't attribute; surface nothing
+  if (!s.surname) return null; // no usable surname → can't attribute; surface nothing
 
   // Disclosed Self relationships (recall-biased: null relatesTo treated as Self).
   const disclosedRows = await db.read.coiActivity.findMany({
@@ -52,12 +63,19 @@ export async function computeScholarGaps(cwid: string): Promise<FreshGap[]> {
     select: { pmid: true },
   });
   const pmids = [...new Set(links.map((l) => l.pmid))];
-  if (pmids.length === 0) return [];
+  if (pmids.length === 0) return { scholar: s, disclosed, statements: [] };
 
   const statements = await db.read.publicationConflictStatement.findMany({
     where: { pmid: { in: pmids } },
     select: { pmid: true, statementText: true },
   });
+  return { scholar: s, disclosed, statements };
+}
+
+export async function computeScholarGaps(cwid: string): Promise<FreshGap[]> {
+  const inputs = await loadCoiInputs(cwid);
+  if (!inputs || inputs.statements.length === 0) return [];
+  const { scholar: s, disclosed, statements } = inputs;
 
   const byKey = new Map<string, FreshGap>();
   for (const st of statements) {
