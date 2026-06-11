@@ -83,12 +83,11 @@ describe("OverviewGenerateControls — onChange", () => {
     fireEvent.click(screen.getByTestId("overview-element-clinical_applications"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
     expect(next.elements).toContain("clinical_applications");
-    // Canonical display order: research_focus, key_findings, methods,
+    // Canonical display order: research_focus, key_findings,
     // clinical_applications, recent_work.
     expect(next.elements).toEqual([
       "research_focus",
       "key_findings",
-      "methods",
       "clinical_applications",
       "recent_work",
     ]);
@@ -96,10 +95,12 @@ describe("OverviewGenerateControls — onChange", () => {
     expect(next.voice).toBe(value.voice);
   });
 
-  it("Methods is checked by default (#875)", () => {
+  it("Methods is NOT checked by default (source dark until the scholar_family wiring)", () => {
+    // #875 — Methods stays opt-in: the generator's method source (`scholar_tool`)
+    // is dark, so defaulting it on would invite emphasis it can't ground.
     renderControls();
     expect(screen.getByTestId("overview-element-methods").getAttribute("aria-checked")).toBe(
-      "true",
+      "false",
     );
   });
 
@@ -108,8 +109,7 @@ describe("OverviewGenerateControls — onChange", () => {
     fireEvent.click(screen.getByTestId("overview-element-research_focus"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
     expect(next.elements).not.toContain("research_focus");
-    // #875 — methods now sits in the default set between key_findings and recent_work.
-    expect(next.elements).toEqual(["key_findings", "methods", "recent_work"]);
+    expect(next.elements).toEqual(["key_findings", "recent_work"]);
   });
 
   it("typing in the instructions textarea calls onChange with the new text", () => {

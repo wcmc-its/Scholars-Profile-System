@@ -63,14 +63,16 @@ export const OVERVIEW_INSTRUCTIONS_MAX = 500;
 /** The defaults a fresh Generate panel opens with — and the fallback every
  *  unknown enum normalizes to. Mirrors the v1 fixed prompt (third person,
  *  formal, ~120–180 words) with a sensible starter set of emphasized themes.
- *  #875 — Methods joins the default-on set (a first-class research-profile
- *  source, gated by the #765 §2 pmid_count >= 2 floor); listed in canonical
- *  OVERVIEW_ELEMENTS order. */
+ *  Methods is intentionally NOT default-on: the generator's method source
+ *  (`scholar_tool`) is dark until the C3 ETL, so defaulting it on would invite
+ *  emphasis the generator can't ground. It becomes default-on once the Methods
+ *  source is wired to the live `scholar_family` data (follow-up to #875). The
+ *  #765 §2 pmid_count >= 2 floor stays in place for when it lands. */
 export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
-  elements: ["research_focus", "key_findings", "methods", "recent_work"],
+  elements: ["research_focus", "key_findings", "recent_work"],
   instructions: "",
 };
 

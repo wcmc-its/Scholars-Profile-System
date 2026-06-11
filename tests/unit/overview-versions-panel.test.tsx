@@ -140,10 +140,10 @@ describe("summarizeParams", () => {
   });
 
   it("renders the default params", () => {
-    // #875 — Methods joins the default-on set, in canonical position (between
-    // "Key findings & significance" and "Recent work").
+    // #875 — Methods is opt-in (not default-on) until its source is wired to the
+    // live scholar_family data; the default set is the three core themes.
     expect(summarizeParams(DEFAULT_OVERVIEW_PARAMS)).toBe(
-      "Third · Formal · Standard · Research focus, Key findings & significance, Methods, Recent work",
+      "Third · Formal · Standard · Research focus, Key findings & significance, Recent work",
     );
   });
 });
