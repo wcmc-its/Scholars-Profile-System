@@ -11,12 +11,12 @@
  *
  * Visibility: a server component only renders this island when
  * `isScholarListExportEnabled()` is true, so flag-off cached HTML never carries
- * it. On top of that the button probes `/api/auth/session` on mount and renders
- * null for anonymous visitors — public surfaces are served by CloudFront's
- * cacheable default behavior, which strips the Cookie header, so the export is
- * only offered once the client confirms an authenticated session (mirroring
- * `components/site/header-auth-slot.tsx`). The route enforces the 401 itself;
- * this is purely so signed-out users never see a button that would fail.
+ * it. On top of that the button probes `/api/profile/viewer/context` on mount and
+ * renders null unless the viewer is INTERNAL — an authenticated session OR (when
+ * the network signal is on) an on-WCM-network source IP (#866). Public surfaces
+ * are CloudFront-cached with the Cookie header stripped, so visibility can't be
+ * decided server-side; the probe resolves it client-side. The route enforces the
+ * 401 itself; this is purely so external viewers never see a button that fails.
  */
 import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
@@ -32,20 +32,20 @@ export function ScholarListExportButton({
   /** Optional roster size hint; unused for gating since the cap is server-side. */
   count?: number;
 }) {
-  const [authed, setAuthed] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" })
+    fetch("/api/profile/viewer/context", { cache: "no-store", credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { authenticated?: boolean } | null) => {
-        if (!active || !data?.authenticated) return;
-        setAuthed(true);
+      .then((data: { internal?: boolean } | null) => {
+        if (!active || !data?.internal) return;
+        setVisible(true);
       })
       .catch(() => {
-        /* leave signed-out — the button stays hidden */
+        /* leave hidden — external viewers never see the control */
       });
     return () => {
       active = false;
@@ -87,8 +87,8 @@ export function ScholarListExportButton({
     }
   };
 
-  // Signed-out visitors never see the control (the route would 401 anyway).
-  if (!authed) return null;
+  // External viewers never see the control (the route would 401 anyway).
+  if (!visible) return null;
 
   return (
     <div className="flex flex-col items-end gap-0.5">
