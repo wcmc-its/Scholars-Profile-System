@@ -1,7 +1,9 @@
 /**
  * POST /api/export/scholars/{method-family|supercategory|topic|subtopic}
  *
- * Internal-only CSV export of a scope's ranked top-50 scholars (#847). Mirrors
+ * Internal-only CSV export of a scope's ranked scholar cohort (#847), offered
+ * only when the displayable cohort is <= 50 (SPEC §B.3 HARD cap; > 50 is refused
+ * server-side via the builder returning null => 404, no partial top-50). Mirrors
  * the publications export route (force-dynamic, defensive body parse, `apiError`,
  * `toCsv`, Content-Disposition attachment) plus an internal-viewer gate: any
  * authenticated WCM session OR an allowlisted on-network viewer (#866) may
@@ -105,9 +107,11 @@ export async function POST(
     return apiError("invalid body", 400);
   }
 
-  // (f) build — null when the scope target does not resolve. The email column
-  // (#866 UC-B) rides on top of the master export flag; the internal-viewer gate
-  // above already ran, so it is only ever passed for an internal viewer.
+  // (f) build — null when the scope target does not resolve OR the displayable
+  // cohort exceeds the HARD <=50 cap (SPEC §B.3): both refuse with the same
+  // dark-feature 404 — never a partial top-50. The email column (#866 UC-B)
+  // rides on top of the master export flag; the internal-viewer gate above
+  // already ran, so it is only ever passed for an internal viewer.
   const includeEmail = isScholarListExportEmailEnabled();
   const result = await buildScholarExport(scope, params, undefined, { includeEmail });
   if (!result) {

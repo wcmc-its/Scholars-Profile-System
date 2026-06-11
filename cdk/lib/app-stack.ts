@@ -1185,6 +1185,19 @@ export class AppStack extends Stack {
         INTERNAL_VIEWER_NETWORK_SIGNAL: env === "staging" ? "on" : "off",
         SCHOLAR_LIST_EXPORT_EMAIL: env === "staging" ? "on" : "off",
         INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "",
+        // PROFILE_EMAIL_RELEASE_GATE -- when "on", the Web Directory
+        // `weillCornellEduReleaseCode;mail` audience (email_visibility) is
+        // respected across both profile-email DISPLAY (table A) and the #847
+        // export row-filter (none blanks the cell). While off, email is shown
+        // to everyone (legacy fail-open) and the export email column is gated
+        // only by viewer-context + hidden-role. OFF in BOTH envs: email_visibility
+        // is NULL until the ED ETL backfills it, and NULL is treated as `none`
+        // (fail-closed) -- flipping before the backfill would hide every email.
+        // Reindex-then-flip discipline: merge dark -> deploy -> run ED ETL to
+        // backfill -> verify -> `cdk deploy Sps-App-<env>` with the flag on
+        // (staging first). Wire in BOTH .env.local AND here per the flag-parity
+        // rule -- CD re-rolls the image only, never the task-def env.
+        PROFILE_EMAIL_RELEASE_GATE: "off",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment

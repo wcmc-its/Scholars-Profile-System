@@ -6,6 +6,8 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
+import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 
 /** Public shape returned to API consumers. */
 export type ScholarPayload = {
@@ -56,7 +58,17 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
-    email: scholar.email,
+    // email-visibility-spec § A + Cache-safety. This anonymous-facing endpoint is
+    // CloudFront-cacheable by path and is NOT in the #866 origin-request policy
+    // (no viewer-address forwarded), so it bakes only the viewer-independent
+    // (public) email — never `institution`/`none`. Internal callers obtain
+    // institution emails via /api/profile/[cwid]/contact-email. No-op when off.
+    email: gateEmailForViewer(
+      scholar.email,
+      scholar.emailVisibility,
+      false,
+      isEmailReleaseGateEnabled(),
+    ),
     overview: scholar.overview,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     appointments: scholar.appointments.map((a) => ({

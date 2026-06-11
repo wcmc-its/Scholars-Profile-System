@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/methods";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
+import { isSupercategoryExportInRange } from "@/lib/api/export-scholars";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
 import { TopScholarsChipRow } from "@/components/topic/top-scholars-chip-row";
 import { SupercategoryFamilyLayout } from "@/components/method/family-publication-layout";
@@ -80,6 +81,12 @@ export default async function SupercategoryPage({
     description: sc.description,
   });
 
+  // SPEC §B.3 HARD cap: offer the export ONLY when the distinct displayable
+  // cohort is <= 50. Only run the (extra) count query when export is enabled, so
+  // the flag-dark path stays cheap. The route refuses > 50 regardless.
+  const exportEligible =
+    isScholarListExportEnabled() && (await isSupercategoryExportInRange(sc.id));
+
   return (
     <main className="mx-auto max-w-[1100px] px-6 py-12">
       <script
@@ -135,7 +142,7 @@ export default async function SupercategoryPage({
             {families.length.toLocaleString()} method{" "}
             {families.length === 1 ? "family" : "families"}
           </div>
-          {isScholarListExportEnabled() ? (
+          {exportEligible ? (
             <ScholarListExportButton scope="supercategory" params={{ supercategory: sc.slug }} />
           ) : null}
         </div>

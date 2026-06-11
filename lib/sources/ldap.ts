@@ -80,6 +80,12 @@ export const ED_FACULTY_ATTRIBUTES = [
   "sn",
   "cn",
   "mail",
+  // Multi-valued Web Directory release-code for the email field. A *set* of
+  // audiences the email is released to ("institution", "public"). Drives
+  // Scholar.emailVisibility (most-permissive-wins, fail-closed) so the profile
+  // and export honor the scholar's directory preference. See
+  // docs/email-visibility-spec.md.
+  "weillCornellEduReleaseCode;mail",
   "ou",
   "title",
   "departmentNumber",
@@ -120,6 +126,28 @@ export const ED_FACULTY_ATTRIBUTES = [
   "labeledURI;pops",
 ] as const;
 
+/** Effective email release audience (most-permissive-wins, fail-closed). */
+export type EmailReleaseAudience = "public" | "institution" | "none";
+
+/**
+ * Parse the multi-valued Web Directory attribute `weillCornellEduReleaseCode;mail`
+ * to a single effective audience. The attribute is a *set* of audiences the email
+ * is released to; we take the most permissive value present and fail closed when
+ * the set is empty / absent / carries only unrecognized values (incl. an explicit
+ * `private`). Confirmed against live record `paa2013` (`{institution, public}` →
+ * `public`). See docs/email-visibility-spec.md.
+ *
+ *   contains 'public'           → 'public'      (with or without 'institution')
+ *   else contains 'institution' → 'institution'
+ *   else                        → 'none'        (fail-closed default)
+ */
+export function parseEmailReleaseAudience(values: unknown): EmailReleaseAudience {
+  const set = allStrings(values).map((v) => v.trim().toLowerCase());
+  if (set.includes("public")) return "public";
+  if (set.includes("institution")) return "institution";
+  return "none";
+}
+
 export type EdFacultyEntry = {
   cwid: string;
   preferredName: string;
@@ -127,6 +155,11 @@ export type EdFacultyEntry = {
   primaryTitle: string | null;
   primaryDepartment: string | null;
   email: string | null;
+  /** Effective email release audience derived from the multi-valued
+   *  `weillCornellEduReleaseCode;mail` attribute (most-permissive-wins,
+   *  fail-closed). Persisted to `Scholar.emailVisibility` and gates email
+   *  display/export. Defaults to 'none' when the attribute is absent. */
+  emailVisibility: EmailReleaseAudience;
   // Phase 2 — feeds deriveRoleCategory in etl/ed/index.ts.
   //
   // primaryPersonTypeCode: scalar "best single signal" value; preferred when populated.
@@ -838,6 +871,9 @@ function projectEntries(
         firstString(e.ou) ??
         null,
       email: firstString(e.mail) ?? null,
+      // Multi-valued release-code parsed to the effective audience (fail-closed).
+      // ldapts surfaces the option-tagged key under its tag suffix.
+      emailVisibility: parseEmailReleaseAudience(r["weillCornellEduReleaseCode;mail"]),
       primaryPersonTypeCode: firstString(e.weillCornellEduPrimaryPersonTypeCode),
       personTypeCodes: allStrings(e.weillCornellEduPersonTypeCode),
       fte: parseFte(e.weillCornellEduFTE),

@@ -57,17 +57,27 @@ vi.mock("@/lib/api/methods-overlay", () => ({
   isFamilyPubliclyVisible: vi.fn(),
 }));
 
+// Email-release gate (SPEC §B.2 row filter). Mocked so each test pins the flag;
+// the default in beforeEach is OFF, matching production-dark + the legacy tests.
+vi.mock("@/lib/profile/email-visibility-flags", () => ({
+  isEmailReleaseGateEnabled: vi.fn(),
+}));
+
 import {
   buildScholarExport,
+  isSupercategoryExportInRange,
   SCHOLAR_EXPORT_CAP,
   SCOPE_HEADERS,
 } from "@/lib/api/export-scholars";
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
 import { loadFamilyOverlayGate, isFamilyPubliclyVisible } from "@/lib/api/methods-overlay";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 
-/** A scholar identity row as SCHOLAR_SELECT projects it. */
-function scholar(i: number) {
+/** A scholar identity row as SCHOLAR_SELECT projects it. `emailVisibility`
+ *  defaults to "public" so the release-code gate (when on) exports the email;
+ *  tests that exercise the row filter override it per-scholar. */
+function scholar(i: number, emailVisibility: string | null = "public") {
   return {
     cwid: `cwid${i}`,
     slug: `slug-${i}`,
@@ -77,6 +87,7 @@ function scholar(i: number) {
     primaryDepartment: `Dept ${i}`,
     roleCategory: "full_time_faculty",
     email: `scholar${i}@med.cornell.edu`,
+    emailVisibility,
   };
 }
 
@@ -99,14 +110,17 @@ beforeEach(() => {
   mockPublicationTopicGroupBy.mockReset();
   mockPublicationAuthorGroupBy.mockReset();
   mockSubtopicFindFirst.mockReset();
+  vi.mocked(isEmailReleaseGateEnabled).mockReset();
 
-  // Default: overlay gate present and every family publicly visible.
+  // Default: overlay gate present and every family publicly visible; the
+  // email-release gate is OFF (production-dark + legacy export behavior).
   vi.mocked(loadFamilyOverlayGate).mockResolvedValue({} as never);
   vi.mocked(isFamilyPubliclyVisible).mockReturnValue(true);
+  vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(false);
 });
 
 describe("buildScholarExport — method-family scope", () => {
-  it("caps the roster at SCHOLAR_EXPORT_CAP (50) and emits the documented columns", async () => {
+  it("exports the complete in-range cohort (50) and emits the documented columns", async () => {
     vi.mocked(getFamily).mockResolvedValue({
       supercategory: "animal_cell_models",
       supercategorySlug: "animal-cell-models",
@@ -115,8 +129,7 @@ describe("buildScholarExport — method-family scope", () => {
       familySlug: "crispr-screens-fam_x",
     } as never);
 
-    // The loader itself passes `take: SCHOLAR_EXPORT_CAP` to prisma; simulate the
-    // DB honoring that cap so even a generous source yields <= 50 body rows.
+    // Exactly 50 scholars — at the HARD cap, so the COMPLETE cohort exports.
     const rows = Array.from({ length: SCHOLAR_EXPORT_CAP }, (_, i) => ({
       pmidCount: SCHOLAR_EXPORT_CAP - i, // already ranked desc
       scholar: scholar(i),
@@ -137,12 +150,12 @@ describe("buildScholarExport — method-family scope", () => {
 
     // Header is exactly the documented per-scope header set.
     expect(header).toEqual([...SCOPE_HEADERS["method-family"]]);
-    // The cap is DB-enforced for this scope: the loader MUST ask prisma for at
-    // most SCHOLAR_EXPORT_CAP rows (deleting `take` would silently uncap it).
+    // The loader fetches CAP + 1 (51) so an over-cap cohort is DETECTABLE — the
+    // builder refuses > 50 rather than the DB silently truncating to a partial 50.
     expect(mockScholarFamilyFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ take: SCHOLAR_EXPORT_CAP }),
+      expect.objectContaining({ take: SCHOLAR_EXPORT_CAP + 1 }),
     );
-    // Body capped at 50.
+    // In-range cohort exports complete (all 50 rows).
     expect(body.length).toBe(SCHOLAR_EXPORT_CAP);
     expect(body.length).toBeLessThanOrEqual(50);
 
@@ -276,7 +289,7 @@ describe("buildScholarExport — supercategory scope", () => {
     expect(result!.csv.toLowerCase()).not.toContain("email");
   });
 
-  it("caps at SCHOLAR_EXPORT_CAP (50) when more than 50 distinct scholars qualify", async () => {
+  it("REFUSES (returns null) when more than 50 distinct scholars qualify (SPEC §B.3 HARD cap)", async () => {
     vi.mocked(getSupercategory).mockResolvedValue({
       id: "animal_cell_models",
       slug: "animal-cell-models",
@@ -284,9 +297,9 @@ describe("buildScholarExport — supercategory scope", () => {
       description: "",
     } as never);
 
-    // 60 distinct scholars, one family row each — the supercategory loader caps
-    // in JS via `.slice(0, SCHOLAR_EXPORT_CAP)`, so this genuinely exercises the
-    // cap (a removed/broken slice would leak all 60 rows).
+    // 60 distinct scholars, one family row each — over the HARD cap. The builder
+    // refuses with the same dark-feature semantics (null => route 404); it does
+    // NOT emit a partial top-50.
     const rows = Array.from({ length: 60 }, (_, i) => ({
       familyLabel: `Family ${i}`,
       pmidCount: 60 - i, // already ranked desc
@@ -298,9 +311,7 @@ describe("buildScholarExport — supercategory scope", () => {
       supercategory: "animal-cell-models",
     });
 
-    expect(result).not.toBeNull();
-    const body = parseCsv(result!.csv).slice(1);
-    expect(body.length).toBe(SCHOLAR_EXPORT_CAP);
+    expect(result).toBeNull();
   });
 });
 
@@ -506,5 +517,224 @@ describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
     expect(header).toEqual([...SCOPE_HEADERS["method-family"]]);
     expect(header.some((h) => h.toLowerCase().includes("email"))).toBe(false);
     expect(defaulted!.csv.toLowerCase()).not.toContain("@med.cornell.edu");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SPEC §B — release-code row filter (rows 9, 10) + HARD <=50 cohort cap
+// (rows 11, 12). The route (tests/unit/scholar-export-route.test.ts) covers the
+// channel-gate 401 (row 8) and the null=>404 propagation; here we lock the
+// builder-level data behavior these gates depend on.
+// ---------------------------------------------------------------------------
+describe("buildScholarExport — release-code row filter (SPEC §B.2)", () => {
+  function resolveCrispr() {
+    vi.mocked(getFamily).mockResolvedValue({
+      supercategory: "animal_cell_models",
+      supercategorySlug: "animal-cell-models",
+      familyId: "fam_x",
+      familyLabel: "CRISPR screens",
+      familySlug: "crispr-screens-fam_x",
+    } as never);
+  }
+
+  async function exportFamily() {
+    return buildScholarExport(
+      "method-family",
+      { supercategory: "animal-cell-models", family: "crispr-screens-fam_x" },
+      undefined,
+      { includeEmail: true },
+    );
+  }
+
+  it("row 9 — gate ON, emailVisibility='institution': row included, email PRESENT", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0, "institution") },
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    // The scholar is still a row in the cohort, and the email is exported
+    // (institution clears the export channel gate alongside public).
+    expect(body.length).toBe(1);
+    expect(body[0][header.indexOf("email")]).toBe("scholar0@med.cornell.edu");
+  });
+
+  it("row 9 — gate ON, emailVisibility='public': email PRESENT", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0, "public") },
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    expect(table.slice(1)[0][header.indexOf("email")]).toBe("scholar0@med.cornell.edu");
+  });
+
+  it("row 10 — gate ON, emailVisibility NULL ('none'): row INCLUDED but email BLANK (fail-closed)", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0, null) },
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    // Independent of email, the scholar remains a counted row; only the email
+    // cell is blanked (NULL = 'none' = fail-closed).
+    expect(body.length).toBe(1);
+    expect(body[0][header.indexOf("email")]).toBe("");
+    expect(body[0][header.indexOf("cwid")]).toBe("cwid0");
+  });
+
+  it("row 10 — gate ON, explicit 'none'/unrecognized values blank the email", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0, "none") },
+      { pmidCount: 8, scholar: scholar(1, "private") }, // unrecognized => fail-closed
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    const emailIdx = header.indexOf("email");
+    expect(body[0][emailIdx]).toBe("");
+    expect(body[1][emailIdx]).toBe("");
+  });
+
+  it("gate OFF: a 'none' scholar's email STILL exports (legacy behavior, row 13 analog)", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(false);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0, "none") },
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    // With the gate off the release code is ignored: the email is present.
+    expect(table.slice(1)[0][header.indexOf("email")]).toBe("scholar0@med.cornell.edu");
+  });
+
+  it("release-code blanking stacks WITH the #536 hidden-role carve (both blank)", async () => {
+    vi.mocked(isEmailReleaseGateEnabled).mockReturnValue(true);
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      // public email but hidden role => blank (role carve wins)
+      { pmidCount: 9, scholar: { ...scholar(0, "public"), roleCategory: "doctoral_student" } },
+      // faculty but 'none' => blank (release code wins)
+      { pmidCount: 8, scholar: scholar(1, "none") },
+      // faculty + public => present
+      { pmidCount: 7, scholar: scholar(2, "public") },
+    ]);
+
+    const result = await exportFamily();
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    const emailIdx = header.indexOf("email");
+    expect(body[0][emailIdx]).toBe("");
+    expect(body[1][emailIdx]).toBe("");
+    expect(body[2][emailIdx]).toBe("scholar2@med.cornell.edu");
+  });
+});
+
+describe("buildScholarExport — HARD <=50 cohort cap (SPEC §B.3)", () => {
+  function resolveCrispr() {
+    vi.mocked(getFamily).mockResolvedValue({
+      supercategory: "animal_cell_models",
+      supercategorySlug: "animal-cell-models",
+      familyId: "fam_x",
+      familyLabel: "CRISPR screens",
+      familySlug: "crispr-screens-fam_x",
+    } as never);
+  }
+
+  it("row 11 — cohort = 51: REFUSES (returns null), no partial top-50", async () => {
+    resolveCrispr();
+    // The loader fetches CAP + 1 (51); a 51-row cohort trips the over-cap guard.
+    const rows = Array.from({ length: 51 }, (_, i) => ({
+      pmidCount: 51 - i,
+      scholar: scholar(i),
+    }));
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+
+    const result = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("row 12 — cohort = 50: exports the COMPLETE 50-row cohort", async () => {
+    resolveCrispr();
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      pmidCount: 50 - i,
+      scholar: scholar(i),
+    }));
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+
+    const result = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(result).not.toBeNull();
+    expect(parseCsv(result!.csv).slice(1).length).toBe(50);
+  });
+
+  it("a small cohort (3) exports complete — the cap never truncates in range", async () => {
+    resolveCrispr();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0) },
+      { pmidCount: 8, scholar: scholar(1) },
+      { pmidCount: 7, scholar: scholar(2) },
+    ]);
+
+    const result = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(parseCsv(result!.csv).slice(1).length).toBe(3);
+  });
+});
+
+describe("isSupercategoryExportInRange — button-visibility gate (SPEC §B.3)", () => {
+  it("true when the DISTINCT publicly-visible cohort is <= 50 (de-dups co-membership)", async () => {
+    // 3 family rows across 2 distinct scholars => distinct cohort = 2 (<= 50).
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { familyLabel: "Family A", scholar: { cwid: "c0" } },
+      { familyLabel: "Family B", scholar: { cwid: "c0" } },
+      { familyLabel: "Family A", scholar: { cwid: "c1" } },
+    ]);
+    await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(true);
+  });
+
+  it("false when more than 50 DISTINCT scholars qualify", async () => {
+    const rows = Array.from({ length: 51 }, (_, i) => ({
+      familyLabel: "Family A",
+      scholar: { cwid: `c${i}` },
+    }));
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(false);
+  });
+
+  it("excludes scholars from suppressed/sensitive families before counting", async () => {
+    // 60 rows, but every family is gated out => distinct visible cohort = 0.
+    vi.mocked(isFamilyPubliclyVisible).mockReturnValue(false);
+    const rows = Array.from({ length: 60 }, (_, i) => ({
+      familyLabel: `Family ${i}`,
+      scholar: { cwid: `c${i}` },
+    }));
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    await expect(isSupercategoryExportInRange("animal_cell_models")).resolves.toBe(true);
   });
 });

@@ -14,6 +14,7 @@ import { CoiGapCard } from "@/components/edit/coi-gap-card";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { EditShell } from "@/components/edit/edit-shell";
 import { EducationCard } from "@/components/edit/education-card";
+import { EmailCard } from "@/components/edit/email-card";
 import { FundingCard } from "@/components/edit/funding-card";
 import { HighlightsCard } from "@/components/edit/highlights-card";
 import { MenteesCard } from "@/components/edit/mentees-card";
@@ -42,6 +43,7 @@ import { isReciterRejectEnabled } from "@/lib/reciter/client";
 type AttrKey =
   | "home"
   | "name-title"
+  | "email"
   | "photo"
   | "overview"
   | "highlights"
@@ -69,6 +71,10 @@ const ATTRIBUTES: ReadonlyArray<AttrDef> = [
   // reads as a read-only profile-completeness overview of the target scholar.
   { key: "home", label: "Home", modes: ["self", "superuser"] },
   { key: "name-title", label: "Name & Title", readonly: true, modes: ["self", "superuser"] },
+  // Email + its Web Directory release audience — read-only (email-visibility
+  // SPEC § C). The release code is owned by the Web Directory SOR; this panel
+  // only shows the imported state and links out, so it carries no write control.
+  { key: "email", label: "Email", readonly: true, modes: ["self", "superuser"] },
   { key: "photo", label: "Photo", readonly: true, modes: ["self", "superuser"] },
   { key: "overview", label: "Overview", modes: ["self", "superuser"] },
   // Highlights (#836, SELF_EDIT_MANUAL_HIGHLIGHTS) — the opt-in manual override
@@ -160,6 +166,7 @@ const SELF_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   // gated/read-only it leads the WCM group.)
   "profile-url",
   "name-title",
+  "email",
   "photo",
   "appointments",
   "education",
@@ -182,6 +189,7 @@ const SELF_RAIL_KIND: Record<AttrKey, "owned" | "sourced" | "readonly"> = {
   education: "sourced",
   mentees: "sourced",
   "name-title": "readonly",
+  email: "readonly",
   photo: "readonly",
   coi: "readonly",
   "coi-gap": "readonly",
@@ -204,6 +212,7 @@ const SUPERUSER_RAIL_ORDER: ReadonlyArray<AttrKey> = [
   "home",
   "profile-url",
   "name-title",
+  "email",
   "photo",
   "overview",
   // Highlights follows Overview (mirrors the self rail); appears only when the
@@ -443,15 +452,27 @@ function renderPanel(
           attribute="name-title"
           cwid={cwid}
           heading="Name & Title"
-          description="Name, title, degrees, department, email, and ORCID come from the WCM directory and faculty records."
+          description="Name, title, degrees, department, and ORCID come from the WCM directory and faculty records."
           fields={[
             { label: "Name", value: ctx.scholar.fullName },
             { label: "Title", value: ctx.scholar.primaryTitle },
             { label: "Degrees", value: ctx.scholar.postnominal },
             { label: "Department", value: ctx.scholar.primaryDepartment },
-            { label: "Email", value: ctx.scholar.email },
             { label: "ORCID", value: ctx.scholar.orcid },
           ]}
+        />
+      );
+    case "email":
+      // Read-only Email tab (email-visibility SPEC § C). Email + its release
+      // audience are owned by the Web Directory SOR; the panel shows the imported
+      // state and links out — no write control. Always shows the email (owner
+      // context is internal); the visibility value is informational.
+      return (
+        <EmailCard
+          mode={childMode}
+          scholarName={scholarName}
+          email={ctx.scholar.email}
+          emailVisibility={ctx.scholar.emailVisibility}
         />
       );
     case "photo":

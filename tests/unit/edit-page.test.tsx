@@ -30,6 +30,7 @@ const ctx: EditContext = {
     postnominal: "MD, MPH",
     primaryDepartment: "Medicine",
     email: "self01@med.cornell.edu",
+    emailVisibility: "public",
     orcid: null,
     roleCategory: "full_time_faculty",
     overview: "<p>Hi.</p>",
@@ -277,6 +278,35 @@ describe("EditPage router — the Apollo shell + rail", () => {
     render(<EditPage ctx={ctx} mode="self" attr="name-title" />);
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
     expect(screen.getByTestId("request-a-change-toggle")).toBeTruthy();
+    // Email moved to its own tab — the Name & Title panel no longer echoes it.
+    expect(screen.queryByText("self01@med.cornell.edu")).toBeNull();
+  });
+
+  it("?attr=email renders the read-only Email tab: email, visibility label + explainer, Web Directory link", () => {
+    render(<EditPage ctx={ctx} mode="self" attr="email" />);
+    expect(document.querySelector('[data-slot="email-panel"]')).not.toBeNull();
+    expect(screen.getByText("self01@med.cornell.edu")).toBeTruthy();
+    // 'public' → "Public" label per SPEC table A.
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Public");
+    expect(screen.getByTestId("email-visibility-explainer")).toBeTruthy();
+    expect(screen.getByText("This section is not editable.")).toBeTruthy();
+    // Read-only: no control that writes the release code, just the SOR link.
+    const link = screen.getByTestId("email-web-directory-link");
+    expect(link.getAttribute("href")).toBe(
+      "https://directory.weill.cornell.edu/update/profile/index",
+    );
+  });
+
+  it("Email tab labels 'institution' as Institution only", () => {
+    const instCtx = { ...ctx, scholar: { ...ctx.scholar, emailVisibility: "institution" } };
+    render(<EditPage ctx={instCtx} mode="self" attr="email" />);
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Institution only");
+  });
+
+  it("Email tab fails closed: NULL / unrecognized visibility → Not released", () => {
+    const noneCtx = { ...ctx, scholar: { ...ctx.scholar, emailVisibility: null } };
+    render(<EditPage ctx={noneCtx} mode="self" attr="email" />);
+    expect(screen.getByTestId("email-visibility-label").textContent).toBe("Not released");
   });
 
   it("shows the Mentees and Conflicts of Interest rail items in self mode", () => {
