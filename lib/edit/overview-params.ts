@@ -152,6 +152,15 @@ export const OVERVIEW_SELECTION_MAX_ITEMS = 25;
  *  the papers, which are the heavy grounding (decision 3 / §3.5). */
 export const OVERVIEW_SELECTION_MAX_TOOLS = 10;
 
+/** The #765 §2 / §7.4 honesty floor: a method family is only default-selected
+ *  when it appears in ≥ 2 publications. Most families have `pmid_count = 1`; a
+ *  top-N-by-count default that surfaced single-paper long-tail families would
+ *  contradict the Methods rule line ("ranked by how often each appears"). The
+ *  client "Top N by score" Methods quick action applies the same floor. Lives
+ *  here (not `overview-facts.ts`) so the client picker can import it without
+ *  pulling the Prisma/`lib/db` server module into the browser bundle. */
+export const OVERVIEW_METHOD_PMID_FLOOR = 2;
+
 /** Coerce an untrusted value to a de-duped, trimmed, non-empty string array.
  *  A non-array, or any non-string member, yields a clean (possibly empty) list. */
 function toStringArray(raw: unknown): string[] {

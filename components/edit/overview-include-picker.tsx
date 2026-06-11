@@ -32,13 +32,13 @@ import { ExternalLink, Search } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import {
-  OVERVIEW_METHOD_PMID_FLOOR,
-  type OverviewSourceFunding,
-  type OverviewSourceOptions,
-  type OverviewSourcePublication,
+import type {
+  OverviewSourceFunding,
+  OverviewSourceOptions,
+  OverviewSourcePublication,
 } from "@/lib/edit/overview-facts";
 import {
+  OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
   type OverviewSelection,

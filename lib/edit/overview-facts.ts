@@ -24,6 +24,7 @@
  */
 import { db } from "@/lib/db";
 import {
+  OVERVIEW_METHOD_PMID_FLOOR,
   OVERVIEW_SELECTION_MAX_ITEMS,
   OVERVIEW_SELECTION_MAX_TOOLS,
   type OverviewSelection,
@@ -164,12 +165,6 @@ function isLeadRole(role: string): boolean {
   return /^(pi\b|pi-subaward|co-pi)/i.test(role.trim());
 }
 
-/** The #765 §2 / §7.4 honesty floor: a method family is only default-selected
- *  when it appears in ≥ 2 publications. Most families have `pmid_count = 1`; a
- *  top-N-by-count default that surfaced single-paper long-tail families would
- *  contradict the Methods rule line ("ranked by how often each appears"). The
- *  client "Top N by score" Methods quick action applies the same floor. */
-export const OVERVIEW_METHOD_PMID_FLOOR = 2;
 
 /**
  * The default pre-check rule (shared by the assembler's empty-selection path and
