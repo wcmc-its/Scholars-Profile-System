@@ -222,6 +222,29 @@ describe("analyzeStatement — end to end", () => {
     const bs = r.candidates.filter((c) => c.normalized === normalizeEntity("Boston Scientific"));
     expect(bs).toHaveLength(1);
   });
+
+  describe("includeSuppressed (diagnostic export only)", () => {
+    const stmt = "Dr. Smith is a consultant for Pfizer Inc.";
+    const smith = () => deriveScholar("John", "Smith");
+
+    it("still drops the Low (matched-as-disclosed) entity by default", () => {
+      const r = analyzeStatement(stmt, smith(), ["Pfizer"]);
+      expect(r.candidates).toHaveLength(0);
+      expect(r.suppressed.nearDisclosed).toBeGreaterThan(0);
+    });
+
+    it("returns the Low entity with its nearest disclosure + reason when opted in", () => {
+      const r = analyzeStatement(stmt, smith(), ["Pfizer"], { includeSuppressed: true });
+      expect(r.candidates).toHaveLength(1);
+      const c = r.candidates[0];
+      expect(c.tier).toBe("Low");
+      expect(c.nearestDisclosed).toBe("Pfizer");
+      expect(c.nearestScore).toBeGreaterThanOrEqual(0.6);
+      expect(c.tierReason).toMatch(/disclosed/i);
+      // The suppression tally is unchanged — opting in only changes what's returned.
+      expect(r.suppressed.nearDisclosed).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe("extractEntities", () => {
