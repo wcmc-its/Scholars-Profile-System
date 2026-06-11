@@ -219,8 +219,11 @@ export function SlugRequestCard({
         {phase === "rejected" && request && (
           <Alert variant="destructive" data-testid="slug-request-rejected">
             <AlertDescription>
-              Your request for <code>/{request.requestedSlug}</code> wasn&apos;t
-              approved.{" "}
+              Your request for{" "}
+              <code>
+                {SITE_HOST}/{request.requestedSlug}
+              </code>{" "}
+              wasn&apos;t approved.{" "}
               {request.decisionNote && request.decisionNote.trim().length > 0 && (
                 <>
                   <strong>Note from the reviewer:</strong> &ldquo;
@@ -318,9 +321,9 @@ export function SlugRequestCard({
                   Lowercase letters, numbers, and hyphens only. Use a variation of
                   your own first and last name — optionally with a middle initial
                   or fuller form — not a research area or other handle; requests
-                  that aren&apos;t name-based are declined.{" "}
+                  that aren&apos;t name-based are declined. The older{" "}
                   <code>/scholars/{formatResult?.ok ? formatResult.value : currentSlug}</code>{" "}
-                  will keep working too.
+                  address will keep redirecting here too.
                 </p>
               )}
             </div>

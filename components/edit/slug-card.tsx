@@ -35,6 +35,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { validateSlugFormat, type SlugFormatResult } from "@/lib/edit/validators";
 
+/** The public host the personalized URL hangs off (root form — the canonical
+ *  `scholars.weill.cornell.edu/<segment>`). Mirrors `slug-request-card`'s
+ *  `SITE_HOST` so the superuser and scholar surfaces show the same address. */
+const SITE_HOST = "scholars.weill.cornell.edu";
+
 export type SlugCardProps = {
   /** The target scholar's cwid (the API requests' `entityId`). */
   cwid: string;
@@ -162,14 +167,14 @@ export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
     <EditPanel
       slot="slug-card"
       heading="Profile URL"
-      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically. The short form scholars.weill.cornell.edu/<segment> and the longer /scholars/<segment> both lead to the same page."
+      description="Override the directory-derived URL segment. The change takes effect immediately; the old URL redirects to the new one automatically. The profile lives at scholars.weill.cornell.edu/<segment>; the older /scholars/<segment> address still redirects here."
     >
       <UnsavedChangesGuard dirty={dirty} />
       <div className="flex flex-col gap-3">
         <p className="flex flex-wrap items-center gap-2.5 text-sm">
           <span className="text-muted-foreground">Current URL: </span>
           <code className="bg-apollo-surface-2 border-apollo-border rounded border px-2.5 py-1 font-mono text-xs">
-            /scholars/{override ?? liveSlug}
+            {SITE_HOST}/{override ?? liveSlug}
           </code>
         </p>
 
@@ -182,7 +187,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
               className="bg-apollo-surface-2 border-apollo-border text-muted-foreground flex select-none items-center whitespace-nowrap border-r px-3 font-mono text-sm"
               data-slot="slug-prefix"
             >
-              /scholars/
+              {SITE_HOST}/
             </span>
             <Input
               id="slug-card-input"
@@ -254,7 +259,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
           >
             <Check className="text-apollo-green" />
             <AlertDescription className="text-apollo-green-foreground">
-              Override saved: <code>/scholars/{override}</code> is now live — the
+              Override saved: <code>{SITE_HOST}/{override}</code> is now live — the
               old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
@@ -267,7 +272,7 @@ export function SlugCard({ cwid, liveSlug, initialOverride }: SlugCardProps) {
           >
             <Check className="text-apollo-green" />
             <AlertDescription className="text-apollo-green-foreground">
-              Override cleared. The URL is now <code>/scholars/{liveSlug}</code>{" "}
+              Override cleared. The URL is now <code>{SITE_HOST}/{liveSlug}</code>{" "}
               — the old URL redirects to it automatically.
             </AlertDescription>
           </Alert>
