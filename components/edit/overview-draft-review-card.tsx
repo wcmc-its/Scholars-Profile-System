@@ -133,7 +133,7 @@ export function OverviewDraftReviewCard({
           disabled={disabled}
           data-testid="overview-draft-replace"
         >
-          Replace current bio
+          Replace current overview
         </Button>
         <Button
           type="button"

@@ -41,10 +41,10 @@ export function OverviewProvenanceNote({ provenance }: OverviewProvenanceNotePro
 function describe(origin: OverviewOrigin, model: string | null): string {
   switch (origin) {
     case "authored":
-      return "Current bio: written by you.";
+      return "Current overview: written by you.";
     case "generated":
-      return `Current bio: generated with ${model}.`;
+      return `Current overview: generated with ${model}.`;
     case "generated_edited":
-      return `Current bio: generated with ${model}, then edited by you.`;
+      return `Current overview: generated with ${model}, then edited by you.`;
   }
 }

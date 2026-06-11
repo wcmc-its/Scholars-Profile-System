@@ -80,7 +80,7 @@ const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again
 
 // #875 §6 — the two pre-generation conditional hints (verbatim from the spec).
 const HINT_EMPHASIS_CONFLICT =
-  "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the bio.";
+  "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the overview.";
 const HINT_SPARSE_SOURCES = "Limited sources may produce a generic draft.";
 
 /** A fresh, all-empty source selection (before the source-options load). */
@@ -176,7 +176,7 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
     <EditPanel
       slot="overview-card"
       heading="Overview"
-      description="This bio is shown read-only here."
+      description="This overview is shown read-only here."
     >
       {hasBio ? (
         <div
@@ -186,7 +186,7 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
         />
       ) : (
         <p className="text-muted-foreground text-sm" data-slot="overview-readonly-empty">
-          No bio yet.
+          No overview yet.
         </p>
       )}
     </EditPanel>
@@ -258,7 +258,7 @@ function OverviewEditorCard({
         slot="overview-card"
         heading="Overview"
         owned
-        description="A short bio shown at the top of your public profile."
+        description="A short overview shown at the top of your public profile."
       >
         <UnsavedChangesGuard dirty={editor.dirty} />
         <OverviewEditorBody editor={editor} previewHref={previewHref} sourceCounts={null} />
@@ -271,7 +271,7 @@ function OverviewEditorCard({
       slot="overview-card"
       heading="Overview"
       owned
-      description="A short bio shown at the top of your public profile."
+      description="A short overview shown at the top of your public profile."
     >
       <UnsavedChangesGuard dirty={editor.dirty} />
       <OverviewProvenanceNote provenance={provenance} />
@@ -810,7 +810,7 @@ function OverviewDraftBlock({
             </Button>
             <span className="text-muted-foreground text-sm">
               Draft from your Scholars publications, topics, and grants — you review it before
-              anything reaches your bio.
+              anything reaches your overview.
             </span>
           </div>
         </div>
@@ -853,14 +853,14 @@ function OverviewEditorBody({
       {isEmpty && (
         <p className="text-muted-foreground text-sm" data-slot="overview-editor-empty">
           {sourceCounts
-            ? `No bio yet. Generate a draft from your ${sourceCounts.publications} ${plural(
+            ? `No overview yet. Generate a draft from your ${sourceCounts.publications} ${plural(
                 sourceCounts.publications,
                 "publication",
               )} and ${sourceCounts.awards} ${plural(
                 sourceCounts.awards,
                 "award",
               )} above, or start writing here.`
-            : "No bio yet. Generate a draft from your work above, or start writing here."}
+            : "No overview yet. Generate a draft from your work above, or start writing here."}
         </p>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -917,7 +917,7 @@ function OverviewEditorBody({
             disabled={!editor.dirty || editor.overEditorialLimit || editor.isSaving}
             data-testid="overview-save"
           >
-            {editor.isSaving ? "Saving…" : "Save bio"}
+            {editor.isSaving ? "Saving…" : "Save overview"}
           </Button>
           <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
             <Globe className="size-3.5" aria-hidden="true" />
@@ -946,9 +946,9 @@ function plural(n: number, singular: string): string {
 function mapErrorToMessage(code: string): string {
   switch (code) {
     case "overview_too_long":
-      return `Your bio exceeds the ${OVERVIEW_MAX_CHARS.toLocaleString()}-character limit. Trim it and try again.`;
+      return `Your overview exceeds the ${OVERVIEW_MAX_CHARS.toLocaleString()}-character limit. Trim it and try again.`;
     case "invalid_value":
-      return "We couldn't save that bio. Try removing unusual formatting and saving again.";
+      return "We couldn't save that overview. Try removing unusual formatting and saving again.";
     default:
       return "Something went wrong — your changes weren't saved. Please try again.";
   }

@@ -171,7 +171,7 @@ describe("OverviewCard — error handling", () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          "We couldn't save that bio. Try removing unusual formatting and saving again.",
+          "We couldn't save that overview. Try removing unusual formatting and saving again.",
         ),
       ).toBeTruthy(),
     );
@@ -637,7 +637,7 @@ describe("OverviewCard — version history (Phase B)", () => {
     });
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" generateEnabled />);
     expect(await screen.findByTestId("overview-provenance-note")).toBeTruthy();
-    expect(screen.getByText("Current bio: generated with openai/gpt.")).toBeTruthy();
+    expect(screen.getByText("Current overview: generated with openai/gpt.")).toBeTruthy();
   });
 
   it("viewing a version lands it in the review card (not the editor) with the banner", async () => {
@@ -838,7 +838,7 @@ describe("OverviewCard — editor empty-state", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     expect(
       await screen.findByText(
-        "No bio yet. Generate a draft from your 2 publications and 1 award above, or start writing here.",
+        "No overview yet. Generate a draft from your 2 publications and 1 award above, or start writing here.",
       ),
     ).toBeTruthy();
   });
@@ -847,7 +847,7 @@ describe("OverviewCard — editor empty-state", () => {
     // No fetch stub installed → source-options never resolves synchronously.
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     expect(
-      screen.getByText("No bio yet. Generate a draft from your work above, or start writing here."),
+      screen.getByText("No overview yet. Generate a draft from your work above, or start writing here."),
     ).toBeTruthy();
     // Never flashes a "0 publications and 0 awards".
     expect(screen.queryByText(/0 publications and 0 awards/)).toBeNull();
@@ -856,13 +856,13 @@ describe("OverviewCard — editor empty-state", () => {
   it("shows count-less fallback on the manual (no-flag) surface", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" />);
     expect(
-      screen.getByText("No bio yet. Generate a draft from your work above, or start writing here."),
+      screen.getByText("No overview yet. Generate a draft from your work above, or start writing here."),
     ).toBeTruthy();
   });
 
   it("hides the empty-state once the editor has content", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>hi</p>" />);
-    expect(screen.queryByText(/No bio yet\./)).toBeNull();
+    expect(screen.queryByText(/No overview yet\./)).toBeNull();
   });
 });
 
@@ -918,7 +918,7 @@ describe("OverviewCard — conditional hints", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" generateEnabled />);
     const hint = await screen.findByTestId("overview-hint-emphasis-conflict");
     expect(hint.textContent).toContain(
-      "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the bio.",
+      "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the overview.",
     );
   });
 
@@ -965,16 +965,16 @@ describe("OverviewCard — readOnly arm", () => {
     expect((readonly as HTMLElement).className).toContain("prose");
   });
 
-  it("renders 'No bio yet.' when initialHtml is empty", () => {
+  it("renders 'No overview yet.' when initialHtml is empty", () => {
     render(<OverviewCard cwid={CWID} initialHtml="" readOnly />);
     const empty = document.querySelector('[data-slot="overview-readonly-empty"]');
     expect(empty).not.toBeNull();
-    expect((empty as HTMLElement).textContent).toBe("No bio yet.");
+    expect((empty as HTMLElement).textContent).toBe("No overview yet.");
   });
 
   it("renders a neutral read-only description (no longer claims only the owner can edit — #844)", () => {
     render(<OverviewCard cwid={CWID} initialHtml="<p>x</p>" readOnly />);
-    expect(screen.getByText("This bio is shown read-only here.")).toBeTruthy();
+    expect(screen.getByText("This overview is shown read-only here.")).toBeTruthy();
     // The pre-#844 copy is gone — a superuser CAN now edit any bio.
     expect(screen.queryByText("Only the profile owner can edit the bio.")).toBeNull();
   });

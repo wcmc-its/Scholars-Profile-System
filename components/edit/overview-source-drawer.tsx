@@ -120,7 +120,7 @@ export function OverviewSourceDrawer({
       <Sheet open={open} onOpenChange={(next) => setOpen(next)}>
         <SheetContent side="right" className="sm:max-w-md" data-testid="overview-source-drawer">
           <SheetHeader className="flex-row items-center justify-between pr-12">
-            <SheetTitle>Sources for your bio</SheetTitle>
+            <SheetTitle>Sources for your overview</SheetTitle>
             <span
               className="bg-apollo-maroon/10 text-apollo-maroon rounded-md px-2.5 py-1 text-xs font-medium"
               data-testid="overview-sources-counter"
@@ -129,7 +129,7 @@ export function OverviewSourceDrawer({
             </span>
           </SheetHeader>
           <SheetDescription className="sr-only">
-            Pick which publications, funding awards, and methods ground your generated bio.
+            Pick which publications, funding awards, and methods ground your generated overview.
           </SheetDescription>
 
           <div className="flex-1 overflow-y-auto p-4">

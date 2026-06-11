@@ -87,7 +87,7 @@ export function OverviewEditor({ initialHtml, onChange }: OverviewEditorProps) {
       History,
       Placeholder.configure({
         placeholder:
-          "Write a short bio — your background, research focus, and clinical interests.",
+          "Write a short overview — your background, research focus, and clinical interests.",
       }),
     ],
     editorProps: {
