@@ -175,21 +175,21 @@ describe("SlugCard — Clear override", () => {
 });
 
 describe("SlugCard — panel copy", () => {
-  it("notes both the short root form and the /scholars/ form lead to the same page", () => {
+  it("leads with the canonical host form and notes the older /scholars/ address still redirects", () => {
     render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride={null} />);
     const desc = screen.getByText(/Override the directory-derived URL segment/);
     expect(desc.textContent).toMatch(/scholars\.weill\.cornell\.edu\/<segment>/);
     expect(desc.textContent).toMatch(/\/scholars\/<segment>/);
-    expect(desc.textContent).toMatch(/same page/i);
+    expect(desc.textContent).toMatch(/redirects here/i);
   });
 });
 
 describe("SlugCard — initial-override rendering", () => {
   it("displays the override in the URL preview when initialOverride is set", () => {
     render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride="custom" />);
-    // Current URL line shows /scholars/custom not /scholars/alex
+    // Current URL line shows the override (custom) not the live slug (alex).
     const preview = screen.getByText(/Current URL:/).parentElement;
-    expect(preview?.textContent).toContain("/scholars/custom");
+    expect(preview?.textContent).toContain("scholars.weill.cornell.edu/custom");
   });
 
   it("pre-fills the input with the override value", () => {
@@ -200,6 +200,6 @@ describe("SlugCard — initial-override rendering", () => {
   it("displays the live slug in the URL preview when no override exists", () => {
     render(<SlugCard cwid={CWID} liveSlug="alex" initialOverride={null} />);
     const preview = screen.getByText(/Current URL:/).parentElement;
-    expect(preview?.textContent).toContain("/scholars/alex");
+    expect(preview?.textContent).toContain("scholars.weill.cornell.edu/alex");
   });
 });

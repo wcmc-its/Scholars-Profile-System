@@ -178,6 +178,6 @@ describe("UI-SPEC #17 — slug save success copy", () => {
     const alert = screen.getByTestId("slug-card-set-success");
     expect(alert.textContent).toMatch(/is now live/i);
     expect(alert.textContent).toMatch(/redirects to it automatically/i);
-    expect(alert.textContent).toContain("/scholars/new-handle");
+    expect(alert.textContent).toContain("scholars.weill.cornell.edu/new-handle");
   });
 });

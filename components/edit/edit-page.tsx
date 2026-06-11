@@ -589,8 +589,8 @@ function ProfileUrlReadonlyPanel({ slug, cwid }: { slug: string; cwid: string })
         <p>
           A personalized URL must be a variation of your own first and last name &mdash; optionally
           with a middle initial or fuller form &mdash; not a research area or other handle, using
-          lowercase letters, numbers, and hyphens only. Your current address (
-          <code className="font-mono">/scholars/{slug}</code>) keeps working either way.
+          lowercase letters, numbers, and hyphens only. The older{" "}
+          <code className="font-mono">/scholars/{slug}</code> address still redirects here.
         </p>
       </div>
       <RequestAChangeDialog
