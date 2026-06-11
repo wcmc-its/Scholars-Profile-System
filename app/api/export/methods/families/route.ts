@@ -8,8 +8,10 @@
  *   supercategory, family_label, tier, reason, is_new, reviewed_at,
  *   scholar_count, pmid_count
  *
- * Supports the same `?filter=` narrowing as the JSON roster; the export reflects
- * exactly what the steward is viewing.
+ * Supports the same `?filter=` narrowing as the JSON roster, plus
+ * `?supercategory=` (a comma-separated allow-list) so the CSV matches the
+ * steward's supercategory multi-select — the export reflects exactly what they
+ * are viewing.
  *
  * Same guard as the JSON roster (§7/§9): COMMS_STEWARD_ENABLED off => 404;
  * anonymous => 401; non-steward/superuser => 403 (`not_comms_steward`, logged).
@@ -28,6 +30,8 @@ import {
   buildFamilyRoster,
   applyRosterFilter,
   parseRosterFilter,
+  applySupercategoryFilter,
+  parseSupercategoriesParam,
 } from "@/lib/api/methods-families";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +76,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const filter = parseRosterFilter(request.nextUrl.searchParams.get("filter"));
-  const roster = applyRosterFilter(await buildFamilyRoster(), filter);
+  const supercategories = parseSupercategoriesParam(
+    request.nextUrl.searchParams.get("supercategory"),
+  );
+  const roster = applySupercategoryFilter(
+    applyRosterFilter(await buildFamilyRoster(), filter),
+    supercategories,
+  );
 
   const rows: CsvCell[][] = roster.map((r) => [
     r.supercategory,

@@ -207,3 +207,21 @@ export function parseRosterFilter(raw: string | null): FamilyRosterFilter {
     ? (raw as FamilyRosterFilter)
     : "all";
 }
+
+/** Parse an untrusted `?supercategory=` value — a comma-separated list — into a
+ *  deduped, trimmed, non-empty array. Absent/blank ⇒ `[]` (no narrowing). */
+export function parseSupercategoriesParam(raw: string | null): string[] {
+  if (!raw) return [];
+  return [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+}
+
+/** Narrow a roster to the given supercategories. An empty list is the identity
+ *  (no supercategory selected ⇒ show all). Composes AFTER `applyRosterFilter`. */
+export function applySupercategoryFilter(
+  rows: FamilyRosterRow[],
+  supercategories: readonly string[],
+): FamilyRosterRow[] {
+  if (supercategories.length === 0) return rows;
+  const allow = new Set(supercategories);
+  return rows.filter((r) => allow.has(r.supercategory));
+}
