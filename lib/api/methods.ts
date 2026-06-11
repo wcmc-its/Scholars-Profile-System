@@ -198,6 +198,17 @@ export async function getFamily(
     const byId = candidates.find((g) => g._max.familyId === urlFamilyId);
     if (byId) chosen = { familyLabel: byId.familyLabel, familyId: byId._max.familyId ?? "" };
   }
+  // A bare `fam_NNNN` segment carries NO label-slug prefix, so the prefix match
+  // above yields no candidate. The `FamilyScholarsRow` client (and any bare-id
+  // permalink) sends exactly this shape — `familyId={activeFamilyId}` — so resolve
+  // it directly by the latest `familyId` across the supercategory's families. This
+  // is the "bare family id resolves through the id tie-break path" the scholars
+  // route documents; without it that row's endpoint never resolves and the row is
+  // always empty. A stale id that is no longer any family's latest still → null.
+  if (!chosen && urlFamilyId) {
+    const byId = famGroups.find((g) => g._max.familyId === urlFamilyId);
+    if (byId) chosen = { familyLabel: byId.familyLabel, familyId: byId._max.familyId ?? "" };
+  }
   if (!chosen) return null;
 
   // §3.4 overlay gate — suppressed/sensitive families have no public page.
