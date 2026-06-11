@@ -559,14 +559,13 @@ function PublicationsItem({
       marker={total > 0 ? "done" : "info"}
       title="Publications"
       subtitle={subtitle}
-      // Superusers have no per-scholar Publications tab to deep-link into, so the
-      // row is informational only (count, no CTA). Self keeps the "Review" link.
+      // Both self and superuser now have a per-scholar Publications tab to
+      // deep-link into (a superuser manages pubs on the scholar's behalf), so the
+      // "Review" link shows in both modes.
       action={
-        isAdmin ? null : (
-          <RowLink href={`${basePath}?attr=publications`} testId="home-card-publications">
-            Review
-          </RowLink>
-        )
+        <RowLink href={`${basePath}?attr=publications`} testId="home-card-publications">
+          Review
+        </RowLink>
       }
     />
   );

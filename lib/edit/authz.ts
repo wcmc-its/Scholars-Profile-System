@@ -55,24 +55,23 @@ const ALLOW: AuthzResult = { ok: true };
 // ---------------------------------------------------------------------------
 
 /**
- * `POST /api/edit/field`. `overview` is editable by the scholar themselves OR a
- * superuser (#844 — admins may now author any scholar's bio; the broad admin
- * field-editing of OTHER fields stays deferred, so this widening is `overview`-
- * only). `selectedHighlightPmids` (#836) stays **self only** — a superuser does
- * not inherit it. `slug` is superuser-only.
+ * `POST /api/edit/field`. Two fields are editable by the scholar themselves OR a
+ * superuser: `overview` (#844 — admins author any scholar's bio) and
+ * `selectedHighlightPmids` (#836 — a superuser may curate any scholar's manual
+ * Highlights; the operator rule is that a superuser is unrestricted on the edit
+ * surface, so the original self-only scope was lifted). `slug` is superuser-only.
+ * The broad admin field-editing of any OTHER (not-yet-allowlisted) field stays
+ * deferred — this self-OR-superuser branch is scoped to exactly these two names.
  */
 export function authorizeFieldEdit(
   session: EditSession,
   target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
 ): AuthzResult {
-  if (target.fieldName === "overview") {
-    // Self OR superuser — and ONLY for `overview` (the deferred broad-admin
-    // widening must not leak to other fields via this branch — #844).
+  if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
+    // Self OR superuser — scoped to these two fields (the deferred broad-admin
+    // widening must not leak to other fields via this branch).
     if (session.cwid === target.entityId || session.isSuperuser) return ALLOW;
     return { ok: false, reason: "not_self" };
-  }
-  if (target.fieldName === "selectedHighlightPmids") {
-    return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
   }
   return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };
 }

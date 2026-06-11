@@ -36,6 +36,10 @@ export type RejectNoticeDialogProps = {
   onOpenChange: (open: boolean) => void;
   /** The publication title, shown in the dialog body. */
   pubTitle: string;
+  /** `superuser` reframes the first-person copy to the scholar's name — a
+   *  superuser rejecting a misattributed paper on the scholar's behalf. */
+  mode?: "self" | "superuser";
+  scholarName?: string;
   /**
    * Commit the rejection (async). Resolves on success — the parent then closes
    * the dialog; rejects to keep the dialog open with an inline error.
@@ -49,9 +53,13 @@ export function RejectNoticeDialog({
   open,
   onOpenChange,
   pubTitle,
+  mode = "self",
+  scholarName = "",
   onReject,
   onHideInstead,
 }: RejectNoticeDialogProps) {
+  const su = mode === "superuser";
+  const possessive = su ? `${scholarName}’s` : "yours";
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -85,25 +93,37 @@ export function RejectNoticeDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Is this paper not yours?</DialogTitle>
+          <DialogTitle>Is this paper not {possessive}?</DialogTitle>
           <DialogDescription>
             Rejecting <span className="text-foreground font-medium">{pubTitle}</span>{" "}
-            tells the matching system this publication isn&apos;t yours, so
-            it&apos;s corrected at the source — it stops appearing on your
-            profile, in internal reports, and in the Faculty Review Tool.
+            tells the matching system this publication isn&apos;t {possessive}, so
+            it&apos;s corrected at the source — it stops appearing on{" "}
+            {su ? `${scholarName}’s` : "your"} profile, in internal reports, and in the Faculty
+            Review Tool.
           </DialogDescription>
         </DialogHeader>
 
         <div className="text-sm text-muted-foreground">
           <p>
             <span className="text-foreground font-medium">
-              Only reject papers that genuinely aren&apos;t yours.
+              Only reject papers that genuinely aren&apos;t {possessive}.
             </span>{" "}
-            Rejecting your own work to tidy your profile feeds the wrong signal
-            into the matching algorithm and weakens attribution for everyone. If
-            this paper <span className="text-foreground font-medium">is</span>{" "}
-            yours and you&apos;d just rather not show it, hide it instead —
-            hiding is display-only and reversible.
+            {su ? (
+              <>
+                Rejecting {scholarName}&apos;s own work feeds the wrong signal into the matching
+                algorithm and weakens attribution for everyone. If this paper{" "}
+                <span className="text-foreground font-medium">is</span> {scholarName}&apos;s and
+                they&apos;d just rather not show it, hide it instead — hiding is display-only and
+                reversible.
+              </>
+            ) : (
+              <>
+                Rejecting your own work to tidy your profile feeds the wrong signal into the
+                matching algorithm and weakens attribution for everyone. If this paper{" "}
+                <span className="text-foreground font-medium">is</span> yours and you&apos;d just
+                rather not show it, hide it instead — hiding is display-only and reversible.
+              </>
+            )}
           </p>
         </div>
 
@@ -144,7 +164,7 @@ export function RejectNoticeDialog({
             onClick={handleReject}
             data-testid="reject-confirm"
           >
-            {pending ? "Working…" : "Reject — it's not mine"}
+            {pending ? "Working…" : su ? `Reject — it's not ${scholarName}’s` : "Reject — it's not mine"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -350,10 +350,31 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("coi-gap-tier-High")).toBeTruthy();
   });
 
-  it("never surfaces coi-gap in superuser mode, even with candidates present", () => {
+  it("surfaces coi-gap in superuser mode when candidates are present (operator decision), with reframed rail label", () => {
     const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
     render(<EditPage ctx={suCtx} mode="superuser" />);
+    const rail = screen.getByTestId("rail-coi-gap");
+    expect(rail).toBeTruthy();
+    // Reframed for the superuser — not the first-person "From your publications".
+    expect(rail.textContent).toContain("From the scholar");
+  });
+
+  it("does NOT surface coi-gap in superuser mode when there are no candidates", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
     expect(screen.queryByTestId("rail-coi-gap")).toBeNull();
+  });
+
+  it("?attr=coi-gap renders the advisory for a superuser with the privacy chip reframed (not 'only you')", () => {
+    const suCtx: EditContext = { ...superuserCtx, unmatchedPubmedCoi: gapCtx.unmatchedPubmedCoi };
+    render(<EditPage ctx={suCtx} mode="superuser" attr="coi-gap" />);
+    expect(document.querySelector('[data-slot="coi-gap-panel"]')).not.toBeNull();
+    // The privacy chip must stay truthful — admins can see these rows.
+    expect(screen.getByText("Visible to administrators and the scholar")).toBeTruthy();
+    expect(screen.queryByText("Visible only to you")).toBeNull();
+    // The back-link returns to the superuser's own COI surface.
+    expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe(
+      "/edit/scholar/other7?attr=coi",
+    );
   });
 });
 
@@ -414,13 +435,14 @@ describe("EditPage router — self Profile URL request card (#497 PR-3, flag-gat
 });
 
 describe("EditPage router — superuser mode", () => {
-  it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications no)", () => {
+  it("defaults to the Home completeness panel, shows the admin banner, and the superuser rail (Home + Profile URL at the top, Publications yes)", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
     expect(document.querySelector('[data-slot="home-panel"]')).not.toBeNull();
     expect(document.querySelector('[data-slot="superuser-banner"]')).not.toBeNull();
     expect(screen.getByTestId("rail-home")).toBeTruthy();
     expect(screen.getByTestId("rail-profile-url")).toBeTruthy();
-    expect(screen.queryByTestId("rail-publications")).toBeNull();
+    // Publications is now a superuser surface too (managed on the scholar's behalf).
+    expect(screen.queryByTestId("rail-publications")).not.toBeNull();
     // Home leads as the landing; Profile URL sits at the top of the attributes
     // (just under Home), ahead of the WCM-sourced ones.
     const home = screen.getByTestId("rail-home");
@@ -432,7 +454,7 @@ describe("EditPage router — superuser mode", () => {
     ).toBeTruthy();
   });
 
-  it("Home (superuser): third-person header, Overview is editable (#844), Publications has no CTA, no units section", () => {
+  it("Home (superuser): third-person header, Overview is editable (#844), Publications has a Review CTA, no units section", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" attr="home" />);
     // Reframed, third-person heading.
     expect(screen.getByText("Profile completeness")).toBeTruthy();
@@ -441,9 +463,10 @@ describe("EditPage router — superuser mode", () => {
     const overviewCta = screen.getByTestId("home-card-overview");
     expect(overviewCta.textContent).toContain("Edit");
     expect(overviewCta.getAttribute("href")).toBe("/edit/scholar/other7?attr=overview");
-    // Publications row is informational only — no deep link (no superuser pubs tab).
+    // Publications now deep-links for a superuser too (managed on the scholar's behalf).
     expect(screen.getByTestId("home-item-publications")).toBeTruthy();
-    expect(screen.queryByTestId("home-card-publications")).toBeNull();
+    const pubsCta = screen.getByTestId("home-card-publications");
+    expect(pubsCta.getAttribute("href")).toBe("/edit/scholar/other7?attr=publications");
     // "Units you manage" is the viewer's, omitted when editing someone else.
     expect(screen.queryByTestId("home-units")).toBeNull();
   });
@@ -479,5 +502,58 @@ describe("EditPage router — superuser mode", () => {
     render(<EditPage ctx={superuserCtx} mode="superuser" />);
     const link = screen.getByTestId("rail-appointments") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/edit/scholar/other7?attr=appointments");
+  });
+
+  // #836 — a superuser may curate another scholar's Highlights (superuser is
+  // unrestricted on the edit surface). The rail item + card appear only when the
+  // loader populated `ctx.highlights`; the copy is reframed to the scholar's name.
+  it("surfaces the Highlights rail item + card in superuser mode when the loader populated it, with reframed copy", () => {
+    const withHighlights: EditContext = {
+      ...superuserCtx,
+      highlights: {
+        manualEnabled: false,
+        manualPmids: [],
+        aiPmids: ["100"],
+        pickable: [
+          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024 },
+          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025 },
+        ],
+      },
+    };
+    render(<EditPage ctx={withHighlights} mode="superuser" attr="highlights" />);
+    const rail = screen.getByTestId("rail-highlights") as HTMLAnchorElement;
+    expect(rail.getAttribute("href")).toBe("/edit/scholar/other7?attr=highlights");
+    // Reframed to a third-person action — not the first-person self label.
+    expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose highlights manually");
+    expect(screen.queryByText("Choose my highlights manually")).toBeNull();
+  });
+
+  it("drops the Highlights rail item in superuser mode when the loader left it null (flag off / not loaded)", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" />);
+    expect(screen.queryByTestId("rail-highlights")).toBeNull();
+  });
+
+  // A superuser manages another scholar's publications on their behalf — the card
+  // renders with copy reframed to the scholar (not first-person "My publications").
+  it("?attr=publications renders the publications card for a superuser with reframed copy", () => {
+    const withPubs: EditContext = {
+      ...superuserCtx,
+      publications: [
+        {
+          pmid: "1",
+          title: "A study",
+          journal: "Cell",
+          year: 2024,
+          state: "shown",
+          suppressionId: null,
+          isSoleDisplayedAuthor: false,
+        },
+      ],
+    };
+    render(<EditPage ctx={withPubs} mode="superuser" attr="publications" />);
+    expect(document.querySelector('[data-slot="publications-card"]')).not.toBeNull();
+    expect(screen.getByTestId("publications-filter")).toBeTruthy();
+    // Reframed heading — not the first-person "My publications".
+    expect(screen.queryByText("My publications")).toBeNull();
   });
 });

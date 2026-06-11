@@ -108,6 +108,10 @@ const ADMIN = { cwid: "adm001", isSuperuser: true };
 const fakeCtx = (cwid: string) => ({
   scholar: { cwid, slug: cwid, preferredName: cwid, fullName: cwid, overview: "", slugOverride: null, suppression: { ownRow: null, adminRow: null } },
   publications: [],
+  // The real loader always returns these (array + nullable); the page reads them
+  // to derive the valid `?attr` set (#836 highlights + COI-gap visibility).
+  unmatchedPubmedCoi: [],
+  highlights: null,
 });
 
 function params(cwid: string): Promise<{ cwid: string }> {
@@ -183,7 +187,15 @@ describe("/edit/scholar/[cwid] — authorization matrix", () => {
     expect(result.props.mode).toBe("self");
     const ctx = result.props.ctx as { scholar: { cwid: string } };
     expect(ctx.scholar.cwid).toBe("self01");
-    expect(mockLoadEditContext).toHaveBeenCalledWith("self01", expect.anything());
+    // #836 — the page now requests highlights context (self or superuser); the
+    // opts arg carries the flag-derived `includeHighlights` boolean.
+    expect(mockLoadEditContext).toHaveBeenCalledWith(
+      "self01",
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      expect.objectContaining({ includeHighlights: expect.any(Boolean) }),
+    );
   });
 
   it("signed-in superuser on another cwid → EditPage(mode='superuser')", async () => {

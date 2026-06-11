@@ -71,7 +71,9 @@ describe("CoiGapCard", () => {
     // Nested under Conflicts of Interest — the back-link returns to the parent.
     expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe("/edit?attr=coi");
     const chips = screen.getByTestId("coi-gap-reassure").textContent ?? "";
-    expect(chips).toContain("Visible only to you");
+    // "Visible only to you" was removed — admins can now see this surface, so the
+    // promise would no longer be truthful (the superuser gets an accurate note instead).
+    expect(chips).not.toContain("Visible only to you");
     expect(chips).toContain("Not a compliance judgement");
     expect(chips).toContain("Managed in the Gateway, never here");
     // A derived SUGGESTION must NOT wear the authoritative "Locked — managed at
@@ -142,6 +144,51 @@ describe("CoiGapCard", () => {
       );
       expect(screen.getByTestId("coi-gap-summary").textContent).toBe(
         "1 worth reviewing · 1 likely already covered",
+      );
+    });
+  });
+
+  describe("superuser mode — reframed copy + the action nag (operator decision)", () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }),
+      );
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it("reframes the privacy chip + back-link and never falsely promises 'only you'", () => {
+      render(
+        <CoiGapCard cwid="self01" mode="superuser" scholarName="Dr. Other" candidates={CANDIDATES} />,
+      );
+      const chips = screen.getByTestId("coi-gap-reassure").textContent ?? "";
+      expect(chips).toContain("Visible to administrators and the scholar");
+      expect(chips).not.toContain("Visible only to you");
+      // The back-link returns to the superuser's own COI surface.
+      expect(screen.getByTestId("coi-gap-back").getAttribute("href")).toBe(
+        "/edit/scholar/self01?attr=coi",
+      );
+    });
+
+    it("nags before any action — 'Not relevant' opens a confirm and does NOT write until confirmed", async () => {
+      render(
+        <CoiGapCard cwid="self01" mode="superuser" scholarName="Dr. Other" candidates={CANDIDATES} />,
+      );
+      fireEvent.click(screen.getByTestId("coi-gap-dismiss-gap-1"));
+      // The nag is open; nothing has been written yet.
+      const continueBtn = await screen.findByRole("button", { name: "Continue" });
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      // Governance holds inside the nag too — no forbidden accusatory vocabulary.
+      const text = document.body.textContent ?? "";
+      for (const re of FORBIDDEN) {
+        expect(text, `forbidden word matched: ${re}`).not.toMatch(re);
+      }
+      // Confirming fires the dismiss write.
+      fireEvent.click(continueBtn);
+      await screen.findByTestId("coi-gap-undo-gap-1");
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/edit/coi-gap/gap-1/dismiss",
+        expect.objectContaining({ method: "POST" }),
       );
     });
   });

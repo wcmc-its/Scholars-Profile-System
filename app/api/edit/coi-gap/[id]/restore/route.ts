@@ -8,11 +8,11 @@
  * (`status` back to 'new'), never a verdict and never a compliance event. A B03
  * audit row records the scholar's own action, self-scoped like the dismiss.
  *
- * Authorization is GENUINE-self, identical to dismiss: the candidate's `cwid`
- * must equal the REAL signed-in human AND no impersonation overlay may be live.
- * A superuser, a curator, and a superuser impersonating the scholar via "View
- * as" (#637) are ALL refused 403. Dormant behind `SELF_EDIT_COI_GAP_HINT`: 503
- * after authz, before any write.
+ * Authorization, identical to dismiss (operator decision, #836 follow-on):
+ * genuine self OR a genuine (non-impersonating) superuser. A superuser
+ * impersonating the scholar via "View as" (#637) and a non-superuser
+ * curator/proxy are refused. Dormant behind `SELF_EDIT_COI_GAP_HINT`: 503 after
+ * authz, before any write.
  */
 import { type NextRequest, type NextResponse } from "next/server";
 
@@ -30,7 +30,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const req = await readEditRequest(request);
   if (!req.ok) return req.response;
-  const { realCwid, impersonatedCwid, requestId } = req.ctx;
+  const { session, realCwid, impersonatedCwid, requestId } = req.ctx;
 
   const { id } = await params;
   if (typeof id !== "string" || id.length === 0) {
@@ -43,9 +43,11 @@ export async function POST(
   });
   if (!candidate) return editError(404, "not_found");
 
-  // --- authorization (403): GENUINE self only (same contract as dismiss). ---
+  // --- authorization (403): genuine self OR a genuine (non-impersonating)
+  //     superuser (same contract as dismiss). ---
   const isGenuineSelf = impersonatedCwid === null && candidate.cwid === realCwid;
-  if (!isGenuineSelf) {
+  const isGenuineSuperuser = impersonatedCwid === null && session.isSuperuser;
+  if (!isGenuineSelf && !isGenuineSuperuser) {
     logEditDenial({
       actorCwid: realCwid,
       targetCwid: candidate.cwid,
@@ -74,7 +76,7 @@ export async function POST(
       });
       await appendAuditRow(tx, {
         actorCwid: realCwid,
-        impersonatedCwid, // always null here (genuine-self gate above)
+        impersonatedCwid, // always null — both allowed paths require no impersonation
         targetEntityType: "coi_gap_candidate",
         targetEntityId: candidate.id,
         action: "coi_gap_restore",

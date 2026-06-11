@@ -24,10 +24,13 @@
  *     durably (the daily `etl:coi-gap` respects it and never re-nags); Undo
  *     restores it.
  *
- * Self-only is enforced upstream at the data layer (`loadEditContext` only
- * populates `unmatchedPubmedCoi` for a genuine, non-impersonating self viewer
- * behind the flag) and again at the dismiss/restore APIs; this component renders
- * only what it is handed.
+ * Visibility was originally self-only; an operator decision (#836 follow-on) also
+ * lets a (non-impersonating) superuser view + act on this surface on the scholar's
+ * behalf, with a confirmation "nag" before any action and the privacy chip
+ * reframed so it never falsely promises "only you". Who may load it is enforced
+ * upstream (`loadEditContext` populates `unmatchedPubmedCoi` only for an allowed
+ * actor behind the flag) and again at the dismiss/restore APIs (genuine-self OR
+ * genuine-superuser); this component renders only what it is handed.
  */
 "use client";
 
@@ -35,6 +38,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowUpRight, ChevronLeft, EyeOff, Info, Lock } from "lucide-react";
 
+import { ConfirmDialog } from "@/components/edit/confirm-dialog";
 import { EditPanel } from "@/components/edit/edit-panel";
 import { RequestAChangeDialog } from "@/components/edit/request-a-change-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -44,12 +48,25 @@ import type { EditContextCoiGapCandidate } from "@/lib/api/edit-context";
 
 export type CoiGapCardProps = {
   cwid: string;
+  /** `superuser` reframes the advisory copy + the privacy chip to the scholar's
+   *  name and gates every action behind a confirmation "nag" — a superuser acts
+   *  on this sensitive surface on the scholar's behalf (operator decision). */
+  mode?: "self" | "superuser";
+  scholarName?: string;
   candidates: ReadonlyArray<EditContextCoiGapCandidate>;
 };
 
 const PUBMED_URL = (pmid: string) => `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
 
-export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
+export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }: CoiGapCardProps) {
+  const su = mode === "superuser";
+  // The back-link returns to the COI panel on the actor's own surface.
+  const backHref = su ? `/edit/scholar/${cwid}?attr=coi` : "/edit?attr=coi";
+  // The "nag" (operator decision): a superuser confirms before any dismiss /
+  // restore, since these are the scholar's private suggestions. Null when closed.
+  const [confirm, setConfirm] = React.useState<{ id: string; action: "dismiss" | "restore" } | null>(
+    null,
+  );
   // The full set always renders; a "Not relevant" row flips IN PLACE to a
   // "marked not relevant — Undo" line (the `dismissed` set is this session's
   // view of which rows the scholar hid). The DB is the source of truth on
@@ -108,6 +125,13 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
     })();
   }
 
+  // A superuser routes every action through the confirm "nag" first; a scholar
+  // acts directly on their own suggestions.
+  function requestMutate(id: string, action: "dismiss" | "restore") {
+    if (su) setConfirm({ id, action });
+    else mutate(id, action);
+  }
+
   const active = candidates.filter((c) => !dismissed.has(c.id));
   const reviewing = active.filter((c) => c.tier === "High").length;
   const covered = active.filter((c) => c.tier === "Medium").length;
@@ -119,7 +143,7 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
   return (
     <>
       <Link
-        href="/edit?attr=coi"
+        href={backHref}
         data-testid="coi-gap-back"
         className="text-apollo-slate -mb-1 inline-flex w-fit items-center gap-1 text-sm font-medium hover:underline"
       >
@@ -129,11 +153,18 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
 
       <EditPanel
         slot="coi-gap-panel"
-        heading="From your publications"
-        description="Relationships named in the “Competing interests” statements of your own PubMed-indexed papers that we couldn’t match to a current Weill Research Gateway disclosure."
+        heading={su ? "From the scholar’s publications" : "From your publications"}
+        description={`Relationships named in the “Competing interests” statements of ${
+          su ? `${scholarName}’s` : "your"
+        } own PubMed-indexed papers that we couldn’t match to a current Weill Research Gateway disclosure.`}
       >
         <ul className="flex flex-wrap gap-2" data-testid="coi-gap-reassure">
-          <ReassureChip icon={EyeOff} label="Visible only to you" />
+          {/* The "Visible only to you" promise was removed — admins can now see
+              this surface, so it would no longer be truthful. The superuser keeps
+              an explicit (accurate) visibility note; the self view simply drops it. */}
+          {su && (
+            <ReassureChip icon={EyeOff} label="Visible to administrators and the scholar" />
+          )}
           <ReassureChip icon={Info} label="Not a compliance judgement" />
           <ReassureChip icon={Lock} label="Managed in the Gateway, never here" />
         </ul>
@@ -167,7 +198,7 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
                       variant="ghost"
                       size="sm"
                       disabled={isPending}
-                      onClick={() => mutate(c.id, "restore")}
+                      onClick={() => requestMutate(c.id, "restore")}
                       data-testid={`coi-gap-undo-${c.id}`}
                     >
                       Undo
@@ -218,7 +249,7 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
                       <button
                         type="button"
                         disabled={isPending}
-                        onClick={() => mutate(c.id, "dismiss")}
+                        onClick={() => requestMutate(c.id, "dismiss")}
                         className="text-muted-foreground hover:text-foreground text-[0.8rem] disabled:opacity-50"
                         data-testid={`coi-gap-dismiss-${c.id}`}
                       >
@@ -237,6 +268,35 @@ export function CoiGapCard({ cwid, candidates }: CoiGapCardProps) {
           })}
         </ul>
       </EditPanel>
+
+      {/* The superuser "nag" (operator decision): confirm before acting on the
+          scholar's private suggestions. Self never sees this — `requestMutate`
+          only opens it when `su`. */}
+      <ConfirmDialog
+        open={confirm !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirm(null);
+        }}
+        title={`Act on ${scholarName}’s private suggestion?`}
+        description={
+          // Governance: the forbidden accusatory vocabulary (undisclosed / failed
+          // to disclose / missing / violation / gap) must NOT appear here either.
+          `These are ${scholarName}’s private suggestions worth reviewing, surfaced from their own ` +
+          `publications — visible to administrators and ${scholarName}, never a compliance judgement. ` +
+          (confirm?.action === "restore"
+            ? `Restoring brings this suggestion back to ${scholarName}’s review. `
+            : `Marking it not relevant hides this suggestion from ${scholarName}’s review. `) +
+          `Continue only if you have a legitimate reason to act on their behalf.`
+        }
+        reasonMode="none"
+        confirmLabel="Continue"
+        confirmVariant="default"
+        onConfirm={() => {
+          const c = confirm;
+          setConfirm(null);
+          if (c) mutate(c.id, c.action);
+        }}
+      />
     </>
   );
 }

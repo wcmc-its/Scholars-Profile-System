@@ -243,7 +243,7 @@ describe("POST /api/edit/clear-field — selectedHighlightPmids (#836)", () => {
     expect(mockTransaction).not.toHaveBeenCalled();
   });
 
-  it("rejects a cross-scholar clear with 403 (self-only)", async () => {
+  it("rejects a NON-superuser cross-scholar clear with 403", async () => {
     process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
     mockGetEditSession.mockResolvedValue(SELF);
     const res = await POST(
@@ -251,6 +251,21 @@ describe("POST /api/edit/clear-field — selectedHighlightPmids (#836)", () => {
     );
     expect(res.status).toBe(403);
     expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it("allows a superuser to clear another scholar's highlights — 200 (#836 superuser widening)", async () => {
+    process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
+    mockGetEditSession.mockResolvedValue(ADMIN);
+    mockFieldOverrideFindUnique.mockResolvedValue({ value: '["100","200"]' });
+    const res = await POST(
+      post({ entityType: "scholar", entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cleared).toBe(true);
+    expect(mockFieldOverrideDelete).toHaveBeenCalledTimes(1);
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(mockReflectOverviewEdit).toHaveBeenCalled();
   });
 
   it("deletes the override + writes a clear audit row, revalidates the profile, cleared:true", async () => {

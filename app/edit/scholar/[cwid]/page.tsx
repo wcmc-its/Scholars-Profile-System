@@ -40,6 +40,8 @@ import {
   type UnitScholarLookup,
 } from "@/lib/edit/unit-scholar-authz";
 import { isSlugRequestEnabled, loadLatestSlugRequest } from "@/lib/edit/slug-request";
+import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isCoiGapHintEnabled } from "@/lib/edit/coi-gap-hint";
 
 export const dynamic = "force-dynamic";
 
@@ -145,7 +147,20 @@ export default async function EditScholarPage({
     }
   }
 
-  const ctx = await loadEditContext(targetCwid, db.read);
+  // #836 — the manual-Highlights editor and the COI-gap advisory both load for
+  // the scholar themselves OR a (non-impersonating) superuser. A superuser is
+  // unrestricted on the edit surface (operator decision); COI-gap was originally
+  // a privacy carve-out but is now superuser-visible too, with a UI nag before any
+  // action and the dismiss/restore routes re-authorizing genuine-self-or-superuser.
+  // Neither is surfaced to a proxy / unit-admin editor, and the loader populates
+  // them only when requested + the flag is on, so they stay dark otherwise.
+  const selfOrSuperuser = isSelf || session.isSuperuser;
+  const includeHighlights = isManualHighlightsEnabled() && selfOrSuperuser;
+  const includeCoiGap = isCoiGapHintEnabled() && selfOrSuperuser;
+  const ctx = await loadEditContext(targetCwid, db.read, new Date(), undefined, {
+    includeHighlights,
+    includeCoiGap,
+  });
   if (!ctx) {
     // The scholar row does not exist (or is soft-deleted). A 404 keeps the
     // route shape predictable — there is no profile to edit.
@@ -170,13 +185,13 @@ export default async function EditScholarPage({
 
   // Canonicalize a present-but-invalid `?attr` (T1.13): redirect to the bare
   // route rather than render the default panel behind a stale URL. The valid set
-  // depends on `mode` (superuser has no Publications), so derive it here.
+  // depends on `mode` (e.g. the COI-gap advisory stays self-only), so derive it here.
   // The redirect target carries no `?attr`, so the re-load never loops.
   const basePath = `/edit/scholar/${targetCwid}`;
   const validAttrs: readonly string[] = visibleAttrKeys(
     mode,
     slugRequestEnabled,
-    false,
+    ctx.unmatchedPubmedCoi.length > 0,
     ctx.highlights !== null,
   );
   if (attr !== undefined && !validAttrs.includes(attr)) {

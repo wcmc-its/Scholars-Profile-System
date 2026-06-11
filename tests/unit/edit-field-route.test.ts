@@ -472,7 +472,7 @@ describe("POST /api/edit/field — superuser cross-scholar overview (#844)", () 
     expect(edited).toBeUndefined();
   });
 
-  it("does NOT widen the superuser path to selectedHighlightPmids (overview-only) — 403", async () => {
+  it("allows a superuser to set another scholar's selectedHighlightPmids — 200 (#836 superuser widening)", async () => {
     const original = process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
     process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = "on";
     mockGetEditSession.mockResolvedValue(ADMIN);
@@ -480,8 +480,9 @@ describe("POST /api/edit/field — superuser cross-scholar overview (#844)", () 
       const res = await POST(
         post({ entityType: "scholar", entityId: "other9", fieldName: "selectedHighlightPmids", value: ["100"] }),
       );
-      expect(res.status).toBe(403);
-      expect(mockTransaction).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(mockFieldOverrideUpsert).toHaveBeenCalledTimes(1);
+      expect(mockExecuteRaw).toHaveBeenCalledTimes(1); // the B03 audit row
     } finally {
       if (original === undefined) delete process.env.SELF_EDIT_MANUAL_HIGHLIGHTS;
       else process.env.SELF_EDIT_MANUAL_HIGHLIGHTS = original;
