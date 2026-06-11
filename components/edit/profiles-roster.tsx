@@ -43,6 +43,9 @@ export type ProfilesRosterProps = {
   /** Forwarded to the sub-nav: `null` hides the "Administrators" tab (the
    *  feature is flag-gated, #728 Phase B); a number shows it. */
   administratorsTab?: number | null;
+  /** Forwarded to the sub-nav: `null` hides the "Method Families" tab
+   *  (comms_steward surface, flag + role-gated). */
+  methodsTab?: number | null;
   /** Link back to the viewer's own self-edit surface, forwarded to the
    *  sub-nav; `null` when they have no profile of their own. */
   selfEditHref?: string | null;
@@ -83,6 +86,7 @@ export function ProfilesRoster({
   pageSize,
   pendingSlugRequests,
   administratorsTab,
+  methodsTab,
   selfEditHref,
   canImpersonate,
   viewerCwid,
@@ -109,6 +113,7 @@ export function ProfilesRoster({
         active="profiles"
         pendingSlugRequests={pendingSlugRequests}
         administratorsTab={administratorsTab}
+        methodsTab={methodsTab}
         selfEditHref={selfEditHref}
       />
 

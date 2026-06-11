@@ -50,6 +50,21 @@ export function isCommsStewardEnabled(): boolean {
 }
 
 /**
+ * Whether to advertise the "Method Families" tab in the admin sub-nav for this
+ * viewer: the surface is enabled AND the viewer can reach it (a comms_steward or
+ * a superuser, §3 superset). Server-only (reads the `COMMS_STEWARD_ENABLED`
+ * flag). Mirrors `isAdministratorsTabEnabled`'s role in the sub-nav, but also
+ * role-gates so a unit Owner (who can land on some admin surfaces but is neither
+ * steward nor superuser) is never shown a tab they can't open.
+ */
+export function isMethodsTabVisible(session: {
+  isSuperuser: boolean;
+  isCommsSteward: boolean;
+}): boolean {
+  return isCommsStewardEnabled() && (session.isSuperuser || session.isCommsSteward);
+}
+
+/**
  * Escape a value for safe interpolation into an LDAP search filter (RFC 4515).
  * The CWID comes from the validated SAML assertion, but an authorization
  * filter must not be injectable regardless. NUL — the fifth RFC 4515

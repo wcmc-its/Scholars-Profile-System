@@ -24,11 +24,14 @@
  */
 import { notFound, redirect } from "next/navigation";
 
+import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { MethodFamiliesRoster } from "@/components/edit/method-families-roster";
 import { buildFamilyRoster } from "@/lib/api/methods-families";
-import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
+import { isCommsStewardEnabled, isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEditSession } from "@/lib/auth/superuser";
 import { db } from "@/lib/db";
+import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
+import { countPendingSlugRequests, isSlugRequestEnabled } from "@/lib/edit/slug-request";
 import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +61,20 @@ export default async function MethodFamiliesPage() {
   // renders publicly. Surfaced prominently so a steward is never misled.
   const sensitivityGateOn = isMethodsLensSensitiveGateOn();
 
+  // §4 — the surface folds into the shared `/edit` console via `AdminSubnav`.
+  // The superuser list surfaces (Profiles / URL requests / Slug registry /
+  // Administrators) render only for a superuser; a comms_steward who is not a
+  // superuser sees just the Method Families tab (the rest would 404 for them).
+  const superuserSurfaces = session.isSuperuser;
+  const pendingSlugRequests =
+    superuserSurfaces && isSlugRequestEnabled() ? await countPendingSlugRequests(db.read) : null;
+  const administratorsTab = superuserSurfaces && isAdministratorsTabEnabled() ? 0 : null;
+  const self = await db.read.scholar.findUnique({
+    where: { cwid: session.cwid },
+    select: { deletedAt: true },
+  });
+  const selfEditHref = self && self.deletedAt === null ? "/edit" : null;
+
   return (
     <div className="min-h-screen bg-[var(--background)]" data-slot="method-families-page">
       <header className="bg-apollo-bar text-white">
@@ -71,6 +88,15 @@ export default async function MethodFamiliesPage() {
           <span className="font-semibold">Scholars Profile Console</span>
         </div>
       </header>
+
+      <AdminSubnav
+        active="methods"
+        pendingSlugRequests={pendingSlugRequests}
+        administratorsTab={administratorsTab}
+        methodsTab={isMethodsTabVisible(session) ? 0 : null}
+        selfEditHref={selfEditHref}
+        superuserSurfaces={superuserSurfaces}
+      />
 
       <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
         <h1 className="mb-1 text-xl font-semibold">Method Families</h1>

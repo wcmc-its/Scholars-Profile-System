@@ -14,6 +14,7 @@ import { notFound, redirect } from "next/navigation";
 import { AdminSubnav } from "@/components/edit/admin-subnav";
 import { ForbiddenEditPage } from "@/components/edit/forbidden-edit-page";
 import { SlugRequestQueue } from "@/components/edit/slug-request-queue";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
@@ -74,6 +75,7 @@ export default async function SlugRequestsPage() {
         active="slug-requests"
         pendingSlugRequests={requests.length}
         administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
+        methodsTab={isMethodsTabVisible(session) ? 0 : null}
         selfEditHref={selfEditHref}
       />
 

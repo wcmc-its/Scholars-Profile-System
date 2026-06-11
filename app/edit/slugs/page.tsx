@@ -24,6 +24,7 @@ import {
   loadSlugRegistry,
   type SlugRegistrySegment,
 } from "@/lib/api/slug-registry";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
@@ -101,6 +102,7 @@ export default async function EditSlugsPage({
       requestedSegmentVisible={requestedEnabled}
       pendingSlugRequests={pendingSlugRequests}
       administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
+      methodsTab={isMethodsTabVisible(session) ? 0 : null}
       selfEditHref={selfEditHref}
     />
   );

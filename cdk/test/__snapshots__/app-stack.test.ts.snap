@@ -3537,7 +3537,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
-                "Value": "",
+                "Value": "dwd2001",
               },
               {
                 "Name": "SECURITY_CSP_MODE",
