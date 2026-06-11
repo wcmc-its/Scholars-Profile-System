@@ -1221,22 +1221,24 @@ export class AppStack extends Stack {
         //     group membership or the allowlist below. Flip to "on" per-env only
         //     after the group exists (or the interim allowlist is set) AND the
         //     surfacing pass has run once (npm run etl:family-review).
-        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- cn of the ED group whose `member`
-        //     list confers the role (e.g. ITS:Library:Scholars/comms-steward-role).
-        //     Left UNSET like SCHOLARS_SUPERUSER_GROUP_CN above: the SPS VPC has no
-        //     route to the WCM directory yet, so the live group search fails closed;
-        //     setting a cn now would only add an LDAPS connect-timeout to each
-        //     session probe. Set once VPC->WCM LDAPS routing lands.
+        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- the ED group whose `member` list
+        //     confers the role: ITS:Library:Scholars/comms-steward-role (the
+        //     durable source of truth). Left UNSET like SCHOLARS_SUPERUSER_GROUP_CN
+        //     above: the SPS VPC has no route to the WCM directory yet, so the live
+        //     group search fails closed; setting a cn now would only add an LDAPS
+        //     connect-timeout to each session probe. Set this to the group above
+        //     (and clear the allowlist) once VPC->WCM LDAPS routing lands (#443).
         //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- interim comma-separated CWID
         //     allowlist that confers the role WITHOUT LDAP (mirrors
-        //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped operator set can use
-        //     the Method-Family surface before the group/routing lands. EMPTY at
-        //     launch. Inert while COMMS_STEWARD_ENABLED is off. Wired here per the
+        //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped steward set can use
+        //     the Method-Family surface before the group/routing lands. STAGING
+        //     carries the interim steward set; prod stays empty (its surface is
+        //     dark). Inert while COMMS_STEWARD_ENABLED is off. Wired here per the
         //     flag-parity rule; promotion is a config edit + manual `cdk deploy
         //     Sps-App-<env>` (CD re-rolls the image only, never the task-def env).
         COMMS_STEWARD_ENABLED: env === "staging" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
-        SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
+        SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the

@@ -20,6 +20,7 @@ import {
   type EditRosterStatusFilter,
   type EditRosterUnitFilter,
 } from "@/lib/api/edit-roster";
+import { isMethodsTabVisible } from "@/lib/auth/comms-steward";
 import { getEffectiveEditSession, impersonationEnabled } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
 import { isAdministratorsTabEnabled } from "@/lib/edit/administrators";
@@ -125,6 +126,7 @@ export default async function EditScholarsPage({
       pageSize={PAGE_SIZE}
       pendingSlugRequests={pendingSlugRequests}
       administratorsTab={isAdministratorsTabEnabled() ? 0 : null}
+      methodsTab={isMethodsTabVisible(session) ? 0 : null}
       selfEditHref={selfEditHref}
       canImpersonate={impersonationEnabled() && session.isSuperuser}
       viewerCwid={session.cwid}

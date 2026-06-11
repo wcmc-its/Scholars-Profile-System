@@ -12,13 +12,20 @@
 import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 
-export type AdminSubnavActive = "profiles" | "slug-requests" | "slugs" | "administrators";
+export type AdminSubnavActive =
+  | "profiles"
+  | "slug-requests"
+  | "slugs"
+  | "administrators"
+  | "methods";
 
 export function AdminSubnav({
   active,
   pendingSlugRequests,
   administratorsTab,
+  methodsTab,
   selfEditHref,
+  superuserSurfaces = true,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -26,16 +33,27 @@ export function AdminSubnav({
    *  (`SELF_EDIT_ADMINISTRATORS_TAB`), mirroring the `pendingSlugRequests`
    *  hide pattern. A number shows the tab (Phase B passes `0` — no badge). */
   administratorsTab?: number | null;
+  /** `null`/omitted hides the "Method Families" tab — the comms_steward surface
+   *  is flag-gated + role-gated (`isMethodsTabVisible`). A number shows it
+   *  (passed `0` — no badge), mirroring `administratorsTab`. */
+  methodsTab?: number | null;
   /** Link back to the viewer's own self-edit surface (`/edit`), right-aligned.
    *  `null`/omitted when the viewer has no profile of their own (a staff
    *  superuser), so the link never lands on a 404. */
   selfEditHref?: string | null;
+  /** Whether to show the superuser list surfaces (Profiles / URL requests /
+   *  Slug registry / Administrators). Default `true`. A comms_steward who is NOT
+   *  a superuser lands only on `/edit/methods`, where those tabs would link to
+   *  surfaces they can't open — pass `false` there so only Method Families shows. */
+  superuserSurfaces?: boolean;
 }) {
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-        <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
-        {pendingSlugRequests !== null && (
+        {superuserSurfaces && (
+          <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
+        )}
+        {superuserSurfaces && pendingSlugRequests !== null && (
           <AdminTab
             href="/edit/slug-requests"
             id="slug-requests"
@@ -46,18 +64,28 @@ export function AdminSubnav({
         )}
         {/* Always visible to superusers — the slug namespace (active / historical
             / override / reserved) exists regardless of the slug-request flag. */}
-        <AdminTab
-          href="/edit/slugs"
-          id="slugs"
-          label="Slug registry"
-          active={active === "slugs"}
-        />
-        {administratorsTab !== null && administratorsTab !== undefined && (
+        {superuserSurfaces && (
+          <AdminTab
+            href="/edit/slugs"
+            id="slugs"
+            label="Slug registry"
+            active={active === "slugs"}
+          />
+        )}
+        {superuserSurfaces && administratorsTab !== null && administratorsTab !== undefined && (
           <AdminTab
             href="/edit/administrators"
             id="administrators"
             label="Administrators"
             active={active === "administrators"}
+          />
+        )}
+        {methodsTab !== null && methodsTab !== undefined && (
+          <AdminTab
+            href="/edit/methods"
+            id="methods"
+            label="Method Families"
+            active={active === "methods"}
           />
         )}
         {selfEditHref ? (
