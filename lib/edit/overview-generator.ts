@@ -157,9 +157,19 @@ export function buildOverviewUserPrompt(facts: OverviewFacts, params: OverviewPa
 
   // Map the selected element keys to their UI labels; omit the line entirely
   // when nothing is selected (no extra emphasis to steer).
-  if (params.elements.length > 0) {
+  //
+  // #886 honesty guard: Methods is default-on, but only emphasize it when there
+  // are method families to ground. A scholar with no `scholar_family` rows (or an
+  // environment where the rollup has not run) must not be told to foreground a
+  // theme the FACTS can't support — that is the #875 dishonesty the default-on
+  // flip would otherwise reintroduce, enforced here at emphasis time.
+  const emphasized =
+    facts.methods.length === 0
+      ? params.elements.filter((key) => key !== "methods")
+      : params.elements;
+  if (emphasized.length > 0) {
     const labelByKey = new Map(OVERVIEW_ELEMENTS.map((e) => [e.key, e.label]));
-    const labels = params.elements
+    const labels = emphasized
       .map((key) => labelByKey.get(key))
       .filter((label): label is string => Boolean(label));
     if (labels.length > 0) {

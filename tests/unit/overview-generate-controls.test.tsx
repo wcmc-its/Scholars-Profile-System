@@ -44,7 +44,7 @@ describe("OverviewGenerateControls — rendering", () => {
   });
 
   it("renders a checkbox per OVERVIEW_ELEMENTS entry, checked iff in value.elements", () => {
-    renderControls(); // defaults: research_focus, key_findings, recent_work
+    renderControls(); // defaults: research_focus, key_findings, methods, recent_work
     for (const { key } of OVERVIEW_ELEMENTS) {
       const box = screen.getByTestId(`overview-element-${key}`);
       const checked = box.getAttribute("aria-checked") === "true";
@@ -83,11 +83,12 @@ describe("OverviewGenerateControls — onChange", () => {
     fireEvent.click(screen.getByTestId("overview-element-clinical_applications"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
     expect(next.elements).toContain("clinical_applications");
-    // Canonical display order: research_focus, key_findings,
+    // Canonical display order: research_focus, key_findings, methods,
     // clinical_applications, recent_work.
     expect(next.elements).toEqual([
       "research_focus",
       "key_findings",
+      "methods",
       "clinical_applications",
       "recent_work",
     ]);
@@ -95,12 +96,13 @@ describe("OverviewGenerateControls — onChange", () => {
     expect(next.voice).toBe(value.voice);
   });
 
-  it("Methods is NOT checked by default (source dark until the scholar_family wiring)", () => {
-    // #875 — Methods stays opt-in: the generator's method source (`scholar_tool`)
-    // is dark, so defaulting it on would invite emphasis it can't ground.
+  it("Methods IS checked by default (#886 — source wired to live scholar_family)", () => {
+    // #886 — Methods is default-on now that the generator's method source is the
+    // live `scholar_family` rollup; `buildOverviewUserPrompt` drops the emphasis
+    // when a scholar has no families, so it stays honest.
     renderControls();
     expect(screen.getByTestId("overview-element-methods").getAttribute("aria-checked")).toBe(
-      "false",
+      "true",
     );
   });
 
@@ -109,7 +111,7 @@ describe("OverviewGenerateControls — onChange", () => {
     fireEvent.click(screen.getByTestId("overview-element-research_focus"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
     expect(next.elements).not.toContain("research_focus");
-    expect(next.elements).toEqual(["key_findings", "recent_work"]);
+    expect(next.elements).toEqual(["key_findings", "methods", "recent_work"]);
   });
 
   it("typing in the instructions textarea calls onChange with the new text", () => {

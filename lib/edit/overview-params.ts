@@ -63,16 +63,17 @@ export const OVERVIEW_INSTRUCTIONS_MAX = 500;
 /** The defaults a fresh Generate panel opens with — and the fallback every
  *  unknown enum normalizes to. Mirrors the v1 fixed prompt (third person,
  *  formal, ~120–180 words) with a sensible starter set of emphasized themes.
- *  Methods is intentionally NOT default-on: the generator's method source
- *  (`scholar_tool`) is dark until the C3 ETL, so defaulting it on would invite
- *  emphasis the generator can't ground. It becomes default-on once the Methods
- *  source is wired to the live `scholar_family` data (follow-up to #875). The
- *  #765 §2 pmid_count >= 2 floor stays in place for when it lands. */
+ *  Methods is default-on (#886): the generator's method source is now the live
+ *  `scholar_family` rollup — the SAME data the public Methods & tools panel
+ *  shows — so the emphasis can be grounded. The #765 §2 pmid_count >= 2 floor
+ *  governs the default family selection, and `buildOverviewUserPrompt` drops the
+ *  Methods emphasis when a scholar has no families, so default-on is honest even
+ *  before/without the rollup. */
 export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
-  elements: ["research_focus", "key_findings", "recent_work"],
+  elements: ["research_focus", "key_findings", "methods", "recent_work"],
   instructions: "",
 };
 
@@ -140,8 +141,8 @@ export function normalizeOverviewParams(raw: unknown): OverviewParams {
 // ---------------------------------------------------------------------------
 
 /** Which sources the scholar picked in the drawer. `pmids` key publications,
- *  `grantIds` key funding awards, `toolNames` key methods (canonical names —
- *  the Tools bucket ships dark until C3, so this is normally `[]` in C2). */
+ *  `grantIds` key funding awards, `toolNames` key methods — the scholar's #799
+ *  method-family labels (#886), `[]` when the scholar has no families. */
 export type OverviewSelection = {
   pmids: string[];
   grantIds: string[];
