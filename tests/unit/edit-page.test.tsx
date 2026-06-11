@@ -555,17 +555,20 @@ describe("EditPage router — superuser mode", () => {
         manualPmids: [],
         aiPmids: ["100"],
         pickable: [
-          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024 },
-          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025 },
+          { pmid: "100", title: "A landmark study", journal: "Cell", year: 2024, impact: 90, publicationType: "Academic Article" },
+          { pmid: "200", title: "A follow-up", journal: "Nature", year: 2025, impact: 70, publicationType: "Review" },
         ],
       },
     };
     render(<EditPage ctx={withHighlights} mode="superuser" attr="highlights" />);
     const rail = screen.getByTestId("rail-highlights") as HTMLAnchorElement;
     expect(rail.getAttribute("href")).toBe("/edit/scholar/other7?attr=highlights");
-    // Reframed to a third-person action — not the first-person self label.
-    expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose highlights manually");
-    expect(screen.queryByText("Choose my highlights manually")).toBeNull();
+    // The mode-switch button is mode-neutral copy; the reframing to a third-person
+    // action lives in the panel description (not the first-person self copy).
+    expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose manually");
+    const panel = document.querySelector('[data-slot="highlights-card"]');
+    expect(panel?.textContent).toContain("on their behalf");
+    expect(panel?.textContent).not.toContain("yourself");
   });
 
   it("drops the Highlights rail item in superuser mode when the loader left it null (flag off / not loaded)", () => {

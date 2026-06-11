@@ -282,7 +282,19 @@ export type EditContextHighlights = {
   aiPmids: ReadonlyArray<string>;
   /** The scholar's shown (non-suppressed) confirmed publications, the pickable
    *  pool. Ordered most-recent-first so the picker reads sensibly. */
-  pickable: ReadonlyArray<{ pmid: string; title: string; journal: string | null; year: number | null }>;
+  pickable: ReadonlyArray<{
+    pmid: string;
+    title: string;
+    journal: string | null;
+    year: number | null;
+    /** Global-or-per-scholar ReCiterAI impact (0–100), the same signal the AI
+     *  ranking and the public profile use. Round at render (`Impact: NN`). 0 when
+     *  unscored. Lets the picker sort by Impact and show it per row. */
+    impact: number;
+    /** Canonical publication-type string (e.g. "Academic Article", "Review") or
+     *  null. Render through `displayPublicationType()` for the badge label. */
+    publicationType: string | null;
+  }>;
 };
 
 export type EditContext = {
@@ -1042,10 +1054,23 @@ async function buildHighlightsContext(
 
   const manual = await getSelectedHighlightPmids(cwid, client);
   // The pickable pool: shown pubs, most-recent-first (year desc), so the picker
-  // reads top-to-bottom newest-first like the profile's publications list.
+  // reads top-to-bottom newest-first like the profile's publications list. Join
+  // the per-pub impact + type already computed above in `rankable` (no extra DB
+  // read) so the redesigned picker can sort by Impact and badge the pub type.
+  const rankByPmid = new Map(rankable.map((r) => [r.pmid, r]));
   const pickable = publications
     .filter((p) => p.state === "shown")
-    .map((p) => ({ pmid: p.pmid, title: p.title, journal: p.journal, year: p.year }))
+    .map((p) => {
+      const r = rankByPmid.get(p.pmid);
+      return {
+        pmid: p.pmid,
+        title: p.title,
+        journal: p.journal,
+        year: p.year,
+        impact: r?.reciteraiImpact ?? 0,
+        publicationType: r?.publicationType ?? null,
+      };
+    })
     .sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
 
   return {
