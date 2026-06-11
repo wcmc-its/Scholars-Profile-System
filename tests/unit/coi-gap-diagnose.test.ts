@@ -10,7 +10,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { diagnoseScholar, summarize, type DiagnoseInput } from "@/lib/coi-gap/diagnose";
+import {
+  countAuthorMentions,
+  diagnoseScholar,
+  summarize,
+  type DiagnoseInput,
+} from "@/lib/coi-gap/diagnose";
 import { deriveScholar } from "@/lib/coi-gap/pipeline";
 
 const baseInput = (): DiagnoseInput => ({
@@ -64,6 +69,47 @@ describe("diagnoseScholar", () => {
   });
 });
 
+describe("countAuthorMentions", () => {
+  it("counts distinct named author-subjects in a statement", () => {
+    expect(countAuthorMentions("Dr. Smith is a consultant for Pfizer.")).toBe(1);
+    expect(
+      countAuthorMentions(
+        "Scott Kasner has received funding from Bayer. Mitchell Elkind reports royalties from UpToDate.",
+      ),
+    ).toBe(2);
+    // No "<Name> <verb>" subject at all → 0.
+    expect(countAuthorMentions("The authors declare no competing interests.")).toBe(0);
+  });
+});
+
+describe("diagnoseScholar — multi-author leakage signal", () => {
+  const multiAuthorStmt =
+    "Scott Kasner has received funding from Bayer. Mitchell Elkind has served as a consultant for Acme Therapeutics.";
+
+  it("stamps isMultiAuthor on every row of a statement naming ≥2 authors", () => {
+    const rows = diagnoseScholar({
+      cwid: "smith1",
+      scholar: deriveScholar("John", "Smith"),
+      disclosed: [],
+      statements: [{ pmid: "m", statementText: multiAuthorStmt }],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.isMultiAuthor)).toBe(true);
+    expect(rows.every((r) => r.authorMentions >= 2)).toBe(true);
+  });
+
+  it("a single-author statement is not flagged multi-author", () => {
+    const rows = diagnoseScholar({
+      cwid: "smith1",
+      scholar: deriveScholar("John", "Smith"),
+      disclosed: [],
+      statements: [{ pmid: "s", statementText: "Dr. Smith is a consultant for Valeant Pharmaceuticals." }],
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => !r.isMultiAuthor)).toBe(true);
+  });
+});
+
 describe("summarize", () => {
   it("tallies tiers, surfaced count, and suppression reasons", () => {
     const rows = diagnoseScholar(baseInput());
@@ -72,5 +118,14 @@ describe("summarize", () => {
     expect(s.surfaced).toBeGreaterThanOrEqual(1);
     expect(s.byTier.Low).toBeGreaterThanOrEqual(1);
     expect(s.suppressedByReason["matched-disclosed"]).toBeGreaterThanOrEqual(1);
+  });
+
+  it("breaks surfaced rows into a precision picture (scholar-attributed core)", () => {
+    const rows = diagnoseScholar(baseInput());
+    const s = summarize(rows);
+    // Valeant is surfaced and attributed to Dr. Smith by surname.
+    expect(s.surfacedBreakdown.scholarAttributed).toBeGreaterThanOrEqual(1);
+    // The four surfaced buckets are present and non-negative.
+    for (const v of Object.values(s.surfacedBreakdown)) expect(v).toBeGreaterThanOrEqual(0);
   });
 });
