@@ -18,13 +18,18 @@
  *   - RA-12: renders nothing when no area matched.
  *   - RA-14: chips wrap; the row never overflows horizontally.
  *
+ * Issue #860 — matched Method-taxonomy entities render as a parallel labeled
+ * "Methods and Tools" chip row BELOW the "Research Areas" topic row (mirroring
+ * the topic row's markup), replacing the former rust callout card. Each method
+ * is a method-tinted chip whose hover card carries the eyebrow / description /
+ * stats / "View the … page →" link.
+ *
  * All data is on the TaxonomyMatchResult computed in page.tsx — no new fetch.
  */
 import { useState } from "react";
 import Link from "next/link";
-import { Sparkles, Users, ArrowUpRight, Wrench, BookText } from "lucide-react";
+import { Sparkles, Users, ArrowUpRight, Wrench } from "lucide-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { EntityBadge } from "@/components/ui/entity-badge";
 import type { TaxonomyMatch, TaxonomyMatchResult } from "@/lib/api/search-taxonomy";
 
 const VISIBLE = 4;
@@ -33,6 +38,7 @@ const FOCUS_RING =
 
 export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
   const [expanded, setExpanded] = useState(false);
+  const [methodsExpanded, setMethodsExpanded] = useState(false);
   // RA-12 — nothing matched → render nothing (no label, no empty row, no card).
   if (result.state !== "matches") return null;
   const methodMatches = result.methodMatches ?? [];
@@ -43,15 +49,13 @@ export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
   const moreCount = totalMatched - VISIBLE; // RA-5
   const beyondRow = totalMatched - areas.length; // areas capped at ROW_AREA_CAP
 
+  // #860 — Methods and Tools chip row. methodMatches has no separate
+  // totalMatched, so the "+N more" count is methodMatches.length − VISIBLE.
+  const shownMethods = methodsExpanded ? methodMatches : methodMatches.slice(0, VISIBLE);
+  const moreMethods = methodMatches.length - VISIBLE;
+
   return (
     <>
-      {/* #824 PR-2 — Method-taxonomy callout(s): a method-tinted card per matched
-          family / supercategory, above the Topic chip row. Mirrors the topic
-          taxonomy callout's shape (eyebrow → name + Method badge → descriptor →
-          scholar/pub stats → "View the … page →" link), tinted toward the rust
-          Method hue. Only the top match renders by default; siblings disclose. */}
-      {methodMatches.length > 0 ? <MethodCallouts matches={methodMatches} /> : null}
-
       {/* #709 — Research Areas chip row (Topic/Subtopic). Unchanged. */}
       {areas.length > 0 ? (
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -85,109 +89,34 @@ export function ResearchAreasRow({ result }: { result: TaxonomyMatchResult }) {
           ) : null}
         </div>
       ) : null}
-    </>
-  );
-}
 
-/**
- * #824 PR-2 — the method-tinted taxonomy callout. Renders the top matched method
- * (family or supercategory) as a card; any sibling matches disclose behind a quiet
- * "+N related method{s}" toggle so the header never stacks many cards.
- */
-function MethodCallouts({ matches }: { matches: TaxonomyMatch[] }) {
-  const [open, setOpen] = useState(false);
-  const [first, ...rest] = matches;
-  if (!first) return null;
-  const shown = open ? matches : [first];
-
-  return (
-    <div className="mt-4 flex flex-col gap-2">
-      {shown.map((m) => (
-        <MethodCallout key={`${m.entityType}:${m.id}`} match={m} />
-      ))}
-      {rest.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className={`self-start rounded px-1 text-[13px] text-[#1f51a8] hover:underline ${FOCUS_RING}`}
-        >
-          {open
-            ? "Show fewer methods"
-            : `+${rest.length} related method${rest.length === 1 ? "" : "s"}`}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-function MethodCallout({ match }: { match: TaxonomyMatch }) {
-  const isSupercategory = match.entityType === "supercategory";
-  const eyebrow = isSupercategory ? "Research methods" : "Method & tool family";
-  return (
-    <div
-      role="region"
-      aria-label={isSupercategory ? "Matched research methods" : "Matched method family"}
-      className="flex items-start gap-3.5 rounded-[10px] border-[0.5px] border-[#ecdcc8] bg-[#fbf4ea] px-4 py-3.5"
-    >
-      <span
-        aria-hidden
-        className="mt-px flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg bg-[#f3e3cf] text-[#8a5a1e]"
-      >
-        <Wrench className="h-[18px] w-[18px]" strokeWidth={2} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className="mb-[3px] inline-flex items-center gap-1.5 text-[12.5px] text-[#8a7a63]">
-          <Sparkles aria-hidden className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-          {eyebrow}
-        </span>
-
-        <div className="flex flex-wrap items-center gap-x-[9px] gap-y-1">
-          <span className="text-[17px] font-bold tracking-[-0.005em] text-[#2b2f36]">
-            {match.name}
+      {/* #860 — Methods and Tools chip row. Mirrors the Research Areas row above
+          (label → chips → "+N more"), with a method-tinted chip cue so the two
+          rows read as a parallel pair. No "Browse" link on the methods row. */}
+      {methodMatches.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="mr-0.5 inline-flex items-center gap-1.5 text-[12.5px] text-[#7a7e85]">
+            <Wrench aria-hidden className="h-[15px] w-[15px] shrink-0" strokeWidth={2} />
+            Methods and Tools
           </span>
-          <EntityBadge kind="method" />
-        </div>
 
-        {match.description ? (
-          <p className="mt-[5px] max-w-[640px] text-[13px] leading-[1.5] text-[#5e636b]">
-            {match.description}
-          </p>
-        ) : null}
+          {shownMethods.map((match) => (
+            <MethodChip key={`${match.entityType}:${match.id}`} match={match} />
+          ))}
 
-        <div className="mt-[9px] flex items-center gap-[7px] text-[12.5px] text-[#6f7077]">
-          <span className="inline-flex items-center gap-[5px]">
-            <Users aria-hidden className="h-[13px] w-[13px] shrink-0" strokeWidth={2} />
-            <strong className="font-semibold text-[#2b2f36]">
-              {match.scholarCount.toLocaleString()}
-            </strong>
-            {match.scholarCount === 1 ? "scholar" : "scholars"}
-          </span>
-          {match.publicationCount > 0 ? (
-            <>
-              <span className="text-[#c7bca8]">·</span>
-              <span className="inline-flex items-center gap-[5px]">
-                <BookText aria-hidden className="h-[13px] w-[13px] shrink-0" strokeWidth={2} />
-                <strong className="font-semibold text-[#2b2f36]">
-                  {match.publicationCount.toLocaleString()}
-                </strong>
-                {match.publicationCount === 1 ? "publication" : "publications"}
-              </span>
-            </>
+          {!methodsExpanded && moreMethods > 0 ? (
+            <button
+              type="button"
+              onClick={() => setMethodsExpanded(true)}
+              aria-label={`Show ${moreMethods} more method${moreMethods === 1 ? "" : "s"}`}
+              className={`rounded px-1 text-[13px] text-[#1f51a8] hover:underline ${FOCUS_RING}`}
+            >
+              +{moreMethods} more
+            </button>
           ) : null}
         </div>
-
-        <div className="mt-[11px]">
-          <Link
-            href={match.href}
-            className="inline-flex items-center gap-[5px] text-[13px] font-semibold text-[#1f51a8] no-underline hover:underline"
-          >
-            View the {match.name} page
-            <ArrowUpRight aria-hidden className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-          </Link>
-        </div>
-      </div>
-    </div>
+      ) : null}
+    </>
   );
 }
 
@@ -240,6 +169,72 @@ function AreaPreview({ area }: { area: TaxonomyMatch }) {
         className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-medium text-[#1f51a8] no-underline hover:underline"
       >
         View research area
+        <ArrowUpRight aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * #860 — a method chip. Same pill geometry as AreaChip, with a method cue:
+ * the #824 soft-method tint at rest (bg #fbf4ea, border #ecdcc8), a small
+ * leading Wrench glyph, and a hover that tints toward rust. The hover card
+ * (MethodPreview) carries the eyebrow / description / stats / page link.
+ */
+function MethodChip({ match }: { match: TaxonomyMatch }) {
+  return (
+    <HoverCard openDelay={300} closeDelay={120}>
+      <HoverCardTrigger asChild>
+        <Link
+          href={match.href}
+          className={`group inline-flex items-center gap-1.5 rounded-full border-[0.5px] border-[#ecdcc8] bg-[#fbf4ea] px-[11px] py-[5px] text-[13px] leading-none text-[#2b2f36] no-underline transition-colors hover:border-[#b5701f] hover:bg-[#f6ead8] hover:text-[#7a3f15] ${FOCUS_RING}`}
+        >
+          <Wrench
+            aria-hidden
+            className="h-3 w-3 shrink-0 text-[#8a5a1e] group-hover:text-[#7a3f15]"
+            strokeWidth={2}
+          />
+          {match.name}
+          <span className="inline-flex items-center gap-[3px] text-[#7a7e85] group-hover:text-[#7a3f15]">
+            <Users aria-hidden className="h-3 w-3 shrink-0" strokeWidth={2} />
+            {match.scholarCount.toLocaleString()}
+          </span>
+        </Link>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-72">
+        <MethodPreview match={match} />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+export function MethodPreview({ match }: { match: TaxonomyMatch }) {
+  const eyebrow = match.entityType === "methodFamily" ? "Method family" : "Research methods";
+  return (
+    <div className="text-[13px] leading-snug">
+      <div className="text-[10px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+        {eyebrow}
+      </div>
+      <div className="mt-0.5 font-semibold text-foreground">{match.name}</div>
+      {match.description ? (
+        <p className="mt-1 line-clamp-4 text-[12.5px] text-muted-foreground">{match.description}</p>
+      ) : null}
+      <div className="mt-2 text-[12px] text-muted-foreground">
+        {match.scholarCount.toLocaleString()}{" "}
+        {match.scholarCount === 1 ? "scholar" : "scholars"}
+        {match.publicationCount > 0 ? (
+          <>
+            {" · "}
+            {match.publicationCount.toLocaleString()}{" "}
+            {match.publicationCount === 1 ? "publication" : "publications"}
+          </>
+        ) : null}
+      </div>
+      <Link
+        href={match.href}
+        className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-medium text-[#1f51a8] no-underline hover:underline"
+      >
+        View the {match.name} page
         <ArrowUpRight aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
       </Link>
     </div>
