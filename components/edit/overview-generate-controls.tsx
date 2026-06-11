@@ -1,9 +1,16 @@
 /**
  * OverviewGenerateControls — the steering panel for the overview-statement
  * generator (#742 Phase A, `docs/overview-statement-generator-spec.md` §
- * Generation options). Renders voice / tone / length radios, an "include or
- * emphasize" checkbox per theme, and a free-text instructions note; the chosen
- * {@link OverviewParams} ride along on the next Generate/Regenerate request.
+ * Generation options). Renders voice / tone / length as compact segmented
+ * pills, an "include & emphasize" wrapped row of coral checkbox chips, and a
+ * free-text instructions note; the chosen {@link OverviewParams} ride along on
+ * the next Generate request.
+ *
+ * #875 re-skin — radios become segmented pills and the checkbox grid becomes a
+ * single wrapped chip row (coral fill when selected). The a11y semantics are
+ * UNCHANGED: pills still wrap a real `RadioGroupItem` (so it carries the
+ * `disabled` attribute + `aria-checked` + the testid), and chips still wrap a
+ * real `Checkbox`. Only the visual treatment changed.
  *
  * This is a pure controlled input surface: it owns no params state and triggers
  * no fetch. The parent (`overview-card.tsx`) holds the params and the Generate
@@ -27,6 +34,7 @@ import {
   type OverviewTone,
   type OverviewVoice,
 } from "@/lib/edit/overview-params";
+import { cn } from "@/lib/utils";
 
 type OverviewGenerateControlsProps = {
   value: OverviewParams;
@@ -68,7 +76,7 @@ export function OverviewGenerateControls({
 
   return (
     <div className="border-apollo-border bg-apollo-surface-2 flex flex-col gap-4 rounded-md border p-4">
-      <RadioFieldset
+      <SegmentedField
         legend="Voice"
         name="overview-voice"
         options={VOICE_OPTIONS}
@@ -76,7 +84,7 @@ export function OverviewGenerateControls({
         disabled={disabled}
         onValueChange={(v) => onChange({ ...value, voice: v as OverviewVoice })}
       />
-      <RadioFieldset
+      <SegmentedField
         legend="Tone"
         name="overview-tone"
         options={TONE_OPTIONS}
@@ -84,7 +92,7 @@ export function OverviewGenerateControls({
         disabled={disabled}
         onValueChange={(v) => onChange({ ...value, tone: v as OverviewTone })}
       />
-      <RadioFieldset
+      <SegmentedField
         legend="Length"
         name="overview-length"
         options={LENGTH_OPTIONS}
@@ -94,17 +102,29 @@ export function OverviewGenerateControls({
       />
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-foreground mb-1 text-sm font-medium">Include / emphasize</legend>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <legend className="text-foreground mb-1 text-sm font-medium">Include &amp; emphasize</legend>
+        <div className="flex flex-wrap gap-2">
           {OVERVIEW_ELEMENTS.map(({ key, label }) => {
             const id = `overview-element-${key}`;
+            const checked = value.elements.includes(key);
             return (
-              <label key={key} htmlFor={id} className="flex items-center gap-2 text-sm">
+              <label
+                key={key}
+                htmlFor={id}
+                className={cn(
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors select-none",
+                  checked
+                    ? "border-apollo-coral-tint-border bg-apollo-coral-tint text-apollo-coral-foreground"
+                    : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+                  disabled && "cursor-not-allowed opacity-60",
+                )}
+              >
                 <Checkbox
                   id={id}
-                  checked={value.elements.includes(key)}
+                  className="sr-only"
+                  checked={checked}
                   disabled={disabled}
-                  onCheckedChange={(checked) => toggleElement(key, checked === true)}
+                  onCheckedChange={(c) => toggleElement(key, c === true)}
                   data-testid={`overview-element-${key}`}
                 />
                 {label}
@@ -139,10 +159,11 @@ export function OverviewGenerateControls({
   );
 }
 
-/** A labelled radio row — one of voice / tone / length. The `<fieldset>` +
- *  `<legend>` give the group an accessible name; each item's `<label>` wraps its
- *  `RadioGroupItem` (the pattern the unit-curation cards use). */
-function RadioFieldset({
+/** A labelled segmented-pill row — one of voice / tone / length. Each pill wraps
+ *  a real `RadioGroupItem` (visually hidden) so it keeps the radio a11y
+ *  semantics, the `disabled` attribute, `aria-checked`, and the testid; the
+ *  wrapping `<label>` carries the pill styling and the selected fill. */
+function SegmentedField({
   legend,
   name,
   options,
@@ -164,14 +185,30 @@ function RadioFieldset({
         value={value}
         onValueChange={onValueChange}
         disabled={disabled}
-        className="flex flex-wrap gap-4"
+        className="inline-flex w-fit flex-wrap gap-1 rounded-lg p-0"
         aria-label={legend}
       >
         {options.map((opt) => {
           const id = `${name}-${opt.value}`;
+          const selected = value === opt.value;
           return (
-            <label key={opt.value} htmlFor={id} className="flex items-center gap-2 text-sm">
-              <RadioGroupItem id={id} value={opt.value} data-testid={`${name}-${opt.value}`} />
+            <label
+              key={opt.value}
+              htmlFor={id}
+              className={cn(
+                "inline-flex cursor-pointer items-center rounded-md border px-3 py-1 text-sm transition-colors select-none",
+                selected
+                  ? "border-apollo-maroon bg-apollo-maroon text-apollo-maroon-foreground"
+                  : "border-apollo-border-strong bg-apollo-surface text-foreground hover:bg-apollo-surface-2",
+                disabled && "cursor-not-allowed opacity-60",
+              )}
+            >
+              <RadioGroupItem
+                id={id}
+                value={opt.value}
+                className="sr-only"
+                data-testid={`${name}-${opt.value}`}
+              />
               {opt.label}
             </label>
           );

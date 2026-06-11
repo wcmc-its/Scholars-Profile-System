@@ -140,8 +140,10 @@ describe("summarizeParams", () => {
   });
 
   it("renders the default params", () => {
+    // #875 — Methods joins the default-on set, in canonical position (between
+    // "Key findings & significance" and "Recent work").
     expect(summarizeParams(DEFAULT_OVERVIEW_PARAMS)).toBe(
-      "Third · Formal · Standard · Research focus, Key findings & significance, Recent work",
+      "Third · Formal · Standard · Research focus, Key findings & significance, Methods, Recent work",
     );
   });
 });

@@ -470,6 +470,47 @@ describe("assembleOverviewFacts — methods & faculty metrics (C3)", () => {
       },
     ]);
   });
+
+  // #765 §2 / §7.4 — the pmid_count >= 2 default floor keeps the Methods rule
+  // line ("ranked by how often each appears") honest. Single-paper long-tail
+  // families are CANDIDATES (still selectable) but never default-selected.
+  it("does NOT default-select a single-paper (pmid_count = 1) method family", async () => {
+    mockScholarToolFindMany.mockResolvedValue([
+      { toolName: "long-tail method", category: "method", pmidCount: 1, maxConfidence: decimal(0.9) },
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools).toEqual([
+      {
+        toolName: "long-tail method",
+        category: "method",
+        pmidCount: 1,
+        maxConfidence: 0.9,
+        defaultSelected: false,
+      },
+    ]);
+  });
+
+  it("default-selects only the >=2-paper families, skipping the pmid_count = 1 ones", async () => {
+    mockScholarToolFindMany.mockResolvedValue([
+      { toolName: "frequent", category: "method", pmidCount: 5, maxConfidence: decimal(0.9) },
+      { toolName: "rare", category: "method", pmidCount: 1, maxConfidence: decimal(0.8) },
+    ]);
+    const opts = await loadOverviewSourceOptions("self01");
+    expect(opts.tools.map((t) => [t.toolName, t.defaultSelected])).toEqual([
+      ["frequent", true],
+      ["rare", false],
+    ]);
+  });
+
+  it("the empty-selection assembler path also honors the pmid_count floor", async () => {
+    mockScholarToolFindMany.mockResolvedValue([
+      { toolName: "frequent", category: "method", pmidCount: 5, maxConfidence: decimal(0.9) },
+      { toolName: "rare", category: "method", pmidCount: 1, maxConfidence: decimal(0.8) },
+    ]);
+    // No explicit selection → default path → only the >=2 family flows to methods.
+    const facts = await assembleOverviewFacts("self01");
+    expect(facts?.methods).toEqual([{ name: "frequent", category: "method" }]);
+  });
 });
 
 describe("hasSufficientFacts", () => {

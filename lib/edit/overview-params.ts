@@ -62,12 +62,15 @@ export const OVERVIEW_INSTRUCTIONS_MAX = 500;
 
 /** The defaults a fresh Generate panel opens with — and the fallback every
  *  unknown enum normalizes to. Mirrors the v1 fixed prompt (third person,
- *  formal, ~120–180 words) with a sensible starter set of emphasized themes. */
+ *  formal, ~120–180 words) with a sensible starter set of emphasized themes.
+ *  #875 — Methods joins the default-on set (a first-class research-profile
+ *  source, gated by the #765 §2 pmid_count >= 2 floor); listed in canonical
+ *  OVERVIEW_ELEMENTS order. */
 export const DEFAULT_OVERVIEW_PARAMS: OverviewParams = {
   voice: "third",
   tone: "formal",
   length: "standard",
-  elements: ["research_focus", "key_findings", "recent_work"],
+  elements: ["research_focus", "key_findings", "methods", "recent_work"],
   instructions: "",
 };
 

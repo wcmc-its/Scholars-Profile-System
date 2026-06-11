@@ -77,15 +77,30 @@ describe("OverviewGenerateControls — onChange", () => {
   });
 
   it("checking an unchecked element adds it (in display order)", () => {
-    // `methods` is not in the defaults; checking it appends, order preserved.
+    // `clinical_applications` is NOT in the defaults; checking it appends in
+    // canonical order (it sorts between `methods` and `recent_work`).
     const { value, onChange } = renderControls();
-    fireEvent.click(screen.getByTestId("overview-element-methods"));
+    fireEvent.click(screen.getByTestId("overview-element-clinical_applications"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
-    expect(next.elements).toContain("methods");
-    // Canonical display order: research_focus, key_findings, methods, …, recent_work.
-    expect(next.elements).toEqual(["research_focus", "key_findings", "methods", "recent_work"]);
+    expect(next.elements).toContain("clinical_applications");
+    // Canonical display order: research_focus, key_findings, methods,
+    // clinical_applications, recent_work.
+    expect(next.elements).toEqual([
+      "research_focus",
+      "key_findings",
+      "methods",
+      "clinical_applications",
+      "recent_work",
+    ]);
     // Other params untouched.
     expect(next.voice).toBe(value.voice);
+  });
+
+  it("Methods is checked by default (#875)", () => {
+    renderControls();
+    expect(screen.getByTestId("overview-element-methods").getAttribute("aria-checked")).toBe(
+      "true",
+    );
   });
 
   it("unchecking a checked element removes it", () => {
@@ -93,7 +108,8 @@ describe("OverviewGenerateControls — onChange", () => {
     fireEvent.click(screen.getByTestId("overview-element-research_focus"));
     const [next] = onChange.mock.calls[0] as [OverviewParams];
     expect(next.elements).not.toContain("research_focus");
-    expect(next.elements).toEqual(["key_findings", "recent_work"]);
+    // #875 — methods now sits in the default set between key_findings and recent_work.
+    expect(next.elements).toEqual(["key_findings", "methods", "recent_work"]);
   });
 
   it("typing in the instructions textarea calls onChange with the new text", () => {
