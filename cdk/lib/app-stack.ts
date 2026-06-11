@@ -1112,6 +1112,17 @@ export class AppStack extends Stack {
         METHODS_LENS_ENABLED: env === "staging" ? "on" : "off",
         METHODS_LENS_SENSITIVE_GATE: env === "staging" ? "on" : "off",
         METHODS_LENS_FAMILY_FILTER: env === "staging" ? "on" : "off",
+        //   METHODS_LENS_FAMILY_ROSTER_FALLBACK -- #862. Backfills the per-family
+        //     "Top scholars" row with attributed non-faculty (postdocs/fellows/core
+        //     staff), faculty-first, when the FT-faculty set is empty/short -- so a
+        //     trainee/core-driven family renders a row instead of an empty one. OFF
+        //     in BOTH envs (a public-display policy change pending External/Faculty
+        //     Affairs sign-off on surfacing non-faculty in this row); while off the
+        //     row is FT-faculty-only, byte-identical to today, and the tooltip copy
+        //     reads faculty-only. doctoral_student/affiliate_alumni are NEVER
+        //     surfaced regardless of this flag. Image-only/reversible (no data
+        //     prereq); flip is env-only via cdk deploy Sps-App-<env>.
+        METHODS_LENS_FAMILY_ROSTER_FALLBACK: "off",
         //   METHODS_LENS_PAGES -- standalone cross-scholar Method pages
         //     (/methods/**), search surfacing, and the per-scholar inbound
         //     links. ARMED ON in BOTH envs. Staging is live (the master lens +

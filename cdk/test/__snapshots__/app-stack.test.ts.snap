@@ -428,6 +428,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "METHODS_LENS_FAMILY_ROSTER_FALLBACK",
+                "Value": "off",
+              },
+              {
                 "Name": "METHODS_LENS_PAGES",
                 "Value": "on",
               },
@@ -3450,6 +3454,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "METHODS_LENS_FAMILY_FILTER",
                 "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_FAMILY_ROSTER_FALLBACK",
+                "Value": "off",
               },
               {
                 "Name": "METHODS_LENS_PAGES",

@@ -19,6 +19,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
 import { getFamily, getFamilyScholarRows } from "@/lib/api/methods";
+import { isMethodsFamilyRosterFallbackOn } from "@/lib/profile/methods-lens-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -48,5 +49,10 @@ export async function GET(
   }
 
   const scholars = await getFamilyScholarRows(resolved.supercategory, resolved.familyLabel);
-  return NextResponse.json({ scholars: scholars ?? [] });
+  // #862 — the row's tooltip copy tracks the roster-fallback flag (env-only flip):
+  // on ⇒ the roster may include attributed non-faculty; off ⇒ FT-faculty-only.
+  return NextResponse.json({
+    scholars: scholars ?? [],
+    includesNonFaculty: isMethodsFamilyRosterFallbackOn(),
+  });
 }
