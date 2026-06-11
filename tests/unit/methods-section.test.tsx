@@ -104,7 +104,7 @@ describe("MethodsSection — #801 sensitive reveal", () => {
     );
     expect(screen.getByLabelText("Hidden from the public profile")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/edit/methods-sensitive/aog"),
+      expect.stringContaining("/api/profile/aog/sensitive-families"),
       expect.objectContaining({ cache: "no-store" }),
     );
   });

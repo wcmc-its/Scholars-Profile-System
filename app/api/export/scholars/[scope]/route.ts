@@ -3,23 +3,34 @@
  *
  * Internal-only CSV export of a scope's ranked top-50 scholars (#847). Mirrors
  * the publications export route (force-dynamic, defensive body parse, `apiError`,
- * `toCsv`, Content-Disposition attachment) plus an auth gate: any authenticated
- * WCM session may download; anonymous => 401. NO role required, NO contact column
- * ever emitted.
+ * `toCsv`, Content-Disposition attachment) plus an internal-viewer gate: any
+ * authenticated WCM session OR an allowlisted on-network viewer (#866) may
+ * download; an external viewer => 401. NO role required.
+ *
+ * By default NO contact column is emitted. When `SCHOLAR_LIST_EXPORT_EMAIL` is on
+ * (#866 UC-B), an internal viewer additionally receives an `email` column; that
+ * download is audited (one structured record capturing the downloader CWID — or,
+ * for an anonymous on-network viewer, the source IP — the scope, and row count).
  *
  * Gate order:
  *   (a) feature flag off                         => 404 (whole feature dark)
- *   (b) no session                               => 401
+ *   (b) external viewer (no session, off-net)    => 401
  *   (c) scope not in the allowlist               => 404
  *   (d) method scopes + METHODS_LENS_PAGES off   => 404
  *   (e) JSON body parsed defensively             => 400 on structural failure
  *   (f) scope target resolves to nothing         => 404
- *   (g) text/csv attachment response
+ *   (g) text/csv attachment response (+ email column + audit when UC-B on)
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { apiError } from "@/lib/api/error-response";
-import { getSession } from "@/lib/auth/session-server";
-import { isScholarListExportEnabled } from "@/lib/export/scholar-export-flags";
+import {
+  resolveViewerContext,
+  extractIpv4FromViewerAddress,
+} from "@/lib/auth/viewer-context";
+import {
+  isScholarListExportEnabled,
+  isScholarListExportEmailEnabled,
+} from "@/lib/export/scholar-export-flags";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
 import {
   buildScholarExport,
@@ -62,9 +73,11 @@ export async function POST(
     return apiError("not_found", 404);
   }
 
-  // (b) internal-only: any authenticated WCM session may download.
-  const session = await getSession();
-  if (!session) {
+  // (b) internal-only: an authenticated WCM session OR an allowlisted on-network
+  // viewer (#866) may download; everyone else => 401. Resolving here (not the
+  // bare session check) lets an anonymous on-WCM-network viewer through.
+  const vc = await resolveViewerContext(request);
+  if (!vc.internal) {
     return apiError("unauthorized", 401);
   }
 
@@ -92,8 +105,11 @@ export async function POST(
     return apiError("invalid body", 400);
   }
 
-  // (f) build — null when the scope target does not resolve.
-  const result = await buildScholarExport(scope, params);
+  // (f) build — null when the scope target does not resolve. The email column
+  // (#866 UC-B) rides on top of the master export flag; the internal-viewer gate
+  // above already ran, so it is only ever passed for an internal viewer.
+  const includeEmail = isScholarListExportEmailEnabled();
+  const result = await buildScholarExport(scope, params, undefined, { includeEmail });
   if (!result) {
     return apiError("not_found", 404);
   }
@@ -103,10 +119,30 @@ export async function POST(
     JSON.stringify({
       event: "export_scholars",
       scope,
-      cwid: session.cwid,
+      cwid: vc.cwid ?? null,
       ts: new Date().toISOString(),
     }),
   );
+
+  // Contact-data audit (#866 UC-B): emit ONE structured record whenever the
+  // email column is included. For an anonymous on-network viewer the source IP
+  // is the only identifier, so capture it (parsed from the CloudFront viewer
+  // address header). `row_count` = data rows = total CSV lines minus the header.
+  if (includeEmail) {
+    const csvLines = result.csv.trim().length === 0 ? 0 : result.csv.trim().split("\r\n").length;
+    console.info(
+      JSON.stringify({
+        event: "scholar_export_email",
+        downloader_cwid: vc.cwid ?? null,
+        source_ip: extractIpv4FromViewerAddress(
+          request.headers.get("cloudfront-viewer-address"),
+        ),
+        scope,
+        row_count: Math.max(0, csvLines - 1),
+        ts: new Date().toISOString(),
+      }),
+    );
+  }
 
   // (g) text/csv attachment.
   return new NextResponse(result.csv, {

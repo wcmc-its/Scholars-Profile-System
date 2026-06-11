@@ -448,6 +448,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "off",
               },
               {
+                "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
+                "Value": "off",
+              },
+              {
+                "Name": "INTERNAL_VIEWER_CIDRS",
+                "Value": "",
+              },
+              {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
               },
@@ -3478,6 +3490,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
                 "Value": "off",
+              },
+              {
+                "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
+                "Value": "off",
+              },
+              {
+                "Name": "INTERNAL_VIEWER_CIDRS",
+                "Value": "",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",

@@ -76,6 +76,7 @@ function scholar(i: number) {
     primaryTitle: `Title ${i}`,
     primaryDepartment: `Dept ${i}`,
     roleCategory: "full_time_faculty",
+    email: `scholar${i}@med.cornell.edu`,
   };
 }
 
@@ -379,5 +380,131 @@ describe("buildScholarExport — subtopic scope", () => {
       subtopic: "from-another-topic",
     });
     expect(result).toBeNull();
+  });
+});
+
+describe("buildScholarExport — includeEmail option (#866 UC-B)", () => {
+  function resolveCrisprFamily() {
+    vi.mocked(getFamily).mockResolvedValue({
+      supercategory: "animal_cell_models",
+      supercategorySlug: "animal-cell-models",
+      familyId: "fam_x",
+      familyLabel: "CRISPR screens",
+      familySlug: "crispr-screens-fam_x",
+    } as never);
+  }
+
+  it("inserts the email column immediately after profile_url and carries each scholar's email", async () => {
+    resolveCrisprFamily();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0) },
+      { pmidCount: 8, scholar: scholar(1) },
+    ]);
+
+    const result = await buildScholarExport(
+      "method-family",
+      { supercategory: "animal-cell-models", family: "crispr-screens-fam_x" },
+      undefined,
+      { includeEmail: true },
+    );
+
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+
+    // `email` sits right after `profile_url` (and the no-email canonical headers
+    // are otherwise unchanged, with `email` spliced in).
+    const urlIdx = header.indexOf("profile_url");
+    expect(header[urlIdx + 1]).toBe("email");
+    expect(header).toEqual([
+      ...SCOPE_HEADERS["method-family"].slice(0, urlIdx + 1),
+      "email",
+      ...SCOPE_HEADERS["method-family"].slice(urlIdx + 1),
+    ]);
+
+    // A faculty row carries the scholar's email.
+    const emailIdx = header.indexOf("email");
+    expect(body[0][emailIdx]).toBe("scholar0@med.cornell.edu");
+    expect(body[1][emailIdx]).toBe("scholar1@med.cornell.edu");
+  });
+
+  it("blanks email for hidden-display roles (doctoral / affiliate alumni), mirroring profile_url", async () => {
+    resolveCrisprFamily();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: scholar(0) },
+      { pmidCount: 8, scholar: { ...scholar(1), roleCategory: "doctoral_student" } },
+      { pmidCount: 7, scholar: { ...scholar(2), roleCategory: "affiliate_alumni" } },
+    ]);
+
+    const result = await buildScholarExport(
+      "method-family",
+      { supercategory: "animal-cell-models", family: "crispr-screens-fam_x" },
+      undefined,
+      { includeEmail: true },
+    );
+
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    const emailIdx = header.indexOf("email");
+    const urlIdx = header.indexOf("profile_url");
+
+    // Faculty: email + link present. Hidden-display roles: BOTH blank, in lockstep.
+    expect(body[0][emailIdx]).toBe("scholar0@med.cornell.edu");
+    expect(body[0][urlIdx]).toBe("/slug-0");
+    expect(body[1][emailIdx]).toBe("");
+    expect(body[1][urlIdx]).toBe("");
+    expect(body[2][emailIdx]).toBe("");
+    expect(body[2][urlIdx]).toBe("");
+  });
+
+  it("emits a blank email cell (not the column's absence) when a faculty scholar has no email", async () => {
+    resolveCrisprFamily();
+    mockScholarFamilyFindMany.mockResolvedValue([
+      { pmidCount: 9, scholar: { ...scholar(0), email: null } },
+    ]);
+
+    const result = await buildScholarExport(
+      "method-family",
+      { supercategory: "animal-cell-models", family: "crispr-screens-fam_x" },
+      undefined,
+      { includeEmail: true },
+    );
+
+    const table = parseCsv(result!.csv);
+    const header = table[0];
+    const body = table.slice(1);
+    expect(header).toContain("email");
+    expect(body[0][header.indexOf("email")]).toBe("");
+  });
+
+  it("includeEmail=false leaves the output byte-identical to the no-email canonical (no email column)", async () => {
+    resolveCrisprFamily();
+    const rows = [
+      { pmidCount: 9, scholar: scholar(0) },
+      { pmidCount: 8, scholar: scholar(1) },
+    ];
+
+    // Default (omitted) and explicit false both produce the canonical output.
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    const defaulted = await buildScholarExport("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+
+    mockScholarFamilyFindMany.mockResolvedValue(rows);
+    const explicitFalse = await buildScholarExport(
+      "method-family",
+      { supercategory: "animal-cell-models", family: "crispr-screens-fam_x" },
+      undefined,
+      { includeEmail: false },
+    );
+
+    expect(defaulted!.csv).toBe(explicitFalse!.csv);
+
+    const header = parseCsv(defaulted!.csv)[0];
+    expect(header).toEqual([...SCOPE_HEADERS["method-family"]]);
+    expect(header.some((h) => h.toLowerCase().includes("email"))).toBe(false);
+    expect(defaulted!.csv.toLowerCase()).not.toContain("@med.cornell.edu");
   });
 });

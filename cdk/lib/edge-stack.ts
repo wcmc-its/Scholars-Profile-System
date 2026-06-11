@@ -352,6 +352,37 @@ export class EdgeStack extends Stack {
     const cachingDisabled = cloudfront.CachePolicy.CACHING_DISABLED;
     const allViewer = cloudfront.OriginRequestPolicy.ALL_VIEWER;
 
+    // #866 internal-viewer origin request policy. ALL_VIEWER forwards every
+    // cookie / query string / viewer header but NOT the CloudFront-generated
+    // CloudFront-* headers, so the on-network signal cannot read the true
+    // viewer IP under plain ALL_VIEWER. This policy adds CloudFront-Viewer-Address
+    // to the forwarded set so the #866 internal-viewer check can match the source
+    // IP against INTERNAL_VIEWER_CIDRS. Applied to EXACTLY two uncacheable
+    // behaviors below -- "/api/profile/*" (the reveal) and "/api/export/*" (so the
+    // roster export can read the viewer IP) -- every other uncacheable behavior
+    // keeps plain ALL_VIEWER. Name/description ASCII-only (#401).
+    const internalViewerOrp = new cloudfront.OriginRequestPolicy(
+      this,
+      "InternalViewerOrp",
+      {
+        originRequestPolicyName: `sps-internal-viewer-${env}`,
+        comment: `SPS internal-viewer (${env}) -- ALL_VIEWER plus CloudFront-Viewer-Address (#866).`,
+        headerBehavior: cloudfront.OriginRequestHeaderBehavior.all(
+          "CloudFront-Viewer-Address",
+        ),
+        cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
+        queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
+      },
+    );
+    // Per-path override: these uncacheable behaviors get internalViewerOrp instead
+    // of plain allViewer so the on-network signal can read the viewer IP (#866).
+    // Every other uncacheable behavior defaults to allViewer.
+    const orpOverrides: ReadonlyMap<string, cloudfront.IOriginRequestPolicy> =
+      new Map([
+        ["/api/profile/*", internalViewerOrp],
+        ["/api/export/*", internalViewerOrp],
+      ]);
+
     // Next.js App Router serves two representations at the SAME URL: the
     // full HTML document (a hard navigation / refresh) and the React
     // Flight payload (a soft navigation -- a `<Link>` click), told apart
@@ -491,6 +522,14 @@ export class EdgeStack extends Stack {
       // Method (cross-scholar family) publication feed -- reads `sort`/`filter`/
       // `page` (#824). Same shape as `/api/topics/*/publications`.
       ["/api/methods/*/*/publications", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
+      // `/api/profile/*` -- the #866 internal-viewer reveal endpoint. MUST have an
+      // explicit uncacheable behavior: an unlisted `/api/profile/*` path falls to
+      // the cacheable default, which would cache one viewer's reveal (incl. the
+      // sensitive live-animal-model families) and serve it to every viewer -- a
+      // leak. CachingDisabled never caches; the internalViewerOrp applied below
+      // additionally forwards CloudFront-Viewer-Address so the on-network signal
+      // can read the source IP. GET-only (the reveal is a read).
+      ["/api/profile/*", cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS],
       // Feedback form page -- `force-dynamic`, reads `?from=` for contextual
       // mode AND the session cookie to prefill; both are stripped by the
       // cacheable default today. AllViewer restores both.
@@ -607,7 +646,7 @@ export class EdgeStack extends Stack {
       additionalBehaviors[pathPattern] = {
         origin,
         cachePolicy: cachingDisabled,
-        originRequestPolicy: allViewer,
+        originRequestPolicy: orpOverrides.get(pathPattern) ?? allViewer,
         allowedMethods,
         responseHeadersPolicy: securityHeaders,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

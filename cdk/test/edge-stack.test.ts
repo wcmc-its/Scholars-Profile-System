@@ -270,15 +270,16 @@ describe("EdgeStack", () => {
           template.findResources("AWS::CloudFront::Distribution"),
         ).map((r) => r.Properties as Record<string, unknown>);
 
-      it("has one default behavior plus twenty-seven additional cache behaviors (acceptance #2)", () => {
+      it("has one default behavior plus twenty-eight additional cache behaviors (acceptance #2)", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const defaultBehavior = dc.DefaultCacheBehavior as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
         expect(defaultBehavior).toBeDefined();
         // 24 prior behaviors + the `/_next/static/*` long-cache behavior + the
-        // two #824 method routes (/api/methods/*/*/publications, /methods/*/*/scholars).
-        expect(cacheBehaviors).toHaveLength(27);
+        // two #824 method routes (/api/methods/*/*/publications, /methods/*/*/scholars)
+        // + the #866 `/api/profile/*` internal-viewer reveal behavior.
+        expect(cacheBehaviors).toHaveLength(28);
       });
 
       it("evaluates additional behaviors in the spec-defined order (static first, then uncacheable, then #634 query-keyed)", () => {
@@ -317,6 +318,9 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
+          // #866 internal-viewer reveal -- uncacheable so a sensitive-family
+          // reveal is never cached + served to another viewer.
+          "/api/profile/*",
           "/about/feedback",
           // The two co-pub export routes MUST precede `/scholars/*` below:
           // CloudFront is first-match-wins in list order and `/scholars/*`
@@ -395,12 +399,34 @@ describe("EdgeStack", () => {
         const props = distributions()[0];
         const dc = props.DistributionConfig as Record<string, unknown>;
         const cacheBehaviors = dc.CacheBehaviors as Array<Record<string, unknown>>;
+        // #866 -- the two internal-viewer behaviors use a stack-local origin
+        // request policy (ALL_VIEWER + CloudFront-Viewer-Address), referenced by
+        // logical id (a `Ref`), not the Managed-AllViewer UUID. Resolve it by name.
+        const internalViewerOrpLogicalId = Object.entries(
+          template.findResources("AWS::CloudFront::OriginRequestPolicy"),
+        ).find(
+          ([, r]) =>
+            (
+              (r.Properties as Record<string, unknown>)
+                .OriginRequestPolicyConfig as Record<string, unknown>
+            ).Name === "sps-internal-viewer-prod",
+        )?.[0];
+        expect(internalViewerOrpLogicalId).toBeDefined();
+        const INTERNAL_VIEWER_ORP_PATHS = new Set([
+          "/api/profile/*",
+          "/api/export/*",
+        ]);
         for (const behavior of cacheBehaviors) {
           const path = behavior.PathPattern as string;
           if (path === "/_next/static/*" || QUERY_KEYED_PATTERNS.has(path)) {
             // `/_next/static/*` (immutable assets) and Group B (highest-traffic
             // pages) must NOT forward cookies -- it would fragment the cache.
             expect(behavior.OriginRequestPolicyId).toBeUndefined();
+          } else if (INTERNAL_VIEWER_ORP_PATHS.has(path)) {
+            // #866 internal-viewer ORP (forwards CloudFront-Viewer-Address) -- a Ref.
+            expect(behavior.OriginRequestPolicyId).toEqual({
+              Ref: internalViewerOrpLogicalId,
+            });
           } else {
             // Managed-AllViewer id.
             expect(behavior.OriginRequestPolicyId).toBe(
@@ -516,6 +542,8 @@ describe("EdgeStack", () => {
           "/api/scholars/*/popover-context",
           "/api/topics/*/publications",
           "/api/methods/*/*/publications",
+          // #866 internal-viewer reveal -- GET-only read.
+          "/api/profile/*",
           "/about/feedback",
           "/scholars/*/co-pubs/export",
           "/scholars/*/co-pubs/*/export",

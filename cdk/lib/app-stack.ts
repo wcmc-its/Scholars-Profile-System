@@ -1160,6 +1160,26 @@ export class AppStack extends Stack {
         // (ships dark). Wire in BOTH .env.local AND here per the flag-parity
         // rule; `cdk deploy Sps-App-<env>` required (CD re-rolls the image only).
         SCHOLAR_LIST_EXPORT: "off",
+        // #866 -- "internal viewer" gating (authenticated session OR on the WCM
+        // network by source IP). Three flags, all OFF in BOTH envs (ships dark);
+        // wire in BOTH .env.local AND here per the flag-parity rule -- a manual
+        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only):
+        //   INTERNAL_VIEWER_NETWORK_SIGNAL -- when "on", an unauthenticated
+        //     viewer whose CloudFront-Viewer-Address falls inside INTERNAL_VIEWER_CIDRS
+        //     also counts as an internal viewer. While off, "internal" means an
+        //     authenticated session only (the network half is inert), so an
+        //     external viewer can never gain internal access via a spoofable IP.
+        //   SCHOLAR_LIST_EXPORT_EMAIL -- UC-B. When "on" (and SCHOLAR_LIST_EXPORT
+        //     is also on), the internal-only #847 roster CSV gains an email column
+        //     for internal viewers. While off the CSV is byte-identical to today.
+        //   INTERNAL_VIEWER_CIDRS -- the CIDR allowlist the network signal matches
+        //     the viewer IP against. EMPTY here (no network signal active until it
+        //     is populated); populate from EdgeStack edgeAllowedCidrs (#461) when
+        //     enabling INTERNAL_VIEWER_NETWORK_SIGNAL. An empty set means the
+        //     network half matches nobody -- default-safe.
+        INTERNAL_VIEWER_NETWORK_SIGNAL: "off",
+        SCHOLAR_LIST_EXPORT_EMAIL: "off",
+        INTERNAL_VIEWER_CIDRS: "",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
