@@ -1065,11 +1065,12 @@ export class AppStack extends Stack {
         // #861 -- streams the /search shell so the header/tabs paint before the
         // cold MeSH precompute + the three badge-count searches resolve (the
         // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".
-        // Default OFF in BOTH envs: while off the rendered output is byte-identical
-        // to today (the body is awaited before the shell, exactly as now). No data
+        // STAGING ON (soak + measure cold/warm /search TTFB); PROD OFF until that
+        // measurement + go-live. While off the rendered output is byte-identical to
+        // today (the body is awaited before the shell, exactly as now). No data
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
-        SEARCH_SHELL_STREAMING: "off",
+        SEARCH_SHELL_STREAMING: env === "staging" ? "on" : "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session
@@ -1123,14 +1124,14 @@ export class AppStack extends Stack {
         //   METHODS_LENS_FAMILY_ROSTER_FALLBACK -- #862. Backfills the per-family
         //     "Top scholars" row with attributed non-faculty (postdocs/fellows/core
         //     staff), faculty-first, when the FT-faculty set is empty/short -- so a
-        //     trainee/core-driven family renders a row instead of an empty one. OFF
-        //     in BOTH envs (a public-display policy change pending External/Faculty
-        //     Affairs sign-off on surfacing non-faculty in this row); while off the
-        //     row is FT-faculty-only, byte-identical to today, and the tooltip copy
-        //     reads faculty-only. doctoral_student/affiliate_alumni are NEVER
-        //     surfaced regardless of this flag. Image-only/reversible (no data
+        //     trainee/core-driven family renders a row instead of an empty one.
+        //     STAGING ON; PROD OFF -- a public-display policy change pending
+        //     External/Faculty Affairs sign-off on surfacing non-faculty in this row.
+        //     While off the row is FT-faculty-only, byte-identical to today, and the
+        //     tooltip copy reads faculty-only. doctoral_student/affiliate_alumni are
+        //     NEVER surfaced regardless of this flag. Image-only/reversible (no data
         //     prereq); flip is env-only via cdk deploy Sps-App-<env>.
-        METHODS_LENS_FAMILY_ROSTER_FALLBACK: "off",
+        METHODS_LENS_FAMILY_ROSTER_FALLBACK: env === "staging" ? "on" : "off",
         //   METHODS_LENS_PAGES -- standalone cross-scholar Method pages
         //     (/methods/**), search surfacing, and the per-scholar inbound
         //     links. ARMED ON in BOTH envs. Staging is live (the master lens +

@@ -3441,7 +3441,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_SHELL_STREAMING",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
@@ -3465,7 +3465,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_ROSTER_FALLBACK",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "METHODS_LENS_PAGES",
