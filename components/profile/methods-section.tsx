@@ -30,12 +30,12 @@ type Row = ScholarFamilyView & { sensitive: boolean };
  * #800-suppressed and #801-sensitive families.
  *
  * #801 reveal: when the audience gate is active (`sensitiveGateActive`), this
- * island fetches the scholar's gated families from the cookie-forwarding
- * /api/edit/methods-sensitive route. The route returns them ONLY to the scholar
- * themselves and site admins (anonymous/other viewers get []), so a public
- * viewer sees exactly the unmarked public list. Revealed families merge into the
- * list in rank order, each flagged with a light "hidden from the public profile"
- * marker (an eye-off icon + hover tooltip).
+ * island fetches the scholar's gated families from the
+ * /api/profile/[cwid]/sensitive-families route. The route returns them ONLY to an
+ * internal viewer — an authenticated session or an on-WCM-network viewer (#866);
+ * external viewers get [] — so a public viewer sees exactly the unmarked public
+ * list. Revealed families merge into the list in rank order, each flagged with a
+ * light "hidden from the public profile" marker (an eye-off icon + hover tooltip).
  *
  * "All work" only: the count is the lead/senior-scoped corpus's single
  * publication count; the mockup's lead/all toggle is omitted until ReciterAI
@@ -94,7 +94,7 @@ export function MethodsSection({
   useEffect(() => {
     if (!sensitiveGateActive || !scholarCwid) return;
     let cancelled = false;
-    fetch(`/api/edit/methods-sensitive/${encodeURIComponent(scholarCwid)}`, {
+    fetch(`/api/profile/${encodeURIComponent(scholarCwid)}/sensitive-families`, {
       cache: "no-store",
     })
       .then((r) => (r.ok ? r.json() : { families: [] }))
@@ -249,8 +249,8 @@ export function MethodsSection({
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs text-sm leading-relaxed">
-                            Hidden from the public profile — shown only to the scholar and site
-                            admins (audience-gated family).
+                            Hidden from the public profile — shown to Weill Cornell viewers
+                            (audience-gated family).
                           </TooltipContent>
                         </Tooltip>
                       ) : null}
@@ -398,7 +398,7 @@ export function MethodsSection({
                         </span>
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs text-sm leading-relaxed">
-                        Hidden from the public profile — shown only to the scholar and site admins
+                        Hidden from the public profile — shown to Weill Cornell viewers
                         (audience-gated family).
                       </TooltipContent>
                     </Tooltip>

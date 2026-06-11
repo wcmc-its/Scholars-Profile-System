@@ -21,3 +21,20 @@
 export function isScholarListExportEnabled(): boolean {
   return process.env.SCHOLAR_LIST_EXPORT === "on";
 }
+
+/**
+ * #866 — adds an email column to the internal-only roster CSV (UC-B). Layered on
+ * top of `isScholarListExportEnabled()` (master gate) AND the per-request
+ * internal-viewer predicate (lib/auth/viewer-context.ts): the email column is
+ * emitted ONLY when this flag is on AND the requester is an internal viewer, so
+ * an external viewer never receives contact data even with the master export on.
+ *
+ * Defaults OFF, so the column ships dark. To turn it on in a deployed env, set
+ * the env var to "on" in BOTH `.env.local` (local) AND the per-env
+ * `environment:` block in cdk/lib/app-stack.ts, then `cdk deploy Sps-App-<env>`
+ * (CD only re-rolls the image; it does not pick up new env keys) — the flag
+ * parity rule. Wiring the flag in only one place is a silent shipping bug.
+ */
+export function isScholarListExportEmailEnabled(): boolean {
+  return process.env.SCHOLAR_LIST_EXPORT_EMAIL === "on";
+}

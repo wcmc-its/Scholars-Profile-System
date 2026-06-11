@@ -22,7 +22,11 @@
  * all-suppressed/sensitive target, and the rosters re-apply `isFamilyPublicly-
  * Visible` per row, so a suppressed/sensitive family never contributes a scholar.
  *
- * NO email or any contact column is ever emitted (internal directory data only).
+ * By default NO email or any contact column is emitted (internal directory data
+ * only). The route may opt in to an EMAIL column (#866 UC-B) via the
+ * `includeEmail` option, but ONLY for an internal viewer with the email flag on;
+ * that gate lives in the route, never here. With `includeEmail` off the output is
+ * byte-identical to the no-email canonical (the exported SCOPE_HEADERS).
  */
 import { prisma } from "@/lib/db";
 import { toCsv, type CsvCell } from "@/lib/csv";
@@ -69,13 +73,28 @@ const COMMON_HEADERS = [
 ] as const;
 
 /** Per-scope CSV header arrays = the common identity columns + the scope's count
- *  column(s). Exported so the route + tests can assert the exact header row. */
+ *  column(s). Exported so the route + tests can assert the exact header row. This
+ *  is the NO-EMAIL canonical; `headersFor` derives the email-augmented variant. */
 export const SCOPE_HEADERS: Readonly<Record<ScholarExportScope, ReadonlyArray<string>>> = {
   "method-family": [...COMMON_HEADERS, "pubs_in_family"],
   supercategory: [...COMMON_HEADERS, "pubs_in_supercategory", "top_family"],
   topic: [...COMMON_HEADERS, "pubs_in_topic"],
   subtopic: [...COMMON_HEADERS, "pubs_in_subtopic", "pubs_total"],
 };
+
+/**
+ * The scope's header list, optionally with `email` inserted immediately AFTER
+ * `profile_url` (#866 UC-B). When `includeEmail` is false this returns
+ * SCOPE_HEADERS[scope] unchanged, so the off-path output is byte-identical to the
+ * no-email canonical. The header row and `projectRows` MUST both derive from this
+ * one function so the cells line up positionally.
+ */
+function headersFor(scope: ScholarExportScope, includeEmail: boolean): ReadonlyArray<string> {
+  const base = SCOPE_HEADERS[scope];
+  if (!includeEmail) return base;
+  const urlIdx = base.indexOf("profile_url");
+  return [...base.slice(0, urlIdx + 1), "email", ...base.slice(urlIdx + 1)];
+}
 
 /** Human report-name prefix for the download filename, per scope. */
 const SCOPE_REPORT_NAME: Readonly<Record<ScholarExportScope, string>> = {
@@ -94,6 +113,7 @@ const SCHOLAR_SELECT = {
   primaryTitle: true,
   primaryDepartment: true,
   roleCategory: true,
+  email: true,
 } as const;
 
 type ScholarIdentity = {
@@ -104,6 +124,7 @@ type ScholarIdentity = {
   primaryTitle: string | null;
   primaryDepartment: string | null;
   roleCategory: string | null;
+  email: string | null;
 };
 
 /** One ranked roster row: identity + the scope count column(s). */
@@ -136,6 +157,11 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
     // the /{slug} route itself 404s for them. Emit a blank URL rather than a
     // dead link the public surface deliberately withholds.
     profile_url: isPubliclyDisplayed(row.roleCategory) ? profilePath(row.slug) : "",
+    // #866 UC-B email column (only emitted when `includeEmail`; see headersFor).
+    // Mirror profile_url's #536 carve: a hidden-display role's email is BLANK,
+    // matching the unlinked public roster. `headersFor`/`projectRows` drop the
+    // key entirely when email is not requested.
+    email: isPubliclyDisplayed(row.roleCategory) ? (row.email ?? "") : "",
   };
 }
 
@@ -297,9 +323,16 @@ async function loadSubtopicRoster(
 // ---------------------------------------------------------------------------
 
 /** Project a ranked roster into positional CSV cells per the scope's header
- *  order. The scope count column(s) map onto the trailing headers. */
-function projectRows(scope: ScholarExportScope, roster: ExportRosterRow[]): CsvCell[][] {
-  const headers = SCOPE_HEADERS[scope];
+ *  order. The scope count column(s) map onto the trailing headers. Projects
+ *  against `headersFor(scope, includeEmail)` so the cells line up with the SAME
+ *  header list the export emits — when `includeEmail` is false the `email` key in
+ *  `commonCells` is never read, so the row is byte-identical to the canonical. */
+function projectRows(
+  scope: ScholarExportScope,
+  roster: ExportRosterRow[],
+  includeEmail: boolean,
+): CsvCell[][] {
+  const headers = headersFor(scope, includeEmail);
   return roster.map((row, i) => {
     const cells: Record<string, CsvCell> = commonCells(row, i + 1);
     if (scope === "method-family") {
@@ -333,12 +366,18 @@ function projectRows(scope: ScholarExportScope, roster: ExportRosterRow[]): CsvC
  *   - supercategory: { supercategory }            (URL slug segment)
  *   - topic:         { slug }                      (topic id == slug)
  *   - subtopic:      { slug, subtopic }            (topic slug + subtopic id)
+ *
+ * `options.includeEmail` (#866 UC-B, default false) adds an `email` column right
+ * after `profile_url`. The route passes it ONLY for an internal viewer with the
+ * email flag on; this builder trusts that decision and does no gating itself.
  */
 export async function buildScholarExport(
   scope: ScholarExportScope,
   params: Record<string, string | undefined>,
   prismaRead: PrismaRead = prisma,
+  options: { includeEmail?: boolean } = {},
 ): Promise<ScholarExport | null> {
+  const includeEmail = options.includeEmail ?? false;
   let roster: ExportRosterRow[] | null = null;
 
   if (scope === "method-family") {
@@ -374,8 +413,8 @@ export async function buildScholarExport(
     roster = await loadSubtopicRoster(prismaRead, topic.id, subtopic.id);
   }
 
-  const headers = SCOPE_HEADERS[scope];
-  const csv = toCsv(headers, projectRows(scope, roster));
+  const headers = headersFor(scope, includeEmail);
+  const csv = toCsv(headers, projectRows(scope, roster, includeEmail));
   const filename = `${SCOPE_REPORT_NAME[scope]}-Scholars-${todayStamp()}.csv`;
   return { filename, csv };
 }
