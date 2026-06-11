@@ -38,6 +38,7 @@ import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
   isMethodsFamilyRosterFallbackOn,
+  isMethodsLensMeshDefinitionsEnabled,
 } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -221,6 +222,54 @@ export async function getFamily(
     familyId: chosen.familyId,
     familyLabel: chosen.familyLabel,
     familySlug: familySlug(chosen.familyLabel, chosen.familyId),
+  };
+}
+
+/** #879 — the NLM MeSH definition surfaced on a family page: the descriptor's
+ *  canonical name + non-null scope note + UI (for the meshb attribution link). */
+export type FamilyMeshDefinition = {
+  descriptorUi: string;
+  name: string;
+  scopeNote: string;
+};
+
+/**
+ * #879 — resolve a family's curated MeSH definition, or null. Returns a
+ * definition ONLY when (a) `METHODS_LENS_MESH_DEFINITIONS` is on, (b) a
+ * `confidence='curated'` `mesh_curated_family_anchor` row exists for the stable
+ * `(supercategory, familyLabel)` identity, (c) that descriptor still exists in
+ * `mesh_descriptor`, and (d) its scope note is non-null. `derived` seed rows are
+ * NEVER surfaced (only a human-promoted `curated` row), and a stale descriptor
+ * UI (post-MeSH-full-replace, the no-FK design) or a null scope note degrade to
+ * null — no definition shown, never a throw.
+ *
+ * Two indexed point-reads (anchor PK prefix + descriptor PK); the flag gate runs
+ * first so the feature is zero-DB-cost when off. Deterministic pick (lowest
+ * descriptorUi) when a family curated-anchors to more than one descriptor.
+ */
+export async function getFamilyMeshDefinition(
+  supercategory: string,
+  familyLabel: string,
+): Promise<FamilyMeshDefinition | null> {
+  if (!isMethodsLensMeshDefinitionsEnabled()) return null;
+
+  const anchor = await prisma.meshCuratedFamilyAnchor.findFirst({
+    where: { supercategory, familyLabel, confidence: "curated" },
+    orderBy: { descriptorUi: "asc" },
+    select: { descriptorUi: true },
+  });
+  if (!anchor) return null;
+
+  const descriptor = await prisma.meshDescriptor.findUnique({
+    where: { descriptorUi: anchor.descriptorUi },
+    select: { descriptorUi: true, name: true, scopeNote: true },
+  });
+  if (!descriptor || !descriptor.scopeNote) return null;
+
+  return {
+    descriptorUi: descriptor.descriptorUi,
+    name: descriptor.name,
+    scopeNote: descriptor.scopeNote,
   };
 }
 

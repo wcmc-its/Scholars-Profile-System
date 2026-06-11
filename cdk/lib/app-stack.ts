@@ -1146,6 +1146,17 @@ export class AppStack extends Stack {
         //     a /methods/** route notFound()s and no search candidate/badge or
         //     inbound link renders.
         METHODS_LENS_PAGES: "on",
+        //   METHODS_LENS_MESH_DEFINITIONS -- #879. Shows the NLM MeSH scope-note
+        //     definition on a /methods family page when a CURATED
+        //     mesh_curated_family_anchor row maps the family to a descriptor.
+        //     Default OFF BOTH envs: data prereq (curated rows must be seeded via
+        //     etl:mesh-family-anchors) AND the visible on-page definition + NLM
+        //     attribution ship in PR-2 (UI placement pending design sign-off).
+        //     While off, getFamilyMeshDefinition returns null -> the JSON-LD
+        //     description stays null (byte-identical to today). Flip is env-only
+        //     via cdk deploy Sps-App-<env>; wire in BOTH .env.local AND here per
+        //     the flag-parity rule.
+        METHODS_LENS_MESH_DEFINITIONS: "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet

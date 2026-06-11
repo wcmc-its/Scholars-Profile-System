@@ -1,0 +1,6 @@
+supercategory,family_label,descriptor_ui,confidence,source_note
+molecular_biochem_reagents,Flow cytometry assays,D005434,curated,"Flow Cytometry — exact method descriptor. A2 families.json v2026-06-10 (label+supercategory verified). #879 seed, hand-verified 2026-06-11."
+microscopy_histology,Immunohistochemistry,D007150,curated,"Immunohistochemistry — 1:1 descriptor name. #879 seed, hand-verified 2026-06-11."
+microscopy_histology,Confocal microscopy,D018613,curated,"Microscopy, Confocal — same method; descriptor uses inverted NLM word order. #879 seed, hand-verified 2026-06-11."
+molecular_biochem_reagents,RNA interference reagents,D034622,curated,"RNA Interference — the method behind the reagent family. #879 seed, hand-verified 2026-06-11."
+molecular_biochem_reagents,CRISPR genome editing,D000072669,curated,"Gene Editing — the technique definition for the CRISPR family. Alternative D064113 (CRISPR-Cas Systems) defines the bacterial system rather than the editing method. #879 seed, hand-verified 2026-06-11."

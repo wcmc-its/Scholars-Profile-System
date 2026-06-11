@@ -440,6 +440,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "METHODS_LENS_MESH_DEFINITIONS",
+                "Value": "off",
+              },
+              {
                 "Name": "PROFILE_FACET_REDESIGN",
                 "Value": "off",
               },
@@ -3482,6 +3486,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "METHODS_LENS_PAGES",
                 "Value": "on",
+              },
+              {
+                "Name": "METHODS_LENS_MESH_DEFINITIONS",
+                "Value": "off",
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",

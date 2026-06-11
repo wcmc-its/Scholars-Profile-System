@@ -6,6 +6,7 @@ import {
   getFamilyScholars,
   getDistinctScholarCountForFamily,
   getRepresentativePubsForFamily,
+  getFamilyMeshDefinition,
 } from "@/lib/api/methods";
 import { supercategoryLabel } from "@/lib/methods/supercategory-labels";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -60,7 +61,7 @@ export default async function FamilyPage({
   const resolved = await getFamily(supercategory, family);
   if (!resolved) notFound();
 
-  const [topScholars, scholarCount, representativePubs] = await Promise.all([
+  const [topScholars, scholarCount, representativePubs, meshDefinition] = await Promise.all([
     getFamilyScholars(resolved.supercategory, resolved.familyLabel).catch(() => null),
     getDistinctScholarCountForFamily(resolved.supercategory, resolved.familyLabel).catch(
       () => 0,
@@ -70,6 +71,12 @@ export default async function FamilyPage({
       resolved.familyLabel,
       SPOTLIGHT_CARDS,
     ).catch(() => []),
+    // #879 — curated MeSH definition (null unless METHODS_LENS_MESH_DEFINITIONS
+    // is on AND a curated anchor exists). Consumed by the JSON-LD description
+    // below; the visible on-page definition block is deferred to PR-2 (UI
+    // placement needs design sign-off). `.catch` so a definition failure never
+    // 500s the page.
+    getFamilyMeshDefinition(resolved.supercategory, resolved.familyLabel).catch(() => null),
   ]);
 
   const scLabel = supercategoryLabel(resolved.supercategory);
@@ -99,7 +106,10 @@ export default async function FamilyPage({
   const jsonLd = buildDefinedTermJsonLd({
     id: resolved.familyId,
     label: resolved.familyLabel,
-    description: null,
+    // #879 — fill the DefinedTerm description from the curated MeSH scope note
+    // when present (NLM-authored; attribution renders with the PR-2 UI). Null
+    // (flag off / no curated anchor) keeps the JSON-LD byte-identical to today.
+    description: meshDefinition?.scopeNote ?? null,
   });
 
   return (

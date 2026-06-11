@@ -758,6 +758,43 @@ model MeshCuratedAlias {
   @@map("mesh_curated_alias")
 }
 
+/// #879 — curated (and derived-seed) mapping from a method family to an NLM MeSH
+/// descriptor, so the /methods family pages can show the descriptor's scope note
+/// as a definition. Mirrors the curated|derived model of MeshCuratedTopicAnchor.
+///
+/// Keyed on the STABLE (supercategory, family_label) identity — NOT familyId,
+/// which A2 re-mints on every rebuild (the same rationale FamilySuppressionOverlay
+/// / FamilySensitivityOverlay key on (supercategory, family_label)). A family may
+/// legitimately anchor to more than one descriptor and a descriptor to more than
+/// one family, so all three columns form the composite PK.
+///
+/// No Prisma FK to MeshDescriptor.descriptorUi — same rationale as
+/// MeshCuratedTopicAnchor / MeshCuratedAlias: the MeSH ETL full-replaces the
+/// descriptor table inside a transaction, so a cascading FK would wipe every
+/// anchor on each MeSH refresh. A stale descriptor_ui becomes inert — the read
+/// path (getFamilyMeshDefinition) finds no descriptor and returns null. No FK to
+/// ScholarFamily either: familyId is unstable and (supercategory, family_label)
+/// is indexed-but-not-unique there (many scholars share a family).
+///
+/// `confidence` is 'curated' (human-verified; the ONLY confidence the read path
+/// surfaces) or 'derived' (generator-proposed seed; never shown until a human
+/// promotes it). Seeded from the committed CSV at
+/// etl/mesh-family-anchors/curated.csv, loaded by `npm run etl:mesh-family-anchors`
+/// (truncate + insert). The secondary index supports a future reverse lookup
+/// (which families anchor to descriptor X) for supercategory roll-ups.
+model MeshCuratedFamilyAnchor {
+  supercategory String   @db.VarChar(128)
+  familyLabel   String   @map("family_label") @db.VarChar(255)
+  descriptorUi  String   @map("descriptor_ui") @db.VarChar(10)
+  confidence    String   @db.VarChar(16) // 'curated' | 'derived'
+  sourceNote    String?  @map("source_note") @db.Text
+  refreshedAt   DateTime @default(now()) @map("refreshed_at")
+
+  @@id([supercategory, familyLabel, descriptorUi])
+  @@index([descriptorUi])
+  @@map("mesh_curated_family_anchor")
+}
+
 /// WCM department from ED LDAP `weillCornellEduOrgUnit` level1.
 /// `code` is the stable org-unit code from LDAP — joined on, never display names.
 /// `chairCwid` is identified from appointment.title LIKE 'Chairman%' (D-03).

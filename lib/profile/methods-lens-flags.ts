@@ -77,3 +77,17 @@ export function isMethodsLensFamilyFilterOn(): boolean {
 export function isMethodsFamilyRosterFallbackOn(): boolean {
   return process.env.METHODS_LENS_FAMILY_ROSTER_FALLBACK === "on";
 }
+
+/**
+ * #879 — shows the NLM MeSH scope-note definition on a /methods family page when
+ * a CURATED `mesh_curated_family_anchor` row maps that family to a descriptor.
+ * Default OFF (data prereq: curated rows must be seeded before any definition is
+ * meaningful), so it's a `=== "on"` opt-in gate, not the `!== "off"` kill-switch.
+ * `getFamilyMeshDefinition` checks this first and returns null when off, so the
+ * page does zero extra DB work and the JSON-LD `description` stays null
+ * (byte-identical to today). Wire in BOTH `.env.local` AND the per-env
+ * `environment:` block in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsLensMeshDefinitionsEnabled(): boolean {
+  return process.env.METHODS_LENS_MESH_DEFINITIONS === "on";
+}

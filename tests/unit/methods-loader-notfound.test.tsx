@@ -72,6 +72,10 @@ vi.mock("@/lib/api/methods", () => ({
   getFamilyScholars: (...a: unknown[]) => mockGetFamilyScholars(...a),
   getDistinctScholarCountForFamily: (...a: unknown[]) => mockGetDistinctScholarCountForFamily(...a),
   getRepresentativePubsForFamily: (...a: unknown[]) => mockGetRepresentativePubsForFamily(...a),
+  // #879 — the FamilyPage RSC now awaits a curated MeSH definition (feeds JSON-LD;
+  // the visible block is PR-2). It never affects notFound() gating, so a static
+  // null stub keeps these loader tests focused on the gate contract.
+  getFamilyMeshDefinition: () => Promise.resolve(null),
 }));
 
 vi.mock("@/lib/export/scholar-export-flags", () => ({
