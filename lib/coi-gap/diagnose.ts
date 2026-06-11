@@ -16,7 +16,13 @@
  * normalization gaps (corporate suffixes beyond the current strip-list, proper-
  * noun casing, word order) and tune generation + matching from real data.
  */
-import { analyzeStatement, normalizeEntity, type Scholar } from "./pipeline";
+import {
+  analyzeStatement,
+  isStructured,
+  looksLikePersonName,
+  normalizeEntity,
+  type Scholar,
+} from "./pipeline";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
 
 export type DiagnosticRow = {
@@ -44,6 +50,16 @@ export type DiagnosticRow = {
   nearestExtraTokens: string;
   failureModeGuess: string;
   tierReason: string;
+  /** The extracted entity itself looks like a PERSON's name (e.g. a co-author),
+   *  not an organization — a generation-noise signal. */
+  entityIsPersonName: boolean;
+  /** The SOURCE STATEMENT names ≥2 distinct authors (an ASCO blob or several
+   *  "Dr X / First Last … discloses" subjects). On such a shared statement an
+   *  `unattributed` surfaced entity is leakage-prone — it may be another author's
+   *  relationship, not the scholar's. */
+  isMultiAuthor: boolean;
+  /** Distinct author subjects named in the statement (best-effort). */
+  authorMentions: number;
   sourceSentence: string;
 };
 
@@ -59,6 +75,31 @@ export type DiagnoseInput = {
 const toks = (s: string): Set<string> =>
   new Set(normalizeEntity(s).split(" ").filter((w) => w.length > 1));
 
+// A disclosure-statement SUBJECT immediately followed by a disclosure verb
+// ("… has received / is a consultant / discloses / serves / reports"), in either
+// form: an honorific + surname ("Dr. Shah discloses") OR a first + last name
+// ("Scott Kasner has received"). The captured surname is group 1 or group 2.
+// Best-effort: a 3-word company in "X Y Z has provided" form can be miscounted as
+// an author, so the count is an upper-ish estimate — fine for SIZING multi-author
+// statements (≥2 subjects), not for production attribution.
+const VERB = "(?:has|have|is\\s+a|was\\s+a|holds?|reports?|disclos\\w*|receiv\\w*|serv\\w*)";
+const AUTHOR_REF = new RegExp(
+  `\\b(?:(?:Drs?|Prof|Mr|Ms|Mrs)\\.?\\s+([A-Z][a-z]+(?:[-‐‑][A-Z][a-z]+)?)` +
+    `|[A-Z][a-z]+\\s+([A-Z][a-z]+(?:[-‐‑][A-Z][a-z]+)?))\\s+${VERB}\\b`,
+  "g",
+);
+
+/** Distinct author subjects named in a statement (best-effort). 1 ⇒ effectively
+ *  single-author (the lone subject is the scholar); ≥2 ⇒ a shared/multi-author
+ *  disclosure block where unattributed clauses are leakage-prone. */
+export function countAuthorMentions(stmt: string): number {
+  const surnames = new Set<string>();
+  AUTHOR_REF.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = AUTHOR_REF.exec(stmt)) !== null) surnames.add((m[1] ?? m[2]).toLowerCase());
+  return surnames.size;
+}
+
 /** Every extracted entity for a scholar (surfaced + suppressed), flattened to
  *  one diagnostic row per (pmid, entity occurrence). Pure — DB-free. */
 export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
@@ -69,6 +110,10 @@ export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
       includeSuppressed: true,
       nearDisclosedThreshold: input.nearDisclosedThreshold,
     });
+    // Per-statement multi-author signal (stamped on every row of the statement):
+    // an ASCO blob, or ≥2 distinct named author-subjects.
+    const authorMentions = countAuthorMentions(st.statementText);
+    const isMultiAuthor = isStructured(st.statementText) || authorMentions >= 2;
     for (const c of candidates) {
       const normalizedNearest = c.nearestDisclosed ? normalizeEntity(c.nearestDisclosed) : "";
       const eTok = toks(c.entity);
@@ -93,6 +138,9 @@ export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
         nearestExtraTokens: missing.join(" "),
         failureModeGuess: c.failureModeGuess,
         tierReason: c.tierReason,
+        entityIsPersonName: looksLikePersonName(c.entity),
+        isMultiAuthor,
+        authorMentions,
         sourceSentence: c.sourceSentence,
       });
     }
@@ -111,6 +159,19 @@ export type DiagnoseSummary = {
   nearMiss: number;
   /** Suppressed rows by reason bucket (matched vs co-author vs non-personal). */
   suppressedByReason: Record<string, number>;
+  /** The precision picture for surfaced rows — what we'd actually show a scholar. */
+  surfacedBreakdown: {
+    /** Attributed to the scholar by name/initials — the trustworthy core. */
+    scholarAttributed: number;
+    /** Unattributed clause in a MULTI-author statement — leakage-prone (may be
+     *  another author's relationship). The dominant precision problem. */
+    leakageRiskMultiAuthor: number;
+    /** Unattributed clause in a single-author statement — the lone subject is the
+     *  scholar, so probably legitimately theirs. */
+    unattributedSingleAuthor: number;
+    /** Surfaced entity that looks like a PERSON's name (a co-author bled through). */
+    personNameSurfaced: number;
+  };
 };
 
 /** Roll diagnostic rows up to a console-friendly summary. */
@@ -120,12 +181,24 @@ export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.
   const suppressedByReason: Record<string, number> = {};
   let surfaced = 0;
   let nearMiss = 0;
+  const surfacedBreakdown = {
+    scholarAttributed: 0,
+    leakageRiskMultiAuthor: 0,
+    unattributedSingleAuthor: 0,
+    personNameSurfaced: 0,
+  };
   for (const r of rows) {
     byTier[r.tier] = (byTier[r.tier] ?? 0) + 1;
     if (r.surfaced) {
       surfaced++;
       surfacedByFailureMode[r.failureModeGuess] = (surfacedByFailureMode[r.failureModeGuess] ?? 0) + 1;
       if (r.nearestScore >= 0.3 && r.nearestScore < nearThreshold) nearMiss++;
+      if (r.entityIsPersonName) surfacedBreakdown.personNameSurfaced++;
+      if (r.attribution === "scholar") surfacedBreakdown.scholarAttributed++;
+      else if (r.attribution === "unattributed") {
+        if (r.isMultiAuthor) surfacedBreakdown.leakageRiskMultiAuthor++;
+        else surfacedBreakdown.unattributedSingleAuthor++;
+      }
     } else {
       // Low: classify by the dominant reason for the bucket tally.
       const reason =
@@ -139,5 +212,13 @@ export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.
       suppressedByReason[reason] = (suppressedByReason[reason] ?? 0) + 1;
     }
   }
-  return { total: rows.length, surfaced, byTier, surfacedByFailureMode, nearMiss, suppressedByReason };
+  return {
+    total: rows.length,
+    surfaced,
+    byTier,
+    surfacedByFailureMode,
+    nearMiss,
+    suppressedByReason,
+    surfacedBreakdown,
+  };
 }
