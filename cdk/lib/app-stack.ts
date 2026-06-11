@@ -1234,7 +1234,7 @@ export class AppStack extends Stack {
         //     launch. Inert while COMMS_STEWARD_ENABLED is off. Wired here per the
         //     flag-parity rule; promotion is a config edit + manual `cdk deploy
         //     Sps-App-<env>` (CD re-rolls the image only, never the task-def env).
-        COMMS_STEWARD_ENABLED: "off",
+        COMMS_STEWARD_ENABLED: env === "staging" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
