@@ -429,7 +429,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_PAGES",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",
