@@ -18,8 +18,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyRosterFilter,
+  applySupercategoryFilter,
   buildFamilyRoster,
   parseRosterFilter,
+  parseSupercategoriesParam,
   type FamilyRosterRow,
 } from "@/lib/api/methods-families";
 
@@ -313,5 +315,42 @@ describe("applyRosterFilter", () => {
     const out = applyRosterFilter(rows, tier);
     expect(out).toHaveLength(1);
     expect(out[0].tier).toBe(tier);
+  });
+});
+
+describe("parseSupercategoriesParam", () => {
+  it("splits a comma list, trims, dedupes, drops blanks", () => {
+    expect(parseSupercategoriesParam("a, b ,a,,c")).toEqual(["a", "b", "c"]);
+  });
+
+  it("absent/blank ⇒ [] (no narrowing)", () => {
+    expect(parseSupercategoriesParam(null)).toEqual([]);
+    expect(parseSupercategoriesParam("")).toEqual([]);
+    expect(parseSupercategoriesParam(" , ")).toEqual([]);
+  });
+});
+
+describe("applySupercategoryFilter", () => {
+  const rows: FamilyRosterRow[] = [
+    { supercategory: "animal_cell_models", familyLabel: "A", tier: "public", reason: null, isNew: false, reviewedAt: null, scholarCount: 1, pmidCount: 1 },
+    { supercategory: "computational_statistical", familyLabel: "B", tier: "public", reason: null, isNew: false, reviewedAt: null, scholarCount: 1, pmidCount: 1 },
+    { supercategory: "animal_cell_models", familyLabel: "C", tier: "public", reason: null, isNew: false, reviewedAt: null, scholarCount: 1, pmidCount: 1 },
+  ];
+
+  it("empty list is the identity (all supercategories)", () => {
+    expect(applySupercategoryFilter(rows, [])).toHaveLength(3);
+  });
+
+  it("narrows to a single selected supercategory", () => {
+    expect(applySupercategoryFilter(rows, ["animal_cell_models"]).map((r) => r.familyLabel)).toEqual([
+      "A",
+      "C",
+    ]);
+  });
+
+  it("unions multiple selected supercategories", () => {
+    expect(
+      applySupercategoryFilter(rows, ["computational_statistical", "animal_cell_models"]),
+    ).toHaveLength(3);
   });
 });

@@ -39,11 +39,13 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, Check, Loader2, Tag } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Tag } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import type {
   FamilyRosterFilter,
@@ -119,6 +121,13 @@ function reasonLabel(reason: string): string {
   return reason;
 }
 
+/** Display a snake_case supercategory id as a readable label
+ *  (`animal_cell_models` → "Animal cell models"). */
+function formatSupercategory(sc: string): string {
+  const spaced = sc.replace(/_/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export type MethodFamiliesRosterProps = {
   /** The full roster (server-pre-ordered by the §6 review-queue priority). */
   families: ReadonlyArray<FamilyRosterRow>;
@@ -131,11 +140,41 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
   const [roster, setRoster] = React.useState<FamilyRosterRow[]>(() => families.map((r) => ({ ...r })));
   // Default view = the review queue (§8).
   const [filter, setFilter] = React.useState<FamilyRosterFilter>("flagged");
+  // The supercategory multi-select. Empty = all supercategories (no narrowing).
+  const [selectedSupers, setSelectedSupers] = React.useState<Set<string>>(() => new Set());
   // The row currently writing, keyed by `rowKey`, or null.
   const [busyKey, setBusyKey] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
-  const visible = React.useMemo(() => filterRows(roster, filter), [roster, filter]);
+  // Distinct supercategories (sorted) + a total family count each, for the
+  // multi-select. Over the FULL roster so the menu is stable as filters change.
+  const supercategories = React.useMemo(() => {
+    const total = new Map<string, number>();
+    for (const r of roster) total.set(r.supercategory, (total.get(r.supercategory) ?? 0) + 1);
+    return [...total.entries()]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  }, [roster]);
+
+  // Narrow to the selected supercategories (empty = all) BEFORE the tab filter,
+  // so the tab counts and the table both reflect the supercategory scope.
+  const scopedRoster = React.useMemo(
+    () =>
+      selectedSupers.size === 0
+        ? roster
+        : roster.filter((r) => selectedSupers.has(r.supercategory)),
+    [roster, selectedSupers],
+  );
+  const visible = React.useMemo(() => filterRows(scopedRoster, filter), [scopedRoster, filter]);
+
+  function toggleSuper(sc: string) {
+    setSelectedSupers((prev) => {
+      const next = new Set(prev);
+      if (next.has(sc)) next.delete(sc);
+      else next.add(sc);
+      return next;
+    });
+  }
 
   /** Set a family's tier. Optimistic: flip the local row first, POST, roll back
    *  on failure. (`public` clears both overlays server-side.) */
@@ -213,17 +252,18 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
     }
   }
 
-  // Counts for every filter tab (not just the review queue).
+  // Counts for every filter tab — over the supercategory-scoped roster, so the
+  // tab numbers match the table when a supercategory is selected.
   const counts = React.useMemo<Record<FamilyRosterFilter, number>>(
     () => ({
-      flagged: roster.filter((r) => r.reason !== null).length,
-      new: roster.filter((r) => r.isNew).length,
-      all: roster.length,
-      public: roster.filter((r) => r.tier === "public").length,
-      suppressed: roster.filter((r) => r.tier === "suppressed").length,
-      sensitive: roster.filter((r) => r.tier === "sensitive").length,
+      flagged: scopedRoster.filter((r) => r.reason !== null).length,
+      new: scopedRoster.filter((r) => r.isNew).length,
+      all: scopedRoster.length,
+      public: scopedRoster.filter((r) => r.tier === "public").length,
+      suppressed: scopedRoster.filter((r) => r.tier === "suppressed").length,
+      sensitive: scopedRoster.filter((r) => r.tier === "sensitive").length,
     }),
-    [roster],
+    [scopedRoster],
   );
 
   return (
@@ -310,14 +350,72 @@ export function MethodFamiliesRoster({ families, sensitivityGateOn }: MethodFami
             );
           })}
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <a
-            href={`/api/export/methods/families?filter=${encodeURIComponent(filter)}`}
-            data-testid="methods-export-csv"
-          >
-            Download for review (CSV)
-          </a>
-        </Button>
+        <div className="flex items-center gap-2">
+          {supercategories.length > 1 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  data-testid="methods-supercat-trigger"
+                >
+                  {selectedSupers.size === 0
+                    ? "All supercategories"
+                    : `${selectedSupers.size} supercategor${selectedSupers.size === 1 ? "y" : "ies"}`}
+                  <ChevronDown className="size-3.5 opacity-60" aria-hidden />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-2" data-testid="methods-supercat-menu">
+                <div className="flex items-center justify-between px-1 pb-1.5">
+                  <span className="text-muted-foreground text-xs font-medium">
+                    Filter by supercategory
+                  </span>
+                  {selectedSupers.size > 0 && (
+                    <button
+                      type="button"
+                      className="text-apollo-maroon text-xs hover:underline"
+                      onClick={() => setSelectedSupers(new Set())}
+                      data-testid="methods-supercat-clear"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {supercategories.map((sc) => (
+                    <label
+                      key={sc.value}
+                      className="hover:bg-accent flex cursor-pointer items-center gap-2 rounded px-1.5 py-1.5 text-sm"
+                      data-testid={`methods-supercat-option-${sc.value}`}
+                    >
+                      <Checkbox
+                        checked={selectedSupers.has(sc.value)}
+                        onCheckedChange={() => toggleSuper(sc.value)}
+                      />
+                      <span className="truncate">{formatSupercategory(sc.value)}</span>
+                      <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+                        {sc.count}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={`/api/export/methods/families?filter=${encodeURIComponent(filter)}${
+                selectedSupers.size > 0
+                  ? `&supercategory=${encodeURIComponent([...selectedSupers].join(","))}`
+                  : ""
+              }`}
+              data-testid="methods-export-csv"
+            >
+              Download for review (CSV)
+            </a>
+          </Button>
+        </div>
       </div>
 
       {error && (
