@@ -2310,6 +2310,7 @@ exports[`EtlStack prod matches the snapshot 1`] = `
               "Resource": [
                 "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
                 "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
                 "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
               ],
             },
@@ -7299,6 +7300,7 @@ exports[`EtlStack staging matches the snapshot 1`] = `
               "Resource": [
                 "arn:aws:s3:::wcmc-reciterai-artifacts/spotlight/*",
                 "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
+                "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
                 "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
               ],
             },
