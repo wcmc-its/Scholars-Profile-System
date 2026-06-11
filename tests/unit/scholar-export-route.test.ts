@@ -204,6 +204,20 @@ describe("POST /api/export/scholars/[scope]", () => {
     expect(resp.status).toBe(404);
   });
 
+  it("(SPEC row 11) 404 when the cohort exceeds the HARD <=50 cap (builder refuses => null), even for an internal viewer", async () => {
+    // The builder returns null for an over-cap cohort (same dark-feature
+    // semantics as an unresolved scope) — the route must 404, never serve a
+    // partial top-50, and never emit a contact audit.
+    vi.mocked(isScholarListExportEmailEnabled).mockReturnValue(true);
+    vi.mocked(buildScholarExport).mockResolvedValue(null);
+    const resp = await call("method-family", {
+      supercategory: "animal-cell-models",
+      family: "crispr-screens-fam_x",
+    });
+    expect(resp.status).toBe(404);
+    expect(console.info).not.toHaveBeenCalled();
+  });
+
   it("returns 400 on a structurally invalid (non-JSON) body", async () => {
     const req = new NextRequest("http://localhost/api/export/scholars/topic", {
       method: "POST",

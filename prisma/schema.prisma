@@ -27,6 +27,11 @@ model Scholar {
   primaryTitle           String?   @map("primary_title") @db.VarChar(255)
   primaryDepartment      String?   @map("primary_department") @db.VarChar(255)
   email                  String?   @db.VarChar(255)
+  /// Effective email release audience derived from the multi-valued Web Directory
+  /// attribute `weillCornellEduReleaseCode;mail` (most-permissive-wins, fail-closed).
+  /// 'public' | 'institution' | 'none'. NULL until the first ED ETL backfill; treated
+  /// as 'none' (fail-closed) by the display/export gate.
+  emailVisibility        String?   @map("email_visibility") @db.VarChar(16)
   headshotUrl            String?   @map("headshot_url") @db.VarChar(512)
   overview               String?   @db.Text
   overviewUpdatedAt      DateTime? @map("overview_updated_at")

@@ -16,6 +16,8 @@ import {
   pickManualHighlights,
 } from "@/lib/api/manual-layer";
 import { isManualHighlightsEnabled } from "@/lib/edit/manual-highlights";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
+import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 import { MAX_SELECTED_HIGHLIGHTS } from "@/lib/edit/validators";
 import { identityImageEndpoint } from "@/lib/headshot";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -533,6 +535,14 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
 export async function getScholarFullProfileBySlug(
   slug: string,
   now: Date = new Date(),
+  // #866 / email-visibility-spec § A. Whether the requesting viewer is INTERNAL
+  // (authenticated session OR allowlisted WCM network — resolved by the caller
+  // from request context via lib/auth/viewer-context). Gates the Contact-card
+  // email per table A when `PROFILE_EMAIL_RELEASE_GATE` is on; ignored when the
+  // flag is off (legacy: email shown to everyone). Defaults to `false` so any
+  // caller that does not (or cannot) supply request context fails closed — only
+  // `public` emails survive the gate, never `institution`.
+  internalViewer: boolean = false,
 ): Promise<ProfilePayload | null> {
   const scholar = await prisma.scholar.findFirst({
     where: { slug, deletedAt: null, status: "active" },
@@ -866,7 +876,16 @@ export async function getScholarFullProfileBySlug(
       scholar.division && scholar.division.name !== "Administration"
         ? scholar.division.name
         : null,
-    email: scholar.email,
+    // email-visibility-spec § A — gate the Contact-card email by the Web
+    // Directory release code (`scholar.emailVisibility`) and the viewer's
+    // internal status. Hidden → null, so it never reaches the client. No-op
+    // (returns `scholar.email` unchanged) while PROFILE_EMAIL_RELEASE_GATE is off.
+    email: gateEmailForViewer(
+      scholar.email,
+      scholar.emailVisibility,
+      internalViewer,
+      isEmailReleaseGateEnabled(),
+    ),
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
     clinicalProfileUrl: scholar.clinicalProfileUrl,

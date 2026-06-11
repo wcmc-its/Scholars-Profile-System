@@ -6,6 +6,8 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
+import { gateEmailForViewer } from "@/lib/profile/email-display-gate";
 
 /** Public shape returned to API consumers. */
 export type ScholarPayload = {
@@ -38,7 +40,15 @@ export type ScholarPayload = {
  * call `/api/scholars/:current_cwid` after a redirect resolution if they need
  * to follow CWID changes.
  */
-export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | null> {
+export async function getScholarByCwid(
+  cwid: string,
+  // email-visibility-spec § A. Whether the requesting viewer is INTERNAL (#866).
+  // This endpoint (GET /api/scholars/:cwid) is anonymous-facing, so it defaults to
+  // `false` (external / fail-closed): when the gate is on, only `public` emails
+  // are serialized unless the caller resolves and passes an internal signal from
+  // the request. No-op while PROFILE_EMAIL_RELEASE_GATE is off (legacy: email for all).
+  internalViewer: boolean = false,
+): Promise<ScholarPayload | null> {
   const scholar = await prisma.scholar.findFirst({
     where: { cwid, deletedAt: null, status: "active" },
     include: {
@@ -56,7 +66,12 @@ export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | n
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
-    email: scholar.email,
+    email: gateEmailForViewer(
+      scholar.email,
+      scholar.emailVisibility,
+      internalViewer,
+      isEmailReleaseGateEnabled(),
+    ),
     overview: scholar.overview,
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     appointments: scholar.appointments.map((a) => ({

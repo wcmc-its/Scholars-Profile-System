@@ -5,18 +5,19 @@
  *
  * Renders a single Download control that POSTs the scope params to
  * /api/export/scholars/{scope} and triggers a Blob anchor download of the
- * dated CSV returned by the server. The roster is the scope's own ranked top
- * 50 (cap is fixed server-side — no confirm dialog), and the CSV never carries
- * a contact column.
+ * dated CSV returned by the server. The roster is the scope's own ranked cohort,
+ * exported in full (SPEC §B.3 HARD cap — the server only serves a cohort of <= 50
+ * and the parent only renders this island for such a cohort; no confirm dialog).
  *
  * Visibility: a server component only renders this island when
- * `isScholarListExportEnabled()` is true, so flag-off cached HTML never carries
- * it. On top of that the button probes `/api/auth/session` on mount and renders
- * null for anonymous visitors — public surfaces are served by CloudFront's
- * cacheable default behavior, which strips the Cookie header, so the export is
- * only offered once the client confirms an authenticated session (mirroring
- * `components/site/header-auth-slot.tsx`). The route enforces the 401 itself;
- * this is purely so signed-out users never see a button that would fail.
+ * `isScholarListExportEnabled()` is true AND the cohort is <= 50 (SPEC §B.3), so
+ * flag-off / over-cap cached HTML never carries it. On top of that the button
+ * probes `/api/auth/session` on mount and renders null for anonymous visitors —
+ * public surfaces are served by CloudFront's cacheable default behavior, which
+ * strips the Cookie header, so the export is only offered once the client
+ * confirms an authenticated session (mirroring
+ * `components/site/header-auth-slot.tsx`). The route enforces the 401 + the cap
+ * itself; this is purely so signed-out / over-cap users never see a button.
  */
 import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
@@ -24,12 +25,14 @@ import { Download, Loader2 } from "lucide-react";
 export function ScholarListExportButton({
   scope,
   params,
+  count,
 }: {
   /** Export scope segment — also the route path param. */
   scope: "method-family" | "supercategory" | "topic";
   /** Flat string body the route's per-scope builder reads (e.g. { supercategory, family }). */
   params: Record<string, string>;
-  /** Optional roster size hint; unused for gating since the cap is server-side. */
+  /** Cohort size (<= 50 by the time this renders — SPEC §B.3); shown in the label.
+   *  Gating itself is done by the parent + the server, not this hint. */
   count?: number;
 }) {
   const [authed, setAuthed] = useState(false);
@@ -103,12 +106,12 @@ export function ScholarListExportButton({
         ) : (
           <Download aria-hidden className="h-3.5 w-3.5" strokeWidth={2} />
         )}
-        Download top 50 (CSV)
+        {typeof count === "number" ? `Download ${count} scholars (CSV)` : "Download scholars (CSV)"}
       </button>
       {error ? (
         <p className="text-[11px] text-[#a0341c]">{error}</p>
       ) : (
-        <p className="text-[11px] text-muted-foreground">Top 50 by publications · internal use</p>
+        <p className="text-[11px] text-muted-foreground">Complete cohort · internal use</p>
       )}
     </div>
   );

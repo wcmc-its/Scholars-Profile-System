@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { NextRequest } from "next/server";
 import { notFound } from "next/navigation";
+import { resolveViewerContext } from "@/lib/auth/viewer-context";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
@@ -48,7 +51,28 @@ import { profilePath } from "@/lib/profile-url";
  * MentoringSection; nothing here reads searchParams.
  */
 export async function ProfileView({ slug }: { slug: string }) {
-  const profile = await getScholarFullProfileBySlug(slug);
+  // email-visibility-spec § A — resolve the #866 internal-viewer signal from the
+  // incoming request (session cookie OR allowlisted WCM source IP) and thread it
+  // into the loader so the Contact-card email is gated by the Web Directory
+  // release code. This route is already `dynamic = "force-dynamic"` (#640), so
+  // reading request headers here does not regress static rendering. We REUSE the
+  // shared `resolveViewerContext` predicate (lib/auth/viewer-context.ts) by
+  // wrapping the incoming headers in a NextRequest — `resolveViewerContext` only
+  // reads the session cookie (from the `cookie` header) and `cloudfront-viewer-
+  // address`, both of which `headers()` carries. Fail-closed: any error reading
+  // the context leaves the viewer external, so only `public` emails survive.
+  let internalViewer = false;
+  try {
+    const incoming = await headers();
+    const viewer = await resolveViewerContext(
+      new NextRequest("https://internal.invalid/", { headers: incoming }),
+    );
+    internalViewer = viewer.internal;
+  } catch {
+    internalViewer = false;
+  }
+
+  const profile = await getScholarFullProfileBySlug(slug, new Date(), internalViewer);
   if (!profile) notFound();
 
   // #536 — hidden identity classes (doctoral students) have no public profile

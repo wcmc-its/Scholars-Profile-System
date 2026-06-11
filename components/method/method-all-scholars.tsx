@@ -28,6 +28,7 @@ import {
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 
 const ROLE_CHIPS: Array<{
   id: MethodScholarRole;
@@ -134,6 +135,15 @@ export function MethodAllScholars({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const pages = paginationPages(page, totalPages);
 
+  // SPEC §B.3 HARD cap: the export is offered ONLY when the full displayable
+  // cohort is <= 50. The export covers the WHOLE cohort (it ignores the name
+  // filter), so gate on the unfiltered all-roles total — which `roleCounts.all`
+  // equals only when no name search is active. During a name search, hide the
+  // button (it would export the unfiltered cohort, not the search). The server
+  // refuses > 50 regardless; this is the matching UI affordance.
+  const exportEligible =
+    exportEnabled && query.length === 0 && result.roleCounts.all <= SCHOLAR_EXPORT_CAP;
+
   return (
     <section className="mt-12">
       <div className="flex items-baseline justify-between gap-4">
@@ -144,15 +154,14 @@ export function MethodAllScholars({
           <p className="hidden text-xs italic text-muted-foreground sm:block">
             Anyone with at least one publication using {familyLabel}, sorted alphabetically.
           </p>
-          {exportEnabled ? (
+          {exportEligible ? (
             <ScholarListExportButton
               scope="method-family"
               params={{
                 supercategory: supercategorySlug,
                 family: familySlug,
-                role: selectedRole,
-                q: query,
               }}
+              count={result.roleCounts.all}
             />
           ) : null}
         </div>

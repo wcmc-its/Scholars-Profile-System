@@ -3,18 +3,20 @@
  * builder).
  *
  * Resolves an export SCOPE (method-family, supercategory, topic, subtopic) + its
- * params into the scope's OWN ranked top-50 roster, projects each scholar to a
- * flat CSV row, and serializes via `toCsv`. The route handler gates auth + the
- * feature flags; this builder trusts validated inputs and only does the data
- * assembly.
+ * params into the scope's OWN ranked roster, projects each scholar to a flat CSV
+ * row, and serializes via `toCsv`. The route handler gates auth + the feature
+ * flags; this builder trusts validated inputs and only does the data assembly.
  *
- * Ranking is the SCOPE's own ranking (NOT alphabetical), capped at
- * SCHOLAR_EXPORT_CAP. The existing page loaders cannot back this directly — they
+ * Ranking is the SCOPE's own ranking (NOT alphabetical). SPEC §B.3 imposes a HARD
+ * cohort cap: the export is offered ONLY when the displayable cohort is <= 50; a
+ * cohort > 50 is REFUSED (the builder returns null, the route 404s, the UI hides
+ * the button) rather than truncated to a partial top-50. In range, the COMPLETE
+ * cohort is exported. The existing page loaders cannot back this directly — they
  * are either alphabetical (`getMethodScholars` / `getTopicScholars`) or ranked
  * but hard-capped well below 50 and carved to FT faculty (`getFamilyScholarRows`
  * / `getSubtopicScholars` / `getTopScholarsForSupercategory`). So each scope gets
  * a small ranked loader here that ranks by the per-scholar publication count
- * within the scope, ALL roles, top 50.
+ * within the scope, ALL roles, fetching CAP + 1 to detect the over-cap case.
  *
  * Method scopes (method-family, supercategory) inherit the public
  * #800-suppression / #801-sensitivity overlay gate VERBATIM — the resolver
@@ -32,6 +34,7 @@ import { prisma } from "@/lib/db";
 import { toCsv, type CsvCell } from "@/lib/csv";
 import { profilePath } from "@/lib/profile-url";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { isEmailReleaseGateEnabled } from "@/lib/profile/email-visibility-flags";
 import {
   loadFamilyOverlayGate,
   isFamilyPubliclyVisible,
@@ -39,8 +42,21 @@ import {
 import { getFamily, getSupercategory } from "@/lib/api/methods";
 import { getTopic } from "@/lib/api/topics";
 
-/** Fixed cap: top 50 scholars by the scope's own ranking. */
+/**
+ * HARD cohort cap (SPEC §B.3): the export is offered ONLY when the displayable
+ * cohort has 50 or fewer scholars. We do NOT support bulk download of WCM
+ * scholars even for internal users, so a cohort > 50 yields NO download — the
+ * server refuses and the UI hides the button. When the cohort is in range
+ * (<= 50) the COMPLETE cohort is exported (no truncation — a <= 50 cohort is
+ * complete by definition).
+ *
+ * The loaders fetch one row beyond the cap (CAP + 1) precisely so the builder
+ * can detect an over-cap cohort and refuse rather than silently emit a partial
+ * top-50.
+ */
 export const SCHOLAR_EXPORT_CAP = 50;
+/** Loaders fetch this many rows so an over-cap cohort is detectable. */
+const ROSTER_FETCH_LIMIT = SCHOLAR_EXPORT_CAP + 1;
 
 export type ScholarExportScope =
   | "method-family"
@@ -114,6 +130,7 @@ const SCHOLAR_SELECT = {
   primaryDepartment: true,
   roleCategory: true,
   email: true,
+  emailVisibility: true,
 } as const;
 
 type ScholarIdentity = {
@@ -125,6 +142,7 @@ type ScholarIdentity = {
   primaryDepartment: string | null;
   roleCategory: string | null;
   email: string | null;
+  emailVisibility: string | null;
 };
 
 /** One ranked roster row: identity + the scope count column(s). */
@@ -142,8 +160,27 @@ function todayStamp(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Whether the scholar's email may be exported under the Web Directory release
+ * code (SPEC §B.2). When the release gate is OFF this is always true (legacy
+ * behavior — email gated only by viewer-context + hidden-role). When ON the
+ * email is exportable only for `public` / `institution`; `none` and NULL (the
+ * fail-closed default until the ED ETL backfills `email_visibility`) blank it.
+ * Any internal viewer who clears the channel gate sees institution + public
+ * alike, so the looser display audience is irrelevant here.
+ */
+function isEmailExportableByReleaseCode(emailVisibility: string | null): boolean {
+  if (!isEmailReleaseGateEnabled()) return true;
+  return emailVisibility === "public" || emailVisibility === "institution";
+}
+
 /** Common identity cells in COMMON_HEADERS order. `rank` is 1-indexed. */
 function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell> {
+  // The email cell stacks two filters: the #536 hidden-display-role carve (a
+  // hidden role's email is blank, matching the unlinked public roster) AND the
+  // SPEC §B.2 release-code filter (gated by PROFILE_EMAIL_RELEASE_GATE).
+  const emailExportable =
+    isPubliclyDisplayed(row.roleCategory) && isEmailExportableByReleaseCode(row.emailVisibility);
   return {
     rank,
     cwid: row.cwid,
@@ -158,10 +195,9 @@ function commonCells(row: ScholarIdentity, rank: number): Record<string, CsvCell
     // dead link the public surface deliberately withholds.
     profile_url: isPubliclyDisplayed(row.roleCategory) ? profilePath(row.slug) : "",
     // #866 UC-B email column (only emitted when `includeEmail`; see headersFor).
-    // Mirror profile_url's #536 carve: a hidden-display role's email is BLANK,
-    // matching the unlinked public roster. `headersFor`/`projectRows` drop the
-    // key entirely when email is not requested.
-    email: isPubliclyDisplayed(row.roleCategory) ? (row.email ?? "") : "",
+    // `headersFor`/`projectRows` drop the key entirely when email is not
+    // requested.
+    email: emailExportable ? (row.email ?? "") : "",
   };
 }
 
@@ -188,7 +224,7 @@ async function loadFamilyRoster(
       scholar: { deletedAt: null, status: "active" },
     },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
-    take: SCHOLAR_EXPORT_CAP,
+    take: ROSTER_FETCH_LIMIT,
     select: { pmidCount: true, scholar: { select: SCHOLAR_SELECT } },
   });
 
@@ -236,8 +272,42 @@ async function loadSupercategoryRoster(
 
   return Array.from(byCwid.values())
     .sort((a, b) => b.total - a.total || a.scholar.cwid.localeCompare(b.scholar.cwid))
-    .slice(0, SCHOLAR_EXPORT_CAP)
+    .slice(0, ROSTER_FETCH_LIMIT)
     .map((e) => ({ ...e.scholar, count: e.total, topFamily: e.topFamily }));
+}
+
+/**
+ * Whether a supercategory's export cohort is in range (<= SCHOLAR_EXPORT_CAP) for
+ * the SPEC §B.3 button-visibility gate. The supercategory landing page has no
+ * single displayable cohort count (the per-family `scholarCount`s are
+ * non-additive across co-membership), so this counts the DISTINCT publicly-
+ * visible scholars exactly as `loadSupercategoryRoster` does — same active-join +
+ * overlay gate — and returns true iff that distinct count is <= the cap. Kept
+ * here so the page's button gate cannot drift from what the export would emit.
+ *
+ * `supercategoryId` is the resolved supercategory id (`getSupercategory(...).id`),
+ * matching `loadSupercategoryRoster`'s `supercategory` arg.
+ */
+export async function isSupercategoryExportInRange(
+  supercategoryId: string,
+  prismaRead: PrismaRead = prisma,
+): Promise<boolean> {
+  const gate = await loadFamilyOverlayGate();
+  const rows = await prismaRead.scholarFamily.findMany({
+    where: {
+      supercategory: supercategoryId,
+      scholar: { deletedAt: null, status: "active" },
+    },
+    select: { familyLabel: true, scholar: { select: { cwid: true } } },
+  });
+  const distinct = new Set<string>();
+  for (const r of rows) {
+    if (!r.scholar) continue;
+    if (!isFamilyPubliclyVisible(supercategoryId, r.familyLabel, gate)) continue;
+    distinct.add(r.scholar.cwid);
+    if (distinct.size > SCHOLAR_EXPORT_CAP) return false;
+  }
+  return distinct.size <= SCHOLAR_EXPORT_CAP;
 }
 
 /** topic: rank by distinct publication count per scholar within the topic (all
@@ -251,7 +321,7 @@ async function loadTopicRoster(db: PrismaRead, topicSlug: string): Promise<Expor
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
-    take: SCHOLAR_EXPORT_CAP,
+    take: ROSTER_FETCH_LIMIT,
   });
 
   const cwids = counts.map((c) => c.cwid).filter((c): c is string => c !== null);
@@ -290,7 +360,7 @@ async function loadSubtopicRoster(
     },
     _count: { pmid: true },
     orderBy: { _count: { pmid: "desc" } },
-    take: SCHOLAR_EXPORT_CAP,
+    take: ROSTER_FETCH_LIMIT,
   });
 
   const cwids = counts.map((c) => c.cwid).filter((c): c is string => c !== null);
@@ -351,8 +421,8 @@ function projectRows(
 }
 
 /**
- * Build the ranked top-50 CSV export for a scope. Resolves the scope target via
- * the existing resolvers (which apply the master lens gate + reject suppressed/
+ * Build the ranked CSV export for a scope. Resolves the scope target via the
+ * existing resolvers (which apply the master lens gate + reject suppressed/
  * sensitive method targets), loads the scope's ranked roster, projects the rows,
  * and returns `{ filename, csv }`.
  *
@@ -360,6 +430,11 @@ function projectRows(
  * category / topic / subtopic, an all-suppressed method scope, or the lens is
  * off) so the route can 404. An empty-but-resolved roster still returns a
  * header-only CSV (a valid, downloadable export for a scope with no scholars).
+ *
+ * HARD cohort cap (SPEC §B.3): also returns `null` when the displayable cohort
+ * exceeds SCHOLAR_EXPORT_CAP (50) — the same dark-feature semantics as an
+ * unresolved scope (the route 404s; the UI hides the button). We do NOT emit a
+ * partial top-50. When the cohort is in range the COMPLETE cohort is exported.
  *
  * `params` keys per scope:
  *   - method-family: { supercategory, family }   (URL slug segments)
@@ -412,6 +487,11 @@ export async function buildScholarExport(
     if (!subtopic) return null;
     roster = await loadSubtopicRoster(prismaRead, topic.id, subtopic.id);
   }
+
+  // HARD cohort cap (SPEC §B.3): the loaders fetched CAP + 1 rows so an over-cap
+  // cohort is detectable. Refuse > 50 with the same dark-feature semantics as an
+  // unresolved scope (route 404, UI hides the button) — never a partial top-50.
+  if (roster.length > SCHOLAR_EXPORT_CAP) return null;
 
   const headers = headersFor(scope, includeEmail);
   const csv = toCsv(headers, projectRows(scope, roster, includeEmail));

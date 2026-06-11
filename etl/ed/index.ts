@@ -787,6 +787,7 @@ async function main() {
             primaryTitle: f.primaryTitle,
             primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
+            emailVisibility: f.emailVisibility,
             roleCategory,
             ...(wasDeleted ? { deletedAt: null } : {}),
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from
@@ -831,6 +832,7 @@ async function main() {
             primaryTitle: f.primaryTitle,
             primaryDepartment: primaryDepartmentDisplay,
             email: f.email,
+            emailVisibility: f.emailVisibility,
             slug,
             roleCategory,
             // Phase 3 — D-01 / probe 2026-05-06: dept + div sourced from SOR.

@@ -30,6 +30,7 @@ import {
 import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { profilePath } from "@/lib/profile-url";
 import { ScholarListExportButton } from "@/components/scholar-export/scholar-list-export-button";
+import { SCHOLAR_EXPORT_CAP } from "@/lib/api/export-scholars";
 
 const ROLE_CHIPS: Array<{ id: TopicAllScholarRole; label: string; countKey: keyof TopicScholarsResult["roleCounts"] }> = [
   { id: "all", label: "All", countKey: "all" },
@@ -139,6 +140,14 @@ export function TopicAllScholars({
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const pages = paginationPages(page, totalPages);
 
+  // SPEC §B.3 HARD cap: offer the export ONLY when the full displayable cohort
+  // is <= 50. The export covers the WHOLE cohort (ignores the name filter), so
+  // gate on the unfiltered all-roles total — `roleCounts.all` equals that only
+  // when no name search is active; during a search, hide the button. The server
+  // refuses > 50 regardless.
+  const exportEligible =
+    exportEnabled && query.length === 0 && result.roleCounts.all <= SCHOLAR_EXPORT_CAP;
+
   // Three-column CSS columns layout preserves alpha-letter dividers in document
   // order. `break-inside-avoid` keeps each row + divider intact across columns.
   return (
@@ -151,10 +160,11 @@ export function TopicAllScholars({
           <p className="hidden text-xs italic text-muted-foreground sm:block">
             Anyone with at least one publication in this area, sorted alphabetically.
           </p>
-          {exportEnabled ? (
+          {exportEligible ? (
             <ScholarListExportButton
               scope="topic"
-              params={{ slug: topicSlug, role: selectedRole, q: query }}
+              params={{ slug: topicSlug }}
+              count={result.roleCounts.all}
             />
           ) : null}
         </div>

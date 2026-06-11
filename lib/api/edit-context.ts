@@ -67,6 +67,11 @@ export type EditContextScholar = {
   postnominal: string | null;
   primaryDepartment: string | null;
   email: string | null;
+  /** Effective email release audience from the Web Directory (`email_visibility`):
+   *  'public' | 'institution' | 'none'. NULL until the first ED ETL backfill;
+   *  read-only, owned by the Web Directory SOR. Drives the informational
+   *  visibility label and explainer on the read-only Email tab — never a control. */
+  emailVisibility: string | null;
   orcid: string | null;
   /** #536 — drives the edit-route guard: a hidden identity class (doctoral
    *  student) has no public profile, so only a superuser may reach its edit
@@ -343,6 +348,7 @@ export async function loadEditContext(
       postnominal: true,
       primaryDepartment: true,
       email: true,
+      emailVisibility: true,
       orcid: true,
       overview: true,
       deletedAt: true,
@@ -662,6 +668,7 @@ export async function loadEditContext(
         postnominal: scholar.postnominal,
         primaryDepartment: scholar.primaryDepartment,
         email: scholar.email,
+        emailVisibility: scholar.emailVisibility,
         orcid: scholar.orcid,
         roleCategory: scholar.roleCategory,
         overview: effectiveOverview ?? "",
@@ -819,6 +826,7 @@ export async function loadEditContext(
       postnominal: scholar.postnominal,
       primaryDepartment: scholar.primaryDepartment,
       email: scholar.email,
+      emailVisibility: scholar.emailVisibility,
       orcid: scholar.orcid,
       roleCategory: scholar.roleCategory,
       overview: effectiveOverview ?? "",
