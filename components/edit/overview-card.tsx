@@ -17,40 +17,37 @@
  * (`/edit/scholar/[other-cwid]`) renders the merged sanitized HTML through a
  * `prose prose-sm` div with no toolbar, no Save, no counter, no unsaved-guard.
  *
- * #742 v3 — two tabs (decision 1, inline publish). When `generateEnabled`, the
- * Overview surface splits into **Existing** (the plain manual editor — saves as
- * `authored`) and **Generator** ᴮᴱᵀᴬ (controls + Generate + its OWN editor —
- * saves as `generated`/`generated_edited`). Both publish through the same
- * `/api/edit/field`; the shared saved bio + provenance + draft history live in
- * the parent so each tab keeps an independent unsaved draft and one
- * `UnsavedChangesGuard` covers either-tab-dirty. When `generateEnabled` is
- * false (the dark-flag default and every non-self surface), there are NO tabs —
- * the manual editor renders exactly as the Phase 6 surface did, so that path is
- * byte-for-byte unchanged.
- *
- * The generator never writes the published bio. A draft seeds the Generator's
- * editor as UNSAVED content; the existing Save path publishes it. `savedHtml`
- * stays the last-published value, so Discard reverts there (spec G3/G4).
+ * #875 redesign — the two-tab (`Existing | Generator`) layout is replaced by a
+ * single persistent editor with a collapsible **Draft with AI** block stacked
+ * above it and a coral **draft-review card** that intercepts every generated
+ * draft. Generation NEVER writes the editor: a draft lands in the review card,
+ * and only an explicit Replace / Insert below pulls it into the editor. The
+ * `sourceGenerationId` provenance link is threaded through Replace AND Insert
+ * (both produce generated content), and stays null for hand-written or
+ * discarded-then-edited text (saves as `authored`). When `generateEnabled` is
+ * false (the dark-flag default and every non-self surface), there is NO block
+ * and NO review card — the manual editor renders exactly as the Phase 6 surface
+ * did, so that path is byte-for-byte unchanged.
  */
 "use client";
 
 import * as React from "react";
 import Link from "next/link";
-import { Check, RefreshCw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Globe, Sparkles, TriangleAlert } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
+import {
+  OverviewDraftReviewCard,
+  type OverviewReviewDraft,
+} from "@/components/edit/overview-draft-review-card";
 import { OverviewEditor } from "@/components/edit/overview-editor";
 import { OverviewGenerateControls } from "@/components/edit/overview-generate-controls";
 import { OverviewProvenanceNote } from "@/components/edit/overview-provenance-note";
 import { OverviewSourceDrawer } from "@/components/edit/overview-source-drawer";
-import {
-  OverviewVersionsPanel,
-  type OverviewGenerationItem,
-} from "@/components/edit/overview-versions-panel";
+import { summarizeParams, type OverviewGenerationItem } from "@/components/edit/overview-versions-panel";
 import { UnsavedChangesGuard } from "@/components/edit/unsaved-changes-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { OverviewSourceOptions } from "@/lib/edit/overview-facts";
 import {
   DEFAULT_OVERVIEW_PARAMS,
@@ -60,8 +57,15 @@ import {
 import type { OverviewOrigin } from "@/lib/edit/overview-provenance";
 import { cn } from "@/lib/utils";
 
-/** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview). */
+/** The hard cap on stored sanitized HTML (`self-edit-spec.md` § overview) — the
+ *  server ceiling. Save still blocks if somehow exceeded, mapping to the
+ *  destructive counter style. */
 const OVERVIEW_MAX_CHARS = 20000;
+/** The real editorial cap (#875). The counter shows `{n}/2,500`; an amber
+ *  warning fires at ~80% and Save is gated here, well below the server ceiling. */
+const OVERVIEW_EDITORIAL_MAX = 2500;
+/** ~80% of the editorial cap — the amber-warning threshold. */
+const OVERVIEW_WARN_CHARS = 2000;
 
 // #742 generator copy — verbatim from
 // `overview-statement-generator-spec.md` § Copy (initial). Kept as named
@@ -73,7 +77,11 @@ const GENERATE_SPARSE =
 const GENERATE_RATE_LIMITED =
   "You've generated several drafts recently — please try again in a little while.";
 const GENERATE_FAILED = "We couldn't generate a draft just now. Please try again.";
-const REGENERATE_CONFIRM = "Replace your current text with a new draft? Your edits will be lost.";
+
+// #875 §6 — the two pre-generation conditional hints (verbatim from the spec).
+const HINT_EMPHASIS_CONFLICT =
+  "awards are selected as sources but won't be mentioned directly — turn on Grants & funding to include them in the bio.";
+const HINT_SPARSE_SOURCES = "Limited sources may produce a generic draft.";
 
 /** A fresh, all-empty source selection (before the source-options load). */
 const EMPTY_SELECTION: OverviewSelection = { pmids: [], grantIds: [], toolNames: [] };
@@ -122,8 +130,8 @@ export type OverviewCardProps = {
   /**
    * Whether the #742 overview-statement generator is available on this surface
    * (`SELF_EDIT_OVERVIEW_GENERATE`). Passed true only on the SELF arm. Off ⇒ no
-   * tabs and no Generate affordance; the editor behaves exactly as the Phase 6
-   * surface did.
+   * Draft-with-AI block and no review card; the editor behaves exactly as the
+   * Phase 6 surface did.
    */
   generateEnabled?: boolean;
 };
@@ -186,9 +194,10 @@ function OverviewReadOnlyCard({ initialHtml }: { initialHtml: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Editor arm — self mode. One manual surface (Existing); plus, behind the flag,
-// the Generator tab (#742 v3). Shared saved bio + provenance + history live
-// here so both tabs publish to one field and keep independent drafts.
+// Editor arm — self mode. ONE persistent editor; behind the flag, the
+// Draft-with-AI block + the coral draft-review card stack above it (#875). The
+// saved bio + provenance + history live here so the editor publishes to one
+// field and the generator only ever proposes drafts into the review card.
 // ---------------------------------------------------------------------------
 
 type OverviewEditorCardProps = Pick<
@@ -202,15 +211,12 @@ function OverviewEditorCard({
   previewHref,
   generateEnabled = false,
 }: OverviewEditorCardProps) {
-  // The currently-published bio — the dirty baseline shared by both tabs. A Save
-  // from either tab updates this (and the other tab's draft is then dirty vs the
-  // new value, which is correct: it's an independent candidate).
+  // The currently-published bio — the dirty baseline.
   const [savedHtml, setSavedHtml] = React.useState(initialHtml);
 
   // #742 Phase B — draft history + provenance, owner-only. `generations` drives
-  // the Versions panel; `provenance` is the one-line origin of the *currently
-  // saved* bio (rendered above the tabs, since it describes the live bio
-  // regardless of which tab you're on).
+  // the in-card "Draft N of M" affordance; `provenance` is the one-line origin
+  // of the *currently saved* bio.
   const [generations, setGenerations] = React.useState<OverviewGenerationItem[]>([]);
   const [provenance, setProvenance] = React.useState<OverviewProvenanceLine | null>(null);
 
@@ -233,8 +239,8 @@ function OverviewEditorCard({
     void refreshGenerations();
   }, [refreshGenerations]);
 
-  // A Save from either tab publishes and re-reads provenance. `value` is the
-  // server's post-sanitize response, which becomes the new shared baseline.
+  // A Save publishes and re-reads provenance. `value` is the server's
+  // post-sanitize response, which becomes the new shared baseline.
   const onSaved = React.useCallback(
     (value: string) => {
       setSavedHtml(value);
@@ -243,21 +249,10 @@ function OverviewEditorCard({
     [refreshGenerations],
   );
 
-  // Two independent editor states, both rooted on the shared `savedHtml`. The
-  // generator one composes the manual editor + the generate/version machinery.
-  const existing = useOverviewEditor({ cwid, savedHtml, onSaved });
-  const generator = useOverviewGenerator({
-    cwid,
-    savedHtml,
-    onSaved,
-    refreshGenerations,
-    generateEnabled,
-  });
+  const editor = useOverviewEditor({ cwid, savedHtml, onSaved });
 
-  const dirty = existing.dirty || (generateEnabled && generator.editor.dirty);
-
-  // Without the flag: the Phase 6 manual surface, no tabs — unchanged behavior.
   if (!generateEnabled) {
+    // The Phase 6 manual surface, byte-for-byte unchanged.
     return (
       <EditPanel
         slot="overview-card"
@@ -265,16 +260,12 @@ function OverviewEditorCard({
         owned
         description="A short bio shown at the top of your public profile."
       >
-        <UnsavedChangesGuard dirty={dirty} />
-        <OverviewManualSurface editor={existing} previewHref={previewHref} />
+        <UnsavedChangesGuard dirty={editor.dirty} />
+        <OverviewEditorBody editor={editor} previewHref={previewHref} sourceCounts={null} />
       </EditPanel>
     );
   }
 
-  // With the flag: two tabs. Existing (manual) is the default; Generator is the
-  // opt-in beta. The provenance line sits above the tabs (it's about the live
-  // bio, not a tab). Radix unmounts the inactive tab, so only one editor is in
-  // the DOM at a time and each tab's draft is preserved in the hooks above.
   return (
     <EditPanel
       slot="overview-card"
@@ -282,42 +273,23 @@ function OverviewEditorCard({
       owned
       description="A short bio shown at the top of your public profile."
     >
-      <UnsavedChangesGuard dirty={dirty} />
+      <UnsavedChangesGuard dirty={editor.dirty} />
       <OverviewProvenanceNote provenance={provenance} />
-      <Tabs defaultValue="existing">
-        <TabsList aria-label="Overview editor mode">
-          <TabsTrigger value="existing" data-testid="overview-tab-existing">
-            Existing
-          </TabsTrigger>
-          <TabsTrigger value="generator" data-testid="overview-tab-generator">
-            Generator
-            <span
-              className="bg-apollo-maroon/10 text-apollo-maroon ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
-              data-testid="overview-generator-beta"
-            >
-              Beta
-            </span>
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="existing" className="flex flex-col gap-4">
-          <OverviewManualSurface editor={existing} previewHref={previewHref} />
-        </TabsContent>
-        <TabsContent value="generator" className="flex flex-col gap-4">
-          <OverviewGeneratorSurface
-            generator={generator}
-            generations={generations}
-            savedHtml={savedHtml}
-            previewHref={previewHref}
-          />
-        </TabsContent>
-      </Tabs>
+      <OverviewGeneratorArm
+        cwid={cwid}
+        savedHtml={savedHtml}
+        editor={editor}
+        generations={generations}
+        refreshGenerations={refreshGenerations}
+        previewHref={previewHref}
+      />
     </EditPanel>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Editor state hooks — shared between the manual (Existing) surface and the
-// Generator surface, so the save/dirty/counter mechanics live in one place.
+// Editor state hook — the save/dirty/counter mechanics in one place, shared by
+// the manual surface and the generator arm.
 // ---------------------------------------------------------------------------
 
 type UseOverviewEditor = {
@@ -329,23 +301,20 @@ type UseOverviewEditor = {
   error: string | null;
   justSaved: boolean;
   dirty: boolean;
+  /** Over the editorial cap — Save is gated here first. */
+  overEditorialLimit: boolean;
+  /** Within the amber-warning band (≥ 80% of the editorial cap). */
+  nearLimit: boolean;
+  /** Over the hard server ceiling (maps to the destructive counter style). */
   overLimit: boolean;
   handleChange: (html: string) => void;
-  /** Re-seed the editor with `html` (generate / load-version / discard). */
+  /** Re-seed the editor with `html` (replace / insert / discard). */
   reseed: (html: string) => void;
   discard: () => void;
   /** Publish the current HTML, tagging provenance with `sourceGenerationId`. */
   save: (sourceGenerationId: string | null) => Promise<void>;
 };
 
-/**
- * The shared editor state: live HTML, dirty/over-limit, Save (to the field
- * route), Discard, and the re-seed mechanism. `savedHtml` is the shared
- * baseline owned by the parent; `onSaved` hands the server's post-sanitize
- * value back up. The editor seeds from `currentHtml`, so a tab-switch remount
- * preserves the in-progress draft (the value isn't lost when Radix unmounts the
- * inactive tab).
- */
 function useOverviewEditor({
   cwid,
   savedHtml,
@@ -368,6 +337,8 @@ function useOverviewEditor({
   const [justSaved, setJustSaved] = React.useState(false);
 
   const dirty = currentHtml !== savedHtml;
+  const overEditorialLimit = currentHtml.length > OVERVIEW_EDITORIAL_MAX;
+  const nearLimit = currentHtml.length >= OVERVIEW_WARN_CHARS;
   const overLimit = currentHtml.length > OVERVIEW_MAX_CHARS;
 
   function handleChange(html: string) {
@@ -390,7 +361,7 @@ function useOverviewEditor({
   }
 
   async function save(sourceGenerationId: string | null) {
-    if (!dirty || overLimit || isSaving) return;
+    if (!dirty || overEditorialLimit || isSaving) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -440,6 +411,8 @@ function useOverviewEditor({
     error,
     justSaved,
     dirty,
+    overEditorialLimit,
+    nearLimit,
     overLimit,
     handleChange,
     reseed,
@@ -448,60 +421,52 @@ function useOverviewEditor({
   };
 }
 
-type UseOverviewGenerator = {
-  editor: UseOverviewEditor;
-  params: OverviewParams;
-  setParams: React.Dispatch<React.SetStateAction<OverviewParams>>;
-  isGenerating: boolean;
-  generated: boolean;
-  generateNotice: string | null;
-  generateError: string | null;
-  currentGenerationId: string | null;
-  /** The Sources drawer's candidate lists (null until the fetch resolves). */
-  sourceOptions: OverviewSourceOptions | null;
-  /** Which sources ground the next draft (v3.1). */
-  selection: OverviewSelection;
-  setSelection: React.Dispatch<React.SetStateAction<OverviewSelection>>;
-  generate: () => Promise<void>;
-  loadVersion: (gen: OverviewGenerationItem) => void;
-};
+// ---------------------------------------------------------------------------
+// The generator arm — the Draft-with-AI block, the conditional hints, and the
+// coral review card. Generation lands a draft in `reviewDraft`, NEVER the
+// editor; Replace / Insert below are the only paths into the editor, and both
+// carry the generation id for provenance.
+// ---------------------------------------------------------------------------
 
-/**
- * The Generator surface's state: the shared editor (composed) plus the
- * Generate/Regenerate flow, the steering params, and the draft↔generation link
- * that lets Save record provenance. A generated draft seeds the editor as
- * UNSAVED content; `savedHtml` is untouched so Discard reverts to the last bio.
- */
-function useOverviewGenerator({
+function OverviewGeneratorArm({
   cwid,
   savedHtml,
-  onSaved,
+  editor,
+  generations,
   refreshGenerations,
-  generateEnabled,
+  previewHref,
 }: {
   cwid: string;
   savedHtml: string;
-  onSaved: (value: string) => void;
+  editor: UseOverviewEditor;
+  generations: OverviewGenerationItem[];
   refreshGenerations: () => Promise<void>;
-  generateEnabled: boolean;
-}): UseOverviewGenerator {
+  previewHref?: string;
+}) {
   const [isGenerating, setIsGenerating] = React.useState(false);
-  const [generated, setGenerated] = React.useState(false);
-  const [lastGeneratedDraft, setLastGeneratedDraft] = React.useState<string | null>(null);
   const [generateNotice, setGenerateNotice] = React.useState<string | null>(null);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [params, setParams] = React.useState<OverviewParams>(DEFAULT_OVERVIEW_PARAMS);
+
+  // The draft currently under review (coral card). `null` = no draft proposed.
+  // `reviewIndex` pages back through `reviewHistory` (newest first).
+  const [reviewHistory, setReviewHistory] = React.useState<OverviewReviewDraft[]>([]);
+  const [reviewIndex, setReviewIndex] = React.useState(0);
+  // The generation id that produced the editor's CURRENT content — set on
+  // Replace / Insert, cleared on Save / hand-edit / discard.
   const [currentGenerationId, setCurrentGenerationId] = React.useState<string | null>(null);
 
-  // #742 v3.1 — the source picker. Fetch the candidate lists once (SELF arm) and
-  // seed the selection from the populated default (first/last-author scored pubs +
-  // PI funding). Best-effort: a failed fetch leaves the drawer disabled, not the
-  // editor — generation still falls back to the server's default selection.
+  // The source picker. Fetch the candidate lists once and seed the selection
+  // from the populated default. Best-effort: a failed fetch leaves the drawer
+  // disabled, not the editor — generation still defaults server-side.
   const [sourceOptions, setSourceOptions] = React.useState<OverviewSourceOptions | null>(null);
   const [selection, setSelection] = React.useState<OverviewSelection>(EMPTY_SELECTION);
 
+  // The block is expanded when there is no saved bio, collapsed when one exists
+  // (§8) — set once on mount from the initial saved value.
+  const [blockOpen, setBlockOpen] = React.useState(() => savedHtml.trim().length === 0);
+
   React.useEffect(() => {
-    if (!generateEnabled) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -523,48 +488,29 @@ function useOverviewGenerator({
     return () => {
       cancelled = true;
     };
-  }, [generateEnabled]);
+  }, []);
 
-  const editor = useOverviewEditor({
-    cwid,
-    savedHtml,
-    onSaved,
-    // Editing the draft clears a stale generation error too.
-    onChangeExtra: () => setGenerateError(null),
-    // Publishing the draft clears the banner + draft↔generation link, then
-    // re-reads provenance (now authored / generated / generated_edited).
-    onSaveSuccess: () => {
-      setGenerateNotice(null);
-      setLastGeneratedDraft(null);
-      setGenerated(false);
+  const busy = isGenerating || editor.isSaving;
+  const reviewDraft = reviewHistory[reviewIndex] ?? null;
+
+  // Editing the draft by hand un-links it from its generation: hand-written text
+  // is `authored`, not `generated_edited`. Generation/replace/insert re-link it.
+  const handleEditorChange = React.useCallback(
+    (html: string) => {
+      setGenerateError(null);
       setCurrentGenerationId(null);
+      editor.handleChange(html);
     },
-    // Discard drops the draft banner along with the text.
-    onDiscardExtra: () => setGenerateNotice(null),
-  });
+    [editor],
+  );
 
-  function loadVersion(gen: OverviewGenerationItem) {
-    if (isGenerating || editor.isSaving) return;
-    editor.reseed(gen.text);
-    setLastGeneratedDraft(gen.text);
-    setGenerated(true);
-    setCurrentGenerationId(gen.id);
-    setGenerateNotice(GENERATE_BANNER);
-    setGenerateError(null);
-  }
+  // §6 pre-generation hints, reading the LIVE selection + params (client-only).
+  const showConflictHint =
+    selection.grantIds.length > 0 && !params.elements.includes("grants_funding");
+  const showSparseHint = selection.pmids.length <= 1 && selection.grantIds.length === 0;
 
   async function generate() {
-    if (isGenerating || editor.isSaving) return;
-    // Regenerating over edits the scholar made (text matching neither the saved
-    // bio nor the last-seeded draft) prompts a confirm before we replace it (G3).
-    if (
-      generated &&
-      editor.currentHtml !== savedHtml &&
-      editor.currentHtml !== (lastGeneratedDraft ?? "") &&
-      !window.confirm(REGENERATE_CONFIRM)
-    ) {
-      return;
-    }
+    if (busy) return;
     setIsGenerating(true);
     setGenerateError(null);
     setGenerateNotice(null);
@@ -591,14 +537,16 @@ function useOverviewGenerator({
         }
         return;
       }
-      // Seed the draft as UNSAVED content; the existing Save publishes it.
-      editor.reseed(data.draft);
-      setLastGeneratedDraft(data.draft);
-      setGenerated(true);
+      // Land the draft in the review card — NEVER the editor. Re-running appends
+      // a new draft to the front and keeps prior ones (cheap iteration).
+      const draft: OverviewReviewDraft = {
+        text: data.draft,
+        generationId: data.generationId,
+        createdAt: new Date().toISOString(),
+      };
+      setReviewHistory((prev) => [draft, ...prev]);
+      setReviewIndex(0);
       setGenerateNotice(GENERATE_BANNER);
-      // Tie the in-editor draft to its history row so a subsequent Save records
-      // provenance. `null` (a history write that hiccuped) saves as authored.
-      setCurrentGenerationId(data.generationId);
       void refreshGenerations();
     } catch {
       setGenerateError(GENERATE_FAILED);
@@ -607,166 +555,330 @@ function useOverviewGenerator({
     }
   }
 
-  return {
-    editor,
-    params,
-    setParams,
-    isGenerating,
-    generated,
-    generateNotice,
-    generateError,
-    currentGenerationId,
-    sourceOptions,
-    selection,
-    setSelection,
-    generate,
-    loadVersion,
-  };
-}
+  // Replace: overwrite the editor with the reviewed draft; the editor's content
+  // is now generated, so Save records provenance.
+  function replaceWithDraft() {
+    if (!reviewDraft) return;
+    editor.reseed(reviewDraft.text);
+    setCurrentGenerationId(reviewDraft.generationId);
+    setReviewHistory([]);
+    setReviewIndex(0);
+  }
 
-// ---------------------------------------------------------------------------
-// Presentational surfaces.
-// ---------------------------------------------------------------------------
+  // Insert below: append the draft to the editor's current contents (Open Q2 —
+  // append-to-end). Must go through `reseed` so the uncontrolled Tiptap DOM
+  // updates. An inserted draft contains generated content → still `generated*`.
+  function insertDraftBelow() {
+    if (!reviewDraft) return;
+    editor.reseed(editor.currentHtml + reviewDraft.text);
+    setCurrentGenerationId(reviewDraft.generationId);
+    setReviewHistory([]);
+    setReviewIndex(0);
+  }
 
-/** The Existing tab (and the no-flag surface): the plain manual editor. Saves
- *  as `authored` (no sourceGenerationId). */
-function OverviewManualSurface({
-  editor,
-  previewHref,
-}: {
-  editor: UseOverviewEditor;
-  previewHref?: string;
-}) {
-  return <OverviewEditorBody editor={editor} sourceGenerationId={null} previewHref={previewHref} />;
-}
+  // Discard: drop the review card only; the editor and saved bio are untouched.
+  function discardDraft() {
+    setReviewHistory([]);
+    setReviewIndex(0);
+    setGenerateNotice(null);
+  }
 
-/** The Generator tab: the steering controls + Generate/Regenerate + Versions +
- *  notices, above the editor body. Saves as `generated`/`generated_edited`. */
-function OverviewGeneratorSurface({
-  generator,
-  generations,
-  savedHtml,
-  previewHref,
-}: {
-  generator: UseOverviewGenerator;
-  generations: OverviewGenerationItem[];
-  savedHtml: string;
-  previewHref?: string;
-}) {
-  const { editor } = generator;
-  // Hide Generate when the scholar already has a non-empty saved bio (G9 — don't
-  // invite clobbering good content); offer Regenerate (behind a confirm) instead.
-  const hasExistingBio = savedHtml.trim().length > 0;
-  const busy = generator.isGenerating || editor.isSaving;
+  // Loading a history row proposes it as a review draft (never the editor).
+  function loadVersion(gen: OverviewGenerationItem) {
+    if (busy) return;
+    setReviewHistory([{ text: gen.text, generationId: gen.id, createdAt: gen.createdAt }]);
+    setReviewIndex(0);
+    setGenerateNotice(GENERATE_BANNER);
+    setGenerateError(null);
+  }
+
+  const sourceCounts =
+    sourceOptions != null
+      ? { publications: selection.pmids.length, awards: selection.grantIds.length }
+      : null;
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3">
-        {hasExistingBio || generator.generated ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={generator.generate}
-            disabled={busy}
-            data-testid="overview-regenerate"
-          >
-            <RefreshCw className="size-4" />
-            {generator.isGenerating ? "Generating…" : "Regenerate"}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={generator.generate}
-            disabled={busy}
-            data-testid="overview-generate"
-          >
-            <Sparkles className="size-4" />
-            {generator.isGenerating ? "Generating…" : "Generate a draft"}
-          </Button>
-        )}
-        <span className="text-muted-foreground text-sm">
-          Draft from your Scholars publications, topics, and grants — you review and edit it.
-        </span>
-      </div>
-
-      <details className="group" data-testid="overview-generate-options">
-        <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
-          Generation options
-        </summary>
-        <div className="mt-3">
-          <OverviewGenerateControls
-            value={generator.params}
-            onChange={generator.setParams}
-            disabled={busy}
-          />
-        </div>
-      </details>
-
-      <OverviewSourceDrawer
-        options={generator.sourceOptions}
-        selection={generator.selection}
-        onSelectionChange={generator.setSelection}
-        disabled={busy}
-      />
-
-      <OverviewVersionsPanel
+      <OverviewDraftBlock
+        open={blockOpen}
+        onToggle={() => setBlockOpen((o) => !o)}
+        params={params}
+        setParams={setParams}
+        sourceOptions={sourceOptions}
+        selection={selection}
+        setSelection={setSelection}
+        showConflictHint={showConflictHint}
+        showSparseHint={showSparseHint}
+        conflictAwardCount={selection.grantIds.length}
+        onGenerate={generate}
+        isGenerating={isGenerating}
+        busy={busy}
         generations={generations}
-        onLoad={generator.loadVersion}
-        onUseSettings={generator.setParams}
-        disabled={busy}
+        onLoadVersion={loadVersion}
       />
 
-      {generator.generateNotice && (
+      {generateNotice && (
         <Alert data-testid="overview-generate-notice">
-          <AlertDescription>{generator.generateNotice}</AlertDescription>
+          <AlertDescription>{generateNotice}</AlertDescription>
         </Alert>
       )}
-      {generator.generateError && (
+      {generateError && (
         <Alert variant="destructive" data-testid="overview-generate-error">
-          <AlertDescription>{generator.generateError}</AlertDescription>
+          <AlertDescription>{generateError}</AlertDescription>
         </Alert>
+      )}
+
+      {reviewDraft && (
+        <OverviewDraftReviewCard
+          draft={reviewDraft}
+          index={reviewIndex + 1}
+          total={reviewHistory.length}
+          onPrev={() => setReviewIndex((i) => Math.max(0, i - 1))}
+          onNext={() => setReviewIndex((i) => Math.min(reviewHistory.length - 1, i + 1))}
+          onReplace={replaceWithDraft}
+          onInsert={insertDraftBelow}
+          onDiscard={discardDraft}
+          disabled={busy}
+        />
       )}
 
       <OverviewEditorBody
         editor={editor}
-        sourceGenerationId={generator.currentGenerationId}
+        sourceGenerationId={currentGenerationId}
         previewHref={previewHref}
+        sourceCounts={sourceCounts}
+        onChange={handleEditorChange}
       />
     </>
   );
 }
 
-/** The editor + counter + Save/Discard row shared by both surfaces. Only one is
- *  mounted at a time (Radix unmounts the inactive tab), so the `overview-save` /
- *  `overview-discard` testids stay unambiguous. */
+// ---------------------------------------------------------------------------
+// The "Draft with AI" collapsible block (#875 §4.1/§4.2). Internal order
+// inverts today's: Settings → Sources → hints → Generate button LAST.
+// ---------------------------------------------------------------------------
+
+function OverviewDraftBlock({
+  open,
+  onToggle,
+  params,
+  setParams,
+  sourceOptions,
+  selection,
+  setSelection,
+  showConflictHint,
+  showSparseHint,
+  conflictAwardCount,
+  onGenerate,
+  isGenerating,
+  busy,
+  generations,
+  onLoadVersion,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  params: OverviewParams;
+  setParams: React.Dispatch<React.SetStateAction<OverviewParams>>;
+  sourceOptions: OverviewSourceOptions | null;
+  selection: OverviewSelection;
+  setSelection: React.Dispatch<React.SetStateAction<OverviewSelection>>;
+  showConflictHint: boolean;
+  showSparseHint: boolean;
+  conflictAwardCount: number;
+  onGenerate: () => void;
+  isGenerating: boolean;
+  busy: boolean;
+  generations: OverviewGenerationItem[];
+  onLoadVersion: (gen: OverviewGenerationItem) => void;
+}) {
+  return (
+    <div
+      className="border-apollo-border bg-apollo-surface rounded-lg border"
+      data-testid="overview-draft-block"
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        data-testid="overview-draft-block-toggle"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Sparkles className="text-apollo-maroon size-[18px] shrink-0" aria-hidden="true" />
+          <span className="text-sm font-medium">Draft with AI</span>
+          <span
+            className="bg-apollo-maroon/10 text-apollo-maroon rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase"
+            data-testid="overview-generator-beta"
+          >
+            Beta
+          </span>
+          {!open && (
+            <span className="text-muted-foreground truncate text-xs" data-testid="overview-draft-block-summary">
+              {summarizeParams(params)}
+            </span>
+          )}
+        </span>
+        <ChevronDown
+          className={cn("text-muted-foreground size-4 shrink-0 transition-transform", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-4 px-4 pb-4" data-testid="overview-draft-block-body">
+          <OverviewGenerateControls value={params} onChange={setParams} disabled={busy} />
+
+          <OverviewSourceDrawer
+            options={sourceOptions}
+            selection={selection}
+            onSelectionChange={setSelection}
+            disabled={busy}
+          />
+
+          {generations.length > 0 && (
+            <details className="group" data-testid="overview-versions-panel">
+              <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
+                Previous drafts ({generations.length})
+              </summary>
+              <ul className="border-apollo-border bg-apollo-surface-2 mt-3 flex flex-col gap-3 rounded-md border p-4">
+                {generations.map((gen) => (
+                  <li
+                    key={gen.id}
+                    className="flex flex-wrap items-start justify-between gap-3"
+                    data-testid={`overview-version-${gen.id}`}
+                  >
+                    <span className="text-muted-foreground min-w-0 text-xs">
+                      {summarizeParams(gen.params)}
+                    </span>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onLoadVersion(gen)}
+                        disabled={busy}
+                        data-testid={`overview-version-load-${gen.id}`}
+                      >
+                        View draft
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setParams(gen.params)}
+                        disabled={busy}
+                        data-testid={`overview-version-use-settings-${gen.id}`}
+                      >
+                        Use these settings
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {showConflictHint && (
+            <Alert data-testid="overview-hint-emphasis-conflict">
+              <AlertDescription>
+                {conflictAwardCount} {HINT_EMPHASIS_CONFLICT}
+              </AlertDescription>
+            </Alert>
+          )}
+          {showSparseHint && (
+            <Alert
+              className="border-apollo-amber-tint-border bg-apollo-amber-tint text-apollo-amber"
+              data-testid="overview-hint-sparse-sources"
+            >
+              <TriangleAlert className="size-4" />
+              <AlertDescription className="text-apollo-amber">
+                {HINT_SPARSE_SOURCES}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onGenerate}
+              disabled={busy}
+              data-testid="overview-generate"
+            >
+              <Sparkles className="size-4" />
+              {isGenerating ? "Generating…" : "Generate a draft"}
+            </Button>
+            <span className="text-muted-foreground text-sm">
+              Draft from your Scholars publications, topics, and grants — you review it before
+              anything reaches your bio.
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The editor + counter + Save/Discard row (the single source of truth).
+// ---------------------------------------------------------------------------
+
 function OverviewEditorBody({
   editor,
-  sourceGenerationId,
+  sourceGenerationId = null,
   previewHref,
+  sourceCounts,
+  onChange,
 }: {
   editor: UseOverviewEditor;
-  sourceGenerationId: string | null;
+  sourceGenerationId?: string | null;
   previewHref?: string;
+  /** Live selected counts for the empty-state on-ramp; null while loading or on
+   *  the manual surface (no source data) → count-less fallback copy. */
+  sourceCounts: { publications: number; awards: number } | null;
+  /** Override the editor's onChange (the generator arm un-links provenance). */
+  onChange?: (html: string) => void;
 }) {
+  const isEmpty = editor.currentHtml.trim().length === 0;
+
   return (
     <>
       <div className="max-w-prose">
         <OverviewEditor
           key={editor.editorKey}
           initialHtml={editor.currentHtml}
-          onChange={editor.handleChange}
+          onChange={onChange ?? editor.handleChange}
         />
       </div>
+      {isEmpty && (
+        <p className="text-muted-foreground text-sm" data-slot="overview-editor-empty">
+          {sourceCounts
+            ? `No bio yet. Generate a draft from your ${sourceCounts.publications} ${plural(
+                sourceCounts.publications,
+                "publication",
+              )} and ${sourceCounts.awards} ${plural(
+                sourceCounts.awards,
+                "award",
+              )} above, or start writing here.`
+            : "No bio yet. Generate a draft from your work above, or start writing here."}
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span
           aria-live="polite"
           className={cn(
             "text-sm tabular-nums",
-            editor.overLimit ? "text-destructive" : "text-muted-foreground",
+            editor.overLimit || editor.overEditorialLimit
+              ? "text-destructive"
+              : editor.nearLimit
+                ? "text-apollo-amber"
+                : "text-muted-foreground",
           )}
+          data-testid="overview-counter"
         >
-          {editor.currentHtml.length.toLocaleString()}/{OVERVIEW_MAX_CHARS.toLocaleString()}
+          {editor.nearLimit
+            ? `${editor.currentHtml.length.toLocaleString()}/${OVERVIEW_EDITORIAL_MAX.toLocaleString()}`
+            : editor.currentHtml.length.toLocaleString()}
         </span>
         <div className="flex flex-wrap items-center gap-3">
           {editor.justSaved && (
@@ -802,13 +914,14 @@ function OverviewEditorBody({
             type="button"
             variant="apollo"
             onClick={() => editor.save(sourceGenerationId)}
-            disabled={!editor.dirty || editor.overLimit || editor.isSaving}
+            disabled={!editor.dirty || editor.overEditorialLimit || editor.isSaving}
             data-testid="overview-save"
           >
             {editor.isSaving ? "Saving…" : "Save bio"}
           </Button>
-          <span className="text-muted-foreground text-sm">
-            Changes publish to your public profile immediately.
+          <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
+            <Globe className="size-3.5" aria-hidden="true" />
+            Publishes to your public profile immediately.
           </span>
         </div>
       </div>
@@ -819,6 +932,10 @@ function OverviewEditorBody({
       )}
     </>
   );
+}
+
+function plural(n: number, singular: string): string {
+  return `${singular}${n === 1 ? "" : "s"}`;
 }
 
 /**
