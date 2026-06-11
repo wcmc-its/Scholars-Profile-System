@@ -338,14 +338,12 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
                 ))}
               </select>
             </label>
-            {!auto && (
-              <span
-                className="bg-apollo-maroon/10 text-apollo-maroon rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap"
-                data-testid="highlights-counter"
-              >
-                {selection.length} of {MAX} selected
-              </span>
-            )}
+            <span
+              className="bg-apollo-maroon/10 text-apollo-maroon rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap"
+              data-testid="highlights-counter"
+            >
+              {auto ? highlights.aiPmids.length : selection.length} of {MAX} selected
+            </span>
           </div>
 
           {/* The pickable list (read-only preview in automatic mode). */}
@@ -354,7 +352,7 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
               No publications match &ldquo;{query}&rdquo;.
             </p>
           ) : (
-            <ScrollArea className="max-h-[430px]">
+            <ScrollArea className="md:h-[60vh]">
               <ul className="divide-apollo-border divide-y" data-testid="highlights-picker">
                 {rows.map((p) => {
                   const rank = rankOf(p.pmid);
@@ -438,10 +436,7 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
                     <li key={p.pmid}>
                       {auto ? (
                         <div
-                          className={cn(
-                            "flex items-start gap-3 px-1 py-3",
-                            !picked && "opacity-50",
-                          )}
+                          className="flex items-start gap-3 px-1 py-3"
                           data-testid={`highlights-row-${p.pmid}`}
                         >
                           {inner}
