@@ -54,16 +54,17 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("HighlightsCard — #895 redesigned editor", () => {
-  it("renders the automatic preview by default: switch ON, AI top-3 numbered, others dimmed, no counter", () => {
+  it("renders the automatic preview by default: switch ON, AI top-3 counter, read-only rows, none dimmed", () => {
     renderCard(makeHighlights());
     expect(screen.getByTestId("highlights-auto-switch").getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("highlights-status").textContent).toContain("Automatic.");
-    expect(screen.queryByTestId("highlights-counter")).toBeNull();
+    // Counter reflects the AI picks in automatic mode (aiPmids has 3).
+    expect(screen.getByTestId("highlights-counter").textContent).toBe(`${MAX} of ${MAX} selected`);
     expect(screen.getByTestId("highlights-opt-in").textContent).toBe("Choose manually");
-    // Read-only preview: rows are not interactive; AI picks full-opacity, rest dimmed.
+    // Read-only preview: rows are not interactive, and nothing is greyed out.
     expect(screen.getByTestId("highlights-row-1").getAttribute("role")).toBeNull();
     expect(screen.getByTestId("highlights-row-1").className).not.toContain("opacity-50");
-    expect(screen.getByTestId("highlights-row-4").className).toContain("opacity-50");
+    expect(screen.getByTestId("highlights-row-4").className).not.toContain("opacity-50");
   });
 
   it("shows the publication type (relabeled) and impact per row", () => {
