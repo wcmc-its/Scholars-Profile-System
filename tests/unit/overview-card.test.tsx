@@ -790,7 +790,7 @@ describe("OverviewCard — editor empty-state", () => {
     stubFetchRouted(() => jsonResponse({ ok: true }), {});
     // Override source-options with a populated default selection.
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
+      async (input: RequestInfo | URL) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url === "/api/edit/overview/source-options") {
           return jsonResponse({
