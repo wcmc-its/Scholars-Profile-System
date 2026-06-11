@@ -44,7 +44,10 @@ export type AuthzDenialReason =
   | "proxy_conflict"
   // ─── #728 § 2.2 #3 / § 5 MUST-7 ED-locked grant ───
   /** a grant/revoke against a `unit_admin` row whose `source` LIKE 'ED:%' by a non-superuser */
-  | "ed_locked";
+  | "ed_locked"
+  // ─── comms_steward Method-Family surface (comms-steward-methods-visibility-spec.md §3/§7) ───
+  /** a Method-Family steward action by an actor who is neither comms_steward nor superuser */
+  | "not_comms_steward";
 
 export type AuthzResult = { ok: true } | { ok: false; reason: AuthzDenialReason };
 
@@ -145,6 +148,21 @@ export function authorizeRevoke(
   return session.cwid === suppression.createdBy
     ? ALLOW
     : { ok: false, reason: "not_owner" };
+}
+
+/**
+ * The Method-Family steward gate (comms-steward-methods-visibility-spec.md
+ * §3/§7) — every `/api/edit/methods/*` action. The `comms_steward` role unlocks
+ * the global Method-Family surface; a superuser is a strict superset (passes
+ * every steward guard) per §3's privilege boundary. There is no `cwid`/owner
+ * dimension: the role is global, so this predicate turns only on the actor's
+ * tier, not on the family being acted upon. Pure and synchronous like its
+ * siblings — the `comms_steward` verdict was resolved live into `EditSession`
+ * by `getEditSession()`.
+ */
+export function authorizeCommsStewardAction(session: EditSession): AuthzResult {
+  if (session.isCommsSteward || session.isSuperuser) return ALLOW;
+  return { ok: false, reason: "not_comms_steward" };
 }
 
 // ---------------------------------------------------------------------------

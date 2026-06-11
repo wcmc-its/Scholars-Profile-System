@@ -15,8 +15,8 @@ import {
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
 
-const SELF: EditSession = { cwid: "self01", isSuperuser: false };
-const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true };
+const SELF: EditSession = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
+const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
 
 // ---------------------------------------------------------------------------
 // authorizeFieldEdit  (self-edit-spec.md § Authorization, edge case 2)

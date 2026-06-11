@@ -156,7 +156,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  * a clear with no override returns `200 { cleared: false }`.
  */
 async function clearSelectedHighlights(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
