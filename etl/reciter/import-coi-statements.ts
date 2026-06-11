@@ -93,9 +93,24 @@ async function main() {
     const { rows, skipped } = parseNdjson(text);
     console.log(`Parsed ${rows.length} statements (${skipped} lines skipped).`);
 
+    // Only statements whose pmid exists in the TARGET's `publication` table can be
+    // stored — `publication_conflict_statement.pmid` is a FK to `publication.pmid`.
+    // The env where the dump was generated can have a different pub set than the
+    // target, so filter against the target here (this job runs in the target's VPC,
+    // so it sees the target's pubs). Mirrors `backfill-coi-statements`, which only
+    // pulls statements for pmids already in `publication`.
+    const existingPmids = new Set(
+      (await db.read.publication.findMany({ select: { pmid: true } })).map((p) => p.pmid),
+    );
+    const toWrite = rows.filter((r) => existingPmids.has(r.pmid));
+    const noPub = rows.length - toWrite.length;
+    console.log(
+      `${toWrite.length} match an existing publication in this env (${noPub} have no matching pmid, skipped).`,
+    );
+
     let written = 0;
     if (!dryRun) {
-      for (const batch of chunks(rows, UPSERT_BATCH)) {
+      for (const batch of chunks(toWrite, UPSERT_BATCH)) {
         await db.write.$transaction(
           batch.map((r) =>
             db.write.publicationConflictStatement.upsert({
@@ -106,7 +121,7 @@ async function main() {
           ),
         );
         written += batch.length;
-        if (written % (UPSERT_BATCH * 10) === 0) console.log(`  ...${written}/${rows.length}`);
+        if (written % (UPSERT_BATCH * 10) === 0) console.log(`  ...${written}/${toWrite.length}`);
       }
     }
 
@@ -116,11 +131,13 @@ async function main() {
     });
     const elapsed = Math.round((Date.now() - start) / 1000);
     console.log(
-      `${dryRun ? "DRY-RUN " : ""}Import complete in ${elapsed}s: ${written} conflict statements upserted` +
-        ` (${rows.length} parsed, ${skipped} skipped).`,
+      `${dryRun ? "DRY-RUN " : ""}Import complete in ${elapsed}s: ${written} upserted of ${toWrite.length} matched` +
+        ` (${rows.length} parsed, ${skipped} skipped, ${noPub} no matching pmid).`,
     );
-    if (!dryRun && written === 0) {
-      console.warn("WARNING: 0 statements written — verify the NDJSON key and contents.");
+    if (!dryRun && toWrite.length === 0) {
+      console.warn(
+        "WARNING: 0 statements matched an existing publication — verify the NDJSON key and the env's publication set.",
+      );
     }
   } catch (err) {
     await db.write.etlRun.update({
