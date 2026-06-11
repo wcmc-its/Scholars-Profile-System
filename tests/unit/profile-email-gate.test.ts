@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Integration coverage for the profile-loader email gate (table A of
- * docs/email-visibility-spec.md). Verifies that `getScholarFullProfileBySlug`
- * threads the `internalViewer` argument and reads `PROFILE_EMAIL_RELEASE_GATE`
- * through `isEmailReleaseGateEnabled()` (which reads `process.env` directly, so
- * the env var drives the flag here — no module mock needed).
+ * Integration coverage for the profile-loader email baking (table A +
+ * Cache-safety of docs/email-visibility-spec.md). The profile page is CloudFront
+ * PATH-cached, so `getScholarFullProfileBySlug` must produce a VIEWER-INDEPENDENT
+ * payload: when PROFILE_EMAIL_RELEASE_GATE is on it bakes ONLY `public` emails and
+ * withholds `institution`/`none`/null, flagging the latter `contactEmailRevealable`
+ * so the Contact card reveals them to internal viewers out-of-band (covered by
+ * contact-email-route.test.ts). Flag off → legacy passthrough.
  *
- * The same mocking shape as profile-suppression.test.ts: `@/lib/db` is mocked so
- * the loader runs against an in-memory scholar row carrying `emailVisibility`.
+ * `isEmailReleaseGateEnabled()` reads `process.env` directly, so the env var
+ * drives the flag here. `@/lib/db` is mocked (as in profile-suppression.test.ts)
+ * so the loader runs against an in-memory scholar row carrying `emailVisibility`.
  */
 const {
   mockScholarFindFirst,
@@ -39,7 +42,7 @@ import { getScholarFullProfileBySlug } from "@/lib/api/profile";
 
 const EMAIL = "person@med.cornell.edu";
 
-function scholarRow(emailVisibility: string | null) {
+function scholarRow(emailVisibility: string | null, email: string | null = EMAIL) {
   return {
     cwid: "p001",
     slug: "person-one",
@@ -48,7 +51,7 @@ function scholarRow(emailVisibility: string | null) {
     postnominal: null,
     primaryTitle: "Professor",
     primaryDepartment: "Medicine",
-    email: EMAIL,
+    email,
     emailVisibility,
     headshotUrl: null,
     overview: null,
@@ -82,65 +85,65 @@ afterEach(() => {
   else process.env.PROFILE_EMAIL_RELEASE_GATE = ORIGINAL_FLAG;
 });
 
-describe("getScholarFullProfileBySlug — email gate (table A)", () => {
-  describe("PROFILE_EMAIL_RELEASE_GATE off (row 13 — legacy)", () => {
+describe("getScholarFullProfileBySlug — cache-safe email baking + reveal flag", () => {
+  describe("PROFILE_EMAIL_RELEASE_GATE off (legacy — row 13)", () => {
     beforeEach(() => {
       delete process.env.PROFILE_EMAIL_RELEASE_GATE;
     });
 
-    it("shows the email to an external viewer regardless of release code", async () => {
+    it("bakes the email for everyone regardless of release code; not revealable", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow("institution"));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), false);
-      expect(payload?.email).toBe(EMAIL);
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBe(EMAIL);
+      expect(p?.contactEmailRevealable).toBe(false);
     });
 
-    it("shows the email even when visibility is null/none", async () => {
+    it("bakes the email even when visibility is null", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow(null));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), false);
-      expect(payload?.email).toBe(EMAIL);
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBe(EMAIL);
+      expect(p?.contactEmailRevealable).toBe(false);
     });
   });
 
-  describe("PROFILE_EMAIL_RELEASE_GATE on (table A applies)", () => {
+  describe("PROFILE_EMAIL_RELEASE_GATE on — payload is viewer-independent (public-only)", () => {
     beforeEach(() => {
       process.env.PROFILE_EMAIL_RELEASE_GATE = "on";
     });
 
-    it("row 1/6: public → shown to an external viewer", async () => {
+    it("public → baked into the cache-safe payload; not revealable", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow("public"));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), false);
-      expect(payload?.email).toBe(EMAIL);
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBe(EMAIL);
+      expect(p?.contactEmailRevealable).toBe(false);
     });
 
-    it("row 2: institution → hidden (null) from an external viewer", async () => {
+    it("institution → withheld from the cached payload, flagged revealable", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow("institution"));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), false);
-      expect(payload?.email).toBeNull();
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBeNull();
+      expect(p?.contactEmailRevealable).toBe(true);
     });
 
-    it("row 3/4: institution → shown to an internal viewer", async () => {
-      mockScholarFindFirst.mockResolvedValue(scholarRow("institution"));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), true);
-      expect(payload?.email).toBe(EMAIL);
-    });
-
-    it("row 5: null visibility → hidden even from an internal viewer (fail-closed)", async () => {
+    it("none/null → withheld; still flagged revealable so external & none are indistinguishable", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow(null));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), true);
-      expect(payload?.email).toBeNull();
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBeNull();
+      expect(p?.contactEmailRevealable).toBe(true);
     });
 
-    it("row 7: unrecognized value → hidden even from an internal viewer (fail-closed)", async () => {
+    it("unrecognized value ('private') → withheld (fail-closed), flagged revealable", async () => {
       mockScholarFindFirst.mockResolvedValue(scholarRow("private"));
-      const payload = await getScholarFullProfileBySlug("person-one", new Date(), true);
-      expect(payload?.email).toBeNull();
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBeNull();
+      expect(p?.contactEmailRevealable).toBe(true);
     });
 
-    it("defaults to external (fail-closed) when no viewer signal is supplied", async () => {
-      mockScholarFindFirst.mockResolvedValue(scholarRow("institution"));
-      // No third arg → internalViewer defaults to false → institution hidden.
-      const payload = await getScholarFullProfileBySlug("person-one");
-      expect(payload?.email).toBeNull();
+    it("no email on file → nothing to bake or reveal", async () => {
+      mockScholarFindFirst.mockResolvedValue(scholarRow("institution", null));
+      const p = await getScholarFullProfileBySlug("person-one");
+      expect(p?.email).toBeNull();
+      expect(p?.contactEmailRevealable).toBe(false);
     });
   });
 });

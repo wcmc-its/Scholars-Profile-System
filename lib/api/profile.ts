@@ -244,6 +244,23 @@ export async function loadSensitiveScholarFamilies(cwid: string): Promise<Schola
   return (await partitionScholarFamilies(cwid)).sensitiveFamilies;
 }
 
+/**
+ * email-visibility-spec § Cache-safety — the cache-unsafe reveal of a scholar's
+ * email for the /api/profile/[cwid]/contact-email endpoint. Returns the raw email
+ * + release audience (the endpoint applies table A against the resolved
+ * internal-viewer signal); `null` for an unknown or soft-deleted scholar.
+ */
+export async function loadScholarContactEmail(
+  cwid: string,
+): Promise<{ email: string | null; emailVisibility: string | null } | null> {
+  const scholar = await prisma.scholar.findUnique({
+    where: { cwid },
+    select: { email: true, emailVisibility: true, deletedAt: true },
+  });
+  if (!scholar || scholar.deletedAt) return null;
+  return { email: scholar.email, emailVisibility: scholar.emailVisibility };
+}
+
 export type ProfilePublication = ScoredPublication<{
   pmid: string;
   title: string;
@@ -317,6 +334,14 @@ export type ProfilePayload = {
    *  when present, falling back to department-only when null. */
   division: string | null;
   email: string | null;
+  /** email-visibility-spec § Cache-safety. True when PROFILE_EMAIL_RELEASE_GATE
+   *  is on and the scholar has an email that was WITHHELD from `email` above
+   *  because it is not `public` (i.e. `institution` or `none`). The Contact card
+   *  mounts the uncacheable client reveal island, which fetches
+   *  /api/profile/[cwid]/contact-email and shows the address to internal viewers
+   *  only. Never carries the address itself. False when the gate is off, the
+   *  email is `public` (already baked), or there is no email. */
+  contactEmailRevealable: boolean;
   identityImageEndpoint: string;
   /** Derived in ED ETL — true when LDAP carries a clinical or NYP-credentialed
    *  signal. Drives whether the "Clinical profile →" link renders in the
@@ -535,14 +560,6 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
 export async function getScholarFullProfileBySlug(
   slug: string,
   now: Date = new Date(),
-  // #866 / email-visibility-spec § A. Whether the requesting viewer is INTERNAL
-  // (authenticated session OR allowlisted WCM network — resolved by the caller
-  // from request context via lib/auth/viewer-context). Gates the Contact-card
-  // email per table A when `PROFILE_EMAIL_RELEASE_GATE` is on; ignored when the
-  // flag is off (legacy: email shown to everyone). Defaults to `false` so any
-  // caller that does not (or cannot) supply request context fails closed — only
-  // `public` emails survive the gate, never `institution`.
-  internalViewer: boolean = false,
 ): Promise<ProfilePayload | null> {
   const scholar = await prisma.scholar.findFirst({
     where: { slug, deletedAt: null, status: "active" },
@@ -876,16 +893,28 @@ export async function getScholarFullProfileBySlug(
       scholar.division && scholar.division.name !== "Administration"
         ? scholar.division.name
         : null,
-    // email-visibility-spec § A — gate the Contact-card email by the Web
-    // Directory release code (`scholar.emailVisibility`) and the viewer's
-    // internal status. Hidden → null, so it never reaches the client. No-op
-    // (returns `scholar.email` unchanged) while PROFILE_EMAIL_RELEASE_GATE is off.
+    // email-visibility-spec § A + Cache-safety — this payload is rendered into
+    // the CloudFront PATH-cached profile page, so it MUST be viewer-independent.
+    // Bake only the cache-safe email: when the gate is on, `public` survives and
+    // `institution`/`none`/null are withheld (gateEmailForViewer with
+    // internalViewer=false). `institution` emails are revealed to internal
+    // viewers out-of-band via the uncacheable /api/profile/[cwid]/contact-email
+    // endpoint (see `contactEmailRevealable`). No-op (raw email) while off.
     email: gateEmailForViewer(
       scholar.email,
       scholar.emailVisibility,
-      internalViewer,
+      false,
       isEmailReleaseGateEnabled(),
     ),
+    // True when the gate is on and the scholar has an email withheld above
+    // because it is not `public` — the Contact card mounts the client reveal
+    // island. Covers `institution` (revealed to internal viewers) and `none`
+    // (endpoint returns nothing); both fetch so an external viewer cannot tell
+    // them apart. Carries no address. False when gate off / public / no email.
+    contactEmailRevealable:
+      isEmailReleaseGateEnabled() &&
+      scholar.email != null &&
+      scholar.emailVisibility !== "public",
     identityImageEndpoint: identityImageEndpoint(scholar.cwid),
     hasClinicalProfile: scholar.hasClinicalProfile,
     clinicalProfileUrl: scholar.clinicalProfileUrl,

@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { headers } from "next/headers";
-import { NextRequest } from "next/server";
 import { notFound } from "next/navigation";
-import { resolveViewerContext } from "@/lib/auth/viewer-context";
 import { buildPersonJsonLd } from "@/lib/seo/jsonld";
+import { SidebarCard } from "@/components/profile/sidebar-card";
+import { ContactEmailReveal } from "@/components/profile/contact-email-reveal";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { DisclosureInfoTooltip } from "@/components/scholar/disclosure-info-tooltip";
 import { DisclosureGroupInfoTooltip } from "@/components/scholar/disclosure-group-info-tooltip";
@@ -51,28 +50,12 @@ import { profilePath } from "@/lib/profile-url";
  * MentoringSection; nothing here reads searchParams.
  */
 export async function ProfileView({ slug }: { slug: string }) {
-  // email-visibility-spec § A — resolve the #866 internal-viewer signal from the
-  // incoming request (session cookie OR allowlisted WCM source IP) and thread it
-  // into the loader so the Contact-card email is gated by the Web Directory
-  // release code. This route is already `dynamic = "force-dynamic"` (#640), so
-  // reading request headers here does not regress static rendering. We REUSE the
-  // shared `resolveViewerContext` predicate (lib/auth/viewer-context.ts) by
-  // wrapping the incoming headers in a NextRequest — `resolveViewerContext` only
-  // reads the session cookie (from the `cookie` header) and `cloudfront-viewer-
-  // address`, both of which `headers()` carries. Fail-closed: any error reading
-  // the context leaves the viewer external, so only `public` emails survive.
-  let internalViewer = false;
-  try {
-    const incoming = await headers();
-    const viewer = await resolveViewerContext(
-      new NextRequest("https://internal.invalid/", { headers: incoming }),
-    );
-    internalViewer = viewer.internal;
-  } catch {
-    internalViewer = false;
-  }
-
-  const profile = await getScholarFullProfileBySlug(slug, new Date(), internalViewer);
+  // email-visibility-spec § Cache-safety — this page is CloudFront PATH-cached,
+  // so the loader bakes only the viewer-independent (public) email. An
+  // `institution` email is revealed to internal viewers out-of-band by the
+  // <ContactEmailReveal> island below (uncacheable /api/profile/[cwid]/contact-
+  // email), never baked into the shared cache.
+  const profile = await getScholarFullProfileBySlug(slug, new Date());
   if (!profile) notFound();
 
   // #536 — hidden identity classes (doctoral students) have no public profile
@@ -237,6 +220,11 @@ export async function ProfileView({ slug }: { slug: string }) {
                       </a>
                     </li>
                   ) : null}
+                  {/* email-visibility-spec § Cache-safety — an institution email
+                      is revealed to internal viewers out-of-band (no cache leak). */}
+                  {profile.contactEmailRevealable ? (
+                    <ContactEmailReveal cwid={profile.cwid} mode="li" />
+                  ) : null}
                   {profile.hasClinicalProfile ? (
                     <li>
                       <a
@@ -260,6 +248,11 @@ export async function ProfileView({ slug }: { slug: string }) {
                   ) : null}
                 </ul>
               </SidebarCard>
+            ) : profile.contactEmailRevealable ? (
+              // No server-baked contact content, but an institution email may be
+              // revealable — the island renders its own Contact card iff it
+              // resolves an email, so external viewers never see an empty card.
+              <ContactEmailReveal cwid={profile.cwid} mode="card" />
             ) : null}
 
             {profile.postdoctoralMentor ? (
@@ -620,13 +613,3 @@ function Section({
   );
 }
 
-function SidebarCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="border-t border-border py-4">
-      <div className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wider">
-        {title}
-      </div>
-      <div className="text-sm">{children}</div>
-    </div>
-  );
-}

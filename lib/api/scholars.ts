@@ -40,15 +40,7 @@ export type ScholarPayload = {
  * call `/api/scholars/:current_cwid` after a redirect resolution if they need
  * to follow CWID changes.
  */
-export async function getScholarByCwid(
-  cwid: string,
-  // email-visibility-spec § A. Whether the requesting viewer is INTERNAL (#866).
-  // This endpoint (GET /api/scholars/:cwid) is anonymous-facing, so it defaults to
-  // `false` (external / fail-closed): when the gate is on, only `public` emails
-  // are serialized unless the caller resolves and passes an internal signal from
-  // the request. No-op while PROFILE_EMAIL_RELEASE_GATE is off (legacy: email for all).
-  internalViewer: boolean = false,
-): Promise<ScholarPayload | null> {
+export async function getScholarByCwid(cwid: string): Promise<ScholarPayload | null> {
   const scholar = await prisma.scholar.findFirst({
     where: { cwid, deletedAt: null, status: "active" },
     include: {
@@ -66,10 +58,15 @@ export async function getScholarByCwid(
     fullName: scholar.fullName,
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
+    // email-visibility-spec § A + Cache-safety. This anonymous-facing endpoint is
+    // CloudFront-cacheable by path and is NOT in the #866 origin-request policy
+    // (no viewer-address forwarded), so it bakes only the viewer-independent
+    // (public) email — never `institution`/`none`. Internal callers obtain
+    // institution emails via /api/profile/[cwid]/contact-email. No-op when off.
     email: gateEmailForViewer(
       scholar.email,
       scholar.emailVisibility,
-      internalViewer,
+      false,
       isEmailReleaseGateEnabled(),
     ),
     overview: scholar.overview,
