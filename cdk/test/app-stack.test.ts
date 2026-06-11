@@ -1513,7 +1513,7 @@ describe("AppStack", () => {
         // Staging-first like the sibling Methods-lens flags; off in prod until the
         // pmids-bearing scholar_family rollup is loaded and the staging soak is done.
         expect(appContainerEnv().get("METHODS_LENS_FAMILY_FILTER")).toBe("off");
-        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("off"); // #824 staging-first
+        expect(appContainerEnv().get("METHODS_LENS_PAGES")).toBe("on"); // #824 armed both envs (armed-not-live; ENABLED still gates prod)
       });
 
       it("serves the root /{slug} canonical profile URL in prod (PROFILE_CANONICAL=root, #671 cutover)", () => {

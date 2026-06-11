@@ -1114,13 +1114,18 @@ export class AppStack extends Stack {
         METHODS_LENS_FAMILY_FILTER: env === "staging" ? "on" : "off",
         //   METHODS_LENS_PAGES -- standalone cross-scholar Method pages
         //     (/methods/**), search surfacing, and the per-scholar inbound
-        //     links. STAGING-ON (the master lens + sensitive gate above are
-        //     already staging-on and have soaked, and the scholar_family rollup
-        //     incl. pmids is loaded on staging via #819/#820); PROD stays off
-        //     until go-live. When off, a /methods/** route notFound()s and no
-        //     search candidate/badge or inbound link renders. A Method page ALSO
-        //     requires METHODS_LENS_ENABLED.
-        METHODS_LENS_PAGES: env === "staging" ? "on" : "off",
+        //     links. ARMED ON in BOTH envs. Staging is live (the master lens +
+        //     sensitive gate above are staging-on and soaked, and the
+        //     scholar_family rollup incl. pmids is loaded on staging via
+        //     #819/#820). PROD is ARMED-NOT-LIVE: this flag is INERT in prod
+        //     until METHODS_LENS_ENABLED is also flipped at the data-gated
+        //     go-live (#794 cutover + the people-attribution reindex) -- a
+        //     Method page / search candidate ALSO requires METHODS_LENS_ENABLED,
+        //     and CD only re-rolls the image (never cdk deploys), so prod stays
+        //     off in practice until a manual cdk deploy Sps-App-prod. When off,
+        //     a /methods/** route notFound()s and no search candidate/badge or
+        //     inbound link renders.
+        METHODS_LENS_PAGES: "on",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet
