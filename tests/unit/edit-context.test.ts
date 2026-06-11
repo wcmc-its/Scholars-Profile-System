@@ -29,6 +29,7 @@ type FakeClient = {
   department: { findFirst: AnyMock };
   coiActivity: { findMany: AnyMock };
   coiGapCandidate: { findMany: AnyMock };
+  publication: { findMany: AnyMock };
 };
 type EditContextClient = Parameters<typeof loadEditContext>[1];
 
@@ -57,6 +58,9 @@ function fakeClient(): FakeClient {
     // COI-gap candidates — default to "none". Only queried when the loader is
     // called with `{ includeCoiGap: true }` (the self-only gate).
     coiGapCandidate: { findMany: vi.fn().mockResolvedValue([]) },
+    // Publications — the COI-gap loader joins this by pmid for the per-source
+    // year + sort date. Default to "no rows" (year/ts fall back to null/0).
+    publication: { findMany: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -817,20 +821,35 @@ describe("loadEditContext — mentees (suppressible)", () => {
   });
 });
 
-describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
+describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", () => {
   const GAP_ROWS = [
     {
-      id: "gap-1",
+      id: "gap-1a",
       pmid: "31508198",
       entity: "Procept BioRobotics",
       tier: "High",
       sourceSentence: "Clinical Research investigator for Procept Aquablation.",
-      // Fields that must NEVER leak to the client shape:
+      // Fields that must NEVER leak to the client shape (score/status/etc.):
       normalizedEntity: "procept biorobotics",
       attribution: "scholar",
       entityScore: 0.94,
       category: "personal",
       status: "new",
+    },
+    {
+      // SAME normalized entity as gap-1a but a different (newer) paper — MUST
+      // collapse into ONE relationship row that cites both, taking the highest
+      // tier (High) and the newest source's raw entity as the display label.
+      id: "gap-1b",
+      pmid: "34963501",
+      entity: "Procept Biorobotics Inc",
+      tier: "Medium",
+      sourceSentence: "Stock options in Procept Biorobotics.",
+      normalizedEntity: "procept biorobotics",
+      attribution: "scholar",
+      entityScore: 0.8,
+      category: "personal",
+      status: "acknowledged",
     },
     {
       id: "gap-2",
@@ -844,6 +863,11 @@ describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
       category: "personal",
       status: "acknowledged",
     },
+  ];
+  const PUB_ROWS = [
+    { pmid: "31508198", year: 2019, dateAddedToEntrez: new Date("2019-08-01T00:00:00Z") },
+    { pmid: "34963501", year: 2022, dateAddedToEntrez: new Date("2022-01-10T00:00:00Z") },
+    { pmid: "30000001", year: 2018, dateAddedToEntrez: new Date("2018-03-01T00:00:00Z") },
   ];
 
   it("does NOT query coi_gap_candidate and returns [] when opts is absent", async () => {
@@ -864,10 +888,11 @@ describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
     expect(c.coiGapCandidate.findMany).not.toHaveBeenCalled();
   });
 
-  it("queries only new+acknowledged and maps to the narrow client shape when includeCoiGap is true", async () => {
+  it("dedupes by entity, cites every source, joins the pub year, and orders newest+confidence", async () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     c.coiGapCandidate.findMany.mockResolvedValue(GAP_ROWS);
+    c.publication.findMany.mockResolvedValue(PUB_ROWS);
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
       includeCoiGap: true,
     });
@@ -875,32 +900,42 @@ describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
     // Only new + acknowledged are requested.
     const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
     expect(whereArg).toEqual({ cwid: SELF, status: { in: ["new", "acknowledged"] } });
+    // The date join is scoped to the gap pmids (deduped).
+    const pubWhere = c.publication.findMany.mock.calls[0][0].where;
+    expect(pubWhere.pmid.in.sort()).toEqual(["30000001", "31508198", "34963501"]);
 
-    // The mapped shape carries ONLY id/pmid/entity/tier/sourceSentence — no
-    // normalizedEntity, attribution, entityScore, category, or status.
-    expect(ctx!.unmatchedPubmedCoi).toEqual([
-      {
-        id: "gap-1",
-        pmid: "31508198",
-        entity: "Procept BioRobotics",
-        tier: "High",
-        sourceSentence: "Clinical Research investigator for Procept Aquablation.",
-      },
-      {
-        id: "gap-2",
-        pmid: "30000001",
-        entity: "Neotract",
-        tier: "Medium",
-        sourceSentence: "Consultant for Neotract Urolift.",
-      },
-    ]);
-    // Belt-and-braces: the forbidden internals are absent from every row.
-    for (const row of ctx!.unmatchedPubmedCoi) {
-      expect(row).not.toHaveProperty("normalizedEntity");
-      expect(row).not.toHaveProperty("attribution");
-      expect(row).not.toHaveProperty("entityScore");
-      expect(row).not.toHaveProperty("category");
-      expect(row).not.toHaveProperty("status");
+    const groups = ctx!.unmatchedPubmedCoi;
+    // Two distinct relationships (the two Procept rows collapsed into one).
+    expect(groups).toHaveLength(2);
+
+    // Default order = newest+confidence → the High "procept" group leads.
+    const procept = groups[0];
+    expect(procept.key).toBe("procept biorobotics");
+    expect(procept.tier).toBe("High"); // highest tier across the two sources
+    // Display label = the raw entity of the NEWEST source (2022 paper).
+    expect(procept.entity).toBe("Procept Biorobotics Inc");
+    // Both papers cited, newest first, each with its year.
+    expect(procept.sources.map((s) => s.id)).toEqual(["gap-1b", "gap-1a"]);
+    expect(procept.sources.map((s) => s.year)).toEqual([2022, 2019]);
+    expect(procept.sources[0].sourceSentence).toBe("Stock options in Procept Biorobotics.");
+
+    const neotract = groups[1];
+    expect(neotract.key).toBe("neotract");
+    expect(neotract.tier).toBe("Medium");
+    expect(neotract.sources.map((s) => s.id)).toEqual(["gap-2"]);
+
+    // Belt-and-braces: the forbidden internals never reach the client — not on a
+    // group, not on a source. (The opaque `key` carries the normalized entity by
+    // design; the score/status/attribution/category do not.)
+    for (const g of groups) {
+      for (const forbidden of ["attribution", "entityScore", "category", "status"]) {
+        expect(g).not.toHaveProperty(forbidden);
+      }
+      for (const s of g.sources) {
+        for (const forbidden of ["attribution", "entityScore", "category", "status", "tier"]) {
+          expect(s).not.toHaveProperty(forbidden);
+        }
+      }
     }
   });
 
@@ -908,12 +943,24 @@ describe("loadEditContext — COI-gap candidates (self-only gate)", () => {
     const c = fakeClient();
     c.scholar.findUnique.mockResolvedValue(scholarRow());
     c.coiGapCandidate.findMany.mockResolvedValue([
-      { ...GAP_ROWS[0], tier: "Low" }, // anything not "High" → "Medium"
+      { ...GAP_ROWS[2], tier: "Low" }, // anything not "High" → "Medium"
     ]);
     const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
       includeCoiGap: true,
     });
     expect(ctx!.unmatchedPubmedCoi[0].tier).toBe("Medium");
+  });
+
+  it("falls back to a null year when the joined publication is missing", async () => {
+    const c = fakeClient();
+    c.scholar.findUnique.mockResolvedValue(scholarRow());
+    c.coiGapCandidate.findMany.mockResolvedValue([GAP_ROWS[2]]);
+    c.publication.findMany.mockResolvedValue([]); // no pub row for the pmid
+    const ctx = await loadEditContext(SELF, asClient(c), undefined, async () => [], {
+      includeCoiGap: true,
+    });
+    expect(ctx!.unmatchedPubmedCoi[0].sources[0].year).toBeNull();
+    expect(ctx!.unmatchedPubmedCoi[0].newestTs).toBe(0);
   });
 });
 
