@@ -16,10 +16,13 @@ import {
   deriveScholar,
   extractEntities,
   fuzzyScore,
+  isCommonGivenName,
   isMultiAuthorStatement,
   isPureNegation,
   isStructured,
   looksLikeGrantId,
+  looksLikeInitialsName,
+  looksLikeJunkEntity,
   looksLikePersonName,
   normalizeEntity,
   scholarSlice,
@@ -62,6 +65,64 @@ describe("helper predicates", () => {
     expect(looksLikePersonName("A. A. Sauve")).toBe(true);
     expect(looksLikePersonName("Y. Yang")).toBe(true);
     expect(looksLikePersonName("Boston Scientific")).toBe(false);
+  });
+
+  it("isolates the dotted-initials form (the only person shape production suppresses)", () => {
+    expect(looksLikeInitialsName("A. A. Sauve")).toBe(true);
+    expect(looksLikeInitialsName("Y. Yang")).toBe(true);
+    // Bare First-Last is NOT an initials name — it must not be suppressed.
+    expect(looksLikeInitialsName("Scott Kasner")).toBe(false);
+    expect(looksLikeInitialsName("Boston Scientific")).toBe(false);
+    expect(looksLikeInitialsName("Leon Levy")).toBe(false);
+  });
+
+  it("recognizes bare First-Last co-author names (given-name gated; diagnostic sizing only)", () => {
+    // Bare "First Last" — caught for diagnostic sizing, NOT for production
+    // suppression (the shape collides with founder-named orgs; see analyzeStatement).
+    expect(looksLikePersonName("Scott Kasner")).toBe(true);
+    expect(looksLikePersonName("Wei Zhang")).toBe(true);
+    expect(looksLikePersonName("Maria Gonzalez")).toBe(true);
+    expect(looksLikePersonName("Daniel O'Brien")).toBe(true); // apostrophe surname
+    expect(looksLikePersonName("Fatima Al-Rashid")).toBe(true); // hyphen surname
+    expect(looksLikePersonName("Scott M. Kasner")).toBe(true); // First M. Last
+  });
+
+  it("does NOT mistake real companies for person names (precision)", () => {
+    // First token is not a recognized given name → not a person.
+    expect(looksLikePersonName("Acme Robotics")).toBe(false);
+    expect(looksLikePersonName("Helix Diagnostics")).toBe(false);
+    expect(looksLikePersonName("Daiichi Sankyo")).toBe(false);
+    expect(looksLikePersonName("Eli Lilly")).toBe(false); // "eli" deliberately excluded
+    // Given-name first token BUT an org/domain second word → still a company.
+    expect(looksLikePersonName("Marcus Therapeutics")).toBe(false);
+    expect(looksLikePersonName("David Biologics")).toBe(false);
+    // …and the same given-name first token with a real surname IS a person.
+    expect(looksLikePersonName("Marcus Kasner")).toBe(true);
+  });
+
+  it("recognizes a given name only when common and unambiguous", () => {
+    expect(isCommonGivenName("Scott")).toBe(true);
+    expect(isCommonGivenName("wei")).toBe(true);
+    expect(isCommonGivenName("Boston")).toBe(false); // excluded — heads a company
+    expect(isCommonGivenName("Eli")).toBe(false); // excluded — Eli Lilly
+    expect(isCommonGivenName("Zhang")).toBe(false); // a surname, stripped at load
+  });
+
+  it("recognizes bare junk/boilerplate single words, not real companies", () => {
+    expect(looksLikeJunkEntity("All")).toBe(true);
+    expect(looksLikeJunkEntity("Various")).toBe(true);
+    expect(looksLikeJunkEntity("Study")).toBe(true);
+    expect(looksLikeJunkEntity("Travel")).toBe(true);
+    // Coined single-word and multi-word real companies are NOT junk.
+    expect(looksLikeJunkEntity("Genmab")).toBe(false);
+    expect(looksLikeJunkEntity("Incyte")).toBe(false);
+    expect(looksLikeJunkEntity("Boston Scientific")).toBe(false);
+    // A real two-word org must NOT collapse to a junk token when normalizeEntity
+    // strips its corporate suffix ("Royalty Pharma" -> "royalty", "Additional
+    // Ventures" -> "additional"). Single-token-ness is judged on the RAW phrase.
+    expect(looksLikeJunkEntity("Royalty Pharma")).toBe(false);
+    expect(looksLikeJunkEntity("Additional Ventures")).toBe(false);
+    expect(looksLikeJunkEntity("Various Therapeutics")).toBe(false);
   });
   it("normalizes entities by stripping legal suffixes", () => {
     expect(normalizeEntity("Pfizer Inc.")).toBe("pfizer");
@@ -310,5 +371,84 @@ describe("analyzeStatement — multi-author unattributed suppression", () => {
     );
     // The scholar is explicitly named → their relationship surfaces.
     expect(r.candidates.map((c) => c.entity)).toContain("Valeant Pharmaceuticals");
+  });
+});
+
+describe("analyzeStatement — extraction-junk suppression", () => {
+  const smith = () => deriveScholar("John", "Smith");
+
+  it("suppresses a bare junk/boilerplate word, keeping the real org", () => {
+    const r = analyzeStatement("Dr. Smith is a consultant for Various and for Genmab.", smith(), []);
+    const entities = r.candidates.map((c) => c.entity);
+    expect(entities).not.toContain("Various");
+    expect(entities).toContain("Genmab"); // coined single-word company survives
+    expect(r.suppressed.junkEntity).toBeGreaterThan(0);
+  });
+
+  it("does NOT suppress a real org that a naive filter would drop (precision over recall)", () => {
+    // PRECISION-OVER-RECALL regression tests, each proven by the adversarial review:
+    //  - eponymous/founder-named orgs share a "First Last" shape with co-authors;
+    //  - "<JunkWord> <CorpSuffix>" orgs collapse to a bare junk token after the
+    //    corporate-suffix strip (Royalty Pharma -> "royalty").
+    // All MUST surface — hiding a real conflict is the catastrophe we avoid.
+    const realOrgs = [
+      "Grace Bio-Labs", "Leon Levy", "Karl Storz", "Ludwig Cancer", "Henry Schein", "Carl Zeiss",
+      "Klaus Tschira", "Royalty Pharma", "Additional Ventures",
+    ];
+    for (const org of realOrgs) {
+      const r = analyzeStatement(`Dr. Smith holds equity in ${org}.`, smith(), []);
+      expect(r.candidates.length, `${org} must surface`).toBeGreaterThan(0);
+      expect(r.suppressed.junkEntity, `${org} must not be junk-suppressed`).toBe(0);
+    }
+  });
+
+  it("never suppresses a known gazetteer company even if it reads like a name", () => {
+    // Defense in depth: a gazetteer hit is exempt from the junk guard.
+    const r = analyzeStatement("Dr. Smith is a consultant for Boston Scientific.", smith(), []);
+    expect(r.candidates.map((c) => c.entity)).toContain("Boston Scientific");
+  });
+
+  it("keeps real undisclosed companies surfacing (must-survive set: not junk, not initials)", () => {
+    // Each is a legitimate COI org a naive filter might drop; none may be junk, and
+    // none is a dotted-initials name (the only person shape production suppresses).
+    const mustSurvive = [
+      "Genmab", "Incyte", "Gelesis", "Vivus", "Karyopharm", "Alnylam", "Ionis", "Sarepta", "Penumbra",
+      "Acme Robotics", "Helix Diagnostics", "Cerus Endovascular", "Quanta Dialysis", "Marius Pharmaceuticals",
+      "Tessa Therapeutics", "Eli Lilly", "Forest Laboratories", "Edwards Lifesciences", "Daiichi Sankyo",
+      "Boston Scientific", "Becton Dickinson", "Allen Institute", "Inari Medical", "Grace Bio-Labs",
+      "Leon Levy", "Karl Storz",
+    ];
+    for (const co of mustSurvive) {
+      expect(looksLikeJunkEntity(co), `${co} must not read as junk`).toBe(false);
+      expect(looksLikeInitialsName(co), `${co} must not read as a dotted-initials name`).toBe(false);
+    }
+  });
+
+  it("flags bare First-Last co-author names for diagnostic sizing (NOT suppression)", () => {
+    // looksLikePersonName recognizes these so the diagnostic can size co-author
+    // leakage — but analyzeStatement never drops them in production.
+    const names = [
+      "Scott Kasner", "Wei Zhang", "Rajesh Patel", "Maria Gonzalez", "Ahmed Hassan", "Jennifer Liu",
+      "David Cohen", "Carlos Ramirez", "Priya Nair", "Yuki Nakamura", "Mei Chen", "Yan Li", "Jin Park",
+    ];
+    for (const n of names) {
+      expect(looksLikePersonName(n), `${n} should read as a person name`).toBe(true);
+      // …and yet it surfaces (is not suppressed) in production.
+      const r = analyzeStatement(`Dr. Smith consults for ${n}.`, smith(), []);
+      expect(r.candidates.map((c) => c.entity), `${n} should still surface`).toContain(n);
+    }
+  });
+
+  it("returns the suppressed junk word as a Low row only under includeSuppressed", () => {
+    const stmt = "Dr. Smith consults for Acme Robotics and lists Various.";
+    const prod = analyzeStatement(stmt, smith(), []);
+    expect(prod.candidates.map((c) => c.entity)).not.toContain("Various");
+
+    const diag = analyzeStatement(stmt, smith(), [], { includeSuppressed: true });
+    const various = diag.candidates.find((c) => /various/i.test(c.entity));
+    expect(various).toBeDefined();
+    expect(various!.tier).toBe("Low");
+    expect(various!.failureModeGuess).toBe("junk-token");
+    expect(various!.tierReason).toMatch(/junk/i);
   });
 });
