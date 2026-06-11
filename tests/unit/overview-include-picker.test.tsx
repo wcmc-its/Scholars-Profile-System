@@ -170,7 +170,7 @@ describe("OverviewIncludePicker — caps", () => {
   });
 });
 
-describe("OverviewIncludePicker — Methods section (dark until C3)", () => {
+describe("OverviewIncludePicker — Methods section (hidden when no families)", () => {
   it("is hidden entirely when there are no tools", () => {
     render(
       <OverviewIncludePicker

@@ -96,7 +96,7 @@ beforeEach(() => {
 
 // The shape normalizeOverviewParams produces for a MISSING/garbage `params`:
 // enums fall back to the defaults, but a missing element array normalizes to []
-// (the DEFAULT_OVERVIEW_PARAMS element trio is the UI starting point, not a
+// (the DEFAULT_OVERVIEW_PARAMS element set is the UI starting point, not a
 // normalization fallback). #742 Phase A.
 const NORMALIZED_EMPTY = {
   voice: "third",

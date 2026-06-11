@@ -1,8 +1,8 @@
 /**
  * OverviewIncludePicker — the controlled checklists inside the Sources drawer
  * (#742 v3.1 §3.2 / #875 §5 + §7 the confidence layer). The scholar picks which
- * **publications** and **funding** awards ground their generated bio (and, once
- * C3 lands the data, which **methods**). A pure controlled surface: it owns no
+ * **publications**, **funding** awards, and **methods** (their #799 method
+ * families, #886) ground their generated bio. A pure controlled surface: it owns no
  * fetch and no open state — the parent (`overview-source-drawer.tsx`) holds the
  * {@link OverviewSourceOptions} payload and the {@link OverviewSelection}; this
  * renders them and emits the next selection.
@@ -22,8 +22,9 @@
  * smaller ceiling. The server re-clamps both regardless (the trust boundary is
  * `normalizeOverviewSelection`).
  *
- * The Methods section is **hidden entirely** when `options.tools` is empty (it
- * ships dark until C3), so the picker degrades cleanly before the ETL exists.
+ * The Methods section is **hidden entirely** when `options.tools` is empty (the
+ * scholar has no method families), so the picker degrades cleanly for scholars
+ * without a `scholar_family` rollup.
  */
 "use client";
 
