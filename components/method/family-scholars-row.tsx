@@ -37,6 +37,7 @@ export function FamilyScholarsRow({
   familyLabel: string | null;
 }) {
   const [scholars, setScholars] = useState<SubtopicScholarRowData[] | null>(null);
+  const [includesNonFaculty, setIncludesNonFaculty] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,9 +50,10 @@ export function FamilyScholarsRow({
       )}/scholars`,
     )
       .then((r) => (r.ok ? r.json() : { scholars: [] }))
-      .then((data: { scholars: SubtopicScholarRowData[] }) => {
+      .then((data: { scholars: SubtopicScholarRowData[]; includesNonFaculty?: boolean }) => {
         if (!cancelled) {
           setScholars(data.scholars ?? []);
+          setIncludesNonFaculty(Boolean(data.includesNonFaculty));
           setLoading(false);
         }
       })
@@ -81,9 +83,20 @@ export function FamilyScholarsRow({
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {familyLabel ? `Top scholars in ${familyLabel}` : "Top scholars in this method"}
           <SectionInfoButton label="Top scholars in this method" anchor="topScholars">
-            Full-time faculty ranked by ReCiterAI on their first- or senior-author
-            publications using this method. Curators do not handpick this list; the
-            order updates weekly as new work appears.
+            {includesNonFaculty ? (
+              <>
+                Researchers ranked by ReCiterAI on their first- or senior-author
+                publications using this method, with full-time faculty listed first.
+                Curators do not handpick this list; the order updates weekly as new
+                work appears.
+              </>
+            ) : (
+              <>
+                Full-time faculty ranked by ReCiterAI on their first- or senior-author
+                publications using this method. Curators do not handpick this list; the
+                order updates weekly as new work appears.
+              </>
+            )}
           </SectionInfoButton>
         </span>
       </div>

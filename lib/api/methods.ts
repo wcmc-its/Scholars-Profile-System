@@ -33,9 +33,12 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
-import { TOP_SCHOLARS_ELIGIBLE_ROLES } from "@/lib/eligibility";
+import { TOP_SCHOLARS_ELIGIBLE_ROLES, isPubliclyDisplayed } from "@/lib/eligibility";
 import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
-import { isMethodsLensEnabled } from "@/lib/profile/methods-lens-flags";
+import {
+  isMethodsLensEnabled,
+  isMethodsFamilyRosterFallbackOn,
+} from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
   isFamilyPubliclyVisible,
@@ -603,10 +606,21 @@ export async function getTopScholarsForSupercategory(
 /**
  * Family researcher rows for the supercategory page's right panel (the
  * SubtopicScholarRow analog, #172). Up to 10, ranked by per-scholar `pmidCount`,
- * within the FT-faculty carve, active-only; floor 1 (narrow scope). Carries
- * `primaryDepartment`, the in-family pub count (`pubCountInSubtopic` reused as the
- * family count), and the scholar's total confirmed pub count (#356-adjusted).
- * Lens-off / gated ⇒ null.
+ * active-only; floor 1 (narrow scope). Carries `primaryDepartment`, the in-family
+ * pub count (`pubCountInSubtopic` reused as the family count), and the scholar's
+ * total confirmed pub count (#356-adjusted). Lens-off / gated ⇒ null.
+ *
+ * Roster eligibility is gated by `isMethodsFamilyRosterFallbackOn()`
+ * (`METHODS_LENS_FAMILY_ROSTER_FALLBACK`, default OFF). When OFF the row is
+ * FT-faculty-only (the `TOP_SCHOLARS_ELIGIBLE_ROLES` carve), byte-identical to the
+ * pre-#862 row. When ON, method/tool attribution is heavily trainee/core-driven —
+ * a faculty-only filter empties the row for any family whose attributed active
+ * scholars are all postdocs/fellows/core staff (#862) — so we backfill attributed
+ * non-faculty after the faculty. Either way we fetch all active attributed
+ * scholars, drop hidden identity classes (`isPubliclyDisplayed` — keeps
+ * doctoral_student/affiliate_alumni out per #536, independent of the flag, in
+ * lockstep with every other profile-link site), then stable-partition faculty-first
+ * so PIs always rank above any backfilled non-faculty before the target slice.
  */
 export async function getFamilyScholarRows(
   supercategory: string,
@@ -624,7 +638,6 @@ export async function getFamilyScholarRows(
       scholar: {
         deletedAt: null,
         status: "active",
-        roleCategory: { in: [...TOP_SCHOLARS_ELIGIBLE_ROLES] },
       },
     },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
@@ -637,13 +650,29 @@ export async function getFamilyScholarRows(
           preferredName: true,
           primaryTitle: true,
           primaryDepartment: true,
+          roleCategory: true,
         },
       },
     },
   });
-  if (rows.length < FAMILY_SCHOLARS_FLOOR) return null;
 
-  const top = rows.slice(0, FAMILY_SCHOLARS_TARGET);
+  // Drop hidden identity classes (doctoral_student / affiliate_alumni) — they are
+  // soft-deleted in ETL and excluded by deletedAt above, but keep the gate so a
+  // public profile link is never minted for them if one ever survives the join.
+  const visible = rows.filter((r) => isPubliclyDisplayed(r.scholar!.roleCategory));
+
+  // Stable-partition faculty-first: PIs (TOP_SCHOLARS_ELIGIBLE_ROLES) keep their
+  // pmidCount order, then — only when METHODS_LENS_FAMILY_ROSTER_FALLBACK is on —
+  // attributed non-faculty backfill (also pmidCount order) so a trainee/core-only
+  // family renders a row instead of an empty one (#862). Flag off ⇒ FT-faculty-only
+  // (byte-identical to the pre-#862 row), matching the FT-faculty framing sign-off.
+  const facultyRoles = new Set<string>(TOP_SCHOLARS_ELIGIBLE_ROLES);
+  const faculty = visible.filter((r) => facultyRoles.has(r.scholar!.roleCategory ?? ""));
+  const nonFaculty = visible.filter((r) => !facultyRoles.has(r.scholar!.roleCategory ?? ""));
+  const ranked = isMethodsFamilyRosterFallbackOn() ? [...faculty, ...nonFaculty] : faculty;
+  if (ranked.length < FAMILY_SCHOLARS_FLOOR) return null;
+
+  const top = ranked.slice(0, FAMILY_SCHOLARS_TARGET);
   const cwids = top.map((r) => r.scholar!.cwid);
 
   // Total confirmed pub count per scholar (#356 — subtract per-author hides).

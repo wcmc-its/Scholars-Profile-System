@@ -60,3 +60,20 @@ export function isMethodPagesEnabled(): boolean {
 export function isMethodsLensFamilyFilterOn(): boolean {
   return process.env.METHODS_LENS_FAMILY_FILTER === "on";
 }
+
+/**
+ * #862 — backfills the supercategory page's per-family "Top scholars" row with
+ * attributed non-faculty (postdocs/fellows/core staff/instructors), faculty-first,
+ * when the FT-faculty set is empty or short — so a trainee/core-driven family
+ * renders a row instead of an empty one. Default OFF: the row stays FT-faculty-only
+ * (byte-identical to the pre-#862 behavior, matching the External/Faculty Affairs
+ * sign-off on the FT-faculty framing) until the per-family roster relaxation is
+ * approved. doctoral_student/affiliate_alumni are NEVER surfaced regardless — the
+ * `isPubliclyDisplayed` gate is independent of this flag. The tooltip copy on the
+ * row tracks this flag (carried in the /scholars API response), so the eventual
+ * flip is env-only. Wire in BOTH `.env.local` AND the per-env `environment:` block
+ * in cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsFamilyRosterFallbackOn(): boolean {
+  return process.env.METHODS_LENS_FAMILY_ROSTER_FALLBACK === "on";
+}
