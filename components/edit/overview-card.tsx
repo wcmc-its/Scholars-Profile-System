@@ -738,7 +738,7 @@ function OverviewDraftBlock({
           {generations.length > 0 && (
             <details className="group" data-testid="overview-versions-panel">
               <summary className="text-apollo-maroon w-fit cursor-pointer text-sm font-medium select-none">
-                Previous drafts ({generations.length})
+                Earlier drafts ({generations.length})
               </summary>
               <ul className="border-apollo-border bg-apollo-surface-2 mt-3 flex flex-col gap-3 rounded-md border p-4">
                 {generations.map((gen) => (

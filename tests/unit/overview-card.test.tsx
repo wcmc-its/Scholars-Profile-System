@@ -616,7 +616,7 @@ describe("OverviewCard — version history (Phase B)", () => {
         ),
       ).toBe(true),
     );
-    // The fetched draft surfaces in the in-block "Previous drafts" affordance.
+    // The fetched draft surfaces in the in-block "Earlier drafts" affordance.
     expect(await screen.findByTestId("overview-versions-panel")).toBeTruthy();
     expect(screen.getByTestId("overview-version-load-gen-1")).toBeTruthy();
   });
