@@ -134,7 +134,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // ---------------------------------------------------------------------------
 
 async function handleScholarFieldEdit(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -378,7 +378,7 @@ async function handleScholarFieldEdit(params: {
 // ---------------------------------------------------------------------------
 
 async function handleUnitFieldEdit(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;

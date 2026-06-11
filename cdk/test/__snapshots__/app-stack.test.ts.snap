@@ -464,6 +464,18 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
               },
               {
+                "Name": "COMMS_STEWARD_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
+                "Value": "",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
+                "Value": "",
+              },
+              {
                 "Name": "SECURITY_CSP_MODE",
                 "Value": "enforce",
               },
@@ -3506,6 +3518,18 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",
                 "Value": "paa2013,drw2004,mrj4001,ved4006,mom2021",
+              },
+              {
+                "Name": "COMMS_STEWARD_ENABLED",
+                "Value": "off",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",
+                "Value": "",
+              },
+              {
+                "Name": "SCHOLARS_COMMS_STEWARD_ALLOWLIST",
+                "Value": "",
               },
               {
                 "Name": "SECURITY_CSP_MODE",

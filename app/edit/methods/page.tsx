@@ -1,0 +1,90 @@
+/**
+ * `/edit/methods` — the global Method-Family visibility surface for the
+ * `comms_steward` role (`comms-steward-methods-visibility-spec.md` §4/§8).
+ *
+ * A SIBLING global route (parallel to `/edit/administrators`, #728), NOT a
+ * per-scholar tab: method families span scholars, so this never touches the
+ * per-profile `EditMode` union. The whole surface is dark unless the operator
+ * has enabled it AND the viewer holds the role.
+ *
+ * Guard (§4/§9):
+ *   - `COMMS_STEWARD_ENABLED` off          ⇒ `notFound()` (404 — never reveal it)
+ *   - no session                           ⇒ SAML login redirect
+ *   - not (`isCommsSteward || isSuperuser`) ⇒ `notFound()` (404, NOT 403 — the
+ *     surface must be indistinguishable from a missing one for a non-steward)
+ *
+ * The live `METHODS_LENS_SENSITIVE_GATE` state is read here (server-only flag)
+ * and passed to the client so the §2 inert-sensitive warning shows the steward
+ * the TRUE public-visibility consequence of the Sensitive tier — a Sensitive
+ * family still renders publicly while that gate is off.
+ *
+ * Authorization is re-checked on every GET, never cached; the route is the scope
+ * boundary, not the UI. `force-dynamic` + `noindex`, mirroring the other
+ * `/edit/*` pages.
+ */
+import { notFound, redirect } from "next/navigation";
+
+import { MethodFamiliesRoster } from "@/components/edit/method-families-roster";
+import { buildFamilyRoster } from "@/lib/api/methods-families";
+import { isCommsStewardEnabled } from "@/lib/auth/comms-steward";
+import { getEditSession } from "@/lib/auth/superuser";
+import { db } from "@/lib/db";
+import { isMethodsLensSensitiveGateOn } from "@/lib/profile/methods-lens-flags";
+
+export const dynamic = "force-dynamic";
+
+export const metadata = {
+  title: "Method Families — Scholars Profile Console",
+  robots: { index: false, follow: false },
+};
+
+export default async function MethodFamiliesPage() {
+  // (a) master kill switch — the whole surface 404s when off (§9). Checked first
+  // so an unauthenticated hit to a dark surface never round-trips through SAML.
+  if (!isCommsStewardEnabled()) notFound();
+
+  const session = await getEditSession();
+  if (!session) {
+    redirect("/api/auth/saml/login?return=/edit/methods");
+  }
+
+  // (b) comms_steward OR superuser (§3 superset). A non-steward gets 404 (NOT
+  // 403) here — the surface must not betray its own existence (§4).
+  if (!session.isCommsSteward && !session.isSuperuser) notFound();
+
+  const families = await buildFamilyRoster(db.read);
+
+  // The live sensitivity-gate state (§2): when off, a Sensitive family still
+  // renders publicly. Surfaced prominently so a steward is never misled.
+  const sensitivityGateOn = isMethodsLensSensitiveGateOn();
+
+  return (
+    <div className="min-h-screen bg-[var(--background)]" data-slot="method-families-page">
+      <header className="bg-apollo-bar text-white">
+        <div className="mx-auto flex h-14 max-w-[var(--max-content)] items-center gap-3 px-6">
+          <span
+            className="bg-apollo-maroon flex size-7 items-center justify-center rounded-sm text-xs font-bold"
+            aria-hidden
+          >
+            WCM
+          </span>
+          <span className="font-semibold">Scholars Profile Console</span>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-[var(--max-content)] px-6 py-8">
+        <h1 className="mb-1 text-xl font-semibold">Method Families</h1>
+        <p className="text-muted-foreground mb-6 max-w-3xl text-sm">
+          Control the visibility tier of each method family and review the ones flagged as
+          potentially sensitive. The review queue surfaces flagged families first; setting a tier
+          takes effect immediately — no rebuild. Nothing here hides a publication; it only changes
+          how a method family is shown on public profiles.
+        </p>
+        <MethodFamiliesRoster
+          families={families}
+          sensitivityGateOn={sensitivityGateOn}
+        />
+      </main>
+    </div>
+  );
+}

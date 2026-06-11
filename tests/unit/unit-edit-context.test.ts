@@ -13,10 +13,10 @@ import { loadUnitEditContext } from "@/lib/api/unit-edit-context";
 type AnyMock = ReturnType<typeof vi.fn>;
 type Client = Parameters<typeof loadUnitEditContext>[3];
 
-const CURATOR = { cwid: "cur001", isSuperuser: false };
-const OWNER = { cwid: "own001", isSuperuser: false };
-const NONADMIN = { cwid: "non001", isSuperuser: false };
-const SUPERUSER = { cwid: "sup001", isSuperuser: true };
+const CURATOR = { cwid: "cur001", isSuperuser: false, isCommsSteward: false };
+const OWNER = { cwid: "own001", isSuperuser: false, isCommsSteward: false };
+const NONADMIN = { cwid: "non001", isSuperuser: false, isCommsSteward: false };
+const SUPERUSER = { cwid: "sup001", isSuperuser: true, isCommsSteward: false };
 
 type Opts = {
   department?: unknown;

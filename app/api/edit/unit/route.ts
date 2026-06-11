@@ -90,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // ---------------------------------------------------------------------------
 
 async function handleCreate(
-  session: { cwid: string; isSuperuser: boolean },
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean },
   realCwid: string,
   impersonatedCwid: string | null,
   body: Record<string, unknown>,
@@ -150,7 +150,7 @@ async function handleCreate(
 }
 
 async function createInformalCenter(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -289,7 +289,7 @@ async function createInformalCenter(params: {
 }
 
 async function createCodedDivision(params: {
-  session: { cwid: string; isSuperuser: boolean };
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean };
   realCwid: string;
   impersonatedCwid: string | null;
   requestId: string | null;
@@ -396,7 +396,7 @@ async function createCodedDivision(params: {
 // ---------------------------------------------------------------------------
 
 async function handleUpdate(
-  session: { cwid: string; isSuperuser: boolean },
+  session: { cwid: string; isSuperuser: boolean; isCommsSteward: boolean },
   realCwid: string,
   impersonatedCwid: string | null,
   body: Record<string, unknown>,

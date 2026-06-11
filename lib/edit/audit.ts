@@ -73,7 +73,16 @@ export type AuditAction =
   /** a scholar (or a superuser on their behalf) revoked a proxy editor
    *  (scholar-proxy-spec.md / #779). `beforeValues` carries the revoked grant's
    *  `{ proxy_cwid, granted_by }`. */
-  | "proxy_revoke";
+  | "proxy_revoke"
+  /** a comms-steward set a Method-Family's tier (public/suppressed/sensitive)
+   *  via the /edit/methods surface (`docs/comms-steward-methods-visibility-spec.md`
+   *  §5/§7). `targetEntityType='method_family'`, `targetEntityId` is the
+   *  `supercategory:familyLabel` pair; before/after carry the tier transition. */
+  | "family_tier_set"
+  /** a comms-steward cleared a Method-Family's review nag without changing its
+   *  tier (sets `reviewedAt`/`reviewedByCwid` on `family_review_flag`).
+   *  `targetEntityType='method_family'`. */
+  | "family_review";
 
 /** The target type — mirrors the table ENUM. */
 export type AuditEntityType =
@@ -91,7 +100,11 @@ export type AuditEntityType =
   | "mentee"
   /** a publication-derived COI-gap candidate the scholar dismissed
    *  (`SELF_EDIT_COI_GAP_HINT`); `targetEntityId` is the `coi_gap_candidate.id` */
-  | "coi_gap_candidate";
+  | "coi_gap_candidate"
+  /** a method family targeted by a comms-steward tier/review action
+   *  (`COMMS_STEWARD_ENABLED`); `targetEntityId` is the
+   *  `supercategory:familyLabel` pair. */
+  | "method_family";
 
 /** One audit row, before the DB assigns its `id`. */
 export interface AuditRow {

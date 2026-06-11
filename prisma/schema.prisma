@@ -1556,6 +1556,10 @@ model FamilySuppressionOverlay {
   familyLabel   String   @map("family_label") @db.VarChar(255)
   sourceNote    String?  @map("source_note") @db.Text
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  /// Provenance so the seed reseed (`etl/family-sensitivity`) never clobbers a
+  /// comms-steward edit: 'seed' = curated CSV bootstrap, 'steward' = a tier set
+  /// from the /edit/methods surface. The reseed upserts only `source='seed'`.
+  source        String   @default("seed") @db.VarChar(16)
 
   @@id([supercategory, familyLabel])
   @@map("family_suppression_overlay")
@@ -1573,9 +1577,35 @@ model FamilySensitivityOverlay {
   familyLabel   String   @map("family_label") @db.VarChar(255)
   sourceNote    String?  @map("source_note") @db.Text
   refreshedAt   DateTime @default(now()) @map("refreshed_at")
+  /// Provenance so the seed reseed never clobbers a comms-steward edit:
+  /// 'seed' = curated CSV bootstrap, 'steward' = a tier set from /edit/methods.
+  /// The reseed upserts only `source='seed'` rows.
+  source        String   @default("seed") @db.VarChar(16)
 
   @@id([supercategory, familyLabel])
   @@map("family_sensitivity_overlay")
+}
+
+/// Comms-steward Method-Family surfacing ledger
+/// (`docs/comms-steward-methods-visibility-spec.md` §5/§6). A deterministic,
+/// allow-by-default review queue: the surfacing pass decorates every distinct
+/// `(supercategory, family_label)` in `scholar_family` with a structural or
+/// lexical animal-model signal so a steward can review it. Keyed on the STABLE
+/// family identity, independent of overlay membership — a family can be flagged
+/// yet still public. NEVER changes a tier and NEVER hides anything; it only
+/// records the signal, when it was first/last seen, and whether a steward has
+/// cleared the nag (`reviewedAt`, which leaves the tier untouched).
+model FamilyReviewFlag {
+  supercategory  String    @db.VarChar(128)
+  familyLabel    String    @map("family_label") @db.VarChar(255)
+  reason         String    @db.VarChar(64) // e.g. 'supercategory:animal_cell_models', 'term:mouse'
+  firstSeenAt    DateTime  @map("first_seen_at") // for the "new" signal
+  lastSeenAt     DateTime  @map("last_seen_at")
+  reviewedAt     DateTime? @map("reviewed_at") // steward cleared the nag (tier may stay public)
+  reviewedByCwid String?   @map("reviewed_by_cwid") @db.VarChar(32)
+
+  @@id([supercategory, familyLabel])
+  @@map("family_review_flag")
 }
 
 /// A scholar's request for a personalized profile slug (#497 PR-3,

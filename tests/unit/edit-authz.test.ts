@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  authorizeCommsStewardAction,
   authorizeFieldEdit,
   authorizeRevoke,
   authorizeSuppress,
@@ -15,8 +16,10 @@ import {
 } from "@/lib/edit/authz";
 import type { EditSession } from "@/lib/auth/superuser";
 
-const SELF: EditSession = { cwid: "self01", isSuperuser: false };
-const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true };
+const SELF: EditSession = { cwid: "self01", isSuperuser: false, isCommsSteward: false };
+const ADMIN: EditSession = { cwid: "adm001", isSuperuser: true, isCommsSteward: false };
+/** A pure comms_steward: the role bit set, NOT a superuser. */
+const STEWARD: EditSession = { cwid: "stw001", isSuperuser: false, isCommsSteward: true };
 
 // ---------------------------------------------------------------------------
 // authorizeFieldEdit  (self-edit-spec.md § Authorization, edge case 2)
@@ -217,6 +220,39 @@ describe("authorizeRevoke", () => {
 });
 
 // ---------------------------------------------------------------------------
+// authorizeCommsStewardAction  (comms-steward-methods-visibility-spec.md §3/§7,
+// test matrix §13 "Authenticated non-steward non-superuser → 403 (API write)")
+//
+// The Method-Family steward gate: the role is global (no cwid/owner dimension),
+// so the verdict turns only on the actor's tier — steward OR superuser allow,
+// neither denies with `not_comms_steward`.
+// ---------------------------------------------------------------------------
+
+describe("authorizeCommsStewardAction", () => {
+  it("allows a comms_steward", () => {
+    expect(authorizeCommsStewardAction(STEWARD)).toEqual({ ok: true });
+  });
+
+  it("allows a superuser (strict superset — passes every steward guard, §3)", () => {
+    // ADMIN is a superuser whose isCommsSteward bit is false, so the allow comes
+    // from the isSuperuser arm — exactly the superset property §3 asserts.
+    expect(authorizeCommsStewardAction(ADMIN)).toEqual({ ok: true });
+  });
+
+  it("allows an actor who is BOTH steward and superuser", () => {
+    const both: EditSession = { cwid: "x", isSuperuser: true, isCommsSteward: true };
+    expect(authorizeCommsStewardAction(both)).toEqual({ ok: true });
+  });
+
+  it("denies an authenticated non-steward non-superuser with not_comms_steward (§13)", () => {
+    expect(authorizeCommsStewardAction(SELF)).toEqual({
+      ok: false,
+      reason: "not_comms_steward",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // page-access predicates  (the GET-time re-check, edge case 15)
 // ---------------------------------------------------------------------------
 
@@ -409,6 +445,10 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
 
   it("authorizeRevoke — allows a superuser to lift a suppression they did not create", () => {
     expect(authorizeRevoke(ADMIN, { createdBy: TARGET })).toEqual({ ok: true });
+  });
+
+  it("authorizeCommsStewardAction — allows a superuser even with isCommsSteward false (§3 superset)", () => {
+    expect(authorizeCommsStewardAction(ADMIN)).toEqual({ ok: true });
   });
 
   it("unit-curation predicates — allow a superuser even with no UnitAdmin role (effectiveRole 'none')", () => {
