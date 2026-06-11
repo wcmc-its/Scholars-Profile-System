@@ -1062,6 +1062,14 @@ export class AppStack extends Stack {
         // resolveFundingMeshGateField reads === "fundedPubMeshUi".
         SEARCH_FUNDING_TAB_CONCEPT: "on",
         SEARCH_FUNDING_MESH_GATE: "fundedPubMeshUi",
+        // #861 -- streams the /search shell so the header/tabs paint before the
+        // cold MeSH precompute + the three badge-count searches resolve (the
+        // 6-10s first-byte block). resolveSearchShellStreaming reads === "on".
+        // Default OFF in BOTH envs: while off the rendered output is byte-identical
+        // to today (the body is awaited before the shell, exactly as now). No data
+        // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
+        // image only) -- the flag-parity rule.
+        SEARCH_SHELL_STREAMING: "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

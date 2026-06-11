@@ -408,6 +408,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "fundedPubMeshUi",
               },
               {
+                "Name": "SEARCH_SHELL_STREAMING",
+                "Value": "off",
+              },
+              {
                 "Name": "IMPERSONATION_ENABLED",
                 "Value": "true",
               },
@@ -3430,6 +3434,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               {
                 "Name": "SEARCH_FUNDING_MESH_GATE",
                 "Value": "fundedPubMeshUi",
+              },
+              {
+                "Name": "SEARCH_SHELL_STREAMING",
+                "Value": "off",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",

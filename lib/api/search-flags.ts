@@ -470,3 +470,25 @@ export function resolvePublicationMatchProvenance(): boolean {
 export function resolvePublicationDepartmentFilter(): boolean {
   return process.env.SEARCH_PUB_DEPARTMENT_FILTER === "on";
 }
+
+/**
+ * Issue #861 — stream the /search shell ahead of the taxonomy + badge-count
+ * work. On a cold `force-dynamic` SSR the page blocked its first byte on the
+ * taxonomy/MeSH resolver (the eager `getMeshMap` descendant precompute) AND the
+ * three count-only badge searches before any markup flushed — a 6-10s blank
+ * page. When on, the page returns the `<main>` shell with a header/tabs
+ * skeleton immediately and resolves taxonomy + counts + the active-tab results
+ * inside a Suspense boundary, so the shell paints at the first byte and the
+ * results stream in.
+ *
+ * Pure render-ordering change: the taxonomy resolution, badge predicates, and
+ * streamed full search are byte-identical to the flag-off path (same inputs,
+ * same calls, same `badge == list` invariant) — only WHEN they run relative to
+ * the first flush differs. Default OFF (`SEARCH_SHELL_STREAMING=on` enables) so
+ * it ships inert and the streaming reorder soaks behind the flag; the off path
+ * is the today-identical single-await render. A separate `=== "on"` lever with
+ * an independent rollback trigger.
+ */
+export function resolveSearchShellStreaming(): boolean {
+  return process.env.SEARCH_SHELL_STREAMING === "on";
+}
