@@ -1197,6 +1197,33 @@ export class AppStack extends Stack {
         // REMOVE this and set SCHOLARS_SUPERUSER_GROUP_CN once VPC->WCM LDAPS
         // routing lands. CWIDs are directory usernames, not secrets.
         SCHOLARS_SUPERUSER_CWIDS: "paa2013,drw2004,mrj4001,ved4006,mom2021",
+        // comms_steward Method-Family visibility role + surface
+        // (docs/comms-steward-methods-visibility-spec.md §3/§9). Three vars,
+        // OFF in BOTH envs at launch -- the surface ships dark until External
+        // Affairs names the steward set and the LDAP group is created:
+        //   COMMS_STEWARD_ENABLED -- the §9 master kill switch. While not "on",
+        //     isCommsSteward() short-circuits to false BEFORE any directory work,
+        //     so the /edit/methods route 404s and every /api/edit/methods/* and
+        //     the /api/export/methods/families endpoint 404 -- regardless of
+        //     group membership or the allowlist below. Flip to "on" per-env only
+        //     after the group exists (or the interim allowlist is set) AND the
+        //     surfacing pass has run once (npm run etl:family-review).
+        //   SCHOLARS_COMMS_STEWARD_GROUP_CN -- cn of the ED group whose `member`
+        //     list confers the role (e.g. ITS:Library:Scholars/comms-steward-role).
+        //     Left UNSET like SCHOLARS_SUPERUSER_GROUP_CN above: the SPS VPC has no
+        //     route to the WCM directory yet, so the live group search fails closed;
+        //     setting a cn now would only add an LDAPS connect-timeout to each
+        //     session probe. Set once VPC->WCM LDAPS routing lands.
+        //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- interim comma-separated CWID
+        //     allowlist that confers the role WITHOUT LDAP (mirrors
+        //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped operator set can use
+        //     the Method-Family surface before the group/routing lands. EMPTY at
+        //     launch. Inert while COMMS_STEWARD_ENABLED is off. Wired here per the
+        //     flag-parity rule; promotion is a config edit + manual `cdk deploy
+        //     Sps-App-<env>` (CD re-rolls the image only, never the task-def env).
+        COMMS_STEWARD_ENABLED: "off",
+        SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
+        SCHOLARS_COMMS_STEWARD_ALLOWLIST: "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
         // this via lib/security-headers.ts `resolveCspMode()`: "report-only"
         // ships the policy as `Content-Security-Policy-Report-Only` (the
