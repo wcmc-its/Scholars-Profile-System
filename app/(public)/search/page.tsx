@@ -12,6 +12,7 @@ import { ExportButton } from "@/components/search/export-button";
 import { PeopleResultCard } from "@/components/search/people-result-card";
 import { PublicationResultRow } from "@/components/search/publication-result-row";
 import { ResultsGridFallback } from "@/components/search/result-skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AZDirectory } from "@/components/browse/az-directory";
 import { ResearchAreasRow } from "@/components/search/research-areas-row";
 import { ConceptEmptyState } from "@/components/search/concept-empty-state";
@@ -36,6 +37,7 @@ import {
   resolvePublicationMatchProvenance,
   resolvePublicationDepartmentFilter,
   resolveConceptFallbackSparseEnabled,
+  resolveSearchShellStreaming,
   computeConceptFallback,
   CONCEPT_FALLBACK_CAP,
   CONCEPT_FALLBACK_SPARSE_THRESHOLD,
@@ -99,6 +101,65 @@ function parseList(val: string | string[] | undefined): string[] {
 }
 
 export default async function SearchPage({ searchParams }: { searchParams: SP }) {
+  // Issue #861 — stream the shell ahead of the taxonomy + badge-count work. The
+  // taxonomy resolver (cold `getMeshMap` precompute) and the three count-only
+  // badge searches all block the first byte today, so a cold SSR paints nothing
+  // for 6-10s. When the flag is on the shell `<main>` + a header/tabs skeleton
+  // flush immediately and `SearchBody` (the byte-identical body below) resolves
+  // inside a Suspense boundary so the results stream in. Flag off awaits the
+  // same body inline, producing identical markup with the legacy paint timing.
+  if (resolveSearchShellStreaming()) {
+    return (
+      <main>
+        <React.Suspense fallback={<SearchShellSkeleton />}>
+          <SearchBody searchParams={searchParams} />
+        </React.Suspense>
+      </main>
+    );
+  }
+  return (
+    <main>
+      <SearchBody searchParams={searchParams} />
+    </main>
+  );
+}
+
+/* ============================================================
+ * Shell skeleton — the header + tab strip placeholder flushed as the first
+ * byte while `SearchBody` resolves taxonomy + counts + results inside the
+ * Suspense boundary (#861). Mirrors the SearchMeta h1 + ModeTabs + results-grid
+ * shape so the swap to real content barely shifts (same markup as
+ * /search/loading.tsx, which is the route-level transition fallback).
+ * ============================================================ */
+function SearchShellSkeleton() {
+  return (
+    <div aria-busy="true">
+      <div role="status" className="sr-only">
+        Loading search results…
+      </div>
+      {/* SearchMeta — h1 */}
+      <div className="mx-auto max-w-[1280px] px-6 pt-5 pb-3">
+        <Skeleton className="mb-2 h-7 w-72" />
+        <Skeleton className="h-3 w-60" />
+      </div>
+      {/* ModeTabs — Scholars / Publications / Funding */}
+      <div className="mx-auto mt-[15px] flex max-w-[1280px] gap-1 border-b border-[#e3e2dd] px-6">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex h-[42px] items-center gap-2 px-4">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-5 w-8 rounded-full" />
+          </div>
+        ))}
+      </div>
+      {/* Facet rail + results column */}
+      <div className="mx-auto grid max-w-[1280px] grid-cols-1 gap-8 px-6 pt-6 pb-16 md:grid-cols-[240px_1fr]">
+        <ResultsGridFallback type="people" />
+      </div>
+    </div>
+  );
+}
+
+async function SearchBody({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const q = (Array.isArray(sp.q) ? sp.q[0] : sp.q) ?? "";
   const type = (Array.isArray(sp.type) ? sp.type[0] : sp.type) ?? "people";
@@ -429,7 +490,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
   );
 
   return (
-    <main>
+    <>
       <SearchMeta q={q} taxonomyMatch={taxonomyMatch} />
       {/* Issue #638 — the research-area suggestion now renders as a compact
           card inside the SearchMeta header (top-right), and the MeSH boost
@@ -610,7 +671,7 @@ export default async function SearchPage({ searchParams }: { searchParams: SP })
           </React.Suspense>
         </div>
       </SearchTransitionProvider>
-    </main>
+    </>
   );
 }
 

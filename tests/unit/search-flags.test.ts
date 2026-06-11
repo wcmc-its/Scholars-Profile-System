@@ -12,6 +12,7 @@ import {
   resolveDeptLeadershipBoost,
   resolveFundingConceptEnabled,
   resolveFundingMeshGateField,
+  resolveSearchShellStreaming,
 } from "@/lib/api/search-flags";
 
 describe("resolveConceptMode (§7.1)", () => {
@@ -195,5 +196,38 @@ describe("resolveFundingMeshGateField (funding reindex)", () => {
     expect(resolveFundingMeshGateField()).toBe("meshDescriptorUi");
     process.env.SEARCH_FUNDING_MESH_GATE = "FUNDEDPUBMESHUI";
     expect(resolveFundingMeshGateField()).toBe("meshDescriptorUi");
+  });
+});
+
+describe("resolveSearchShellStreaming (#861)", () => {
+  const original = process.env.SEARCH_SHELL_STREAMING;
+  beforeEach(() => {
+    delete process.env.SEARCH_SHELL_STREAMING;
+  });
+  afterEach(() => {
+    if (original === undefined) delete process.env.SEARCH_SHELL_STREAMING;
+    else process.env.SEARCH_SHELL_STREAMING = original;
+  });
+
+  it("defaults to false when unset (ships inert — legacy single-await render)", () => {
+    expect(resolveSearchShellStreaming()).toBe(false);
+  });
+
+  it("is true only for exactly 'on' (the documented enable literal)", () => {
+    process.env.SEARCH_SHELL_STREAMING = "on";
+    expect(resolveSearchShellStreaming()).toBe(true);
+  });
+
+  it("is false for any value that is not 'on' (including casing variants)", () => {
+    // Casing matters: only the literal 'on' enables streaming, mirroring the
+    // other default-off `=== "on"` gates (SEARCH_PUB_DEPARTMENT_FILTER).
+    process.env.SEARCH_SHELL_STREAMING = "ON";
+    expect(resolveSearchShellStreaming()).toBe(false);
+    process.env.SEARCH_SHELL_STREAMING = "off";
+    expect(resolveSearchShellStreaming()).toBe(false);
+    process.env.SEARCH_SHELL_STREAMING = "true";
+    expect(resolveSearchShellStreaming()).toBe(false);
+    process.env.SEARCH_SHELL_STREAMING = "";
+    expect(resolveSearchShellStreaming()).toBe(false);
   });
 });
