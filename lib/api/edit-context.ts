@@ -52,6 +52,7 @@ type EditContextReadClient = Pick<
   | "department"
   | "coiActivity"
   | "coiGapCandidate"
+  | "publication"
 >;
 
 export type EditContextScholar = {
@@ -190,28 +191,62 @@ export type EditContextCoiDisclosure = {
 };
 
 /**
- * One publication-derived COI-gap candidate, narrowed to ONLY what the self-only
- * `coi-gap` panel renders. This is the deliberately starved client projection of
- * `CoiGapCandidate`: the persisted row carries `normalizedEntity` (the dedupe
- * key), `attribution`, `entityScore`, `category`, and `status`, NONE of which
- * reach the client — exposing the numeric score or status would re-introduce the
- * "verdict"/false-precision shapes the governance review forbade. Confidence is
- * the qualitative `tier` only (High | Medium), never a percentage; the verbatim
- * `sourceSentence` is always carried so the human, not the score, adjudicates.
- *
- * This array is populated ONLY when `loadEditContext` is called with
- * `opts.includeCoiGap === true`, which the self page sets exclusively for a
- * genuine (non-impersonating) self viewer behind `SELF_EDIT_COI_GAP_HINT`. Every
- * other caller (the superuser-viewing-other path, public, search) leaves the opt
- * absent, so this loader is the authoritative self-only enforcement point — the
- * candidates are never even read for a non-self viewer, not merely UI-hidden.
+ * One source publication citing a relationship on the "From your publications"
+ * advisory — a single `CoiGapCandidate` row, and the unit a dismiss / restore
+ * acts on. The same relationship is often named across several of the scholar's
+ * papers; each paper becomes one source under its grouped entity (see
+ * `EditContextCoiGapCandidate`). Narrowed to ONLY what the panel renders.
  */
-export type EditContextCoiGapCandidate = {
+export type EditContextCoiGapSource = {
+  /** The underlying `CoiGapCandidate.id` — the unit a dismiss / restore targets. */
   id: string;
   pmid: string;
-  entity: string;
-  tier: "High" | "Medium";
+  /** Verbatim source sentence — always shown so the human, not a score, adjudicates. */
   sourceSentence: string;
+  /** Publication year for display, or null when unknown. */
+  year: number | null;
+};
+
+/**
+ * One relationship on the "From your publications" advisory, DEDUPED across the
+ * scholar's papers: the same entity named in several PubMed "Competing interests"
+ * statements collapses to a single row that CITES every source publication
+ * (`sources`), rather than repeating the entity once per PMID. This is the
+ * deliberately starved client projection of `CoiGapCandidate`: the persisted rows
+ * also carry `attribution`, `entityScore`, `category`, and `status`, NONE of which
+ * reach the client — exposing the numeric score or status would re-introduce the
+ * "verdict"/false-precision shapes the governance review forbade. (`normalizedEntity`
+ * crosses only as the opaque grouping `key` — a lowercased form of the entity that
+ * is already shown verbatim — never the score, status, attribution, or category.)
+ * Confidence is the qualitative `tier` only
+ * (High | Medium), never a percentage; the verbatim `sourceSentence` of every
+ * source is always carried so the human, not the score, adjudicates.
+ *
+ * This array is populated ONLY when `loadEditContext` is called with
+ * `opts.includeCoiGap === true`, which the self page sets for a genuine
+ * (non-impersonating) self viewer and the superuser page for a genuine
+ * (non-impersonating) superuser, both behind `SELF_EDIT_COI_GAP_HINT`. Every
+ * other caller (public, search) leaves the opt absent, so this loader is the
+ * authoritative enforcement point — the candidates are never even read for a
+ * disallowed viewer, not merely UI-hidden.
+ */
+export type EditContextCoiGapCandidate = {
+  /** Group key — the normalized entity. Stable across reloads; the card keys its
+   *  dismissed / pending / error state off it. NEVER displayed (the raw `entity`
+   *  is what the scholar sees). */
+  key: string;
+  /** Display label — the relationship as written verbatim (the raw `entity` of
+   *  the newest citing source). */
+  entity: string;
+  /** Highest qualitative tier across the grouped sources — High if ANY source is
+   *  High, else Medium (a relationship is "worth reviewing" if any paper is). */
+  tier: "High" | "Medium";
+  /** Every source publication naming this relationship, newest first. A
+   *  group-level dismiss / restore fires for each source's `id`. */
+  sources: ReadonlyArray<EditContextCoiGapSource>;
+  /** Sort key: the newest source's publication date as epoch ms (0 when no source
+   *  has a known date). NEVER displayed — it only orders the list. */
+  newestTs: number;
 };
 
 /**
@@ -457,19 +492,115 @@ export async function loadEditContext(
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
       where: { cwid, status: { in: ["new", "acknowledged"] } },
-      select: { id: true, pmid: true, entity: true, tier: true, sourceSentence: true },
-      // High before Medium ("High" < "Medium" lexically, asc), then entity.
-      orderBy: [{ tier: "asc" }, { entity: "asc" }],
+      // `normalizedEntity` is the group (dedupe) key; it never reaches the client.
+      select: {
+        id: true,
+        pmid: true,
+        entity: true,
+        normalizedEntity: true,
+        tier: true,
+        sourceSentence: true,
+      },
+      orderBy: [{ entity: "asc" }],
     });
-    unmatchedPubmedCoi = gapRows.map((g) => ({
-      id: g.id,
-      pmid: g.pmid,
-      entity: g.entity,
+
+    // The candidate has no date column, so join `publication` by pmid for the
+    // year (display) + `dateAddedToEntrez` (a finer sort key than year alone).
+    // The numeric date never reaches the client — only the year and a derived
+    // sort timestamp do, and the timestamp orders the list without being shown.
+    const gapPmids = [...new Set(gapRows.map((g) => g.pmid))];
+    const pubDates =
+      gapPmids.length > 0
+        ? await client.publication.findMany({
+            where: { pmid: { in: gapPmids } },
+            select: { pmid: true, year: true, dateAddedToEntrez: true },
+          })
+        : [];
+    const dateByPmid = new Map(
+      pubDates.map((p) => [
+        p.pmid,
+        {
+          year: p.year ?? null,
+          // Prefer the precise Entrez date; fall back to Jan 1 of the year; else 0.
+          ts: p.dateAddedToEntrez
+            ? p.dateAddedToEntrez.getTime()
+            : p.year != null
+              ? Date.UTC(p.year, 0, 1)
+              : 0,
+        },
+      ]),
+    );
+
+    // Collapse the per-(pmid, entity) rows into ONE row per normalized entity,
+    // citing every source publication. Tier is the highest across sources; the
+    // display label is the raw entity of the newest source.
+    type GapSrc = {
+      id: string;
+      pmid: string;
+      sourceSentence: string;
+      year: number | null;
+      ts: number;
+      entity: string;
+    };
+    const groups = new Map<
+      string,
+      { key: string; tier: "High" | "Medium"; newestTs: number; sources: GapSrc[] }
+    >();
+    for (const g of gapRows) {
       // The DB column is a free `VarChar(16)`; narrow to the rendered union and
       // treat any unexpected value as the more conservative "Medium" tier.
-      tier: g.tier === "High" ? "High" : "Medium",
-      sourceSentence: g.sourceSentence,
-    }));
+      const tier: "High" | "Medium" = g.tier === "High" ? "High" : "Medium";
+      const d = dateByPmid.get(g.pmid) ?? { year: null, ts: 0 };
+      const src: GapSrc = {
+        id: g.id,
+        pmid: g.pmid,
+        sourceSentence: g.sourceSentence,
+        year: d.year,
+        ts: d.ts,
+        entity: g.entity,
+      };
+      const existing = groups.get(g.normalizedEntity);
+      if (existing) {
+        existing.sources.push(src);
+        if (tier === "High") existing.tier = "High";
+        if (d.ts > existing.newestTs) existing.newestTs = d.ts;
+      } else {
+        groups.set(g.normalizedEntity, {
+          key: g.normalizedEntity,
+          tier,
+          newestTs: d.ts,
+          sources: [src],
+        });
+      }
+    }
+
+    unmatchedPubmedCoi = [...groups.values()]
+      .map((grp) => {
+        // Sources newest first (pmid desc as a stable tiebreak); the newest
+        // source's raw entity is the group's display label.
+        const sorted = [...grp.sources].sort((a, b) => b.ts - a.ts || b.pmid.localeCompare(a.pmid));
+        return {
+          key: grp.key,
+          entity: sorted[0].entity,
+          tier: grp.tier,
+          sources: sorted.map((s) => ({
+            id: s.id,
+            pmid: s.pmid,
+            sourceSentence: s.sourceSentence,
+            year: s.year,
+          })),
+          newestTs: grp.newestTs,
+        };
+      })
+      // Default SSR order = "Newest + confidence": High tier first, newest within
+      // tier (entity asc as a final tiebreak). The card re-sorts on the chosen
+      // mode, but this matches the default control so SSR and hydration agree.
+      .sort(
+        (a, b) =>
+          (a.tier === b.tier ? 0 : a.tier === "High" ? -1 : 1) ||
+          b.newestTs - a.newestTs ||
+          a.entity.localeCompare(b.entity),
+      );
   }
 
   // Mentees — suppressible, derived from training records (reporting DB). The

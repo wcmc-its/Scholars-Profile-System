@@ -4,6 +4,13 @@
  * in a scholar's OWN PubMed competing-interest statements that we could not
  * match to a current Weill Research Gateway disclosure.
  *
+ * Each row is ONE relationship, DEDUPED across the scholar's papers: the same
+ * entity named in several "Competing interests" statements collapses to a single
+ * row that CITES every source publication (its verbatim sentence + PMID + year).
+ * "Not relevant" / Undo therefore act on the WHOLE relationship — they fan out to
+ * every underlying candidate id (the per-id routes are idempotent, so a retry
+ * after a partial failure converges).
+ *
  * It is deliberately NOT styled like the read-only SOR panels: this is a
  * DERIVED SUGGESTION, not authoritative data on file, so it carries no "Locked —
  * managed at its source" chip (which would imply the list is ground truth).
@@ -14,9 +21,10 @@
  * Governance posture (non-negotiable — `docs/coi-pubmed-unmatched-feasibility.md`):
  *   - SUGGEST, never accuse. The forbidden vocabulary (undisclosed / failed to
  *     disclose / missing / violation / gap) appears nowhere on this surface.
- *   - The verbatim `sourceSentence` is ALWAYS rendered so the human, not a
- *     score, adjudicates. Confidence is a qualitative tier only — never a
- *     percentage, never the numeric score (which never crosses to the client).
+ *   - The verbatim `sourceSentence` of every source is ALWAYS rendered so the
+ *     human, not a score, adjudicates. Confidence is a qualitative tier only —
+ *     never a percentage, never the numeric score (which never crosses to the
+ *     client). The sort control orders by tier and/or recency, never by score.
  *   - SPS is NOT the COI system of record: no in-app COI editing. "Review in
  *     Gateway" routes to WRG via the existing `coi` Request-a-Change flow.
  *   - "Not relevant" is the scholar's PRIVATE hide of a suggestion, with undo —
@@ -53,10 +61,53 @@ export type CoiGapCardProps = {
    *  on this sensitive surface on the scholar's behalf (operator decision). */
   mode?: "self" | "superuser";
   scholarName?: string;
+  /** One entry per DEDUPED relationship; each cites all of its source papers. */
   candidates: ReadonlyArray<EditContextCoiGapCandidate>;
 };
 
 const PUBMED_URL = (pmid: string) => `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(pmid)}/`;
+
+/**
+ * The three sort modes (operator decision — locked). Default = "newest +
+ * confidence". All order by tier and/or recency only; the numeric entity score
+ * never crosses to the client and is never a sort input here.
+ */
+type SortMode = "newest-confidence" | "newest" | "confidence";
+const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
+  { value: "newest-confidence", label: "Newest + confidence" },
+  { value: "newest", label: "Newest" },
+  { value: "confidence", label: "Confidence" },
+];
+
+const tierRank = (t: "High" | "Medium") => (t === "High" ? 0 : 1);
+
+/** Pure, deterministic re-order of the deduped relationships for a chosen mode. */
+function sortCandidates(
+  list: ReadonlyArray<EditContextCoiGapCandidate>,
+  mode: SortMode,
+): EditContextCoiGapCandidate[] {
+  const byEntity = (a: EditContextCoiGapCandidate, b: EditContextCoiGapCandidate) =>
+    a.entity.localeCompare(b.entity);
+  const byNewest = (a: EditContextCoiGapCandidate, b: EditContextCoiGapCandidate) =>
+    b.newestTs - a.newestTs;
+  const byTier = (a: EditContextCoiGapCandidate, b: EditContextCoiGapCandidate) =>
+    tierRank(a.tier) - tierRank(b.tier);
+  const arr = [...list];
+  switch (mode) {
+    case "newest":
+      // Pure recency; tier only breaks date ties.
+      arr.sort((a, b) => byNewest(a, b) || byTier(a, b) || byEntity(a, b));
+      break;
+    case "confidence":
+      // Tier groups (High then Medium); alphabetical within a tier.
+      arr.sort((a, b) => byTier(a, b) || byEntity(a, b));
+      break;
+    default:
+      // "Newest + confidence": tier groups, newest within each tier.
+      arr.sort((a, b) => byTier(a, b) || byNewest(a, b) || byEntity(a, b));
+  }
+  return arr;
+}
 
 export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }: CoiGapCardProps) {
   const su = mode === "superuser";
@@ -64,61 +115,72 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
   const backHref = su ? `/edit/scholar/${cwid}?attr=coi` : "/edit?attr=coi";
   // The "nag" (operator decision): a superuser confirms before any dismiss /
   // restore, since these are the scholar's private suggestions. Null when closed.
-  const [confirm, setConfirm] = React.useState<{ id: string; action: "dismiss" | "restore" } | null>(
+  const [confirm, setConfirm] = React.useState<{ key: string; action: "dismiss" | "restore" } | null>(
     null,
   );
-  // The full set always renders; a "Not relevant" row flips IN PLACE to a
-  // "marked not relevant — Undo" line (the `dismissed` set is this session's
-  // view of which rows the scholar hid). The DB is the source of truth on
-  // reload — a committed dismissal is filtered out by the loader next time.
+  const [sortMode, setSortMode] = React.useState<SortMode>("newest-confidence");
+  // All rows always render; a "Not relevant" row flips IN PLACE to a "marked not
+  // relevant — Undo" line. State is keyed by the relationship GROUP key (the
+  // normalized entity), not a per-paper id, since a row now spans many papers.
+  // The DB is the source of truth on reload — a committed dismissal drops those
+  // sources, and an entity whose every source is dismissed is gone next load.
   const [dismissed, setDismissed] = React.useState<Set<string>>(new Set());
   const [pending, setPending] = React.useState<Set<string>>(new Set());
   const [errors, setErrors] = React.useState<Map<string, string>>(new Map());
 
-  function setError(id: string, msg: string | null) {
+  function setError(key: string, msg: string | null) {
     setErrors((prev) => {
       const next = new Map(prev);
-      if (msg === null) next.delete(id);
-      else next.set(id, msg);
+      if (msg === null) next.delete(key);
+      else next.set(key, msg);
       return next;
     });
   }
-  function setDismissedFlag(id: string, on: boolean) {
+  function setDismissedFlag(key: string, on: boolean) {
     setDismissed((prev) => {
       const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
+      if (on) next.add(key);
+      else next.delete(key);
       return next;
     });
   }
 
-  // `dismiss` and its inverse `restore` (Undo) are the same optimistic shape: flip
-  // the local flag, POST, and roll back on failure. Both are durable + genuine-
-  // self-guarded server-side.
-  function mutate(id: string, action: "dismiss" | "restore") {
+  // `dismiss` and its inverse `restore` (Undo) act on the WHOLE relationship:
+  // flip the local flag, then POST to the per-id route for EVERY source. Both
+  // routes are idempotent + genuine-self-or-superuser-guarded server-side, so a
+  // retry after a partial failure converges. On any failure we roll the row back
+  // to active and surface a retry; the rows we did flip will reconcile on reload.
+  function mutate(key: string, action: "dismiss" | "restore") {
+    const group = candidates.find((c) => c.key === key);
+    if (!group) return;
     const dismiss = action === "dismiss";
-    setError(id, null);
-    setPending((prev) => new Set(prev).add(id));
-    setDismissedFlag(id, dismiss); // optimistic
+    setError(key, null);
+    setPending((prev) => new Set(prev).add(key));
+    setDismissedFlag(key, dismiss); // optimistic
     void (async () => {
       try {
-        const res = await fetch(`/api/edit/coi-gap/${encodeURIComponent(id)}/${action}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-        const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
-        if (!res.ok || data.ok !== true) {
-          setDismissedFlag(id, !dismiss); // roll back
-          setError(id, "We couldn't update this just now. Please try again.");
+        const results = await Promise.all(
+          group.sources.map(async (s) => {
+            const res = await fetch(`/api/edit/coi-gap/${encodeURIComponent(s.id)}/${action}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            });
+            const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
+            return res.ok && data.ok === true;
+          }),
+        );
+        if (!results.every(Boolean)) {
+          setDismissedFlag(key, !dismiss); // roll back
+          setError(key, "We couldn't update this just now. Please try again.");
         }
       } catch {
-        setDismissedFlag(id, !dismiss);
-        setError(id, "We couldn't update this just now. Please try again.");
+        setDismissedFlag(key, !dismiss);
+        setError(key, "We couldn't update this just now. Please try again.");
       } finally {
         setPending((prev) => {
           const next = new Set(prev);
-          next.delete(id);
+          next.delete(key);
           return next;
         });
       }
@@ -127,18 +189,21 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
 
   // A superuser routes every action through the confirm "nag" first; a scholar
   // acts directly on their own suggestions.
-  function requestMutate(id: string, action: "dismiss" | "restore") {
-    if (su) setConfirm({ id, action });
-    else mutate(id, action);
+  function requestMutate(key: string, action: "dismiss" | "restore") {
+    if (su) setConfirm({ key, action });
+    else mutate(key, action);
   }
 
-  const active = candidates.filter((c) => !dismissed.has(c.id));
+  const ordered = sortCandidates(candidates, sortMode);
+  const active = ordered.filter((c) => !dismissed.has(c.key));
   const reviewing = active.filter((c) => c.tier === "High").length;
   const covered = active.filter((c) => c.tier === "Medium").length;
   const summaryParts: string[] = [];
   if (reviewing) summaryParts.push(`${reviewing} worth reviewing`);
   if (covered) summaryParts.push(`${covered} likely already covered`);
   const summary = summaryParts.length > 0 ? summaryParts.join(" · ") : "Nothing left to review";
+
+  const confirmName = scholarName || "the scholar";
 
   return (
     <>
@@ -169,23 +234,40 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
           <ReassureChip icon={Lock} label="Managed in the Gateway, never here" />
         </ul>
 
-        <p
-          className="border-apollo-border text-muted-foreground border-t pt-3 text-sm"
-          data-testid="coi-gap-summary"
-        >
-          {summary}
-        </p>
+        <div className="border-apollo-border flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+          <p className="text-muted-foreground text-sm" data-testid="coi-gap-summary">
+            {summary}
+          </p>
+          {/* The sort control only earns its keep with more than one relationship. */}
+          {candidates.length > 1 && (
+            <label className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+              Sort
+              <select
+                data-testid="coi-gap-sort"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="border-apollo-border bg-apollo-surface-2 text-foreground rounded border px-2 py-1 text-xs"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
 
         <ul data-slot="coi-gap-panel-list">
-          {candidates.map((c) => {
-            const isDismissed = dismissed.has(c.id);
-            const isPending = pending.has(c.id);
-            const error = errors.get(c.id) ?? null;
+          {ordered.map((c) => {
+            const isDismissed = dismissed.has(c.key);
+            const isPending = pending.has(c.key);
+            const error = errors.get(c.key) ?? null;
             return (
               <li
-                key={c.id}
+                key={c.key}
                 className="border-apollo-border border-t py-4 first:border-t-0"
-                data-testid={`coi-gap-row-${c.id}`}
+                data-testid={`coi-gap-row-${c.key}`}
               >
                 {isDismissed ? (
                   <div className="flex items-center justify-between gap-3 opacity-80">
@@ -198,8 +280,8 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                       variant="ghost"
                       size="sm"
                       disabled={isPending}
-                      onClick={() => requestMutate(c.id, "restore")}
-                      data-testid={`coi-gap-undo-${c.id}`}
+                      onClick={() => requestMutate(c.key, "restore")}
+                      data-testid={`coi-gap-undo-${c.key}`}
                     >
                       Undo
                     </Button>
@@ -210,31 +292,48 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                       <div className="mb-2 flex items-center gap-2.5">
                         <TierChip tier={c.tier} />
                         <span className="text-foreground text-base font-semibold">{c.entity}</span>
+                        {c.sources.length > 1 && (
+                          <span
+                            className="text-muted-foreground text-xs"
+                            data-testid={`coi-gap-source-count-${c.key}`}
+                          >
+                            {c.sources.length} publications
+                          </span>
+                        )}
                       </div>
-                      <blockquote
-                        className="border-apollo-slate-tint-border text-foreground border-l-2 pl-3 text-sm leading-snug italic"
-                        data-testid={`coi-gap-source-${c.id}`}
-                      >
-                        “{c.sourceSentence}”
-                      </blockquote>
-                      <p className="text-muted-foreground mt-2 text-[0.8rem]">
-                        From{" "}
-                        <a
-                          href={PUBMED_URL(c.pmid)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-apollo-slate font-medium underline-offset-2 hover:underline"
-                        >
-                          PMID {c.pmid}
-                        </a>
-                      </p>
+                      {/* Every citing paper is listed with its verbatim sentence —
+                          the human adjudicates each, the score never shows. */}
+                      <ul className="flex flex-col gap-3">
+                        {c.sources.map((s) => (
+                          <li key={s.id}>
+                            <blockquote
+                              className="border-apollo-slate-tint-border text-foreground border-l-2 pl-3 text-sm leading-snug italic"
+                              data-testid={`coi-gap-source-${s.id}`}
+                            >
+                              “{s.sourceSentence}”
+                            </blockquote>
+                            <p className="text-muted-foreground mt-1.5 text-[0.8rem]">
+                              From{" "}
+                              <a
+                                href={PUBMED_URL(s.pmid)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-apollo-slate font-medium underline-offset-2 hover:underline"
+                              >
+                                PMID {s.pmid}
+                              </a>
+                              {s.year != null && <span> · {s.year}</span>}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2.5">
                       <RequestAChangeDialog
                         attribute="coi"
                         cwid={cwid}
                         itemLabel={c.entity}
-                        triggerTestId={`coi-gap-review-${c.id}`}
+                        triggerTestId={`coi-gap-review-${c.key}`}
                         trigger={(open) => (
                           <button
                             type="button"
@@ -249,9 +348,9 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
                       <button
                         type="button"
                         disabled={isPending}
-                        onClick={() => requestMutate(c.id, "dismiss")}
+                        onClick={() => requestMutate(c.key, "dismiss")}
                         className="text-muted-foreground hover:text-foreground text-[0.8rem] disabled:opacity-50"
-                        data-testid={`coi-gap-dismiss-${c.id}`}
+                        data-testid={`coi-gap-dismiss-${c.key}`}
                       >
                         Not relevant
                       </button>
@@ -277,15 +376,15 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
         onOpenChange={(open) => {
           if (!open) setConfirm(null);
         }}
-        title={`Act on ${scholarName}’s private suggestion?`}
+        title={`Act on ${confirmName}’s private suggestion?`}
         description={
           // Governance: the forbidden accusatory vocabulary (undisclosed / failed
           // to disclose / missing / violation / gap) must NOT appear here either.
-          `These are ${scholarName}’s private suggestions worth reviewing, surfaced from their own ` +
-          `publications — visible to administrators and ${scholarName}, never a compliance judgement. ` +
+          `These are ${confirmName}’s private suggestions worth reviewing, surfaced from their own ` +
+          `publications — visible to administrators and ${confirmName}, never a compliance judgement. ` +
           (confirm?.action === "restore"
-            ? `Restoring brings this suggestion back to ${scholarName}’s review. `
-            : `Marking it not relevant hides this suggestion from ${scholarName}’s review. `) +
+            ? `Restoring brings this suggestion back to ${confirmName}’s review. `
+            : `Marking it not relevant hides this suggestion from ${confirmName}’s review. `) +
           `Continue only if you have a legitimate reason to act on their behalf.`
         }
         reasonMode="none"
@@ -294,7 +393,7 @@ export function CoiGapCard({ cwid, mode = "self", scholarName = "", candidates }
         onConfirm={() => {
           const c = confirm;
           setConfirm(null);
-          if (c) mutate(c.id, c.action);
+          if (c) mutate(c.key, c.action);
         }}
       />
     </>

@@ -364,7 +364,10 @@ export function EditPage({
           // it for a superuser viewing another scholar's advisory.
           const label =
             a.key === "coi-gap" ? "From the scholar’s publications" : a.label;
-          return [{ key: a.key, label, readonly: a.readonly }];
+          // Like the self rail, the advisory nests under Conflicts of Interest
+          // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
+          // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
+          return [{ key: a.key, label, readonly: a.readonly, child: a.key === "coi-gap" }];
         });
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).

@@ -343,12 +343,19 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     ...ctx,
     unmatchedPubmedCoi: [
       {
-        id: "gap-1",
-        pmid: "31508198",
+        key: "procept biorobotics",
         entity: "Procept BioRobotics",
         tier: "High",
-        sourceSentence:
-          "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+        newestTs: Date.UTC(2019, 0, 1),
+        sources: [
+          {
+            id: "gap-1",
+            pmid: "31508198",
+            sourceSentence:
+              "Clinical Research investigator for Procept Aquablation and Neotract Urolift.",
+            year: 2019,
+          },
+        ],
       },
     ],
   };
@@ -387,6 +394,9 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(rail).toBeTruthy();
     // Reframed for the superuser — not the first-person "From your publications".
     expect(rail.textContent).toContain("From the scholar");
+    // Nested UNDER Conflicts of Interest (like the self rail) — a sub-view, not a
+    // flat sibling. The child marker is the indentation class.
+    expect(rail.className).toContain("pl-9");
   });
 
   it("does NOT surface coi-gap in superuser mode when there are no candidates", () => {
