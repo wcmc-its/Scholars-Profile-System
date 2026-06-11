@@ -3489,19 +3489,19 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_NETWORK_SIGNAL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLAR_LIST_EXPORT_EMAIL",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "INTERNAL_VIEWER_CIDRS",
-                "Value": "",
+                "Value": "157.139.83.164/32",
               },
               {
                 "Name": "SCHOLARS_SUPERUSER_CWIDS",

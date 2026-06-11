@@ -1157,14 +1157,17 @@ export class AppStack extends Stack {
         // #847 -- internal "download the leading scholars" CSV export. When
         // "on", the POST /api/export/scholars/{scope} endpoint accepts
         // authenticated requests and the download button renders; method scopes
-        // are ALSO gated by METHODS_LENS_PAGES above. Default OFF in both envs
-        // (ships dark). Wire in BOTH .env.local AND here per the flag-parity
-        // rule; `cdk deploy Sps-App-<env>` required (CD re-rolls the image only).
-        SCHOLAR_LIST_EXPORT: "off",
+        // are ALSO gated by METHODS_LENS_PAGES above. STAGING ON (soak, paired
+        // with the #866 email column below); prod OFF (ships dark in prod). Wire
+        // in BOTH .env.local AND here per the flag-parity rule; `cdk deploy
+        // Sps-App-<env>` required (CD re-rolls the image only).
+        SCHOLAR_LIST_EXPORT: env === "staging" ? "on" : "off",
         // #866 -- "internal viewer" gating (authenticated session OR on the WCM
-        // network by source IP). Three flags, all OFF in BOTH envs (ships dark);
-        // wire in BOTH .env.local AND here per the flag-parity rule -- a manual
-        // `cdk deploy Sps-App-<env>` is required (CD re-rolls the image only):
+        // network by source IP). STAGING soak ON (network signal + email column);
+        // prod OFF (ships dark in prod, pending #876 authoritative ranges +
+        // Faculty Affairs sign-off on the email column). Wire in BOTH .env.local
+        // AND here per the flag-parity rule -- a manual `cdk deploy Sps-App-<env>`
+        // is required (CD re-rolls the image only):
         //   INTERNAL_VIEWER_NETWORK_SIGNAL -- when "on", an unauthenticated
         //     viewer whose CloudFront-Viewer-Address falls inside INTERNAL_VIEWER_CIDRS
         //     also counts as an internal viewer. While off, "internal" means an
@@ -1174,13 +1177,14 @@ export class AppStack extends Stack {
         //     is also on), the internal-only #847 roster CSV gains an email column
         //     for internal viewers. While off the CSV is byte-identical to today.
         //   INTERNAL_VIEWER_CIDRS -- the CIDR allowlist the network signal matches
-        //     the viewer IP against. EMPTY here (no network signal active until it
-        //     is populated); populate from EdgeStack edgeAllowedCidrs (#461) when
-        //     enabling INTERNAL_VIEWER_NETWORK_SIGNAL. An empty set means the
-        //     network half matches nobody -- default-safe.
-        INTERNAL_VIEWER_NETWORK_SIGNAL: "off",
-        SCHOLAR_LIST_EXPORT_EMAIL: "off",
-        INTERNAL_VIEWER_CIDRS: "",
+        //     the viewer IP against. STAGING carries a TEMP single-host soak CIDR
+        //     (one WCM egress in the 157.139.0.0/16 range) -- REPLACE with the
+        //     authoritative WCM/Qatar/NYP ranges from #876, sourced together with
+        //     EdgeStack edgeAllowedCidrs (#461). Prod EMPTY (network half matches
+        //     nobody -- default-safe).
+        INTERNAL_VIEWER_NETWORK_SIGNAL: env === "staging" ? "on" : "off",
+        SCHOLAR_LIST_EXPORT_EMAIL: env === "staging" ? "on" : "off",
+        INTERNAL_VIEWER_CIDRS: env === "staging" ? "157.139.83.164/32" : "",
         // #443 INTERIM superuser allowlist. The live LDAP superuser check
         // (lib/auth/superuser.ts, R1) cannot succeed in any deployed env: the
         // SPS VPC has no route to the WCM directory (10.63.x) -- TGW attachment
