@@ -1071,6 +1071,22 @@ export class AppStack extends Stack {
         // prereq; flip is env-only via cdk deploy Sps-App-<env> (CD re-rolls the
         // image only) -- the flag-parity rule.
         SEARCH_SHELL_STREAMING: env === "staging" ? "on" : "off",
+        // Section B / B2 -- drop the dedicated concept-escalation pre-count on
+        // the People tab. NOTE THE INVERTED POLARITY: "off" is the NEW fast path
+        // (read the main search's own total, re-run escalated only on sparse),
+        // "on" is today's dedicated size:0 pre-count. resolvePeopleConcept-
+        // Precount reads `!== "off"`, so unset == "on" == unchanged. The two
+        // states are RESULT-NEUTRAL -- both make the identical escalation
+        // decision off the same lexical predicate, so `badge == list` holds
+        // either way (locked by tests/unit/search-people-concept-precount.ts);
+        // only the round-trip count differs (the win: 2 fewer hops per cold
+        // concept-People SSR render on the common non-sparse case). STAGING runs
+        // the reorder ("off") to soak + let the latency probe measure the delta;
+        // PROD stays on today's pre-count ("on") until that staging probe
+        // confirms the win, then flip prod to "off" + `cdk deploy Sps-App-prod`
+        // (CD re-rolls the image only, so an env-flag change needs the explicit
+        // cdk deploy) -- the flag-parity rule.
+        SEARCH_PEOPLE_CONCEPT_PRECOUNT: env === "staging" ? "off" : "on",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

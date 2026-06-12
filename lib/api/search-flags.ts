@@ -492,3 +492,35 @@ export function resolvePublicationDepartmentFilter(): boolean {
 export function resolveSearchShellStreaming(): boolean {
   return process.env.SEARCH_SHELL_STREAMING === "on";
 }
+
+/**
+ * Issue #726 follow-up (Section B / B2) — drop the dedicated concept-escalation
+ * pre-count on the People tab. The escalate-on-sparse recall floor (#726) admits
+ * concept-tagged scholars when a TRUSTWORTHY descriptor resolved AND the lexical
+ * result is sparse (< `MESH_ESCALATION_THRESHOLD`). Today that decision is gated
+ * by a dedicated `size:0` pre-count of the lexical predicate — a full extra
+ * OpenSearch round-trip fired even on common high-volume topics that will never
+ * be sparse, and on the SSR page it fires twice (the People badge count-call and
+ * the full People search each pay it).
+ *
+ * When this lever is at its default (`on`), `searchPeople` keeps that pre-count:
+ * the escalation is decided up front, so the count/full bodies dispatch once
+ * (already escalated if sparse). When `off`, `searchPeople` skips the pre-count
+ * and instead reads the main search's OWN `hits.total` (the bodies are already
+ * `track_total_hits: true`), re-running escalated ONLY when sparse. That drops
+ * the dedicated hop on the common non-sparse path (the win — 2 fewer hops per
+ * SSR concept-People render) and pays a second search only on the rare sparse
+ * path.
+ *
+ * Result-NEUTRAL by construction: BOTH states make the identical deterministic
+ * escalation decision (`lexicalTotal < MESH_ESCALATION_THRESHOLD`) off the
+ * identical lexical predicate, so the count-only badge and the full list reach
+ * the same total under either state (`badge == list`). Only the number of
+ * round-trips differs. Default ON (`SEARCH_PEOPLE_CONCEPT_PRECOUNT=off` enables
+ * the reorder); a `!== "off"` default-on lever so the implementation ships dark
+ * (zero behavior change until flipped) with an independent rollback trigger,
+ * separate from `SEARCH_SHELL_STREAMING` and the ranking flags above.
+ */
+export function resolvePeopleConceptPrecount(): boolean {
+  return process.env.SEARCH_PEOPLE_CONCEPT_PRECOUNT !== "off";
+}
