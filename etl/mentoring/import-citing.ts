@@ -4,8 +4,9 @@
  * Loads the `publication_citing` table from an NDJSON object on S3 (produced
  * WCM-side by `etl:mentoring:export-citing`) instead of from the live WCM
  * ReciterDB query the in-VPC app can't reach. Run in-VPC as a normal `run-task`.
- * Idempotent / safe to re-run. Full refresh: rows absent from this import (a
- * pmid that dropped to zero NIH cites) are deleted.
+ * Idempotent / safe to re-run. Full refresh via truncate-load (deleteMany +
+ * chunked createMany): the table is fully replaced each run, so a pmid that
+ * dropped to zero NIH cites simply doesn't reappear.
  *
  * Once the table is populated, the read layer uses it when
  * `PUBLICATION_CITING_BRIDGE=on` (import-then-flip — see
@@ -37,7 +38,7 @@ const BUCKET =
   process.env.ARTIFACTS_BUCKET ??
   "wcmc-reciterai-artifacts";
 const REGION = process.env.AWS_DEFAULT_REGION ?? "us-east-1";
-const UPSERT_BATCH = 500;
+const INSERT_BATCH = 500;
 
 const dryRun = process.argv.includes("--dry-run");
 const allowEmpty = process.argv.includes("--allow-empty");
@@ -109,36 +110,30 @@ async function main() {
 
     let written = 0;
     if (!dryRun) {
-      for (const batch of chunks(rows, UPSERT_BATCH)) {
-        await db.write.$transaction(
-          batch.map((r) =>
-            db.write.publicationCiting.upsert({
-              where: { pmid: r.pmid },
-              create: {
-                pmid: r.pmid,
-                total: r.total,
-                citingPubs: r.citingPubs as unknown as Prisma.InputJsonValue,
-                refreshedAt: importedAt,
-              },
-              update: {
-                total: r.total,
-                citingPubs: r.citingPubs as unknown as Prisma.InputJsonValue,
-                refreshedAt: importedAt,
-              },
-            }),
-          ),
-        );
+      // Full refresh via TRUNCATE-LOAD (the import-aoc pattern, chunked for
+      // volume): one deleteMany, then chunked createMany. createMany issues ONE
+      // multi-row INSERT per chunk, so ~170K rows load in ~chunkCount statements
+      // instead of one-per-row upsert round-trips — the latter blow Prisma's 5 s
+      // interactive-transaction timeout (P2028) on a table this size, since the
+      // cost here is round-trip count, not row size (the citing list is small,
+      // article-metadata-limited). The read path is flag-gated, so the brief
+      // empty window between delete and reload is never observed (and would
+      // degrade honestly if it were); the empty-export guard above protects the
+      // table from a corrupt/empty S3 object.
+      await db.write.publicationCiting.deleteMany({});
+      for (const batch of chunks(rows, INSERT_BATCH)) {
+        await db.write.publicationCiting.createMany({
+          data: batch.map((r) => ({
+            pmid: r.pmid,
+            total: r.total,
+            citingPubs: r.citingPubs as unknown as Prisma.InputJsonValue,
+            refreshedAt: importedAt,
+          })),
+          skipDuplicates: true,
+        });
         written += batch.length;
-        if (written % (UPSERT_BATCH * 20) === 0) console.log(`  ...${written}/${rows.length}`);
+        if (written % (INSERT_BATCH * 20) === 0) console.log(`  ...${written}/${rows.length}`);
       }
-
-      // Full refresh: drop rows not present in this import (pmids that fell to
-      // zero NIH cites). Anything not just-upserted still carries its prior,
-      // older `refreshedAt`.
-      const stale = await db.write.publicationCiting.deleteMany({
-        where: { refreshedAt: { lt: importedAt } },
-      });
-      console.log(`Deleted ${stale.count} stale rows (not in this import).`);
     }
 
     await db.write.etlRun.update({
