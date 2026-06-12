@@ -45,6 +45,8 @@
     "etl:reciter-refresh": "tsx etl/reciter-refresh/index.ts",
     "etl:reciter:coi-statements": "tsx etl/reciter/backfill-coi-statements.ts",
     "etl:reciter:import-coi-statements": "tsx etl/reciter/import-coi-statements.ts",
+    "etl:mentoring:export-copubs": "tsx etl/mentoring/export-copubs.ts",
+    "etl:mentoring:import-copubs": "tsx etl/mentoring/import-copubs.ts",
     "etl:asms:probe": "tsx etl/asms/probe.ts",
     "etl:asms": "tsx etl/asms/index.ts",
     "etl:infoed:probe": "tsx etl/infoed/probe.ts",

@@ -369,57 +369,93 @@ export async function getMenteesForMentor(
   // so callers can tell "ReciterDB was down" apart from "this mentor genuinely
   // has zero co-pubs" and stop silently dropping the rollup link / badges.
   let copubSourceAvailable = false;
-  await withReciterConnection(async (conn) => {
-    const rows = (await conn.query(
-      `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
-              a1.pmid AS pmid,
-              art.articleTitle AS title,
-              art.journalTitleVerbose AS journal,
-              art.articleYear AS year
-         FROM analysis_summary_author a1
-         JOIN analysis_summary_author a2
-           ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
-         JOIN analysis_summary_article art
-           ON art.pmid = a1.pmid
-        WHERE a1.personIdentifier = ?
-          AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
-        ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
-      [mentorCwid, ...cwids],
-    )) as {
-      mentee_cwid: string;
-      pmid: number | bigint;
-      title: string;
-      journal: string | null;
-      year: number | null;
-    }[];
-    for (const r of rows) {
-      copubCountByCwid.set(
-        r.mentee_cwid,
-        (copubCountByCwid.get(r.mentee_cwid) ?? 0) + 1,
-      );
-      const preview = copubPreviewByCwid.get(r.mentee_cwid) ?? [];
-      if (preview.length < 3) {
-        preview.push({
-          pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
-          title: r.title,
-          journal: r.journal,
-          year: r.year,
-        });
-        copubPreviewByCwid.set(r.mentee_cwid, preview);
+
+  // Issue #443 — two co-pub sources. LIVE: the WCM ReciterDB query (load-bearing
+  // where the SPS VPC can reach ReciterDB). BRIDGE: the pre-computed
+  // `mentee_copublication` table, populated from S3 (etl:mentoring:import-copubs)
+  // for envs that can't reach ReciterDB. `MENTORING_COPUB_BRIDGE` selects the
+  // source; it's flipped only after the import runs (import-then-flip).
+  if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+    try {
+      const rows = await prisma.menteeCopublication.findMany({
+        where: { mentorCwid, menteeCwid: { in: cwids } },
+        select: { menteeCwid: true, count: true, preview: true },
+      });
+      for (const r of rows) {
+        copubCountByCwid.set(r.menteeCwid, r.count);
+        copubPreviewByCwid.set(r.menteeCwid, (r.preview as CoPublication[]) ?? []);
       }
+      // Rows for this mentor ⇒ unambiguously covered. NO rows is ambiguous:
+      // "bridge not yet imported" (table globally empty ⇒ degrade honestly to
+      // unavailable, exactly like a live-query outage) vs "this mentor genuinely
+      // has zero co-pubs" (table has data ⇒ available, all counts legitimately
+      // zero). One cheap existence probe — only when this mentor had no rows —
+      // distinguishes them, so a flag flipped before the import never shows
+      // fake zeros.
+      copubSourceAvailable =
+        rows.length > 0 ||
+        (await prisma.menteeCopublication.findFirst({
+          select: { mentorCwid: true },
+        })) !== null;
+    } catch (err) {
+      console.error(
+        `[mentoring] copub bridge read failed for mentor ${mentorCwid}`,
+        err,
+      );
     }
-    copubSourceAvailable = true;
-  }).catch((err) => {
-    // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
-    // gave operators zero visibility when ReciterDB was unreachable and left
-    // every mentee's co-pub count a misleading zero. Log with the mentor cwid
-    // and that this is the co-pub source so the cause is diagnosable;
-    // `copubSourceAvailable` stays false so the UI degrades honestly.
-    console.error(
-      `[mentoring] reciterdb co-pub count query failed for mentor ${mentorCwid}`,
-      err,
-    );
-  });
+  } else {
+    await withReciterConnection(async (conn) => {
+      const rows = (await conn.query(
+        `SELECT DISTINCT a2.personIdentifier AS mentee_cwid,
+                a1.pmid AS pmid,
+                art.articleTitle AS title,
+                art.journalTitleVerbose AS journal,
+                art.articleYear AS year
+           FROM analysis_summary_author a1
+           JOIN analysis_summary_author a2
+             ON a1.pmid = a2.pmid AND a2.personIdentifier != a1.personIdentifier
+           JOIN analysis_summary_article art
+             ON art.pmid = a1.pmid
+          WHERE a1.personIdentifier = ?
+            AND a2.personIdentifier IN (${cwids.map(() => "?").join(",")})
+          ORDER BY a2.personIdentifier, art.articleYear DESC, a1.pmid DESC`,
+        [mentorCwid, ...cwids],
+      )) as {
+        mentee_cwid: string;
+        pmid: number | bigint;
+        title: string;
+        journal: string | null;
+        year: number | null;
+      }[];
+      for (const r of rows) {
+        copubCountByCwid.set(
+          r.mentee_cwid,
+          (copubCountByCwid.get(r.mentee_cwid) ?? 0) + 1,
+        );
+        const preview = copubPreviewByCwid.get(r.mentee_cwid) ?? [];
+        if (preview.length < 3) {
+          preview.push({
+            pmid: typeof r.pmid === "bigint" ? Number(r.pmid) : r.pmid,
+            title: r.title,
+            journal: r.journal,
+            year: r.year,
+          });
+          copubPreviewByCwid.set(r.mentee_cwid, preview);
+        }
+      }
+      copubSourceAvailable = true;
+    }).catch((err) => {
+      // Issue #843 — DE-SILENCE: this was a silent `.catch(() => {})`, which
+      // gave operators zero visibility when ReciterDB was unreachable and left
+      // every mentee's co-pub count a misleading zero. Log with the mentor cwid
+      // and that this is the co-pub source so the cause is diagnosable;
+      // `copubSourceAvailable` stays false so the UI degrades honestly.
+      console.error(
+        `[mentoring] reciterdb co-pub count query failed for mentor ${mentorCwid}`,
+        err,
+      );
+    });
+  }
 
   // Scholar-table presence — drives linkability. Non-deleted, active rows only.
   // Only `status='active'` rows can be linked. Suppressed scholars (alumni

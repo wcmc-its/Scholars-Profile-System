@@ -964,6 +964,21 @@ export class AppStack extends Stack {
         // nightly etl:coi-gap source has seeded data in that env. Prod takes
         // effect only on an approval-gated `cdk deploy Sps-App-prod`.
         SELF_EDIT_COI_GAP_HINT: "on",
+        // #443 -- mentee co-publication BRIDGE. getMenteesForMentor's per-mentee
+        // co-pub count + 3-pub preview is a LIVE WCM ReciterDB query the in-VPC
+        // app can't reach, so it degrades to "temporarily unavailable" in
+        // staging/prod. When "on" the read layer serves the pre-computed
+        // `mentee_copublication` table instead (lib/api/mentoring.ts). DATA
+        // PREREQ (import-then-flip): populate that table FIRST -- run
+        // `etl:mentoring:export-copubs` WCM-side (writes S3) then
+        // `etl:mentoring:import-copubs` in-VPC -- BEFORE the activating `cdk
+        // deploy --exclusively Sps-App-<env>` (CD only re-rolls the image, never
+        // CDK). An empty / not-yet-imported table degrades honestly back to
+        // "temporarily unavailable" (the read does one cheap global existence
+        // probe), so a flag that goes live before the import never shows fake
+        // zeros. ON in both envs; prod activates only on the approval-gated prod
+        // cdk deploy.
+        MENTORING_COPUB_BRIDGE: "on",
         // #497 -- self-serve slug ("Profile URL") request lifecycle: the scholar
         // request card, the superuser /edit/slug-requests approve/decline queue,
         // and the requester notification (PRs #503/#504/#505). Read via
