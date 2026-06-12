@@ -50,6 +50,7 @@ in **§10**.
 | Why does search rank things this way? | [`search.md`](./search.md), [`people-relevance-baseline.md`](./people-relevance-baseline.md) |
 | Why doesn't searching `covid19` or `tylenol` find the obvious people? | [`search-recall.md`](./search-recall.md) |
 | Why doesn't this (retracted) paper show up? | [`retracted-publications.md`](./retracted-publications.md) |
+| Why don't doctoral students have profiles? Is there a flag to show them? | [`student-profile-visibility.md`](./student-profile-visibility.md) (no flag — FERPA carve via `deleted_at`) |
 | What is the WAF / firewall posture? | [`network-security-topology.md`](./network-security-topology.md), [`waf-request-RITM0792011.md`](./waf-request-RITM0792011.md) |
 | Can we restore from backup? | [`restore-drill-runbook.md`](./restore-drill-runbook.md) |
 
