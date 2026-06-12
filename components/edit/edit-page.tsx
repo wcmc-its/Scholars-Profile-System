@@ -354,6 +354,9 @@ export function EditPage({
               // immediately follows "coi" in SELF_RAIL_ORDER) rather than reading
               // as a flat sibling — it is a sub-view of COI, not its own SOR.
               child: a.key === "coi-gap",
+              // A quiet count of High-tier relationships to review (the item only
+              // appears when this is > 0, see `hasCoiGap`).
+              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length : undefined,
             },
           ];
         })
@@ -367,7 +370,15 @@ export function EditPage({
           // Like the self rail, the advisory nests under Conflicts of Interest
           // (it immediately follows "coi" in SUPERUSER_RAIL_ORDER) rather than
           // reading as a flat sibling — it is a sub-view of COI, not its own SOR.
-          return [{ key: a.key, label, readonly: a.readonly, child: a.key === "coi-gap" }];
+          return [
+            {
+              key: a.key,
+              label,
+              readonly: a.readonly,
+              child: a.key === "coi-gap",
+              count: a.key === "coi-gap" ? ctx.unmatchedPubmedCoi.length : undefined,
+            },
+          ];
         });
   // Self edits at "/edit"; superuser and proxy edit a named scholar at
   // "/edit/scholar/<cwid>" (a proxy is never on their own /edit).
