@@ -50,6 +50,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { CWID_PATTERN } from "@/lib/cwid";
+
 /** The center this backfill targets — the Center.code @id (NOT the slug). */
 export const MEYER_CENTER_CODE = "meyer_cancer_center";
 
@@ -115,7 +117,6 @@ export type MeyerBackfillResult = {
 
 const log = (msg: string) => console.log(msg);
 
-const CWID_PATTERN = /^[a-z]{3}[0-9]{4}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseArgs(argv: string[]): MeyerBackfillOptions {

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
 import type { DepartmentFacultyHit } from "@/lib/api/departments";
@@ -20,7 +21,15 @@ function RoleTag({ role }: { role: string }) {
   );
 }
 
-export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
+export function PersonRow({
+  hit,
+  trailingBadge,
+}: {
+  hit: DepartmentFacultyHit;
+  /** Optional badge rendered after the role tag — e.g. the center roster's
+   *  Research/Clinical membership-type chip. Omitted everywhere else. */
+  trailingBadge?: ReactNode;
+}) {
   const deptLine = hit.divisionName
     ? `${hit.divisionName} · Department of ${hit.departmentName}`
     : `Department of ${hit.departmentName}`;
@@ -60,6 +69,7 @@ export function PersonRow({ hit }: { hit: DepartmentFacultyHit }) {
             const label = formatRoleCategory(hit.roleCategory);
             return label ? <RoleTag role={label} /> : null;
           })()}
+          {trailingBadge}
         </div>
         {hit.primaryTitle && (
           <div className="mb-[2px] text-[13px] text-muted-foreground">

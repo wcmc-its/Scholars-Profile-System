@@ -26,6 +26,7 @@
 import DOMPurify from "isomorphic-dompurify";
 
 import type { PrismaClient } from "@/lib/generated/prisma/client";
+import { CWID_PATTERN } from "@/lib/cwid";
 import { containsProfanity } from "@/lib/edit/profanity";
 import { isChairTitleFor } from "@/lib/leadership";
 import { isNameBasedSlug, RESERVED_SLUGS } from "@/lib/slug";
@@ -541,8 +542,11 @@ export function validateUnitDescription(input: string): UnitFieldResult {
   return { ok: true, value: trimmed };
 }
 
-/** Format of a CWID — 3-9 lowercase letters/digits. */
-export const CWID_PATTERN = /^[a-z][a-z0-9]{2,8}$/;
+/** Format of a CWID — 3-9 lowercase letters/digits. Single source of truth in
+ *  `@/lib/cwid` (imported above); re-exported here so existing
+ *  `lib/edit/validators` consumers keep working and the importer backfills share
+ *  the exact same rule. */
+export { CWID_PATTERN };
 
 /**
  * Validate a unit `leaderCwid` override value — the three-state model

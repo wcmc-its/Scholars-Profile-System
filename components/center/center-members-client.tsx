@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   RoleChipRow,
   filterByRoleCategory,
   type RoleCategory,
 } from "@/components/department/role-chip-row";
 import { PersonRow } from "@/components/department/person-row";
+import {
+  RosterFacet,
+  type FacetOption,
+} from "@/components/center/center-roster-facets";
 import {
   Pagination,
   PaginationContent,
@@ -18,6 +22,8 @@ import {
 } from "@/components/ui/pagination";
 import type {
   CenterMemberGroup,
+  CenterMemberHit,
+  CenterMembershipType,
   CenterMembersResult,
 } from "@/lib/api/centers";
 
@@ -34,14 +40,35 @@ export function CenterMembersClient({
   return <FlatMembers result={result} centerSlug={centerSlug} />;
 }
 
-type IndexedGroup = CenterMemberGroup & { id: string };
+/** Research/Clinical pill rendered after a member's role tag in the roster. */
+function MembershipBadge({ type }: { type: CenterMembershipType | null }) {
+  if (!type) return null;
+  const research = type === "research";
+  return (
+    <span
+      className={`inline-flex items-center rounded-[3px] border px-[6px] text-[11px] font-medium leading-[1.4] ${
+        research
+          ? "border-[#c7d6e2] bg-[#eef3f7] text-[#2c4f6e]"
+          : "border-[#e6cdd0] bg-[#f7eef0] text-[var(--color-primary-cornell-red)]"
+      }`}
+    >
+      {research ? "Research" : "Clinical"}
+    </span>
+  );
+}
+
+type RowWithProgram = CenterMemberHit & { programLabel: string };
+
+const TYPE_ORDER: CenterMembershipType[] = ["research", "clinical"];
+const NO_DEPT = "—";
 
 /**
- * Programmed center: a sticky two-row sub-nav (PROGRAM = scroll-spy jump list,
- * APPOINTMENT = faculty-type filter) over anchored program sections, all
- * active members rendered (no pagination — #552 §6.2 "grouped = single page").
- * The APPOINTMENT filter reshapes the program sections + their chip counts
- * (empty sections drop out); the PROGRAM row only navigates.
+ * Programmed center: a left facet sidebar (Program / Membership type /
+ * Organizational unit) over program-grouped member sections, plus the existing
+ * Appointment (role) chip row. All active members are on one page (#552 §6.2),
+ * so faceting is client-side. Facets multi-select (OR within a facet, AND
+ * across facets); counts reflect the other active facets. Empty program
+ * sections drop out as filters narrow.
  */
 function GroupedRoster({
   groups,
@@ -51,158 +78,196 @@ function GroupedRoster({
   total: number;
 }) {
   const [appointment, setAppointment] = useState<RoleCategory>("All");
+  const [selPrograms, setSelPrograms] = useState<ReadonlySet<string>>(new Set());
+  const [selTypes, setSelTypes] = useState<ReadonlySet<string>>(new Set());
+  const [selDepts, setSelDepts] = useState<ReadonlySet<string>>(new Set());
 
-  // Stable per-group anchor ids (kept across appointment filtering so the
-  // scroll-spy + jump targets don't shift).
-  const indexed = useMemo<IndexedGroup[]>(
-    () => groups.map((g, i) => ({ ...g, id: `center-prog-${i}` })),
+  // Flatten to rows tagged with the program section they belong to; keep the
+  // (sorted) program order for both the facet and the section layout.
+  const allRows = useMemo<RowWithProgram[]>(
+    () => groups.flatMap((g) => g.members.map((m) => ({ ...m, programLabel: g.label }))),
     [groups],
   );
-  const allMembers = useMemo(
-    () => groups.flatMap((g) => g.members),
-    [groups],
+  const programOrder = useMemo(() => groups.map((g) => g.label), [groups]);
+
+  const deptKey = (m: RowWithProgram) => m.departmentName || NO_DEPT;
+  const typeKey = (m: RowWithProgram): string => m.membershipType ?? "";
+
+  // Appointment (role) is the outer filter; the sidebar facets compose on top.
+  const base = useMemo(
+    () => filterByRoleCategory(allRows, appointment),
+    [allRows, appointment],
   );
 
-  // Reshape by appointment: filter each section, drop the now-empty ones.
+  // A row passes every selected facet EXCEPT the named one (so a facet's own
+  // counts don't collapse when you select within it).
+  const passes = (
+    m: RowWithProgram,
+    except: "program" | "type" | "dept" | null,
+  ): boolean =>
+    (except === "program" || selPrograms.size === 0 || selPrograms.has(m.programLabel)) &&
+    (except === "type" || selTypes.size === 0 || selTypes.has(typeKey(m))) &&
+    (except === "dept" || selDepts.size === 0 || selDepts.has(deptKey(m)));
+
+  const finalRows = useMemo(
+    () => base.filter((m) => passes(m, null)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, selPrograms, selTypes, selDepts],
+  );
+
+  const programOptions = useMemo<FacetOption[]>(
+    () =>
+      programOrder.map((label) => ({
+        value: label,
+        label,
+        count: base.filter((m) => m.programLabel === label && passes(m, "program")).length,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, programOrder, selTypes, selDepts],
+  );
+
+  const typeOptions = useMemo<FacetOption[]>(
+    () =>
+      TYPE_ORDER.filter((t) => allRows.some((m) => m.membershipType === t)).map((t) => ({
+        value: t,
+        label: t === "research" ? "Research" : "Clinical",
+        count: base.filter((m) => typeKey(m) === t && passes(m, "type")).length,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, allRows, selPrograms, selDepts],
+  );
+
+  const deptOptions = useMemo<FacetOption[]>(
+    () =>
+      Array.from(new Set(allRows.map(deptKey)))
+        .map((name) => ({
+          value: name,
+          label: name === NO_DEPT ? "No department" : name,
+          count: base.filter((m) => deptKey(m) === name && passes(m, "dept")).length,
+        }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [base, allRows, selPrograms, selTypes],
+  );
+
+  // Re-group the surviving rows under their program headers (original order).
   const sections = useMemo(
     () =>
-      indexed
-        .map((g) => ({
-          ...g,
-          members: filterByRoleCategory(g.members, appointment),
+      programOrder
+        .map((label) => ({
+          label,
+          members: finalRows.filter((m) => m.programLabel === label),
         }))
-        .filter((g) => g.members.length > 0),
-    [indexed, appointment],
+        .filter((s) => s.members.length > 0),
+    [finalRows, programOrder],
   );
 
-  // The PROGRAM nav only earns its keep when there are ≥2 sections to jump
-  // between; presence is based on the unfiltered grouping so it doesn't blink
-  // in and out as the appointment filter narrows things.
-  const showProgramNav = indexed.length >= 2;
-
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const sectionKey = sections.map((s) => s.id).join("|");
-
-  // Scroll-spy: highlight the program chip for the section currently under the
-  // sticky nav. Mirrors the mockup's offsetTop walk; rAF-throttled.
-  useEffect(() => {
-    if (!showProgramNav) return;
-    const ids = sectionKey ? sectionKey.split("|") : [];
-    if (ids.length === 0) return;
-    setActiveId((prev) => (prev && ids.includes(prev) ? prev : ids[0]));
-
-    let frame = 0;
-    const STICKY_OFFSET = 180; // global header (60) + sticky sub-nav (~120)
-    const onScroll = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        const y = window.scrollY + STICKY_OFFSET;
-        let current = ids[0];
-        for (const id of ids) {
-          const el = document.getElementById(id);
-          if (el && el.getBoundingClientRect().top + window.scrollY <= y) {
-            current = id;
-          }
-        }
-        setActiveId(current);
-      });
+  const makeToggle =
+    (set: ReadonlySet<string>, setSet: (s: ReadonlySet<string>) => void) =>
+    (value: string) => {
+      const next = new Set(set);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      setSet(next);
     };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [showProgramNav, sectionKey]);
 
-  const jumpTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setActiveId(id);
+  // Once the Program facet is narrowed to a single program, the lone section
+  // header just echoes the active filter — drop it (option A redundancy fix).
+  const hideHeaders = selPrograms.size === 1;
+  const anySelected = selPrograms.size + selTypes.size + selDepts.size > 0;
+  const clearAll = () => {
+    setSelPrograms(new Set());
+    setSelTypes(new Set());
+    setSelDepts(new Set());
   };
 
-  const navLabel =
-    "min-w-[72px] shrink-0 text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground";
-
   return (
-    <>
-      {showProgramNav ? (
-        <div className="sticky top-[60px] z-30 -mx-6 border-b border-border bg-background px-6 py-3">
-          <div className="mb-2.5 flex flex-wrap items-center gap-2.5">
-            <span className={navLabel}>Program</span>
-            {sections.map((g) => {
-              const isActive = g.id === activeId;
-              const isOther = g.label === "Other";
-              return (
-                <button
-                  key={g.id}
-                  type="button"
-                  onClick={() => jumpTo(g.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[13px] ${
-                    isActive
-                      ? "border-border bg-card font-medium text-foreground shadow-xs"
-                      : "border-border/60 bg-transparent text-muted-foreground hover:bg-accent"
-                  } ${isOther ? "italic" : ""}`}
-                >
-                  {g.label}
-                  <span className="text-[11px] text-muted-foreground">
-                    {g.members.length}
-                  </span>
-                </button>
-              );
-            })}
+    <div className="mt-6 flex flex-col gap-8 md:flex-row">
+      <aside className="md:w-[200px] md:shrink-0">
+        <div className="md:sticky md:top-[76px]">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              Filter
+            </span>
+            {anySelected && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="cursor-pointer text-[12px] font-medium text-[var(--color-primary-cornell-red)] hover:underline"
+              >
+                Clear
+              </button>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-            <span className={navLabel}>Appointment</span>
-            <RoleChipRow
-              faculty={allMembers}
-              active={appointment}
-              onChange={setAppointment}
+          {programOptions.length >= 2 && (
+            <RosterFacet
+              title="Program"
+              options={programOptions}
+              selected={selPrograms}
+              onToggle={makeToggle(selPrograms, setSelPrograms)}
             />
-          </div>
-        </div>
-      ) : (
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <span className={navLabel}>Appointment</span>
-          <RoleChipRow
-            faculty={allMembers}
-            active={appointment}
-            onChange={setAppointment}
+          )}
+          <RosterFacet
+            title="Membership type"
+            options={typeOptions}
+            selected={selTypes}
+            onToggle={makeToggle(selTypes, setSelTypes)}
+          />
+          <RosterFacet
+            title="Organizational unit"
+            options={deptOptions}
+            selected={selDepts}
+            onToggle={makeToggle(selDepts, setSelDepts)}
+            collapseAfter={8}
           />
         </div>
-      )}
+      </aside>
 
-      <div className={`flex flex-col gap-8 ${showProgramNav ? "mt-6" : ""}`}>
+      <div className="min-w-0 flex-1">
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span className="min-w-[72px] shrink-0 text-[11px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+            Appointment
+          </span>
+          <RoleChipRow faculty={allRows} active={appointment} onChange={setAppointment} />
+        </div>
+
         {sections.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No members match this appointment filter.
+            No members match these filters.
           </p>
         ) : (
-          sections.map((g) => (
-            <section key={g.id} id={g.id} className="scroll-mt-40">
-              <div className="mb-3 flex items-baseline justify-between border-b border-border pb-2">
-                <h2 className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                  {g.label}
-                </h2>
-                <span className="text-[11px] text-muted-foreground">
-                  {g.members.length} {g.members.length === 1 ? "member" : "members"}
-                </span>
-              </div>
-              <div className="flex flex-col">
-                {g.members.map((hit) => (
-                  <PersonRow key={hit.cwid} hit={hit} />
-                ))}
-              </div>
-            </section>
-          ))
+          <div className="flex flex-col gap-8">
+            {sections.map((g) => (
+              <section key={g.label}>
+                {!hideHeaders && (
+                  <div className="mb-3 flex items-baseline justify-between border-b border-border pb-2">
+                    <h2 className="text-[12px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                      {g.label}
+                    </h2>
+                    <span className="text-[11px] text-muted-foreground">
+                      {g.members.length} {g.members.length === 1 ? "member" : "members"}
+                    </span>
+                  </div>
+                )}
+                <div className="flex flex-col">
+                  {g.members.map((m) => (
+                    <PersonRow
+                      key={m.cwid}
+                      hit={m}
+                      trailingBadge={<MembershipBadge type={m.membershipType} />}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
         )}
-      </div>
 
-      <p className="sr-only" aria-live="polite">
-        {sections.reduce((n, g) => n + g.members.length, 0)} of {total} members
-        shown
-      </p>
-    </>
+        <p className="sr-only" aria-live="polite">
+          {finalRows.length} of {total} members shown
+        </p>
+      </div>
+    </div>
   );
 }
 
