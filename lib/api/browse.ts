@@ -34,6 +34,8 @@ export type BrowseDepartmentTopicChip = {
 export type BrowseDepartment = {
   code: string;
   name: string;
+  officialName: string | null;
+  compactName: string | null;
   slug: string;
   category: DepartmentCategory;
   scholarCount: number;
@@ -75,6 +77,8 @@ export type BrowseData = {
 type DeptRow = {
   code: string;
   name: string;
+  officialName: string | null;
+  compactName: string | null;
   slug: string;
   category: string;
   scholarCount: number;
@@ -102,6 +106,8 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
     select: {
       code: true,
       name: true,
+      officialName: true,
+      compactName: true,
       slug: true,
       category: true,
       scholarCount: true,
@@ -194,6 +200,8 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
     return {
       code: d.code,
       name: d.name,
+      officialName: d.officialName,
+      compactName: d.compactName,
       slug: d.slug,
       category: cat,
       scholarCount: d.scholarCount,

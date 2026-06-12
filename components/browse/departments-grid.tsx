@@ -30,6 +30,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
+import { officialUnitName } from "@/lib/org-unit-names";
 
 const TYPE_FILTER_ORDER: ReadonlyArray<DepartmentCategory> = [
   "clinical",
@@ -117,18 +118,25 @@ function DepartmentsGridInner({
     }
     const needle = nameFilter.trim().toLowerCase();
     if (needle) {
+      // Match the official name (what's displayed) AND the raw ED name +
+      // compact form, so typing any of "Samuel J. Wood", "Library", or
+      // "Samuel J. Wood Library" finds the row after a curated rename.
       filtered = filtered.filter((d) =>
-        d.name.toLowerCase().includes(needle),
+        [officialUnitName(d), d.name, d.compactName ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
       );
     }
     const sorted = [...filtered];
+    // Sort by the displayed (official) name so the alphabetical order matches
+    // the visible labels.
+    const byName = (a: BrowseDepartment, b: BrowseDepartment) =>
+      officialUnitName(a).localeCompare(officialUnitName(b));
     if (sortMode === "count") {
-      sorted.sort(
-        (a, b) =>
-          b.scholarCount - a.scholarCount || a.name.localeCompare(b.name),
-      );
+      sorted.sort((a, b) => b.scholarCount - a.scholarCount || byName(a, b));
     } else {
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
+      sorted.sort(byName);
     }
     return sorted;
   }, [departments, activeTypes, sortMode, nameFilter]);
@@ -358,7 +366,7 @@ function DeptRowFlat({ dept }: { dept: BrowseDepartment }) {
           href={`/departments/${dept.slug}`}
           className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
         >
-          {dept.name}
+          {officialUnitName(dept)}
         </Link>
         <HeadLine dept={dept} />
       </div>
@@ -395,7 +403,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls={panelId}
-          aria-label={`${open ? "Collapse" : "Expand"} ${dept.name}${
+          aria-label={`${open ? "Collapse" : "Expand"} ${officialUnitName(dept)}${
             divisionCount ? `, ${divisionCount}` : ""
           }`}
           className="-mx-2 flex shrink-0 cursor-pointer items-center self-stretch rounded-sm px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-slate)] focus-visible:ring-offset-1"
@@ -414,7 +422,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
             href={`/departments/${dept.slug}`}
             className="inline-flex min-h-6 items-center text-base font-semibold text-foreground hover:text-[var(--color-accent-slate)]"
           >
-            {dept.name}
+            {officialUnitName(dept)}
           </Link>
           <HeadLine dept={dept} />
         </div>
@@ -466,7 +474,7 @@ function DeptRowExpandable({ dept }: { dept: BrowseDepartment }) {
           href={`/departments/${dept.slug}`}
           className="mt-3 inline-block text-sm text-[var(--color-accent-slate)] hover:underline"
         >
-          View {dept.name} &rarr;
+          View {officialUnitName(dept)} &rarr;
         </Link>
       </div>
     </div>

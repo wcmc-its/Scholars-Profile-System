@@ -187,15 +187,20 @@ export async function ProfileView({ slug }: { slug: string }) {
                       profile↔department link graph. Subtle (color inherited,
                       hover-underline) per the division-page convention. */}
                   {(() => {
+                    // Prefer the curated official department name (e.g. "Samuel
+                    // J. Wood Library") over the raw ED `primaryDepartment`
+                    // string; falls back when no curated name is set.
+                    const deptName =
+                      profile.departmentOfficialName ?? profile.primaryDepartment;
                     const deptLabel = profile.departmentSlug ? (
                       <Link
                         href={`/departments/${profile.departmentSlug}`}
                         className="hover:underline"
                       >
-                        {profile.primaryDepartment}
+                        {deptName}
                       </Link>
                     ) : (
-                      profile.primaryDepartment
+                      deptName
                     );
                     return profile.division ? (
                       <>

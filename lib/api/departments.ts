@@ -74,7 +74,14 @@ export type DepartmentStats = {
 };
 
 export type DepartmentDetail = {
-  dept: { code: string; name: string; slug: string; description: string | null };
+  dept: {
+    code: string;
+    name: string;
+    officialName: string | null;
+    compactName: string | null;
+    slug: string;
+    description: string | null;
+  };
   chair: DepartmentChair | null;
   topResearchAreas: DepartmentTopicArea[];
   divisions: DepartmentDivisionSummary[];
@@ -242,7 +249,14 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   };
 
   return {
-    dept: { code: dept.code, name: dept.name, slug: dept.slug, description: merged.description },
+    dept: {
+      code: dept.code,
+      name: dept.name,
+      officialName: dept.officialName,
+      compactName: dept.compactName,
+      slug: dept.slug,
+      description: merged.description,
+    },
     chair,
     topResearchAreas,
     divisions,
