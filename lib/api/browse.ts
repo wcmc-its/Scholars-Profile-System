@@ -15,6 +15,7 @@
  */
 import { prisma } from "@/lib/db";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import type {
   DepartmentCategory,
 } from "@/lib/department-categories";
@@ -206,7 +207,13 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
       category: cat,
       scholarCount: d.scholarCount,
       chairName: d.chairCwid
-        ? (chairMap.get(d.chairCwid)?.preferredName ?? null)
+        ? // External leader (not a WCM scholar, e.g. Joel Stein / Rehab Med):
+          // the scholar lookup misses, so fall back to the curated name so the
+          // chair still shows on browse. Rendered as plain text (no link), so
+          // no slug is needed — chairSlug stays null below.
+          (chairMap.get(d.chairCwid)?.preferredName ??
+          EXTERNAL_LEADERS[d.code]?.name ??
+          null)
         : null,
       chairSlug: d.chairCwid
         ? (chairMap.get(d.chairCwid)?.slug ?? null)
