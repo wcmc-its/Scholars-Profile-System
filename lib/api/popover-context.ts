@@ -125,6 +125,25 @@ export async function fetchRecentPubs(
   limit = 2,
 ): Promise<RecentPub[]> {
   if (!cwid) return [];
+  // #928 P2 — in-VPC (MENTORING_COPUB_BRIDGE on) the live ReciterDB query is
+  // unreachable, so read the scholar's recent CONFIRMED publications from the
+  // local publication_author + publication tables instead — the same source
+  // every sibling lookup in this module already uses, so the popover is
+  // internally consistent. Off ⇒ the live ReciterDB query (unchanged).
+  if (process.env.MENTORING_COPUB_BRIDGE === "on") {
+    const rows = await prisma.$queryRaw<
+      Array<{ pmid: string; title: string | null; year: number | null }>
+    >`
+      SELECT p.pmid AS pmid, p.title AS title, p.year AS year
+        FROM publication_author pa
+        JOIN publication p ON p.pmid = pa.pmid
+       WHERE pa.cwid = ${cwid}
+         AND pa.is_confirmed = 1
+       ORDER BY p.year DESC, p.pmid DESC
+       LIMIT ${limit}
+    `.catch(() => []);
+    return rows.map((r) => ({ pmid: r.pmid, title: r.title ?? "", year: r.year }));
+  }
   return await withReciterConnection(async (conn) => {
     type Row = { pmid: number | bigint; title: string | null; year: number | null };
     const rows = (await conn.query(
