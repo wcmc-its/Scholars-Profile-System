@@ -221,7 +221,9 @@ export async function getDepartmentsList(): Promise<BrowseDepartment[]> {
 
 export async function getCentersList(): Promise<BrowseCenter[]> {
   const centers = await prisma.center.findMany({
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    // Browse lists centers alphabetically by name (comms 2026-06-12); sortOrder
+    // is retained on the row for other surfaces but no longer drives browse.
+    orderBy: { name: "asc" },
     select: {
       code: true,
       name: true,
