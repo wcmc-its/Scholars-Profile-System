@@ -27,5 +27,5 @@ export const EXTERNAL_LEADERS: Record<string, ExternalLeader> = {
   // Joel Stein — Chair of Rehabilitation Medicine (N1540). Primary appointment
   // at Columbia, so not a WCM scholar and has no profile to link. Photo is
   // available through the Directory API by CWID. (comms 2026-06-12)
-  N1540: { cwid: "jos7021", name: "Joel Stein", primaryTitle: null },
+  N1540: { cwid: "jos7021", name: "Joel Stein", primaryTitle: "Chair of Rehabilitation Medicine" },
 };
