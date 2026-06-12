@@ -378,6 +378,30 @@ describe("EditPage router — coi-gap rail visibility (SELF_EDIT_COI_GAP_HINT)",
     expect(screen.getByTestId("rail-coi-gap")).toBeTruthy();
   });
 
+  it("renders a quiet count chip = number of relationships to review", () => {
+    render(<EditPage ctx={gapCtx} mode="self" />);
+    const item = screen.getByTestId("rail-coi-gap");
+    // The count is exposed by an accessible "to review" label (a cue, not a
+    // digit-only alert badge), and the visible text is the count.
+    expect(item.querySelector('[aria-label="1 to review"]')?.textContent).toBe("1");
+  });
+
+  it("caps the count chip display at 9+ (keeping the true count in the a11y label)", () => {
+    const many: EditContext = {
+      ...ctx,
+      unmatchedPubmedCoi: Array.from({ length: 12 }, (_, i) => ({
+        key: `e${i}`,
+        entity: `Entity ${i}`,
+        tier: "High" as const,
+        newestTs: 0,
+        sources: [{ id: `s${i}`, pmid: `p${i}`, sourceSentence: "x", year: null }],
+      })),
+    };
+    render(<EditPage ctx={many} mode="self" />);
+    const item = screen.getByTestId("rail-coi-gap");
+    expect(item.querySelector('[aria-label="12 to review"]')?.textContent).toBe("9+");
+  });
+
   it("?attr=coi-gap renders the panel with the verbatim source sentence + tier chip", () => {
     render(<EditPage ctx={gapCtx} mode="self" attr="coi-gap" />);
     expect(document.querySelector('[data-slot="coi-gap-panel"]')).not.toBeNull();

@@ -41,6 +41,13 @@ export type RailItem = {
    * stays highlighted so the scholar keeps their place in the tree.
    */
   child?: boolean;
+  /**
+   * Optional count of items to review, rendered as a quiet muted pill after the
+   * label (capped at "9+"). Used by "From your publications" to show how many
+   * High-tier COI-gap relationships are pending — a discoverability cue, never an
+   * alert. Omit (or 0) to render no chip.
+   */
+  count?: number;
 };
 
 export type AttributeRailProps = {
@@ -176,6 +183,22 @@ function RailLink({
       >
         <span className="flex items-center gap-2">
           {item.label}
+          {item.count != null && item.count > 0 && (
+            // Quiet "to review" count — a muted pill, deliberately NOT an alert
+            // badge. Capped at "9+" so it stays a cue, not a scoreboard. White-on-
+            // maroon variant when the row is active.
+            <span
+              aria-label={`${item.count} to review`}
+              className={cn(
+                "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1.5 py-0.5 text-[0.6875rem] leading-none font-semibold tabular-nums",
+                isActive
+                  ? "text-apollo-maroon-foreground bg-white/20"
+                  : "text-muted-foreground border-apollo-border-strong bg-apollo-border border",
+              )}
+            >
+              {item.count > 9 ? "9+" : item.count}
+            </span>
+          )}
           {kind === "sourced" && <span className="sr-only"> (sourced from WCM systems)</span>}
           {kind === "readonly" && <span className="sr-only"> (read-only, from WCM systems)</span>}
         </span>
