@@ -3521,7 +3521,7 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "METHODS_LENS_FAMILY_DEFINITIONS",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "PROFILE_FACET_REDESIGN",
