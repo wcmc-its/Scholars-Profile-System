@@ -21,7 +21,7 @@ import { FamilyPublicationFeed } from "@/components/method/publication-feed";
 import { FamilyScholarsRow } from "@/components/method/family-scholars-row";
 import { SupercategoryAllWorkFeed } from "@/components/method/supercategory-all-work-feed";
 import { ScrollFade } from "@/components/ui/scroll-fade";
-import { familySegmentFor } from "@/lib/method-url";
+import { familySegmentFor, resolveFamilyParam } from "@/lib/method-url";
 import type { MethodPublicationHit } from "@/lib/api/methods";
 
 // ---------------------------------------------------------------------------
@@ -87,18 +87,18 @@ function SupercategoryFamilyLayoutInner({
 }) {
   const searchParams = useSearchParams();
   const requestedFamily = searchParams.get("family");
-  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(
-    requestedFamily && families.some((f) => f.familyId === requestedFamily)
-      ? requestedFamily
-      : null,
-  );
+  // `familyId` re-mints on every A2 rebuild, so resolve the deep-link by the
+  // STABLE label-slug (bare id accepted for back-compat) — never a raw-id match,
+  // which silently drifts to a different family after a rebuild (#940).
+  const resolvedFamilyId = resolveFamilyParam(requestedFamily, families);
+  const [activeFamilyId, setActiveFamilyId] = useState<string | null>(resolvedFamilyId);
 
   // Scroll the panel into view when a `?family=` deep-link resolves, once per
   // distinct requested family (mirrors the subtopic layout's scroll behavior).
   const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
-    if (requestedFamily && families.some((f) => f.familyId === requestedFamily)) {
-      setActiveFamilyId(requestedFamily);
+    if (resolvedFamilyId) {
+      setActiveFamilyId(resolvedFamilyId);
       if (lastScrolledRef.current !== requestedFamily) {
         lastScrolledRef.current = requestedFamily;
         requestAnimationFrame(() => {
@@ -106,7 +106,7 @@ function SupercategoryFamilyLayoutInner({
         });
       }
     }
-  }, [requestedFamily, families]);
+  }, [resolvedFamilyId, requestedFamily]);
 
   const hasFamilies = families.length > 0;
   const activeMeta = activeFamilyId ? familyMeta[activeFamilyId] ?? null : null;
