@@ -20,13 +20,21 @@ const { withReciterConnection } = vi.hoisted(() => ({
   withReciterConnection: vi.fn(),
 }));
 
-const { phdFindMany, postdocFindMany, studentPhdProgramFindMany, scholarFindMany } =
-  vi.hoisted(() => ({
-    phdFindMany: vi.fn(async () => [] as unknown[]),
-    postdocFindMany: vi.fn(async () => [] as unknown[]),
-    studentPhdProgramFindMany: vi.fn(async () => [] as unknown[]),
-    scholarFindMany: vi.fn(async () => [] as unknown[]),
-  }));
+const {
+  phdFindMany,
+  postdocFindMany,
+  studentPhdProgramFindMany,
+  scholarFindMany,
+  menteeCopubFindMany,
+  menteeCopubFindFirst,
+} = vi.hoisted(() => ({
+  phdFindMany: vi.fn(async () => [] as unknown[]),
+  postdocFindMany: vi.fn(async () => [] as unknown[]),
+  studentPhdProgramFindMany: vi.fn(async () => [] as unknown[]),
+  scholarFindMany: vi.fn(async () => [] as unknown[]),
+  menteeCopubFindMany: vi.fn(async () => [] as unknown[]),
+  menteeCopubFindFirst: vi.fn(async () => null as unknown),
+}));
 
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
 vi.mock("@/lib/db", () => ({
@@ -35,6 +43,7 @@ vi.mock("@/lib/db", () => ({
     postdocMentorRelationship: { findMany: postdocFindMany },
     studentPhdProgram: { findMany: studentPhdProgramFindMany },
     scholar: { findMany: scholarFindMany },
+    menteeCopublication: { findMany: menteeCopubFindMany, findFirst: menteeCopubFindFirst },
   },
 }));
 
@@ -157,5 +166,76 @@ describe("getMenteesForMentor — copubSourceAvailable (issue #843)", () => {
     // Only the AOC query ran — the empty-relationships guard short-circuits
     // before the co-pub query.
     expect(call).toBe(1);
+  });
+});
+
+describe("getMenteesForMentor — MENTORING_COPUB_BRIDGE (issue #443)", () => {
+  beforeEach(() => {
+    process.env.MENTORING_COPUB_BRIDGE = "on";
+    // AOC (reporting_students_mentors) query returns nothing; the bridge
+    // replaces the co-pub query, so the co-pub branch never calls ReciterDB.
+    withReciterConnection.mockImplementation(
+      async (fn: (conn: { query: () => Promise<unknown[]> }) => Promise<unknown>) =>
+        fn({ query: async () => [] }),
+    );
+    menteeCopubFindMany.mockResolvedValue([]);
+    menteeCopubFindFirst.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    delete process.env.MENTORING_COPUB_BRIDGE;
+    menteeCopubFindMany.mockReset();
+    menteeCopubFindFirst.mockReset();
+  });
+
+  it("serves counts + preview from the bridge table and never runs the live co-pub query", async () => {
+    menteeCopubFindMany.mockResolvedValue([
+      {
+        menteeCwid: "m1",
+        count: 3,
+        preview: [{ pmid: 111, title: "Shared paper", journal: "J. Test", year: 2021 }],
+      },
+    ]);
+
+    const { mentees, copubSourceAvailable } = await getMenteesForMentor("mentor01");
+
+    expect(copubSourceAvailable).toBe(true);
+    expect(mentees).toHaveLength(1);
+    expect(mentees[0].copublicationCount).toBe(3);
+    expect(mentees[0].copublicationPreview).toEqual([
+      { pmid: 111, title: "Shared paper", journal: "J. Test", year: 2021 },
+    ]);
+    // Only the AOC query runs via ReciterDB; the count is served from the table.
+    expect(withReciterConnection).toHaveBeenCalledTimes(1);
+    expect(menteeCopubFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a genuine zero as available when the table has data but none for this mentor", async () => {
+    menteeCopubFindMany.mockResolvedValue([]); // no rows for this mentor
+    menteeCopubFindFirst.mockResolvedValue({ mentorCwid: "someoneElse" }); // table non-empty
+
+    const { mentees, copubSourceAvailable } = await getMenteesForMentor("mentor01");
+
+    expect(copubSourceAvailable).toBe(true);
+    expect(mentees[0].copublicationCount).toBe(0);
+  });
+
+  it("degrades to unavailable when the bridge table is empty (not yet imported)", async () => {
+    menteeCopubFindMany.mockResolvedValue([]);
+    menteeCopubFindFirst.mockResolvedValue(null); // table globally empty
+
+    const { mentees, copubSourceAvailable } = await getMenteesForMentor("mentor01");
+
+    expect(copubSourceAvailable).toBe(false);
+    expect(mentees[0].copublicationCount).toBe(0);
+  });
+
+  it("degrades honestly (no 500) when the bridge read throws", async () => {
+    menteeCopubFindMany.mockRejectedValue(new Error("aurora down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { copubSourceAvailable } = await getMenteesForMentor("mentor01");
+
+    expect(copubSourceAvailable).toBe(false);
   });
 });

@@ -240,6 +240,33 @@ model PostdocMentorRelationship {
   @@map("postdoc_mentor_relationship")
 }
 
+/// Issue #443 — Pre-computed per-(mentor, mentee) co-publication counts, bridged
+/// from WCM ReciterDB via S3 because the SPS VPC can't reach ReciterDB to run the
+/// live co-pub query at request time (`getMenteesForMentor`). The export step
+/// (`etl:mentoring:export-copubs`, run WCM-side) computes the count + a 3-pub
+/// preview from `analysis_summary_author`/`_article` and writes NDJSON to S3; the
+/// import step (`etl:mentoring:import-copubs`, run in-VPC) upserts this table.
+/// The read layer reads this instead of the live query when
+/// `MENTORING_COPUB_BRIDGE=on` (import-then-flip).
+///
+/// No FK to Scholar — mentees are frequently unlinked alumni with no local
+/// Scholar row (~75% of co-pub-bearing mentees, GH #181), identical to how the
+/// mentor-relationship tables are handled. Composite PK (mentor, mentee); the
+/// read query filters mentor= + mentee IN(), served by the PK's leading column.
+model MenteeCopublication {
+  mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  /// Number of publications co-authored by the mentor and this mentee.
+  count       Int      @map("copub_count")
+  /// Up to 3 most-recent shared publications for the inline chip expansion
+  /// (#185), shape `[{ pmid, title, journal, year }]` (matches `CoPublication`).
+  preview     Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([mentorCwid, menteeCwid])
+  @@map("mentee_copublication")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni

@@ -352,6 +352,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "MENTORING_COPUB_BRIDGE",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -3413,6 +3417,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "SELF_EDIT_COI_GAP_HINT",
+                "Value": "on",
+              },
+              {
+                "Name": "MENTORING_COPUB_BRIDGE",
                 "Value": "on",
               },
               {
