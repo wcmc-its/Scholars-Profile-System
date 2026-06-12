@@ -118,7 +118,13 @@ jobs:
       - name: Build image
         run: |
           set -euo pipefail
+          # NEXT_DEPLOYMENT_ID = the deploying commit SHA, inlined by Next for
+          # version-skew protection (Dockerfile `build` stage): a client loaded
+          # from an older build that navigates onto a newer task hard-reloads
+          # instead of silently dropping the click. The ETL image below is not a
+          # Next app, so it does not get the arg.
           docker build \
+            --build-arg NEXT_DEPLOYMENT_ID="${{ github.sha }}" \
             --tag "${{ steps.outputs.outputs.ecr_uri }}:${{ github.sha }}" \
             --tag "${{ steps.outputs.outputs.ecr_uri }}:latest" \
             .
