@@ -29,6 +29,7 @@ import {
 } from "@/lib/api/manual-layer";
 import { isFundingActive } from "@/lib/api/search-funding";
 import { extractMeshDescriptorUis } from "@/lib/mesh-descriptor-uis";
+import { extractLastNameSort } from "@/lib/name-sort";
 import { isCenterMembershipActive } from "@/lib/api/centers";
 import { isTrainingOnlyGrant } from "@/lib/grants/training-exclusions";
 import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
@@ -125,21 +126,10 @@ export function trailingNameSlices(name: string): string[] {
   return slices;
 }
 
-/**
- * Extract the surname token from a "Given Last" preferredName. Strips
- * trailing generational suffixes ("Jr", "II", etc.) so "Smith Jr" yields
- * "Smith". Returns "" for empty input. Used to populate the keyword
- * `lastNameSort` field on each people doc — see issue #82.
- */
-export function extractLastNameSort(name: string): string {
-  if (!name) return "";
-  const raw = name.trim().split(/\s+/).filter(Boolean);
-  if (raw.length === 0) return "";
-  const SUFFIXES = /^(Jr|Sr|I{1,3}|IV|V|VI{0,3}|Esq)\.?,?$/i;
-  let end = raw.length;
-  while (end > 1 && SUFFIXES.test(raw[end - 1])) end -= 1;
-  return raw[end - 1].toLowerCase();
-}
+// `extractLastNameSort` now lives in `@/lib/name-sort` (single source of truth,
+// shared with the center roster sort); imported above and re-exported here so
+// existing `from "@/lib/search-index-docs"` consumers keep working.
+export { extractLastNameSort };
 
 /**
  * Build a "first + last" slice that drops middle tokens, so users typing
