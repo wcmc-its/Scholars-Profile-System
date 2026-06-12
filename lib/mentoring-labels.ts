@@ -85,6 +85,23 @@ const DISTRIBUTION_BUCKET_ORDER: MentoringDistributionBucket[] = [
   "other",
 ];
 
+/** Human-readable bucket labels for the distribution subhead, pluralized by
+ *  count. The degree-track buckets (MD/PhD/MD-PhD) carry "student" — MD here
+ *  means AOC / Area-of-Concentration medical students, so "MD students" is
+ *  correct. Postdoc/ECR are roles, so they pluralize without "student".
+ *  "other" stays bare in both forms. */
+const DISTRIBUTION_BUCKET_LABEL: Record<
+  MentoringDistributionBucket,
+  { singular: string; plural: string }
+> = {
+  MD: { singular: "MD student", plural: "MD students" },
+  PhD: { singular: "PhD student", plural: "PhD students" },
+  "MD-PhD": { singular: "MD-PhD student", plural: "MD-PhD students" },
+  Postdoc: { singular: "Postdoc", plural: "Postdocs" },
+  ECR: { singular: "early-career researcher", plural: "early-career researchers" },
+  other: { singular: "other", plural: "other" },
+};
+
 /** Map a raw `programType` to the coarse distribution bucket used in the
  *  section-header subhead. Distinct from `formatProgramLabel` (which is
  *  per-chip and may keep finer program names): the subhead is a one-line
@@ -103,7 +120,8 @@ export function mentoringDistributionBucket(
 }
 
 /** Format the degree-bucket distribution for the Mentoring section
- *  subhead — e.g. `"7 MD · 8 PhD · 6 MD-PhD · 3 Postdoc"`.
+ *  subhead — e.g. `"7 MD students · 8 PhD students · 6 MD-PhD students · 3 Postdocs"`.
+ *  Each bucket label is pluralized by count (singular at exactly 1).
  *
  *  Returns `null` when the distribution should not render and the caller
  *  should fall back to the plain "N mentees" subhead. Two suppression
@@ -111,8 +129,9 @@ export function mentoringDistributionBucket(
  *
  *   - Fewer than `MENTORING_DISTRIBUTION_THRESHOLD` mentees — the simple
  *     count carries enough shape on small lists.
- *   - Only one non-empty bucket — "8 mentees — 8 PhD" is tautological
- *     noise. The distribution exists to show *split*, not affirm uniformity.
+ *   - Only one non-empty bucket — "8 mentees — 8 PhD students" is
+ *     tautological noise. The distribution exists to show *split*, not
+ *     affirm uniformity.
  *
  *  Buckets render in fixed order (MD, PhD, MD-PhD, Postdoc, ECR, other);
  *  zero-count buckets are omitted so the line stays compact.
@@ -131,7 +150,13 @@ export function formatMentoringDistribution(
   const present = DISTRIBUTION_BUCKET_ORDER.filter((b) => (counts.get(b) ?? 0) > 0);
   if (present.length < 2) return null;
 
-  return present.map((b) => `${counts.get(b)} ${b}`).join(" · ");
+  return present
+    .map((b) => {
+      const count = counts.get(b) ?? 0;
+      const { singular, plural } = DISTRIBUTION_BUCKET_LABEL[b];
+      return `${count} ${count === 1 ? singular : plural}`;
+    })
+    .join(" · ");
 }
 
 /** Single "terminal year" for sort tiebreaking across mixed mentee types

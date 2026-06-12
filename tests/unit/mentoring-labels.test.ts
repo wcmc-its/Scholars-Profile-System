@@ -95,8 +95,8 @@ describe("formatMentoringDistribution", () => {
   });
 
   it("returns null at threshold when every mentee falls in one bucket", () => {
-    // "8 mentees — 8 PhD" is tautological; the helper signals the
-    // caller to fall back to the plain count.
+    // "8 mentees — 8 PhD students" is tautological; the helper signals
+    // the caller to fall back to the plain count.
     expect(
       formatMentoringDistribution(mentees(Array(8).fill("PhD"))),
     ).toBeNull();
@@ -114,7 +114,7 @@ describe("formatMentoringDistribution", () => {
       "AOC",
     ]);
     expect(formatMentoringDistribution(list)).toBe(
-      "1 MD · 2 PhD · 1 MD-PhD · 3 Postdoc · 1 ECR",
+      "1 MD student · 2 PhD students · 1 MD-PhD student · 3 Postdocs · 1 early-career researcher",
     );
   });
 
@@ -131,7 +131,7 @@ describe("formatMentoringDistribution", () => {
       "AOC",
       "PhD",
     ]);
-    expect(formatMentoringDistribution(list)).toBe("7 MD · 1 PhD");
+    expect(formatMentoringDistribution(list)).toBe("7 MD students · 1 PhD student");
   });
 
   it("buckets unknown and null programTypes into 'other'", () => {
@@ -146,7 +146,7 @@ describe("formatMentoringDistribution", () => {
       null,
       "Mystery Program",
     ]);
-    expect(formatMentoringDistribution(list)).toBe("7 MD · 2 other");
+    expect(formatMentoringDistribution(list)).toBe("7 MD students · 2 other");
   });
 });
 

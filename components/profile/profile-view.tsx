@@ -476,7 +476,8 @@ export async function ProfileView({ slug }: { slug: string }) {
               0,
             );
             // Issue #201 priority #5 — degree-bucket distribution
-            // ("7 MD · 8 PhD · 6 MD-PhD") renders on its own row beneath
+            // ("7 MD students · 8 PhD students · 6 MD-PhD students")
+            // renders on its own row beneath
             // the count once the portfolio is large enough that the
             // breakdown carries shape the bare count doesn't. Helper
             // returns null below the threshold or when every mentee

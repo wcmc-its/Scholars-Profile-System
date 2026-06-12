@@ -289,12 +289,36 @@ describe("EditPage router — the Apollo shell + rail", () => {
     // 'public' → "Public" label per SPEC table A.
     expect(screen.getByTestId("email-visibility-label").textContent).toBe("Public");
     expect(screen.getByTestId("email-visibility-explainer")).toBeTruthy();
+    // #919 — usage line, first-person for self.
+    expect(screen.getByTestId("email-usage-note").textContent).toBe(
+      "This is the contact email shown on your public profile.",
+    );
+    // #919 — download / on-network policy note (general; no numeric cap surfaced).
+    const policy = screen.getByTestId("email-download-policy");
+    expect(policy.textContent).toMatch(/signed in or on the campus network/i);
+    expect(policy.textContent).toMatch(/internal directory export/i);
+    expect(policy.textContent).toMatch(/that access is logged/i);
+    expect(policy.textContent).toMatch(/excluded from the export/i);
+    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
+    expect(policy.textContent).not.toMatch(/50/);
     expect(screen.getByText("This section is not editable.")).toBeTruthy();
     // Read-only: no control that writes the release code, just the SOR link.
     const link = screen.getByTestId("email-web-directory-link");
     expect(link.getAttribute("href")).toBe(
       "https://directory.weill.cornell.edu/update/profile/index",
     );
+  });
+
+  it("Email tab reframes the usage line + policy note to the scholar's name for a superuser (#919)", () => {
+    render(<EditPage ctx={superuserCtx} mode="superuser" attr="email" />);
+    // possessive → "{ScholarName}'s" (preferredName), matching the explainer's framing.
+    expect(screen.getByTestId("email-usage-note").textContent).toBe(
+      "This is the contact email shown on Alex Other's public profile.",
+    );
+    const policy = screen.getByTestId("email-download-policy");
+    expect(policy.textContent).toMatch(/download Alex Other's email/i);
+    expect(policy.textContent).not.toMatch(/\byour\b/i);
+    expect(policy.textContent).toMatch(/bulk download of large groups is not supported/i);
   });
 
   it("Email tab labels 'institution' as Institution only", () => {
