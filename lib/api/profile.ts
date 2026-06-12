@@ -6,6 +6,7 @@
  * profile page server component imports this directly for ISR; the equivalent
  * external API endpoint would call the same function.
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import {
   getEffectiveOverview,
@@ -557,10 +558,10 @@ function ensureOwnerInChipWindow<T extends { cwid: string }>(
   return next;
 }
 
-export async function getScholarFullProfileBySlug(
+export const getScholarFullProfileBySlug = cache(async (
   slug: string,
   now: Date = new Date(),
-): Promise<ProfilePayload | null> {
+): Promise<ProfilePayload | null> => {
   const scholar = await prisma.scholar.findFirst({
     where: { slug, deletedAt: null, status: "active" },
     include: {
@@ -619,51 +620,97 @@ export async function getScholarFullProfileBySlug(
   });
   if (!scholar) return null;
 
-  // The effective `overview` merges a manual `field_override` over the ETL
-  // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
-  // sanitized on write, so it is rendered as-is.
-  const effectiveOverview = await getEffectiveOverview(
-    scholar.cwid,
-    scholar.overview,
-    prisma,
-  );
-
-  // Authorships for this scholar — drives the publications list. Pull author rows
-  // for every publication so coauthor chips can be rendered. Issue #63: drop
-  // Retraction / Erratum rows at fetch time so the list, header counts, and
-  // keyword aggregation all see the same filtered set.
-  const authorships = await prisma.publicationAuthor.findMany({
-    where: {
-      cwid: scholar.cwid,
-      isConfirmed: true,
-      publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
-    },
-    include: {
-      publication: {
+  // These reads are all keyed only on the (already-fetched) scholar cwid and
+  // have no data dependency on one another, so they run concurrently in one
+  // round of awaits rather than serially. Anything that consumes `authorships`
+  // (suppressions, ranking) stays sequential below, after this resolves.
+  //   - effectiveOverview      — field_override('overview') merge (#356)
+  //   - authorships            — drives the publications list (#63 type filter)
+  //   - nihProfileRow          — preferred NIH RePORTER profile_id (#90)
+  //   - families               — gated Methods-lens rows (#799); [] when off
+  //   - manualHighlightPmids   — field_override('selectedHighlightPmids') (#836);
+  //                              read only when the flag is on, else null (dark)
+  const [effectiveOverview, authorships, nihProfileRow, families, manualHighlightPmids] =
+    await Promise.all([
+      // The effective `overview` merges a manual `field_override` over the ETL
+      // column at read time (#356, lib/api/manual-layer.ts). A self-edited bio is
+      // sanitized on write, so it is rendered as-is.
+      getEffectiveOverview(scholar.cwid, scholar.overview, prisma),
+      // Authorships for this scholar — drives the publications list. Pull author
+      // rows for every publication so coauthor chips can be rendered. Issue #63:
+      // drop Retraction / Erratum rows at fetch time so the list, header counts,
+      // and keyword aggregation all see the same filtered set.
+      prisma.publicationAuthor.findMany({
+        where: {
+          cwid: scholar.cwid,
+          isConfirmed: true,
+          publication: { publicationType: { notIn: [...NEVER_DISPLAY_TYPES] } },
+        },
         include: {
-          authors: {
-            orderBy: { position: "asc" },
-            include: {
-              scholar: {
-                select: {
-                  cwid: true,
-                  slug: true,
-                  preferredName: true,
-                  deletedAt: true,
-                  status: true,
-                  roleCategory: true,
+          publication: {
+            // Tight projection — the publications table carries the huge
+            // `fullAuthorsString` (db.Text) plus ~12 scalars this read never
+            // touches. Select only the scalars the mappers below consume
+            // (verified against every `a.publication.<field>` access) so the row
+            // stays small. `authors` + `publicationScores` are unchanged (nested
+            // relations are listed alongside scalars under `select`).
+            select: {
+              pmid: true,
+              title: true,
+              authorsString: true,
+              journal: true,
+              year: true,
+              publicationType: true,
+              citationCount: true,
+              dateAddedToEntrez: true,
+              doi: true,
+              pmcid: true,
+              pubmedUrl: true,
+              meshTerms: true,
+              abstract: true,
+              impactScore: true,
+              authors: {
+                orderBy: { position: "asc" },
+                include: {
+                  scholar: {
+                    select: {
+                      cwid: true,
+                      slug: true,
+                      preferredName: true,
+                      deletedAt: true,
+                      status: true,
+                      roleCategory: true,
+                    },
+                  },
                 },
               },
+              // ReCiterAI per-scholar publication score (D-08). Filtered to this
+              // scholar's row only; PublicationScore is keyed by (cwid, pmid)
+              // unique pair so this returns at most one row per publication.
+              publicationScores: { where: { cwid: scholar.cwid } },
             },
           },
-          // ReCiterAI per-scholar publication score (D-08). Filtered to this
-          // scholar's row only; PublicationScore is keyed by (cwid, pmid)
-          // unique pair so this returns at most one row per publication.
-          publicationScores: { where: { cwid: scholar.cwid } },
         },
-      },
-    },
-  });
+      }),
+      // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used to
+      // render the outbound "View NIH portfolio on RePORTER" link in the Funding
+      // section header. Null when no mapping was found by the etl:nih-profile
+      // resolver.
+      prisma.personNihProfile.findFirst({
+        where: { cwid: scholar.cwid, isPreferred: true },
+        select: { nihProfileId: true },
+      }),
+      // #799 — family-primary Methods lens rows (gated + overlay-filtered).
+      // Returns [] when the lens flag is off, so this is a no-op until on.
+      loadScholarFamilies(scholar.cwid),
+      // #836 — the scholar's manual Highlights override, in stored order, read
+      // only when the flag is on (else null, keeping the feature fully dark).
+      // The precedence/visibility resolution happens below once the ranked AI
+      // set exists; this fetch is independent and only the read is hoisted here.
+      isManualHighlightsEnabled()
+        ? getSelectedHighlightPmids(scholar.cwid, prisma)
+        : Promise.resolve(null),
+    ]);
 
   // #356 — publication suppression. A publication this scholar has hidden
   // (a per-author suppression on their own cwid), or one taken down whole,
@@ -781,15 +828,13 @@ export async function getScholarFullProfileBySlug(
     0,
     MAX_SELECTED_HIGHLIGHTS,
   );
-  // #836 — a scholar who opted in to choosing their own Highlights manually has
-  // a `field_override(selectedHighlightPmids)` row; when the flag is on it takes
-  // precedence over the AI selection, in stored order, restricted to their still-
-  // visible publications (`pickManualHighlights` drops any suppressed/out-of-set
-  // pmid and falls back to the AI set if none survive). Flag off ⇒ never read the
-  // override, so the feature is fully dark.
-  const manualHighlightPmids = isManualHighlightsEnabled()
-    ? await getSelectedHighlightPmids(scholar.cwid, prisma)
-    : null;
+  // #836 — `manualHighlightPmids` (the scholar's stored override, or null when
+  // the flag is off / no override) was fetched in the cwid-only Promise.all
+  // above. When the flag is on it takes precedence over the AI selection, in
+  // stored order, restricted to their still-visible publications
+  // (`pickManualHighlights` drops any suppressed/out-of-set pmid and falls back
+  // to the AI set if none survive). Flag off ⇒ the read was never issued, so the
+  // feature is fully dark.
   let highlights: ProfilePublication[];
   if (manualHighlightPmids && manualHighlightPmids.length > 0) {
     // Only when a manual override is actually present do we build the pickable
@@ -858,18 +903,10 @@ export async function getScholarFullProfileBySlug(
     .sort((a, b) => tier(a.source) - tier(b.source));
   const annotatedAppointments = annotateAppointments(sortedAppointments, now);
 
-  // Issue #90 — preferred NIH RePORTER profile_id for this scholar, used
-  // to render the outbound "View NIH portfolio on RePORTER" link in the
-  // Funding section header. Null when no mapping was found by the
-  // etl:nih-profile resolver.
-  const nihProfileRow = await prisma.personNihProfile.findFirst({
-    where: { cwid: scholar.cwid, isPreferred: true },
-    select: { nihProfileId: true },
-  });
-
-  // #799 — family-primary Methods lens rows (gated + overlay-filtered). Returns
-  // [] when the lens flag is off, so this is a no-op until it is turned on.
-  const families = await loadScholarFamilies(scholar.cwid);
+  // `nihProfileRow` (#90 — preferred NIH RePORTER profile_id, drives the
+  // "View NIH portfolio on RePORTER" link) and `families` (#799 — gated +
+  // overlay-filtered Methods-lens rows, [] when the lens flag is off) were both
+  // fetched in the cwid-only Promise.all above.
 
   return {
     cwid: scholar.cwid,
@@ -1033,7 +1070,7 @@ export async function getScholarFullProfileBySlug(
         : null,
     nihReporterProfileId: nihProfileRow?.nihProfileId ?? null,
   };
-}
+});
 
 /**
  * Slugs of all active, non-deleted, non-suppressed scholars — used by Next.js

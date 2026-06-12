@@ -693,17 +693,29 @@ export async function searchFunding(opts: {
   const personCwids = [
     ...new Set(r.hits.hits.flatMap((h) => (h._source.people ?? []).map((p) => p.cwid))),
   ];
-  const roleByCwid =
+  // Issue #94 — the investigator-facet bucket cwids (aggregation top-500 plus
+  // any active selections). Computed here so its display-name hydration can run
+  // concurrently with the per-row `roleByCwid` lookup above — two independent
+  // Prisma reads against different cwid sets, no data dependency between them.
+  const investigatorBuckets = r.aggregations?.investigators?.keys.buckets ?? [];
+  const facetCwids = new Set(investigatorBuckets.map((b) => b.key));
+  if (filters.investigator) for (const c of filters.investigator) facetCwids.add(c);
+  const facetCwidList = Array.from(facetCwids);
+  const [roleRows, facetScholarRows] = await Promise.all([
     personCwids.length > 0
-      ? new Map(
-          (
-            await prisma.scholar.findMany({
-              where: { cwid: { in: personCwids } },
-              select: { cwid: true, roleCategory: true },
-            })
-          ).map((s) => [s.cwid, s.roleCategory]),
-        )
-      : new Map<string, string | null>();
+      ? prisma.scholar.findMany({
+          where: { cwid: { in: personCwids } },
+          select: { cwid: true, roleCategory: true },
+        })
+      : Promise.resolve([] as { cwid: string; roleCategory: string | null }[]),
+    facetCwidList.length === 0
+      ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
+      : prisma.scholar.findMany({
+          where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
+          select: { cwid: true, preferredName: true, slug: true },
+        }),
+  ]);
+  const roleByCwid = new Map(roleRows.map((s) => [s.cwid, s.roleCategory]));
 
   // PLAN P4 — funded-outputs count X (per project), at QUERY TIME, no reindex.
   // The funding hit already carries each grant's funded pmids (`publications[]`),
@@ -840,20 +852,11 @@ export async function searchFunding(opts: {
   );
 
   // Issue #94 — hydrate Investigator facet buckets with display name +
-  // slug + avatar in a single Prisma round trip. Active selections may
-  // not appear in the top-500 result set, so include them in the lookup
-  // so the rail can pin them with a real label rather than the bare CWID.
-  const investigatorBuckets = r.aggregations?.investigators?.keys.buckets ?? [];
-  const facetCwids = new Set(investigatorBuckets.map((b) => b.key));
-  if (filters.investigator) for (const c of filters.investigator) facetCwids.add(c);
-  const facetCwidList = Array.from(facetCwids);
-  const scholarRows = facetCwidList.length === 0
-    ? []
-    : await prisma.scholar.findMany({
-        where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
-        select: { cwid: true, preferredName: true, slug: true },
-      });
-  const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
+  // slug + avatar. `investigatorBuckets` / `facetCwidList` / `facetScholarRows`
+  // were resolved above (the facet display-name lookup runs in the same
+  // Promise.all as the per-row role lookup). Active selections may not appear in
+  // the top-500 result set, so they were already folded into `facetCwidList`.
+  const scholarByCwid = new Map(facetScholarRows.map((s) => [s.cwid, s]));
   const investigators: WcmInvestigatorFacetBucket[] = investigatorBuckets.flatMap((b) => {
     const s = scholarByCwid.get(b.key);
     if (!s) return []; // scholar deleted/suppressed since the index was built

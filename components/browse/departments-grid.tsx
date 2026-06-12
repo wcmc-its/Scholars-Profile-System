@@ -10,9 +10,10 @@
  *   - sort toggle (far right): Name (A–Z) default, or Faculty count
  *
  * Type and sort live in the URL (`?type=clinical,basic&sort=count`) via
- * `router.replace`, so deep-links and back-button restore those. The
- * name filter is intentionally not URL-synced — it's a narrow-the-view
- * affordance, not a shareable selection.
+ * `history.replaceState`, so deep-links and back-button restore those (the
+ * filtered/sorted view is fully client-derived, so no RSC refetch is needed on
+ * a toggle). The name filter is intentionally not URL-synced — it's a
+ * narrow-the-view affordance, not a shareable selection.
  *
  * Client Component so filter/sort run instantly without a server round-
  * trip and without invalidating the parent /browse page's ISR. The full
@@ -25,7 +26,7 @@
  * placeholder so the dept-name column stays aligned across the list.
  */
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
 import type { BrowseDepartment } from "@/lib/api/browse";
 import type { DepartmentCategory } from "@/lib/department-categories";
@@ -88,7 +89,6 @@ function DepartmentsGridInner({
 }: {
   departments: BrowseDepartment[];
 }) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -141,7 +141,14 @@ function DepartmentsGridInner({
     }
     const qs = params.toString();
     const url = qs ? `${pathname}?${qs}#departments` : `${pathname}#departments`;
-    router.replace(url, { scroll: false });
+    // Update the URL in place with the native History API rather than
+    // router.replace(). The filtered/sorted result is fully client-derivable
+    // from the already-shipped `departments` prop (the `visible` useMemo), and
+    // type/sort are read via useSearchParams() — which Next keeps in sync with
+    // history.replaceState — so a router navigation would only trigger a
+    // needless RSC refetch of /browse per toggle. replaceState does not scroll,
+    // matching the prior { scroll: false }. (Mirrors profile-pubs-cluster.tsx.)
+    window.history.replaceState(null, "", url);
   }
 
   function toggleType(t: DepartmentCategory) {
