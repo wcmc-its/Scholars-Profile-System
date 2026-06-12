@@ -76,6 +76,7 @@ import {
 } from "@/lib/api/match-provenance";
 import {
   resolveConceptMode,
+  resolvePeopleConceptPrecount,
   resolvePubRecencyMode,
   resolvePublicationDepartmentFilter,
   type PubRecencyMode,
@@ -1010,11 +1011,18 @@ export async function searchPeople(opts: {
   // result is sparse (< MESH_ESCALATION_THRESHOLD), OR-in a
   // `terms { publicationMeshUi }` admission so concept-tagged scholars surface
   // on an otherwise-thin page (e.g. tylenol → acetaminophen authors). The
-  // decision is COUNT-GATED by a cheap size:0 pre-count of the lexical
-  // admission so common queries keep count == lexical and aren't diluted; the
-  // two-pass cost is paid only on the eligible/sparse path. The floor is
-  // ambiguity OR an ultra-short matched form — NOT anchor status — so an
-  // unanchored entry-term still escalates (the tylenol 0→N recall win).
+  // decision is COUNT-GATED so common queries keep count == lexical and aren't
+  // diluted; the two-pass cost is paid only on the eligible/sparse path. The
+  // floor is ambiguity OR an ultra-short matched form — NOT anchor status — so
+  // an unanchored entry-term still escalates (the tylenol 0→N recall win).
+  //
+  // HOW the count gate is sourced is the B2 lever below: by default a dedicated
+  // cheap size:0 pre-count of the lexical predicate decides up front; with
+  // SEARCH_PEOPLE_CONCEPT_PRECOUNT=off the count comes from the main search's
+  // OWN total and we re-run escalated only on sparse (one fewer round-trip on
+  // the common non-sparse path). Both source the SAME lexical total against the
+  // SAME predicate, so the escalation decision — and therefore `badge == list`
+  // — is identical under either state.
   //
   // EXCLUDES `concept` scope: that scope already pushes the SAME
   // `terms { publicationMeshUi }` clause into the always-on `queryFilter`
@@ -1023,14 +1031,62 @@ export async function searchPeople(opts: {
   // every doc and make the lexical clause optional — silently widening the
   // precision gate from "lexical ∩ tagged" to "all tagged", the opposite of
   // what concept scope promises. Under `concept` the gate is the admission, so
-  // escalation is both redundant and harmful (and the pre-count is wasted).
+  // escalation is both redundant and harmful (and any pre-count is wasted).
   const meshConceptEligible =
     applyTopicTemplate &&
     opts.scope !== "concept" &&
     meshDescendantUis.length > 0 &&
     !opts.meshAmbiguous &&
     (opts.meshMatchedFormLength ?? 0) >= MESH_MIN_MATCHED_FORM_LEN;
-  if (meshConceptEligible) {
+
+  // The escalate-on-sparse mutation, factored out so the flag-on pre-count path
+  // and the flag-off reorder path apply the IDENTICAL admission. applyTopic-
+  // Template ⇒ queryBranch IS the topic-shape body (the name / dept / hybrid
+  // arms are mutually exclusive shapes), so its `bool.must` is the lexical
+  // clause. Wrap it in a should that ALSO admits concept-tagged docs. A
+  // concept-only doc (no lexical hit) scores ONLY this terms clause's constant
+  // boost (MESH_ADMIT_WEIGHT[tier]); a genuine lexical hit scores BM25 over the
+  // high-evidence topic fields (publicationTitles^6, publicationMesh^4, …),
+  // which empirically runs well above the admit boosts (entry 0.7 … exact 3),
+  // so lexical sorts on top and the admit weights only order the concept-only
+  // tail by match-type trust (see docs/search-recall.md; the runtime order
+  // check is the gate). `must`, the facet aggs, and the count-only body all
+  // reference queryBranch, so this single mutation is reflected in every body
+  // that carries the topic clause — the count-only badge and the full search
+  // share the admitted set however the gate was sourced.
+  const applyConceptEscalation = () => {
+    const topicBool = (
+      queryBranch as { bool: { must: Record<string, unknown>[] } }
+    ).bool;
+    topicBool.must = [
+      {
+        bool: {
+          should: [
+            ...topicBool.must,
+            {
+              terms: {
+                publicationMeshUi: meshDescendantUis,
+                boost: MESH_ADMIT_WEIGHT[meshTier],
+              },
+            },
+          ],
+          minimum_should_match: 1,
+        },
+      },
+    ];
+  };
+
+  // B2 — SEARCH_PEOPLE_CONCEPT_PRECOUNT (default on = today's pre-count path).
+  const conceptPrecount = resolvePeopleConceptPrecount();
+
+  // Flag-ON (default): a dedicated size:0 pre-count of the LEXICAL predicate
+  // gates the escalation up front, so the count/full bodies built below
+  // dispatch once (already escalated when sparse). Mutating AFTER the pre-count
+  // request was dispatched keeps that count lexical. Flag-OFF: skip the
+  // dedicated pre-count — the reordered count-only and full paths below read
+  // the main search's own total (already track_total_hits) and re-run escalated
+  // only on sparse, dropping this hop on the common non-sparse case (the win).
+  if (meshConceptEligible && conceptPrecount) {
     const preCount = await searchClient().search({
       index: PEOPLE_INDEX,
       body: {
@@ -1042,40 +1098,7 @@ export async function searchPeople(opts: {
     const lexicalTotal =
       (preCount.body as unknown as { hits: { total: { value: number } } })
         .hits.total.value;
-    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) {
-      // applyTopicTemplate ⇒ queryBranch IS the topic-shape body (the name /
-      // dept / hybrid arms are mutually exclusive shapes), so its `bool.must`
-      // is the lexical clause. Wrap it in a should that ALSO admits
-      // concept-tagged docs. A concept-only doc (no lexical hit) scores ONLY
-      // this terms clause's constant boost (MESH_ADMIT_WEIGHT[tier]); a genuine
-      // lexical hit scores BM25 over the high-evidence topic fields
-      // (publicationTitles^6, publicationMesh^4, …), which empirically runs well
-      // above the admit boosts (entry 0.7 … exact 3), so lexical sorts on top
-      // and the admit weights only order the concept-only tail by match-type
-      // trust (see docs/search-recall.md; the runtime order check is the gate).
-      // Mutated AFTER the pre-count's request was dispatched, so the count above
-      // stays lexical; `must` references this object, so the count-only badge
-      // below and the full search share the admitted set.
-      const topicBool = (
-        queryBranch as { bool: { must: Record<string, unknown>[] } }
-      ).bool;
-      topicBool.must = [
-        {
-          bool: {
-            should: [
-              ...topicBool.must,
-              {
-                terms: {
-                  publicationMeshUi: meshDescendantUis,
-                  boost: MESH_ADMIT_WEIGHT[meshTier],
-                },
-              },
-            ],
-            minimum_should_match: 1,
-          },
-        },
-      ];
-    }
+    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) applyConceptEscalation();
   }
 
   // Perf — count-only fast path (inactive tab). `hits.total.value` reflects
@@ -1084,17 +1107,35 @@ export async function searchPeople(opts: {
   // same total the full search would, far cheaper. Returns the same empty
   // shape as the no-topic short-circuit above.
   if (opts.countOnly) {
-    const countResp = await searchClient().search({
-      index: PEOPLE_INDEX,
-      body: {
-        size: 0,
-        track_total_hits: true,
-        query: { bool: { must, filter: queryFilter } },
-      } as object,
-    });
-    const total =
-      (countResp.body as unknown as { hits: { total: { value: number } } })
-        .hits.total.value;
+    const runCount = async () =>
+      (
+        (
+          await searchClient().search({
+            index: PEOPLE_INDEX,
+            body: {
+              size: 0,
+              track_total_hits: true,
+              query: { bool: { must, filter: queryFilter } },
+            } as object,
+          })
+        ).body as unknown as { hits: { total: { value: number } } }
+      ).hits.total.value;
+    let total = await runCount();
+    // Flag-OFF reorder: no up-front pre-count mutated the predicate, so the
+    // count above is the LEXICAL total. Escalate + re-count only when eligible
+    // and sparse — the IDENTICAL deterministic decision the flag-on pre-count
+    // makes, off the same lexical predicate and threshold, so the badge equals
+    // the full list under BOTH flag states. (Flag-ON already escalated up
+    // front when sparse, so `runCount` returned the escalated total in one hop
+    // and this never fires.)
+    if (
+      meshConceptEligible &&
+      !conceptPrecount &&
+      total < MESH_ESCALATION_THRESHOLD
+    ) {
+      applyConceptEscalation();
+      total = await runCount();
+    }
     return {
       hits: [],
       total,
@@ -1467,7 +1508,25 @@ export async function searchPeople(opts: {
     },
   };
 
-  const resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+  let resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+
+  // Flag-OFF reorder: the dispatch above ran the LEXICAL query (no up-front
+  // pre-count mutated it). Read its own total — the body is track_total_hits —
+  // and, only when eligible and sparse, escalate the SHARED query objects
+  // (`body.query` resolves through `must` to `queryBranch`) and re-run the full
+  // search escalated. Non-sparse is the common case and stops at one dispatch
+  // (the win: the dedicated pre-count hop is gone); the rare sparse path pays a
+  // second full search with aggs + hydration. Flag-ON already escalated up
+  // front when sparse, so this never fires and the single dispatch stands.
+  if (meshConceptEligible && !conceptPrecount) {
+    const lexicalTotal =
+      (resp.body as unknown as { hits: { total: { value: number } } }).hits.total
+        .value;
+    if (lexicalTotal < MESH_ESCALATION_THRESHOLD) {
+      applyConceptEscalation();
+      resp = await searchClient().search({ index: PEOPLE_INDEX, body: body as object });
+    }
+  }
 
   type Hit = {
     _source: {
