@@ -784,7 +784,6 @@ function ModeTabs({
         label="Scholars"
         count={peopleCount}
         active={activeType === "people"}
-        title="Scholars whose own profile matches your search — counted differently from the Publications tab's author list (authors of the matched publications)."
       />
       <ModeTab
         href={pubHref}
@@ -2445,7 +2444,7 @@ function FacetSidebarPubs({
           selection); empty `departmentItems` ⇒ no group. Collapses past 6
           like the People-tab dept facet. */}
       {departmentItems.length > 0 ? (
-        <FacetGroup label="Department" collapseAfter={6}>
+        <FacetGroup label="Department / division / center" collapseAfter={6}>
           {departmentItems.map((d) => (
             <FacetCheckbox
               key={d.value}
@@ -2453,6 +2452,7 @@ function FacetSidebarPubs({
               count={d.count}
               isActive={d.isActive}
               href={d.href}
+              wrap
             />
           ))}
         </FacetGroup>
