@@ -91,15 +91,28 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
     return true;
   }
 
-  /** Inline one-field set; optimistic with revert on failure. */
+  /** Per-cwid write chain so two quick edits to the SAME row don't race. The
+   *  API guards against concurrent modification ("record has changed since last
+   *  read"); a second field edit fired before the first POST returns would 500
+   *  and revert (e.g. setting Start then End in quick succession). */
+  const writeQueue = React.useRef<Map<string, Promise<unknown>>>(new Map());
+
+  /** Inline one-field set; optimistic with revert on failure, serialized per row. */
   async function patch(cwid: string, field: Partial<RosterMember>) {
     setError(null);
     const prev = members.find((m) => m.cwid === cwid);
     if (!prev) return;
     const next = { ...prev, ...field };
     setMembers((ms) => ms.map((m) => (m.cwid === cwid ? next : m)));
-    const ok = await post({ cwid, action: "set", ...field });
-    if (!ok) setMembers((ms) => ms.map((m) => (m.cwid === cwid ? prev : m)));
+    const prior = writeQueue.current.get(cwid) ?? Promise.resolve();
+    const run = prior
+      .catch(() => {})
+      .then(async () => {
+        const ok = await post({ cwid, action: "set", ...field });
+        if (!ok) setMembers((ms) => ms.map((m) => (m.cwid === cwid ? prev : m)));
+      });
+    writeQueue.current.set(cwid, run);
+    await run;
   }
 
   async function add() {
@@ -120,7 +133,7 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
       startDate: null,
       endDate: null,
     };
-    setMembers((ms) => [...ms, member]);
+    setMembers((ms) => [member, ...ms]);
     setAddValue(null);
     const ok = await post({ cwid: picked.cwid, action: "add" });
     if (!ok) setMembers((ms) => ms.filter((m) => m.cwid !== picked.cwid));
@@ -166,6 +179,16 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
       description="The people listed on this center. Listing a member does not grant them edit access."
     >
       <div className="flex flex-col gap-4">
+        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
+          <p className="text-sm font-medium">Add member</p>
+          <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
+          <div className="flex justify-end">
+            <Button type="button" variant="apollo" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
+              {adding ? "Adding…" : "Add"}
+            </Button>
+          </div>
+        </div>
+
         <label className="flex items-center gap-2 self-end text-sm">
           <Checkbox
             checked={showActiveOnly}
@@ -180,7 +203,8 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
             This roster is empty. Add the first member to populate this center.
           </p>
         ) : (
-          <table className="w-full text-sm" data-testid="center-roster-table">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm" data-testid="center-roster-table">
             <thead className="bg-apollo-surface-2 text-muted-foreground text-left">
               <tr className="border-apollo-border border-b">
                 <th className="px-3 py-2 font-medium">Member</th>
@@ -292,17 +316,8 @@ export function CenterRosterCard({ unitCode, members: initial, programs, today }
               )}
             </tbody>
           </table>
-        )}
-
-        <div className="border-apollo-border flex flex-col gap-3 rounded-md border p-4" data-slot="center-roster-add">
-          <p className="text-sm font-medium">Add member</p>
-          <DirectoryPeopleTypeahead idPrefix="roster" value={addValue} onChange={setAddValue} />
-          <div className="flex justify-end">
-            <Button type="button" variant="apollo" onClick={add} disabled={!addValue || adding} data-testid="center-roster-add">
-              {adding ? "Adding…" : "Add"}
-            </Button>
           </div>
-        </div>
+        )}
 
         {error && (
           <Alert variant="destructive">
