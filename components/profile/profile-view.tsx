@@ -55,7 +55,10 @@ export async function ProfileView({ slug }: { slug: string }) {
   // `institution` email is revealed to internal viewers out-of-band by the
   // <ContactEmailReveal> island below (uncacheable /api/profile/[cwid]/contact-
   // email), never baked into the shared cache.
-  const profile = await getScholarFullProfileBySlug(slug, new Date());
+  // Call with just `slug` (the loader defaults `now` to a fresh Date inside its
+  // body) so this render and generateMetadata's identical-arg call share one
+  // React `cache()` entry per request instead of computing the payload twice.
+  const profile = await getScholarFullProfileBySlug(slug);
   if (!profile) notFound();
 
   // #536 — hidden identity classes (doctoral students) have no public profile

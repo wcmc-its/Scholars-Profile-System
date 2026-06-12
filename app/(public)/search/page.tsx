@@ -349,11 +349,91 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
     knownDepartments: peopleClassifierSets.departments,
   });
 
+  // Perf — start the active tab's FULL faceted search NOW, concurrently with the
+  // three count-only badge queries below, instead of constructing it as a JSX
+  // argument that only begins once the badge `await Promise.all` has settled. The
+  // full search has no data dependency on the badge counts, so hoisting it removes
+  // one serial OpenSearch round-trip from the critical path to the results. The
+  // #861 shell-streaming design is preserved: the shell still paints on the badge
+  // counts and the Suspense child still awaits this promise. Only the active
+  // type's promise is created — the inactive branches stay null and fire no query.
+  // The bare `.catch(() => {})` marks the promise handled so an early rejection
+  // (before the Suspense child attaches its await) can't surface as an unhandled
+  // rejection; the awaiting result component still receives the real value/error.
+  const activePeoplePromise =
+    type === "people"
+      ? searchPeople({
+          q,
+          page,
+          sort: sort as PeopleSort,
+          filters: {
+            deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
+            personType: personType.length > 0 ? personType : undefined,
+            activity: activity.length > 0 ? activity : undefined,
+            pi,
+            piMin,
+          },
+          relevanceMode: peopleRelevanceMode,
+          shape: peopleQueryShape,
+          meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
+          meshMatchTier: meshTier,
+          meshAmbiguous: effectiveMeshResolution?.ambiguous,
+          meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
+          scope,
+          deptLeadershipBoost: resolveDeptLeadershipBoost(),
+          genericDemote,
+          contentQuery,
+          matchProvenance: resolvePeopleMatchProvenance(),
+          meshDescriptorName: taxonomyMatch.meshResolution?.name,
+          matchExplain: resolvePeopleMatchExplain(),
+        })
+      : null;
+  const activePubsPromise =
+    type === "publications"
+      ? searchPublications({
+          q,
+          page,
+          sort: sort as PublicationsSort,
+          filters: {
+            yearMin,
+            yearMax,
+            publicationType: publicationType || undefined,
+            journal: journal.length > 0 ? journal : undefined,
+            wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
+            wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
+            department: pubDepartment.length > 0 ? pubDepartment : undefined,
+            mentoringPrograms:
+              mentoringProgram.length > 0 ? mentoringProgram : undefined,
+          },
+          meshResolution: effectiveMeshResolution,
+          meshStrict,
+          genericDemote,
+          contentQuery,
+          highlightMatches: resolvePublicationHighlight(),
+          matchProvenance: resolvePublicationMatchProvenance(),
+        })
+      : null;
+  const activeFundingPromise =
+    type === "funding"
+      ? searchFunding({
+          q,
+          page,
+          sort: sort as FundingSort,
+          filters: fundingFilters,
+          meshResolution: effectiveMeshResolution,
+          scope,
+        })
+      : null;
+  activePeoplePromise?.catch(() => {});
+  activePubsPromise?.catch(() => {});
+  activeFundingPromise?.catch(() => {});
+
   // Tab badge counts for all three corpora, count-only (size:0, no aggs, no
-  // hydration). The active tab's hits + facets come from a separate full search
-  // streamed inside <Suspense> below, so the shell (header, chip, tabs, counts)
-  // paints without waiting on the faceted query. `hits.total.value` is computed
-  // from the same query predicate, so these badge counts equal a full search.
+  // hydration). The active tab's hits + facets come from the hoisted full search
+  // above, streamed inside <Suspense> below, so the shell (header, chip, tabs,
+  // counts) paints without waiting on the faceted query. `hits.total.value` is
+  // computed from the same query predicate, so these badge counts equal a full
+  // search.
   const searchesStart = performance.now();
   const [peopleResult, pubsResult, fundingResult] = await Promise.all([
     searchPeople({
@@ -561,34 +641,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 wcmAuthor={wcmAuthor}
                 department={pubDepartment}
                 mentoringProgram={mentoringProgram}
-                resultPromise={searchPublications({
-                  q,
-                  page,
-                  sort: sort as PublicationsSort,
-                  filters: {
-                    yearMin,
-                    yearMax,
-                    publicationType: publicationType || undefined,
-                    journal: journal.length > 0 ? journal : undefined,
-                    wcmAuthorRole:
-                      wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
-                    wcmAuthor: wcmAuthor.length > 0 ? wcmAuthor : undefined,
-                    department:
-                      pubDepartment.length > 0 ? pubDepartment : undefined,
-                    mentoringPrograms:
-                      mentoringProgram.length > 0 ? mentoringProgram : undefined,
-                  },
-                  meshResolution: effectiveMeshResolution,
-                  meshStrict,
-                  // Issue #692 — generic-term demotion on the streamed pub tab.
-                  genericDemote,
-                  contentQuery,
-                  // SEARCH_PUB_HIGHLIGHT — mark matched terms in the title on the
-                  // SSR render so direct navigation shows highlights too.
-                  highlightMatches: resolvePublicationHighlight(),
-                  // SEARCH_PUB_MATCH_PROVENANCE — #688-parity MeSH note on SSR.
-                  matchProvenance: resolvePublicationMatchProvenance(),
-                })}
+                resultPromise={activePubsPromise!}
                 meshResolution={effectiveMeshResolution}
                 chipMode={chipMode}
                 broadenHref={buildMeshHref(sp, "off")}
@@ -605,16 +658,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
-                resultPromise={searchFunding({
-                  q,
-                  page,
-                  sort: sort as FundingSort,
-                  filters: fundingFilters,
-                  meshResolution: effectiveMeshResolution,
-                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
-                  // (in lockstep with the countOnly badge call above).
-                  scope,
-                })}
+                resultPromise={activeFundingPromise!}
               />
             ) : (
               <PeopleResults
@@ -629,43 +673,7 @@ async function SearchBody({ searchParams }: { searchParams: SP }) {
                 scope={scope}
                 concept={concept}
                 scopeHrefs={scopeHrefs}
-                resultPromise={searchPeople({
-                  q,
-                  page,
-                  sort: sort as PeopleSort,
-                  filters: {
-                    deptDiv: deptDiv.length > 0 ? deptDiv : undefined,
-                    personType: personType.length > 0 ? personType : undefined,
-                    activity: activity.length > 0 ? activity : undefined,
-                    pi,
-                    piMin,
-                  },
-                  relevanceMode: peopleRelevanceMode,
-                  shape: peopleQueryShape,
-                  meshDescendantUis: meshOff ? undefined : taxonomyMatch.meshResolution?.descendantUis,
-                  // #726 — tier + ambiguity/length floor (lockstep with the
-                  // countOnly badge call above, so badge == list).
-                  meshMatchTier: meshTier,
-                  meshAmbiguous: effectiveMeshResolution?.ambiguous,
-                  meshMatchedFormLength: effectiveMeshResolution?.matchedForm.length,
-                  // PLAN R5 / handoff item 3 — concept-only result-SET gate
-                  // (kept in lockstep with the countOnly badge call above).
-                  scope,
-                  deptLeadershipBoost: resolveDeptLeadershipBoost(),
-                  // Issue #692 — generic-term demotion on the streamed people
-                  // tab: gates/highlights on the content query (this is the SSR
-                  // render the screenshot showed un-demoted before the fix).
-                  genericDemote,
-                  contentQuery,
-                  // Issue #688 — MeSH match-provenance on the SSR path too, so
-                  // the "Why this match" note renders on direct navigation, not
-                  // just on a client-side /api/search fetch.
-                  matchProvenance: resolvePeopleMatchProvenance(),
-                  meshDescriptorName: taxonomyMatch.meshResolution?.name,
-                  // Issue #702 — pub-evidence highlighting + "Matched on" chip so
-                  // a publication-only match isn't left bare on the SSR render.
-                  matchExplain: resolvePeopleMatchExplain(),
-                })}
+                resultPromise={activePeoplePromise!}
               />
             )}
           </React.Suspense>

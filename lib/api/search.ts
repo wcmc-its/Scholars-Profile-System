@@ -1398,6 +1398,25 @@ export async function searchPeople(opts: {
   const body = {
     from: page * PAGE_SIZE,
     size: PAGE_SIZE,
+    // Perf — return only the scalars the People hit mapper reads (verified
+    // against the `Hit._source` type + the mapper below). Without this,
+    // OpenSearch ships the entire `_source` per hit (incl. concatenated
+    // abstracts) only to be discarded. Highlight fragments arrive on
+    // `hit.highlight`, independent of `_source`, so they are unaffected.
+    _source: [
+      "cwid",
+      "slug",
+      "preferredName",
+      "primaryTitle",
+      "primaryDepartment",
+      "deptName",
+      "divisionName",
+      "personType",
+      "publicationCount",
+      "grantCount",
+      "hasActiveGrants",
+      "publicationMeshUi",
+    ],
     // OpenSearch's default cap of 10000 short-circuits the total counter
     // and would make the subhead read "10,000 publications" even when
     // there are 90k. Costs more on truly broad queries but the people
@@ -2461,12 +2480,23 @@ export async function searchPublications(opts: {
   const facetCwids = new Set(authorBuckets.map((b) => b.key));
   if (filters.wcmAuthor) for (const c of filters.wcmAuthor) facetCwids.add(c);
   const facetCwidList = Array.from(facetCwids);
-  const scholarRows = facetCwidList.length === 0
-    ? []
-    : await prisma.scholar.findMany({
-        where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
-        select: { cwid: true, preferredName: true, slug: true },
-      });
+  // The page's pmids (for the chip-data hydration below). Computed up here so
+  // the facet-scholar lookup and the author-chip lookup — independent reads,
+  // one against Prisma, one against publication_author — issue concurrently
+  // rather than serially. `fetchAuthorBylineForPmids` stays sequential after
+  // this resolves; it depends on `wcmAuthorsByPmid`.
+  const pmids = r.hits.hits.map((h) => h._source.pmid);
+  const [scholarRows, wcmAuthorsByPmid] = await Promise.all([
+    facetCwidList.length === 0
+      ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
+      : prisma.scholar.findMany({
+          where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
+          select: { cwid: true, preferredName: true, slug: true },
+        }),
+    // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
+    // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
+    fetchWcmAuthorsForPmids(pmids),
+  ]);
   const scholarByCwid = new Map(scholarRows.map((s) => [s.cwid, s]));
   const wcmAuthorBuckets: WcmAuthorFacetBucket[] = authorBuckets.flatMap((b) => {
     const s = scholarByCwid.get(b.key);
@@ -2498,10 +2528,8 @@ export async function searchPublications(opts: {
     }
   }
 
-  // Enrich hits with topic-page-style chip data (avatar + isFirst/isLast)
-  // by querying publication_author for the page's pmids. Bounded to PAGE_SIZE.
-  const pmids = r.hits.hits.map((h) => h._source.pmid);
-  const wcmAuthorsByPmid = await fetchWcmAuthorsForPmids(pmids);
+  // `pmids` + `wcmAuthorsByPmid` (the topic-page-style chip data) were resolved
+  // above in the same Promise.all as the facet-scholar lookup.
 
   // Issue #718 — a row whose displayable WCM author list is empty (its sole
   // confirmed WCM author was soft-deleted / left WCM) would otherwise render with
