@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import type { ConsoleLink } from "@/lib/auth/console-links";
+
 /**
  * Shared client hook for the impersonation state carried by the
  * `/api/auth/session` probe (#637 §6/§7, T6). The amber banner
@@ -44,10 +46,13 @@ export type ImpersonationProbe = {
   scholar: ProbeScholar | null;
   impersonating: ProbeImpersonating | null;
   canImpersonate: boolean;
-  /** Whether the real signed-in CWID may reach the admin Profiles roster
-   *  (`isSuperuser`). Independent of the impersonation flag — true for any
-   *  superuser, dark deployment or not. Gates the "Manage profiles" entry. */
-  canBrowseProfiles: boolean;
+  /** The role-aware `/edit` console entry points the viewer may open, computed
+   *  server-side (`lib/auth/console-links.ts`). Each renders as a row in the
+   *  account-menu's "Manage" section. `[]` (the default) renders no section —
+   *  a plain scholar, or a probe error. Replaces the old superuser-only
+   *  `canBrowseProfiles` flag, so a non-superuser steward / unit admin gets an
+   *  entry point too. */
+  consoleLinks: ConsoleLink[];
 };
 
 /**
@@ -82,7 +87,7 @@ export function useImpersonationProbe(enabled = true): ImpersonationProbe | null
           scholar: data.scholar ?? null,
           impersonating: data.impersonating ?? null,
           canImpersonate: data.canImpersonate ?? false,
-          canBrowseProfiles: data.canBrowseProfiles ?? false,
+          consoleLinks: data.consoleLinks ?? [],
         });
       })
       .catch(() => {

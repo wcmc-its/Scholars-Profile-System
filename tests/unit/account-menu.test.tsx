@@ -1,7 +1,32 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { AccountMenu } from "@/components/site/account-menu";
+import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
+import type { ImpersonationProbe } from "@/components/site/use-impersonation-probe";
+
+// The account-menu reads its admin/console rows from the `/api/auth/session`
+// probe. Mock the hook so the render branches are exercised deterministically
+// without a live fetch; it defaults to `null` (probe in flight / error), which
+// is exactly what the existing no-probe cases below expect.
+vi.mock("@/components/site/use-impersonation-probe", () => ({
+  useImpersonationProbe: vi.fn(() => null),
+}));
+
+function mockProbe(probe: Partial<ImpersonationProbe>): void {
+  vi.mocked(useImpersonationProbe).mockReturnValue({
+    authenticated: true,
+    scholar: null,
+    impersonating: null,
+    canImpersonate: false,
+    consoleLinks: [],
+    ...probe,
+  });
+}
+
+beforeEach(() => {
+  vi.mocked(useImpersonationProbe).mockReturnValue(null);
+});
 
 describe("AccountMenu — with a scholar row", () => {
   const scholar = { slug: "jane-smith", preferredName: "Jane Smith" };
@@ -52,5 +77,79 @@ describe("AccountMenu — without a scholar row (D5.3)", () => {
     const signout = screen.getByTestId("account-menu-signout");
     expect(signout.textContent).toBe("Sign out");
     expect(signout.closest("form")?.getAttribute("action")).toBe("/api/auth/logout");
+  });
+});
+
+describe("AccountMenu — role-aware console links", () => {
+  it("comms_steward with no profile (dwd2001) → Method Families link, no Edit/View", () => {
+    mockProbe({
+      scholar: null,
+      consoleLinks: [{ id: "methods", label: "Method Families", href: "/edit/methods" }],
+    });
+    render(<AccountMenu scholar={null} />);
+    // No scholar row → trigger still falls back to "Account".
+    expect(screen.getByText("Account")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    const methods = screen.getByTestId("account-menu-console-methods");
+    expect(methods.getAttribute("href")).toBe("/edit/methods");
+    expect(methods.textContent).toContain("Method Families");
+
+    // The console section renders even without a profile — the whole point.
+    expect(screen.queryByTestId("account-menu-edit")).toBeNull();
+    expect(screen.queryByTestId("account-menu-view")).toBeNull();
+    expect(screen.getByTestId("account-menu-signout")).toBeTruthy();
+  });
+
+  it("superuser → a single 'Manage profiles' link to the roster", () => {
+    const sue = { slug: "sue-admin", preferredName: "Sue Admin" };
+    mockProbe({
+      scholar: sue,
+      consoleLinks: [{ id: "manage-profiles", label: "Manage profiles", href: "/edit/scholars" }],
+    });
+    render(<AccountMenu scholar={sue} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    const manage = screen.getByTestId("account-menu-console-manage-profiles");
+    expect(manage.getAttribute("href")).toBe("/edit/scholars");
+    expect(screen.queryByTestId("account-menu-console-methods")).toBeNull();
+    expect(screen.queryByTestId("account-menu-console-units")).toBeNull();
+  });
+
+  it("unit Owner/Curator → 'Units you manage' link", () => {
+    mockProbe({
+      consoleLinks: [{ id: "units", label: "Units you manage", href: "/edit/units" }],
+    });
+    render(<AccountMenu scholar={null} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    const units = screen.getByTestId("account-menu-console-units");
+    expect(units.getAttribute("href")).toBe("/edit/units");
+  });
+
+  it("steward AND unit admin → both rows, Method Families before Units", () => {
+    mockProbe({
+      consoleLinks: [
+        { id: "methods", label: "Method Families", href: "/edit/methods" },
+        { id: "units", label: "Units you manage", href: "/edit/units" },
+      ],
+    });
+    render(<AccountMenu scholar={null} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    const rows = screen
+      .getAllByTestId(/^account-menu-console-/)
+      .map((el) => el.getAttribute("data-testid"));
+    expect(rows).toEqual(["account-menu-console-methods", "account-menu-console-units"]);
+  });
+
+  it("plain scholar (empty consoleLinks) → no console section, just Edit/View/Sign out", () => {
+    const jane = { slug: "jane-smith", preferredName: "Jane Smith" };
+    mockProbe({ scholar: jane, consoleLinks: [] });
+    render(<AccountMenu scholar={jane} />);
+    fireEvent.click(screen.getByLabelText("Account menu"));
+
+    expect(screen.queryAllByTestId(/^account-menu-console-/)).toHaveLength(0);
+    expect(screen.getByTestId("account-menu-edit")).toBeTruthy();
   });
 });
