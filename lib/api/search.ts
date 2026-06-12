@@ -1718,6 +1718,21 @@ export async function searchPublications(opts: {
    */
   countOnly?: boolean;
   /**
+   * Perf — hits-only mode for the sparse/empty concept-fallback preview
+   * (`#298`, gated by `resolveConceptFallbackSparseEnabled`). Like `countOnly`
+   * it omits the OpenSearch `aggs` block and the ≤500-row facet
+   * `scholar.findMany` (the wcmAuthors-bucket hydration) — the dominant cost —
+   * but UNLIKE `countOnly` it keeps `size`, scoring, and per-hit hydration
+   * (`fetchWcmAuthorsForPmids` / `fetchAuthorBylineForPmids` / impact) so the
+   * returned `hits` render in the fallback preview. `total` + hit order are
+   * byte-identical to a full search (same `query` / `post_filter` / sort);
+   * `facets` come back empty (every reader is `?.… ?? []`) and the caller
+   * discards them. Mentoring buckets are loaded only when a `mentoringPrograms`
+   * filter is active (so the filtered total stays correct); otherwise the
+   * stall-prone ReciterDB round-trip is skipped too.
+   */
+  hitsOnly?: boolean;
+  /**
    * Issue #645 — injectable "current year" for the recency-decay origin (§7 of
    * the spec). Defaults to `new Date().getUTCFullYear()`. Tests pass a fixed
    * value so the emitted `gauss.year.origin` (and the §5.4 calibration) is
@@ -2068,9 +2083,16 @@ export async function searchPublications(opts: {
   // mariadb pool's ~10s acquireTimeout on each, the root cause of the /search
   // SSR stall.
   const mentoringPrograms = filters.mentoringPrograms ?? [];
-  const mentoringBuckets = opts.countOnly
-    ? EMPTY_MENTORING_BUCKETS
-    : await getMentoringPmidBuckets();
+  // Perf (B4 hits-only fallback) — `getMentoringPmidBuckets()` is the ReciterDB
+  // round-trip the comment above flags as the /search SSR stall source.
+  // `countOnly` skips it (the badge never reads buckets); `hitsOnly` skips it
+  // too UNLESS a mentoring filter is active, in which case the buckets are
+  // needed to build `mentoringPmids` so the broad total/hits honor the filter
+  // (an active filter with an empty bucket set collapses to `match_none` below).
+  const mentoringBuckets =
+    opts.countOnly || (opts.hitsOnly === true && mentoringPrograms.length === 0)
+      ? EMPTY_MENTORING_BUCKETS
+      : await getMentoringPmidBuckets();
   const mentoringPmids = mentoringPrograms.length > 0
     ? Array.from(new Set(mentoringPrograms.flatMap((p) => mentoringBuckets.byProgram[p] ?? [])))
     : [];
@@ -2419,7 +2441,18 @@ export async function searchPublications(opts: {
     },
   };
 
-  const resp = await searchClient().search({ index: PUBLICATIONS_INDEX, body: body as object });
+  // Perf (B4 hits-only fallback) — drop the `aggs` block from the request when
+  // the caller only needs total + hits (sparse-concept preview). Same `query` /
+  // `post_filter` / `sort` / `size`, so `total` and the hit order are identical
+  // to a full search; only the server-side facet aggregations are skipped.
+  // Mirrors the `countOnly` short-circuit above, but keeps `size` and hit
+  // emission. The facet `scholar.findMany` is skipped separately below.
+  const skipAggs = opts.hitsOnly === true;
+  const { aggs: _aggs, ...bodyNoAggs } = body;
+  const resp = await searchClient().search({
+    index: PUBLICATIONS_INDEX,
+    body: (skipAggs ? bodyNoAggs : body) as object,
+  });
 
   type Hit = {
     _source: {
@@ -2487,7 +2520,11 @@ export async function searchPublications(opts: {
   // this resolves; it depends on `wcmAuthorsByPmid`.
   const pmids = r.hits.hits.map((h) => h._source.pmid);
   const [scholarRows, wcmAuthorsByPmid] = await Promise.all([
-    facetCwidList.length === 0
+    // Perf (B4 hits-only fallback) — skip the ≤500-row facet hydration when the
+    // caller discards facets; the per-hit `fetchWcmAuthorsForPmids` below
+    // (bounded to PAGE_SIZE) still runs so the preview rows render. With aggs
+    // skipped `facetCwidList` is already empty, so this gate is self-documenting.
+    opts.hitsOnly === true || facetCwidList.length === 0
       ? Promise.resolve([] as { cwid: string; preferredName: string; slug: string }[])
       : prisma.scholar.findMany({
           where: { cwid: { in: facetCwidList }, deletedAt: null, status: "active" },
