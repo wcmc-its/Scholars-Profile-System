@@ -88,8 +88,19 @@ export function EmailCard({ mode, scholarName, email, emailVisibility }: EmailCa
         </div>
       </dl>
 
+      <p className="text-muted-foreground text-sm" data-testid="email-usage-note">
+        This is the contact email shown on {possessive} public profile.
+      </p>
+
       <p className="text-muted-foreground text-sm" data-testid="email-visibility-explainer">
         {reframed}
+      </p>
+
+      <p className="text-muted-foreground text-sm" data-testid="email-download-policy">
+        WCM staff who are signed in or on the campus network may also download {possessive} email
+        as part of an internal directory export, and that access is logged. A &ldquo;Not
+        released&rdquo; email is excluded from the export, and bulk download of large groups is not
+        supported.
       </p>
 
       <div className="border-apollo-border flex flex-col items-start gap-2 border-t pt-3">
