@@ -2,12 +2,21 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDownIcon, ChevronLeftIcon, EyeIcon, UsersIcon } from "lucide-react";
+import {
+  Building2Icon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  EyeIcon,
+  FlaskConicalIcon,
+  type LucideIcon,
+  UsersIcon,
+} from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { useImpersonationProbe } from "@/components/site/use-impersonation-probe";
 import { ImpersonationSwitcher } from "@/components/site/impersonation-switcher";
+import type { ConsoleLink } from "@/lib/auth/console-links";
 import { profilePath } from "@/lib/profile-url";
 
 /**
@@ -19,12 +28,21 @@ import { profilePath } from "@/lib/profile-url";
  *   - Without a scholar row (a staff superuser without their own scholar
  *     profile — D5.3): Sign out only.
  *
- * **"View as" entry (#637, impersonation-spec.md §8).** When the
- * `/api/auth/session` probe reports `canImpersonate` (the real CWID is a
- * superuser, R1) a "View as…" row is added; it swaps the popover's contents to
- * the `ImpersonationSwitcher` panel (an in-place sub-view, not a nested
- * popover). A non-superuser — or a dark deployment — never sees the row, since
- * the probe returns `canImpersonate: false` when the feature flag is off.
+ * **Console entry points (role-aware-navigation-entry-points-spec.md).** The
+ * `/api/auth/session` probe reports `consoleLinks` — the ordered `/edit` console
+ * destinations the viewer is entitled to, computed server-side
+ * (`lib/auth/console-links.ts`). They render as a row each in the "Manage"
+ * section, **independent of whether the viewer has a scholar row** — so a
+ * `comms_steward` or unit Owner/Curator who is not a superuser (and may have no
+ * profile of their own, e.g. dwd2001) finally has a clickable path into the
+ * console. Replaces the prior superuser-only "Manage profiles" entry.
+ *
+ * **"View as" entry (#637, impersonation-spec.md §8).** When the probe reports
+ * `canImpersonate` (the real CWID is a superuser, R1) a "View as…" row is added;
+ * it swaps the popover's contents to the `ImpersonationSwitcher` panel (an
+ * in-place sub-view, not a nested popover). A non-superuser — or a dark
+ * deployment — never sees the row, since the probe returns
+ * `canImpersonate: false` when the feature flag is off.
  *
  * Sign out is a POST `<form>` (not a `<Link>`) — the /api/auth/logout route
  * accepts only POST, so a tricked GET cannot end a session. The Popover
@@ -33,6 +51,13 @@ import { profilePath } from "@/lib/profile-url";
 
 const ROW_CLASS =
   "block rounded-sm px-3 py-2 text-sm text-foreground hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none transition-colors";
+
+/** Leading icon per console destination, keyed by `ConsoleLink["id"]`. */
+const CONSOLE_LINK_ICON: Record<ConsoleLink["id"], LucideIcon> = {
+  "manage-profiles": UsersIcon,
+  methods: FlaskConicalIcon,
+  units: Building2Icon,
+};
 
 export type AccountMenuProps = {
   /**
@@ -58,10 +83,11 @@ export function AccountMenu({ scholar, showViewProfile = true }: AccountMenuProp
   // request (the cookie-forwarding auth probe is header-auth-slot.tsx's job).
   const probe = useImpersonationProbe(open);
   const canImpersonate = probe?.canImpersonate ?? false;
-  // A superuser also gets a "Manage profiles" entry to the admin roster
-  // (`/edit/scholars`). Independent of the impersonation flag, so it appears
-  // even when "View as" is dark.
-  const canBrowseProfiles = probe?.canBrowseProfiles ?? false;
+  // The role-aware console destinations the viewer may open (Manage profiles /
+  // Method Families / Units you manage), computed server-side. Empty for a plain
+  // scholar or before the probe resolves — the "Manage" section then renders
+  // nothing.
+  const consoleLinks = probe?.consoleLinks ?? [];
 
   // Reset to the menu whenever the popover closes so it reopens on the rows.
   function onOpenChange(next: boolean) {
@@ -115,21 +141,25 @@ export function AccountMenu({ scholar, showViewProfile = true }: AccountMenuProp
                 <Separator className="my-1" />
               </>
             ) : null}
-            {canBrowseProfiles || canImpersonate ? (
+            {consoleLinks.length > 0 || canImpersonate ? (
               <>
-                {canBrowseProfiles ? (
-                  <Link
-                    href="/edit/scholars"
-                    className={`${ROW_CLASS} flex w-full items-center gap-2`}
-                    data-testid="account-menu-manage-profiles"
-                  >
-                    <UsersIcon
-                      className="size-4 shrink-0 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                    Manage profiles
-                  </Link>
-                ) : null}
+                {consoleLinks.map((link) => {
+                  const Icon = CONSOLE_LINK_ICON[link.id];
+                  return (
+                    <Link
+                      key={link.id}
+                      href={link.href}
+                      className={`${ROW_CLASS} flex w-full items-center gap-2`}
+                      data-testid={`account-menu-console-${link.id}`}
+                    >
+                      <Icon
+                        className="size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      {link.label}
+                    </Link>
+                  );
+                })}
                 {canImpersonate ? (
                   <button
                     type="button"
