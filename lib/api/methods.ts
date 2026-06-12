@@ -38,6 +38,7 @@ import { FEED_EXCLUDED_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
   isMethodsFamilyRosterFallbackOn,
+  isMethodsFamilyDefinitionsOn,
 } from "@/lib/profile/methods-lens-flags";
 import {
   loadFamilyOverlayGate,
@@ -105,6 +106,11 @@ export type ResolvedFamily = {
   familyLabel: string;
   /** URL segment (`${slug(label)}-${familyId}`) — the canonical family slug. */
   familySlug: string;
+  /** #879 — generated capability gloss (passthrough, render-only). `null` until
+   *  the tools-a2-v3 rollup populates it, or when the render flag is off. */
+  definition: string | null;
+  /** #879 — "generated" | null; gates the page's "AI-generated" disclaimer. */
+  definitionSource: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -215,12 +221,31 @@ export async function getFamily(
   const gate = await loadFamilyOverlayGate();
   if (!isFamilyPubliclyVisible(supercategory, chosen.familyLabel, gate)) return null;
 
+  // #879 — family-level generated definition (render-only, flag-gated). The
+  // groupBy above cannot project a text column, so read one matching row by the
+  // stable (supercategory, familyLabel) identity — the value is identical across
+  // the family's scholar rows (indexed by @@index([supercategory, familyLabel])).
+  // Gated on METHODS_LENS_FAMILY_DEFINITIONS so nothing (incl. the DefinedTerm
+  // JSON-LD / SEO) surfaces until the copy is flipped on after EA sign-off.
+  let definition: string | null = null;
+  let definitionSource: string | null = null;
+  if (isMethodsFamilyDefinitionsOn()) {
+    const def = await prisma.scholarFamily.findFirst({
+      where: { supercategory, familyLabel: chosen.familyLabel },
+      select: { definition: true, definitionSource: true },
+    });
+    definition = def?.definition ?? null;
+    definitionSource = def?.definitionSource ?? null;
+  }
+
   return {
     supercategory,
     supercategorySlug: supercategorySlug(supercategory),
     familyId: chosen.familyId,
     familyLabel: chosen.familyLabel,
     familySlug: familySlug(chosen.familyLabel, chosen.familyId),
+    definition,
+    definitionSource,
   };
 }
 

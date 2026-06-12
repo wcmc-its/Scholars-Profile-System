@@ -28,6 +28,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodsLensSensitiveGateOn: vi.fn(),
 }));
 

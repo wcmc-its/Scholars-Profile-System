@@ -99,7 +99,15 @@ export default async function FamilyPage({
   const jsonLd = buildDefinedTermJsonLd({
     id: resolved.familyId,
     label: resolved.familyLabel,
-    description: null,
+    // #879 — the generated gloss enriches the DefinedTerm description. `null` until
+    // the rollup populates it / the METHODS_LENS_FAMILY_DEFINITIONS flag is on
+    // (getFamily only reads it when gated), so no SEO side channel leaks pre-flip.
+    // NOTE: buildDefinedTermJsonLd runs this through overviewToDescription() — HTML
+    // strip + whitespace collapse + a 300-char cap — so the STRUCTURED-DATA copy is
+    // SEO-normalized, not byte-verbatim like the on-page <p>. Intended: glosses are
+    // 1–2 sentence (~≤40 word) capability blurbs, comfortably under the cap; the
+    // visible paragraph below renders the definition verbatim (em-dashes included).
+    description: resolved.definition,
   });
 
   return (
@@ -137,6 +145,23 @@ export default async function FamilyPage({
         <h1 className="page-title mt-2 text-3xl font-bold leading-tight tracking-tight">
           {resolved.familyLabel}
         </h1>
+
+        {/* #879 — generated capability gloss (render-only passthrough from the A2
+            tools-a2-v3 taxonomy). Present only when METHODS_LENS_FAMILY_DEFINITIONS
+            is on AND the rollup populated it (getFamily reads it under the same
+            gate). Em-dashes render verbatim (house style, no transform). */}
+        {resolved.definition && (
+          <div className="mt-3 max-w-prose">
+            <p className="text-base leading-relaxed text-muted-foreground">
+              {resolved.definition}
+            </p>
+            {resolved.definitionSource === "generated" && (
+              <p className="mt-1 text-xs italic text-muted-foreground/80">
+                AI-generated definition
+              </p>
+            )}
+          </div>
+        )}
 
         {/* TopScholarsChipRow's built-in "+ N more" link is hardcoded to
             `/topics/{slug}/scholars`; on a method page the enumerative list

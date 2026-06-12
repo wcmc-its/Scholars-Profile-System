@@ -77,3 +77,19 @@ export function isMethodsLensFamilyFilterOn(): boolean {
 export function isMethodsFamilyRosterFallbackOn(): boolean {
   return process.env.METHODS_LENS_FAMILY_ROSTER_FALLBACK === "on";
 }
+
+/**
+ * #879 — renders ReciterAI's generated per-family `definition` (tools-a2-v3
+ * passthrough) on the family page + the profile methods hover, with an
+ * "AI-generated" disclaimer gated on `definition_source === "generated"`. Default
+ * OFF: the column is populated by the ETL unconditionally, but nothing renders —
+ * and the family page does not even READ the definition (no DefinedTerm JSON-LD /
+ * SEO side channel) — until this flips, so the generated copy ships dark pending
+ * External Affairs sign-off, independent of the methods-lens / Method-pages
+ * rollout. RENDER-ONLY: the definition is never fed back into any LLM/embedding/
+ * retrieval. Wire in BOTH `.env.local` AND the per-env `environment:` block in
+ * cdk/lib/app-stack.ts per the flag-parity rule.
+ */
+export function isMethodsFamilyDefinitionsOn(): boolean {
+  return process.env.METHODS_LENS_FAMILY_DEFINITIONS === "on";
+}

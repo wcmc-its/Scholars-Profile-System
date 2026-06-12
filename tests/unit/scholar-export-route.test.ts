@@ -43,6 +43,7 @@ vi.mock("@/lib/export/scholar-export-flags", () => ({
   isScholarListExportEmailEnabled: vi.fn(),
 }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodPagesEnabled: vi.fn(),
 }));
 vi.mock("@/lib/api/export-scholars", () => ({ buildScholarExport: vi.fn() }));

@@ -1179,6 +1179,19 @@ export class AppStack extends Stack {
         //     a /methods/** route notFound()s and no search candidate/badge or
         //     inbound link renders.
         METHODS_LENS_PAGES: "on",
+        //   METHODS_LENS_FAMILY_DEFINITIONS -- #879. Renders ReciterAI's generated
+        //     per-family `definition` (tools-a2-v3 passthrough) on the family page +
+        //     the profile methods hover, with an "AI-generated" disclaimer gated on
+        //     definition_source === "generated". OFF in BOTH envs at merge -- ships
+        //     fully dark because the generated copy is unreviewed: the ETL populates
+        //     the column unconditionally, but the family page does not even READ the
+        //     definition (no DefinedTerm JSON-LD / SEO side channel) and the profile
+        //     payload omits it until this flips. Go-live: migrate + run
+        //     etl:scholar-tool (backfill) -> flip staging-on here + cdk deploy
+        //     Sps-App-staging to soak -> External Affairs sign-off -> prod on.
+        //     RENDER-ONLY: never re-fed into any LLM/embedding/retrieval. Wire in
+        //     BOTH .env.local AND here per the flag-parity rule.
+        METHODS_LENS_FAMILY_DEFINITIONS: "off",
         // Scholar-profile facet-filter redesign (PR-2). A BIG visual change to
         // the Topics/Methods facets + a unified filter bar, fully gated. ON in
         // staging to soak the real-data behavior (method rows + cross-facet

@@ -344,6 +344,9 @@ async function loadScholarMethodFamilies(cwid: string): Promise<
   const rows = await db.read.scholarFamily.findMany({
     where: { cwid },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
+    // #879 D-19 LOCKED — do NOT add `definition` to this select. The generated
+    // family definition is RENDER-ONLY and must never enter the overview/bio
+    // generator's grounding (an LLM prompt). Family identity + counts only here.
     select: {
       familyId: true,
       familyLabel: true,

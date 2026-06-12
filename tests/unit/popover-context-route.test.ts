@@ -41,6 +41,7 @@ vi.mock("@/lib/api/methods", () => ({
 }));
 
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodPagesEnabled: () => mockIsMethodPagesEnabled(),
 }));
 
