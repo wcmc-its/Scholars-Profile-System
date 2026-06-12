@@ -4,11 +4,14 @@
  * the method supercategories (those with at least one publicly-visible family) as
  * a multi-column masonry of GROUPS: each group is a supercategory heading (linking
  * to its page) above its families, and every family deep-links to that family on
- * the supercategory page via `?family={familyId}` (which scrolls the panel into
- * view — UX feedback B5/B6). Empty `items` → an unavailable state.
+ * the supercategory page via `?family={familySlug}` (which scrolls the panel into
+ * view — UX feedback B5/B6). The deep-link carries the STABLE family slug, not the
+ * bare re-minted `fam_NNNN` id, so cached links self-heal across A2 rebuilds (#940).
+ * Empty `items` → an unavailable state.
  */
 import Link from "next/link";
 import type { SupercategoryHubEntry } from "@/lib/api/methods";
+import { familySegmentFor } from "@/lib/method-url";
 
 export function MethodsHubGrid({ items }: { items: SupercategoryHubEntry[] }) {
   if (items.length === 0) {
@@ -56,7 +59,7 @@ export function MethodsHubGrid({ items }: { items: SupercategoryHubEntry[] }) {
                 {sc.families.map((f) => (
                   <li key={f.familyId}>
                     <a
-                      href={`/methods/${sc.slug}?family=${encodeURIComponent(f.familyId)}`}
+                      href={`/methods/${sc.slug}?family=${encodeURIComponent(familySegmentFor(f.familyLabel, f.familyId))}`}
                       className="block text-sm leading-snug text-muted-foreground transition-colors hover:text-[var(--color-accent-slate)] hover:underline"
                     >
                       {f.familyLabel}

@@ -80,3 +80,49 @@ export function extractFamilyIdFromSlug(familySegment: string): string | null {
 export function familySegmentFor(familyLabel: string, familyId: string): string {
   return familySlug(familyLabel, familyId);
 }
+
+/**
+ * Resolve an inbound `?family=` deep-link value to the CURRENT `familyId`, given
+ * the supercategory's live family set. `familyId` (`fam_NNNN`) is RE-MINTED on
+ * every A2 rebuild, so a bookmarked or CloudFront-cached deep-link must resolve by
+ * the STABLE `(supercategory, familyLabel)` identity — its label-slug — exactly as
+ * the `[family]` detail-page loader does (`getFamily`). Without this, a stale id
+ * silently resolves to a DIFFERENT family (or to nothing). Resolution order:
+ *
+ *   1. exact `familyId` — a fresh in-page link or a still-current within-manifest id.
+ *   2. exact full family slug (`familySegmentFor(label, id)`, e.g. `cancer-cell-lines-fam_0007`).
+ *   3. the STABLE label-slug (`deriveSlug(label)`), after stripping any trailing
+ *      `-fam_NNNN` suffix off the param. On a label-slug collision the param's
+ *      `fam_NNNN` suffix (when present) breaks the tie; otherwise the first match
+ *      wins (families arrive sorted by label).
+ *
+ * Returns the current `familyId`, or null when nothing matches — the caller then
+ * shows the default "all work" panel rather than a silently-wrong family. A stale
+ * BARE id (no label-slug to recover from) deliberately falls through to null.
+ */
+export function resolveFamilyParam(
+  param: string | null | undefined,
+  families: ReadonlyArray<{ familyId: string; familyLabel: string }>,
+): string | null {
+  if (!param) return null;
+
+  // 1. exact current id.
+  if (families.some((f) => f.familyId === param)) return param;
+
+  // 2. exact full slug.
+  const byFullSlug = families.find((f) => familySegmentFor(f.familyLabel, f.familyId) === param);
+  if (byFullSlug) return byFullSlug.familyId;
+
+  // 3. stable label-slug; the id suffix (if the param carried one) is a tiebreaker only.
+  const idSuffix = extractFamilyIdFromSlug(param);
+  const labelSlugCandidate = idSuffix
+    ? param.slice(0, param.length - idSuffix.length).replace(/-+$/, "")
+    : param;
+  if (!labelSlugCandidate) return null;
+
+  const byLabelSlug = families.filter((f) => deriveSlug(f.familyLabel) === labelSlugCandidate);
+  if (byLabelSlug.length === 0) return null;
+  if (byLabelSlug.length === 1) return byLabelSlug[0].familyId;
+  const exact = idSuffix ? byLabelSlug.find((f) => f.familyId === idSuffix) : undefined;
+  return (exact ?? byLabelSlug[0]).familyId;
+}
