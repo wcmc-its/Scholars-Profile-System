@@ -74,7 +74,7 @@
   {
     "id": 9,
     "area": "Genetics, Genomics & Precision Medicine",
-    "label": "Liquid biopsy / circulating tumor DNA",
+    "label": "Liquid biopsy",
     "mesh": "Liquid Biopsy; Circulating Tumor DNA",
     "wcm_pubs_2023_present": 331,
     "replaces": "",
@@ -137,7 +137,7 @@
   {
     "id": 16,
     "area": "Cancer Biology (General)",
-    "label": "Cancer epigenetics / DNA methylation",
+    "label": "Cancer epigenetics",
     "mesh": "DNA Methylation; Epigenomics",
     "wcm_pubs_2023_present": 1186,
     "replaces": "",
@@ -182,7 +182,7 @@
   {
     "id": 21,
     "area": "Gene & Cell Therapy",
-    "label": "CRISPR / gene editing",
+    "label": "CRISPR",
     "mesh": "CRISPR-Cas Systems; Gene Editing",
     "wcm_pubs_2023_present": 534,
     "replaces": "",
@@ -200,7 +200,7 @@
   {
     "id": 23,
     "area": "Cell & Molecular Biology",
-    "label": "Extracellular vesicles / exosomes",
+    "label": "Exosomes",
     "mesh": "Extracellular Vesicles; Exosomes",
     "wcm_pubs_2023_present": 203,
     "replaces": "",
@@ -308,7 +308,7 @@
   {
     "id": 35,
     "area": "Gastroenterology, Hepatology & Pancreatic Disease",
-    "label": "MASLD / nonalcoholic fatty liver",
+    "label": "Nonalcoholic fatty liver disease",
     "mesh": "Non-alcoholic Fatty Liver Disease",
     "wcm_pubs_2023_present": 208,
     "replaces": "",
@@ -344,7 +344,7 @@
   {
     "id": 39,
     "area": "Neurodegenerative Disease",
-    "label": "Tauopathy / tau protein",
+    "label": "Tauopathy",
     "mesh": "tauopathies; tau Proteins",
     "wcm_pubs_2023_present": 557,
     "replaces": "",
@@ -353,7 +353,7 @@
   {
     "id": 40,
     "area": "Neurodegenerative Disease",
-    "label": "Amyloid-beta / Alzheimer disease",
+    "label": "Amyloid-beta",
     "mesh": "Amyloid beta-Peptides; Alzheimer Disease",
     "wcm_pubs_2023_present": 1119,
     "replaces": "",
@@ -371,7 +371,7 @@
   {
     "id": 42,
     "area": "Neurodegenerative Disease",
-    "label": "Alpha-synuclein / Parkinson disease",
+    "label": "Alpha-synuclein",
     "mesh": "alpha-Synuclein; Parkinson Disease",
     "wcm_pubs_2023_present": 454,
     "replaces": "",
@@ -380,7 +380,7 @@
   {
     "id": 43,
     "area": "Aging & Geroscience",
-    "label": "Cellular senescence / senolytics",
+    "label": "Senolytics",
     "mesh": "Cellular Senescence",
     "wcm_pubs_2023_present": 122,
     "replaces": "",
@@ -479,7 +479,7 @@
   {
     "id": 54,
     "area": "Substance Use & Addiction Medicine",
-    "label": "Opioid use disorder / overdose",
+    "label": "Opioid use disorder",
     "mesh": "Opioid-Related Disorders; Opiate Overdose",
     "wcm_pubs_2023_present": 307,
     "replaces": "",
@@ -515,7 +515,7 @@
   {
     "id": 58,
     "area": "Digital Health & Telemedicine",
-    "label": "Telemedicine / telehealth",
+    "label": "Telemedicine",
     "mesh": "Telemedicine",
     "wcm_pubs_2023_present": 533,
     "replaces": "",
@@ -587,7 +587,7 @@
   {
     "id": 66,
     "area": "Biomedical Informatics",
-    "label": "Health information exchange / interoperability",
+    "label": "Health information exchange",
     "mesh": "Health Information Exchange",
     "wcm_pubs_2023_present": 147,
     "replaces": "",
@@ -668,7 +668,7 @@
   {
     "id": 75,
     "area": "Bioethics, Medical Humanities & Clinician Wellbeing",
-    "label": "Advance care planning / goals of care",
+    "label": "Advance care planning",
     "mesh": "Advance Care Planning",
     "wcm_pubs_2023_present": 670,
     "replaces": "",
@@ -731,7 +731,7 @@
   {
     "id": 82,
     "area": "Cardiovascular Disease",
-    "label": "Cardio-oncology / cardiotoxicity",
+    "label": "Cardio-oncology",
     "mesh": "Cardiotoxicity",
     "wcm_pubs_2023_present": 156,
     "replaces": "",
@@ -758,7 +758,7 @@
   {
     "id": 85,
     "area": "Cell & Molecular Biology",
-    "label": "m6A RNA methylation / epitranscriptomics",
+    "label": "Epitranscriptomics",
     "mesh": "Epitranscriptomics; RNA Methylation",
     "wcm_pubs_2023_present": 212,
     "replaces": "",
@@ -830,7 +830,7 @@
   {
     "id": 93,
     "area": "Environmental & Planetary Health",
-    "label": "Air pollution / particulate matter",
+    "label": "Air pollution",
     "mesh": "Air Pollution; Particulate Matter",
     "wcm_pubs_2023_present": 112,
     "replaces": "",
@@ -848,7 +848,7 @@
   {
     "id": 95,
     "area": "Gastroenterology, Hepatology & Pancreatic Disease",
-    "label": "Liver cirrhosis / portal hypertension",
+    "label": "Liver cirrhosis",
     "mesh": "Liver Cirrhosis",
     "wcm_pubs_2023_present": 1267,
     "replaces": "",
@@ -875,7 +875,7 @@
   {
     "id": 98,
     "area": "Genetics, Genomics & Precision Medicine",
-    "label": "Whole-genome / exome sequencing",
+    "label": "Whole-genome sequencing",
     "mesh": "Whole Genome Sequencing; Exome Sequencing",
     "wcm_pubs_2023_present": 731,
     "replaces": "",
@@ -902,7 +902,7 @@
   {
     "id": 101,
     "area": "Global & Public Health",
-    "label": "HIV / AIDS",
+    "label": "HIV/AIDS",
     "mesh": "HIV Infections",
     "wcm_pubs_2023_present": 1457,
     "replaces": "",
@@ -965,7 +965,7 @@
   {
     "id": 108,
     "area": "Immunology & Inflammation",
-    "label": "Inflammasome / NLRP3",
+    "label": "Inflammasome",
     "mesh": "Inflammasomes",
     "wcm_pubs_2023_present": 121,
     "replaces": "",
@@ -983,7 +983,7 @@
   {
     "id": 110,
     "area": "Infectious Disease & Host Defense",
-    "label": "Invasive fungal infections / antifungal resistance",
+    "label": "Invasive fungal infections",
     "mesh": "Invasive Fungal Infections; Antifungal Agents",
     "wcm_pubs_2023_present": 203,
     "replaces": "",
@@ -1163,7 +1163,7 @@
   {
     "id": 130,
     "area": "Neuroscience & Neurology",
-    "label": "Ischemic stroke / thrombectomy",
+    "label": "Ischemic stroke",
     "mesh": "Ischemic Stroke; Thrombectomy",
     "wcm_pubs_2023_present": 827,
     "replaces": "",
@@ -1208,7 +1208,7 @@
   {
     "id": 135,
     "area": "Otolaryngology & Head and Neck Medicine",
-    "label": "Hearing loss / cochlear implants",
+    "label": "Cochlear implants",
     "mesh": "Hearing Loss; Cochlear Implants",
     "wcm_pubs_2023_present": 106,
     "replaces": "",
@@ -1244,7 +1244,7 @@
   {
     "id": 139,
     "area": "Pathology & Laboratory Medicine",
-    "label": "Digital / computational pathology",
+    "label": "Computational pathology",
     "mesh": "Image Interpretation, Computer-Assisted",
     "wcm_pubs_2023_present": 46,
     "replaces": "",
@@ -1316,7 +1316,7 @@
   {
     "id": 147,
     "area": "Pulmonary & Critical Care Medicine",
-    "label": "Idiopathic pulmonary fibrosis / ILD",
+    "label": "Idiopathic pulmonary fibrosis",
     "mesh": "Idiopathic Pulmonary Fibrosis; Lung Diseases, Interstitial",
     "wcm_pubs_2023_present": 368,
     "replaces": "",
@@ -1478,7 +1478,7 @@
   {
     "id": 165,
     "area": "Urology & Men's Health",
-    "label": "Kidney stones / nephrolithiasis",
+    "label": "Kidney stones",
     "mesh": "Kidney Calculi; Nephrolithiasis",
     "wcm_pubs_2023_present": 64,
     "replaces": "",
@@ -1505,7 +1505,7 @@
   {
     "id": 168,
     "area": "Women's Health & Reproductive Medicine",
-    "label": "Menopause / hormone therapy",
+    "label": "Menopause",
     "mesh": "Menopause; Hormone Replacement Therapy",
     "wcm_pubs_2023_present": 333,
     "replaces": "",
