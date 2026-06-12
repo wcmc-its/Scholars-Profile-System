@@ -843,18 +843,61 @@ function ModeTab({
 type PeopleResultData = Awaited<ReturnType<typeof searchPeople>>;
 type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 
-// One-shot label resolver for the dept/div/center facet. Cheap because
-// the three tables are small; called once per page render. Centers and
-// departments key on `code`, divisions key on `${deptCode}--${divCode}`,
-// and the long-tail free-text fallback uses the bare name.
+// Module-level TTL cache for the dept/div/center reference rows (B5). The three
+// tables are tiny (~80 near-static rows) and change only on a nightly ETL
+// reseed, yet `resolveDeptDivLabels` runs on every People-tab render (and again
+// on the Pubs Department facet), so without memoization each /search hit pays
+// three Prisma round-trips. We cache the PLAIN ARRAYS and rebuild the Map per
+// call below, mirroring lib/api/people-classifier-sets.ts: a `{ data, ts }`
+// cache + an `inflight` promise guard + a TTL gate. Labels are display-only chip
+// text (never counts/ranking), so the time-based staleness is acceptable;
+// /search is not in the revalidate allow-list, so a TTL is the only viable
+// invalidation here.
+type DeptDivData = {
+  depts: { code: string; name: string }[];
+  divs: { code: string; name: string; deptCode: string }[];
+  centers: { code: string; name: string }[];
+};
+
+const DEPT_DIV_TTL_MS = 60 * 60 * 1000; // 1h — well within the nightly ETL reseed cadence
+let deptDivCache: { data: DeptDivData; ts: number } | null = null;
+let deptDivInflight: Promise<DeptDivData> | null = null;
+
+// Loads (and TTL-caches) the three reference tables. Concurrent callers share
+// one inflight refresh so a cold render issues the three queries at most once.
+// An error propagates to the caller (unchanged from the pre-cache behavior) and
+// is not cached, so the next request retries.
+async function loadDeptDivData(): Promise<DeptDivData> {
+  if (deptDivCache && Date.now() - deptDivCache.ts < DEPT_DIV_TTL_MS) {
+    return deptDivCache.data;
+  }
+  if (deptDivInflight) return deptDivInflight;
+  deptDivInflight = (async () => {
+    try {
+      const [depts, divs, centers] = await Promise.all([
+        prisma.department.findMany({ select: { code: true, name: true } }),
+        prisma.division.findMany({
+          select: { code: true, name: true, deptCode: true },
+        }),
+        prisma.center.findMany({ select: { code: true, name: true } }),
+      ]);
+      const data: DeptDivData = { depts, divs, centers };
+      deptDivCache = { data, ts: Date.now() };
+      return data;
+    } finally {
+      deptDivInflight = null;
+    }
+  })();
+  return deptDivInflight;
+}
+
+// One-shot label resolver for the dept/div/center facet. Backed by the
+// module-level TTL cache above so the underlying rows are fetched at most once
+// per TTL window; the returned Map is rebuilt per call. Centers and departments
+// key on `code`, divisions key on `${deptCode}--${divCode}`, and the long-tail
+// free-text fallback uses the bare name.
 async function resolveDeptDivLabels(): Promise<Map<string, string>> {
-  const [depts, divs, centers] = await Promise.all([
-    prisma.department.findMany({ select: { code: true, name: true } }),
-    prisma.division.findMany({
-      select: { code: true, name: true, deptCode: true },
-    }),
-    prisma.center.findMany({ select: { code: true, name: true } }),
-  ]);
+  const { depts, divs, centers } = await loadDeptDivData();
   const deptByCode = new Map(depts.map((d) => [d.code, d.name]));
   const out = new Map<string, string>();
   for (const d of depts) out.set(d.code, d.name);
@@ -1214,6 +1257,12 @@ async function PublicationsResults({
       // §8 #6 — the user's year/journal/author filters DO carry into the broad
       // call (broadening is about the concept gate, not the other filters).
       meshResolution: null,
+      // Perf (B4) — the caller reads only `broad.total` + `broad.hits`;
+      // `broad.facets` is discarded. Hits-only keeps the hits + per-hit
+      // hydration but skips the aggs block and the ≤500-row facet
+      // `scholar.findMany` (and the mentoring ReciterDB round-trip when no
+      // mentoring filter is active).
+      hitsOnly: true,
       // SEARCH_PUB_HIGHLIGHT — keep the fallback rows' highlighting consistent
       // with the primary list.
       highlightMatches: resolvePublicationHighlight(),

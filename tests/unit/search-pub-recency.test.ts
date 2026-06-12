@@ -246,6 +246,41 @@ describe("pub-tab recency tilt — SEARCH_PUB_RELEVANCE_RECENCY (#645)", () => {
     expect(result.recencyOriginYear).toBeNull();
   });
 
+  // B4 — hitsOnly fallback path keeps `size` + scoring (UNLIKE countOnly) but
+  // strips the `aggs` block so the server skips the facet aggregations. The full
+  // search in the same test provides the contrast: same body, but with `aggs`.
+  it("hitsOnly: keeps size + scoring but omits the aggs block (countOnly contrast)", async () => {
+    delete process.env.SEARCH_PUB_RELEVANCE_RECENCY; // gentle
+    const { searchPublications } = await importSearch();
+
+    // full search → carries the aggs block + a non-zero size
+    await searchPublications({ q: "cancer", page: 0, nowYear: 2026 });
+    expect(capturedBodies[0]).toHaveProperty("aggs");
+    expect(capturedBodies[0].size).not.toBe(0);
+
+    // hitsOnly → identical non-zero size + recency scoring, but no aggs
+    await searchPublications({ q: "cancer", page: 0, hitsOnly: true, nowYear: 2026 });
+    expect(capturedBodies[1].size).toBe(capturedBodies[0].size);
+    expect(topQuery(capturedBodies[1])).toHaveProperty("function_score");
+    expect(capturedBodies[1]).not.toHaveProperty("aggs");
+  });
+
+  // B4 — hitsOnly must NOT pay the stall-prone ReciterDB round-trip
+  // (`getMentoringPmidBuckets`) when no mentoring filter is active. Kept in its
+  // own test (no preceding full search) so the call-count assertion is clean.
+  it("hitsOnly: skips the mentoring ReciterDB round-trip when no mentoring filter", async () => {
+    delete process.env.SEARCH_PUB_RELEVANCE_RECENCY; // gentle
+    const { searchPublications } = await importSearch();
+    // The spy persists across resetModules, so clear its history (accumulated by
+    // earlier full-search tests) immediately before the action.
+    const { getMentoringPmidBuckets } = await import("@/lib/api/mentoring-pmids");
+    vi.mocked(getMentoringPmidBuckets).mockClear();
+
+    await searchPublications({ q: "cancer", page: 0, hitsOnly: true, nowYear: 2026 });
+
+    expect(getMentoringPmidBuckets).not.toHaveBeenCalled();
+  });
+
   // T6 — concept_expanded: wrapper around the whole admission bool (E4).
   it("concept_expanded: function_score wraps the should+msm:1 admission bool", async () => {
     process.env.SEARCH_PUB_RELEVANCE_RECENCY = "gentle";

@@ -38,6 +38,7 @@
  * candidate set is capped at MATCH_HARD_CAP before count enrichment;
  * any extras roll into the overflow count.
  */
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { normalizeForMatch } from "@/lib/api/normalize";
 import { isMethodPagesEnabled } from "@/lib/profile/methods-lens-flags";
@@ -201,7 +202,14 @@ type EntityCandidate = {
   familyLabel: string | null;
 };
 
-async function loadEntityCandidates(): Promise<EntityCandidate[]> {
+// Request-scoped memo (B6): the generic-strip retry calls `matchQueryToTaxonomy`
+// a second time within one request, which re-runs this loader (3 Prisma queries
+// + the method-candidate groupBy/overlay read). React `cache()` collapses the
+// second call to the first's result so the retry only re-runs the in-memory
+// substring filter. Scoped to the request — deliberately NOT a cross-request
+// TTL cache, which would freeze #800/#801 method-family visibility (the overlay
+// gate is read live inside `loadMethodCandidates`). Mirrors `profile.ts`.
+const loadEntityCandidates = cache(async (): Promise<EntityCandidate[]> => {
   const [topics, subtopics, subtopicCounts] = await Promise.all([
     prisma.topic.findMany({ select: { id: true, label: true, description: true } }),
     prisma.subtopic.findMany({
@@ -267,7 +275,7 @@ async function loadEntityCandidates(): Promise<EntityCandidate[]> {
     out.push(...(await loadMethodCandidates()));
   }
   return out;
-}
+});
 
 /**
  * #824 PR-2 — Method-taxonomy candidates from `scholar_family`, overlay-gated.

@@ -283,6 +283,11 @@ export async function GET(request: NextRequest) {
           wcmAuthorRole: wcmAuthorRole.length > 0 ? wcmAuthorRole : undefined,
           department: department.length > 0 ? department : undefined,
         },
+        // Perf (B4) — this branch reads only `broad.total` (hits are discarded
+        // and this call passes no mentoring/author filter), so the existing
+        // count-only fast path applies directly: no aggs, no hit emission, no
+        // hydration.
+        countOnly: true,
         meshResolution: null,
       });
       conceptFallbackBroadCount = broad.total;
