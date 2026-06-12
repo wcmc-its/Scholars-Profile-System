@@ -397,6 +397,9 @@ export class EtlStack extends Stack {
             // #443 — etl:mentoring:import-copubs reads the mentee co-pub bridge
             // NDJSON (exported WCM-side) from here.
             "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
+            // #928 — etl:mentoring:import-citing reads the publication cited-by
+            // bridge NDJSON (exported WCM-side) from here.
+            "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
             "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
           ],
         }),

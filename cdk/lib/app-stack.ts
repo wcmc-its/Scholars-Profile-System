@@ -979,6 +979,23 @@ export class AppStack extends Stack {
         // zeros. ON in both envs; prod activates only on the approval-gated prod
         // cdk deploy.
         MENTORING_COPUB_BRIDGE: "on",
+        // #928 -- publication-modal cited-by BRIDGE. The modal's "Cited by" list
+        // + total are a LIVE WCM ReciterDB query (analysis_nih_cites, in
+        // lib/api/publication-detail.ts) the in-VPC app can't reach, so they
+        // degrade to "Citation list temporarily unavailable" in staging/prod.
+        // When "on" the read layer serves the pre-computed `publication_citing`
+        // table instead. DATA PREREQ (import-then-flip): populate that table
+        // FIRST -- run `etl:mentoring:export-citing` WCM-side (writes S3) then
+        // `etl:mentoring:import-citing` in-VPC -- BEFORE the activating `cdk
+        // deploy --exclusively Sps-App-<env>` (CD only re-rolls the image, never
+        // CDK; the new etl `citations/*` GetObject grant also needs `cdk deploy
+        // Sps-Etl-<env>`). An empty / not-yet-imported table degrades honestly
+        // back to "temporarily unavailable" (the read does one cheap global
+        // existence probe), so a flag live before the import never shows fake
+        // zeros -- the in-VPC outcome is byte-identical to today's live-path
+        // failure. ON in both envs; prod activates only on the approval-gated
+        // prod cdk deploy.
+        PUBLICATION_CITING_BRIDGE: "on",
         // #497 -- self-serve slug ("Profile URL") request lifecycle: the scholar
         // request card, the superuser /edit/slug-requests approve/decline queue,
         // and the requester notification (PRs #503/#504/#505). Read via

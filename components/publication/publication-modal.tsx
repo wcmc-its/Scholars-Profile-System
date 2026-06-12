@@ -17,6 +17,7 @@ import { CopyButton } from "@/components/publication/copy-button";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import type {
+  PublicationDetailMethodFamily,
   PublicationDetailPayload,
   PublicationDetailTopic,
 } from "@/lib/api/publication-detail";
@@ -349,6 +350,7 @@ function ModalContent({
           />
           <TopicsSection topics={topics} currentTopicSlug={currentTopicSlug} />
           <MeshSection meshTerms={pub.meshTerms} />
+          <MethodsSection families={payload.methodFamilies} />
           <CitingPubsSection
             pmid={pub.pmid}
             citationCount={pub.citationCount}
@@ -611,6 +613,47 @@ function MeshSection({
             {m.label}
           </li>
         ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * #917 — method families (#799/#819) attributed to this pmid, aggregated across
+ * the paper's WCM authors and already #800/#801-gated server-side. Labels link to
+ * the cross-scholar Method pages when those are enabled (`href` set), else render
+ * as plain text. Sparse like the synopsis: the whole section is omitted when the
+ * paper has no surfaced family (or the Methods lens is off → empty array).
+ */
+function MethodsSection({
+  families,
+}: {
+  families: PublicationDetailMethodFamily[];
+}) {
+  if (families.length === 0) return null;
+  return (
+    <section>
+      <SectionHeading>Methods</SectionHeading>
+      <ul className="mt-2 flex flex-wrap gap-1.5">
+        {families.map((f) =>
+          f.href ? (
+            <li key={`${f.supercategory}::${f.familyLabel}`}>
+              <Link
+                href={f.href}
+                className="bg-muted rounded px-2 py-0.5 text-xs text-[var(--color-accent-slate)] hover:underline"
+              >
+                {f.familyLabel}
+              </Link>
+            </li>
+          ) : (
+            <li
+              key={`${f.supercategory}::${f.familyLabel}`}
+              className="bg-muted text-foreground/80 rounded px-2 py-0.5 text-xs"
+            >
+              {f.familyLabel}
+            </li>
+          ),
+        )}
       </ul>
     </section>
   );

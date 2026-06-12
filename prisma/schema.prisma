@@ -320,6 +320,35 @@ model MenteeCopublicationPub {
   @@map("mentee_copublication_pub")
 }
 
+/// Issue #928 — publication-modal cited-by BRIDGE. The modal's "Cited by" list +
+/// total are a LIVE WCM ReciterDB query (`analysis_nih_cites` joined to
+/// `analysis_summary_article`, `lib/api/publication-detail.ts`) the in-VPC app
+/// can't reach, so they degrade to "temporarily unavailable" in staging/prod
+/// (#443). This pre-computes ONE row per CITED pmid: the full NIH-cite `total`
+/// plus the same ≤500-most-recent citing-pub list the modal renders, stored as
+/// JSON — NOT the full `(cited, citing)` edge list (tens of millions of rows).
+/// Exported WCM-side (`etl:mentoring:export-citing` → `citations/citing.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-citing`; read by
+/// `getPublicationDetail`/`getCitingPublicationsForCsv` when
+/// `PUBLICATION_CITING_BRIDGE=on`. An empty table degrades honestly back to
+/// "temporarily unavailable" (the read does one cheap global existence probe),
+/// so a flag flipped before the import never shows fake zeros. No FK to
+/// Publication: `citingPubs` are citer pmids that need not be WCM publications.
+model PublicationCiting {
+  /// The CITED pmid (matches `Publication.pmid` numerically; int form of the
+  /// reciterdb `analysis_nih_cites.cited_pmid` column).
+  pmid        Int      @id
+  /// Full count of rows in `analysis_nih_cites` for this `cited_pmid` (may exceed
+  /// the ≤500 stored in `citingPubs` — drives the "N total" subhead).
+  total       Int
+  /// Up to 500 most-recent citing pubs `[{ pmid, title, journal, year }]`,
+  /// publicationDate desc — the exact shape `PublicationDetailCitingPub` renders.
+  citingPubs  Json     @map("citing_pubs")
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@map("publication_citing")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni
