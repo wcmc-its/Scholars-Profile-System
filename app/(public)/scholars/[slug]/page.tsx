@@ -16,9 +16,17 @@ import { canonicalProfilePath, isRootCanonical } from "@/lib/profile-url";
 import { buildProfileMetadata } from "@/lib/profile-metadata";
 import { ProfileView } from "@/components/profile/profile-view";
 
-// Dynamic render — see ProfileView / #640. CloudFront caches the public
-// response by path at the edge.
-export const dynamic = "force-dynamic";
+// ISR-cached, on-demand. #640 moved every per-viewer read off the server render
+// (auth/owner via <HeaderAuthSlot>/<EditMyProfileButton>, the #866 internal-viewer
+// reveal and #891 email are all client islands hitting uncacheable /api/*
+// endpoints), so the server response is viewer-independent and safe to cache at
+// the edge. In root-canonical mode this route only 301s to /{slug}; otherwise it
+// renders the shared <ProfileView>. force-static is load-bearing: Next 15 deopts
+// DB-backed routes to dynamic and `revalidate` alone does NOT make this ISR — see
+// the root /{slug} route for the full rationale.
+export const revalidate = 86400; // 24h — the documented profile ISR TTL
+export const dynamicParams = true;
+export const dynamic = "force-static";
 
 export async function generateMetadata({
   params,
