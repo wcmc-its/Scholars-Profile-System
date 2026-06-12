@@ -843,7 +843,7 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       id: "gap-1b",
       pmid: "34963501",
       entity: "Procept Biorobotics Inc",
-      tier: "Medium",
+      tier: "High",
       sourceSentence: "Stock options in Procept Biorobotics.",
       normalizedEntity: "procept biorobotics",
       attribution: "scholar",
@@ -852,14 +852,17 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       status: "acknowledged",
     },
     {
+      // A second distinct relationship. (All rows here are `High`: the loader now
+      // queries `tier: "High"` only — `Medium` is never fetched, see the where
+      // assertion below — so the fixture mirrors that High-only result set.)
       id: "gap-2",
       pmid: "30000001",
       entity: "Neotract",
-      tier: "Medium",
+      tier: "High",
       sourceSentence: "Consultant for Neotract Urolift.",
       normalizedEntity: "neotract",
-      attribution: "unattributed",
-      entityScore: 0.61,
+      attribution: "scholar",
+      entityScore: 0.9,
       category: "personal",
       status: "acknowledged",
     },
@@ -897,9 +900,10 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
       includeCoiGap: true,
     });
 
-    // Only new + acknowledged are requested.
+    // Only new + acknowledged, and HIGH tier only (the raised bar — Medium, which
+    // is dominated by co-author leakage, is never fetched for the rendered surface).
     const whereArg = c.coiGapCandidate.findMany.mock.calls[0][0].where;
-    expect(whereArg).toEqual({ cwid: SELF, status: { in: ["new", "acknowledged"] } });
+    expect(whereArg).toEqual({ cwid: SELF, status: { in: ["new", "acknowledged"] }, tier: "High" });
     // The date join is scoped to the gap pmids (deduped).
     const pubWhere = c.publication.findMany.mock.calls[0][0].where;
     expect(pubWhere.pmid.in.sort()).toEqual(["30000001", "31508198", "34963501"]);
@@ -921,7 +925,7 @@ describe("loadEditContext — COI-gap candidates (gate + dedup + date join)", ()
 
     const neotract = groups[1];
     expect(neotract.key).toBe("neotract");
-    expect(neotract.tier).toBe("Medium");
+    expect(neotract.tier).toBe("High");
     expect(neotract.sources.map((s) => s.id)).toEqual(["gap-2"]);
 
     // Belt-and-braces: the forbidden internals never reach the client — not on a

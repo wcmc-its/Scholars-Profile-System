@@ -497,13 +497,27 @@ export async function loadEditContext(
   // query never runs and the array is empty — the candidates are never read for
   // a non-self viewer. Surface only actionable lifecycle states (`new` +
   // `acknowledged`); `dismissed`/`resolved` are intentionally excluded so a
-  // disavowed nudge never reappears. Ordered tier (High first) then entity, and
-  // mapped to the STARVED client shape — `normalizedEntity`, `attribution`,
+  // disavowed nudge never reappears.
+  //
+  // HIGH TIER ONLY. The rendered surface is restricted to `High` candidates —
+  // scholar-attributed (the scholar's own name/initials in the clause) AND a
+  // strong entity. `Medium` is excluded on purpose: it is the "plausible but
+  // soft attribution or weak entity" bucket, which in practice is dominated by
+  // co-author disclosures that leak onto a shared paper's other authors (a
+  // diagnostic recompute found ~92% of surfaced candidates are `unattributed`,
+  // and a typical scholar's `Medium` set is entirely co-author leakage with zero
+  // genuine matches). Showing that to a scholar reads as a wall of false
+  // accusations, so the bar is raised to the credible bucket. The `Medium` rows
+  // stay in the table for diagnostics; they are simply never rendered. (This also
+  // matches the long-stated go-live gate — see `lib/edit/coi-gap-hint.ts`: a
+  // measured HIGH-tier precision number, not Medium.)
+  //
+  // Mapped to the STARVED client shape — `normalizedEntity`, `attribution`,
   // `entityScore`, `category`, and `status` never cross to the client.
   let unmatchedPubmedCoi: EditContextCoiGapCandidate[] = [];
   if (opts?.includeCoiGap === true) {
     const gapRows = await client.coiGapCandidate.findMany({
-      where: { cwid, status: { in: ["new", "acknowledged"] } },
+      where: { cwid, status: { in: ["new", "acknowledged"] }, tier: "High" },
       // `normalizedEntity` is the group (dedupe) key; it never reaches the client.
       select: {
         id: true,
