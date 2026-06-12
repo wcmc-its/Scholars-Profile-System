@@ -11,6 +11,8 @@ function makeFamilies(n: number): ScholarFamilyView[] {
     pubCount: 100 - i,
     exemplarTools: [`Tool ${i + 1}A`, `Tool ${i + 1}B`],
     pmids: [`${i + 1}001`, `${i + 1}002`],
+    definition: null,
+    definitionSource: null,
   }));
 }
 
@@ -34,6 +36,8 @@ describe("MethodsSection", () => {
             pubCount: 5,
             exemplarTools: [],
             pmids: ["1", "2", "3", "4", "5"],
+            definition: null,
+            definitionSource: null,
           },
         ]}
       />,
@@ -363,6 +367,8 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
             pubCount: 1,
             exemplarTools: ["Tool X"],
             pmids: ["9001"],
+            definition: null,
+            definitionSource: null,
           },
         ]}
         selectedFamilyIds={[]}
@@ -424,5 +430,53 @@ describe("MethodsSection — v2 budget / selected-zero / animation (#841)", () =
     );
     const offRow = screen.getByText("Family 2").closest("li") as HTMLElement;
     expect(offRow.className).not.toContain("facet-chip-transition");
+  });
+});
+
+// #879 — the generated family definition surfaces as a hover (i) trigger next to
+// the family label. The server data layer nulls `definition` unless the flag is on,
+// so the component simply renders the trigger iff a definition is present.
+describe("MethodsSection — #879 family definition hover", () => {
+  function withDefinition(def: string | null, source: string | null): ScholarFamilyView[] {
+    return [
+      {
+        familyId: "fam_1",
+        familyLabel: "CRISPR screens",
+        supercategory: "genome_engineering",
+        pubCount: 8,
+        exemplarTools: ["GeCKO"],
+        pmids: ["1", "2"],
+        definition: def,
+        definitionSource: source,
+      },
+    ];
+  }
+
+  it("renders an (i) hover trigger labelled 'About <family>' when a definition is present", () => {
+    render(<MethodsSection families={withDefinition("Pooled loss-of-function screens.", "generated")} />);
+    expect(screen.getByRole("button", { name: "About CRISPR screens" })).toBeTruthy();
+  });
+
+  it("renders NO definition trigger when the definition is null (flag off / not populated)", () => {
+    render(<MethodsSection families={withDefinition(null, null)} />);
+    expect(screen.queryByRole("button", { name: "About CRISPR screens" })).toBeNull();
+  });
+
+  // radix renders TooltipContent twice (visible + a visually-hidden a11y mirror),
+  // so assert on getAllByText length rather than a single match.
+  it("shows the 'AI-generated definition' disclaimer when definitionSource === 'generated'", async () => {
+    render(<MethodsSection families={withDefinition("Pooled CRISPR screens.", "generated")} />);
+    fireEvent.focus(screen.getByRole("button", { name: "About CRISPR screens" }));
+    await waitFor(() =>
+      expect(screen.getAllByText("AI-generated definition").length).toBeGreaterThan(0),
+    );
+  });
+
+  it("omits the disclaimer when definitionSource is null (non-generated gloss)", async () => {
+    render(<MethodsSection families={withDefinition("A curated gloss.", null)} />);
+    fireEvent.focus(screen.getByRole("button", { name: "About CRISPR screens" }));
+    // The tooltip opens (definition appears) but carries NO AI disclaimer.
+    await waitFor(() => expect(screen.getAllByText("A curated gloss.").length).toBeGreaterThan(0));
+    expect(screen.queryAllByText("AI-generated definition")).toHaveLength(0);
   });
 });

@@ -85,6 +85,7 @@ vi.mock("@/lib/api/methods", () => ({
   getSupercategoryHubEntries: methodMocks.getSupercategoryHubEntries,
 }));
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodPagesEnabled: methodMocks.isMethodPagesEnabled,
 }));
 

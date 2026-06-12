@@ -57,6 +57,8 @@ describe("buildScholarFamilyWritesFromS3 — canonical mapping", () => {
         pmidCount: 12,
         exemplarTools: ["CheXpert", "MIMIC-CXR"], // resolved from canonical_tool_id, NOT the raw ids
         pmids: [], // none in this fixture
+        definition: null, // #879 — no familyDefById supplied → null
+        definitionSource: null,
       },
     ]);
   });
@@ -315,5 +317,53 @@ describe("buildScholarFamilyWritesFromS3 — #819 pmids membership", () => {
     expect(writes).toHaveLength(1);
     expect(writes[0].pmidCount).toBe(5);
     expect(writes[0].pmids).toEqual(["11", "12", "13", "14", "15"]);
+  });
+});
+
+describe("buildScholarFamilyWritesFromS3 — #879 family definition join", () => {
+  it("joins definition + definitionSource from familyDefById by family_id (+ counts join hits)", () => {
+    const res = buildScholarFamilyWritesFromS3(
+      artifact({
+        aog: [
+          { family_id: "fam_1", label: "CRISPR screens", supercategory: "s", pub_count: 4 },
+          { family_id: "fam_2", label: "Mass spec", supercategory: "s", pub_count: 2 },
+        ],
+      }),
+      {
+        ourCwidSet: new Set(["aog"]),
+        familyDefById: new Map([
+          // em-dash kept verbatim (house style — no transform)
+          ["fam_1", { definition: "Pooled loss-of-function screens—including X.", definitionSource: "generated" }],
+          // fam_2 intentionally absent → its row stays null
+        ]),
+      },
+    );
+    const byId = Object.fromEntries(res.writes.map((w) => [w.familyId, w]));
+    expect(byId.fam_1.definition).toBe("Pooled loss-of-function screens—including X.");
+    expect(byId.fam_1.definitionSource).toBe("generated");
+    // A family with no entry in the index keeps null (benign, never dropped).
+    expect(byId.fam_2.definition).toBeNull();
+    expect(byId.fam_2.definitionSource).toBeNull();
+    // Observability: exactly one row got a non-null definition from the join.
+    expect(res.definitionJoinHits).toBe(1);
+  });
+
+  it("leaves both null when no familyDefById is supplied (pre-v3 artifact)", () => {
+    const { writes } = buildScholarFamilyWritesFromS3(
+      artifact({ aog: [{ family_id: "fam_1", label: "X", supercategory: "s", pub_count: 1 }] }),
+      { ourCwidSet: new Set(["aog"]) },
+    );
+    expect(writes[0].definition).toBeNull();
+    expect(writes[0].definitionSource).toBeNull();
+  });
+
+  it("never drops a family for a missing definition (a join miss is benign)", () => {
+    const res = buildScholarFamilyWritesFromS3(
+      artifact({ aog: [{ family_id: "fam_1", label: "Keep me", supercategory: "s", pub_count: 7 }] }),
+      { ourCwidSet: new Set(["aog"]), familyDefById: new Map() },
+    );
+    expect(res.writes).toHaveLength(1);
+    expect(res.skippedMissingFields).toBe(0);
+    expect(res.writes[0].definition).toBeNull();
   });
 });

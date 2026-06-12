@@ -2,12 +2,53 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, EyeOff, Square, SquareCheck, X } from "lucide-react";
+import { ArrowUpRight, EyeOff, Info, Square, SquareCheck, X } from "lucide-react";
 
 import { MethodsHeading } from "@/components/profile/methods-heading";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { ScholarFamilyView } from "@/lib/api/profile";
 import { methodFamilyPath } from "@/lib/method-url";
+
+/**
+ * #879 — the generated family definition as a hover (the prevailing in-file radix
+ * Tooltip style, matching the #801 EyeOff marker). An (i) trigger sits inline next
+ * to the family label; `relative z-10` keeps it independently hoverable/focusable
+ * ABOVE the #819 whole-row filter overlay (and a `type="button"` with no onClick
+ * never toggles the filter). Rendered only when a definition is present — the
+ * server data layer already nulls it unless METHODS_LENS_FAMILY_DEFINITIONS is on,
+ * so this component needs no flag of its own. The "AI-generated" disclaimer is
+ * gated on `definitionSource === "generated"`. RENDER-ONLY (display, never re-fed
+ * to any model).
+ */
+function FamilyDefinitionTip({
+  definition,
+  familyLabel,
+  generated,
+}: {
+  definition: string;
+  familyLabel: string;
+  generated: boolean;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground relative z-10 inline-flex items-center"
+          aria-label={`About ${familyLabel}`}
+        >
+          <Info className="size-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-sm leading-relaxed">
+        {definition}
+        {generated ? (
+          <span className="mt-1 block text-xs italic opacity-80">AI-generated definition</span>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 // Resting budget for UNSELECTED method rows in the redesign panel (#1/#2).
 // Selected/pinned rows are budgeted INDEPENDENTLY (always all rendered), so a
@@ -254,6 +295,13 @@ export function MethodsSection({
                           </TooltipContent>
                         </Tooltip>
                       ) : null}
+                      {f.definition ? (
+                        <FamilyDefinitionTip
+                          definition={f.definition}
+                          familyLabel={f.familyLabel}
+                          generated={f.definitionSource === "generated"}
+                        />
+                      ) : null}
                     </div>
                     {f.exemplarTools.length > 0 ? (
                       <div
@@ -402,6 +450,13 @@ export function MethodsSection({
                         (audience-gated family).
                       </TooltipContent>
                     </Tooltip>
+                  ) : null}
+                  {f.definition ? (
+                    <FamilyDefinitionTip
+                      definition={f.definition}
+                      familyLabel={f.familyLabel}
+                      generated={f.definitionSource === "generated"}
+                    />
                   ) : null}
                 </div>
                 {f.exemplarTools.length > 0 ? (

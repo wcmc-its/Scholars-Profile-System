@@ -28,6 +28,7 @@ import { NEVER_DISPLAY_TYPES } from "@/lib/publication-types";
 import {
   isMethodsLensEnabled,
   isMethodsLensSensitiveGateOn,
+  isMethodsFamilyDefinitionsOn,
 } from "@/lib/profile/methods-lens-flags";
 import { familyOverlayKey } from "@/lib/api/methods-overlay";
 import {
@@ -77,6 +78,12 @@ export type ScholarFamilyView = {
   /** #819 — distinct member PMIDs (digit strings) backing the click-to-filter.
    *  `len === pubCount` upstream (ReciterAI#175); `[]` on a pre-#175 rollup. */
   pmids: string[];
+  /** #879 — generated capability gloss for the family (passthrough, render-only).
+   *  `null` until the tools-a2-v3 rollup populates it. NEVER fed back into any
+   *  LLM/embedding/retrieval — the overview generator reads its own projection. */
+  definition: string | null;
+  /** #879 — "generated" | null; gates the "AI-generated" disclaimer in the UI. */
+  definitionSource: string | null;
 };
 
 /** Publication types excluded from the Topics section's per-keyword counts.
@@ -148,14 +155,23 @@ export function aggregateKeywords(
 // the per-profile lens and the standalone pages apply ONE suppression/sensitivity
 // implementation. Imported above; behavior here is unchanged.
 
-function toScholarFamilyView(r: {
-  familyId: string;
-  familyLabel: string;
-  supercategory: string;
-  pmidCount: number;
-  exemplarTools: unknown;
-  pmids: unknown;
-}): ScholarFamilyView {
+function toScholarFamilyView(
+  r: {
+    familyId: string;
+    familyLabel: string;
+    supercategory: string;
+    pmidCount: number;
+    exemplarTools: unknown;
+    pmids: unknown;
+    definition: string | null;
+    definitionSource: string | null;
+  },
+  // #879 — when the flag is off, drop the definition from the view ENTIRELY. The
+  // public profile payload is CloudFront-cached, so a client-side render gate would
+  // still bake the copy into the cache; nulling it here keeps it out of the payload
+  // until the flag flips (mirrors getFamily reading it only under the same gate).
+  includeDefinition: boolean,
+): ScholarFamilyView {
   return {
     familyId: r.familyId,
     familyLabel: r.familyLabel,
@@ -164,6 +180,10 @@ function toScholarFamilyView(r: {
     exemplarTools: Array.isArray(r.exemplarTools) ? (r.exemplarTools as string[]) : [],
     // Coerce defensively: the column is nullable (pre-#175 rollup) and Json.
     pmids: Array.isArray(r.pmids) ? (r.pmids as unknown[]).map(String) : [],
+    // #879 — render-only passthrough; null until the tools-a2-v3 rollup lands AND
+    // the METHODS_LENS_FAMILY_DEFINITIONS flag is on.
+    definition: includeDefinition ? r.definition : null,
+    definitionSource: includeDefinition ? r.definitionSource : null,
   };
 }
 
@@ -185,6 +205,9 @@ async function partitionScholarFamilies(
 ): Promise<{ publicFamilies: ScholarFamilyView[]; sensitiveFamilies: ScholarFamilyView[] }> {
   if (!isMethodsLensEnabled()) return { publicFamilies: [], sensitiveFamilies: [] };
 
+  // #879 — gate the generated definition out of the (cached) payload unless on.
+  const defsOn = isMethodsFamilyDefinitionsOn();
+
   const rows = await prisma.scholarFamily.findMany({
     where: { cwid },
     orderBy: [{ pmidCount: "desc" }, { familyId: "asc" }],
@@ -195,6 +218,8 @@ async function partitionScholarFamilies(
       pmidCount: true,
       exemplarTools: true,
       pmids: true,
+      definition: true,
+      definitionSource: true,
     },
   });
   if (rows.length === 0) return { publicFamilies: [], sensitiveFamilies: [] };
@@ -210,7 +235,10 @@ async function partitionScholarFamilies(
   );
 
   if (!isMethodsLensSensitiveGateOn()) {
-    return { publicFamilies: visible.map(toScholarFamilyView), sensitiveFamilies: [] };
+    return {
+      publicFamilies: visible.map((r) => toScholarFamilyView(r, defsOn)),
+      sensitiveFamilies: [],
+    };
   }
 
   const sensitivity = await prisma.familySensitivityOverlay.findMany({
@@ -225,15 +253,16 @@ async function partitionScholarFamilies(
     (sensitiveKeys.has(familyOverlayKey(r.supercategory, r.familyLabel))
       ? sensitiveFamilies
       : publicFamilies
-    ).push(toScholarFamilyView(r));
+    ).push(toScholarFamilyView(r, defsOn));
   }
   return { publicFamilies, sensitiveFamilies };
 }
 
 /** PUBLIC method families for the (CloudFront-cached) profile payload (#799).
  *  #800-suppressed and #801-gated families are excluded; [] when the lens flag
- *  is off (the master render gate), so no SEO/JSON side channel can leak. */
-async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
+ *  is off (the master render gate), so no SEO/JSON side channel can leak.
+ *  @internal Exported for the #879 definition flag-gate unit test. */
+export async function loadScholarFamilies(cwid: string): Promise<ScholarFamilyView[]> {
   return (await partitionScholarFamilies(cwid)).publicFamilies;
 }
 

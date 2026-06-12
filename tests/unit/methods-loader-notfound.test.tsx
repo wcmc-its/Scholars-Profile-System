@@ -61,6 +61,7 @@ const {
 vi.mock("next/navigation", () => ({ notFound: mockNotFound }));
 
 vi.mock("@/lib/profile/methods-lens-flags", () => ({
+  isMethodsFamilyDefinitionsOn: () => false,
   isMethodPagesEnabled: () => mockIsMethodPagesEnabled(),
 }));
 

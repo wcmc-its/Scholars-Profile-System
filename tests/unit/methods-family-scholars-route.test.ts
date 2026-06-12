@@ -40,6 +40,7 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsFamilyRosterFallbackOn: () => mockRosterFallbackOn(),
   isMethodPagesEnabled: () => true,
   isMethodsLensSensitiveGateOn: () => false,
+  isMethodsFamilyDefinitionsOn: () => false,
 }));
 vi.mock("@/lib/api/methods-overlay", () => ({
   loadFamilyOverlayGate: () => mockLoadOverlayGate(),

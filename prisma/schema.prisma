@@ -1628,6 +1628,19 @@ model ScholarFamily {
   /// The `manifest.sha256` of the artifact this row was loaded from — lets a
   /// family-id renumber be detected per refresh (no semantic taxonomy_version).
   sourceArtifactSha String?  @map("source_artifact_sha") @db.VarChar(64)
+  /// #879 — generated 1–2 sentence capability gloss for the family, passthrough
+  /// from the A2 taxonomy `families[].definition` (schema tools-a2-v3, ReciterAI).
+  /// Family-level (identical across a family's scholar rows); denormalized here the
+  /// same way `family_label`/`exemplar_tools` are, joined by `family_id` at ETL
+  /// time. RENDER-ONLY — never re-fed into any LLM/embedding/retrieval (the #886
+  /// overview generator reads a projection without it). Nullable: a pre-v3 artifact
+  /// or a family with no generated gloss leaves it null; the next full-replace
+  /// ETL backfills it.
+  definition        String?  @db.Text
+  /// #879 — provenance for `definition`: "generated" when ReciterAI produced one,
+  /// else null. The render layer gates the "AI-generated" disclaimer on
+  /// `definition_source === "generated"`; stored raw (not coerced) like a tier.
+  definitionSource  String?  @map("definition_source") @db.VarChar(32)
   refreshedAt       DateTime @default(now()) @map("refreshed_at")
 
   scholar Scholar @relation(fields: [cwid], references: [cwid], onDelete: Cascade)
