@@ -356,6 +356,10 @@ exports[`AppStack prod matches the snapshot 1`] = `
                 "Value": "on",
               },
               {
+                "Name": "PUBLICATION_CITING_BRIDGE",
+                "Value": "on",
+              },
+              {
                 "Name": "SELF_EDIT_SLUG_REQUEST",
                 "Value": "on",
               },
@@ -3425,6 +3429,10 @@ exports[`AppStack staging matches the snapshot 1`] = `
               },
               {
                 "Name": "MENTORING_COPUB_BRIDGE",
+                "Value": "on",
+              },
+              {
+                "Name": "PUBLICATION_CITING_BRIDGE",
                 "Value": "on",
               },
               {

@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   subtopicFindMany: vi.fn().mockResolvedValue([]),
   suppressionFindMany: vi.fn().mockResolvedValue([]),
   publicationAuthorFindMany: vi.fn().mockResolvedValue([]),
+  scholarFamilyFindMany: vi.fn().mockResolvedValue([]),
+  publicationCitingFindUnique: vi.fn().mockResolvedValue(null),
+  publicationCitingFindFirst: vi.fn().mockResolvedValue(null),
+  familySuppressionOverlayFindMany: vi.fn().mockResolvedValue([]),
+  familySensitivityOverlayFindMany: vi.fn().mockResolvedValue([]),
   withReciterConnection: vi.fn(),
 }));
 
@@ -27,6 +32,13 @@ vi.mock("@/lib/db", () => ({
     subtopic: { findMany: mocks.subtopicFindMany },
     suppression: { findMany: mocks.suppressionFindMany },
     publicationAuthor: { findMany: mocks.publicationAuthorFindMany },
+    scholarFamily: { findMany: mocks.scholarFamilyFindMany },
+    publicationCiting: {
+      findUnique: mocks.publicationCitingFindUnique,
+      findFirst: mocks.publicationCitingFindFirst,
+    },
+    familySuppressionOverlay: { findMany: mocks.familySuppressionOverlayFindMany },
+    familySensitivityOverlay: { findMany: mocks.familySensitivityOverlayFindMany },
   },
 }));
 
@@ -46,6 +58,15 @@ beforeEach(() => {
   mocks.subtopicFindMany.mockResolvedValue([]);
   mocks.suppressionFindMany.mockResolvedValue([]);
   mocks.publicationAuthorFindMany.mockResolvedValue([]);
+  mocks.scholarFamilyFindMany.mockResolvedValue([]);
+  mocks.publicationCitingFindUnique.mockResolvedValue(null);
+  mocks.publicationCitingFindFirst.mockResolvedValue(null);
+  mocks.familySuppressionOverlayFindMany.mockResolvedValue([]);
+  mocks.familySensitivityOverlayFindMany.mockResolvedValue([]);
+  delete process.env.METHODS_LENS_ENABLED;
+  delete process.env.METHODS_LENS_PAGES;
+  delete process.env.METHODS_LENS_SENSITIVE_GATE;
+  delete process.env.PUBLICATION_CITING_BRIDGE;
   mocks.withReciterConnection.mockImplementation(
     async (fn: (conn: unknown) => Promise<unknown>) => {
       const conn = {
@@ -330,6 +351,199 @@ describe("getPublicationDetail — citing publications", () => {
     const r = await getPublicationDetail("12345");
     expect(r?.citingPubs?.[0].pmid).toBe("999");
     expect(r?.citingPubsTotal).toBe(1);
+  });
+});
+
+function pubForMethods() {
+  return {
+    pmid: "12345",
+    title: "Test paper",
+    journal: null,
+    year: 2024,
+    volume: null,
+    issue: null,
+    pages: null,
+    fullAuthorsString: null,
+    abstract: null,
+    impactScore: null,
+    impactJustification: null,
+    citationCount: 0,
+    pmcid: null,
+    doi: null,
+    pubmedUrl: null,
+    meshTerms: [],
+    synopsis: null,
+    publicationTopics: [],
+  };
+}
+
+describe("getPublicationDetail — method families (#917)", () => {
+  it("returns [] when the Methods lens master flag is off (no DB scan)", async () => {
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toEqual([]);
+    expect(mocks.scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+
+  it("de-dupes a family by (supercategory, familyLabel) across multiple WCM authors", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PAGES = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([
+      { cwid: "aaa1001" },
+      { cwid: "bbb2002" },
+    ]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      // Same family, two different authors + familyIds — must collapse to one.
+      {
+        supercategory: "animal_cell_models",
+        familyLabel: "CRISPR knockout",
+        familyId: "fam_0042",
+        pmids: ["12345", "999"],
+      },
+      {
+        supercategory: "animal_cell_models",
+        familyLabel: "CRISPR knockout",
+        familyId: "fam_9999",
+        pmids: ["12345"],
+      },
+      // A second distinct family attributed to this pmid.
+      {
+        supercategory: "imaging",
+        familyLabel: "Two-photon microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+      },
+      // A family that does NOT include this pmid — excluded.
+      {
+        supercategory: "sequencing",
+        familyLabel: "Bulk RNA-seq",
+        familyId: "fam_0200",
+        pmids: ["55555"],
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies.map((f) => f.familyLabel)).toEqual([
+      "CRISPR knockout", // animal_cell_models sorts before imaging
+      "Two-photon microscopy",
+    ]);
+    // href built off the FIRST familyId seen for the (sc,label) key.
+    expect(r?.methodFamilies[0].href).toBe(
+      "/methods/animal-cell-models/crispr-knockout-fam_0042",
+    );
+  });
+
+  it("excludes a #800-suppressed family even when the pmid matches", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    process.env.METHODS_LENS_PAGES = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "animal_cell_models",
+        familyLabel: "Gain-of-function virology",
+        familyId: "fam_0042",
+        pmids: ["12345"],
+      },
+    ]);
+    mocks.familySuppressionOverlayFindMany.mockResolvedValueOnce([
+      { supercategory: "animal_cell_models", familyLabel: "Gain-of-function virology" },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toEqual([]);
+  });
+
+  it("nulls the href when the Method pages surface is off", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    // METHODS_LENS_PAGES intentionally unset.
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([{ cwid: "aaa1001" }]);
+    mocks.scholarFamilyFindMany.mockResolvedValueOnce([
+      {
+        supercategory: "imaging",
+        familyLabel: "Two-photon microscopy",
+        familyId: "fam_0100",
+        pmids: ["12345"],
+      },
+    ]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toEqual([
+      { supercategory: "imaging", familyLabel: "Two-photon microscopy", href: null },
+    ]);
+  });
+
+  it("returns [] when the paper has no confirmed WCM authors", async () => {
+    process.env.METHODS_LENS_ENABLED = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(pubForMethods());
+    mocks.publicationAuthorFindMany.mockResolvedValue([]);
+    const r = await getPublicationDetail("12345");
+    expect(r?.methodFamilies).toEqual([]);
+    expect(mocks.scholarFamilyFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("getPublicationDetail — citing bridge (#928)", () => {
+  function bridgePub() {
+    return { ...pubForMethods(), citationCount: 100 };
+  }
+
+  it("serves the bridge row (total + ≤500 list) and does NOT hit reciterdb", async () => {
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(bridgePub());
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce({
+      total: 7,
+      citingPubs: [
+        { pmid: 999, title: "Newest", journal: "J1", year: 2025 },
+        { pmid: 888, title: "Older", journal: null, year: 2024 },
+      ],
+    });
+    const r = await getPublicationDetail("12345");
+    expect(r?.citingPubsTotal).toBe(7);
+    expect(r?.citingPubs).toEqual([
+      { pmid: "999", title: "Newest", journal: "J1", year: 2025 },
+      { pmid: "888", title: "Older", journal: null, year: 2024 },
+    ]);
+    expect(mocks.withReciterConnection).not.toHaveBeenCalled();
+  });
+
+  it("degrades to null/null when the bridge table is empty (un-imported)", async () => {
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(bridgePub());
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce(null);
+    mocks.publicationCitingFindFirst.mockResolvedValueOnce(null); // table empty
+    const r = await getPublicationDetail("12345");
+    expect(r?.citingPubs).toBeNull();
+    expect(r?.citingPubsTotal).toBeNull();
+  });
+
+  it("returns a genuine zero when the pmid is absent but the table is populated", async () => {
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationFindUnique.mockResolvedValueOnce(bridgePub());
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce(null);
+    mocks.publicationCitingFindFirst.mockResolvedValueOnce({ pmid: 1 }); // has rows
+    const r = await getPublicationDetail("12345");
+    expect(r?.citingPubs).toEqual([]);
+    expect(r?.citingPubsTotal).toBe(0);
+  });
+
+  it("CSV: serves the bridged list (publicationDate dropped) when the flag is on", async () => {
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce({
+      citingPubs: [{ pmid: 999, title: "X", journal: "J", year: 2024 }],
+    });
+    const r = await getCitingPublicationsForCsv("12345");
+    expect(r).toEqual([
+      { pmid: "999", title: "X", journal: "J", year: 2024, publicationDate: null },
+    ]);
+    expect(mocks.withReciterConnection).not.toHaveBeenCalled();
+  });
+
+  it("CSV: returns [] (not a throw) when the bridge has no row for the pmid", async () => {
+    process.env.PUBLICATION_CITING_BRIDGE = "on";
+    mocks.publicationCitingFindUnique.mockResolvedValueOnce(null);
+    const r = await getCitingPublicationsForCsv("12345");
+    expect(r).toEqual([]);
   });
 });
 

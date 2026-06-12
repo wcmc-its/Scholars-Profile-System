@@ -926,6 +926,7 @@ describe("EtlStack", () => {
           "arn:aws:s3:::wcmc-reciterai-artifacts/tools/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/ed/*",
           "arn:aws:s3:::wcmc-reciterai-artifacts/mentoring/*",
+          "arn:aws:s3:::wcmc-reciterai-artifacts/citations/*",
           "arn:aws:s3:::wcmc-reciterai-hierarchy/*",
         ]);
       });
