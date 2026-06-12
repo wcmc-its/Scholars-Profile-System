@@ -27,6 +27,9 @@ const {
   scholarFindMany,
   menteeCopubFindMany,
   menteeCopubFindFirst,
+  aocMenteeFindMany,
+  aocMenteeFindFirst,
+  menteeCopubPubFindMany,
 } = vi.hoisted(() => ({
   phdFindMany: vi.fn(async () => [] as unknown[]),
   postdocFindMany: vi.fn(async () => [] as unknown[]),
@@ -34,6 +37,10 @@ const {
   scholarFindMany: vi.fn(async () => [] as unknown[]),
   menteeCopubFindMany: vi.fn(async () => [] as unknown[]),
   menteeCopubFindFirst: vi.fn(async () => null as unknown),
+  // Issue #928 — the AOC list and the full co-pub list are now bridged too.
+  aocMenteeFindMany: vi.fn(async () => [] as unknown[]),
+  aocMenteeFindFirst: vi.fn(async () => null as unknown),
+  menteeCopubPubFindMany: vi.fn(async () => [] as unknown[]),
 }));
 
 vi.mock("@/lib/sources/reciterdb", () => ({ withReciterConnection }));
@@ -44,6 +51,8 @@ vi.mock("@/lib/db", () => ({
     studentPhdProgram: { findMany: studentPhdProgramFindMany },
     scholar: { findMany: scholarFindMany },
     menteeCopublication: { findMany: menteeCopubFindMany, findFirst: menteeCopubFindFirst },
+    aocMentee: { findMany: aocMenteeFindMany, findFirst: aocMenteeFindFirst },
+    menteeCopublicationPub: { findMany: menteeCopubPubFindMany },
   },
 }));
 
@@ -172,18 +181,25 @@ describe("getMenteesForMentor — copubSourceAvailable (issue #843)", () => {
 describe("getMenteesForMentor — MENTORING_COPUB_BRIDGE (issue #443)", () => {
   beforeEach(() => {
     process.env.MENTORING_COPUB_BRIDGE = "on";
-    // AOC (reporting_students_mentors) query returns nothing; the bridge
-    // replaces the co-pub query, so the co-pub branch never calls ReciterDB.
-    withReciterConnection.mockImplementation(
-      async (fn: (conn: { query: () => Promise<unknown[]> }) => Promise<unknown>) =>
-        fn({ query: async () => [] }),
+    // Issue #928 — with the flag on BOTH the AOC list and the co-pub count are
+    // bridged, so the whole function reads only local tables: the AOC mentee
+    // table replaces the reporting_students_mentors query and the
+    // `mentee_copublication` table replaces the live co-pub query. ReciterDB is
+    // never touched. The PhD mentee (PHD_ROW) still drives these assertions; the
+    // AOC table is empty here.
+    withReciterConnection.mockRejectedValue(
+      new Error("ReciterDB must not be touched when the bridge is on"),
     );
+    aocMenteeFindMany.mockResolvedValue([]);
+    aocMenteeFindFirst.mockResolvedValue(null);
     menteeCopubFindMany.mockResolvedValue([]);
     menteeCopubFindFirst.mockResolvedValue(null);
   });
 
   afterEach(() => {
     delete process.env.MENTORING_COPUB_BRIDGE;
+    aocMenteeFindMany.mockReset();
+    aocMenteeFindFirst.mockReset();
     menteeCopubFindMany.mockReset();
     menteeCopubFindFirst.mockReset();
   });
@@ -205,8 +221,9 @@ describe("getMenteesForMentor — MENTORING_COPUB_BRIDGE (issue #443)", () => {
     expect(mentees[0].copublicationPreview).toEqual([
       { pmid: 111, title: "Shared paper", journal: "J. Test", year: 2021 },
     ]);
-    // Only the AOC query runs via ReciterDB; the count is served from the table.
-    expect(withReciterConnection).toHaveBeenCalledTimes(1);
+    // Both the AOC list and the count are served from local tables — ReciterDB
+    // is never consulted on the flag-on path.
+    expect(withReciterConnection).not.toHaveBeenCalled();
     expect(menteeCopubFindMany).toHaveBeenCalledTimes(1);
   });
 

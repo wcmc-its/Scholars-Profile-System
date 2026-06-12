@@ -267,6 +267,59 @@ model MenteeCopublication {
   @@map("mentee_copublication")
 }
 
+/// Issue #928 — AOC / med-student mentee bridge. Mirrors ReciterDB
+/// `reporting_students_mentors` rows into Aurora so the in-VPC app can render
+/// AOC mentee chips without the request-time ReciterDB query that
+/// `getMenteesForMentor` / `getMentorMenteePair` otherwise run (the SPS VPC
+/// can't reach ReciterDB, so that query silently drops AOC chips in-VPC).
+/// Exported WCM-side (`etl:mentoring:export-copubs` → `mentoring/aoc-mentees.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-aoc`; read when
+/// `MENTORING_COPUB_BRIDGE=on` (import-then-flip).
+///
+/// Raw mirror: a (mentor, mentee) pair can appear under several programs
+/// (e.g. AOC + AOC-2025), so rows are NOT collapsed here — the read path
+/// collapses per-CWID exactly as it does for the live query. No natural
+/// per-pair key, so a surrogate `id` PK plus a full truncate-and-load import.
+/// No FK to Scholar — AOC students are frequently unlinked alumni (GH #181).
+model AocMentee {
+  id             Int      @id @default(autoincrement())
+  mentorCwid     String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid     String   @map("mentee_cwid") @db.VarChar(32)
+  firstName      String?  @map("first_name") @db.VarChar(255)
+  lastName       String?  @map("last_name") @db.VarChar(255)
+  graduationYear Int?     @map("graduation_year")
+  programType    String?  @map("program_type") @db.VarChar(64)
+  refreshedAt    DateTime @default(now()) @map("refreshed_at")
+
+  @@index([mentorCwid], map: "aoc_mentee_mentor_cwid_idx")
+  @@index([mentorCwid, menteeCwid], map: "aoc_mentee_mentor_mentee_idx")
+  @@map("aoc_mentee")
+}
+
+/// Issue #928 — full mentor↔mentee co-publication list bridge. One row per
+/// (mentor, mentee, pmid); `pub` holds the raw `CoPublicationFull` JSON
+/// (title/journal/year/doi/pmcid/citation count/abstract + the full author
+/// list). Stored PRE-suppression — the read path re-applies local publication
+/// suppression (`loadPublicationSuppressions`/`resolveDarkPmids`/`isAuthorHidden`)
+/// since suppression is env-specific and changes independently of this bridge.
+/// Exported WCM-side (`etl:mentoring:export-copubs` → `mentoring/copub-list.ndjson`)
+/// and loaded in-VPC by `etl:mentoring:import-copub-list`; read by
+/// `getCoPublications` when `MENTORING_COPUB_BRIDGE=on`. `pubYear` is
+/// denormalized for DB-side ordering (year desc, pmid desc — matches the live
+/// query). No FK to Scholar/Publication (alumni mentees, GH #181).
+model MenteeCopublicationPub {
+  mentorCwid  String   @map("mentor_cwid") @db.VarChar(32)
+  menteeCwid  String   @map("mentee_cwid") @db.VarChar(32)
+  pmid        Int
+  pubYear     Int?     @map("pub_year")
+  pub         Json
+  refreshedAt DateTime @default(now()) @map("refreshed_at")
+
+  @@id([mentorCwid, menteeCwid, pmid])
+  @@index([mentorCwid, menteeCwid], map: "mentee_copublication_pub_pair_idx")
+  @@map("mentee_copublication_pub")
+}
+
 /// Issue #195 — Per-CWID PhD program record sourced from ED's
 /// `weillCornellEduSORRoleRecord` class under `ou=students,ou=sors` filtered
 /// to `weillCornellEduDegreeCode=PHD`. Includes expired rows so alumni
