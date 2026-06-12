@@ -83,6 +83,7 @@ import { mechanismVerbose, mechanismDescriptor } from "@/lib/mechanism-lookup";
 import { methodologyHref } from "@/lib/methodology-anchors";
 import { FunderFacet } from "@/components/search/funder-facet";
 import { HoverTooltip } from "@/components/ui/hover-tooltip";
+import { compactUnitName } from "@/lib/org-unit-names";
 
 export const dynamic = "force-dynamic";
 
@@ -855,7 +856,7 @@ type PubsResultData = Awaited<ReturnType<typeof searchPublications>>;
 type DeptDivData = {
   depts: { code: string; name: string }[];
   divs: { code: string; name: string; deptCode: string }[];
-  centers: { code: string; name: string }[];
+  centers: { code: string; name: string; compactName: string | null }[];
 };
 
 const DEPT_DIV_TTL_MS = 60 * 60 * 1000; // 1h — well within the nightly ETL reseed cadence
@@ -878,7 +879,7 @@ async function loadDeptDivData(): Promise<DeptDivData> {
         prisma.division.findMany({
           select: { code: true, name: true, deptCode: true },
         }),
-        prisma.center.findMany({ select: { code: true, name: true } }),
+        prisma.center.findMany({ select: { code: true, name: true, compactName: true } }),
       ]);
       const data: DeptDivData = { depts, divs, centers };
       deptDivCache = { data, ts: Date.now() };
@@ -904,7 +905,8 @@ async function resolveDeptDivLabels(): Promise<Map<string, string>> {
     const dn = deptByCode.get(div.deptCode);
     out.set(`${div.deptCode}--${div.code}`, dn ? `${div.name} — ${dn}` : div.name);
   }
-  for (const c of centers) out.set(`center:${c.code}`, c.name);
+  for (const c of centers)
+    out.set(`center:${c.code}`, compactUnitName({ name: c.name, compactName: c.compactName }));
   return out;
 }
 

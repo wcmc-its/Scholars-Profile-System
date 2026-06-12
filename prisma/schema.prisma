@@ -852,6 +852,14 @@ model Department {
   name         String   @db.VarChar(255)
   slug         String   @unique @db.VarChar(255)
   description  String?  @db.Text
+  /// Curated full / ceremonial display name (e.g. ED `name` "Library" ->
+  /// "Samuel J. Wood Library"). NULL = use `name`. Seeded on CREATE from
+  /// lib/department-names.ts; the ED ETL NEVER writes it on UPDATE, so renames
+  /// survive every refresh. Resolved via lib/org-unit-names.ts:officialUnitName.
+  officialName String?  @map("official_name") @db.VarChar(255)
+  /// Curated short / common display name for facet chips (e.g. "Medicine").
+  /// NULL = use `name`. Same ED-preserving contract as officialName.
+  compactName  String?  @map("compact_name") @db.VarChar(255)
   /// Browse-page grouping bucket. Hand-curated via lib/department-categories.ts;
   /// the ED ETL preserves existing values rather than overwriting, so manual
   /// reclassification sticks across refreshes. Display label mapping ("mixed"
@@ -908,6 +916,13 @@ model Center {
   name          String   @db.VarChar(255)
   slug          String   @unique @db.VarChar(255)
   description   String?  @db.Text
+  /// Curated names, symmetric with Department (lib/org-unit-names.ts). A center
+  /// is manually-owned — no ETL fights its `name` — so `name` already serves as
+  /// the official name and `officialName` is typically NULL (resolver falls back
+  /// to `name`). `compactName` carries the short facet label (e.g. "Precision
+  /// Medicine" for "Englander Institute for Precision Medicine").
+  officialName  String?  @map("official_name") @db.VarChar(255)
+  compactName   String?  @map("compact_name") @db.VarChar(255)
   /// Presentation kind: "center" (default) or "institute". Drives the badge
   /// color in autocomplete and search results — institutes (typically NCI/NIH-
   /// designated, larger, more endowed) get their own teal badge; centers get

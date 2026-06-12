@@ -328,6 +328,12 @@ export type ProfilePayload = {
    *  `primaryDepartment` display label to `/departments/<slug>` when present,
    *  strengthening the on-site profile↔department link graph. */
   departmentSlug: string | null;
+  /** Curated official department name from the Department relation (e.g.
+   *  "Samuel J. Wood Library"). NULL when the dept has no curated override or
+   *  no joined Department row — the sidebar then falls back to
+   *  `primaryDepartment`. Resolved via lib/org-unit-names.ts:officialUnitName
+   *  conceptually, but precomputed here so the view stays presentational. */
+  departmentOfficialName: string | null;
   /** Issue #167 — division name when the scholar has a populated divCode
    *  AND the joined division name is not "Administration" (an admin-style
    *  level2 unit that should not be surfaced as a research/clinical
@@ -597,10 +603,11 @@ export const getScholarFullProfileBySlug = cache(async (
       // the existing `primaryDepartment` text column.
       division: { select: { name: true } },
       // #684 — the department page slug, so the sidebar department name can
-      // link to /departments/<slug>. The display label stays the free-text
-      // `primaryDepartment`; this is just the link target (null when the
-      // scholar's deptCode has no joined Department row).
-      department: { select: { slug: true } },
+      // link to /departments/<slug> (null when the scholar's deptCode has no
+      // joined Department row). `officialName` is the curated ceremonial name
+      // (e.g. ED "Library" -> "Samuel J. Wood Library") preferred over the raw
+      // `primaryDepartment` string for display; falls back when NULL.
+      department: { select: { slug: true, officialName: true } },
       // Issue #5 — surface the postdoctoral mentor on the sidebar. Hide
       // soft-deleted / suppressed mentors at the API layer so the card
       // never points at a hidden profile.
@@ -921,6 +928,7 @@ export const getScholarFullProfileBySlug = cache(async (
     primaryTitle: scholar.primaryTitle,
     primaryDepartment: scholar.primaryDepartment,
     departmentSlug: scholar.department?.slug ?? null,
+    departmentOfficialName: scholar.department?.officialName ?? null,
     // Issue #167 — belt-and-suspenders filter for the "Administration"
     // division label. The ED ETL drops Administration at the divCode level
     // (EXCLUDED_DIV_NAMES), so this typically only matters when divCode

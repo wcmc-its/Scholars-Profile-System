@@ -39,6 +39,7 @@ async function main() {
         code: c.code,
         name: c.name,
         slug: c.slug,
+        compactName: c.compactName,
         description: c.description,
         sortOrder: c.sortOrder,
         centerType: c.centerType,
@@ -47,6 +48,7 @@ async function main() {
       update: {
         name: c.name,
         slug: c.slug,
+        compactName: c.compactName,
         description: c.description,
         sortOrder: c.sortOrder,
         centerType: c.centerType,

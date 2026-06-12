@@ -157,14 +157,17 @@ describe("fixtureLoadCenters", () => {
     expect(db.center.upsert).not.toHaveBeenCalled();
   });
 
-  it("creates the 8 centers + Meyer programs as source='manual' on an empty DB", async () => {
+  it("creates the 11 centers + Meyer programs as source='manual' on an empty DB", async () => {
     const { db } = makeCenterDb([]);
     const res = await fixtureLoadCenters(db, RUN);
-    expect(res.centersCreated).toBe(8);
+    // 11 centers post comms 2026-06-12 (was 8: -Computational Biomedicine,
+    // -Iris Cantor, +Drukier, +Weill Metabolic, +Global Health, +Appel,
+    // +Friedman). Tracks prisma/center-seed-data.ts CENTERS.
+    expect(res.centersCreated).toBe(11);
     expect(res.programsUpserted).toBe(5);
     // every created row carries source='manual'
     const upsertCalls = (db.center.upsert as ReturnType<typeof vi.fn>).mock.calls;
-    expect(upsertCalls).toHaveLength(8);
+    expect(upsertCalls).toHaveLength(11);
     for (const [arg] of upsertCalls) {
       expect((arg as { create: { source: string } }).create.source).toBe("manual");
     }

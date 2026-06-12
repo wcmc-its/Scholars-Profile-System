@@ -20,6 +20,7 @@
  */
 import { prisma } from "@/lib/db";
 import { identityImageEndpoint } from "@/lib/headshot";
+import { EXTERNAL_LEADERS } from "@/lib/external-leaders";
 import { formatRoleCategory } from "@/lib/role-display";
 import type { LeaderRole } from "@/components/scholar/leader-card";
 import {
@@ -32,7 +33,9 @@ import {
 export type DepartmentChair = {
   cwid: string;
   preferredName: string;
-  slug: string;
+  /** Profile slug, or null for an external leader (lib/external-leaders.ts) who
+   *  is not a WCM scholar — rendered as a non-linked name. */
+  slug: string | null;
   /** From appointment.title, e.g. "Chairman and Stephen and Suzanne Weiss Professor"
    *  or "Director of Library" for administrative depts (issue #58). */
   chairTitle: string;
@@ -74,7 +77,14 @@ export type DepartmentStats = {
 };
 
 export type DepartmentDetail = {
-  dept: { code: string; name: string; slug: string; description: string | null };
+  dept: {
+    code: string;
+    name: string;
+    officialName: string | null;
+    compactName: string | null;
+    slug: string;
+    description: string | null;
+  };
   chair: DepartmentChair | null;
   topResearchAreas: DepartmentTopicArea[];
   divisions: DepartmentDivisionSummary[];
@@ -143,6 +153,24 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
         role: leaderRole,
         isInterim: merged.leaderInterim,
       };
+    } else {
+      // External-leader hack (lib/external-leaders.ts): a leader CWID that is
+      // NOT a WCM scholar (e.g. a Columbia primary appointment, like Joel Stein
+      // for Rehabilitation Medicine) renders as a non-linked name + Directory
+      // photo. The CWID still drives the photo via identityImageEndpoint.
+      const external = EXTERNAL_LEADERS[dept.code];
+      if (external && external.cwid === merged.leaderCwid) {
+        chair = {
+          cwid: external.cwid,
+          preferredName: external.name,
+          slug: null,
+          chairTitle: leaderRole,
+          primaryTitle: external.primaryTitle,
+          identityImageEndpoint: identityImageEndpoint(external.cwid),
+          role: leaderRole,
+          isInterim: merged.leaderInterim,
+        };
+      }
     }
   }
 
@@ -242,7 +270,14 @@ export async function getDepartment(slug: string): Promise<DepartmentDetail | nu
   };
 
   return {
-    dept: { code: dept.code, name: dept.name, slug: dept.slug, description: merged.description },
+    dept: {
+      code: dept.code,
+      name: dept.name,
+      officialName: dept.officialName,
+      compactName: dept.compactName,
+      slug: dept.slug,
+      description: merged.description,
+    },
     chair,
     topResearchAreas,
     divisions,
