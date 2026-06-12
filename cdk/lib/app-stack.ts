@@ -1095,13 +1095,15 @@ export class AppStack extends Stack {
         // decision off the same lexical predicate, so `badge == list` holds
         // either way (locked by tests/unit/search-people-concept-precount.ts);
         // only the round-trip count differs (the win: 2 fewer hops per cold
-        // concept-People SSR render on the common non-sparse case). STAGING runs
-        // the reorder ("off") to soak + let the latency probe measure the delta;
-        // PROD stays on today's pre-count ("on") until that staging probe
-        // confirms the win, then flip prod to "off" + `cdk deploy Sps-App-prod`
-        // (CD re-rolls the image only, so an env-flag change needs the explicit
-        // cdk deploy) -- the flag-parity rule.
-        SEARCH_PEOPLE_CONCEPT_PRECOUNT: env === "staging" ? "off" : "on",
+        // concept-People SSR render on the common non-sparse case). BOTH ENVS
+        // now run the reorder ("off"): staging soaked clean, and the win was
+        // confirmed deterministically via the D3 `osRoundTrips` SLI (#927) --
+        // topic-People drops one OpenSearch hop (4 -> 3) -- because prod's tiny
+        // topic-query volume (n=15/14d) is too sparse for a latency-percentile
+        // read. Prod applied via `cdk deploy --exclusively Sps-App-prod` (CD
+        // re-rolls the image only, so an env-flag change needs the explicit cdk
+        // deploy) -- the flag-parity rule.
+        SEARCH_PEOPLE_CONCEPT_PRECOUNT: "off",
         // #637 "View as" impersonation -- the global feature gate. The code
         // checks `=== "true"` exactly (lib/auth/effective-identity.ts,
         // middleware.ts, the /api/impersonation* routes, the /api/auth/session

@@ -417,7 +417,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "SEARCH_PEOPLE_CONCEPT_PRECOUNT",
-                "Value": "on",
+                "Value": "off",
               },
               {
                 "Name": "IMPERSONATION_ENABLED",
