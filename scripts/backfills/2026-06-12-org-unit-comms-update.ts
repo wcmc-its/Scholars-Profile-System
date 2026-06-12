@@ -26,9 +26,10 @@
  *     • chairs the ED title regex missed, set via field_override(leaderCwid)
  *       (durable across ETL) AND written to chairCwid for immediate display
  *
- * Joel Stein (Rehabilitation Medicine) is intentionally NOT set: his primary
- * appointment is at Columbia, so he is not a WCM scholar and cannot be linked
- * by CWID under the current model.
+ * Joel Stein (Rehabilitation Medicine) is not a WCM scholar (Columbia primary
+ * appointment), so his chairCwid (jos7021) renders via the external-leader
+ * carve-out in lib/external-leaders.ts — name + Directory photo, no profile
+ * link. The override + chairCwid are still written for data consistency.
  *
  * Flags:
  *   --dry-run   report intended changes; write nothing.
@@ -101,6 +102,11 @@ const DEPT_CHAIRS: Array<{ code: string; cwid: string }> = [
   { code: "N1760", cwid: "coi2001" }, // Costantino Iadecola — Brain & Mind
   { code: "N1400", cwid: "mgs2002" }, // Michael G. Stewart — Otolaryngology
   { code: "N1740", cwid: "rbsilve" }, // Randi B. Silver — Systems & Comp Bio
+  // Joel Stein — Rehabilitation Medicine. NOT a WCM scholar (Columbia primary
+  // appointment), so the chairCwid resolves via the external-leader carve-out
+  // in lib/external-leaders.ts (rendered name + Directory photo, no profile
+  // link). The override + chairCwid are still written for data consistency.
+  { code: "N1540", cwid: "jos7021" },
 ];
 
 const log = (m: string) => console.log(m);

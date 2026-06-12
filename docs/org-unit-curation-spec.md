@@ -119,7 +119,7 @@ Centers/Institutes later.
 |---|---|---|
 | `N1400` | Otolaryngology Head and Neck Surgery | Stewart `mgs2002` |
 | `N1740` | Systems and Computational Biomedicine | Silver `rbsilve` |
-| `N1540` | Rehabilitation Medicine | **Joel Stein — NOT SET** (Columbia primary appt; not a WCM scholar, no CWID to link) |
+| `N1540` | Rehabilitation Medicine | Stein `jos7021` — **external-leader carve-out** (Columbia primary appt, not a WCM scholar): name + Directory-API photo, no profile link (`lib/external-leaders.ts`) |
 
 ### 5d. Department categories (`lib/department-categories.ts`)
 
@@ -130,11 +130,14 @@ Centers/Institutes later.
 
 ## 6. Known limitations / follow-ups
 
-- **Joel Stein (Rehab Med chair)** can't be represented — `directorCwid`/`chairCwid`
-  must link to a displayable WCM scholar. A free-text leader field is a possible
-  future enhancement.
-- **Cross-campus director display**: a director who isn't a WCM scholar can't show.
-  All 8 directors here resolved to WCM scholars.
+- **External leaders** (not WCM scholars, e.g. Joel Stein / Rehab Med, Columbia
+  primary appt) are handled by `lib/external-leaders.ts`: the `chairCwid` is still
+  written, and the leader renders as name + Directory-API photo with **no profile
+  link**. This is a deliberate carve-out from the "leader CWID must resolve to a
+  displayable scholar" rule; remove the entry once the person becomes a WCM
+  scholar. It currently covers **department leaders only** — a center director who
+  isn't a WCM scholar would need the same fallback wired into `getCenter`. All 8
+  center directors here resolved to WCM scholars, so that's not needed yet.
 - **New-center descriptions** are placeholders pending comms copy.
 - `N1760` will need a department→center migration when comms is ready.
 
