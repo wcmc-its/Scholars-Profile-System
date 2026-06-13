@@ -17,6 +17,7 @@ import { getSession } from "@/lib/auth/session-server";
 import { getEffectiveCwid } from "@/lib/auth/effective-identity";
 import { isSuperuser } from "@/lib/auth/superuser";
 import { isCommsSteward, isMethodsTabVisible } from "@/lib/auth/comms-steward";
+import { isPubliclyDisplayed } from "@/lib/eligibility";
 import { loadEditContext } from "@/lib/api/edit-context";
 import { db } from "@/lib/db";
 import { scholarsServedByProxy, type ProxyListLookup } from "@/lib/edit/proxy-authz";
@@ -106,6 +107,21 @@ export default async function EditSelfPage({
     }
     notFound();
   }
+
+  // #536 — a hidden identity class (doctoral student / alumnus) has no public
+  // profile, so its self-edit surface is reachable only by a superuser. This
+  // mirrors the sibling `/edit/scholar/[cwid]` guard. A genuine non-superuser
+  // scholar whose role is not publicly displayed 404s; the real signed-in
+  // superuser is allowed through even while impersonating via `getEffectiveCwid`
+  // (the `View as` overlay points `editCwid` at the hidden target T, so the live
+  // verdict is keyed on `session.cwid` — the actual human — not `editCwid`).
+  if (
+    !isPubliclyDisplayed(ctx.scholar.roleCategory) &&
+    !(await isSuperuser(session.cwid))
+  ) {
+    notFound();
+  }
+
   const { attr } = (await searchParams) ?? {};
 
   // The "Profile URL" request card (#497 PR-3) is flag-gated. When on, seed it
