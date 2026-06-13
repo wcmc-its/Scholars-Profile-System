@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  loadAllUnitsDirectory,
   loadAllUnitsForFinder,
   loadManageableUnits,
   unitEditHref,
@@ -182,5 +183,235 @@ describe("loadAllUnitsForFinder", () => {
       kind: "division",
       href: "/edit/division/D1",
     });
+  });
+});
+
+// --- #971 directory loader --------------------------------------------------
+
+type DeptRow = {
+  code: string;
+  name: string;
+  slug?: string;
+  description?: string | null;
+  officialName?: string | null;
+  compactName?: string | null;
+  category?: string;
+  chairCwid?: string | null;
+  scholarCount?: number;
+  source?: string;
+};
+type DivRow = {
+  code: string;
+  name: string;
+  slug?: string;
+  description?: string | null;
+  chiefCwid?: string | null;
+  scholarCount?: number;
+  source?: string;
+  deptCode?: string;
+  department?: { name: string } | null;
+};
+type CtrRow = {
+  code: string;
+  name: string;
+  slug?: string;
+  description?: string | null;
+  officialName?: string | null;
+  compactName?: string | null;
+  centerType?: string;
+  directorCwid?: string | null;
+  leaderInterim?: boolean;
+  scholarCount?: number;
+  sortOrder?: number;
+  source?: string;
+};
+type Suppr = { entityType: string; entityId: string };
+type ScholarRow = { cwid: string; preferredName: string };
+
+function makeDirectoryClient(opts: {
+  departments?: DeptRow[];
+  divisions?: DivRow[];
+  centers?: CtrRow[];
+  suppressions?: Suppr[];
+  scholars?: ScholarRow[];
+}) {
+  const dept = vi.fn(async () => opts.departments ?? []);
+  const div = vi.fn(async () => opts.divisions ?? []);
+  const ctr = vi.fn(async () => opts.centers ?? []);
+  const suppression = vi.fn(async () => opts.suppressions ?? []);
+  const scholar = vi.fn(async (args?: { where?: { cwid?: { in?: string[] } } }) => {
+    const inList = args?.where?.cwid?.in ?? [];
+    return (opts.scholars ?? []).filter((s) => inList.includes(s.cwid));
+  });
+  return {
+    client: {
+      department: { findMany: dept },
+      division: { findMany: div },
+      center: { findMany: ctr },
+      suppression: { findMany: suppression },
+      scholar: { findMany: scholar },
+    } as never,
+    spies: { dept, div, ctr, suppression, scholar },
+  };
+}
+
+describe("loadAllUnitsDirectory", () => {
+  it("maps a curated department: official override heading, compact short label", async () => {
+    const { client } = makeDirectoryClient({
+      departments: [
+        {
+          code: "N1280",
+          name: "Library",
+          slug: "library",
+          description: "The library.",
+          officialName: "Samuel J. Wood Library",
+          compactName: "Library",
+          category: "administrative",
+          chairCwid: "abc1234",
+          scholarCount: 5,
+          source: "ED",
+        },
+      ],
+      scholars: [{ cwid: "abc1234", preferredName: "Jane Chair" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({
+      kind: "department",
+      code: "N1280",
+      officialName: "Samuel J. Wood Library",
+      compactName: "Library",
+      category: "administrative",
+      centerType: null,
+      leaderCwid: "abc1234",
+      leaderName: "Jane Chair",
+      leaderInterim: false,
+      parentDeptCode: null,
+      parentDeptName: null,
+      sortOrder: null,
+      retired: false,
+      href: "/edit/department/N1280",
+    });
+  });
+
+  it("division degrades gracefully: official=compact=name, no category, parent resolved", async () => {
+    const { client } = makeDirectoryClient({
+      divisions: [
+        {
+          code: "D-CARD",
+          name: "Cardiology",
+          slug: "cardiology",
+          description: null,
+          chiefCwid: null,
+          scholarCount: 2,
+          source: "ED",
+          deptCode: "N1280",
+          department: { name: "Medicine" },
+        },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    const div = r.find((u) => u.code === "D-CARD")!;
+    expect(div.officialName).toBe("Cardiology");
+    expect(div.compactName).toBe("Cardiology");
+    expect(div.category).toBeNull();
+    expect(div.centerType).toBeNull();
+    expect(div.sortOrder).toBeNull();
+    expect(div.parentDeptCode).toBe("N1280");
+    expect(div.parentDeptName).toBe("Medicine");
+  });
+
+  it("center carries centerType/sortOrder/leaderInterim and never a parent dept", async () => {
+    const { client } = makeDirectoryClient({
+      centers: [
+        {
+          code: "man-onc",
+          name: "Cancer Center",
+          slug: "cancer",
+          description: "Onc.",
+          centerType: "institute",
+          directorCwid: "dir9999",
+          leaderInterim: true,
+          scholarCount: 9,
+          sortOrder: 3,
+          source: "seed",
+        },
+      ],
+      scholars: [{ cwid: "dir9999", preferredName: "Acting Director" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    const ctr = r.find((u) => u.code === "man-onc")!;
+    expect(ctr.centerType).toBe("institute");
+    expect(ctr.sortOrder).toBe(3);
+    expect(ctr.leaderInterim).toBe(true);
+    expect(ctr.leaderName).toBe("Acting Director");
+    expect(ctr.parentDeptCode).toBeNull();
+    expect(ctr.parentDeptName).toBeNull();
+  });
+
+  it("leaderName is null (not the bare cwid) when the leader isn't a scholar — gap signal", async () => {
+    const { client } = makeDirectoryClient({
+      departments: [{ code: "N9", name: "Orphan Dept", chairCwid: "ghost1", scholarCount: 0 }],
+      // no matching scholar row for ghost1
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].leaderCwid).toBe("ghost1");
+    expect(r[0].leaderName).toBeNull();
+  });
+
+  it("external-leader overlay (keyed by unit code) wins with no scholar row", async () => {
+    const { client } = makeDirectoryClient({
+      // N1540 is Joel Stein in EXTERNAL_LEADERS; jos7021 has no scholar row.
+      departments: [
+        { code: "N1540", name: "Rehabilitation Medicine", chairCwid: "jos7021", scholarCount: 1 },
+      ],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r[0].leaderName).toBe("Joel Stein");
+    expect(r[0].leaderCwid).toBe("jos7021");
+  });
+
+  it("derives retired from ONE suppression.findMany (not per-unit), hidden by default", async () => {
+    const { client, spies } = makeDirectoryClient({
+      centers: [
+        { code: "live", name: "Live Center", scholarCount: 1 },
+        { code: "dead", name: "Dead Center", scholarCount: 0 },
+      ],
+      suppressions: [{ entityType: "center", entityId: "dead" }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(spies.suppression).toHaveBeenCalledTimes(1);
+    expect(r.map((u) => u.code)).toEqual(["live"]); // dead dropped (default hides retired)
+  });
+
+  it("includeRetired keeps and marks retired rows", async () => {
+    const { client } = makeDirectoryClient({
+      centers: [
+        { code: "live", name: "Live Center", scholarCount: 1 },
+        { code: "dead", name: "Dead Center", scholarCount: 0 },
+      ],
+      suppressions: [{ entityType: "center", entityId: "dead" }],
+    });
+    const r = await loadAllUnitsDirectory(client, { includeRetired: true });
+    expect(r.find((u) => u.code === "dead")!.retired).toBe(true);
+    expect(r.find((u) => u.code === "live")!.retired).toBe(false);
+  });
+
+  it("sorts by kind (dept, division, center) then name", async () => {
+    const { client } = makeDirectoryClient({
+      departments: [
+        { code: "N2", name: "Surgery", scholarCount: 0 },
+        { code: "N1", name: "Anesthesiology", scholarCount: 0 },
+      ],
+      divisions: [{ code: "D1", name: "Cardiology", scholarCount: 0 }],
+      centers: [{ code: "C1", name: "Brain Center", scholarCount: 0 }],
+    });
+    const r = await loadAllUnitsDirectory(client);
+    expect(r.map((u) => `${u.kind}:${u.name}`)).toEqual([
+      "department:Anesthesiology",
+      "department:Surgery",
+      "division:Cardiology",
+      "center:Brain Center",
+    ]);
   });
 });

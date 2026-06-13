@@ -15,10 +15,15 @@ import Link from "next/link";
 import { ChevronLeftIcon } from "lucide-react";
 import { redirect } from "next/navigation";
 
+import { AllUnitsDirectory } from "@/components/edit/all-units-directory";
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
 import { getEffectiveEditSession } from "@/lib/auth/effective-identity";
 import { db } from "@/lib/db";
-import { loadAllUnitsForFinder, loadManageableUnits } from "@/lib/edit/manageable-units";
+import {
+  loadAllUnitsDirectory,
+  loadAllUnitsForFinder,
+  loadManageableUnits,
+} from "@/lib/edit/manageable-units";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +40,17 @@ export default async function EditUnitsPage() {
 
   const units = await loadManageableUnits(session.cwid, db.read);
   // A superuser AND a comms_steward (a global unit-content editor, comms-steward-
-  // profile-editing-spec.md §3b) both get the all-units finder — they may edit
-  // any existing unit, not only ones they hold a grant on.
-  const finderUnits =
-    session.isSuperuser || session.isCommsSteward ? await loadAllUnitsForFinder(db.read) : [];
+  // profile-editing-spec.md §3b) both get the all-units finder AND the complete
+  // org-unit directory (#971) — they may edit any existing unit, not only ones
+  // they hold a grant on. Retired units stay superuser-only (the directory's
+  // includeRetired below), matching the retired gate in unit-edit-context.ts.
+  const canSeeAllUnitsDirectory = session.isSuperuser || session.isCommsSteward;
+  const [finderUnits, directoryUnits] = await Promise.all([
+    canSeeAllUnitsDirectory ? loadAllUnitsForFinder(db.read) : Promise.resolve([]),
+    canSeeAllUnitsDirectory
+      ? loadAllUnitsDirectory(db.read, { includeRetired: session.isSuperuser })
+      : Promise.resolve([]),
+  ]);
 
   // Back-link to the actor's own self-edit surface — only when they have a
   // (non-deleted) profile, so a staff superuser without one never hits a 404.
@@ -81,9 +93,14 @@ export default async function EditUnitsPage() {
         <ManageableUnitsIndex
           units={units}
           isSuperuser={session.isSuperuser}
-          canFindAnyUnit={session.isSuperuser || session.isCommsSteward}
+          canFindAnyUnit={canSeeAllUnitsDirectory}
           finderUnits={finderUnits}
         />
+        {canSeeAllUnitsDirectory && (
+          <section className="mt-10">
+            <AllUnitsDirectory units={directoryUnits} isSuperuser={session.isSuperuser} />
+          </section>
+        )}
       </main>
     </div>
   );
