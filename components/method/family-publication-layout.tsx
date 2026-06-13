@@ -142,6 +142,21 @@ function SupercategoryFamilyLayoutInner({
             <>
               <header className="mb-4">
                 <h2 className="text-xl font-semibold leading-tight">{activeLabel}</h2>
+                {activeSegment && (
+                  // The supercategory panel and the standalone family page show the
+                  // same family. The rail click is an in-page deep-link (`?family=`),
+                  // not navigation, so signpost the canonical family page explicitly
+                  // — otherwise the two surfaces read as accidental duplicates. The
+                  // family label is kept in the link text so it stands alone for a11y.
+                  <a
+                    href={`/methods/${encodeURIComponent(supercategorySlug)}/${encodeURIComponent(
+                      activeSegment,
+                    )}`}
+                    className="mt-1 inline-block text-sm text-[var(--color-accent-slate)] underline-offset-4 hover:underline"
+                  >
+                    View full {activeLabel} method page →
+                  </a>
+                )}
               </header>
               <FamilyScholarsRow
                 supercategorySlug={supercategorySlug}
