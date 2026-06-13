@@ -208,7 +208,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // Post-commit reflection — the access list is rendered on the unit page
   // (Phase 7); a grant changes who sees the edit affordances.
   const unitKind: UnitKind = unit.kind;
-  reflectUnitChange({
+  await reflectUnitChange({
     unitKind,
     unitSlug: unit.slug,
     parentDeptSlug:

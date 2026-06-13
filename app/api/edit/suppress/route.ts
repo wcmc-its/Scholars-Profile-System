@@ -338,7 +338,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // facet drops on the next nightly rebuild — SPEC § Write-path behavior
   // explicitly disowns the fast-path / reconciler urgency split for units.
   if (unitForReflection) {
-    reflectUnitChange({
+    await reflectUnitChange({
       unitKind: unitForReflection.kind,
       unitSlug: unitForReflection.slug,
       parentDeptSlug: unitForReflection.parentDeptSlug,

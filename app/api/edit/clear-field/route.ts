@@ -222,7 +222,7 @@ async function clearSelectedHighlights(params: {
   // revalidate it (unlike the slug clear, which only flips on the next etl/ed).
   if (cleared) {
     const [profile] = await resolveAffectedProfiles("scholar", entityId, null);
-    if (profile) reflectOverviewEdit(profile.slug);
+    if (profile) await reflectOverviewEdit(profile.slug);
   }
 
   return editOk({ fieldName: "selectedHighlightPmids", cleared });

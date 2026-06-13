@@ -284,7 +284,7 @@ async function createInformalCenter(params: {
     return editError(500, "write_failed");
   }
 
-  reflectUnitChange({ unitKind: "center", unitSlug: slug });
+  await reflectUnitChange({ unitKind: "center", unitSlug: slug });
   return editOk({ code: createdId, slug });
 }
 
@@ -383,7 +383,7 @@ async function createCodedDivision(params: {
     return editError(500, "write_failed");
   }
 
-  reflectUnitChange({
+  await reflectUnitChange({
     unitKind: "division",
     unitSlug: slug,
     parentDeptSlug,
@@ -549,7 +549,7 @@ async function handleUpdate(
   // Post-commit reflection. A slug change flips the URL immediately
   // (Center.slug is the column; no ETL lag), so the previous slug page
   // needs busting too.
-  reflectUnitChange({
+  await reflectUnitChange({
     unitKind: "center",
     unitSlug: fieldName === "slug" ? (storedValue as string) : unit.slug,
     previousSlug: fieldName === "slug" ? unit.slug : null,
