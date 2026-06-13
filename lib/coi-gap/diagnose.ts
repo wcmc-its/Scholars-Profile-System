@@ -23,6 +23,7 @@ import {
   looksLikeJunkEntity,
   looksLikePersonName,
   normalizeEntity,
+  type AuthorRoster,
   type Scholar,
 } from "./pipeline";
 import { canonicalizeSponsor } from "@/lib/sponsor-canonicalize";
@@ -76,6 +77,9 @@ export type DiagnoseInput = {
   scholar: Scholar;
   disclosed: ReadonlyArray<string>;
   statements: ReadonlyArray<{ pmid: string; statementText: string }>;
+  /** Per-PMID author byline for the co-author cross-check (see `buildAuthorRoster`).
+   *  Threaded so the diagnostic measures the SAME suppression production applies. */
+  rosters?: Map<string, AuthorRoster>;
   /** Override the near-disclosed threshold for a what-if pass (default: pipeline). */
   nearDisclosedThreshold?: number;
 };
@@ -92,6 +96,7 @@ export function diagnoseScholar(input: DiagnoseInput): DiagnosticRow[] {
       canonicalize: canonicalizeSponsor,
       includeSuppressed: true,
       nearDisclosedThreshold: input.nearDisclosedThreshold,
+      roster: input.rosters?.get(st.pmid),
     });
     // Per-statement multi-author signal (stamped on every row of the statement),
     // the same signal the production pipeline now uses to suppress unattributed
@@ -155,10 +160,11 @@ export type DiagnoseSummary = {
      *  scholar, so probably legitimately theirs. */
     unattributedSingleAuthor: number;
     /** Surfaced entity that looks like a PERSON's name — a co-author that bled
-     *  through extraction. Now catches bare "First Last" names (not just dotted
-     *  initials), so this is the SIZE of the co-author-name leakage that is
-     *  deliberately surfaced (not suppressed, since the shape collides with
-     *  founder-named orgs); the right fix is a later author-roster cross-check. */
+     *  through extraction. The author-roster cross-check (`matchesCoAuthor`) now
+     *  drops the ones confirmed on this paper's byline; this RESIDUAL is the
+     *  person-shaped leakage the roster could NOT confirm — byline missing/empty,
+     *  an initials-only byline, or a surname/initial-form mismatch — still surfaced
+     *  because the shape alone collides with founder-named orgs. */
     personNameSurfaced: number;
   };
 };
@@ -192,21 +198,25 @@ export function summarize(rows: ReadonlyArray<DiagnosticRow>, nearThreshold = 0.
       // Low: classify by reason, mirroring analyzeStatement's suppression order so
       // the bucket matches the actual cause. Junk-word is checked FIRST because it
       // short-circuits before tierOf in the pipeline and carries an authoritative
-      // failureModeGuess set at suppression time. (Person-name is NOT a suppression
-      // reason: bare First-Last co-author names are surfaced, not dropped — they are
-      // sized via surfacedBreakdown.personNameSurfaced, not here.)
+      // failureModeGuess set at suppression time. The author-roster cross-check is
+      // checked NEXT (it likewise short-circuits and stamps an authoritative
+      // tierReason). Person-name on SHAPE alone is still not a suppression reason:
+      // bare First-Last names that are NOT on the byline stay surfaced — sized via
+      // surfacedBreakdown.personNameSurfaced, not here.
       const reason =
         r.failureModeGuess === "junk-token"
           ? "junk-word"
-          : r.nearestScore >= nearThreshold
-            ? "matched-disclosed"
-            : r.category !== "personal"
-              ? "non-personal"
-              : r.attribution === "other"
-                ? "co-author"
-                : r.isMultiAuthor && r.attribution === "unattributed"
-                  ? "multi-author-leakage"
-                  : "weak-signal";
+          : /roster cross-check/.test(r.tierReason)
+            ? "co-author-roster"
+            : r.nearestScore >= nearThreshold
+              ? "matched-disclosed"
+              : r.category !== "personal"
+                ? "non-personal"
+                : r.attribution === "other"
+                  ? "co-author"
+                  : r.isMultiAuthor && r.attribution === "unattributed"
+                    ? "multi-author-leakage"
+                    : "weak-signal";
       suppressedByReason[reason] = (suppressedByReason[reason] ?? 0) + 1;
     }
   }

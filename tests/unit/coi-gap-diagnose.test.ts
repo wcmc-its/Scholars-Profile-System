@@ -16,7 +16,7 @@ import {
   summarize,
   type DiagnoseInput,
 } from "@/lib/coi-gap/diagnose";
-import { deriveScholar } from "@/lib/coi-gap/pipeline";
+import { buildAuthorRoster, deriveScholar } from "@/lib/coi-gap/pipeline";
 
 const baseInput = (): DiagnoseInput => ({
   cwid: "smith1",
@@ -177,5 +177,36 @@ describe("diagnoseScholar — extraction-junk sizing (junk suppressed; co-author
     expect(s.surfacedBreakdown.personNameSurfaced).toBeGreaterThanOrEqual(1);
     // …and person-name is NOT a suppression bucket (the names surface).
     expect(s.suppressedByReason["person-name"]).toBeUndefined();
+  });
+});
+
+describe("diagnoseScholar — author-roster cross-check sizing", () => {
+  // An UNATTRIBUTED clause where an INITIAL-form co-author ("W Zhang") leaks
+  // alongside a real org. WITH the paper's byline (Zhang W) the cross-check moves it
+  // from surfaced-leakage to a suppressed "co-author-roster" bucket; the org stays.
+  const rosterInput = (): DiagnoseInput => ({
+    cwid: "smith1",
+    scholar: deriveScholar("John", "Smith"),
+    disclosed: [],
+    statements: [
+      { pmid: "j", statementText: "Consulting fees were received from Acme Robotics, W Zhang, and Various." },
+    ],
+    rosters: new Map([["j", buildAuthorRoster("Smith J, Zhang W")]]),
+  });
+
+  it("suppresses the on-byline co-author as a Low row tagged co-author (roster)", () => {
+    const rows = diagnoseScholar(rosterInput());
+    const zhang = rows.find((r) => r.entity === "W Zhang");
+    expect(zhang).toBeDefined();
+    expect(zhang!.surfaced).toBe(false); // now dropped — it is a confirmed co-author
+    expect(zhang!.failureModeGuess).toBe("co-author");
+    expect(zhang!.tierReason).toMatch(/roster cross-check/i);
+  });
+
+  it("buckets the co-author under co-author-roster and keeps the real org surfaced", () => {
+    const s = summarize(diagnoseScholar(rosterInput()));
+    expect(s.suppressedByReason["co-author-roster"]).toBeGreaterThanOrEqual(1);
+    const acme = diagnoseScholar(rosterInput()).find((r) => /acme/i.test(r.entity));
+    expect(acme?.surfaced).toBe(true);
   });
 });
