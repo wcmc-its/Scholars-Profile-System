@@ -207,6 +207,11 @@ describe("CenterMembersClient — Methods & tools facet (#962)", () => {
     render(<CenterMembersClient result={withMethods} centerSlug="x" />);
 
     expect(screen.getByRole("heading", { name: "Methods & tools" })).toBeTruthy();
+    // #962 follow-up — Methods & tools ranks ABOVE Organizational unit in the sidebar.
+    const facetHeadings = screen.getAllByRole("heading").map((h) => h.textContent);
+    expect(facetHeadings.indexOf("Methods & tools")).toBeLessThan(
+      facetHeadings.indexOf("Organizational unit"),
+    );
     // Chips piped to PersonRow (top-N familyLabels) for the equipped members only.
     const chips = Object.fromEntries(
       screen
