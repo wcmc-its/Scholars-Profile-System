@@ -12,6 +12,12 @@
  * Remove (the Superuser is the backstop, but a self-revoke would lock the actor
  * out of this very surface — mirrors the `/api/edit/grant` T7 guard). Per the
  * SPEC there is deliberately no last-Owner guard.
+ *
+ * ED-locked guard (#728 § 2.2 #3 / § 5 MUST-7): a row sourced from the nightly
+ * Web Directory (Enterprise Directory) import — `source` LIKE `ED:%` — is
+ * read-only here for EVERYONE (superusers included); the role is changed at the
+ * source, not here. The `/api/edit/grant` route enforces this server-side and
+ * returns `ed_locked`; we mirror it by disabling Remove on those rows.
  */
 "use client";
 
@@ -34,7 +40,19 @@ type AccessRow = {
   role: "owner" | "curator";
   grantedBy: string | null;
   grantedAt: Date;
+  /** Provenance (#728): "manual" for human grants; "ED:…" for Web Directory
+   *  (Enterprise Directory) imports. ED-sourced rows are read-only here. */
+  source?: string;
 };
+
+/** Whether a row is owned by the ED import and so can't be removed in this UI —
+ *  mirrors the `/api/edit/grant` server gate (`source` LIKE `ED:%`). */
+function isEdLocked(row: AccessRow): boolean {
+  return row.source?.startsWith("ED:") ?? false;
+}
+
+const ED_LOCKED_HINT =
+  "This access is managed in the Enterprise Directory and can't be removed here.";
 
 export type UnitAccessCardProps = {
   entityType: "department" | "division" | "center";
@@ -190,6 +208,12 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
             <tbody>
               {rows.map((row) => {
                 const isSelf = row.cwid === actorCwid;
+                const edLocked = isEdLocked(row);
+                const removeTitle = isSelf
+                  ? "You can't remove your own access."
+                  : edLocked
+                    ? ED_LOCKED_HINT
+                    : undefined;
                 const shown = displayName(row);
                 return (
                   <tr key={row.cwid} className="border-apollo-border border-b" data-testid={`unit-access-row-${row.cwid}`}>
@@ -205,8 +229,8 @@ export function UnitAccessCard({ entityType, entityId, access, actorCwid }: Unit
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={isSelf || busy}
-                        title={isSelf ? "You can't remove your own access." : undefined}
+                        disabled={isSelf || edLocked || busy}
+                        title={removeTitle}
                         onClick={() => setRevokeTarget(row)}
                         data-testid={`unit-access-remove-${row.cwid}`}
                       >
@@ -277,6 +301,8 @@ function mapErrorToMessage(code: string): string {
       return "You don't have permission to manage access for this unit.";
     case "cannot_revoke_self":
       return "You can't remove your own access.";
+    case "ed_locked":
+      return ED_LOCKED_HINT;
     case "invalid_cwid":
       return "That person couldn't be found. Try a different search.";
     default:

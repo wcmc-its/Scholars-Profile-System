@@ -36,6 +36,7 @@ vi.mock("@aws-sdk/client-cloudfront", () => ({
 
 import {
   reflectOverviewEdit,
+  reflectUnitChange,
   reflectVisibilityChange,
   resolveAffectedProfiles,
 } from "@/lib/edit/revalidation";
@@ -82,10 +83,61 @@ describe("resolveAffectedProfiles", () => {
 });
 
 describe("reflectOverviewEdit", () => {
-  it("revalidates only the profile page", () => {
-    reflectOverviewEdit("jane-smith");
+  it("revalidates only the profile page", async () => {
+    await reflectOverviewEdit("jane-smith");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/scholars/jane-smith");
     expect(mockRevalidatePath).toHaveBeenCalledTimes(1);
+  });
+
+  it("enqueues a CloudFront invalidation for the profile page", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectOverviewEdit("jane-smith");
+    expect(mockCdnCreate).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/scholars/jane-smith",
+    ]);
+    expect(mockCfSend).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("reflectUnitChange", () => {
+  it("revalidates the unit page and /browse for a department edit", async () => {
+    await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/browse");
+    expect(mockRevalidatePath).toHaveBeenCalledWith("/departments/medicine");
+  });
+
+  it("enqueues a CloudFront invalidation for the unit page and /browse", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });
+    expect(mockCdnCreate).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/browse",
+      "/departments/medicine",
+    ]);
+    expect(mockCfSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("enqueues both the old and new center slug paths on a slug change", async () => {
+    process.env.SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID = "E1234567890ABC";
+    await reflectUnitChange({
+      unitKind: "center",
+      unitSlug: "new-center",
+      previousSlug: "old-center",
+    });
+    expect(JSON.parse(mockCdnCreate.mock.calls[0][0].data.paths)).toEqual([
+      "/browse",
+      "/centers/new-center",
+      "/centers/old-center",
+    ]);
+    expect(mockCfSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("is dormant when no distribution id is set: no enqueue, no send", async () => {
+    // beforeEach already deletes SCHOLARS_CLOUDFRONT_DISTRIBUTION_ID.
+    await reflectUnitChange({ unitKind: "department", unitSlug: "medicine" });
+    expect(mockCdnCreate).not.toHaveBeenCalled();
+    expect(mockCfSend).not.toHaveBeenCalled();
   });
 });
 
