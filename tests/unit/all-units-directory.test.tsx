@@ -134,13 +134,15 @@ describe("AllUnitsDirectory", () => {
 
   it("flags gap markers for a null-leader / null-description unit, none for a curated one", () => {
     render(<AllUnitsDirectory units={[curatedDept, degradedDivision]} isSuperuser />);
-    // Degraded division: no leader, no description (and no official override).
+    // Degraded division: no leader, no description.
     expect(screen.getByTestId("all-units-gap-division-D-CARD-leader")).toBeTruthy();
     expect(screen.getByTestId("all-units-gap-division-D-CARD-description")).toBeTruthy();
+    // A missing official name is NOT a gap — that marker no longer exists, even
+    // for the degraded division whose official name falls back to its name.
+    expect(screen.queryByTestId("all-units-gap-division-D-CARD-official")).toBeNull();
     // Fully-curated dept: no gap pills at all.
     expect(screen.queryByTestId("all-units-gap-department-N1280-leader")).toBeNull();
     expect(screen.queryByTestId("all-units-gap-department-N1280-description")).toBeNull();
-    expect(screen.queryByTestId("all-units-gap-department-N1280-official")).toBeNull();
   });
 
   it("renders the Retired pill only on the retired unit", () => {
@@ -170,5 +172,49 @@ describe("AllUnitsDirectory", () => {
     fireEvent.change(screen.getByTestId("all-units-filter"), { target: { value: "jane" } });
     expect(screen.getByTestId("all-units-row-department-N1280")).toBeTruthy();
     expect(screen.queryByTestId("all-units-row-division-D-CARD")).toBeNull();
+  });
+
+  it("'Sort by scholars' orders by scholar count, most first, as a flat list", () => {
+    const { container } = render(<AllUnitsDirectory units={allFour} isSuperuser />);
+    fireEvent.change(screen.getByTestId("all-units-sort"), { target: { value: "scholars" } });
+    const ids = Array.from(container.querySelectorAll('[data-testid^="all-units-row-"]')).map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(ids).toEqual([
+      "all-units-row-center-man-onc", // 9, "Cancer Center" (name tiebreak)
+      "all-units-row-center-man-old", // 9, "Old Center"
+      "all-units-row-department-N1280", // 5
+      "all-units-row-division-D-CARD", // 2
+    ]);
+  });
+
+  it("'Missing description' filter narrows to undescribed units", () => {
+    render(<AllUnitsDirectory units={allFour} isSuperuser />);
+    fireEvent.click(screen.getByTestId("all-units-filter-missing-description"));
+    // Only the degraded division lacks a description.
+    expect(screen.getByTestId("all-units-row-division-D-CARD")).toBeTruthy();
+    expect(screen.queryByTestId("all-units-row-department-N1280")).toBeNull();
+    expect(screen.queryByTestId("all-units-row-center-man-onc")).toBeNull();
+  });
+
+  it("'Missing leader' filter narrows to leaderless units", () => {
+    render(<AllUnitsDirectory units={allFour} isSuperuser />);
+    fireEvent.click(screen.getByTestId("all-units-filter-missing-leader"));
+    expect(screen.getByTestId("all-units-row-division-D-CARD")).toBeTruthy();
+    expect(screen.queryByTestId("all-units-row-department-N1280")).toBeNull();
+  });
+
+  it("labels the ED source as 'Enterprise Directory', not the raw code", () => {
+    render(<AllUnitsDirectory units={[curatedDept]} isSuperuser />);
+    expect(screen.getByTestId("all-units-row-department-N1280").textContent).toContain(
+      "Enterprise Directory",
+    );
+  });
+
+  it("offers 'Create a unit' to a superuser but not to a comms steward", () => {
+    const { rerender } = render(<AllUnitsDirectory units={[curatedDept]} isSuperuser />);
+    expect(screen.getByTestId("all-units-create")).toBeTruthy();
+    rerender(<AllUnitsDirectory units={[curatedDept]} isSuperuser={false} />);
+    expect(screen.queryByTestId("all-units-create")).toBeNull();
   });
 });

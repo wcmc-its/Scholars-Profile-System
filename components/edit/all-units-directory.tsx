@@ -3,24 +3,26 @@
  * `/edit/units`, visible only to superusers + comms stewards (the page gates it;
  * this component renders whatever it's handed). Where "Units you manage" shows
  * the actor's own grants in bare rows, this is the full org-chart audit view:
- * every department, division, and center with its curated names, leadership,
- * counts, provenance, and curation-gap markers.
+ * every department, division, and center with its names, leadership, counts,
+ * provenance, and the two curation gaps that matter (no description, no leader).
  *
- * A client component for one reason: a small in-memory filter + sort over the
- * bounded list (~50 units), mirroring `UnitFinder`'s "server-provided bounded
- * list, filter in-memory, no fetch" contract. The server page passes only plain
+ * A client component for one reason: an in-memory filter + sort over the bounded
+ * list (~80 units), mirroring `UnitFinder`'s "server-provided bounded list,
+ * filter in-memory, no fetch" contract. The server page passes only plain
  * `UnitDirectoryEntry` data (all strings/numbers/booleans/null), so the
  * server→client boundary is clean.
  */
 "use client";
 
 import * as React from "react";
-import { ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Plus } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { ManageableUnitKind, UnitDirectoryEntry } from "@/lib/edit/manageable-units";
 
-type SortKey = "name" | "kind" | "gaps";
+type SortKey = "name" | "kind" | "scholars";
 
 const KIND_ORDER: ReadonlyArray<{ kind: ManageableUnitKind; title: string }> = [
   { kind: "department", title: "Departments" },
@@ -28,14 +30,24 @@ const KIND_ORDER: ReadonlyArray<{ kind: ManageableUnitKind; title: string }> = [
   { kind: "center", title: "Centers" },
 ];
 
-/** A unit is a curation gap when its official name, description, or leader is missing. */
-function gapCount(unit: UnitDirectoryEntry): number {
-  let n = 0;
-  // No curated official override (official resolves to the bare canonical name).
-  if (unit.officialName === unit.name) n += 1;
-  if (!unit.description || unit.description.trim().length === 0) n += 1;
-  if (!unit.leaderName) n += 1;
-  return n;
+/**
+ * Human label for a unit's data provenance — the raw `source` ("ED", "manual")
+ * is internal jargon. ED = the WCM Enterprise Directory feed that seeds most
+ * units; "manual" = a unit curated by hand in this app.
+ */
+function sourceLabel(source: string): string {
+  switch (source.toLowerCase()) {
+    case "ed":
+      return "Enterprise Directory";
+    case "manual":
+      return "Manually added";
+    default:
+      return source;
+  }
+}
+
+function hasNoDescription(u: UnitDirectoryEntry): boolean {
+  return !u.description || u.description.trim().length === 0;
 }
 
 export function AllUnitsDirectory({
@@ -47,30 +59,37 @@ export function AllUnitsDirectory({
 }) {
   const [query, setQuery] = React.useState("");
   const [sort, setSort] = React.useState<SortKey>("name");
+  // Curation-gap filters — narrow to units missing a description and/or a
+  // leader. (A missing *official name* is not a gap: it's an occasional curated
+  // override, not something every unit should carry.)
+  const [missingDescriptionOnly, setMissingDescriptionOnly] = React.useState(false);
+  const [missingLeaderOnly, setMissingLeaderOnly] = React.useState(false);
 
   const filtered = React.useMemo(() => {
     const trimmed = query.trim().toLowerCase();
-    const pool =
-      trimmed.length === 0
-        ? units
-        : units.filter(
-            (u) =>
-              u.officialName.toLowerCase().includes(trimmed) ||
-              u.name.toLowerCase().includes(trimmed) ||
-              u.compactName.toLowerCase().includes(trimmed) ||
-              u.code.toLowerCase().includes(trimmed) ||
-              (u.leaderName?.toLowerCase().includes(trimmed) ?? false),
-          );
-    if (sort === "gaps") {
-      // Most-incomplete first; ties fall back to name.
+    const pool = units.filter((u) => {
+      if (missingDescriptionOnly && !hasNoDescription(u)) return false;
+      if (missingLeaderOnly && u.leaderName) return false;
+      if (trimmed.length === 0) return true;
+      return (
+        u.officialName.toLowerCase().includes(trimmed) ||
+        u.name.toLowerCase().includes(trimmed) ||
+        u.compactName.toLowerCase().includes(trimmed) ||
+        u.code.toLowerCase().includes(trimmed) ||
+        (u.leaderName?.toLowerCase().includes(trimmed) ?? false)
+      );
+    });
+    if (sort === "scholars") {
+      // Most scholars first, as a flat list across kinds so the biggest units
+      // lead; ties fall back to name.
       return [...pool].sort(
-        (a, b) => gapCount(b) - gapCount(a) || a.officialName.localeCompare(b.officialName),
+        (a, b) => b.scholarCount - a.scholarCount || a.officialName.localeCompare(b.officialName),
       );
     }
     // "name" and "kind" both group-render by kind below, so within a group a
     // name sort is the natural order either way.
     return [...pool].sort((a, b) => a.officialName.localeCompare(b.officialName));
-  }, [units, query, sort]);
+  }, [units, query, sort, missingDescriptionOnly, missingLeaderOnly]);
 
   return (
     <div
@@ -78,13 +97,24 @@ export function AllUnitsDirectory({
       data-slot="all-units-directory"
       data-testid="all-units-directory"
     >
-      <div>
-        <h2 className="text-[15px] font-semibold">All units</h2>
-        <p className="text-muted-foreground text-sm">
-          Every department, division, and center{isSuperuser ? ", including retired ones," : ""}{" "}
-          with its curated names, leadership, and counts — a read-only audit of the full org chart.
-          Amber tags flag a curation gap.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[15px] font-semibold">All units</h2>
+          <p className="text-muted-foreground text-sm">
+            Every department, division, and center{isSuperuser ? ", including retired ones," : ""}{" "}
+            with its names, leadership, and counts — a read-only audit of the full org chart.
+          </p>
+        </div>
+        {/* Create a unit is superuser-only — a comms_steward edits existing units
+            but never creates (or deletes) them. */}
+        {isSuperuser && (
+          <Button asChild variant="apollo" size="sm">
+            <Link href="/edit/unit/new" data-testid="all-units-create">
+              <Plus className="size-4" aria-hidden />
+              Create a unit
+            </Link>
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -107,12 +137,26 @@ export function AllUnitsDirectory({
           >
             <option value="name">Name</option>
             <option value="kind">Kind</option>
-            <option value="gaps">Curation gaps</option>
+            <option value="scholars">Scholars</option>
           </select>
         </label>
+        <GapToggle
+          active={missingDescriptionOnly}
+          onClick={() => setMissingDescriptionOnly((v) => !v)}
+          testid="all-units-filter-missing-description"
+        >
+          Missing description
+        </GapToggle>
+        <GapToggle
+          active={missingLeaderOnly}
+          onClick={() => setMissingLeaderOnly((v) => !v)}
+          testid="all-units-filter-missing-leader"
+        >
+          Missing leader
+        </GapToggle>
       </div>
 
-      {sort === "gaps" ? (
+      {sort === "scholars" ? (
         <UnitList units={filtered} />
       ) : (
         KIND_ORDER.map(({ kind, title }) => (
@@ -120,6 +164,34 @@ export function AllUnitsDirectory({
         ))
       )}
     </div>
+  );
+}
+
+function GapToggle({
+  active,
+  onClick,
+  testid,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  testid: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      data-testid={testid}
+      className={
+        active
+          ? "border-apollo-slate bg-apollo-slate-tint text-apollo-slate rounded-full border px-3 py-1.5 text-sm font-medium"
+          : "border-input text-muted-foreground hover:text-foreground rounded-full border px-3 py-1.5 text-sm"
+      }
+    >
+      {children}
+    </button>
   );
 }
 
@@ -145,8 +217,7 @@ function UnitList({ units }: { units: UnitDirectoryEntry[] }) {
 }
 
 function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
-  const hasDescription = !!unit.description && unit.description.trim().length > 0;
-  const noOfficial = unit.officialName === unit.name;
+  const hasDescription = !hasNoDescription(unit);
   const compactDiffers = unit.compactName !== unit.officialName;
   const typeChip = unit.centerType
     ? unit.centerType === "institute"
@@ -178,10 +249,13 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
             </span>
           )}
         </div>
+        {/* Meta line — the parent department ("in Pediatrics") rides up here next
+            to the code so a division's place in the org chart reads at a glance. */}
         <div className="text-muted-foreground text-sm">
           {unit.kindLabel} · {unit.code}
+          {unit.parentDeptName ? ` · in ${unit.parentDeptName}` : ""}
           {compactDiffers ? ` · ${unit.compactName}` : ""} · {unit.scholarCount} scholars ·{" "}
-          {unit.source}
+          {sourceLabel(unit.source)}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
           {unit.leaderName ? (
@@ -194,9 +268,6 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
               No leader
             </GapPill>
           )}
-          {unit.parentDeptName && (
-            <span className="text-muted-foreground">in {unit.parentDeptName}</span>
-          )}
           {hasDescription ? (
             <span className="text-muted-foreground line-clamp-1 max-w-md truncate">
               {unit.description}
@@ -204,11 +275,6 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
           ) : (
             <GapPill kind={unit.kind} code={unit.code} marker="description">
               No description
-            </GapPill>
-          )}
-          {noOfficial && (
-            <GapPill kind={unit.kind} code={unit.code} marker="official">
-              No official name
             </GapPill>
           )}
         </div>

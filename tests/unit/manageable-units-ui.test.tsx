@@ -8,7 +8,7 @@
  * Native DOM assertions (no jest-dom in `tests/setup.ts`).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 
 const { mockPush } = vi.hoisted(() => ({ mockPush: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({
 
 import { ManageableUnitsIndex } from "@/components/edit/manageable-units-index";
 import { HomePanel } from "@/components/edit/home-panel";
-import type { ManageableUnit, ManageableUnits, UnitFinderEntry } from "@/lib/edit/manageable-units";
+import type { ManageableUnit, ManageableUnits } from "@/lib/edit/manageable-units";
 
 beforeEach(() => mockPush.mockReset());
 
@@ -60,7 +60,6 @@ describe("ManageableUnitsIndex", () => {
       <ManageableUnitsIndex
         units={mkUnits([deptOwner, divCurator, centerOwner])}
         isSuperuser={false}
-        finderUnits={[]}
       />,
     );
     expect(href(screen.getByTestId("units-edit-department-N1280"))).toBe("/edit/department/N1280");
@@ -76,43 +75,24 @@ describe("ManageableUnitsIndex", () => {
 
   it("does not offer 'Add a center' on a department the actor only curates", () => {
     const deptCurator = { ...deptOwner, role: "curator" as const };
-    render(
-      <ManageableUnitsIndex units={mkUnits([deptCurator])} isSuperuser={false} finderUnits={[]} />,
-    );
+    render(<ManageableUnitsIndex units={mkUnits([deptCurator])} isSuperuser={false} />);
     expect(screen.queryByTestId("units-add-center-N1280")).toBeNull();
   });
 
   it("non-superuser with no grants shows the empty state", () => {
-    render(<ManageableUnitsIndex units={mkUnits([])} isSuperuser={false} finderUnits={[]} />);
+    render(<ManageableUnitsIndex units={mkUnits([])} isSuperuser={false} />);
     expect(screen.getByTestId("units-empty")).toBeTruthy();
     expect(screen.queryByTestId("units-superuser-tools")).toBeNull();
   });
 
-  it("superuser: finder + create, no empty state even with no explicit grants", () => {
-    render(
-      <ManageableUnitsIndex
-        units={mkUnits([])}
-        isSuperuser
-        finderUnits={[
-          { kind: "division", code: "D1", name: "Cardiology", href: "/edit/division/D1" },
-        ]}
-      />,
-    );
-    expect(href(screen.getByTestId("units-create"))).toBe("/edit/unit/new");
-    expect(screen.getByTestId("unit-finder-input")).toBeTruthy();
+  it("superuser with no grants: no empty state and no finder/create in this body", () => {
+    // The finder + "Create a unit" moved to AllUnitsDirectory (#971); a superuser
+    // with no direct grants sees neither here, and is not shown the empty state
+    // (canFindAnyUnit defaults to isSuperuser).
+    render(<ManageableUnitsIndex units={mkUnits([])} isSuperuser />);
     expect(screen.queryByTestId("units-empty")).toBeNull();
-  });
-
-  it("superuser finder routes to the selected unit's editor", () => {
-    const finderUnits: UnitFinderEntry[] = [
-      { kind: "division", code: "D1", name: "Cardiology", href: "/edit/division/D1" },
-    ];
-    render(<ManageableUnitsIndex units={mkUnits([])} isSuperuser finderUnits={finderUnits} />);
-    const input = screen.getByTestId("unit-finder-input");
-    fireEvent.focus(input);
-    fireEvent.change(input, { target: { value: "card" } });
-    fireEvent.mouseDown(screen.getByTestId("unit-finder-option-division-D1"));
-    expect(mockPush).toHaveBeenCalledWith("/edit/division/D1");
+    expect(screen.queryByTestId("units-superuser-tools")).toBeNull();
+    expect(screen.queryByTestId("units-create")).toBeNull();
   });
 });
 
