@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 
 export type FacetOption = { value: string; label: string; count: number };
 
@@ -18,24 +18,64 @@ export function RosterFacet({
   selected,
   onToggle,
   collapseAfter = Infinity,
+  searchable = false,
+  searchPlaceholder = "Search…",
+  noMatchLabel = "No matches",
 }: {
   title: string;
   options: FacetOption[];
   selected: ReadonlySet<string>;
   onToggle: (value: string) => void;
   collapseAfter?: number;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  noMatchLabel?: string;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [query, setQuery] = useState("");
   if (options.length === 0) return null;
 
-  const visible = showAll ? options : options.slice(0, collapseAfter);
-  const hiddenCount = options.length - visible.length;
+  // Search input only when explicitly enabled AND there are enough options to
+  // warrant filtering (mirrors the collapse threshold so short lists stay simple).
+  const showSearch = searchable && options.length > collapseAfter;
+  const q = query.trim().toLowerCase();
+
+  // Selected options must always stay visible + de-selectable, even when they
+  // don't match the query: pin selected first, then the query-filtered
+  // UNSELECTED matches, de-duped (a selected option never appears twice). The
+  // search bypasses the collapse cap. With no query this is the original
+  // collapse-after list in original order.
+  let visible: FacetOption[];
+  if (q) {
+    const selectedOpts = options.filter((o) => selected.has(o.value));
+    const matches = options.filter(
+      (o) => !selected.has(o.value) && o.label.toLowerCase().includes(q),
+    );
+    visible = [...selectedOpts, ...matches];
+  } else {
+    visible = showAll ? options : options.slice(0, collapseAfter);
+  }
+  const hiddenCount = q ? 0 : options.length - visible.length;
+  const noMatches = showSearch && q.length > 0 && visible.length === 0;
 
   return (
     <div className="mb-5">
       <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {title}
       </h3>
+      {showSearch ? (
+        <label className="mb-2 flex items-center gap-1.5 rounded-sm border border-[#c8c6be] bg-white px-2 py-1 text-[12.5px] focus-within:border-[var(--color-primary-cornell-red)]">
+          <Search aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" strokeWidth={2} />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={searchPlaceholder}
+            aria-label={`Search ${title}`}
+            className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+          />
+        </label>
+      ) : null}
       <ul className="m-0 flex list-none flex-col p-0">
         {visible.map((o) => {
           const isSelected = selected.has(o.value);
@@ -70,7 +110,16 @@ export function RosterFacet({
           );
         })}
       </ul>
-      {!showAll && hiddenCount > 0 ? (
+      {noMatches ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="px-1 py-1 text-[12px] text-muted-foreground"
+        >
+          {noMatchLabel}
+        </div>
+      ) : null}
+      {!q && !showAll && hiddenCount > 0 ? (
         <button
           type="button"
           onClick={() => setShowAll(true)}
@@ -80,7 +129,7 @@ export function RosterFacet({
           Show all {options.length}
         </button>
       ) : null}
-      {showAll && options.length > collapseAfter ? (
+      {!q && showAll && options.length > collapseAfter ? (
         <button
           type="button"
           onClick={() => setShowAll(false)}
