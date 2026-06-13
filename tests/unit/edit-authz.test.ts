@@ -466,3 +466,69 @@ describe("INVARIANT: a superuser is allowed by every edit authorization predicat
     ).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// comms_steward profile editing  (comms-steward-profile-editing-spec.md §3b/§4)
+//   superuser PROFILE parity across all scholars, MINUS slug + admin/unit
+//   governance.
+// ---------------------------------------------------------------------------
+
+describe("comms_steward — profile-field parity (overview / highlights, any scholar)", () => {
+  it("allows a steward editing any scholar's overview", () => {
+    expect(authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "overview" })).toEqual({
+      ok: true,
+    });
+  });
+
+  it("allows a steward editing any scholar's selectedHighlightPmids", () => {
+    expect(
+      authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "selectedHighlightPmids" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("DENIES a steward setting a slug — slug is out of scope (superuser only)", () => {
+    expect(authorizeFieldEdit(STEWARD, { entityId: "other9", fieldName: "slug" })).toEqual({
+      ok: false,
+      reason: "not_superuser",
+    });
+  });
+});
+
+describe("comms_steward — suppression parity (incl. publication takedown)", () => {
+  it("allows a steward to take down a whole publication on any profile", () => {
+    expect(
+      authorizeSuppress(STEWARD, { entityType: "publication", entityId: "12345", contributorCwid: null }),
+    ).toEqual({ ok: true });
+  });
+
+  it("allows a steward to suppress any scholar's grant", () => {
+    expect(
+      authorizeSuppress(STEWARD, { entityType: "grant", entityId: "g1", ownerCwid: "other9" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("allows a steward to revoke any suppression (mirror of suppress parity)", () => {
+    expect(authorizeRevoke(STEWARD, { createdBy: "other9" })).toEqual({ ok: true });
+  });
+});
+
+describe("comms_steward — page access", () => {
+  it("may open any scholar's edit page", () => {
+    expect(canAccessScholarEditPage(STEWARD, "other9")).toBe(true);
+  });
+
+  it("does NOT get the superuser-only publication takedown PAGE", () => {
+    expect(canAccessPublicationEditPage(STEWARD)).toBe(false);
+  });
+});
+
+describe("comms_steward — governance boundary (NOT granted)", () => {
+  it("cannot edit org units (not a unit owner/curator/superuser)", () => {
+    expect(canEditUnit(STEWARD, "none").ok).toBe(false);
+  });
+
+  it("cannot manage unit access / grant roles ('adding/removing users')", () => {
+    expect(canManageAccess(STEWARD, "none").ok).toBe(false);
+    expect(canGrant(STEWARD, "none", "curator").ok).toBe(false);
+  });
+});

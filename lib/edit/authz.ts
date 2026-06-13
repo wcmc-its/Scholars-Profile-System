@@ -71,11 +71,17 @@ export function authorizeFieldEdit(
   target: { entityId: string; fieldName: "overview" | "slug" | "selectedHighlightPmids" },
 ): AuthzResult {
   if (target.fieldName === "overview" || target.fieldName === "selectedHighlightPmids") {
-    // Self OR superuser — scoped to these two fields (the deferred broad-admin
-    // widening must not leak to other fields via this branch).
-    if (session.cwid === target.entityId || session.isSuperuser) return ALLOW;
+    // Self OR superuser OR comms_steward — scoped to these two fields. A
+    // comms_steward edits any scholar's narrative (superuser profile parity,
+    // comms-steward-profile-editing-spec.md §3b); the deferred broad-admin
+    // widening must still not leak to other fields via this branch.
+    if (session.cwid === target.entityId || session.isSuperuser || session.isCommsSteward) {
+      return ALLOW;
+    }
     return { ok: false, reason: "not_self" };
   }
+  // `slug` — superuser only. A comms_steward is explicitly NOT a slug editor
+  // ("superuser parity MINUS slug review", §3b), so it is not added here.
   return session.isSuperuser ? ALLOW : { ok: false, reason: "not_superuser" };
 }
 
@@ -105,7 +111,12 @@ export function authorizeSuppress(
     ownerCwid?: string | null;
   },
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // Superuser, and a comms_steward at superuser profile parity (incl. the
+  // whole-publication takedown + section/entity visibility this route drives —
+  // kept in scope per comms-steward-profile-editing-spec.md §3b). Slug + admin /
+  // unit governance are NOT routed through here, so this parity does not widen
+  // those.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
 
   if (target.entityType === "scholar") {
     return session.cwid === target.entityId ? ALLOW : { ok: false, reason: "not_self" };
@@ -144,7 +155,9 @@ export function authorizeRevoke(
   session: EditSession,
   suppression: { createdBy: string },
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // Superuser, and a comms_steward at superuser profile parity (§3b) — a steward
+  // may lift any suppression, the mirror of their suppress parity above.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   return session.cwid === suppression.createdBy
     ? ALLOW
     : { ok: false, reason: "not_owner" };
@@ -179,10 +192,12 @@ export function canAccessScholarEditPage(
   session: EditSession,
   targetCwid: string,
 ): boolean {
-  return session.cwid === targetCwid || session.isSuperuser;
+  return session.cwid === targetCwid || session.isSuperuser || session.isCommsSteward;
 }
 
-/** `GET /edit/publication/[pmid]`: superuser only. */
+/** `GET /edit/publication/[pmid]`: superuser only. (A comms_steward reaches
+ *  publication suppression through the per-scholar editor's Publications panel,
+ *  not this standalone takedown surface — kept superuser-only to bound scope.) */
 export function canAccessPublicationEditPage(session: EditSession): boolean {
   return session.isSuperuser;
 }

@@ -37,6 +37,7 @@ export function AdminSubnav({
   methodsTab,
   selfEditHref,
   superuserSurfaces = true,
+  profilesTab = false,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -53,16 +54,21 @@ export function AdminSubnav({
    *  superuser), so the link never lands on a 404. Ignored when `active="self"`
    *  — the viewer is already there, so "My Profile" renders as the active tab. */
   selfEditHref?: string | null;
-  /** Whether to show the superuser list surfaces (Profiles / URL requests /
-   *  Slug registry / Administrators). Default `true`. A comms_steward who is NOT
-   *  a superuser lands only on `/edit/methods`, where those tabs would link to
-   *  surfaces they can't open — pass `false` there so only Method Families shows. */
+  /** Whether to show the superuser list surfaces (URL requests / Slug registry /
+   *  Administrators — and Profiles, unless `profilesTab` separately enables it).
+   *  Default `true`. A comms_steward who is NOT a superuser passes `false` so
+   *  those superuser-only surfaces stay hidden. */
   superuserSurfaces?: boolean;
+  /** Show the "Profiles" tab independently of `superuserSurfaces`. A
+   *  comms_steward is a global profile editor (comms-steward-profile-editing-
+   *  spec.md §4d), so they get Profiles (+ Method Families) without the other
+   *  superuser surfaces. A superuser already gets Profiles via `superuserSurfaces`. */
+  profilesTab?: boolean;
 }) {
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
-        {superuserSurfaces && (
+        {(superuserSurfaces || profilesTab) && (
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
         )}
         {superuserSurfaces && pendingSlugRequests !== null && (
