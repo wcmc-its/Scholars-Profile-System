@@ -34,10 +34,13 @@ export function MatchReason({
   const Icon = ICONS[kind];
   return (
     <div
-      className={`mt-2 flex items-center gap-1.5 text-[12.5px] leading-snug text-muted-foreground ${className}`}
+      className={`mt-2 flex min-w-0 items-center gap-1.5 text-[12.5px] leading-snug text-muted-foreground ${className}`}
     >
       <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2} />
-      <span>{children}</span>
+      {/* Single line — clips an over-long reason (e.g. #967's representative-pub
+          title) rather than wrapping. A no-op for the short count/concept
+          reasons, which already fit. */}
+      <span className="truncate">{children}</span>
     </div>
   );
 }
