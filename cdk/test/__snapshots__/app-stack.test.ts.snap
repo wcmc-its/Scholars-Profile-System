@@ -489,7 +489,7 @@ exports[`AppStack prod matches the snapshot 1`] = `
               },
               {
                 "Name": "COMMS_STEWARD_ENABLED",
-                "Value": "off",
+                "Value": "on",
               },
               {
                 "Name": "SCHOLARS_COMMS_STEWARD_GROUP_CN",

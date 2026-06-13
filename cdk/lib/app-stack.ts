@@ -1311,12 +1311,20 @@ export class AppStack extends Stack {
         //   SCHOLARS_COMMS_STEWARD_ALLOWLIST -- interim comma-separated CWID
         //     allowlist that confers the role WITHOUT LDAP (mirrors
         //     SCHOLARS_SUPERUSER_CWIDS), so a tightly-scoped steward set can use
-        //     the Method-Family surface before the group/routing lands. STAGING
-        //     carries the interim steward set; prod stays empty (its surface is
-        //     dark). Inert while COMMS_STEWARD_ENABLED is off. Wired here per the
-        //     flag-parity rule; promotion is a config edit + manual `cdk deploy
-        //     Sps-App-<env>` (CD re-rolls the image only, never the task-def env).
-        COMMS_STEWARD_ENABLED: env === "staging" ? "on" : "off",
+        //     the Method-Family + profile/unit surfaces before the group/routing
+        //     lands. The live LDAPS group search fails closed in-VPC (#443), so
+        //     this allowlist is the ONLY thing that confers the role to a
+        //     non-superuser in a deployed env today.
+        // PROD ARM (this PR): COMMS_STEWARD_ENABLED flipped on for prod so the
+        // role machinery is live, BUT the prod allowlist is left EMPTY on
+        // purpose -- with it empty, the surfaces are reachable ONLY by prod
+        // superusers (the steward superset), and NO External-Affairs comms
+        // person has the role yet. >>> ACTION REQUIRED before this confers
+        // anything to comms: set the prod allowlist to the EA steward CWIDs
+        // (e.g. "dwd2001,..."), or wire SCHOLARS_COMMS_STEWARD_GROUP_CN once
+        // #443 LDAPS routing lands. Promotion is a manual `cdk deploy
+        // Sps-App-prod` (reviewer-gated); CD re-rolls the image only.
+        COMMS_STEWARD_ENABLED: env === "staging" || env === "prod" ? "on" : "off",
         SCHOLARS_COMMS_STEWARD_GROUP_CN: "",
         SCHOLARS_COMMS_STEWARD_ALLOWLIST: env === "staging" ? "dwd2001" : "",
         // #374 — Content-Security-Policy rollout mode. next.config.ts reads
