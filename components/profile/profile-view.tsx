@@ -70,7 +70,10 @@ export async function ProfileView({ slug }: { slug: string }) {
   // client island (<EditMyProfileButton>) that probes /api/auth/session. Doing
   // the owner check server-side here both 500'd this statically-generated route
   // (cookies() → DYNAMIC_SERVER_USAGE) and was wrong on CloudFront-cached pages
-  // (the edge strips the cookie). Keeping it client-side preserves ISR.
+  // (the edge strips the cookie). Keeping it client-side preserves ISR. #955 —
+  // the same island also renders a superuser "Edit profile" deep-link to
+  // /edit/scholar/<cwid> off the probe's canImpersonate flag, so the cwid is
+  // threaded through alongside the slug.
 
   // ANALYTICS-01 (D-01): structured page-view log on each ISR render / cache miss.
   console.log(
@@ -212,7 +215,7 @@ export async function ProfileView({ slug }: { slug: string }) {
                   })()}
                 </div>
               ) : null}
-              <EditMyProfileButton profileSlug={profile.slug} />
+              <EditMyProfileButton profileSlug={profile.slug} profileCwid={profile.cwid} />
             </div>
 
             {profile.email || profile.hasClinicalProfile ? (
