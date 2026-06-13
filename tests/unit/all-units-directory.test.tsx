@@ -125,11 +125,12 @@ describe("AllUnitsDirectory", () => {
     expect(row.textContent).toContain("5 scholars");
   });
 
-  it("division degrades gracefully — heading falls back to name, shows 'in {parent}'", () => {
+  it("division degrades gracefully — heading falls back to name, parent dept shown above", () => {
     render(<AllUnitsDirectory units={[degradedDivision]} isSuperuser />);
     const row = screen.getByTestId("all-units-row-division-D-CARD");
     expect(row.textContent).toContain("Cardiology");
-    expect(row.textContent).toContain("in Medicine");
+    // Parent department rides above the name as a muted eyebrow (no "in" prefix).
+    expect(row.textContent).toContain("Medicine");
   });
 
   it("flags gap markers for a null-leader / null-description unit, none for a curated one", () => {
@@ -216,5 +217,14 @@ describe("AllUnitsDirectory", () => {
     expect(screen.getByTestId("all-units-create")).toBeTruthy();
     rerender(<AllUnitsDirectory units={[curatedDept]} isSuperuser={false} />);
     expect(screen.queryByTestId("all-units-create")).toBeNull();
+  });
+
+  it("links a WCM org-unit code to the Web Directory, but leaves a center slug plain", () => {
+    render(<AllUnitsDirectory units={[curatedDept, interimCenter]} isSuperuser />);
+    expect(href(screen.getByTestId("all-units-code-link-N1280"))).toBe(
+      "https://directory.weill.cornell.edu/orgunits/N1280",
+    );
+    // A center's code is a slug the Web Directory can't resolve — not linked.
+    expect(screen.queryByTestId("all-units-code-link-man-onc")).toBeNull();
   });
 });

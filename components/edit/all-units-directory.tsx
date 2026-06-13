@@ -50,6 +50,15 @@ function hasNoDescription(u: UnitDirectoryEntry): boolean {
   return !u.description || u.description.trim().length === 0;
 }
 
+/**
+ * A WCM Enterprise Directory org-unit code (e.g. "N3623") — departments and
+ * divisions carry one. Centers use a local slug, which the Web Directory does
+ * not resolve, so those codes render as plain text rather than a dead link.
+ */
+function isOrgUnitCode(code: string): boolean {
+  return /^N\d+$/i.test(code);
+}
+
 export function AllUnitsDirectory({
   units,
   isSuperuser,
@@ -233,7 +242,14 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
       data-testid={`all-units-row-${unit.kind}-${unit.code}`}
     >
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          {/* Parent department rides above the name as a muted, left-aligned
+              eyebrow so a division's place in the org chart reads at a glance. */}
+          {unit.parentDeptName && (
+            <span className="text-muted-foreground basis-full text-xs leading-tight">
+              {unit.parentDeptName}
+            </span>
+          )}
           <span className="truncate text-[15px] font-semibold">{unit.officialName}</span>
           {typeChip && (
             <span className="bg-apollo-slate-tint text-apollo-slate border-apollo-slate-tint-border flex-none rounded-full border px-2 py-0.5 text-xs font-medium">
@@ -249,11 +265,8 @@ function UnitRow({ unit }: { unit: UnitDirectoryEntry }) {
             </span>
           )}
         </div>
-        {/* Meta line — the parent department ("in Pediatrics") rides up here next
-            to the code so a division's place in the org chart reads at a glance. */}
         <div className="text-muted-foreground text-sm">
-          {unit.kindLabel} · {unit.code}
-          {unit.parentDeptName ? ` · in ${unit.parentDeptName}` : ""}
+          {unit.kindLabel} · <UnitCodeRef code={unit.code} />
           {compactDiffers ? ` · ${unit.compactName}` : ""} · {unit.scholarCount} scholars ·{" "}
           {sourceLabel(unit.source)}
         </div>
@@ -311,6 +324,27 @@ function GapPill({
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * The unit code — linked to its WCM Web Directory org-unit page when it is a
+ * real org-unit code (departments + divisions), plain text otherwise (centers,
+ * whose slug the Web Directory does not resolve). Opens in a new tab: the Web
+ * Directory is a separate WCM system, so the edit console stays put.
+ */
+function UnitCodeRef({ code }: { code: string }) {
+  if (!isOrgUnitCode(code)) return <>{code}</>;
+  return (
+    <a
+      href={`https://directory.weill.cornell.edu/orgunits/${code}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="hover:text-foreground underline underline-offset-2"
+      data-testid={`all-units-code-link-${code}`}
+    >
+      {code}
+    </a>
   );
 }
 
