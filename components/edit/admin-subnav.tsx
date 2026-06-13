@@ -22,6 +22,7 @@ import { ChevronLeftIcon } from "lucide-react";
 
 export type AdminSubnavActive =
   | "profiles"
+  | "units"
   | "slug-requests"
   | "slugs"
   | "administrators"
@@ -38,6 +39,7 @@ export function AdminSubnav({
   selfEditHref,
   superuserSurfaces = true,
   profilesTab = false,
+  unitsTab = false,
 }: {
   active: AdminSubnavActive;
   pendingSlugRequests: number | null;
@@ -64,12 +66,18 @@ export function AdminSubnav({
    *  spec.md §4d), so they get Profiles (+ Method Families) without the other
    *  superuser surfaces. A superuser already gets Profiles via `superuserSurfaces`. */
   profilesTab?: boolean;
+  /** Show the "Units" tab (the `/edit/units` finder). A comms_steward edits any
+   *  existing org unit's content (§3b), and a superuser jumps to any unit too. */
+  unitsTab?: boolean;
 }) {
   return (
     <div className="border-border border-b" data-slot="admin-subnav">
       <div className="mx-auto flex max-w-[var(--max-content)] items-center gap-6 px-6">
         {(superuserSurfaces || profilesTab) && (
           <AdminTab href="/edit/scholars" id="profiles" label="Profiles" active={active === "profiles"} />
+        )}
+        {unitsTab && (
+          <AdminTab href="/edit/units" id="units" label="Units" active={active === "units"} />
         )}
         {superuserSurfaces && pendingSlugRequests !== null && (
           <AdminTab

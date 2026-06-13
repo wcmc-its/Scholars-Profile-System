@@ -372,7 +372,12 @@ export function canEditUnit(
   session: EditSession,
   effectiveRole: EffectiveUnitRole,
 ): AuthzResult {
-  if (session.isSuperuser) return ALLOW;
+  // A comms_steward edits any EXISTING unit's content at curator parity
+  // (description / leadership / roster) — comms-steward-profile-editing-spec.md
+  // §3b "minus adding/remove org units" excludes only create/delete + grants,
+  // not editing existing units. Grants stay Owner/Superuser (`canManageAccess`)
+  // and unit create/delete is not widened — so this confers content editing only.
+  if (session.isSuperuser || session.isCommsSteward) return ALLOW;
   if (effectiveRole === "owner" || effectiveRole === "curator") return ALLOW;
   return { ok: false, reason: "not_curator" };
 }

@@ -140,6 +140,7 @@ export default async function EditScholarsPage({
       viewerCwid={session.cwid}
       superuserSurfaces={superuserSurfaces}
       profilesTab
+      unitsTab={session.isSuperuser || session.isCommsSteward}
     />
   );
 }

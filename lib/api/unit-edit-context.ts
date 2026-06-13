@@ -259,7 +259,11 @@ export async function loadUnitEditContext(
     unitRef,
     client as unknown as UnitAdminLookup,
   );
-  if (!session.isSuperuser && effective === "none") return null;
+  // A comms_steward edits any existing unit at curator parity (content only, no
+  // grants — comms-steward-profile-editing-spec.md §3b), so they pass the
+  // "no unit-admin role" gate like a superuser does. The retired-unit gate below
+  // still excludes them (only a superuser sees/restores a retired unit).
+  if (!session.isSuperuser && !session.isCommsSteward && effective === "none") return null;
 
   // Retire gate — a non-Superuser never sees a retired unit; a Superuser does
   // (restore path). The suppression row, when present, populates `unit.suppression`.
@@ -270,9 +274,15 @@ export async function loadUnitEditContext(
   });
   if (suppressionRow !== null && !session.isSuperuser) return null;
 
+  // A steward without a real grant (`effective === "none"`, having passed the
+  // gate above) acts as a CURATOR: edits content but never manages access
+  // (`canManageAccess` below stays Superuser/Owner-only, so a steward gets no
+  // grant UI). A steward who ALSO holds a real owner/curator grant keeps it.
   const actorRole: UnitActorRole = session.isSuperuser
     ? "superuser"
-    : (effective as "owner" | "curator");
+    : effective === "none"
+      ? "curator"
+      : (effective as "owner" | "curator");
 
   // 3. Override-merge the curator-editable fields (centers return {}).
   const overrides = await loadUnitFieldOverrides(unitType, code, client);
