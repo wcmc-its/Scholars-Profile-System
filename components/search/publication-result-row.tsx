@@ -1,6 +1,7 @@
 "use client";
 
 import { AuthorChipRow } from "@/components/publication/author-chip-row";
+import { PubJournal } from "@/components/publication/pub-html";
 import { PublicationMeta } from "@/components/publication/publication-meta";
 import { usePublicationModal } from "@/components/publication/publication-modal";
 import { MatchReason } from "@/components/search/match-reason";
@@ -69,7 +70,7 @@ export function PublicationResultRow({ hit }: { hit: PublicationHit }) {
         />
       </div>
       <div className="mb-2 text-[13px] leading-snug text-[#4a4a4a]">
-        {hit.journal ? <em className="not-italic">{hit.journal}</em> : null}
+        <PubJournal value={hit.journal} className="not-italic" />
         {hit.journal && hit.year ? ". " : null}
         {hit.year ?? null}.
       </div>

@@ -31,6 +31,7 @@
 import * as React from "react";
 import { ExternalLink, Search } from "lucide-react";
 
+import { PubTitle } from "@/components/publication/pub-html";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type {
@@ -61,12 +62,6 @@ const RULE_PUBLICATIONS =
 const RULE_FUNDING = "Ranked by your role and recency.";
 const RULE_METHODS =
   "Inferred from methods named in your publications · ranked by how often each appears.";
-
-/** PubMed titles embed formatting tags (`<i>`, `<sub>`); strip them for the
- *  plain checkbox label so they don't render as literal angle-bracket text. */
-function stripTags(text: string): string {
-  return text.replace(/<[^>]+>/g, "");
-}
 
 /** Toggle `value` in `list` (add if checked + absent, remove if unchecked). */
 function toggle(list: string[], value: string, checked: boolean): string[] {
@@ -362,7 +357,7 @@ function PublicationRow({
         />
         <span className="min-w-0">
           <span className="flex items-center gap-1.5 text-sm">
-            {stripTags(pub.title)}
+            <PubTitle as="span" value={pub.title} />
             <a
               href={`https://pubmed.ncbi.nlm.nih.gov/${pub.pmid}/`}
               target="_blank"

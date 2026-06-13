@@ -35,6 +35,7 @@ import { useRouter } from "next/navigation";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
 import { EditPanel } from "@/components/edit/edit-panel";
+import { PubJournal, PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -378,11 +379,11 @@ export function HighlightsCard({ cwid, mode, scholarName, highlights }: Highligh
                         {picked ? rank : ""}
                       </span>
                       <span className="flex min-w-0 flex-col gap-1">
-                        <span className="text-sm leading-snug font-medium">{p.title}</span>
+                        <PubTitle value={p.title} className="text-sm leading-snug font-medium" />
                         <span className="text-muted-foreground text-xs">
                           {p.journal ? (
                             <>
-                              <em>{p.journal}</em>
+                              <PubJournal value={p.journal} />
                               {p.year ? ` · ${p.year}` : ""}
                             </>
                           ) : (

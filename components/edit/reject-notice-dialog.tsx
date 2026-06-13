@@ -20,6 +20,7 @@
 
 import * as React from "react";
 
+import { PubTitle } from "@/components/publication/pub-html";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -95,7 +96,7 @@ export function RejectNoticeDialog({
         <DialogHeader>
           <DialogTitle>Is this paper not {possessive}?</DialogTitle>
           <DialogDescription>
-            Rejecting <span className="text-foreground font-medium">{pubTitle}</span>{" "}
+            Rejecting <PubTitle as="span" className="text-foreground font-medium" value={pubTitle} />{" "}
             tells the matching system this publication isn&apos;t {possessive}, so
             it&apos;s corrected at the source — it stops appearing on{" "}
             {su ? `${scholarName}’s` : "your"} profile, in internal reports, and in the Faculty

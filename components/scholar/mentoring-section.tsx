@@ -4,6 +4,7 @@ import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { HeadshotAvatar } from "@/components/scholar/headshot-avatar";
 import { PersonPopover } from "@/components/scholar/person-popover";
+import { PubJournal } from "@/components/publication/pub-html";
 import { Badge } from "@/components/ui/badge";
 import { sanitizePubTitle } from "@/lib/utils";
 import { isPubliclyDisplayed } from "@/lib/eligibility";
@@ -550,7 +551,9 @@ function CoPubInlinePanel({
             />
             {(p.journal || p.year) && (
               <div className="text-muted-foreground mt-0.5">
-                {[p.journal, p.year].filter(Boolean).join(" · ")}
+                <PubJournal as="span" value={p.journal} />
+                {p.journal && p.year ? " · " : ""}
+                {p.year}
               </div>
             )}
           </li>
