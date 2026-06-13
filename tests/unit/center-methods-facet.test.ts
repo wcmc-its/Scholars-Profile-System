@@ -39,17 +39,11 @@ vi.mock("@/lib/profile/methods-lens-flags", () => ({
   isMethodsLensSensitiveGateOn: () => mockSensitiveGateOn(),
 }));
 
-// centers.ts drags in role-display / headshot / name-sort / manual-layer via its
-// import graph; stub the heaviest so this unit resolves without real DB/helpers.
-vi.mock("@/lib/api/manual-layer", () => ({
-  isAuthorHidden: vi.fn(),
-  isUnitSuppressed: vi.fn(),
-  loadPublicationSuppressions: vi.fn(),
-  resolveActiveGrantSuppression: vi.fn(),
-  resolveDarkPmids: vi.fn(),
-}));
-
-import { loadPublicFamiliesForMembers } from "@/lib/api/centers";
+// loadPublicFamiliesForMembers was hoisted out of centers.ts into the shared,
+// surface-agnostic methods-roster module (#974). It now takes the surface flag
+// via `{ enabled }`, so the call sites below pass `mockFacetEnabled()` to drive
+// the same flag-on / flag-off behavior the center facet exercised under #962.
+import { loadPublicFamiliesForMembers } from "@/lib/api/methods-roster";
 
 const SC = "imaging_image_analysis";
 const CWIDS = ["abc1234", "def5678"];
@@ -89,7 +83,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
       row("def5678", "Deep learning", "fam_0001", 3),
     ]);
 
-    const out = await loadPublicFamiliesForMembers(CWIDS);
+    const out = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
 
     expect(mockScholarFamilyFindMany).toHaveBeenCalledTimes(1);
     const args = mockScholarFamilyFindMany.mock.calls[0][0];
@@ -117,7 +111,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
       row("abc1234", "Deep learning", "fam_0001", 12),
     ]);
 
-    const out = await loadPublicFamiliesForMembers(CWIDS);
+    const out = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
 
     expect(out.get("abc1234")!.map((f) => f.familyLabel)).toEqual(["Deep learning"]);
     expect(out.get("abc1234")!.some((f) => f.familyLabel === "Secret")).toBe(false);
@@ -134,7 +128,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
 
     // Gate OFF → sensitive family is public (overlay never even consulted).
     mockSensitiveGateOn.mockReturnValue(false);
-    const off = await loadPublicFamiliesForMembers(CWIDS);
+    const off = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
     expect(off.get("abc1234")!.map((f) => f.familyLabel)).toEqual([
       "Sensitive",
       "Deep learning",
@@ -152,7 +146,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
       row("abc1234", "Sensitive", "fam_0008", 20),
       row("abc1234", "Deep learning", "fam_0001", 12),
     ]);
-    const on = await loadPublicFamiliesForMembers(CWIDS);
+    const on = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
     expect(on.get("abc1234")!.map((f) => f.familyLabel)).toEqual(["Deep learning"]);
   });
 
@@ -164,7 +158,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
       row("abc1234", "F4", "fam_0004", 40),
     ]);
 
-    const out = await loadPublicFamiliesForMembers(CWIDS);
+    const out = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
 
     // The loader keeps the full set (facet membership); the ≤3 chip cap is taken
     // by `topMethods = families.slice(0, 3)` in getCenterMembers.
@@ -183,15 +177,15 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
       row("abc1234", "F2", "fam_0002", 5, null),
     ]);
 
-    const out = await loadPublicFamiliesForMembers(CWIDS);
+    const out = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
     expect(out.get("abc1234")![0].exemplarTools).toEqual(["CheXpert", "MONAI"]);
     expect(out.get("abc1234")![1].exemplarTools).toEqual([]);
   });
 
-  it("returns an empty map and does NOT query when the flag is off", async () => {
+  it("returns an empty map and does NOT query when the flag is off (enabled:false)", async () => {
     mockFacetEnabled.mockReturnValue(false);
 
-    const out = await loadPublicFamiliesForMembers(CWIDS);
+    const out = await loadPublicFamiliesForMembers(CWIDS, { enabled: mockFacetEnabled() });
 
     expect(out.size).toBe(0);
     expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
@@ -199,7 +193,7 @@ describe("loadPublicFamiliesForMembers (#962)", () => {
   });
 
   it("returns an empty map for an empty cwid list without any DB read", async () => {
-    const out = await loadPublicFamiliesForMembers([]);
+    const out = await loadPublicFamiliesForMembers([], { enabled: mockFacetEnabled() });
 
     expect(out.size).toBe(0);
     expect(mockScholarFamilyFindMany).not.toHaveBeenCalled();
