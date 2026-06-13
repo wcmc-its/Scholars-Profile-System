@@ -55,7 +55,7 @@ type ScholarLite = { slug: string; preferredName: string };
 type ImpersonatingBlock = {
   targetCwid: string;
   targetName: string;
-  role: "owner" | "curator" | "scholar";
+  role: "owner" | "curator" | "scholar" | "comms_steward";
   unitKind: ImpersonationUnitKind | null;
   unit: string | null;
   startedAt: number;
@@ -154,7 +154,24 @@ export async function GET(): Promise<NextResponse> {
         unit: display.unit,
         startedAt: session.impersonating.startedAt,
       };
+    } else if (await isCommsSteward(targetCwid).catch(() => false)) {
+      // A profile-less comms_steward target (e.g. dwd2001): no Scholar row to
+      // read, but the overlay is real (the POST guard admitted it,
+      // role-aware-navigation-entry-points-spec.md). Surface it anyway so the
+      // amber banner AND its "Return to my view" exit still render — otherwise a
+      // superuser viewing as a steward would be stuck with no visible way out.
+      // Name falls back to the CWID; a steward administers no unit.
+      impersonating = {
+        targetCwid,
+        targetName: targetCwid,
+        role: "comms_steward",
+        unitKind: null,
+        unit: null,
+        startedAt: session.impersonating.startedAt,
+      };
     }
+    // else: the target vanished (departed / invalid) — leave `impersonating`
+    // null, exactly as before.
   }
 
   return NextResponse.json(

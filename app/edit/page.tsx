@@ -81,6 +81,16 @@ export default async function EditSelfPage({
     includeHighlights,
   });
   if (!ctx) {
+    // A comms_steward with no Scholar row of their own has no self-profile to
+    // edit — their home is the global Method-Family surface, so send them there
+    // instead of 404ing (role-aware-navigation-entry-points-spec.md). This is
+    // also the landing when a superuser is *viewing as* a profile-less steward
+    // (e.g. dwd2001) and the reload hits /edit. Keyed on the effective cwid, so
+    // it reflects the impersonated identity. Flag-gated (false when COMMS_STEWARD
+    // is off), so it's inert on a dark deployment.
+    if (await isCommsSteward(editCwid)) {
+      redirect("/edit/methods");
+    }
     // A signed-in user with no Scholar row may still be a scholar-assigned proxy
     // editor (#779) — pure administrative staff (Beth Chunn) editing on a
     // scholar's behalf. Route them to whom they serve: one grant → straight to

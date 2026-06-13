@@ -257,3 +257,47 @@ Method Families when the comms flag is on).
 - Tests: `tests/unit/account-menu.test.tsx`, a new session-route test.
 - No flag changes; no `AdminSubnav` change; no top-bar change (unless the
   optional 4b affordance is accepted).
+
+---
+
+## 9. Addendum — operator follow-ups (post-launch feedback)
+
+After the §1–§8 dropdown fix shipped (#941), a superuser reported two console
+gaps. Both are operator-discoverability, not authorization.
+
+### 9a. Unify the console tab strip (Issue 2 — shipped)
+
+The `/edit` self-edit surface rendered only "My Profile / All profiles", so the
+full admin option set (Method Families included) appeared only after drilling
+into the roster. Fix: render the shared `AdminSubnav` on the self-edit surface
+for a superuser or comms_steward (`active="self"`, "My Profile" the active tab),
+so every role-gated option is visible from anywhere in the console. A plain
+scholar keeps the minimal strip. Drill-down detail pages
+(`/edit/scholar/[cwid]`, unit editors) deliberately keep their contextual
+breadcrumb — this unifies the **top-level** surfaces.
+
+### 9b. View-as for comms_stewards (Issue 1 — shipped)
+
+A superuser could not "View as" dwd2001 to preview the steward experience: the
+candidate search is over `Scholar` rows and dwd2001 has none, and even if listed
+the POST guard (impersonation-spec.md §7) rejected any target without a Scholar
+row (`target_not_found`).
+
+Changes: `/api/impersonation/candidates` appends enumerable stewards
+(`listCommsStewardCwids`, the allowlist — LDAP-group enumeration is a noted
+follow-up; profile-less stewards show their CWID, role "Communications
+Steward"); the POST guard is broadened to admit a comms_steward target; the
+session probe + banner surface a profile-less steward target (so the amber
+banner **and its "Return to my view" exit** still render); and a profile-less
+steward landing on `/edit` redirects to `/edit/methods` instead of 404 (the
+impersonation landing, and a real steward's own home).
+
+**Security rationale (the broadened guard).** This relaxes impersonation-spec.md
+§7's "target must be a real scholar" to "a real scholar **or** a comms_steward."
+No escalation: **R1** (only a superuser initiates) and **R2** (target may not be
+a superuser, via `assertImpersonable`) are unchanged, and a superuser is already
+a **superset** of comms_steward — so "view as a steward" is a strictly narrower
+preview of a capability the actor already holds, never a gain. **R3** (writes
+attributed to the real actor) and the enter/exit audit are unchanged. The check
+is flag-gated (`isCommsSteward` ⇒ false when `COMMS_STEWARD_ENABLED` is off), so
+the broadening is inert on a dark deployment.

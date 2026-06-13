@@ -108,6 +108,23 @@ function getCommsStewardAllowlist(): string[] {
   ];
 }
 
+/**
+ * The comms_steward CWIDs that can be ENUMERATED, for the "View as" candidate
+ * list (impersonation-spec.md §7). Today this is the interim allowlist only:
+ * the LDAP group is the durable source of truth for the per-CWID
+ * `isCommsSteward` check, but enumerating its `member` list is a separate
+ * directory capability not yet built (and the group cn is unset everywhere
+ * today). So a group-only steward will not yet *appear* as an impersonation
+ * candidate — `isCommsSteward` still admits them at the per-target POST guard;
+ * this gap is discoverability-only. Returns `[]` when the role is disabled (kill
+ * switch), so a dark deployment surfaces no steward candidates. Lower-cased +
+ * de-duplicated (via `getCommsStewardAllowlist`).
+ */
+export function listCommsStewardCwids(): string[] {
+  if (!isCommsStewardEnabled()) return [];
+  return getCommsStewardAllowlist();
+}
+
 /** One structured log line for a directory-side failure of the comms-steward check. */
 function logCheckFailed(cwid: string, reason: string): void {
   console.warn(
